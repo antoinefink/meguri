@@ -1,9 +1,10 @@
 # Op model and executor
 
 Spec: engine/op-model
-Requirements: R1490, R1494, R1495, R1658, R1790, R1860, R2002, R2006, R727 (mechanism)
+Requirements: R1490, R1494, R1495, R1658, R1790, R1860, R2002, R2006, R727 (mechanism); supports R2047, R2051 (O1.1)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
+Status: Under review (R2066) for O1.1, the `CloudIncoming` and `CloudRekey` rows of O1, the CloudKit wording of O2 and O5, and the `cloud_incoming_apply` row of O9, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (`engine/undo`, U25) consumes the op journal described here.
 
@@ -14,7 +15,7 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 | Field | Meaning |
 |---|---|
 | name | a static name; the catalog (O9) names every op that may declare a long write |
-| source | one of the seven below |
+| source | one of the nine below |
 | stamping mode | default from the source (table below); an op may set another (`KeepMtime` for `.apkg` updates, `CallerSupplied` for undo restores, `Raw` for the day clock's ops, U40, `sched/day-clock` D10) |
 | preconditions | O7 |
 | cancel token, progress sink | O5, `engine/jobs` |
@@ -28,19 +29,34 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 | `UserUndoable` | interactive | `Local` | answers, edits, deck and note actions the user can undo |
 | `UserNonUndoable` | interactive | `Local` | settings and other user writes that clear undo (U25) |
 | `LocalApi` | interactive | `Local` | AnkiConnect and Migaku writes (R1658, R1789) |
-| `SyncIncoming` | background | `CallerSupplied` | a normal sync's merge commit (U107) |
+| `SyncIncoming` | background | `CallerSupplied` | a normal sync's merge commit (U107). Manual Anki transfers only (frozen; KTD26) |
+| `CloudIncoming` | background | `CallerSupplied` | a CloudKit apply of ready inbox entries and merge results (`sync/cloudkit-records#K13.2`, `#K12.3`), and the CloudKit barriers (O1.1) (U113, U114) |
+| `CloudRekey` | background | `Local` | a CloudKit re-key of a colliding local object (`sync/cloudkit-records#K14.2`) (U113, U114) |
 | `Optimizer` | background | `Local` | the FSRS optimizer commit (U47) |
 | `Rollover` | background | `Local` | day-rollover writes (U40) |
 | `Maintenance` | background | `Local` | Check Database, Empty Cards and other maintenance (U128-U131) |
 
-What each source does to the undo history (recorded, cleared, truncated, the sync merge rule; skip-undo per op) is `engine/undo` M2.
+What each source does to the undo history (recorded, cleared, truncated, the sync merge rule, the CloudKit targeted drop; skip-undo per op) is `engine/undo` M2.
+
+### O1.1 CloudKit ops (KTD25)
+
+Added for CloudKit sync. The rows above for the other sources do not change.
+
+- **Remote-apply sources.** Two sources write data that came from another device: `SyncIncoming`, for manual Anki transfers only (frozen), and `CloudIncoming`, for CloudKit. They share no state. A CloudKit apply never uses `SyncIncoming`, and a manual transfer never uses `CloudIncoming`.
+- **`CloudIncoming` stamping.** The op writes each changed or new row with the column values of the CloudKit payload, the modification time included, and `usn` -1. It sets `col.mod` to now when it changed a row, and leaves `col.usn` and `col.ls` as they are. It sets `col.scm` only when it applies a structural generation that changes local structure (`sync/cloudkit-records#K11.3`; the stamp rows of both CloudKit sources are `storage/ids-usn-mtime#S3`).
+- **`CloudRekey` stamping.** `Local`: the rows it rewrites are local changes, sent onward like any other (`sync/cloudkit-records#K14.2`).
+- **Intents.** Both ops record their intent in the tracking store before their `COMMIT` (`sync/cloudkit-records#K13.2`, `#K14.2`). A rollback (an error, a panic, or a cancel under O5's exception) leaves every key at its expected before digest, and the core then settles the intent at once (K13.2 "Failed applies"). After a cancel the entries stay ready and are applied again later. After any other rollback (an error, a constraint failure, a panic) the entries take the inbox reason `apply_failed` (failure `apply`, or `rekey` for a `CloudRekey`), and are applied again only at an event trigger, one entry per op (`sync/policy#P4` `ApplyReady{retryFailed}`), so a failing entry never loops on the writer. After COMMIT the core records the op's seq, taken from its result (O4), in the intent, also when the change set is empty (K13.2).
+- **Targets and undo.** Both ops report their targets to the undo manager (`engine/undo#M9.8`). The result of a `CloudIncoming` or `CloudRekey` op also carries the held run that the drop removed, if any (`engine/undo#M9.8`).
+- **Barriers.** The CloudKit barrier (`sync/policy#P7.1`) and the Sync Now capture (`sync/policy#P12.2`) are ops of source `CloudIncoming` that write no row: plain ops, with no catalog entry. Their source effect (`engine/undo` M2) is none, because they change nothing, and they publish no event (O4). The barrier's only undo change is what its call of `begin_cloud_hold` (`engine/undo#M9.6`) through its op context does: flags and redo drops. The Sync Now capture records only its seq and makes no such call. The barrier receives the cloud reader's lease from its caller and never waits for one on the writer (`engine/lifecycle#L11`). A barrier never waits for the WAL flush; the batch builder waits for it off the writer (`sync/policy#P7.1`).
+- **Admission.** CloudKit ops run only in `Ready` (`engine/lifecycle#L4`); in any other state they are refused, never parked. The policy submits none while its gate is closed (`sync/policy#P6`).
+- The CloudKit network work is not an op and not a job: the Swift actor owns it (`engine/jobs#J2.1`).
 
 ## O2. One writer, two queues
 
 - One writer thread per open collection owns the writer connection (`storage/open-and-connections` C4). Nothing else writes the file.
 - Submitted ops wait in one of two FIFO queues. The writer always takes the oldest interactive op first; it takes a background op or a maintenance task (O8) only when no interactive op is queued. It never preempts: an op on the writer runs to its end before the next one starts.
 - Within a queue, ops commit in arrival order. Server writes and UI writes share the interactive queue, so they commit in the order they arrived (R1790): a `LocalApi` field update queued before a UI edit of the same note commits first.
-- A submit returns at once with a pending result; the caller waits on it or not. Answers never wait for a sync: a normal sync plans off the writer and holds it only for its `SyncIncoming` commit (U107; R1495 with KTD6).
+- A submit returns at once with a pending result; the caller waits on it or not. Answers never wait for a sync: a normal sync plans off the writer and holds it only for its `SyncIncoming` commit (U107; R1495 with KTD6). CloudKit holds the writer only for its barriers, which write nothing, and for its `CloudIncoming` and `CloudRekey` commits (O1.1); it builds records off the writer (`sync/policy#P7`, R2006).
 - Between ops the writer runs the WAL flush (`storage/open-and-connections` C9.2): 750 ms after the first commit that no full sync covers yet, whatever made that commit, it syncs the `-wal`. A due flush runs before the next queued op, so queues never push it past its 1 s bound, and an op that may hold the writer for long (a declared write or a maintenance task, O8) starts only after the pending flush. A failed sync covers nothing and is retried after 50 ms, doubling up to 1 s. With nothing to cover the writer sets no timer (R1854).
 
 ## O3. One transaction per op
@@ -65,7 +81,7 @@ and recover attachments as needed; they never repeat the note operation.
 
 - An op's cancel token (`engine/jobs` J4) is checked when the writer takes the op: if cancel was requested while it waited, nothing runs and the result is `Cancelled`.
 - The write phase starts when the writer takes the op. From then on the op completes: a cancel requested during the write phase is ignored and the result reports `past_cancel_point = true`. The progress sink switches to `Committing` at that moment, so the UI stops offering Cancel.
-- Exception: an op whose catalog entry declares a cancellable write phase (O9; U107's `SyncIncoming` merge) checks its token between batches; a cancel there rolls the whole op back and the result is `Cancelled`.
+- Exception: an op whose catalog entry declares a cancellable write phase (O9; U107's `SyncIncoming` merge, a `CloudIncoming` apply submitted as `cloud_incoming_apply`) checks its token between batches; a cancel there rolls the whole op back and the result is `Cancelled`.
 - Planning (O6) runs on the caller's thread and checks the token itself; a cancel during planning ends the op with `Cancelled` before anything is submitted.
 
 ## O6. Plan and commit
@@ -112,7 +128,8 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 |---|---|---|---|---|
 | `check_database` (vacuum and repairs) | U128 | destructive, not undoable | yes | no |
 | `apkg_apply` (a large `.apkg` apply) | U120 | undoable | yes | no |
-| `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | not destructive | yes | yes |
+| `sync_incoming_merge` (a large `SyncIncoming` merge; manual Anki transfers, frozen) | U107 | not destructive | yes | yes |
+| `cloud_incoming_apply` (a `CloudIncoming` apply of a complete structural generation with more than 500 entries, which is applied in one op, O8; any other incoming apply is a series of plain `CloudIncoming` ops of at most 500 entries each, `sync/cloudkit-records#K13.2`; O1.1) | U114 | not destructive | yes | yes |
 | `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
 | `memory_recompute` (`sched/memory-state` M4) | U46 | undoable | yes | yes |
 | `enable_fsrs` (`sched/fsrs-policy` E1-E4) | U50 | not destructive, not undoable | yes | yes |

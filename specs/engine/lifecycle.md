@@ -1,9 +1,10 @@
 # Collection lifecycle, generations and arbitration
 
 Spec: engine/lifecycle
-Requirements: R171 (core arbitration), R1489 (generation side), R1670 (core side), R1706, R1797 (waits); supports R458, R1659
+Requirements: R171 (core arbitration), R1489 (generation side), R1670 (core side), R1706, R1797 (waits); supports R458, R1659, R2056 (`CloudAdopt`)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
+Status: Under review (R2066) for the `CloudAdopt` and CloudKit parts of L4, L5, L6, L9 and L11, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force: L1's transitions to and from `Failed{Corrupt}`, L2's recorded corrupt verdict and the Check Database parts of L4 and L5 were updated for `maintenance/optimize-integrity#M7.2` (U132, U128) and are in force; the rest is unchanged.
 
 The states of the collection the engine holds (C7), the generation that keys every handle, which ops the executor admits in which state, the long-operation slot, the availability wait the local servers use, the exclusive phase, and the generation change after a collection swap. Ops are `engine/op-model`; jobs are `engine/jobs`.
 
@@ -18,7 +19,7 @@ The states of the collection the engine holds (C7), the generation that keys eve
 | `ExclusiveBusy{op, phase, cancellable}` | a replacement op runs its exclusive phase (L7); `phase` is `Draining`, `Working` or `Replacing` |
 | `Failed{reason}` | the open failed (the gate's refusal or error, or an open step's error), or the collection is corrupt (`Corrupt`, set by U132) |
 
-Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only when the gate upgrades) → `Ready` or `Failed`; `Ready` → `ExclusiveBusy` → `Ready` (with a new generation after a replacement, the same one after a cancel); `Ready` → `Failed{Corrupt}`; any open state → `NoCollection` (close). Each change is published as a `Lifecycle` event (`engine/change-stream` S3).
+Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only when the gate upgrades) → `Ready` or `Failed`; `Ready` → `ExclusiveBusy` → `Ready` (with a new generation after a replacement, the same one after a cancel); `Ready` → `Failed{Corrupt}`; `Opening` → `Failed{Corrupt}` (a recorded corrupt verdict, L2); `Failed{Corrupt}` → `Ready` with the same generation (a sound verdict of Check Database, L4); any open state → `NoCollection` (close). Each change is published as a `Lifecycle` event (`engine/change-stream` S3).
 
 ## L2. Opening
 
@@ -29,6 +30,8 @@ Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only 
 5. The state becomes `Ready{generation}`.
 
 A gate refusal or error, or an open step's error, leaves `Failed{reason}` with nothing open.
+
+A recorded corrupt verdict (`lastQuickCheck.passed` false, `maintenance/optimize-integrity#M5.1`) is read after step 2 and before step 3. The open then ends in `Failed{Corrupt}` with the new generation: no open step runs and nothing writes the file. Its connections stay as they are: the writer admits nothing (L4), and readers can still be leased, so Check Database's integrity stage (L4) and the maintenance status record (`maintenance/optimize-integrity#M10`) can read the file. A corrupt verdict in `Ready` (U132) moves to the same state the same way.
 
 ## L3. Generations
 
@@ -49,20 +52,25 @@ When an op is submitted, the executor decides by the current state:
 
 - Refused means the result `CollectionUnavailable{reason}` at once. Parked means the op waits outside the queues until the state is `Ready` again; it is then checked again: if it was planned on an older generation it fails with `StaleGeneration`, otherwise it is queued and runs on the new generation. Ops are refused unless their spec asks to be parked. Parked ops fail with `CollectionUnavailable` when the collection closes or fails instead.
 - A privileged handle carries a token the lifecycle issued for the open steps or the exclusive phase; it stops working when that phase ends.
-- From `Failed{Corrupt}` only restore and U132's recovery download (a one-way download) may enter `ExclusiveBusy`.
+- From `Failed{Corrupt}` only restore, the adoption of an iCloud collection (`CloudAdopt`, `sync/cloudkit-recovery#V19`) and the recovery download of `sync/one-way` (a one-way download; a manual Anki transfer, frozen, KTD26; not a remedy of U132, `maintenance/optimize-integrity#M7.1`) may enter `ExclusiveBusy`. `CloudAdopt` was added for CloudKit; the other two do not change.
+- In `Failed{Corrupt}`, Check Database (U128, once it lands) may take the slot (L5) and run its integrity stage on the maintenance reader (`maintenance/optimize-integrity#M7.2`; `conformance/collection-check` K3, K10). Nothing else is admitted meanwhile: no op and no maintenance task. A corrupt verdict leaves the state `Failed{Corrupt}`. A sound verdict returns the state to `Ready` with the same generation, since no file was replaced, and Check Database goes on as from `Ready`; one `Available` event follows once its slot is released (L6). Check Database never enters `ExclusiveBusy`.
+- CloudKit ops (`CloudIncoming`, `CloudRekey` and the barriers, `engine/op-model#O1.1`) are admitted only in `Ready`, and refused, never parked, in every other state.
 
 ## L5. The long-operation slot
 
-- One holder at a time among one-way sync, restore, `.colpkg` import, `.apkg` apply and Check Database (R171). A second request gets `Busy{running_op}`, naming the holder; it never queues.
-- Holding the slot leaves the state `Ready`: answers and edits still commit, and otherwise admissible unrelated jobs still run. Normal and media sync remain subject to independent protocol admission (`engine/jobs` J3).
-- Only the replacement ops (one-way sync, restore, `.colpkg` import) may then enter `ExclusiveBusy` (L7) (KTD17).
-- The slot can be taken in `Ready`; in `NoCollection` or `Failed` only by a replacement op (it creates or replaces the collection); in `Failed{Corrupt}` only by restore and one-way sync.
+- One holder at a time among one-way sync, restore, `.colpkg` import, `.apkg` apply, Check Database (R171) and `CloudAdopt` (Replace local collection from iCloud, also at a first connection; `sync/cloudkit-recovery#V14`). A second request gets `Busy{running_op}`, naming the holder; it never queues.
+- Holding the slot leaves the state `Ready`: answers and edits still commit, and otherwise admissible unrelated jobs still run. Normal and media sync remain subject to independent protocol admission (`engine/jobs` J3). CloudKit sends, fetches and applies take no slot and are not refused because of a holder (L9).
+- Only the replacement ops (one-way sync, restore, `.colpkg` import, `CloudAdopt`) may then enter `ExclusiveBusy` (L7) (KTD17).
+- The slot can be taken in `Ready`; in `NoCollection` or `Failed` only by a replacement op (it creates or replaces the collection); in `Failed{Corrupt}` only by restore, `CloudAdopt`, one-way sync and Check Database (U128, `maintenance/optimize-integrity#M7.2`; it creates or replaces nothing, L4).
+- `CloudAdopt` takes the slot at `sync/cloudkit-recovery#V14.2` step 3 and holds it until step 9 or until the op ends. Its staging (step 4) runs while it holds the slot, in `Ready`, `NoCollection` or `Failed{Corrupt}` (`sync/cloudkit-recovery#V19`); in `Ready` study and edits continue, and only step 7's exclusive phase stops them. Until that phase starts, its hold does not make the collection unavailable (L6). The prefetch of a connection decision (`sync/cloudkit-recovery#V13.2`) and Replace iCloud collection (`#V15`) take no slot.
+- **Slot lease.** Taking the slot returns a lease: an owned value that names its holder, which `Busy{running_op}` reports, and the generation it belongs to. A job started with a lease runs under it and does not take the slot again (`engine/jobs` J3). Dropping or releasing the lease frees the slot; a close frees the slot and the lease then stops working (L10), as below. The FFI exposes it as an opaque token, so a holder made of several calls, such as U113's `CloudAdopt` op, keeps it between them. A holder that is one job keeps the lease inside the job, as today.
+- One-way sync in this section is a manual Anki transfer (frozen; KTD26). `CloudAdopt` was added for CloudKit; the rules for the other holders do not change.
 - The slot belongs to one generation: the current one when it was taken (with nothing open, the last one), then the one its holder's own replacement makes (L8). Closing the collection frees the slot (L10). A holder whose slot a close freed gets `CollectionUnavailable` when it tries to enter the exclusive phase; a holder whose generation is no longer current (another collection was opened) gets `StaleGeneration`. Such a holder never acts on another collection, and dropping it does not free a slot taken since.
 - Releasing the slot (the holder drops it) may make the collection available (L6).
 
 ## L6. Availability and waits
 
-- The collection is available when the state is `Ready` and the slot is free.
+- The collection is available when the state is `Ready` and the slot is free, or held only by a `CloudAdopt` that has not entered its exclusive phase (L5): its staging and its wait at step `ready` (`sync/cloudkit-recovery#V14.2` steps 4 to 7, V20) do not touch the collection, so local servers are served meanwhile. When it enters the phase the collection becomes unavailable, as for any exclusive phase (L7).
 - A waiter (U135 wraps it for both local servers) blocks until the collection is available, with a timeout the caller chooses: 5 s for Migaku (R1706, U139), 30 s for AnkiConnect (R1797, U141). On timeout it gets `CollectionUnavailable` (a refusal naming the slot holder or the state). When available it gets a handle of the current generation.
 - Whenever the collection becomes available after not being available (a slot release, the end of an exclusive phase, an open), one `Available` event is published (`engine/change-stream` S3), and every waiter wakes.
 
@@ -90,13 +98,18 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 
 | Job | Slot | Exclusive phase |
 |---|---|---|
-| one-way sync (upload, download, recovery download) | yes | yes |
+| one-way sync (upload, download, recovery download; manual Anki transfer, frozen) | yes | yes |
 | restore | yes | yes |
 | `.colpkg` import | yes | yes |
+| `CloudAdopt` (Replace local collection from iCloud; adoption at a first connection) | yes, from `sync/cloudkit-recovery#V14.2` step 3 to step 9 | yes, step 7 to step 8 |
 | `.apkg` import (apply) | yes | no |
 | Check Database | yes | no |
-| normal sync, media sync | no (they may overlap each other, subject to J3 admission) | no |
-| Check Media, Empty Cards, export, backup, optimizer, bulk ops, login, `meta` probe | no | no |
+| normal sync, media sync (manual Anki transfers, frozen) | no (they may overlap each other, subject to J3 admission) | no |
+| CloudKit sends, fetches, barriers, `CloudIncoming` applies and `CloudRekey` ops | no | no |
+| CloudKit prefetch for a connection decision (`sync/cloudkit-recovery#V13.2`), Replace iCloud collection (`#V15`), conflict-copy operations (`#V17`) | no | no |
+| Check Media, Empty Cards, export, backup, optimizer, bulk ops, login, `meta` probe (login and `meta` are manual Anki transfers, frozen) | no | no |
+
+The CloudKit rows were added for CloudKit (`sync/policy#P23`); the others do not change.
 
 ## L10. Close
 
@@ -106,4 +119,6 @@ Admission stops (queued ops still commit), parked ops fail with `CollectionUnava
 
 - The engine hands out read-only connections by role (KTD3, `storage/open-and-connections` C6): interactive, query, one per search worker, sync, maintenance, two server readers. Each is opened when first asked for and kept until the collection closes or is replaced; one user holds it at a time.
 - Long-lived snapshots go to the sync reader (normal and one-way sync) or the shared maintenance reader (backups, `VACUUM INTO`, stats cache builds, derived rebuilds, planning heavy ops), never to the interactive, query or server readers. A sync holding the sync reader therefore never delays a backup, a stats build, a search or an interactive read.
+- CloudKit barrier snapshots, batch builds and the reconcile scan (`sync/cloudkit-records#K11.4`) use a reader role of their own, `cloud` (`sync/policy#P7.1`), so a manual transfer's long snapshot on the sync reader never blocks them, and they never wait for a backup. A scan holds it while no batch can be built (`sync/policy#P6`). The `cloud` role is added for CloudKit; `storage/open-and-connections` C6 adds it with `query_only` on, since it never runs `VACUUM INTO` (`sync/policy#P23`).
+- The writer never waits for the cloud reader. The batch builder leases it off the writer, waiting there if a scan or an earlier build holds it, and then submits the barrier op with the lease; the barrier begins its read transaction on that lease (`sync/policy#P7.1` step 1) and hands the lease back with its result. A barrier op submitted without a lease fails with `InvalidArgument` and flags nothing.
 - When a reader is leased, the derived store's attachment is checked for the lease's generation: the store's file is attached as schema `derived` when the store is bound to that generation, and detached otherwise (`storage/derived-store` D9).

@@ -1,11 +1,12 @@
 # Undo and redo
 
 Spec: engine/undo
-Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811
+Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811, R2047 (M8.1, M9.6 to M9.10)
 Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). Sections A1 to A11 are Anki's observable results at 26.09.3, written by the spec writer; A11 lists what they change in M1 to M12.
-Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `op_catalog.rs`; `undo_conformance.rs` plays every undo scenario on the engine against its golden, deviations applied, with stand-ins for the new collection, the setup and the note and answer ops, until the runner's undo adapter runs the area (`undo-ops.md` V6)
+Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `undo_cloud.rs` (M9.10), `op_catalog.rs`; `undo_conformance.rs` plays every undo scenario on the engine against its golden, deviations applied, with stand-ins for the new collection, the setup and the note and answer ops, until the runner's undo adapter runs the area (`undo-ops.md` V6)
+Status: Under review (R2066) for the CloudKit parts: the `CloudIncoming` and `CloudRekey` row of M2, the CloudKit wording of M3, M8.1, M9.6 to M9.11 and the targeted drop in M11, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
-The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
+The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, the CloudKit hold-back and acknowledgement states (M8.1, M9.6 to M9.10, `sync/policy#P8`), and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
 
 ## M1. Steps
 
@@ -25,7 +26,8 @@ Each op source has one undo effect, applied on the writer right after the op com
 | `UserUndoable` | recorded as a new step, or merged into the top step (M1); redo is cleared, also when the op changed nothing (A2) |
 | `UserNonUndoable` | clear all, reason `ClearedByNonUndoableOp` (R366, R725); an op marked skip-undo instead keeps the steps and clears redo (below) |
 | `LocalApi` | never recorded; truncates at the deepest intersecting step (M7, R1795, R1796) |
-| `SyncIncoming` | the merge rule of M9.4 (KTD7) |
+| `SyncIncoming` | the merge rule of M9.4 (KTD7). Manual Anki transfers only (U107, frozen; KTD26) |
+| `CloudIncoming`, `CloudRekey` | the targeted drop of M9.8 (`sync/policy#P8.3`): a cut below the newest targeted step, as M7. Nothing else: redo is cut only as M9.8 says, never cleared whole |
 | `Optimizer`, `Maintenance` | clear all, reason `ClearedByNonUndoableOp` |
 | `Rollover` | none: the day clock's writes keep both histories (`sched/day-clock` D10); its rollover op clears them when the day changes (M6) |
 
@@ -43,12 +45,12 @@ Each op source has one undo effect, applied on the writer right after the op com
   |---|---|
   | `None` | nothing to undo (session start, everything undone, or a session scope whose top step is not its own) |
   | `ClearedByRollover` | the history was cleared by day rollover |
-  | `ClearedBySync` | a normal sync's incoming changes dropped the steps below |
-  | `ClearedByOneWay` | the collection was replaced: one-way sync, restore or `.colpkg` import |
+  | `ClearedBySync` | a normal sync's incoming changes dropped the steps below (M9.4, manual transfers), or a CloudKit apply or re-key dropped them (M9.8) |
+  | `ClearedByOneWay` | the collection was replaced: one-way sync, restore, `.colpkg` import, or Replace local collection from iCloud (`CloudAdopt`, `engine/collection-replace#R1`) |
   | `ClearedByNonUndoableOp` | a non-undoable user op, the optimizer, maintenance or Check Database cleared it |
   | `ChangedExternally` | a local-server write or an outside change truncated the history, or an undo found its rows changed (M4.1) |
-  | `AlreadyUploaded` | the top step was uploaded by a sync (M9) |
-  | `UploadPending` | the top step is in the snapshot of a running sync (M9) |
+  | `AlreadyUploaded` | the top step was uploaded by a sync (M9). For CloudKit: CloudKit acknowledged every entity of the step that a batch named (M9.7) |
+  | `UploadPending` | the top step is in the snapshot of a running sync (M9). For CloudKit: a barrier flagged the step for a batch, and an acknowledgement is still outstanding (M9.6) |
 
 - On an empty history peek reports the reason the oldest step was last dropped with: clear all, a truncation, a sync drop, or a failed undo. Dropping the oldest step to keep 30 resets it to `None`. A redo peek reports only `None` when nothing can be redone.
 
@@ -88,6 +90,14 @@ Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo 
 - Its value: the steps (ids, names, kinds) and the rows they touched, each with its before-image from the oldest step of the run that touched it (absent when the run created it). The `col` row is not in it. The value keeps the steps' journals and reads an image only when asked, for one row by its key or one row at a time as an iteration over the rows reaches it, from memory or from the journal's spill file (M1). Taking the run, at a sync's barrier on the writer or through `held_back_run`, reads no image, so a run with a large step (a session-scoped bulk edit) costs no memory beyond its journals and holds the writer no longer than a small one (R1851). The journals live as long as the value, also after their steps leave the history.
 - The session for hold-back ends when U43 says so (the summary or congrats screen is dismissed, KTD6); U43 then stops passing it.
 
+### M8.1 The CloudKit held run (`sync/policy#P1`)
+
+Added for CloudKit. `held_back_run` stays as M8 says.
+
+- `cloud_held_run(session)` is a contiguous run of steps at the top of the history. Read from the top down, its steps are neither uploaded nor upload-pending, and each belongs to that session or to no session. It ends at, and includes, the newest answer of that session. It is empty when there is no session, or when the reading meets an uploaded or pending step, a step of another session, or the end of the history before that answer.
+- So a step of no session above the session's newest answer (a Browse edit on Mac, an editor save during the session) is in the run. When every step of the run is the session's, the run equals `held_back_run(session)`.
+- Its value has M8's form and lifetime: the steps, and the rows they touched with the before-image from the oldest step of the run that touched each row. The journals are kept, and images are read only when asked. Taking the run reads no image.
+
 ## M9. Sync
 
 1. **Begin.** At its snapshot barrier (U107: an op on the writer between ops, writing nothing), a normal sync calls `begin_sync_hold(session)` through its op context. It returns the snapshot seq (the last committed op's) and the held-back run (M8), and flags every other step up to the snapshot that is not yet uploaded `UploadPending`. Only the writer can call it, so no undo runs between the snapshot and the flags. A sync that begins while an earlier one still has pending steps marks those uploaded first, since its `finish` may have been sent.
@@ -102,6 +112,65 @@ Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo 
    Matching is by key (a target's note does not reach the note's cards).
 5. An uploaded step is never undone (M4.1) and the held-back run is never flagged, so a revlog row the server holds is never deleted by an undo (spec-flow C3).
 
+M9.1 to M9.5 are the path of manual Anki transfers (U107, frozen; KTD26) and stay as written. CloudKit sync uses M9.6 to M9.10 instead (`sync/policy#P8.2`, `#P8.3`). The two paths share the upload states and the refusals of M4.1, and nothing else. M9.6 to M9.10 are additive: M1 to M8 and M9.1 to M9.5 do not change.
+
+### M9.6 CloudKit barrier flags (`sync/policy#P7.1`, `#P8.2`)
+
+- At a CloudKit barrier (an op on the writer between two ops that writes no row, `engine/op-model#O1.1`), the core calls `begin_cloud_hold(session, keys)` through its op context. `keys` are the row keys of the entities the batch request names (`sync/cloudkit-records#K6` maps an entity to its rows). When several requests share one barrier, `keys` is their union.
+- It returns the snapshot seq S (the last committed op's) and `cloud_held_run(session)` (M8.1). It flags `UploadPending` every step with an id at or below S that is not in that run, is not yet flagged, and whose touched set (M1) holds one of `keys`. For each step it flags, it also returns the keys of `keys` in that step's touched set.
+- Only the writer can call it, so no undo runs between the snapshot and the flags (as in M9.1).
+- Redo steps with an id at or below S whose touched set holds one of `keys` are dropped, as M9.2 drops the redo steps made up to the snapshot. A redo would write rows back over a version CloudKit may already hold. Example: an answer is undone before the barrier, so the undo deleted its review-log row and left a redo step. The barrier names that row, and its deletion is sent as a tombstone (`sync/cloudkit-records#K17.3`). The redo would insert the row again.
+- Unlike M9.1, a step that the request does not name stays as it is, and a later barrier does not mark earlier flags as uploaded (M9.7 does that).
+- A flag never goes back. A batch that then returns no record, a failed save, a lost save result, a cancel and a closed gate all leave the step flagged (`sync/policy#P8.2`: a save whose result is lost may have landed). M9.3 does not apply to CloudKit.
+- A step whose change is pending in tracking (in the outbox, `sync/cloudkit-recovery#V1`) and that no barrier has flagged stays undoable. Its undo is a local change like any other. The tracking observer then finds the entity clean when its rows equal the acked rows, and pending otherwise (`sync/cloudkit-records#K11.1`, `#K11.4`).
+- Steps of `cloud_held_run` are never flagged, so the newest answer stays undoable during the session (R365).
+
+### M9.7 Acknowledgement
+
+- The undo manager keeps the map from each flagged step to the keys M9.6 returned for it. `begin_cloud_hold` returns a copy for the caller.
+- `mark_cloud_uploaded(step ids)` sets upload state `Uploaded` on each named step whose upload state is `Pending`. Any thread may call it. CloudKit tracking (U113, U114) calls it with step ids, after the tracking commit in which every key of the step's map entry belongs to an entity that is acked or clean (`sync/cloudkit-records#K12.3`). An id that is not in the history (dropped by M9.8, M7, M6 or the 30-step limit) or whose step is not `Pending` is ignored; the call never fails for it.
+- `UploadPending` and `Uploaded` are both not undoable (M4.1). The acknowledgement changes only the reason peek reports: `UploadPending` while the change may still be in flight, `AlreadyUploaded` once CloudKit holds it.
+- The map lives in memory with the history, and an entry goes when its step leaves the history. A close, a crash and a replacement drop both (M6), so nothing is settled at launch.
+
+### M9.8 Incoming and re-key targets (`sync/policy#P8.3`)
+
+A `CloudIncoming` or `CloudRekey` op has targets: every key its journal changed, and a grave given as the key of the card, note or deck it deletes (as in M9.4); `col` is left out. The op names the active session, if any (`sync/policy#P5`). When it commits, on the writer, with its other undo effects (M2):
+
+- the history is cut below the newest step whose touched set holds a target: that step and every older step are dropped, as in M7. Steps newer than it stay, except steps of `cloud_held_run(session)`, which the third bullet drops whole (the run is at the top of the history, so a target in one of its steps also drops the run's newer steps, such as a Browse edit above the answer). An older step that touches no target is dropped too, because a newer step may depend on it: with W creating deck d2 and a later Y moving card c1 into d2, a target c1 drops Y, and if W stayed, its undo would delete d2 while c1 still points to it (R2053);
+- redo steps are cut the same way: the redo step nearest the top whose touched set holds a target, and every redo step below it, are dropped (M7);
+- when a target is in the touched set of any step of `cloud_held_run(session)`, taken just before the drop, the whole run is dropped (the cut above then reaches every older step too). Its value (M8.1, journals kept) is returned with the op's result, and the policy keeps it as the detached hold (`sync/policy#P1`, `#P8.3`);
+- steps newer than the cut and redo steps above it stay, except steps of `cloud_held_run(session)` when the third bullet drops the run. M9.4's first rule ("every step up to the snapshot is dropped") does not apply.
+- When the oldest step was dropped, the reason becomes `ClearedBySync` (as M9.4, M3). There is no new reason.
+- Matching is by key, as in M9.4. A `CloudRekey` journal holds the old key, the new key and every reference it rewrote, so every step that touches the re-keyed object is dropped (`sync/cloudkit-records#K14.2`).
+
+### M9.9 Acked tombstones
+
+An undo or redo never restores a row whose CloudKit tombstone is acked or applied (`sync/cloudkit-records#K17.3`). This follows from M9.6 to M9.8 and needs no check of its own: a step whose deletion a batch named is flagged, a redo step that a batch named is dropped, and a step or redo step that an incoming tombstone targets is dropped.
+
+### M9.10 Tests
+
+In `core/crates/meguri-engine/tests/undo_cloud.rs`, with keys only and no CloudKit:
+
+- Two answers A1 and A2 in one session, then a barrier that names both cards: `cloud_held_run` is A2, and A1 becomes `UploadPending`. Undo of A2 succeeds. Undo of A1 is refused with `UploadPending`, also when it was submitted while the barrier held the writer (M4.1 resolves the target when the writer takes the op). After `mark_cloud_uploaded` it is refused with `AlreadyUploaded`.
+- A barrier that names no key of a step leaves that step undoable. A later barrier that names it flags it.
+- A step of no session after the newest answer is in `cloud_held_run`. A step of another session above the answer makes the run empty.
+- A redo step whose keys a barrier names is dropped. One whose keys it does not name stays.
+- An incoming target in a step of the run drops the whole run and every older step, and returns the run's value, which still reads the before-images after the steps left the history. A target in a step below the run drops that step and every older step; the run and the steps between stay. With the run [answer A1, then a step E of no session above it], a target in A1 drops E too: E is not undoable and is in the returned run.
+- Older W (no session) creates deck d2, newer Y moves card c1, which CloudKit holds, into d2; an incoming change to c1 drops Y, and W is dropped with it: peek reports `ClearedBySync` and no undo deletes d2.
+- A target in a redo step drops it and every redo step below it; redo steps above it stay.
+- A `CloudRekey` drops every step that touches the old or the new key.
+- Property test: random sequences of answers, edits, undos, redos, barriers, acknowledgements and incoming targets never undo or redo a flagged step, never flag a step of `cloud_held_run`, never undo a step older than one an incoming target dropped, and never restore a row that an earlier barrier named for a deletion.
+
+### M9.11 Structure reports of undo and redo (`engine/change-stream#S2.5`)
+
+Added 2026-10-27. An undo or redo that restores note type layouts is a structural change like the op it reverses, and S2.5's guard holds for it.
+
+- A step keeps the structure report of its op (S2.5) with its journal; a step whose op reported nothing keeps none.
+- The undo of such a step reports the inverse: each `layouts` entry with both maps inverted (the inverse has one entry per old `ord`: the new `ord` that the old one went to, or -1 when it went nowhere); each `type_changes` entry reversed (new id to old id) with its maps inverted; and the step's reason codes. A note type that the step removed comes back as an addition, which needs no entry.
+- The undo of any step that added a note type, with or without a kept report, lists that note type in `removed` and adds reason 4 `notetype_removed`, since the undo deletes it.
+- The redo of the step reports the step's own report again.
+- Tests are in S2.5's list.
+
 ## M10. Restorers (R721)
 
 State outside the collection that an undo or redo must put back (U44's load-balancer cache and learning cutoff, U43's session queue) is restored by restorers registered on the collection. An op attaches an opaque restorer state to the step it records. After an undo or redo commits, on the writer and before the change set is published, each restorer gets the direction, the step (id, name, kind, session), the change set and that state. Like observers they keep short and never submit ops; one that panics is logged and the others still run. Showing the card next (R722) is U43's.
@@ -109,7 +178,7 @@ State outside the collection that an undo or redo must put back (U44's load-bala
 ## M11. Undo classes (R2020)
 
 - Every op of the op catalog (`engine/op-model` O9) declares one class: `Undoable` (recorded as a step), `DestructiveNonUndoable` (not undoable: confirmed first and preceded by U127's pre-op backup), or `NonDestructive` (not undoable and destroys nothing). Units add their ops to the catalog with their class.
-- Every op source declares its effect (M2): recorded, clear all, truncate, or the sync merge; skip-undo is per op. `tests/op_catalog.rs` enumerates both.
+- Every op source declares its effect (M2): recorded, clear all, truncate, the sync merge, or the targeted drop (M9.8); skip-undo is per op. `tests/op_catalog.rs` enumerates both.
 
 ## M12. Budget
 

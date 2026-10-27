@@ -4,8 +4,9 @@ Spec: engine/collection-replace
 Requirements: R2004 (replace primitive), R2005, R1489, R1548 (publication decision; U113/U114 resolve it), R2051, R2056, R2066, R1638 (data side); supports R1543, R1626, R2003, R2010, R2019, and R1478, R1479, R1482, R2013, R2016 through the open gate
 Anki: 26.09.3 for R7 (what a replacement from a collection package stamps); every other section is Meguri design
 Scenarios: conformance/scenarios/package/collection-package/ (R7); tests in `core/crates/meguri-engine/tests/replace.rs`
+Status: Under review (R2066) for the `CloudAdopt` row of R1, the `CloudAdopt` bullet of R2, the CloudKit wording of R2 and R5, R6.6 and R6.7, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
-The only way Meguri swaps the collection file for another file: a full download or upload (U109), a restore (U127) and a `.colpkg` import (U124). The primitive checks the incoming file with the open gate and the integrity check, applies the change its reason calls for, makes the file self-contained, and swaps it in during the exclusive phase as the swap step of `engine/lifecycle#L8`. It also keeps the device-only replacement and publication recovery state (R6). Reading and inspecting packages is `package/container`.
+The only way Meguri swaps the collection file for another file: a full download or upload (U109; manual Anki transfers, frozen), a restore (U127), a `.colpkg` import (U124), and the adoption of an iCloud collection (`CloudAdopt`, U113 and U114: Replace local collection from iCloud and the first connection to an iCloud collection, `sync/cloudkit-recovery#V13`, `#V14`). The primitive checks the incoming file with the open gate and the integrity check, applies the change its reason calls for, makes the file self-contained, and swaps it in during the exclusive phase as the swap step of `engine/lifecycle#L8`. It also keeps the device-only replacement and publication recovery state (R6). Reading and inspecting packages is `package/container`.
 
 ## R1. Reasons
 
@@ -15,6 +16,9 @@ The only way Meguri swaps the collection file for another file: a full download 
 | `ColpkgImport` | U166 minimal caller; U124 full flow | inspecting a `.colpkg` | the package stamps, then any change U124 passes | set |
 | `FullDownload` | U109 | the server's file, streamed into staging | U109's change: `ls` = `mod` (R1543) | manual Import: fresh publication identity and pending fence under R6, even if the old decision was clear |
 | `FullUpload` | U109 | the file U109 transformed and uploaded | none (U109 changed it before the upload) | preserve the cloud decision; manual policy remains separate |
+| `CloudAdopt` | U113, U114 (`sync/cloudkit-recovery#V14.2` step 8) | the staging fetcher's staged collection, built from an epoch (`sync/cloudkit-records#K18.4`) | none: no package stamps; the staged file already holds K18.4's `col` values | R6.6: the caller's fresh publication identity, bound to the new binding (active source) or local only (previous source); intent recorded; no fence |
+
+`FullDownload` and `FullUpload` are manual Anki transfers (U109, frozen; KTD26). `CloudAdopt` is added for CloudKit; the other rows do not change.
 
 The package stamps are Anki's behavior (R7), so the primitive applies them itself for both package reasons; U127 passes no change, and U124 passes only what its own spec adds. `ColpkgImport` exists in the type from this unit on; U166 supplies its minimal collection-only caller; U124 supplies the full flow.
 
@@ -22,7 +26,8 @@ The package stamps are Anki's behavior (R7), so the primitive applies them itsel
 
 - **The staged file**: `collection.anki2` in a staging directory that U32's staging-directory primitive made in the collection directory (`package/container#P9`), handed over as an inspect handle or by the caller that wrote it there. It must be on the collection's file system (same device), else `CrossDevice`. No connection other than the primitive's own may be open on it.
 - **The reason**, and the caller's change if any: a function the primitive runs inside the R3 step 3 transaction on the staged file.
-- **The exclusive phase.** The caller holds the long-operation slot and runs the phase's `Working` step with its privileged handle (`engine/lifecycle#L5`, `#L7`); otherwise `NotExclusive`, and nothing is touched. With no collection open (a first download, a recovery from `Failed`), holding the slot is enough (L5).
+- **For `CloudAdopt` only**, three values the caller passes and the primitive does not generate: the operation identity (the `adopt` recovery op id, `sync/cloudkit-recovery#V2.3`), the candidate publication identity (that op row's candidate identity column), and the candidate decision (bound to the new binding's account and environment, or local only, `sync/cloudkit-recovery#V14.1`). Without all three a `CloudAdopt` fails with `InvalidArgument` before anything is touched. For every other reason the primitive generates the identities as R6.1 says.
+- **The exclusive phase.** The caller holds the long-operation slot and runs the phase's `Working` step with its privileged handle (`engine/lifecycle#L5`, `#L7`); otherwise `NotExclusive`, and nothing is touched. With no collection open (a first download, a first connection to an iCloud collection, a recovery from `Failed`), holding the slot is enough (L5).
 - The process keeps its advisory lock on the collection (R2014) through the whole replacement.
 
 ## R3. Checking the staged file (R2005)
@@ -47,10 +52,10 @@ The result is one self-contained file: everything committed is in it, and it nee
 
 ## R5. The swap
 
-Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the phase to `Replacing` and closed every connection to the live collection: every reader (U107's snapshot reader and its stage attachment and the derived-store attachments included, after their read transactions end), then the writer with its checkpoint (`storage/open-and-connections#C10`).
+Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the phase to `Replacing` and closed every connection to the live collection: every reader (U107's snapshot reader and its stage attachment, the CloudKit cloud reader (`engine/lifecycle#L11`) and the derived-store attachments included, after their read transactions end), then the writer with its checkpoint (`storage/open-and-connections#C10`).
 
 1. The live `collection.anki2-wal` must be absent or empty (0 bytes). If not, nothing is changed and the replace fails with `LiveWalNotEmpty`: L8 reopens the old file and keeps the generation.
-2. For `Restore` and `ColpkgImport`, durably record the replacement intent and publication fence (R6.2); R6.5 continues its already-recorded intent for the same operation.
+2. For `Restore` and `ColpkgImport`, durably record the replacement intent and publication fence (R6.2); R6.5 continues its already-recorded intent for the same operation. For `CloudAdopt`, durably record the replacement intent with the fence false (R6.6).
 3. Remove the live `collection.anki2-shm` and `collection.anki2-wal`. They hold nothing (step 1); a stale `-wal` left next to the new file would be applied to it by SQLite.
 4. Rename the staged file over `collection.anki2`: one `rename`, on one file system.
 5. A full sync of the collection directory.
@@ -106,7 +111,7 @@ maintenance records, not collection or sync fields:
 `conformance/collection-check#K5`: either every documented problem kind with an
 unsigned 64-bit count and no `error` member, or `error: "corrupt"` with no problem
 count members. It stores no localized messages or raw error text. Unknown
-members remain allowed and preserved. This defines storage/accessors only;
+members remain allowed and preserved. This defines only these stored records and their accessors in U32's sidecar (`storage/durability-and-files`);
 U128/U132 still own the operations and their scheduling and user presentation.
 
 A genuinely absent sidecar, `deviceState` or optional record reads as no record.
@@ -233,12 +238,37 @@ retained evidence, and refusal by old readers before activation and after rename
 while WAL work is pending. Check exact old main/WAL recovery or keep old WAL away
 from the candidate. Keep the existing nonempty-WAL and publication-fence tests.
 
+### R6.6 `CloudAdopt` (U113, U114; `sync/cloudkit-recovery#V14`)
+
+Added for CloudKit. R6.1 to R6.4 do not change for the other reasons.
+
+- **Intent.** `CloudAdopt` uses R6.2's handshake with the three values R2 lists. The operation identity is the `adopt` recovery op id (`sync/cloudkit-recovery#V2.3`). The intent also records the candidate's decision: bound to the new binding's account and environment when the source is the active epoch, or local only when it is the previous epoch (`sync/cloudkit-recovery#V14.1`).
+- **Candidate identity.** The publication identity in the candidate identity column of the `adopt` op row (`sync/cloudkit-recovery#V2.3`); for the active source V14.2 step 6 also writes it into the new binding. It is fresh: no earlier collection had it.
+- **No fence.** The cloud side is the source, so the candidate is never fenced: the intent records `cloudPublicationPending` false. The adoption is itself the user's explicit cloud choice (R6.1), so it also resolves a fence that was pending before the op (`sync/cloudkit-recovery#V12.2`, `#V14.2` step 8). Of the replacement reasons, it is the only one that clears a fence. U113's other choices clear it without a replacement (`sync/cloudkit-recovery#V12.2`, `#V13`, `#V15.2` step 2).
+- **After activation.** R6.3's first paragraph applies, with the candidate marked active with its recorded decision and the fence clear, not pending.
+- **At startup**, for an unfinished `CloudAdopt` intent:
+
+  | Proven state | Durable result |
+  |---|---|
+  | Intent phase; only the old file identity matches, also a recorded absence | restore the old identity and its exact prior decision, a pending fence included, then remove the intent |
+  | Intent phase; only the candidate file identity matches | activate the candidate identity with its recorded decision and the fence clear (a bound decision only after the account check below), then complete the intent |
+  | Durable activation exists | keep the candidate and its decision |
+  | Both match, neither matches, or the metadata is unreadable | block publication and keep the journal, as R6.3. Only U113 resolves the block: `sync/cloudkit-recovery#V14.3`'s Cancel, then a V13 choice for the collection that opens |
+
+- The account check of R6.3 applies to a bound decision: when the captured account binding no longer matches, the candidate is activated with `cloudPublicationPending` true and no recorded decision, so publication stays paused until U113's decision (`sync/cloudkit-recovery#V12.2`). It never becomes a decision for another account. A local-only decision has no account to check.
+- R7's package stamps do not apply. The tracking side of the adoption (`sync/cloudkit-recovery#V14.2` step 9) runs after the reopen; this spec does not touch the tracking store.
+- Tests, in `core/crates/meguri-engine/tests/replace.rs`: a `CloudAdopt` from a prior-clear and from a prior-pending decision ends with the fence clear and the recorded decision; a kill at each R8 fault point gives the table above; an account mismatch at startup activates the candidate with the fence pending and no `pendingDecisionReason`; `pendingDecisionReason` (R6.7) round-trips, reads absent as no reason, and is an error when null or an unknown string; `CloudAdopt` with no old file; `ClearedByOneWay` and `CollectionReplaced` as for any replacement.
+
+### R6.7 The reason of a pending decision (`sync/cloudkit-recovery#V12.1`)
+
+Added for CloudKit. When `Restore`, `ColpkgImport` or `FullDownload` (manual Import) sets the fence, `deviceState` also keeps the replacement's reason with the pending decision, until U113 resolves it, in the member `pendingDecisionReason`: the JSON string `restore`, `colpkgImport` or `manualImport`. U113 reads it for `MGEpoch.reason` (`sync/cloudkit-recovery#V12.2`). An absent member means no reason: a pending decision recorded before this member existed, or one that R6.6's account check left. A present null, another type or another string is an error, as R6.1 says. The member is cleared with the decision, and R6.3's restore of a prior decision restores it with that decision.
+
 ## R7. What a replacement from a collection package stamps (Anki 26.9.3)
 
 - Anki's restore of a backup and its `.colpkg` import are one operation. On its copy of the incoming collection, after the copy has opened (upgraded when older) and before the swap, it sets `col.scm` and `col.mod` to the current time in epoch milliseconds. Nothing else in the file changes: no `usn`, no `ls`, no row of any other table.
 - The stamps retain manual Anki-transfer compatibility. They do not identify a publication generation or resolve R6 recovery.
 - Meguri's primitive makes the same change for `Restore` and `ColpkgImport` (R3 step 3), with one instant for both columns. Under a scenario's frozen clock both equal the scenario's current instant in milliseconds.
-- Scenarios: `package/collection-package/restore-backup`, `upgrade-on-import` and the import half of `export-import-roundtrip` observe the stamped `col` row in `db_dump` (`specs/conformance/package-ops.md` E2).
+- Scenarios: `conformance/scenarios/package/collection-package/restore-backup.yaml`, `upgrade-on-import.yaml` and the import half of `export-import-roundtrip.yaml` observe the stamped `col` row in `db_dump` (`specs/conformance/package-ops.md` E2).
 
 ## R8. Failures and kills
 
@@ -266,7 +296,7 @@ The lifecycle's own errors (`CollectionUnavailable`, `StaleGeneration`, `engine/
 
 | What | Where |
 |---|---|
-| `Restore` of the backup fixture: the dump equals the oracle's restore of it | `package/collection-package/restore-backup` (Meguri's `import` adapter runs inspect, then this primitive with `Restore`) |
+| `Restore` of the backup fixture: the dump equals the oracle's restore of it | `conformance/scenarios/package/collection-package/restore-backup.yaml` (Meguri's `import` adapter runs inspect, then this primitive with `Restore`) |
 | After a `Restore`: `CollectionReplaced(generation + 1)` once, older readers closed and their handles failing with `StaleGeneration`, the derived store rebuilding, the candidate publication identity active and `cloudPublicationPending` true | `core/crates/meguri-engine/tests/replace.rs` |
 | After a `Restore` and after a `FullDownload`: no external change reported at the reopen (no `ChangedExternally`, no whole-collection change set besides `CollectionReplaced`), the sidecar's last-seen `mod` and `scm` are the new file's, and U32's sidecar members and `deviceState` are both still present | same file |
 | Kill at `replace.after_pause_recorded` (and every fault point before it): the relaunch opens the old file unchanged (SHA-256), the prior publication decision is restored only after the old file identity is proven; a cancel before the rename does the same at once | same file |
@@ -285,4 +315,4 @@ For `package/container` P16, extend this replacement's R6 intent with the owned 
 
 Record old and candidate native file identities from locked files alongside R6's finalized byte identities. When their bytes are identical but media differs, use the native identities or durable activation witness to prove which file became active. Ordinary identical-database imports must remain supported. If the evidence cannot distinguish them, retain it and fail closed rather than choosing a media view from timestamps or hashes alone.
 
-Recover the old or candidate media/journal view under P16 before any collection writer, mutating day check, reader, Ready state or replacement event. An unresolved media state blocks Ready even where R6 alone permits validated local review. P9's unconditional sweep must not remove these owned recovery files. A post-rename failure reports the candidate active or its activation uncertain; it never implies rollback. Keep the backup and recovery facts across delivery failure and relaunch.
+Recover the old or candidate view of the media folder and its journal (`media/media-files`, `media/media-journal`) under `package/container#P16.3` before any collection writer, mutating day check, reader, Ready state or replacement event. An unresolved media state blocks Ready even where R6 alone permits validated local review. P9's unconditional sweep must not remove these owned recovery files. A post-rename failure reports the candidate active or its activation uncertain; it never implies rollback. Keep the backup and recovery facts across delivery failure and relaunch.

@@ -1,9 +1,10 @@
 # Change sets, observers and the change stream
 
 Spec: engine/change-stream
-Requirements: R1490, R1658, R1792 (core side); supports R45, R173, R447, R1286, R1434, R1559
+Requirements: R1490, R1658, R1792 (core side); supports R45, R173, R447, R1286, R1434, R1559, R2051 (S1.2, S2.4)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
+Status: Under review (R2066) for S1.2, S2.4, S2.5 and the CloudKit wording of S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 What a committed op reports (the change set), who sees it inside the core before anyone else (in-core observers), and the one ordered queue that carries it and every other core→Swift event (the change stream). Ops are `engine/op-model`.
 
@@ -31,6 +32,8 @@ A value type (`meguri_model::changes`, KTD2), derived from the op's journal (U23
 - A change set is empty when it lists nothing. An empty change set is never published (`engine/op-model` O4).
 
 ### S1.1 Skipped incoming IDs (U107)
+
+Manual Anki transfers only (U107, frozen; KTD26). CloudKit applies use S1.2 and never fill these lists.
 
 The current mutation lists describe rows actually changed. They must not list
 a skipped row as added, updated or removed. Add three default-empty typed-ID
@@ -72,6 +75,18 @@ Focused tests cover each entity kind, duplicate and ordering rules, a missing
 note without a card grave, committed/no-op results, rollback, empty defaults and
 nonempty model-to-FFI/event conversion. An exhaustive constructor is updated,
 not a reason to discard diagnostics required by the caller.
+
+### S1.2 CloudKit changes (U113, U114)
+
+Added for CloudKit sync (KTD25). S1 does not change.
+
+- A `CloudIncoming` or `CloudRekey` op (`engine/op-model#O1.1`) reports its writes as any op does: one change set from its journal, with `source` `CloudIncoming` or `CloudRekey`, published as one `Changes` event with the op's seq and generation (S3). It adds no member to S1.
+- It lists only rows the op changed. A server version whose row equals the local row writes nothing (`storage/ids-usn-mtime` S4) and is not listed, so a replayed apply publishes nothing. An entry that waits in the inbox (`sync/cloudkit-records#K13.1`) is not listed until the op that applies it commits.
+- `collection_row` is true when the op set `col.scm` (a structural generation, `sync/cloudkit-records#K11.3`) or another `col` column other than `mod`. `schema_changed` follows S1 for the note types the apply changed.
+- `skipped_incoming_cards`, `skipped_incoming_notes` and `skipped_incoming_decks` (S1.1) stay empty. What the apply did not apply (waiting entries, refused records, conflict copies) is CloudKit tracking state, reported in sync status (`sync/policy#P14`), never in a change set.
+- Barriers and the Sync Now capture write nothing, so they publish no `Changes` event (`engine/op-model` O4).
+- Media files that CloudKit installs (`sync/cloudkit-records#K9.3`) are written by the media store outside any op. They appear as the media store's own event (S3 `Extension`, U31's media arrived), not as `media_added` of a change set. Media-name entities live in the media journal, not in collection rows (`sync/cloudkit-records#K9.4`), so they are not in a change set either.
+- Consumers treat a CloudKit change set like any other source's, with one exception: where a consumer has a rule keyed on source `SyncIncoming`, a change set of source `CloudIncoming` or `CloudRekey` takes that same rule. The known cases: U42's queue rebuild row (`sched/queue-building`, R457: changes from a sync rebuild the queue), and U50's post-commit `fsrs` observation (`sched/fsrs-policy` S2, its U114 row). A `CloudRekey` changes card, note or deck ids, so a queue that holds the old ids must rebuild too. Otherwise U43's session applies its rules for another source's change (`sched/review-session`, R457), observers and the derived store run as S2 says, and undo applies `engine/undo#M9.8`.
 
 ## S2. In-core observers
 
@@ -148,6 +163,35 @@ Run the allocator-backed 150k payload proof in `storage/journal` J4 through
 real consumers; existing dispatch, held-run and large-sync tests alone do
 not establish that memory bound.
 
+### S2.4 The CloudKit tracking observer (U113, U114)
+
+Added for CloudKit (`sync/cloudkit-records#K11.1`, `#K11.2`, `#K24`). S2 to S2.3 do not change for other observers.
+
+- The tracking observer is an in-core `ChangeObserver`. U114's wiring registers it at every collection open at which the CloudKit tracking store exists or iCloud sync is enabled on the device, before the writer admits ops. It then runs for every op with a non-empty change set, whatever its source. Ops committed while it was not registered are found by the reconcile scan (`sync/cloudkit-records#K11.4`) or by the first connection (`sync/cloudkit-recovery#V13`).
+- Beyond S2's payload it reads, through the same journal-backed handle (S2.1), what the journal already keeps for every journal row of every table: the before-image (the base of `sync/cloudkit-records#K11.2`), and the after-image, which for notes is the journal's digest of the new row (`engine/undo` M1). That note digest is the one K11.1 compares only when it equals K11's row digest for the note; otherwise the observer reads the live note row through the writer's connection, which equals the after-image because observers run before the next op (S2). The journal keeps nothing new for this (`storage/journal`, U23, unchanged). The tables are notes, decks, presets (`deck_config`), note types with their `fields` and `templates` rows, and tags, as well as cards, review-log rows and config values. The payload of other observers stays as S2 says.
+- It learns of its own failure: when its run returns an error or panics, the dispatcher still lets the commit stand and runs the other observers (S2), and it then calls the observer's failure hook once, on the writer, with the op's seq. The tracking observer sets its scan-required flag there (`sync/cloudkit-records#K11.1`).
+- For a `CloudIncoming` op it records the op's seq in the apply intent and marks no key of the intent dirty, `entry` or `side_effect` (`sync/cloudkit-records#K11.1`, `#K13.2`): the settle after the WAL flush makes the `side_effect` keys pending as local changes. The observer does not run for an empty change set, so the core also records the seq from the op's result (`engine/op-model#O1.1`); both writes are idempotent.
+- For a `CloudRekey` op it records the op's seq in the re-key intent, and marks the reference rows the op rewrote dirty as local changes (`engine/op-model#O1.1`, `sync/cloudkit-records#K14.2`). The re-keyed entity itself moves to its new key when the intent settles (K14.2), not here.
+- It reads the op's structure report (S2.5) and stores from it the op's structural generation, if any (`sync/cloudkit-records#K19.2`). It never infers field or template maps from rows.
+- Tests: a note edit, a deck rename, a preset change, a note type field rename and a tag registration each give the observer the before-image and the after-image or note digest; an observer that panics gets one failure call with the seq, and the other observers and the publication are unchanged; a `CloudIncoming` op marks nothing dirty, and a `CloudRekey` of a note marks its cards' rewritten rows dirty.
+
+### S2.5 Structure reports (U113, U114; `sync/cloudkit-records#K19.2`)
+
+Added 2026-10-27 for CloudKit structural generations (R2053). S1 to S2.4 do not change. Decided 2026-10-27: the op that changes a structure states its maps, because no observer can infer them: a field rename and a reorder leave the same `fields` keys (S1), and moved notes do not say which old field fills which new one. A guessed map would put field contents in the wrong fields on every receiver.
+
+- **The report.** An op that changes a note type's fields or templates, removes a note type or moves notes to another note type fills a structure report through its op context before it returns:
+  - `reasons`: the `sync/cloudkit-records#K19.1` reason codes that apply to the op, ascending;
+  - `layouts`: per note type that exists before and after the op and whose `fields` or `templates` rows the op added, removed or renamed (a different name at an `ord`, so a reorder counts), or whose sort field it changed: the note type id, `field_map` and `template_map`, with K19.2's meaning (entry i is the old `ord` that new `ord` i comes from, or -1 for none). A save that only renames reports identity maps and no reason code;
+  - `removed`: the ids of the note types the op removed;
+  - `type_changes`: for Change Note Type, per old note type, the old id, the new id, and the field and template maps from the old note type's `ord`s to the new one's.
+  `struct_gen` values are not in the report; tracking assigns them (K19.2).
+- **Ops that report.** Every op that K19.1 lists fills the report with its reason codes, also when its maps are empty: a preset deletion reports 7 and no layout; every `.apkg` import reports 8 `apkg_apply`, and 9 `notetypes_merged` when it merges note types, whatever its size and whether or not a layout changed; Check Database reports 10 only for the repairs that `notetypes/schema-changes#G2` lists as schema changes. A note type save that changes nothing structural (`notetypes/schema-changes#G3`) and is not a rename reports nothing.
+- **Scope.** The report travels with the observed commit (S2), beside the change set. It is not a change-set member (S1.2 adds none), is not in a `Changes` event and does not cross the FFI. A failed step of a composite op rolls its part of the report back with its savepoint, as `engine/op-model` O3 does for the op's other notes; a rollback of the op discards it.
+- **One op, at most one generation.** When `reasons` is not empty, the tracking observer stores one generation for the op, with state `local`: its reasons, its `maps` from `layouts`, its `type_changes`, and its members the entities the op changed (K19.2). An `.apkg` import is one op in one transaction (`engine/op-model` O3), so it is one generation whatever its size. An op whose `reasons` is empty makes no generation; its identity maps only show that a rename was not a reorder.
+- **Undo and redo.** The undo manager keeps a step's report with the step, and the undo and redo ops report from it (`engine/undo#M9.11`).
+- **The guard.** At the commit of every op whose source is not `CloudIncoming` or `CloudRekey`, the executor checks the journal: every note type that exists before and after the transaction and whose `fields` or `templates` rows were added, removed or renamed has a `layouts` entry; every note type removed is in `removed`; every note whose `mid` changed has a `type_changes` entry for its old note type. Otherwise the transaction rolls back and the op fails with `StructureNotReported { notetype_id }`, an internal error (a bug in the op): nothing is written, as `notetypes/schema-changes#G6` does for `scm`. The guard runs whether or not iCloud sync is enabled, so a missing report fails in every build's tests. A sort-field change, a preset deletion and the import reasons are not visible to the guard; the tests below cover them. A `CloudIncoming` op applies a generation that another device reported (K19.5) and a `CloudRekey` op changes ids, not layouts; neither reports.
+- Tests (`core/crates/meguri-engine/tests/op_catalog.rs`): each op of K19.1 reports its reasons and maps: a field add, removal and reorder; a template add, removal and reorder; a sort-field change; a rename alone (identity maps, no reason); a note type deletion; Restore to Default that changes structure; Change Note Type (its `type_changes`); a preset deletion (7, no layout); an `.apkg` import without a merge (8) and with one (8, 9); a Check Database repair of G2's list (10). An op that renames a field without a report fails with `StructureNotReported` and writes nothing. A composite op whose structural step fails reports nothing for that step. The undo of a field reorder reports the inverted map, and its redo the original map (`engine/undo#M9.11`).
+
 ## S3. The change stream
 
 - One ordered queue per engine carries every core→Swift event except progress (`engine/jobs` J5), host events (U135) and search results (U85), which have their own channels (KTD5, KTD9).
@@ -165,7 +209,7 @@ not establish that memory bound.
   | `RolledOver{old_day, new_day}` | the day clock saw the scheduler day change, either way, and its rollover op committed (`sched/day-clock` D8, D9) |
   | `TimeZoneChanged{zone_id}` | a day clock check found an IANA zone id other than the one it last saw, whether or not the day or the offset changed (`sched/day-clock` D8) |
   | `NextDayAtChanged{next_day_at}` | the next day boundary a day clock check found differs from the one it last reported, in epoch seconds (`sched/day-clock` D8) |
-  | `Extension(payload)` | a crate above the engine publishes its own event kind (U95 stats, U106 sync status, U31 media arrived, U26 derived readiness and `DerivedApplied` (`storage/derived-store` D8), U100 widget snapshot): the engine carries it without reading it, and U6's dispatcher maps it to its `CoreEvent` variant |
+  | `Extension(payload)` | a crate above the engine publishes its own event kind (U95 stats, U106 sync status (manual Anki transfers, frozen), the CloudKit sync status (U113, `sync/policy#P4` `StatusChanged`), U31 media arrived, U26 derived readiness and `DerivedApplied` (`storage/derived-store` D8), U100 widget snapshot): the engine carries it without reading it, and U6's dispatcher maps it to its `CoreEvent` variant |
 
 - The day clock's three kinds follow the commit of the `Rollover` op whose check found them, in the order of the table, after that op's `Changes` event; their `cause_seq` is that op's seq when it published a change set, otherwise none. The first check after an open or a generation change publishes none of them (`sched/day-clock` D8).
 - Ordering with observers: an op's seq is reserved at its commit and the `Changes` event is filled in once the observers ran. Events are delivered strictly in seq order: an event published by another thread with a higher seq waits until every lower seq has been filled or given up. A reservation is given up when the op published nothing (an empty change set) or its thread failed before publishing; the gap is skipped.
