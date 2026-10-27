@@ -1,5 +1,6 @@
 #if os(macOS) && MEGURI_TEST_HOOKS
 import AVFoundation
+import CoreAudio
 import Darwin
 import Foundation
 import Testing
@@ -56,6 +57,7 @@ import Testing
             }
             // Ownership transfers to MediaFile; close it even if preparation throws.
             let media = MediaFile(descriptor: duplicate, name: "silence.wav", opening: opening)
+            Self.logOutputConfiguration()
             let backendPrepareStart = ContinuousClock.now
             let playback = AVQueuePlayback()
             playback.onNativePreparationInterval = { phase, elapsedMs in
@@ -94,6 +96,54 @@ import Testing
         #expect(fileURL.succeeded && fileURL.duration == 2)
         // Descriptor controls are diagnostic facts, separate from this verdict.
         #expect(backend.succeeded && backend.duration == 2)
+    }
+
+    private static func logOutputConfiguration() {
+        func readUInt32(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector)
+            -> (value: UInt32?, status: OSStatus) {
+            var address = AudioObjectPropertyAddress(mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var value: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+            return (status == noErr && size == UInt32(MemoryLayout<UInt32>.size) ? value : nil, status)
+        }
+
+        let output = readUInt32(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice)
+        let present = output.value.map { $0 != kAudioObjectUnknown } ?? false
+        var alive = "null", aliveStatus = "null"
+        var streamCount = "null", streamStatus = "null"
+        var sampleRate = "null", sampleRateStatus = "null"
+        if present, let device = output.value {
+            let result = readUInt32(device, kAudioDevicePropertyDeviceIsAlive)
+            aliveStatus = String(result.status)
+            if let value = result.value, value <= 1 { alive = value == 1 ? "true" : "false" }
+
+            var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+            var streamBytes: UInt32 = 0
+            let streamsResult = AudioObjectGetPropertyDataSize(device, &streams, 0, nil, &streamBytes)
+            streamStatus = String(streamsResult)
+            let streamSize = UInt32(MemoryLayout<AudioStreamID>.size)
+            if streamsResult == noErr, streamBytes <= 1_024 * streamSize, streamBytes % streamSize == 0 {
+                streamCount = String(streamBytes / streamSize)
+            }
+
+            var rate = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+                mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var value: Float64 = 0
+            var size = UInt32(MemoryLayout<Float64>.size)
+            let rateResult = AudioObjectGetPropertyData(device, &rate, 0, nil, &size, &value)
+            sampleRateStatus = String(rateResult)
+            if rateResult == noErr, size == UInt32(MemoryLayout<Float64>.size),
+               value.isFinite, value > 0, value <= 768_000 {
+                sampleRate = String(value)
+            }
+        }
+        print("{\"nativeAudioOutputConfiguration\":1,\"defaultOutputPresent\":\(present),"
+              + "\"defaultOutputStatus\":\(output.status),\"aliveStatus\":\(aliveStatus),\"alive\":\(alive),"
+              + "\"outputStreamsStatus\":\(streamStatus),\"outputStreamCount\":\(streamCount),"
+              + "\"sampleRateStatus\":\(sampleRateStatus),\"sampleRate\":\(sampleRate)}")
     }
 
     private nonisolated final class PreparationTimings: @unchecked Sendable {
