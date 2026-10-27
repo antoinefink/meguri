@@ -714,8 +714,11 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ("steps: [{observe: [{search: {query: q}}]}]", "does not take"),
         ("steps: [{observe: [search]}]", "does not take"),
         ("steps: [{observe: [{search: [{query: 1}]}]}]", "query string"),
-        ("steps: [{observe: [{search: [{query: q, order: id}]}]}]", "\"order\""),
-        ("steps: [{observe: [{search: [q]}]}]", "{query, kind?}"),
+        (
+            "steps: [{observe: [{search: [{query: q, order: id}]}]}]",
+            "observation search: order is a mapping",
+        ),
+        ("steps: [{observe: [{search: [q]}]}]", "{query, kind?, order?} mapping"),
         (
             "steps: [{observe: [{canonical_search: []}]}]",
             "at least one search text",
@@ -2734,7 +2737,7 @@ steps:
 fn prepared_package_contracts_load_with_their_recorded_hashes() {
     let mut files = Vec::new();
     scenario_files(&conformance_dir().join("scenarios/package"), "package", &mut files);
-    assert_eq!(files.len(), 29);
+    assert_eq!(files.len(), 29 + 16 + 14 + 2 + 9);
     for (path, id) in files {
         let loaded = scenario::load(&path).unwrap_or_else(|e| panic!("{id}: {e}"));
         assert_eq!(loaded.scenario.id, id);

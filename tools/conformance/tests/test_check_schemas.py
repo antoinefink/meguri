@@ -126,6 +126,7 @@ class SchemaChecks(unittest.TestCase):
             (conf / 'schema').mkdir(parents=True)
             (conf / 'scenarios').mkdir()
             (conf / 'goldens').mkdir()
+            (conf / 'goldens-apple').mkdir()
             for name in ('scenario', 'observation', 'golden', 'area', 'deviations', 'overlay'):
                 schema = {'$schema': 'https://json-schema.org/draft/2020-12/schema',
                           '$id': f'https://schema.example.invalid/{name}', 'type': 'object',
@@ -135,11 +136,19 @@ class SchemaChecks(unittest.TestCase):
                                 ('b', {'count': 'wrong'}), ('c', {}), ('d', {'count': 2})]:
                 (conf / 'scenarios' / f'{name}.json').write_text(json.dumps(value))
             (conf / 'goldens' / 'e.json').write_text('broken')
+            (conf / 'goldens-apple' / 'f.json').write_text('{"count": 3}')
             cli = root / 'cli'
             cli.write_text('#!' + sys.executable + '\nimport json,sys\nfrom pathlib import Path\n'
-                           'for filename in sys.argv[3:]:\n'
+                           'args=sys.argv[3:]\n'
+                           'with Path(__file__).with_suffix(".calls").open("a") as calls:\n'
+                           ' calls.write(json.dumps(args)+"\\n")\n'
+                           'mode=args[0]=="--observation-json"\n'
+                           'assert args[int(mode)]=="--"\n'
+                           'for filename in args[int(mode)+1:]:\n'
+                           ' assert (Path(filename).parent.name in ("goldens", "goldens-apple"))==mode\n'
                            ' try: item={"value":json.loads(Path(filename).read_text())}\n'
                            ' except ValueError: item={"error":"invalid fixture"}\n'
+                           ' item["path"]=filename\n'
                            ' print(json.dumps(item,ensure_ascii=False))\n')
             cli.chmod(0o755)
             reports = []
@@ -152,12 +161,20 @@ class SchemaChecks(unittest.TestCase):
                 self.assertTrue(report.exists(), out.stderr)
                 reports.append(json.loads(report.read_text()))
             self.assertEqual(reports[0], reports[1])
-            self.assertEqual(reports[0]['files'], 5)
+            self.assertEqual(reports[0]['files'], 6)
             self.assertEqual([e['file'] for e in reports[0]['errors']],
                              ['goldens/e.json', 'scenarios/b.json', 'scenarios/c.json'])
             self.assertIn('invalid fixture', reports[0]['errors'][0]['message'])
             self.assertIn('integer', reports[0]['errors'][1]['message'])
             self.assertIn('required', reports[0]['errors'][2]['message'])
+            calls = [json.loads(line) for line in cli.with_suffix('.calls').read_text().splitlines()]
+            self.assertEqual(len(calls), 4)
+            for authored, observations in (calls[:2], calls[2:]):
+                self.assertEqual(authored, ['--', *[str(conf / 'scenarios' / f'{name}.json')
+                                                    for name in ('a', 'b', 'c', 'd')]])
+                self.assertEqual(observations, ['--observation-json', '--',
+                                                str(conf / 'goldens-apple/f.json'),
+                                                str(conf / 'goldens/e.json')])
 
     def test_reference_declarations_are_strict_and_resolve_before_execution(self):
         spec = importlib.util.spec_from_file_location("schema_checks", SCRIPT)

@@ -474,6 +474,326 @@ fn to_json_prints_parsed_values_and_flags_bad_files() {
 }
 
 #[test]
+fn to_json_observation_mode_preserves_exact_integer_values_and_float_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("observation.json");
+    std::fs::write(
+        &path,
+        r#"{"nested":[-9223372036854775808,12345678901234567890,18446744073709551615,1.0]}"#,
+    )
+    .unwrap();
+    let filename = path.to_str().unwrap();
+    let strict = cli(&["conformance", "to-json", filename]);
+    assert_eq!(strict.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&strict.stdout).unwrap();
+    assert_eq!(error["path"], filename);
+    assert!(error["error"].as_str().unwrap().contains("outside ±2^53"));
+
+    let out = cli(&["conformance", "to-json", "--observation-json", "--", filename]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout).lines().count(), 1);
+    let parsed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(parsed["path"], filename);
+    let values = &parsed["value"]["nested"];
+    assert_eq!(values[0].as_i64(), Some(i64::MIN));
+    assert_eq!(values[1].as_u64(), Some(12_345_678_901_234_567_890));
+    assert_eq!(values[2].as_u64(), Some(u64::MAX));
+    assert!(values[3].is_f64());
+    assert_eq!(values[3].as_f64(), Some(1.0));
+    assert!(
+        text(&out.stdout).contains(r#""nested":[-9223372036854775808,12345678901234567890,18446744073709551615,1.0]"#)
+    );
+
+    std::fs::write(
+        &path,
+        r#"{"nested":[0,1,-0,1.0,1e0,1E0,-0.0,18446744073709551616.0,-9223372036854775809.0,1.5e300,1.2345678901234567]}"#,
+    )
+    .unwrap();
+    let ordinary = cli(&["conformance", "to-json", filename]);
+    let observation = cli(&["conformance", "to-json", "--observation-json", filename]);
+    assert_eq!(ordinary.status.code(), Some(0));
+    assert_eq!(observation.status.code(), Some(0));
+    assert_eq!(ordinary.stdout, observation.stdout);
+    let parsed = meguri_testkit::observe::parse_json(&text(&observation.stdout)).unwrap();
+    let values = parsed["value"]["nested"].as_array().unwrap();
+    assert_eq!(values.len(), 11);
+    for (value, expected) in values[..2].iter().zip([0, 1]) {
+        assert_eq!(value.as_i64(), Some(expected));
+        assert!(!value.is_f64());
+    }
+    for (value, expected) in values[2..].iter().zip([
+        "-0",
+        "1.0",
+        "1e0",
+        "1E0",
+        "-0.0",
+        "18446744073709551616.0",
+        "-9223372036854775809.0",
+        "1.5e300",
+        "1.2345678901234567",
+    ]) {
+        assert!(value.is_f64());
+        if matches!(expected, "-0" | "-0.0") {
+            assert!(value.as_f64().unwrap().is_sign_negative());
+        }
+        assert_eq!(
+            value.as_f64().unwrap().to_bits(),
+            expected.parse::<f64>().unwrap().to_bits()
+        );
+    }
+    assert_eq!(
+        cli(&["conformance", "capabilities", "--observation-json"])
+            .status
+            .code(),
+        Some(2)
+    );
+    let yaml = dir.path().join("observation.yaml");
+    std::fs::write(&yaml, "value: 1\n").unwrap();
+    let out = cli(&["conformance", "to-json", "--observation-json", yaml.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(error["error"].as_str().unwrap().contains("requires a .json file"));
+}
+
+#[test]
+fn to_json_observation_mode_keeps_outside_64_bit_integer_float_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outside64.json");
+    for number in ["18446744073709551616", "-9223372036854775809"] {
+        std::fs::write(&path, format!(r#"{{"nested":[{{"value":{number}}}]}}"#)).unwrap();
+        let filename = path.to_str().unwrap();
+        let authored = cli(&["conformance", "to-json", filename]);
+        assert_eq!(authored.status.code(), Some(1), "{number}");
+        let item: Value = serde_json::from_slice(&authored.stdout).unwrap();
+        assert_eq!(item["path"], filename);
+        assert!(item["error"].as_str().unwrap().contains("outside ±2^53"));
+        assert!(item.get("value").is_none());
+
+        let observation = cli(&["conformance", "to-json", "--observation-json", filename]);
+        assert_eq!(observation.status.code(), Some(0), "{}", text(&observation.stderr));
+        let item = meguri_testkit::observe::parse_json(&text(&observation.stdout)).unwrap();
+        assert_eq!(item["path"], filename);
+        let value = &item["value"]["nested"][0]["value"];
+        assert!(value.is_f64(), "{number}");
+        assert_eq!(
+            value.as_f64().unwrap().to_bits(),
+            number.parse::<f64>().unwrap().to_bits()
+        );
+        assert!(item.get("error").is_none());
+    }
+}
+
+#[test]
+fn to_json_both_modes_reject_invalid_json_and_continue_reporting_each_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let documents = [
+        r#"{"nested":{"a":1,"a":2}}"#,
+        r#"{"nested":{"a":1,"\u0061":2}}"#,
+        r#"{"a": [1,]}"#,
+        r#"{"a": NaN}"#,
+        r#"{"a": Infinity}"#,
+        r#"{"a": -Infinity}"#,
+        r#"{"a": 1e999}"#,
+        r#"{"a": 1} {}"#,
+        r#"{"a":1,"f":1.0}"#,
+    ];
+    let paths: Vec<_> = documents
+        .iter()
+        .enumerate()
+        .map(|(index, document)| {
+            let path = dir.path().join(format!("{index}.json"));
+            std::fs::write(&path, document).unwrap();
+            path.to_str().unwrap().to_owned()
+        })
+        .collect();
+    for observations in [false, true] {
+        let mut args = vec!["conformance", "to-json"];
+        if observations {
+            args.push("--observation-json");
+        }
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+        let out = cli(&args);
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+        let items: Vec<Value> = text(&out.stdout)
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(items.len(), documents.len());
+        for (index, item) in items.iter().enumerate() {
+            assert_eq!(item["path"], paths[index]);
+            if index + 1 == documents.len() {
+                assert_eq!(item["value"], serde_json::json!({"a": 1, "f": 1.0}));
+                assert!(item["value"]["f"].is_f64());
+            } else {
+                assert!(item["error"].is_string(), "{item}");
+                assert!(item.get("value").is_none());
+                if index < 2 {
+                    assert!(item["error"].as_str().unwrap().contains("duplicate key"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn schema_checker_uses_observation_conversion_and_keeps_authored_d2_limits() {
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("conformance");
+    for folder in [
+        "schema",
+        "scenarios/example",
+        "goldens/example",
+        "goldens-apple/example",
+    ] {
+        std::fs::create_dir_all(root.join(folder)).unwrap();
+    }
+    for name in ["scenario", "observation", "golden", "area", "deviations", "overlay"] {
+        std::fs::copy(
+            conformance().join(format!("schema/{name}.schema.json")),
+            root.join(format!("schema/{name}.schema.json")),
+        )
+        .unwrap();
+    }
+    let hash = "0".repeat(64);
+    let numbers = json!({"min": i64::MIN, "wide": 12_345_678_901_234_567_890_u64,
+        "max": u64::MAX, "float": 1.0});
+    let golden = json!({"scenario_id": "example/wide", "scenario_sha256": hash,
+        "oracle": {"anki_version": "fixture", "lock_sha256": hash, "driver_sha256": hash},
+        "tz": "UTC", "clock": {"start": "2030-01-15T10:00:00", "mode": "frozen"},
+        "observations": {"steps": [{"file_col": {"conf": numbers}}]}});
+    let overlay = json!({"scenario_id": "example/wide", "scenario_sha256": hash,
+        "linux_observations_sha256": hash,
+        "oracle": {"anki_version": "fixture", "lock_sha256": hash, "driver_sha256": hash,
+            "platform": "macos-arm64"},
+        "entries": [
+            {"pointer": "/steps/0/file_col/conf/min", "linux": i64::MIN, "apple": i64::MIN},
+            {"pointer": "/steps/0/file_col/conf/wide", "linux": numbers["wide"], "apple": numbers["wide"]},
+            {"pointer": "/steps/0/file_col/conf/max", "linux": u64::MAX, "apple": u64::MAX},
+            {"pointer": "/steps/0/file_col/conf/float", "linux": 1.0, "apple": 1.0}]});
+    for (folder, value) in [("goldens", &golden), ("goldens-apple", &overlay)] {
+        std::fs::write(root.join(format!("{folder}/example/wide.json")), value.to_string()).unwrap();
+    }
+    let scenario = json!({"id": "example/safe", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "setup": {"config": {"nested": [9_007_199_254_740_992_i64, -9_007_199_254_740_992_i64]}}});
+    std::fs::write(root.join("scenarios/example/safe.json"), scenario.to_string()).unwrap();
+    let yaml = "id: example/safe\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup: {config: {nested: [9007199254740992, -9007199254740992]}}\n";
+    std::fs::write(root.join("scenarios/example/safe.yaml"), yaml).unwrap();
+    let report = dir.path().join("report.json");
+    let check = |jobs: &str| {
+        let out = Command::new("python3")
+            .args(["-B", "-I"])
+            .arg(conformance().join("../tools/conformance/check_schemas.py"))
+            .arg("--cli")
+            .arg(env!("CARGO_BIN_EXE_meguri-cli"))
+            .arg("--conformance")
+            .arg(&root)
+            .arg("--report")
+            .arg(&report)
+            .args(["--jobs", jobs])
+            .output()
+            .unwrap();
+        let parsed: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        (out, parsed)
+    };
+    let (out, parsed) = check("1");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(parsed, json!({"files": 4, "errors": []}));
+
+    let mut expected_errors = Vec::new();
+    for number in ["9007199254740993", "-9007199254740993"] {
+        for suffix in ["json", "yaml"] {
+            let rel = format!("scenarios/example/{number}.{suffix}");
+            let document = if suffix == "json" {
+                let mut value = scenario.clone();
+                value["setup"]["config"]["nested"] = json!([{"value": number.parse::<i64>().unwrap()}]);
+                value.to_string()
+            } else {
+                yaml.replace(
+                    "[9007199254740992, -9007199254740992]",
+                    &format!("[{{value: {number}}}]"),
+                )
+            };
+            let path = root.join(&rel);
+            std::fs::write(&path, &document).unwrap();
+            let error = meguri_testkit::scenario::load(&path).unwrap_err().to_string();
+            assert!(error.contains("outside ±2^53"), "{rel}: {error}");
+            if suffix == "json" {
+                assert!(meguri_testkit::scenario::parse_json(&document).is_err());
+            }
+            expected_errors.push((rel, "outside ±2^53"));
+        }
+    }
+    for number in [
+        "18446744073709551615",
+        "18446744073709551616",
+        "-9223372036854775808",
+        "-9223372036854775809",
+    ] {
+        let rel = format!("scenarios/example/{number}.json");
+        let document = scenario.to_string().replace(
+            "[9007199254740992,-9007199254740992]",
+            &format!("[{{\"value\":{number}}}]"),
+        );
+        assert!(document.contains(&format!("\"value\":{number}")));
+        let path = root.join(&rel);
+        std::fs::write(&path, &document).unwrap();
+        let error = meguri_testkit::scenario::load(&path).unwrap_err().to_string();
+        assert!(meguri_testkit::scenario::parse_json(&document).is_err());
+        let out = cli(&["conformance", "to-json", path.to_str().unwrap()]);
+        assert_eq!(out.status.code(), Some(1), "{number}");
+        assert_eq!(text(&out.stdout).lines().count(), 1);
+        let item: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(item["path"], path.to_str().unwrap());
+        assert!(item["error"].is_string(), "{number}: {item}");
+        assert!(item.get("value").is_none(), "{number}: {item}");
+        assert!(error.contains("outside ±2^53"), "{number}: {error}");
+        assert!(item["error"].as_str().unwrap().contains("outside ±2^53"));
+        expected_errors.push((rel, "outside ±2^53"));
+    }
+    for folder in ["goldens", "goldens-apple"] {
+        for (name, document, why) in [
+            ("duplicate", r#"{"nested":{"a":1,"a":2}}"#, "duplicate key"),
+            ("decoded", r#"{"nested":{"a":1,"\u0061":2}}"#, "duplicate key"),
+            ("malformed", r#"{"a":[1,]}"#, "JSON:"),
+            ("nonfinite", r#"{"a":1e999}"#, "JSON:"),
+            ("trailing", r#"{} {}"#, "JSON:"),
+            ("shape", "{}", "required"),
+        ] {
+            let rel = format!("{folder}/example/{name}.json");
+            std::fs::write(root.join(&rel), document).unwrap();
+            expected_errors.push((rel, why));
+        }
+    }
+    expected_errors.sort_by(|a, b| a.0.cmp(&b.0));
+    let (out, parsed) = check("2");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    assert_eq!(parsed["files"], 24);
+    // Shape failures can report multiple required fields; every bad input
+    // must still appear, and every diagnostic must keep its original path.
+    let errors = parsed["errors"].as_array().unwrap();
+    let mut actual_files: Vec<_> = errors.iter().map(|error| error["file"].as_str().unwrap()).collect();
+    actual_files.dedup();
+    assert_eq!(
+        actual_files,
+        expected_errors
+            .iter()
+            .map(|(file, _)| file.as_str())
+            .collect::<Vec<_>>()
+    );
+    for (file, why) in expected_errors {
+        assert!(
+            errors
+                .iter()
+                .any(|error| error["file"] == file && error["message"].as_str().unwrap().contains(why)),
+            "{file}: {parsed}"
+        );
+    }
+}
+
+#[test]
 fn to_json_reads_quoted_keys_and_flow_mappings_as_the_same_members() {
     // tools/mg finds actor scenarios by the top-level `actors` member that
     // to-json prints (sync-ops.md S2.1), so every spelling of the key must

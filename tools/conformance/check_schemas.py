@@ -4,8 +4,9 @@
 
   python3 -B -I tools/conformance/check_schemas.py --cli <meguri-cli> --conformance conformance --report FILE
 
-YAML files are parsed by `meguri-cli conformance to-json`, so the values are
-the ones the runner and the scenario hash see (YAML 1.2 core schema subset).
+Authored files use `meguri-cli conformance to-json` with the runner's D2
+limits. Golden/overlay JSON explicitly uses its observation conversion mode
+to retain exact signed/unsigned 64-bit integers (observations.md O6).
 Needs python3-jsonschema (the dev image has it).
 """
 
@@ -139,16 +140,30 @@ def main(argv: list[str] | None = None) -> int:
         if p.is_file() and schema_for(p.relative_to(root).as_posix())
     )
     if schemas and files:
-        out = subprocess.run(
-            [args.cli, "conformance", "to-json", *[str(p) for _, p in files]],
-            capture_output=True, text=True, check=False,
-        )
-        # One JSON value per "\n"-terminated line. Not splitlines(): it also
-        # breaks at U+2028, U+0085 and other characters JSON strings carry raw.
-        parsed = [json.loads(line) for line in out.stdout.split("\n") if line.strip()]
-        if len(parsed) != len(files):
-            errors.append({"file": "to-json", "message": f"meguri-cli parsed {len(parsed)} of {len(files)} files: {out.stderr[-2000:]}"})
-        tasks = [(rel, item) for (rel, _), item in zip(files, parsed)]
+        tasks = []
+        for observations in (False, True):
+            # The path/schema context selects the mode, never document values.
+            group = [(rel, path) for rel, path in files
+                     if (schema_for(rel) in ("golden", "overlay")) == observations]
+            if not group:
+                continue
+            mode = ["--observation-json"] if observations else []
+            out = subprocess.run(
+                [args.cli, "conformance", "to-json", *mode, "--", *[str(path) for _, path in group]],
+                capture_output=True, text=True, check=False,
+            )
+            # Not splitlines(): JSON strings can carry raw U+2028 and U+0085.
+            parsed = [json.loads(line) for line in out.stdout.split("\n") if line.strip()]
+            if len(parsed) != len(group):
+                errors.append({"file": "to-json", "message": f"meguri-cli parsed {len(parsed)} of {len(group)} files: {out.stderr[-2000:]}"})
+            if out.returncode not in (0, 1) or (out.returncode == 1 and not any("error" in item for item in parsed)):
+                errors.append({"file": "to-json", "message": f"meguri-cli exited {out.returncode}: {out.stderr[-2000:]}"})
+            for (rel, path), item in zip(group, parsed):
+                if item.get("path") != str(path):
+                    errors.append({"file": rel, "message": "meguri-cli returned a mismatched path"})
+                else:
+                    tasks.append((rel, item))
+        tasks.sort(key=lambda task: task[0])
         if args.jobs == 1 or len(tasks) < 2:
             init_validators(schemas)
             for task in tasks:

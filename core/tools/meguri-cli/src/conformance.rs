@@ -29,7 +29,9 @@ const USAGE: &str = "usage: meguri-cli conformance <command> [options]
   harvest-report [--catalog FILE] [--live-report FILE] [--report FILE] [--markdown FILE]
         --live-report: a run --live report at the current oracle pin; its
         statuses replace `live` and `pending` for the scenario texts it ran
-  to-json <file>...                     parsed YAML or JSON, one JSON line per file
+  to-json [--observation-json] <file>...  parsed values, one JSON line per file
+        default: scenario YAML or JSON, enforcing D2's integer range
+        --observation-json: golden/overlay JSON, retaining exact i64/u64 values
 
 common options:
   --conformance DIR   the conformance tree (default: the nearest conformance/ above the current directory)
@@ -62,6 +64,7 @@ struct Options {
     handoff_dir: Option<PathBuf>,
     lock: Option<String>,
     macos_lock: Option<Option<String>>,
+    observation_json: bool,
     rest: Vec<String>,
 }
 
@@ -81,6 +84,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         handoff_dir: None,
         lock: None,
         macos_lock: None,
+        observation_json: false,
         rest: Vec::new(),
     };
     let mut it = args.iter();
@@ -109,6 +113,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             "--oracle-lock-sha256" => o.lock = Some(value(arg)?),
             "--oracle-macos-lock-sha256" => o.macos_lock = Some(Some(value(arg)?)),
             "--oracle-macos-lock-absent" => o.macos_lock = Some(None),
+            "--observation-json" => o.observation_json = true,
             "--" => o.rest.extend(it.by_ref().cloned()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
             other => o.rest.push(other.to_owned()),
@@ -130,6 +135,10 @@ pub fn main(args: &[String]) -> i32 {
             return 2;
         }
     };
+    if options.observation_json && command != "to-json" {
+        eprintln!("meguri-cli conformance: --observation-json is only for to-json");
+        return 2;
+    }
     let result = match command.as_str() {
         "run" => run(&options),
         "exec" => exec(&options),
@@ -498,7 +507,12 @@ fn to_json(options: &Options) -> Result<i32, String> {
         let parsed = std::fs::read_to_string(path)
             .map_err(|e| e.to_string())
             .and_then(|text| {
-                if path.ends_with(".json") {
+                if options.observation_json {
+                    if !path.ends_with(".json") {
+                        return Err("--observation-json requires a .json file".to_owned());
+                    }
+                    scenario::parse_observation_json(&text)
+                } else if path.ends_with(".json") {
                     scenario::parse_json(&text)
                 } else {
                     scenario::parse_yaml(&text)

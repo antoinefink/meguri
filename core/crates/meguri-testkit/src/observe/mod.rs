@@ -18,25 +18,43 @@ use crate::scenario::FormatError;
 /// fail exact f64 comparisons.
 pub fn parse_json(text: &str) -> Result<Value, serde_json::Error> {
     let raw: &RawValue = serde_json::from_str(text)?;
-    exact(raw)
+    exact(raw, None)
 }
 
-fn exact(raw: &RawValue) -> Result<Value, serde_json::Error> {
+/// Authored scenarios bound raw integer lexemes before JSON's float fallback.
+pub(crate) fn parse_json_bounded_integers(text: &str, max_integer: i128) -> Result<Value, serde_json::Error> {
+    let raw: &RawValue = serde_json::from_str(text)?;
+    exact(raw, Some(max_integer))
+}
+
+fn exact(raw: &RawValue, max_integer: Option<i128>) -> Result<Value, serde_json::Error> {
     let text = raw.get();
     match text.as_bytes().first() {
         Some(b'{') => {
             let members: BTreeMap<String, &RawValue> = serde_json::from_str(text)?;
             members
                 .into_iter()
-                .map(|(key, value)| Ok((key, exact(value)?)))
+                .map(|(key, value)| Ok((key, exact(value, max_integer)?)))
                 .collect::<Result<Map<String, Value>, serde_json::Error>>()
                 .map(Value::Object)
         }
         Some(b'[') => {
             let items: Vec<&RawValue> = serde_json::from_str(text)?;
-            items.into_iter().map(exact).collect::<Result<_, _>>().map(Value::Array)
+            items
+                .into_iter()
+                .map(|value| exact(value, max_integer))
+                .collect::<Result<_, _>>()
+                .map(Value::Array)
         }
         Some(b'-' | b'0'..=b'9') => {
+            // D2 applies only to authored integer lexemes, including -0.
+            // C3's shared conversion below keeps -0 and outside-i64/u64
+            // integers as floats, and fractions/exponents as nearest doubles.
+            if let Some(max) = max_integer {
+                if !text.contains(['.', 'e', 'E']) && !text.parse::<i128>().is_ok_and(|n| (-max..=max).contains(&n)) {
+                    return Err(serde::de::Error::custom(format!("integer {text} is outside ±2^53")));
+                }
+            }
             let value: Value = serde_json::from_str(text)?;
             match &value {
                 // Integers are exact already; re-read fractions and exponents.

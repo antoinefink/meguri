@@ -200,6 +200,120 @@ fn a_listed_deviation_turns_its_difference_into_a_pass_and_nothing_else() {
 }
 
 #[test]
+fn exact_json_representable_integer_lexemes_keep_integer_kind() {
+    for (lexeme, expected) in [
+        ("0", json!(0)),
+        ("1", json!(1)),
+        ("-9223372036854775808", json!(i64::MIN)),
+        ("9223372036854775807", json!(i64::MAX)),
+        ("12345678901234567890", json!(12_345_678_901_234_567_890_u64)),
+        ("18446744073709551615", json!(u64::MAX)),
+    ] {
+        let parsed = observe::parse_json(&format!(r#"{{"nested":[{{"value":{lexeme}}}]}}"#)).unwrap();
+        let value = &parsed["nested"][0]["value"];
+        assert_eq!(value, &expected, "{lexeme}");
+        assert!(!value.is_f64(), "{lexeme}");
+        assert_eq!(value.to_string(), expected.to_string(), "{lexeme}");
+    }
+}
+
+#[test]
+fn exact_json_outside_64_bit_integers_keep_c3_float_fallback() {
+    for lexeme in ["18446744073709551616", "-9223372036854775809"] {
+        let document = format!(r#"{{"nested":[{{"value":{lexeme}}}]}}"#);
+        for value in [
+            observe::parse_json(lexeme).unwrap(),
+            observe::parse_json(&document).unwrap()["nested"][0]["value"].clone(),
+            meguri_testkit::scenario::parse_observation_json(&document).unwrap()["nested"][0]["value"].clone(),
+        ] {
+            assert!(value.is_f64(), "{lexeme}");
+            assert_eq!(
+                value.as_f64().unwrap().to_bits(),
+                lexeme.parse::<f64>().unwrap().to_bits()
+            );
+        }
+        assert!(meguri_testkit::scenario::parse_json(&document).is_err(), "{lexeme}");
+    }
+}
+
+#[test]
+fn authored_json_bounds_raw_integer_lexemes_before_conversion() {
+    for lexeme in [
+        "9007199254740993",
+        "-9007199254740993",
+        "18446744073709551615",
+        "18446744073709551616",
+        "-9223372036854775808",
+        "-9223372036854775809",
+        "170141183460469231731687303715884105728",
+        "-170141183460469231731687303715884105729",
+    ] {
+        for document in [lexeme.to_owned(), format!(r#"{{"nested":[{{"value":{lexeme}}}]}}"#)] {
+            let error = meguri_testkit::scenario::parse_json(&document).unwrap_err();
+            assert!(error.to_string().contains("outside ±2^53"), "{lexeme}: {error}");
+        }
+    }
+}
+
+#[test]
+fn exact_json_float_lexemes_keep_kind_and_precision() {
+    for lexeme in [
+        "-0",
+        "1.0",
+        "1e0",
+        "1E0",
+        "-0.0",
+        "18446744073709551616.0",
+        "-9223372036854775809.0",
+        "1.5e300",
+        "1.2345678901234567",
+    ] {
+        let parsed = observe::parse_json(&format!(r#"{{"nested":[{lexeme}]}}"#)).unwrap();
+        let value = &parsed["nested"][0];
+        assert!(value.is_f64(), "{lexeme}");
+        if matches!(lexeme, "-0" | "-0.0") {
+            assert!(value.as_f64().unwrap().is_sign_negative(), "{lexeme}");
+        }
+        assert_eq!(
+            value.as_f64().unwrap().to_bits(),
+            lexeme.parse::<f64>().unwrap().to_bits(),
+            "{lexeme}"
+        );
+        let authored = meguri_testkit::scenario::parse_json(&format!(r#"{{"nested":[{lexeme}]}}"#)).unwrap();
+        assert!(authored["nested"][0].is_f64(), "{lexeme}");
+        assert_eq!(
+            authored["nested"][0].as_f64().unwrap().to_bits(),
+            value.as_f64().unwrap().to_bits(),
+            "{lexeme}"
+        );
+        let round_trip = observe::parse_json(&observe::golden_text(&parsed)).unwrap();
+        assert!(round_trip["nested"][0].is_f64(), "{lexeme}");
+        assert_eq!(
+            round_trip["nested"][0].as_f64().unwrap().to_bits(),
+            value.as_f64().unwrap().to_bits(),
+            "{lexeme}"
+        );
+    }
+}
+
+#[test]
+fn browser_config_json_negative_zero_is_float_but_authored_yaml_is_integer() {
+    // storage/config-table C3 and browser-config-ops B2 preserve JSON -0;
+    // conformance/dsl D2 resolves the authored YAML token as an integer.
+    let observation =
+        meguri_testkit::scenario::parse_observation_json(r#"{"steps":[{"browser_config":{"sortType":-0}}]}"#).unwrap();
+    let observed = &observation["steps"][0]["browser_config"]["sortType"];
+    assert!(observed.is_f64());
+    assert_eq!(observed.as_f64(), Some(0.0));
+    assert!(observed.as_f64().unwrap().is_sign_negative());
+
+    let authored = meguri_testkit::scenario::parse_yaml("setup:\n  config:\n    sortType: -0\n").unwrap();
+    let configured = &authored["setup"]["config"]["sortType"];
+    assert_eq!(configured.as_i64(), Some(0));
+    assert!(!configured.is_f64());
+}
+
+#[test]
 fn f32_values_are_written_as_their_shortest_round_trip_text() {
     assert_eq!(observe::f32_value(11.262_237_f32).unwrap().to_string(), "11.262237");
     assert_eq!(observe::f32_value(2.3065_f32).unwrap().to_string(), "2.3065");

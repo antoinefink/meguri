@@ -60,6 +60,13 @@ pub fn parse_json(text: &str) -> Result<Value, FormatError> {
     yaml::parse_json(text)
 }
 
+/// Parses golden or overlay JSON for conversion (observations.md O6), retaining
+/// signed/unsigned 64-bit integers and float kind, and rejecting duplicate keys.
+/// Authored scenarios must use `parse_json` or `load` to enforce D2's range.
+pub fn parse_observation_json(text: &str) -> Result<Value, FormatError> {
+    yaml::parse_observation_json(text)
+}
+
 /// The lower-case hex SHA-256 of the scenario value's JCS text (D3).
 pub fn scenario_sha256(value: &Value) -> Result<String, FormatError> {
     let text = jcs(value)?;

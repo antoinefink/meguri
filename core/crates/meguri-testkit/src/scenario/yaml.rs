@@ -227,29 +227,20 @@ fn float(x: f64) -> Option<Value> {
 /// Generated scenarios: JSON with no duplicate keys, numbers within the
 /// scenario range.
 pub(super) fn parse_json(text: &str) -> Result<Value, FormatError> {
+    let value = crate::observe::parse_json_bounded_integers(text, MAX_SAFE)
+        .map_err(|e| FormatError::new(format!("JSON: {e}")))?;
+    check_duplicates(text)?;
+    Ok(value)
+}
+
+/// Observation documents retain the parser's exact i64/u64 and float kinds;
+/// only authored scenarios apply D2's additional integer range restriction.
+pub(super) fn parse_observation_json(text: &str) -> Result<Value, FormatError> {
     let value = crate::observe::parse_json(text).map_err(|e| FormatError::new(format!("JSON: {e}")))?;
     // serde_json keeps the last of two equal keys: count the keys of the
     // text's objects by re-reading it as a stream of map entries.
     check_duplicates(text)?;
-    check_numbers(&value)?;
     Ok(value)
-}
-
-fn check_numbers(value: &Value) -> Result<(), FormatError> {
-    match value {
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                integer(i128::from(i)).map(|_| ()).map_err(FormatError::new)
-            } else if let Some(u) = n.as_u64() {
-                integer(i128::from(u)).map(|_| ()).map_err(FormatError::new)
-            } else {
-                Ok(())
-            }
-        }
-        Value::Array(items) => items.iter().try_for_each(check_numbers),
-        Value::Object(map) => map.values().try_for_each(check_numbers),
-        _ => Ok(()),
-    }
 }
 
 fn check_duplicates(text: &str) -> Result<(), FormatError> {
