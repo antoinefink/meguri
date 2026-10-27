@@ -8,6 +8,7 @@ pub use meguri_engine::backup_limits::{self, BackupLimits};
 #[derive(Debug)]
 pub struct BackupWritten {
     pub receipt: BackupReceipt,
+    pub guard: meguri_engine::ports::GuardedBackup,
     pub deleted_names: Vec<String>,
     pub retention_failures: Vec<retention::RetentionFailure>,
 }
@@ -18,7 +19,7 @@ use std::{
 };
 
 use meguri_engine::{
-    CancelToken, Collection, Engine, EngineError,
+    CancelToken, Collection, Engine, EngineError, WeakEngine,
     device_state::{DeviceState, LastBackup},
     ports::{BackupFailureCause, BackupPublication, BackupReceipt, BackupService, SafetyBackupFailure},
 };
@@ -28,7 +29,7 @@ use meguri_storage::{ReaderRole, StorageError, atomic_file::Purpose, space::Spac
 use crate::{CollectionPackageWriteContext, CollectionPackageWriteError as WriteError, Finalisation};
 
 pub struct ForcedBackupProvider {
-    engine: Engine,
+    engine: WeakEngine,
     collection: PathBuf,
     backups: PathBuf,
     clock: Arc<dyn Clock>,
@@ -37,6 +38,7 @@ pub struct ForcedBackupProvider {
     // Snapshot order, not numeric col.mod order (undo can lower it), owns the
     // device reference. Keep the lane through durable metadata publication.
     lane: Mutex<()>,
+    protected: Arc<Mutex<std::collections::BTreeMap<String, usize>>>,
 }
 
 impl ForcedBackupProvider {
@@ -49,28 +51,63 @@ impl ForcedBackupProvider {
         space: Arc<dyn SpaceProvider>,
     ) -> Self {
         Self {
-            engine,
+            engine: engine.downgrade(),
             collection,
             backups,
             clock,
             random,
             space,
             lane: Mutex::new(()),
+            protected: Arc::default(),
         }
     }
 
     pub fn force(&self, collection: &Collection, cancel: &CancelToken) -> Result<BackupWritten, EngineError> {
+        self.force_inner(collection, cancel, false)
+    }
+
+    fn engine(&self) -> Result<Engine, EngineError> {
+        self.engine.upgrade().ok_or_else(|| {
+            failure(
+                engine_cause(EngineError::CollectionUnavailable {
+                    reason: "the backup provider's engine has dropped".into(),
+                }),
+                BackupPublication::Unpublished,
+            )
+        })
+    }
+
+    fn pin(&self, name: &str) -> Arc<dyn meguri_engine::ports::BackupProtection> {
+        *self
+            .protected
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(name.to_owned())
+            .or_default() += 1;
+        Arc::new(BackupPin {
+            name: name.to_owned(),
+            protected: self.protected.clone(),
+        })
+    }
+
+    fn force_inner(
+        &self,
+        collection: &Collection,
+        cancel: &CancelToken,
+        protect: bool,
+    ) -> Result<BackupWritten, EngineError> {
         let _lane = self.lane.lock().unwrap_or_else(PoisonError::into_inner);
         let fail = |cause| failure(cause, BackupPublication::Unpublished);
         cancel.check().map_err(|e| fail(engine_cause(e)))?;
+        let engine = self.engine()?;
         // Read through the handle supplied by the exclusive caller.
         let lease = collection
             .reader(ReaderRole::Maintenance)
             .map_err(|e| fail(engine_cause(e)))?;
-        if collection.generation() != self.engine.generation() {
+        if collection.generation() != engine.generation() {
             return Err(fail(engine_cause(EngineError::StaleGeneration {
                 planned: collection.generation(),
-                current: self.engine.generation(),
+                current: engine.generation(),
             })));
         }
         let limits = backup_limits::read(&*lease).map_err(|e| fail(engine_cause(e)))?;
@@ -124,6 +161,9 @@ impl ForcedBackupProvider {
                     return Err(failure(error.into(), publication));
                 }
             };
+            // The publication lane prevents another retention pass until this
+            // actual name has a lifetime pin, including metadata callbacks.
+            let protection = protect.then(|| self.pin(&name));
             let recorded: Result<BackupReceipt, EngineError> = (|| {
                 let size_bytes = fs::metadata(&destination)
                     .map_err(|e| {
@@ -151,12 +191,17 @@ impl ForcedBackupProvider {
             // Publication is durable. Neither late cancellation nor metadata
             // failure may bypass retention or lose the primary error.
             let retained = match naming::today(EpochMillis(self.clock.now_ms()), self.clock.as_ref()) {
-                Ok(today) => retention::thin_pinned(
-                    retention_directory,
-                    today,
-                    limits,
-                    &std::collections::BTreeSet::from([name.clone()]),
-                ),
+                Ok(today) => retention::thin_pinned(retention_directory, today, limits, &{
+                    let mut names = self
+                        .protected
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .keys()
+                        .cloned()
+                        .collect::<std::collections::BTreeSet<_>>();
+                    names.insert(name.clone());
+                    names
+                }),
                 Err(error) => {
                     tracing::warn!(%error, "backup retention date unavailable");
                     retention::RetentionReport {
@@ -170,7 +215,12 @@ impl ForcedBackupProvider {
             };
             let receipt = recorded?;
             // lease drops here, before the caller invokes verified replacement.
+            let guard = meguri_engine::ports::GuardedBackup {
+                receipt: Some(receipt.clone()),
+                protection,
+            };
             return Ok(BackupWritten {
+                guard,
                 receipt,
                 deleted_names: retained.deleted_names,
                 retention_failures: retained.failures,
@@ -180,7 +230,44 @@ impl ForcedBackupProvider {
     }
 }
 
+struct BackupPin {
+    name: String,
+    protected: Arc<Mutex<std::collections::BTreeMap<String, usize>>>,
+}
+impl Drop for BackupPin {
+    fn drop(&mut self) {
+        let mut names = self.protected.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = names.get_mut(&self.name) {
+            *count -= 1;
+            if *count == 0 {
+                names.remove(&self.name);
+            }
+        }
+    }
+}
+
 impl BackupService for ForcedBackupProvider {
+    fn before_safety_operation(
+        &self,
+        collection: &Collection,
+        cancel: &CancelToken,
+    ) -> Result<meguri_engine::ports::GuardedBackup, EngineError> {
+        self.force_inner(collection, cancel, true).map(|written| written.guard)
+    }
+
+    fn protect_backup(
+        &self,
+        name: &str,
+    ) -> Result<Option<Arc<dyn meguri_engine::ports::BackupProtection>>, EngineError> {
+        let _lane = self.lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _engine = self.engine()?;
+        // Missing/unreadable proof falls back to a fresh backup.
+        Ok(listing::list(&self.backups)
+            .ok()
+            .filter(|entries| entries.iter().any(|entry| entry.name == name))
+            .map(|_| self.pin(name)))
+    }
+
     fn before_manual_transfer(
         &self,
         collection: Option<&Collection>,
@@ -198,6 +285,7 @@ impl BackupService for ForcedBackupProvider {
         // advisory ownership. No checkpoint or quick_check is run for T7.
         let fail = |cause| failure(cause, BackupPublication::Unpublished);
         cancel.check().map_err(|e| fail(engine_cause(e)))?;
+        let _engine = self.engine()?;
         let main_size = match fs::symlink_metadata(&self.collection) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(TransferBackup::Absent),
             Err(e) => return Err(fail(io_cause(e))),
@@ -284,8 +372,8 @@ impl BackupService for ForcedBackupProvider {
     }
 
     fn before_deck_delete(&self) -> Result<(), EngineError> {
-        let collection = self
-            .engine
+        let engine = self.engine()?;
+        let collection = engine
             .collection()
             .map_err(|e| failure(engine_cause(e), BackupPublication::Unpublished))?;
         self.force(&collection, &CancelToken::default()).map(|_| ())

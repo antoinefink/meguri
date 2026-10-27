@@ -11,3 +11,6 @@
 - E7/P15 is opt-in (`file_export`); P11 backups/server copies and general `UnsupportedMedia` intake stay collection-only. Export source validation must run after the final artifact hash at delivery, not just inside AtomicFile's verifier. It owns read-only descriptors, never engine/media locks or capture staging.
 
 - E7 inventory classifies with descriptor-relative no-follow stat before any media read. M8's optional colon applies only to `thumbs?db`. Freeze the full descriptor-relative no-follow `media.staging` recovery tree at E7 preflight; retained P16/R6 directories are valid protected metadata, never payload. Revalidate every nested binding/stamp after capture and final hash. Active U32 stages/output keep per-pass alias/binding guards and may be written or cleaned by their owner. Unit-only open injection proves permission refusals under root; it is not native permission evidence.
+
+- `before_safety_operation` returns a lifetime guard for the actual published name. Every retention pass of the same provider includes active pins; reuse pins under its publication lane before trusting a prior name. A receipt alone owns no retention protection.
+- The registered backup provider holds a weak engine reference; retain an upgrade only during an operation so engine drop can stop the writer and release collection ownership.

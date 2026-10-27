@@ -71,7 +71,10 @@ impl Harness {
         Harness::open_fixture("schema-18.anki2", ports)
     }
 
-    pub fn open_fixture(name: &str, ports: Ports) -> Harness {
+    pub fn open_fixture(name: &str, mut ports: Ports) -> Harness {
+        if ports.backup_service.is_none() {
+            ports = ports.backup_service(Arc::new(SafetyWitness));
+        }
         let (dir, path) = copy_fixture(name);
         let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
         let engine = Engine::new(EngineConfig::default()).unwrap();
@@ -109,8 +112,18 @@ pub fn fresh() -> Harness {
     Harness::open_path(dir, path)
 }
 
+// Explicit unit-test witness: these raw engine fixtures exercise transactions,
+// not production package publication. Safety tests inject a counted provider.
+struct SafetyWitness;
+impl meguri_engine::ports::BackupService for SafetyWitness {
+    fn before_deck_delete(&self) -> Result<(), meguri_engine::EngineError> {
+        Ok(())
+    }
+}
+
 pub fn open_config(clock: &Arc<StepClock>) -> OpenConfig {
     OpenConfig::new(clock.clone(), Arc::new(SeededRandom::new(7)))
+        .ports(Ports::new().backup_service(Arc::new(SafetyWitness)))
 }
 
 pub fn note(fields: &[&str]) -> Note {

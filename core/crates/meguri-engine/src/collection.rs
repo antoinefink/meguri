@@ -24,6 +24,7 @@ pub(crate) struct CollectionCore {
     pub(crate) exec: Arc<ExecShared>,
     pub(crate) readers: Readers,
     pub(crate) space: Arc<dyn crate::DiskSpaceProvider>,
+    pub(crate) backup: Option<Arc<dyn crate::ports::BackupService>>,
     /// Attaches the derived store to readers (`storage/derived-store` D9),
     /// once the store's open step ran.
     pub(crate) derived: OnceLock<Arc<crate::derived_host::Attachment>>,
@@ -141,12 +142,25 @@ impl Collection {
         self.core.exec.write_delay()
     }
 
-    /// Submits an op and returns at once (`engine/op-model` O2).
+    /// Admits required safety work off the writer, then queues the op (O2, T6).
     pub fn submit<T, F>(&self, mut spec: OpSpec, op: F) -> Pending<OpResult<T>>
     where
         T: Send + 'static,
         F: FnOnce(&mut OpContext<'_, '_>) -> Result<T, EngineError> + Send + 'static,
     {
+        if !spec.safety_admitted && spec.needs_safety_backup() {
+            match self.admit_safety(&spec) {
+                Ok(backup) => {
+                    spec.safety_backup = Some(backup);
+                    spec.safety_admitted = true;
+                }
+                Err(error) => {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let _ = tx.send(Err(error));
+                    return Pending { rx };
+                }
+            }
+        }
         if spec.source == crate::OpSource::UserUndoable && spec.undo.session.is_none() {
             spec.undo.session = self.undo_session;
         }

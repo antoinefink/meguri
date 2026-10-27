@@ -258,7 +258,7 @@ impl CoreHost {
         #[cfg(feature = "test-hooks")]
         let backup = config.test_backup.unwrap_or(backup);
         let mut options = OpenConfig::new(config.clock.clone(), config.random.clone())
-            .ports(ports)
+            .ports(ports.backup_service(backup.clone()))
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();

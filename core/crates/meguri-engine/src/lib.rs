@@ -43,6 +43,7 @@ pub mod progress;
 pub mod readers;
 pub mod rendering;
 pub mod replace;
+mod safety;
 pub mod sched;
 pub mod schema_gate;
 pub mod session;
@@ -65,7 +66,7 @@ pub use jobs::registry::{JobRegistry, RunningJob};
 pub use jobs::{JobContext, JobHandle, JobId, JobKind, JobOutcome};
 pub use lifecycle::{
     Engine, EngineConfig, Exclusive, ExclusivePhase, FailedReason, Generation, LifecycleState, LongOp, OpenConfig,
-    SlotGuard,
+    SlotGuard, WeakEngine,
 };
 /// The change value types (KTD2), for crates that reach the engine only.
 pub use meguri_model::changes::{ChangeKind, ChangeSet, OpSource};

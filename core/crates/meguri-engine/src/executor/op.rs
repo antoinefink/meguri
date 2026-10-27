@@ -27,6 +27,9 @@ use crate::undo::{Restore, UndoManager, UndoNotes, UndoSpec};
 /// How an op is to run.
 #[derive(Clone, Debug)]
 pub struct OpSpec {
+    pub(crate) schema_reasons: Vec<crate::SchemaReason>,
+    pub(crate) safety_admitted: bool,
+    pub(crate) safety_backup: Option<crate::ports::GuardedBackup>,
     pub(crate) recorded_clock: Option<Arc<dyn meguri_model::clock::Clock>>,
     pub(crate) def: OpDef,
     pub(crate) source: OpSource,
@@ -44,6 +47,9 @@ pub struct OpSpec {
 impl OpSpec {
     pub fn new(def: OpDef, source: OpSource) -> OpSpec {
         OpSpec {
+            schema_reasons: Vec::new(),
+            safety_admitted: false,
+            safety_backup: None,
             recorded_clock: None,
             def,
             source,
@@ -62,6 +68,21 @@ impl OpSpec {
     /// A plain op (no catalog entry).
     pub fn named(name: &'static str, source: OpSource) -> OpSpec {
         OpSpec::new(OpDef::new(name), source)
+    }
+
+    /// Records schema effects found during planning without changing collection data (G3).
+    pub fn schema_changes(mut self, reasons: impl IntoIterator<Item = crate::SchemaReason>) -> Self {
+        self.schema_reasons = reasons.into_iter().collect();
+        self
+    }
+
+    pub fn schema_reasons(&self) -> &[crate::SchemaReason] {
+        &self.schema_reasons
+    }
+
+    pub(crate) fn needs_safety_backup(&self) -> bool {
+        self.def.undo_class().is_some_and(|class| class.requires_backup())
+            || self.schema_reasons.iter().any(|reason| reason.is_structural())
     }
 
     /// Replay-local maintenance stamps use the recorded instant. This does

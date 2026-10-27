@@ -493,3 +493,63 @@ fn retention_read_failure_is_reported_without_an_error_result_or_foreign_deletio
         .is_empty()
     );
 }
+
+#[test]
+fn structural_preset_removal_backs_up_actual_pre_edit_rows() {
+    let f = Fixture::new(0);
+    let preset = meguri_engine::deck_config::add(&f.collection, "pre-edit preset".into())
+        .unwrap()
+        .value;
+    let before = f.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    f.clock.step_ms(1_000);
+    meguri_engine::deck_config::remove(&f.collection, preset, meguri_model::ids::DeckConfigId(1)).unwrap();
+    let record = meguri_engine::device_state::DeviceState::for_collection(f.collection.path())
+        .last_backup()
+        .unwrap()
+        .unwrap();
+    let captured = inspect(&f, &record.name);
+    let db = meguri_storage::open_collection(
+        &captured.collection_path(),
+        &OpenOptions::new(f.clock.as_ref(), f.random.as_ref()),
+    )
+    .unwrap();
+    let reader = db.open_reader(ReaderRole::Query).unwrap();
+    assert!(reader.deck_config(preset).unwrap().is_some());
+    assert_eq!(reader.col().unwrap(), before);
+    assert!(
+        f.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .deck_config(preset)
+            .unwrap()
+            .is_none()
+    );
+    drop(reader);
+    db.close().unwrap();
+    f.host.close().unwrap();
+}
+
+#[test]
+fn published_safety_name_is_pinned_until_the_operation_guard_drops() {
+    use meguri_engine::ports::BackupService;
+    let f = Fixture::new(0);
+    zero_limits(&f);
+    let writer = provider(&f, Arc::new(StatvfsSpace));
+    let guard = writer
+        .before_safety_operation(&f.collection, &CancelToken::default())
+        .unwrap();
+    let name = guard.receipt.as_ref().unwrap().name.clone();
+    let original = fs::read(f.dir.path().join("backups").join(&name)).unwrap();
+    // Make it old enough for zero-limit retention to delete, while a guarded
+    // operation still owns its publication pin. A later ordinary backup uses
+    // the same real writer and must respect that pin.
+    f.clock.step_ms(3 * 86_400_000);
+    let second = writer.force(&f.collection, &CancelToken::default()).unwrap();
+    assert!(!second.deleted_names.contains(&name));
+    assert_eq!(fs::read(f.dir.path().join("backups").join(&name)).unwrap(), original);
+    drop(guard);
+    let third = writer.force(&f.collection, &CancelToken::default()).unwrap();
+    assert!(third.deleted_names.contains(&name));
+    assert!(!f.dir.path().join("backups").join(&name).exists());
+    f.host.close().unwrap();
+}

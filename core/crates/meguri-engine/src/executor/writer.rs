@@ -470,6 +470,7 @@ fn run_op<T>(
             .map_err(|payload| EngineError::from_panic(payload.as_ref()))?
             .map_err(EngineError::from)
         })?;
+        shared.undo.safety_commit_pending();
         let reservation = shared.stream.reserve();
         *last = reservation.seq();
         (committed, reservation)

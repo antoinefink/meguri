@@ -108,6 +108,7 @@ impl PortKind {
 #[derive(Clone, Default)]
 pub struct Ports {
     pub observers: Vec<Arc<dyn ChangeObserver>>,
+    pub backup_service: Option<Arc<dyn BackupService>>,
     pub generation_listeners: Vec<Arc<dyn GenerationListener>>,
     pub suspend_participants: Vec<Arc<dyn SuspendParticipant>>,
     pub open_steps: Vec<Arc<dyn OpenStep>>,
@@ -156,6 +157,11 @@ impl Ports {
         self
     }
 
+    pub fn backup_service(mut self, provider: Arc<dyn BackupService>) -> Self {
+        self.backup_service = Some(provider);
+        self
+    }
+
     /// How many providers a port has.
     pub fn providers(&self, kind: PortKind) -> usize {
         match kind {
@@ -174,6 +180,24 @@ pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
 /// failure prevents the deletion. meguri-host supplies the package service.
 pub trait BackupService: Send + Sync {
     fn before_deck_delete(&self) -> Result<(), EngineError>;
+
+    /// Shared T6 admission, on the caller's worker. Legacy explicit test
+    /// witnesses remain valid but provide no reuse proof.
+    fn before_safety_operation(
+        &self,
+        _collection: &Collection,
+        cancel: &crate::CancelToken,
+    ) -> Result<GuardedBackup, EngineError> {
+        cancel.check()?;
+        self.before_deck_delete()?;
+        Ok(GuardedBackup::default())
+    }
+
+    /// Atomically pin an earlier publication against this provider's retention.
+    /// None means proof is absent: admission takes a fresh backup.
+    fn protect_backup(&self, _name: &str) -> Result<Option<Arc<dyn BackupProtection>>, EngineError> {
+        Ok(None)
+    }
 
     /// Working's handle, or None under initial replacement ownership. Never
     /// called before a downloaded Import candidate has been validated.
@@ -198,6 +222,23 @@ pub trait BackupService: Send + Sync {
         Err(EngineError::CollectionUnavailable {
             reason: "forced pre-import backup provider is unavailable".into(),
         })
+    }
+}
+
+/// Lifetime-only retention ownership. No collection, writer or undo lock.
+pub trait BackupProtection: Send + Sync {}
+impl<T: Send + Sync> BackupProtection for T {}
+
+#[derive(Clone, Default)]
+pub struct GuardedBackup {
+    pub receipt: Option<BackupReceipt>,
+    pub protection: Option<Arc<dyn BackupProtection>>,
+}
+impl fmt::Debug for GuardedBackup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GuardedBackup")
+            .field("receipt", &self.receipt)
+            .finish_non_exhaustive()
     }
 }
 

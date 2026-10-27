@@ -499,6 +499,93 @@ fn suspend_closes_media_across_clones_and_resume_reopens_the_same_store() {
 }
 
 #[test]
+fn production_backup_registration_allows_fallback_drop_and_reopen_without_close() {
+    use meguri_engine::ports::{BackupFailureCause, BackupPublication, SafetyBackupFailure};
+    use meguri_engine::{CancelToken, EngineError, LifecycleState, LongOp, OpSource, OpSpec};
+    use meguri_storage::{ConfigValue, OpenError, lockfile::CollectionLock};
+
+    let dir = tempfile::tempdir().unwrap();
+    let options = config(dir.path());
+    let process = meguri_host::ProcessCore::new(options.engine.clone()).unwrap();
+    let host = process.open(options.clone()).unwrap();
+    let engine = host.engine().clone();
+    let owner = engine.downgrade();
+    let threads = engine.threads().clone();
+    let collection = host.collection().unwrap();
+    let backup = host.backup(); // The real, registered production provider.
+    collection
+        .run(OpSpec::named("fallback drop witness", OpSource::Maintenance), |ctx| {
+            ctx.scope()
+                .set_config("fallbackDropWitness", &ConfigValue::Bool(true))?;
+            Ok(())
+        })
+        .unwrap();
+
+    // This deterministic handoff refuses CoreHost's best-effort drop close.
+    // The last engine owner must still shut down the writer on its own.
+    let handoff = engine.reserve_collection_export_handoff().unwrap();
+    drop(host);
+    drop(process);
+    assert_eq!(engine.slot_holder(), Some(LongOp::CollectionExportHandoff));
+    assert_eq!(
+        engine.state(),
+        LifecycleState::Ready {
+            generation: collection.generation(),
+        }
+    );
+    assert!(threads.threads().iter().any(|thread| thread.name == "meguri-writer"));
+    assert!(matches!(
+        CollectionLock::acquire(&options.collection_directory),
+        Err(OpenError::OpenInAnotherProgram)
+    ));
+    drop(engine);
+    drop(handoff);
+
+    assert!(
+        owner.upgrade().is_none(),
+        "the registered provider must not keep its engine alive"
+    );
+    assert!(threads.threads().iter().all(|thread| thread.name != "meguri-writer"));
+    assert!(collection.reader(ReaderRole::Query).is_err());
+    // Retained provider handles fail before reading files or publishing anything.
+    for error in [
+        backup
+            .before_safety_operation(&collection, &CancelToken::new())
+            .unwrap_err(),
+        backup
+            .protect_backup("backup-2030-01-15-10.00.00.colpkg")
+            .err()
+            .expect("owner has dropped"),
+    ] {
+        assert_eq!(
+            error,
+            EngineError::SafetyBackupFailed(Box::new(SafetyBackupFailure {
+                cause: BackupFailureCause::Engine(Box::new(EngineError::CollectionUnavailable {
+                    reason: "the backup provider's engine has dropped".into(),
+                })),
+                publication: BackupPublication::Unpublished,
+            }))
+        );
+    }
+    assert_eq!(std::fs::read_dir(&options.backups_directory).unwrap().count(), 0);
+    drop(collection);
+    drop(backup);
+
+    let reopened = CoreHost::open(options).unwrap();
+    assert_eq!(
+        reopened
+            .collection()
+            .unwrap()
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .config_value("fallbackDropWitness")
+            .unwrap(),
+        Some(ConfigValue::Bool(true))
+    );
+    reopened.close().unwrap();
+}
+
+#[test]
 fn an_open_failure_releases_workers_and_the_collection_ownership_lock() {
     let dir = tempfile::tempdir().unwrap();
     let config = config(dir.path());

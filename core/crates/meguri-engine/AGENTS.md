@@ -47,3 +47,5 @@
 - Verified replacement uses `replace_verified`; the legacy `Exclusive::replace` closure intentionally permits active sessions. Reconcile `device_state` under collection ownership before sweep or any managed reopen/day write. An `AfterActivation` error means the candidate file stands; never retry as rollback. Cloud decisions have no clear setter: manual-transfer state is separate.
 
 - Initial replacement keeps failed-reopen advisory ownership in lifecycle recovery state until explicit close. Retained initial opens skip launch staging sweeps: other live inspections own those directories.
+
+- T6 safety admission: plan effect reasons read-only with `OpSpec::schema_changes`; `plan_and_commit` retains one guarded backup across Stale. Mutating preparation (including rollover) must follow admission. Keep the guard through the terminal result. Reuse evidence is opening-local in undo, never inferred from `col.mod`, `peek_undo` or the persisted last-backup instant.

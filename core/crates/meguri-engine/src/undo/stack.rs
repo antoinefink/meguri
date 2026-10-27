@@ -30,6 +30,9 @@ struct SyncState {
 
 #[derive(Debug)]
 pub(crate) struct UndoStack {
+    pub(super) safety_revision: u64,
+    pub(super) safety_pending_commit: bool,
+    pub(super) safety_backup: Option<(i64, crate::ports::BackupReceipt)>,
     /// Oldest first; the top is the last.
     undo: Vec<Entry>,
     /// The top (next to redo) is the last.
@@ -42,6 +45,9 @@ pub(crate) struct UndoStack {
 impl Default for UndoStack {
     fn default() -> UndoStack {
         UndoStack {
+            safety_revision: 0,
+            safety_pending_commit: false,
+            safety_backup: None,
             undo: Vec::new(),
             redo: Vec::new(),
             floor: DisabledReason::None,
@@ -51,6 +57,11 @@ impl Default for UndoStack {
 }
 
 impl UndoStack {
+    pub(super) fn invalidate_safety(&mut self) {
+        self.safety_revision = self.safety_revision.wrapping_add(1);
+        self.safety_backup = None;
+    }
+
     fn stack(&self, side: Side) -> &Vec<Entry> {
         match side {
             Side::Undo => &self.undo,
@@ -102,12 +113,15 @@ impl UndoStack {
     /// is cleared. Returns the step that now holds the op.
     pub(crate) fn record(&mut self, entry: Entry) -> StepInfo {
         let info = self.push(entry);
-        self.redo.clear();
+        self.clear_redo();
         info
     }
 
     /// A2: an op that records nothing still empties redo (A11.1).
     pub(crate) fn clear_redo(&mut self) {
+        if !self.redo.is_empty() {
+            self.invalidate_safety();
+        }
         self.redo.clear();
     }
 
@@ -122,6 +136,7 @@ impl UndoStack {
         let info = entry.info.clone();
         self.undo.push(entry);
         if self.undo.len() > CAPACITY {
+            self.invalidate_safety();
             self.undo.remove(0);
             self.floor = DisabledReason::None;
         }
@@ -130,6 +145,7 @@ impl UndoStack {
 
     /// M2, M6: drops every step and redo step.
     pub(crate) fn clear_all(&mut self, reason: DisabledReason) {
+        self.invalidate_safety();
         self.undo.clear();
         self.redo.clear();
         self.floor = reason;
@@ -146,6 +162,7 @@ impl UndoStack {
     /// merge into the top step as a new step would (A3). Nothing when a
     /// clear dropped the step meanwhile.
     pub(crate) fn restored(&mut self, side: Side, id: EntryId, inverse: impl FnOnce(&Entry) -> Entry) {
+        self.invalidate_safety();
         let stack = match side {
             Side::Undo => &mut self.undo,
             Side::Redo => &mut self.redo,
@@ -167,6 +184,7 @@ impl UndoStack {
     /// older one go, with reason `ChangedExternally`; for redo, that redo step
     /// and every one below it.
     pub(crate) fn drop_changed(&mut self, side: Side, id: EntryId) {
+        self.invalidate_safety();
         match side {
             Side::Undo => {
                 if let Some(at) = self.undo.iter().position(|entry| entry.info.id == id) {
@@ -189,6 +207,7 @@ impl UndoStack {
         if targets.is_empty() {
             return;
         }
+        self.invalidate_safety();
         let reaches = |entry: &Entry| targets.iter().any(|target| entry.intersects(target, true));
         if let Some(at) = self.undo.iter().rposition(reaches) {
             self.undo.drain(..=at);
@@ -229,6 +248,7 @@ impl UndoStack {
     /// upload-pending. Steps a sync left pending (its `finish` may have been
     /// sent) become uploaded first.
     pub(crate) fn begin_sync(&mut self, session: Option<SessionId>, snapshot: Seq) -> Vec<Entry> {
+        self.invalidate_safety();
         for entry in &mut self.undo {
             if entry.upload == UploadState::Pending {
                 entry.upload = UploadState::Uploaded;
@@ -247,6 +267,7 @@ impl UndoStack {
 
     /// M9.2: the `finish` request was sent.
     pub(crate) fn finish_sent(&mut self) {
+        self.invalidate_safety();
         for entry in &mut self.undo {
             if entry.upload == UploadState::Pending {
                 entry.upload = UploadState::Uploaded;
@@ -273,6 +294,7 @@ impl UndoStack {
         if targets.is_empty() {
             return;
         }
+        self.invalidate_safety();
         let (snapshot, held) = match (&self.sync, snapshot) {
             (Some(sync), None) => (sync.snapshot, sync.held.clone()),
             (Some(sync), Some(given)) if sync.snapshot == given => (given, sync.held.clone()),

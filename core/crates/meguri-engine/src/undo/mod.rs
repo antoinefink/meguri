@@ -198,6 +198,30 @@ pub(crate) struct UndoManager {
 }
 
 impl UndoManager {
+    pub(crate) fn safety_state(&self, now: i64) -> (Option<u64>, Option<crate::ports::BackupReceipt>) {
+        let stack = self.lock();
+        if stack.safety_pending_commit {
+            return (None, None);
+        }
+        let receipt = stack.safety_backup.as_ref().and_then(|(completed, receipt)| {
+            now.checked_sub(*completed)
+                .filter(|age| (0..600_000).contains(age))
+                .map(|_| receipt.clone())
+        });
+        (Some(stack.safety_revision), receipt)
+    }
+
+    pub(crate) fn safety_commit_pending(&self) {
+        self.lock().safety_pending_commit = true;
+    }
+
+    pub(crate) fn safety_completed(&self, revision: Option<u64>, completed: i64, receipt: crate::ports::BackupReceipt) {
+        let mut stack = self.lock();
+        if !stack.safety_pending_commit && revision == Some(stack.safety_revision) {
+            stack.safety_backup = Some((completed, receipt));
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, UndoStack> {
         self.stack.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -240,6 +264,16 @@ impl UndoManager {
     pub(crate) fn after_commit(&self, commit: CommitInfo<'_>) -> Applied {
         let changed = commit.journal.as_ref().is_some_and(|journal| !journal.is_empty());
         let mut stack = self.lock();
+        stack.safety_pending_commit = false;
+        let safety_changed = changed || !commit.changes.is_empty();
+        if safety_changed
+            && (commit.source != OpSource::UserUndoable
+                || commit.spec.skip
+                || commit.spec.action.is_some()
+                || commit.journal.is_none())
+        {
+            stack.invalidate_safety();
+        }
         if let Some(cause) = commit.notes.clear {
             // M6, whether or not the op changed anything.
             stack.clear_all(cause.reason());

@@ -11,7 +11,7 @@ pub mod wait;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -114,6 +114,19 @@ pub struct Engine {
     pub(crate) inner: Arc<EngineInner>,
 }
 
+/// A provider's non-owning reference to its engine.
+#[derive(Clone)]
+pub struct WeakEngine {
+    inner: Weak<EngineInner>,
+}
+
+impl WeakEngine {
+    /// Retains the engine for one operation, if its owner still exists.
+    pub fn upgrade(&self) -> Option<Engine> {
+        self.inner.upgrade().map(|inner| Engine { inner })
+    }
+}
+
 impl fmt::Debug for Engine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Engine")
@@ -158,6 +171,13 @@ pub(crate) struct Current {
 }
 
 impl Engine {
+    /// Registered providers must not retain the engine that owns their ports.
+    pub fn downgrade(&self) -> WeakEngine {
+        WeakEngine {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     pub fn new(config: EngineConfig) -> Result<Engine, EngineError> {
         let stream = ChangeStream::new();
         let threads = ThreadRegistry::new();
@@ -411,6 +431,7 @@ impl Engine {
             last_seq,
         ));
         let core = Arc::new(CollectionCore {
+            backup: config.ports.backup_service.clone(),
             exec: Arc::clone(&exec),
             readers: Readers::new(opened.reader_factory()),
             derived: std::sync::OnceLock::new(),

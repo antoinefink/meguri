@@ -100,6 +100,7 @@ where
 {
     let commit = Arc::new(commit);
     let mut attempt = 0;
+    let mut safety = None;
     loop {
         if let Some(token) = &spec.cancel {
             token.check()?;
@@ -125,6 +126,13 @@ where
         }
         let mut attempt_spec = choose(&spec, &planned.value).preconditions(planned.preconditions);
         attempt_spec.plan_time = Some(plan_time);
+        if attempt_spec.needs_safety_backup() {
+            if safety.is_none() {
+                safety = Some(collection.admit_safety(&attempt_spec)?);
+            }
+            attempt_spec.safety_backup = safety.clone();
+            attempt_spec.safety_admitted = true;
+        }
         let commit = Arc::clone(&commit);
         let value = planned.value;
         match collection.run(attempt_spec, move |context| commit(context, value)) {
