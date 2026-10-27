@@ -1,0 +1,73 @@
+# The default deck of a note type (specs/notes/add-defaults.md D2): the deck
+# _nt_<id>_lastDeck names, when the key reads as an integer and names an
+# existing normal deck; otherwise none. One note type per stored form:
+#   Absent      no key
+#   ToNormal    Target's id (a normal deck)
+#   ToFiltered  900, the filtered deck Cram
+#   ToDeleted   Gone's id; Gone is deleted afterwards
+#   IdFive      5, the normal deck Five (inserted with id 5)
+#   AsString    the JSON string "5"
+#   AsFloat     the JSON number 5.0
+#   AsText      5 stored as TEXT, not BLOB (storage/config-table C3)
+# A leftover key for note type id 424242, which names no note type, still
+# gives its deck. addToCur is not read: both modes give the same results.
+# No setup note, since an add writes the key (notes/note-records A4).
+# Needs the notetype_last_deck observation (D7).
+id: notes/add-defaults/last-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Target, Gone]
+  notetypes:
+    - {name: Absent, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: ToNormal, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: ToFiltered, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: ToDeleted, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: IdFive, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: AsString, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: AsFloat, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: AsText, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (5, 'Five', 0, 0, X'08011001', X'0a020801')"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST((SELECT id FROM decks WHERE name = 'Target') AS BLOB) FROM notetypes WHERE name = 'ToNormal'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST(900 AS BLOB) FROM notetypes WHERE name = 'ToFiltered'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST((SELECT id FROM decks WHERE name = 'Gone') AS BLOB) FROM notetypes WHERE name = 'ToDeleted'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST(5 AS BLOB) FROM notetypes WHERE name = 'IdFive'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST('\"5\"' AS BLOB) FROM notetypes WHERE name = 'AsString'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, CAST('5.0' AS BLOB) FROM notetypes WHERE name = 'AsFloat'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || id || '_lastDeck', 0, 0, '5' FROM notetypes WHERE name = 'AsText'"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_424242_lastDeck', 0, 0, CAST(id AS BLOB) FROM decks WHERE name = 'Target'"
+  - delete_decks: {decks: [Gone]}
+  # The decks inserted above were never in Anki's deck cache; reopen anyway,
+  # as every scenario that writes decks with db_exec does.
+  - reopen: {}
+  - set_config: {key: addToCur, value: true}
+  - observe: [{notetype_last_deck: {notetype: Absent}}]
+  - observe: [{notetype_last_deck: {notetype: ToNormal}}]
+  - observe: [{notetype_last_deck: {notetype: ToFiltered}}]
+  - observe: [{notetype_last_deck: {notetype: ToDeleted}}]
+  - observe: [{notetype_last_deck: {notetype: IdFive}}]
+  - observe: [{notetype_last_deck: {notetype: AsString}}]
+  - observe: [{notetype_last_deck: {notetype: AsFloat}}]
+  - observe: [{notetype_last_deck: {notetype: AsText}}]
+  - observe: [{notetype_last_deck: {notetype_id: 424242}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{notetype_last_deck: {notetype: Absent}}]
+  - observe: [{notetype_last_deck: {notetype: ToNormal}}]
+  - observe: [{notetype_last_deck: {notetype: ToFiltered}}]
+  - observe: [{notetype_last_deck: {notetype: ToDeleted}}]
+  - observe: [{notetype_last_deck: {notetype: IdFive}}]
+  - observe: [{notetype_last_deck: {notetype: AsString}}]
+  - observe: [{notetype_last_deck: {notetype: AsFloat}}]
+  - observe: [{notetype_last_deck: {notetype: AsText}}]
+  - observe: [{notetype_last_deck: {notetype_id: 424242}}]

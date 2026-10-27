@@ -1,0 +1,31 @@
+# The next defaults after an add (specs/notes/add-defaults.md D6,
+# notes/note-records A4): the add writes _nt_<Vocab>_lastDeck,
+# _deck_<Spanish::Mining>_lastNotetype and curModel, and later D1 and D2
+# requests read them. Before the add, curModel names Idiom (the last note
+# type set up) and no note type has a last deck. After the add to
+# Spanish::Mining with Vocab: with addToCur true and curDeck still Default,
+# Vocab (curModel's); with curDeck Spanish::Mining, that deck and Vocab (its
+# last note type); with addToCur false, Vocab and Spanish::Mining (its last
+# deck), which notetype_last_deck also gives.
+# Needs the add_defaults and notetype_last_deck observations (D7).
+id: notes/add-defaults/after-add
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Spanish::Mining", Other]
+  notetypes:
+    - {name: Vocab, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Idiom, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+steps:
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Vocab}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]
+  - add_note: {notetype: Vocab, deck: "Spanish::Mining", fields: [hola, hello]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Vocab}}]
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: "Spanish::Mining"}
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Vocab}}]
+  - observe: [{notetype_last_deck: {notetype: Idiom}}]

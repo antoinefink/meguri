@@ -1,0 +1,86 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "add_defaults": {
+          "error": "not_found"
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Spanish",
+          "notetype": "Vocab"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "error": "not_found"
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Spanish",
+          "notetype": "Vocab"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "error": "invalid_argument"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "error": "not_found"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/add-defaults/missing-default-deck",
+  "scenario_sha256": "b355a6574dfe4dcae6347253c1331187564c4934de4f81a52c4286d48f624eab",
+  "tz": "UTC"
+}

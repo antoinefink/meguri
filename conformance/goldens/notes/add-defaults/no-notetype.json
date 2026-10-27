@@ -1,0 +1,62 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Vocab"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "add_defaults": {
+          "error": "invalid_argument"
+        }
+      },
+      {
+        "add_defaults": {
+          "error": "invalid_argument"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "error": "invalid_argument"
+        }
+      },
+      {
+        "add_defaults": {
+          "error": "invalid_argument"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/add-defaults/no-notetype",
+  "scenario_sha256": "aebe22a5d165bd6ad07ea50c2554261c3ff3d4c902625e407840a9eae212fba1",
+  "tz": "UTC"
+}
