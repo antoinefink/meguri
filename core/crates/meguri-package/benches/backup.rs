@@ -19,7 +19,7 @@ use std::{fs, process::ExitCode, sync::Arc, time::Duration};
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
 
-// Temporary generated-only Quit diagnosis. Remove with the two writer probes
+// Temporary generated-only Quit diagnosis. Remove with the lib/writer probes
 // after interpreting the unchanged complete-call measurements.
 mod temporary_quit_timing {
     use meguri_model::faultpoint::{self, Fault};
@@ -35,13 +35,22 @@ mod temporary_quit_timing {
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static START: AtomicU64 = AtomicU64::new(0);
     static STAGES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
-    const HOOKS: [(&str, fn()); 6] = [
+    static CANCELLED: AtomicU64 = AtomicU64::new(0);
+    static STREAM_BOUNDARY: AtomicU64 = AtomicU64::new(0);
+    static DIGEST_NS: AtomicU64 = AtomicU64::new(0);
+    static ENCODE_NS: AtomicU64 = AtomicU64::new(0);
+    static CHUNKS: AtomicU64 = AtomicU64::new(0);
+    const HOOKS: [(&str, fn()); 10] = [
         ("package.backup.before_snapshot_live", || record(0)),
         ("package.backup.after_snapshot_live", || record(1)),
         ("storage.atomic.after_write", || record(2)),
         ("storage.atomic.after_sync", || record(3)),
         ("storage.atomic.after_verify", || record(4)),
         ("storage.backup.before_rename", || record(5)),
+        ("package.backup.cancelled", record_cancelled),
+        ("package.backup.snapshot.before_digest", before_digest),
+        ("package.backup.snapshot.after_digest", after_digest),
+        ("package.backup.snapshot.after_encode", after_encode),
     ];
 
     fn now_ns() -> u64 {
@@ -60,10 +69,48 @@ mod temporary_quit_timing {
         let _ = STAGES[stage].compare_exchange(0, elapsed.saturating_add(1), Ordering::Relaxed, Ordering::Relaxed);
     }
 
+    fn record_cancelled() {
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
+        let elapsed = now_ns().saturating_sub(START.load(Ordering::Relaxed));
+        let _ = CANCELLED.compare_exchange(0, elapsed.saturating_add(1), Ordering::Relaxed, Ordering::Relaxed);
+    }
+
+    fn before_digest() {
+        if ACTIVE.load(Ordering::Relaxed) {
+            STREAM_BOUNDARY.store(now_ns(), Ordering::Relaxed);
+        }
+    }
+
+    fn after_digest() {
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
+        let now = now_ns();
+        let before = STREAM_BOUNDARY.swap(now, Ordering::Relaxed);
+        DIGEST_NS.fetch_add(now.saturating_sub(before), Ordering::Relaxed);
+    }
+
+    fn after_encode() {
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
+        let now = now_ns();
+        ENCODE_NS.fetch_add(
+            now.saturating_sub(STREAM_BOUNDARY.load(Ordering::Relaxed)),
+            Ordering::Relaxed,
+        );
+        CHUNKS.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn arm() {
         ORIGIN.get_or_init(Instant::now);
         for stage in &STAGES {
             stage.store(0, Ordering::Relaxed);
+        }
+        for value in [&CANCELLED, &STREAM_BOUNDARY, &DIGEST_NS, &ENCODE_NS, &CHUNKS] {
+            value.store(0, Ordering::Relaxed);
         }
         for (name, callback) in HOOKS {
             faultpoint::arm(name, Fault::Callback(callback));
@@ -92,6 +139,24 @@ mod temporary_quit_timing {
                 .checked_sub(1)
                 .map(Duration::from_nanos)
         })
+    }
+
+    pub fn cancellation_observed() -> Option<Duration> {
+        CANCELLED
+            .load(Ordering::Relaxed)
+            .checked_sub(1)
+            .map(Duration::from_nanos)
+    }
+
+    // Both intervals include observer/dispatcher overhead. The complete-call
+    // measurement includes every callback in full; nothing is subtracted.
+    // CHUNKS counts completed encode/write calls in the snapshot stream only.
+    pub fn streaming() -> (Duration, Duration, u64) {
+        (
+            Duration::from_nanos(DIGEST_NS.load(Ordering::Relaxed)),
+            Duration::from_nanos(ENCODE_NS.load(Ordering::Relaxed)),
+            CHUNKS.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -172,14 +237,25 @@ fn main() -> ExitCode {
                         let publication = state.last_backup();
                         let published = publication.as_ref().ok().and_then(Option::as_ref);
                         let expected = (modified.0, clock.now_ms());
+                        let live_mod = collection
+                            .reader(ReaderRole::Query)
+                            .ok()
+                            .and_then(|reader| reader.col().ok())
+                            .map(|col| col.modified.0);
                         eprintln!(
                             "temporary generated Quit diagnostic: elapsed={elapsed:?} stages_order=\
                              [before_snapshot_live,after_snapshot_live,after_write,after_sync,after_verify,before_rename] \
-                             stages={:?} call_ok={} returned_deadline={:?} previous_mod_instant={:?} \
+                             stages={:?} cancellation_observed={:?} \
+                             streaming_digest_encode_write_completed_chunks={:?} \
+                             live_mod={live_mod:?} live_mod_read_ok={} \
+                             call_ok={} returned_deadline={:?} previous_mod_instant={:?} \
                              published_mod_instant={:?} expected_mod_instant={expected:?} \
                              publication_read_ok={} durable_name_changed={:?} \
                              snapshot_record_matches={:?} published_file_exists={:?}",
                             temporary_quit_timing::stages(),
+                            temporary_quit_timing::cancellation_observed(),
+                            temporary_quit_timing::streaming(),
+                            live_mod.is_some(),
                             outcome.as_ref().is_some_and(Result::is_ok),
                             outcome.as_ref().and_then(|result| result.as_ref().ok()),
                             (previous.snapshot_mod, previous.instant),

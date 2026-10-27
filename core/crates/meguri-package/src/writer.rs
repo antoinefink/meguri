@@ -206,8 +206,12 @@ pub(crate) fn publish_snapshot_with_media(
             break;
         }
         length += n as u64;
+        // Temporary generated-benchmark streaming probes; remove after Quit diagnosis.
+        meguri_model::faultpoint!("package.backup.snapshot.before_digest")?;
         digest.update(&buffer[..n]);
+        meguri_model::faultpoint!("package.backup.snapshot.after_digest")?;
         encoder.write_all(&buffer[..n])?;
+        meguri_model::faultpoint!("package.backup.snapshot.after_encode")?;
     }
     encoder.finish()?;
     drop(source_file);
