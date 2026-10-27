@@ -181,7 +181,9 @@ fn apply(state: &mut State, record: Record) -> Result<(), EngineError> {
     Ok(())
 }
 fn read(path: &Path, expected: &Header) -> Result<(State, u64, usize), EngineError> {
-    let bytes = std::fs::read(path).map_err(error)?;
+    read_bytes(&std::fs::read(path).map_err(error)?, expected)
+}
+fn read_bytes(bytes: &[u8], expected: &Header) -> Result<(State, u64, usize), EngineError> {
     let complete = bytes.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
     let mut header = None;
     let mut state = None;
@@ -234,6 +236,132 @@ fn create(path: &Path, header: &Header, replace: bool) -> Result<(), EngineError
     }
     Ok(())
 }
+/// Recovery-only replacement has no review worker and must never replay old
+/// answers. Under advisory/exclusive ownership, preserve the entire validated
+/// file (including a torn tail) before installing a retired binding marker.
+/// Archives are permanent evidence, outside the temporary sweep namespace.
+pub(crate) struct RecoveryJournal {
+    path: PathBuf,
+    original: Vec<u8>,
+    marker: Vec<u8>,
+}
+impl RecoveryJournal {
+    pub(crate) fn prepare(collection: &Path) -> Result<Option<Self>, EngineError> {
+        use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+        let path = collection.with_file_name("meguri-pending-answers.jsonl");
+        if !path.try_exists().map_err(error)? {
+            // A dangling link is evidence, not absence.
+            if std::fs::symlink_metadata(&path).is_ok() {
+                return Err(error("invalid recovery journal binding; evidence retained"));
+            }
+            return Ok(None);
+        }
+        // No SQLite open or recovery. Release this descriptor before any new
+        // writer opens: closing a second descriptor can release POSIX locks.
+        let main = recovery_file(collection)?;
+        let native = main.metadata().map_err(error)?;
+        let expected = Header {
+            version: 1,
+            path: collection
+                .canonicalize()
+                .map_err(error)?
+                .as_os_str()
+                .as_bytes()
+                .to_vec(),
+            native: (native.dev(), native.ino()),
+            incarnation: [0, 0],
+            next_event: 1,
+        };
+        let original = recovery_bytes(&path)?;
+        let (loaded, _, _) = read_bytes(&original, &expected)?;
+        // Even a retired file must bind to this old main in this recovery path.
+        if loaded.header.native != expected.native {
+            return Err(error("unexpected recovery journal native identity; evidence retained"));
+        }
+        if loaded.retired {
+            return Ok(None);
+        }
+        let digest = Sha256::digest(&original);
+        let name = format!("{digest:x}");
+        let archive = collection.with_file_name(format!("meguri-pending-answers.{name}.recovery.jsonl"));
+        if archive.try_exists().map_err(error)? {
+            if recovery_bytes(&archive)? != original {
+                return Err(error("recovery journal archive differs; evidence retained"));
+            }
+            full_sync(&recovery_file(&archive)?)?;
+            meguri_storage::atomic_file::sync_directory(archive.parent().unwrap())?;
+        } else {
+            let mut copy = AtomicFile::new(&archive, Purpose::Sidecar)?;
+            copy.file_mut().write_all(&original).map_err(error)?;
+            copy.publish_new(|_| Ok(()))?;
+        }
+        let unresolved = loaded.events.values().filter(|e| e.terminal.is_none()).count();
+        let mut header = loaded.header;
+        header.next_event = loaded.next_event;
+        let mut marker = encode(1, &Record::Header(header))?;
+        marker.extend(encode(2, &Record::Retired)?);
+        let current = std::fs::symlink_metadata(collection).map_err(error)?;
+        if !current.is_file() || (current.dev(), current.ino()) != expected.native {
+            return Err(error("recovery main identity changed; evidence retained"));
+        }
+        replace_recovery_bytes(&path, &original, &marker)?;
+        tracing::warn!(path = %archive.display(), unresolved, "old pending-answer evidence archived for recovery replacement; not replayed");
+        Ok(Some(Self { path, original, marker }))
+    }
+
+    /// A proven preactivation failure restores the exact old active file. The
+    /// archive remains durable across failures/crashes. Never roll back after
+    /// activation or an uncertain activation.
+    pub(crate) fn finish(self, activated: bool) -> Result<(), EngineError> {
+        if !activated {
+            replace_recovery_bytes(&self.path, &self.marker, &self.original)?;
+        }
+        Ok(())
+    }
+}
+pub(crate) fn recovery_identity(collection: &Path) -> Result<(u64, u64), EngineError> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = recovery_file(collection)?.metadata().map_err(error)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+fn recovery_file(path: &Path) -> Result<File, EngineError> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(error)?;
+    let metadata = file.metadata().map_err(error)?;
+    let named = std::fs::symlink_metadata(path).map_err(error)?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || !named.is_file()
+        || (metadata.dev(), metadata.ino()) != (named.dev(), named.ino())
+    {
+        return Err(error("unsafe recovery journal file binding; evidence retained"));
+    }
+    Ok(file)
+}
+fn recovery_bytes(path: &Path) -> Result<Vec<u8>, EngineError> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    recovery_file(path)?.read_to_end(&mut bytes).map_err(error)?;
+    Ok(bytes)
+}
+fn replace_recovery_bytes(path: &Path, expected: &[u8], bytes: &[u8]) -> Result<(), EngineError> {
+    let mut replacement = AtomicFile::new(path, Purpose::Sidecar)?;
+    replacement.file_mut().write_all(bytes).map_err(error)?;
+    replacement.publish(|_| {
+        if recovery_bytes(path).map_err(|e| meguri_storage::StorageError::Io { detail: e.to_string() })? != expected {
+            return Err(meguri_storage::StorageError::Io {
+                detail: "recovery journal changed; evidence retained".into(),
+            });
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
 impl Journal {
     pub(crate) fn open(
         collection: &Path,
@@ -661,6 +789,85 @@ fn stage(fault: &mut Option<JournalStage>, hook: &Option<StageHook>, stage: Jour
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn recovery_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Header) {
+        use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("collection.anki2");
+        std::fs::write(&main, b"damaged main, no SQLite open permitted").unwrap();
+        let metadata = std::fs::metadata(&main).unwrap();
+        let h = Header {
+            path: main.canonicalize().unwrap().as_os_str().as_bytes().to_vec(),
+            native: (metadata.dev(), metadata.ino()),
+            ..header()
+        };
+        let journal = main.with_file_name("meguri-pending-answers.jsonl");
+        let mut bytes = encode(1, &Record::Header(h.clone())).unwrap();
+        bytes.extend(encode(2, &intent()).unwrap());
+        bytes.extend(b"torn final frame");
+        std::fs::write(&journal, bytes).unwrap();
+        (dir, main, journal, h)
+    }
+    #[test]
+    fn recovery_archive_keeps_unresolved_and_torn_bytes_before_retired_marker_and_rollback() {
+        let (dir, main, journal, h) = recovery_fixture();
+        let original = std::fs::read(&journal).unwrap();
+        let main_bytes = std::fs::read(&main).unwrap();
+        let pending = RecoveryJournal::prepare(&main).unwrap().unwrap();
+        let marker = read(&journal, &h).unwrap().0;
+        assert!(marker.retired);
+        assert!(marker.events.is_empty());
+        let archive = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(Result::unwrap)
+            .find(|e| e.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
+            .unwrap();
+        assert_eq!(std::fs::read(archive.path()).unwrap(), original);
+        pending.finish(false).unwrap();
+        assert_eq!(std::fs::read(&journal).unwrap(), original);
+        assert_eq!(std::fs::read(&main).unwrap(), main_bytes);
+        // An interrupted handoff leaves a durable retired marker and exact
+        // archived bytes; a new native identity may bind, never replaying them.
+        drop(RecoveryJournal::prepare(&main).unwrap());
+        let mut next = h;
+        next.native.1 += 1;
+        assert!(read(&journal, &next).unwrap().0.retired);
+        assert_eq!(std::fs::read(archive.path()).unwrap(), original);
+    }
+    #[test]
+    fn recovery_archive_rejects_wrong_identity_corruption_and_aliases_without_writing() {
+        use std::os::unix::fs::symlink;
+        for case in ["identity", "checksum", "symlink", "hardlink"] {
+            let (dir, main, journal, mut h) = recovery_fixture();
+            match case {
+                "identity" => {
+                    h.native.1 += 1;
+                    std::fs::write(&journal, encode(1, &Record::Header(h)).unwrap()).unwrap();
+                }
+                "checksum" => {
+                    let mut bytes = std::fs::read(&journal).unwrap();
+                    bytes[0] = b'x';
+                    std::fs::write(&journal, bytes).unwrap();
+                }
+                "symlink" => {
+                    let evidence = dir.path().join("evidence");
+                    std::fs::rename(&journal, &evidence).unwrap();
+                    symlink(evidence, &journal).unwrap();
+                }
+                "hardlink" => std::fs::hard_link(&journal, dir.path().join("evidence")).unwrap(),
+                _ => unreachable!(),
+            }
+            let before = std::fs::read(&journal).unwrap();
+            assert!(RecoveryJournal::prepare(&main).is_err(), "{case}");
+            assert_eq!(std::fs::read(&journal).unwrap(), before, "{case}");
+            assert!(
+                !std::fs::read_dir(dir.path())
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .any(|e| e.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
+            );
+        }
+    }
+
     fn header() -> Header {
         Header {
             version: 1,

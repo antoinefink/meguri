@@ -246,6 +246,14 @@ impl Collection {
         Ok(ReaderLease::new(guard, &self.core.exec, self.generation))
     }
 
+    /// Exercise the writer-loop fallback independently of CloseTask.
+    #[cfg(feature = "test-hooks")]
+    pub fn stop_writer_for_testing(&self) {
+        self.core.exec.wait_idle();
+        self.core.readers.close_all();
+        self.core.exec.stop();
+    }
+
     pub(crate) fn check_current(&self) -> Result<(), EngineError> {
         let current = self.current_generation();
         if current == self.generation {

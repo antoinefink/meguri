@@ -162,10 +162,25 @@ pub(crate) fn run(
         }
         shared.task_done();
     }
-    if let Some(collection) = collection.take()
-        && let Err(error) = collection.close()
-    {
-        tracing::warn!(%error, "closing the collection when the writer stopped");
+    if let Some(opened) = collection.take() {
+        match close_owned_collection(&shared, opened) {
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "closing the collection when the writer stopped"),
+        }
+    }
+}
+
+/// Select the close policy from the corruption marker, including after admission closes.
+pub(crate) fn close_owned_collection(
+    shared: &ExecShared,
+    opened: OpenedCollection,
+) -> Result<Option<meguri_storage::CheckpointOutcome>, meguri_storage::StorageError> {
+    if shared.corrupt.load(Ordering::Acquire) {
+        opened.close_preserving_recovery()?;
+        Ok(None)
+    } else {
+        let checkpoint = opened.close()?;
+        Ok(Some(checkpoint))
     }
 }
 
@@ -770,10 +785,17 @@ impl TaskBody for ReplaceTask {
         // Keep the live collection installed until both journal obligations
         // succeed. An error returns its current readers without closing it.
         let recovery_only = env.collection.is_none() && shared.corrupt.load(Ordering::Acquire);
+        let mut recovery_journal = None;
         let journal_result = match env.collection.as_ref() {
             Some(current) => crate::session::retire_witnesses(shared, current.writer())
                 .and_then(|()| crate::session::retire_incarnation(shared)),
-            None if recovery_only => Ok(()),
+            None if recovery_only && swap.activated.is_some() => crate::session::prepare_recovery_replacement(shared)
+                .map(|journal| {
+                    recovery_journal = journal;
+                }),
+            None if recovery_only => Err(EngineError::unavailable(
+                "recovery journal requires verified replacement",
+            )),
             None => Err(EngineError::unavailable("the collection is closed")),
         };
         if let Err(error) = journal_result {
@@ -789,7 +811,10 @@ impl TaskBody for ReplaceTask {
         // surrender the open file to the existing replacement protocol.
         *shared.active_session.lock().unwrap() = None;
         *shared.fsrs_policy.review_active.lock().unwrap() = false;
-        let closed = env.collection.take().map(|collection| collection.close()).transpose();
+        let closed = match env.collection.take() {
+            Some(opened) => close_owned_collection(shared, opened).map(Some),
+            None => Ok(None),
+        };
         let live = LiveFile::before_swap(&shared.path);
         // Never replace a file whose final commit/checkpoint could not be
         // made durable. Reopen the original through the same recovery path
@@ -800,7 +825,7 @@ impl TaskBody for ReplaceTask {
             media_recovered,
         } = swap;
         let swapped = match closed {
-            Ok(outcome) if outcome.is_none_or(|o| o.succeeded()) => {
+            Ok(outcome) if outcome.flatten().is_none_or(|o| o.succeeded()) => {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
                     .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())))
             }
@@ -813,6 +838,17 @@ impl TaskBody for ReplaceTask {
         let replacing = activated
             .as_ref()
             .map_or(swapped.is_ok() || changed, |a| a.load(Ordering::Acquire));
+        if let Some(journal) = recovery_journal
+            && let Err(error) = journal.finish(replacing || changed)
+        {
+            let _ = reply.send(Replaced {
+                reopened: false,
+                error: Some(error),
+                generation: None,
+                factory: None,
+            });
+            return;
+        }
         if replacing {
             // The steps describe the file the swap replaced; dropped before
             // any op of the new generation, also when the reopen fails
@@ -883,10 +919,13 @@ impl TaskBody for ReplaceTask {
                             // stays open, no reader ever opens on the new
                             // file, and nobody hears of its generation.
                             drop(announce);
-                            if let Some(collection) = env.collection.take()
-                                && let Err(error) = collection.close()
-                            {
-                                tracing::warn!(%error, "closing the collection after its first day check failed");
+                            if let Some(opened) = env.collection.take() {
+                                match close_owned_collection(shared, opened) {
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        tracing::warn!(%error, "closing the collection after its first day check failed");
+                                    }
+                                }
                             }
                             let error = match swapped {
                                 Ok(()) => check_error,
@@ -958,10 +997,11 @@ impl TaskBody for CloseTask {
     fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
         // Steps live only while the collection is open (engine/undo M1, M6).
         env.shared.undo.reset(DisabledReason::None);
-        let result = match env.collection.take() {
-            Some(collection) => collection.close().map(|_| ()).map_err(EngineError::from),
-            None => Ok(()),
-        };
+        let result = env.collection.take().map_or(Ok(()), |opened| {
+            close_owned_collection(env.shared, opened)
+                .map(drop)
+                .map_err(EngineError::from)
+        });
         let _ = self.reply.send(result);
     }
 

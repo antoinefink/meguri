@@ -213,14 +213,20 @@ impl OpenedCollection {
         })
     }
 
-    /// The storage side of closing (C10), once every reader is closed: the
-    /// checkpoint primitive, then the writer closes and SQLite removes the
-    /// `-wal` and `-shm` files. The writer closes even when the checkpoint
-    /// was busy; the outcome says so.
+    pub fn close_preserving_recovery(self) -> Result<(), StorageError> {
+        self.writer.conn.close().map_err(|(_, e)| StorageError::from(e))
+    }
+
+    /// Ordinary C10, after readers close: checkpoint, mark clean when covered,
+    /// then restore SQLite's normal last-close WAL/SHM cleanup.
     pub fn close(self) -> Result<CheckpointOutcome, StorageError> {
         let outcome = self.writer.checkpoint();
         if self.managed && outcome.as_ref().is_ok_and(|o| o.succeeded()) {
             self.save_sidecar(true)?;
+        }
+        // Ordinary C10 retains SQLite's usual final checkpoint/sidecar cleanup.
+        if outcome.is_ok() {
+            close_checkpoint(&self.writer.conn, false)?;
         }
         self.writer.conn.close().map_err(|(_, e)| StorageError::from(e))?;
         outcome
@@ -270,6 +276,7 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
     };
     // Phase 4.
     let writer = Writer::open(path, &options.initializers)?;
+    close_checkpoint(&writer.conn, true).map_err(|e| OpenError::Io { detail: e.to_string() })?;
     if upgrading {
         let context = UpgradeContext {
             clock: options.clock,
@@ -420,4 +427,25 @@ fn remove_if_present(path: &Path) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Owner-thread-only connection policy; sqlite3_db_config does not access pages.
+fn close_checkpoint(conn: &Connection, disabled: bool) -> Result<(), StorageError> {
+    let mut actual = -1;
+    // SAFETY: a live owner-thread connection and the documented int/int* varargs
+    // for SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE; SQLite retains neither pointer.
+    let status = unsafe {
+        rusqlite::ffi::sqlite3_db_config(
+            conn.handle(),
+            rusqlite::ffi::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+            i32::from(disabled),
+            &mut actual as *mut i32,
+        )
+    };
+    if status != rusqlite::ffi::SQLITE_OK || actual != i32::from(disabled) {
+        return Err(StorageError::Io {
+            detail: format!("SQLite close-checkpoint policy failed (status {status}, result {actual})"),
+        });
+    }
+    Ok(())
 }

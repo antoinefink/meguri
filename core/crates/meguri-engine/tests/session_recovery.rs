@@ -1006,3 +1006,124 @@ fn c12_recovery_allows_unrelated_mtime_opaque_counters_and_admitted_fsrs_off() {
         engine.close().unwrap();
     }
 }
+
+#[test]
+fn recovery_restore_archives_real_unresolved_answers_and_preserves_preactivation_failure() {
+    use meguri_engine::{
+        FailedReason, ProgressSink,
+        device_state::{DeviceState, LastQuickCheck, PublicationDecision},
+    };
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::space::StatvfsSpace;
+
+    // Capture real production Intent and Prepared prefixes, including native
+    // binding/checksums. Never synthesize a successful answer or rebind result.
+    for prepared in [false, true] {
+        let captured = capture_answer(|_| {});
+        restore_uncommitted(&captured, &captured.intent);
+        let old = if prepared { &captured.prepared } else { &captured.intent };
+        // Make a good backup of the pre-answer database with a valid empty
+        // journal. Reinstall the captured unresolved evidence after closing.
+        let header_end = captured.intent.iter().position(|b| *b == b'\n').unwrap() + 1;
+        fs::write(journal_path(&captured.path), &captured.intent[..header_end]).unwrap();
+        let backups = captured._dir.path().join("backups");
+        let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
+        let host = meguri_testkit::backup_support::open_restore_host(
+            &captured.path,
+            &backups,
+            clock.clone(),
+            Arc::new(StatvfsSpace),
+        )
+        .unwrap();
+        let expected_logs = logs(&host.collection().unwrap());
+        let backup = host.engine().back_up_now(&Default::default()).unwrap().receipt;
+        host.close().unwrap();
+        drop(host);
+        fs::write(journal_path(&captured.path), old).unwrap();
+        fs::write(&captured.path, b"unreadable main retaining real unresolved journal").unwrap();
+        let damaged = fs::read(&captured.path).unwrap();
+        let device = DeviceState::for_collection(&captured.path);
+        device
+            .set_last_quick_check(&LastQuickCheck {
+                instant: NOW,
+                passed: false,
+            })
+            .unwrap();
+        let host = meguri_testkit::backup_support::open_restore_host(
+            &captured.path,
+            &backups,
+            clock.clone(),
+            Arc::new(StatvfsSpace),
+        )
+        .unwrap();
+        let generation = host.engine().generation();
+        faultpoint::arm(
+            "replace.before_live_wal_check",
+            Fault::IoError(std::io::ErrorKind::Other),
+        );
+        let refused = host.restore_backup(&backup.name, &Default::default(), &ProgressSink::new());
+        faultpoint::disarm("replace.before_live_wal_check");
+        assert!(refused.is_err());
+        assert_eq!(host.engine().generation(), generation);
+        assert!(matches!(
+            host.engine().state(),
+            LifecycleState::Failed {
+                reason: FailedReason::Corrupt { .. }
+            }
+        ));
+        assert_eq!(fs::read(journal_path(&captured.path)).unwrap(), *old);
+        assert_eq!(fs::read(&captured.path).unwrap(), damaged);
+        host.close().unwrap();
+        drop(host);
+        // Reopen the damaged owner before a new, separately requested Restore.
+        let host = meguri_testkit::backup_support::open_restore_host(
+            &captured.path,
+            &backups,
+            clock.clone(),
+            Arc::new(StatvfsSpace),
+        )
+        .unwrap();
+        let generation = host.engine().generation();
+        clock.step_ms(1000);
+        let restored = host
+            .restore_backup(&backup.name, &Default::default(), &ProgressSink::new())
+            .unwrap();
+        assert_eq!(restored.generation.0, generation.0 + 1);
+        assert!(matches!(host.engine().state(), LifecycleState::Ready { .. }));
+        host.review().flush_for_background().unwrap();
+        assert_eq!(
+            logs(&host.collection().unwrap()),
+            expected_logs,
+            "old answers must not replay"
+        );
+        assert!(restored.cloud_publication_pending);
+        assert_eq!(
+            device.publication().unwrap().unwrap().decision,
+            PublicationDecision::Pending
+        );
+        assert_eq!(
+            fs::read(backups.join(restored.safety_backup.as_ref().unwrap())).unwrap(),
+            damaged
+        );
+        let archives = fs::read_dir(captured._dir.path())
+            .unwrap()
+            .map(Result::unwrap)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
+            .collect::<Vec<_>>();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(fs::read(archives[0].path()).unwrap(), *old);
+        host.close().unwrap();
+        drop(host);
+        let reopened =
+            meguri_testkit::backup_support::open_restore_host(&captured.path, &backups, clock, Arc::new(StatvfsSpace))
+                .unwrap();
+        assert!(matches!(reopened.engine().state(), LifecycleState::Ready { .. }));
+        assert_eq!(logs(&reopened.collection().unwrap()), expected_logs);
+        assert_eq!(fs::read(archives[0].path()).unwrap(), *old);
+        assert_eq!(
+            device.publication().unwrap().unwrap().decision,
+            PublicationDecision::Pending
+        );
+        reopened.close().unwrap();
+    }
+}

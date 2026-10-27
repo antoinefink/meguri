@@ -287,7 +287,9 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
         }
         Control::Suspend { deadline } => {
             check_deadline(deadline, "checkpoint")?;
-            if let Some(collection) = env.collection.as_ref() {
+            if let Some(collection) = env.collection.as_ref()
+                && !env.shared.corrupt.load(std::sync::atomic::Ordering::Acquire)
+            {
                 let result = collection
                     .writer()
                     .checkpoint_with_timeout(deadline.saturating_sub(monotonic::now()))?;
@@ -295,8 +297,9 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
                     return Err(EngineError::unavailable("checkpoint blocked by an external reader"));
                 }
             }
-            if let Some(collection) = env.collection.take() {
-                collection.close()?;
+            if let Some(opened) = env.collection.take() {
+                let closed = crate::executor::writer::close_owned_collection(env.shared, opened);
+                closed?;
             }
             if env.suspended_file.is_none() {
                 *env.suspended_file = Some(super::executor::live_file::LiveFile::before_swap(&env.shared.path));

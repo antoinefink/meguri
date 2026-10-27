@@ -58,3 +58,23 @@ pub(crate) fn retire_incarnation(shared: &crate::executor::ExecShared) -> Result
     *shared.review_journal.lock().unwrap() = None;
     Ok(())
 }
+
+/// Recovery can own either an already quiesced live binding or no provider at
+/// all. Never edit its file while a retained worker still owns that binding.
+pub(crate) fn prepare_recovery_replacement(
+    shared: &crate::executor::ExecShared,
+) -> Result<Option<journal::RecoveryJournal>, crate::EngineError> {
+    let bound = shared
+        .review_journal
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade);
+    if let Some(bound) = bound {
+        bound.check_identity(journal::recovery_identity(&shared.path)?)?;
+        retire_incarnation(shared)?;
+        Ok(None)
+    } else {
+        journal::RecoveryJournal::prepare(&shared.path)
+    }
+}

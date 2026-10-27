@@ -97,7 +97,7 @@ fn malformed_cadence_records_stay_untouched_and_other_status_fields_are_independ
         trigger(&h, Trigger::BackgroundProcessing);
         let status = h.engine.maintenance_status().unwrap();
         assert!(status.last_optimize.is_err());
-        assert_eq!(status.last_quick_check.unwrap().unwrap().passed, true);
+        assert!(status.last_quick_check.unwrap().unwrap().passed);
         assert!(status.last_backup.is_ok());
         assert!(status.last_check_database.is_ok());
         assert_eq!(std::fs::read(&sidecar).unwrap(), before);
@@ -486,6 +486,7 @@ fn real_restore_clears_recorded_corruption_in_new_generation_and_survives_reopen
     host.close().unwrap();
     std::fs::write(&path, b"unreadable collection for recovery ownership").unwrap();
     let damaged = std::fs::read(&path).unwrap();
+    let old_journal = std::fs::read(path.with_file_name("meguri-pending-answers.jsonl")).unwrap();
     let host =
         meguri_testkit::backup_support::open_restore_host(&path, &backups, clock.clone(), Arc::new(StatvfsSpace))
             .unwrap();
@@ -508,6 +509,13 @@ fn real_restore_clears_recorded_corruption_in_new_generation_and_survives_reopen
         .restore_backup(&backup.name, &CancelToken::new(), &meguri_engine::ProgressSink::new())
         .unwrap();
     assert_eq!(restored.generation.0, generation.0 + 1);
+    let archived = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(Result::unwrap)
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(".recovery.jsonl"))
+        .expect("old production journal archived");
+    assert_eq!(std::fs::read(archived.path()).unwrap(), old_journal);
+    host.review().flush_for_background().unwrap();
     assert!(restored.cloud_publication_pending);
     assert_eq!(
         std::fs::read(backups.join(restored.safety_backup.as_ref().unwrap())).unwrap(),
@@ -791,6 +799,62 @@ fn damage_root(collection: &meguri_engine::Collection, path: &std::path::Path, t
         .unwrap();
     file.write_all(&[0]).unwrap();
     file.sync_all().unwrap();
+}
+
+#[test]
+fn live_corrupt_close_suspend_and_drop_preserve_nonempty_wal_and_release_locks() {
+    for shutdown_case in ["close", "suspend-close", "drop", "fallback", "failed-suspend-drop"] {
+        let harness = Harness::open();
+        damage_root(&harness.collection, &harness.path, "revlog");
+        raw_writer(&harness.collection, "PRAGMA wal_autocheckpoint=0");
+        raw_writer(&harness.collection, "UPDATE col SET mod=987654321");
+        std::fs::write(sibling(&harness.path, "-journal"), b"retained rollback evidence").unwrap();
+        trigger(&harness, Trigger::Background);
+        assert!(matches!(
+            harness.engine.state(),
+            LifecycleState::Failed {
+                reason: FailedReason::Corrupt { .. }
+            }
+        ));
+        assert!(!state(&harness).last_quick_check().unwrap().unwrap().passed);
+        let evidence = recovery_bytes(&harness.path);
+        assert!(evidence[1].as_ref().is_some_and(|bytes| bytes.len() > 32));
+        assert!(meguri_storage::lockfile::CollectionLock::acquire(harness.dir.path()).is_err());
+        match shutdown_case {
+            "close" => harness.engine.close().unwrap(),
+            "suspend-close" => {
+                harness.engine.suspend(Duration::from_secs(5)).unwrap();
+                assert_eq!(recovery_bytes(&harness.path), evidence);
+                harness.engine.close().unwrap();
+            }
+            "failed-suspend-drop" => {
+                assert!(harness.engine.suspend(Duration::ZERO).is_err());
+            }
+            "drop" => {}
+            "fallback" => harness.collection.stop_writer_for_testing(),
+            _ => unreachable!(),
+        }
+        let Harness {
+            dir: directory,
+            engine,
+            collection,
+            ..
+        } = harness;
+        drop(collection);
+        drop(engine);
+        assert_eq!(
+            recovery_bytes(&directory.path().join("collection.anki2")),
+            evidence,
+            "{shutdown_case}"
+        );
+        let lock = meguri_storage::lockfile::CollectionLock::acquire(directory.path()).unwrap();
+        let probe = meguri_storage::raw::PlainDatabase::open(&directory.path().join("collection.anki2")).unwrap();
+        probe
+            .execute_batch("PRAGMA busy_timeout=0; BEGIN IMMEDIATE; ROLLBACK;")
+            .unwrap();
+        probe.close().unwrap();
+        drop(lock);
+    }
 }
 
 #[test]
