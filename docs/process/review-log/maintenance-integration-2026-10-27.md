@@ -104,3 +104,44 @@ Use the original base again for the next full gate, including all new commits.
 Keep the frozen checks and their failed results. No pass is inferred from them.
 Release still needs Apple's account step, Antoine's device checks and trial days.
 Proceed toward iCloud after repairing and checking the active changes.
+
+## Held vocabulary merge and final numeric repairs
+
+`b3f84156` adds strict parsing for both held-scenario handoff sections, without
+activating adapters. Independent review found the cached browser-mode actor
+check; the filtered fixer repaired it and the second review was clear.
+`core-test/20261027T210411Z-85225` passed 13 focused tests.
+`conformance/20261027T210619Z-86562` parsed all 166 prepared cases with matching
+recorded hashes: zero invalid cases, 147 pending and 19 unsupported observations.
+Those inactive outcomes are prerequisites for intake, not product passes.
+`e9d8914d` merged only `oracle/batch-2`, including its held-scenario history.
+
+`c6cf0af1` corrected the native executable working directory described above.
+`selftest/20261027T210206Z-83478` passed all 22 native scratch, package-directory,
+lease and cancellation checks. Actual dual-lane T0 remains required.
+
+The first post-merge golden check (`goldens-check/20261027T210939Z-89761`)
+rejected three valid observation integers using authored scenario limits. The
+focused run (`core-test/20261027T211231Z-92144`) also found stale package-count
+and malformed-search diagnostic expectations. Preserve both failed receipts.
+
+`a55af9b3` clarifies the existing observation/scenario contract. `303ebf64`
+separates observation conversion from authored-input bounds. Generic observation
+parsing retains C3 floating conversion beyond the 64-bit range and JSON negative
+zero, while authored integer lexemes retain D2 bounds. All original golden
+values and hashes remain unchanged. Package coverage includes every recorded
+case; no adapter or capability is activated. Independent context review R3 was
+clear. `289b42ad` adds a non-panicking YAML minimum-integer range check and
+flattens the conditional flagged by lint; its independent scoped review was
+clear. These are integration-delta reviews, not additional whole-unit rounds.
+
+Final focused receipts on the repaired source:
+
+- `core-lint/20261027T215643Z-16607`: pass.
+- `core-test/20261027T215654Z-16966`: 91 passed, zero skipped.
+- `goldens-check/20261027T215805Z-17686`: 1,948 files, zero schema errors.
+- `selftest/20261027T214750Z-11914`: schema conversion selftest passed.
+- Privacy scans of the nine-file repair and final three-file delta passed.
+
+The original batch base, frozen-server dispositions and U127 escalation remain
+unchanged. No Unit trailer or integration acceptance is added by these repairs.
