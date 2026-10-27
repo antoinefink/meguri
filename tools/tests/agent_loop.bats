@@ -51,6 +51,7 @@ setup() {
 }
 
 teardown() {
+  [ -z "${FX_WORKTREE_RELEASE:-}" ] || touch "$FX_WORKTREE_RELEASE"
   pkill -f "$BATS_TEST_TMPDIR/bin/caffeinate" 2>/dev/null || true
   [ ! -f "$BATS_TEST_TMPDIR/bg.pids" ] || xargs kill <"$BATS_TEST_TMPDIR/bg.pids" 2>/dev/null || true
 }
@@ -408,20 +409,44 @@ EOF
 @test "two worktrees of one repository share one host lease, in the main checkout" {
   add_fixture_jobs
   unset MEGURI_HOST_LEASE_DIR
-  local wt="$BATS_TEST_TMPDIR/wt" first
+  local wt="$BATS_TEST_TMPDIR/wt" first second first_status first_result
+  FX_WORKTREE_RELEASE="$BATS_TEST_TMPDIR/worktree-lease.free"
   git -C "$SB" worktree add -q -b wt "$wt"
   wt="$(cd "$wt" && pwd -P)"
   cp "$SB/tools/mg.d/zz-fixture.sh" "$wt/tools/mg.d/"
-  FX_HOLD=2 "$wt/tools/mg" fx-lease a >/dev/null 2>&1 &
+  FX_UNTIL="$FX_WORKTREE_RELEASE" "$wt/tools/mg" fx-lease a >"$BATS_TEST_TMPDIR/a.out" 2>"$BATS_TEST_TMPDIR/a.err" 3>&- &
   first=$!
+  bg_track "$first"
   for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  [ -s "$FX_LOG" ]
   [ "$(jq -r '"\(.job) \(.worktree)"' "$SB/build/mg/host.lock/holder.json")" = "fx-lease $wt" ]
   [ ! -e "$wt/build/mg/host.lock" ]
-  FX_HOLD=0 mg fx-lease b
-  wait "$first"
+  FX_HOLD=0 "$SB/tools/mg" fx-lease b >"$BATS_TEST_TMPDIR/b.out" 2>"$BATS_TEST_TMPDIR/b.err" 3>&- &
+  second=$!
+  bg_track "$second"
+  # Release only after this execution has observed contention with the
+  # worktree holder; startup time cannot make the waiting assertion vacuous.
+  for _ in $(seq 1 50); do
+    grep -Fq "host lease: waiting for fx-lease in $wt" "$BATS_TEST_TMPDIR/b.err" && break
+    sleep 0.1
+  done
+  grep -Fq "host lease: waiting for fx-lease in $wt" "$BATS_TEST_TMPDIR/b.err"
+  touch "$FX_WORKTREE_RELEASE"
+  first_status=0
+  wait "$first" || first_status=$?
+  status=0
+  wait "$second" || status=$?
+  first_result="$(tail -n 1 "$BATS_TEST_TMPDIR/a.out")"
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/b.out")"
+  stderr="$(cat "$BATS_TEST_TMPDIR/b.err")"
+  [ "$first_status" -eq 0 ]
   [ "$status" -eq 0 ]
+  [ "$(jq -r .status "$first_result")" = pass ]
+  [ "$(field .status)" = pass ]
   [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starta enda startb endb " ]
+  [ "$(awk '$1 == "start" && $2 == "b" {print $3}' "$FX_LOG")" \> "$(awk '$1 == "end" && $2 == "a" {print $3}' "$FX_LOG")" ]
   [[ "$stderr" == *"host lease: waiting for fx-lease in $wt"* ]]
+  [ "$(field '.details.host_lease.job')" = fx-lease ]
   [ ! -e "$SB/build/mg/host.lock" ]
 }
 

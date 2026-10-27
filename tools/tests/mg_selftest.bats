@@ -2090,6 +2090,7 @@ actor_fixture() {
   printf 'anki==26.9.3 \\\n    --hash=sha256:%064d\n' 0 >"$SB/oracle/requirements.lock"
   printf '*\n' >"$SB/oracle/Dockerfile.dockerignore"
   printf '#!/bin/sh\n' >"$SB/oracle/entrypoint.sh"
+  printf '# fixture worker holder\n' >"$SB/oracle/worker_holder.py"
   printf '# driver\n' >"$SB/oracle/driver/worker.py"
   printf 'id: smoke/sync/pair\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\nactors: [client_a, client_c]\n' \
     >"$SB/conformance/scenarios/smoke/sync/pair.yaml"
