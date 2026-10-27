@@ -91,7 +91,10 @@ pub fn write_collection_package_from_live(
     preflight_publication(size, destination, context)?;
     cancelled(context.is_cancelled)?;
     let staging = staging_directory(context.collection_directory)?;
+    // Temporary generated-benchmark timing probes; remove after Quit diagnosis.
+    meguri_model::faultpoint!("package.backup.before_snapshot_live")?;
     let snapshot = reader.snapshot_live(staging.path())?;
+    meguri_model::faultpoint!("package.backup.after_snapshot_live")?;
     let snapshot_modified = collection_package::snapshot_modified(&snapshot).map_err(source_error)?;
     publish_snapshot(&snapshot, staging.path(), destination, context)?;
     Ok(LiveCollectionPackageWritten { snapshot_modified })
@@ -203,8 +206,12 @@ pub(crate) fn publish_snapshot_with_media(
             break;
         }
         length += n as u64;
+        // Temporary generated-benchmark streaming probes; remove after Quit diagnosis.
+        meguri_model::faultpoint!("package.backup.snapshot.before_digest")?;
         digest.update(&buffer[..n]);
+        meguri_model::faultpoint!("package.backup.snapshot.after_digest")?;
         encoder.write_all(&buffer[..n])?;
+        meguri_model::faultpoint!("package.backup.snapshot.after_encode")?;
     }
     encoder.finish()?;
     drop(source_file);

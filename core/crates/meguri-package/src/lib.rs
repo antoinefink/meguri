@@ -127,5 +127,11 @@ fn corrupt(detail: impl Into<String>) -> Error {
     Error::Corrupt { detail: detail.into() }
 }
 fn cancelled(check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
-    if check() { Err(Error::Cancelled) } else { Ok(()) }
+    if check() {
+        // Temporary generated-benchmark cancellation probe; remove after Quit diagnosis.
+        meguri_model::faultpoint!("package.backup.cancelled")?;
+        Err(Error::Cancelled)
+    } else {
+        Ok(())
+    }
 }
