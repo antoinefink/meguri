@@ -102,6 +102,7 @@ The precondition kinds:
 - An op whose write phase cannot stay near 200 ms declares its expected length. Only catalog ops may (O9); a declaration by any other op is refused with `InvalidArgument`.
 - When the writer starts a declared write, it publishes `WriteDelay{op, declared}` on the change stream and keeps it readable from the collection handle until the write ends, then publishes `WriteDelayEnded{op}`, after the op's own change set: once U43 sees the delay end, the commit is visible. U43 reads it: answers accepted meanwhile stay in the session's overlay and pending-answer journal and commit as soon as the writer is free (KTD6). Every other write waits for the writer.
 - A maintenance task is work that must run on the writer outside any transaction: `VACUUM`, `REINDEX`, `ANALYZE`, `wal_checkpoint`. It is queued as a background item with a declared duration, gets the writer connection itself, and publishes its delay like a declared write. The writer never starts one while an interactive op is queued (O2). During `ExclusiveBusy` it is accepted only from the exclusive job. Users: U128, U132, U109.
+- `damaged_backup` is T7's Ready-state fallback after a snapshot fails with a corruption error (`package/backup-triggers#T7`). It uses the same declared-delay maintenance window so no collection commit or checkpoint runs during the main/WAL byte copy. The task runs no SQLite check, repair or collection write and neither records nor clears undo. T7 still defines the copy, publication, cleanup and other lifecycle states.
 
 ## O9. Op catalog
 
@@ -123,6 +124,7 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 | `reindex` | U128 | not destructive | maintenance task | |
 | `analyze` | U132 | not destructive | maintenance task | |
 | `wal_checkpoint` | U109, U132 | not destructive | maintenance task | |
+| `damaged_backup` (T7 main/WAL byte copy) | U127 | not destructive | maintenance task | |
 
 A destructive op that is not undoable is confirmed first and preceded by U127's pre-op backup. U37 exports the catalog's names and undo classes.
 
