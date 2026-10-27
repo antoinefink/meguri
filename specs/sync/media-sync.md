@@ -1,9 +1,11 @@
 # Media sync
 
 Spec: sync/media-sync
-Requirements: R1534, R1546, R1554 (media part), R1565 (upload exclusion), R1572, R1575, R1576, R1577, R1578, R1579, R1580, R1581, R1583 (progress and estimate), R1584 (core part), R1585, R1588, R1592 (core part), R1844, R2060, R2061, R2062, R2063; AE65
+Requirements: R1534, R1546, R1565 (upload exclusion), R1575, R1576, R1577, R1578, R1579, R1580, R1581, R1583 (progress and estimate), R1584 (core part), R1585, R1588, R2060, R2061, R2062, R2063; AE65
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/media/ (prepared; integration/activation remain pending)
+
+Manual-transfer compatibility (KTD26; frozen with U111): this job runs only inside an explicit manual Anki transfer. Routine media sync is CloudKit: R1572 and R2057 are `sync/cloudkit-records#K9` and `sync/policy#P13`, R1592 is `sync/policy#P13` and `sync/cloudkit-recovery`, R1554 is `sync/policy#P11.2`. The CloudKit halves of R1844 (resumable transfer of the large media fixture), R1583 (the first full download's counts, bytes and estimate), R1584 (the placeholder while the first download runs) and R1588 (a mass change resumes in the background) are `sync/cloudkit-records#K9.3` and `sync/policy#P13`. Where this file cites R1554, R1572, R1583, R1584, R1588, R1592 or R1844, it means only the manual job.
 
 How Meguri's media sync job brings the media folder and the server's media into agreement: which changes it fetches, what it decides for each one, how it downloads, saves and uploads files, the sanity check that ends it, and how it reports progress, stops and resumes. It builds on:
 
@@ -13,7 +15,7 @@ How Meguri's media sync job brings the media folder and the server's media into 
 - `sync/wire-format` W15–W17: the media envelope, the five media methods and both zips;
 - `sync/errors`: the error kinds a failed job returns.
 
-The job's scenario op is `conformance/media-sync-ops#V3`; `server_media` (V5) puts on the server what no client would send.
+The job's scenario op is `conformance/media-sync-ops#V3`. The op `server_media` puts on the server what no client would send; `conformance/media-sync-ops` does not define it yet, and it lands with U111's driver and schema contract (V4).
 
 Follow `sync/anki-transfers` M1/M5/M6. Ask separately before media changes either side, including before any request
 or page is applied. Never start from a timer or app event. Collection-only does no media work.
@@ -314,11 +316,11 @@ Neutral actor scenarios under `conformance/scenarios/sync/media/`, in the vocabu
 | `size-limit` | R1565: a file over 100 MiB and an empty file never reach the server or the other client |
 | `nfd-upload` | an NFD-named file reaches the server and another client under its NFC name, and later media syncs move nothing (deviations: the Linux oracle skips the file, `media-tracking#T5`; Anki on macOS sends and delivers the NFC name as Meguri does) |
 
-The goldens are the Linux oracle's. The native macOS oracle agrees with them for every scenario but `nfd-upload`, where it shows the transfers Meguri's deviations hold, and `server-names`, which it cannot run (`conformance/media-sync-ops#V6`).
+The goldens are the Linux oracle's. The native macOS oracle agrees with them for every scenario but `nfd-upload`, where it shows the transfers Meguri's deviations hold, and `server-names`, which it cannot run. Driver and executor status: `conformance/media-sync-ops#V4`.
 
 No client can put an NFD name on the server: the official server refuses a name not in NFC (Y2). An NFD name therefore only ever starts in a client's own folder, which is what `nfd-upload` covers; a non-NFC name from a server that holds one anyway is a stub test (Y9, below).
 
-Recordings: `tools/mg oracle recordings sync/media/batches` keeps the exchanges of the oracle playing every actor (`conformance/sync-ops#S9`). Download requests show their name lists; upload answers show `processed`; zip bodies are recorded by size and hash only. The job records only scenarios T0 lists as live or pending, so this recording is made once Meguri's testkit model reads the scenario (`conformance/media-sync-ops#V6`); until then the request sizes are checked by the stub tests below.
+Recordings: `tools/mg oracle recordings sync/media/batches` keeps the exchanges of the oracle playing every actor (`conformance/sync-ops#S9`). Download requests show their name lists; upload answers show `processed`; zip bodies are recorded by size and hash only. The job records only scenarios T0 lists as live or pending, so this recording is made once Meguri's testkit model reads the scenario (`conformance/media-sync-ops#V4`); until then the request sizes are checked by the stub tests below.
 
 Meguri-only behavior is tested in `core/crates/meguri-sync/tests/media_sync.rs` against the scripted stub (`transport#T13`) and the local server rig (U13), where a scenario cannot reach:
 

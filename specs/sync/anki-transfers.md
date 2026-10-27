@@ -5,10 +5,12 @@ Requirements: R118, R119, R120, R121, R126, R1540, R1548, R2060, R2061, R2062, R
 Anki: none (Meguri product policy; retained protocol facts are cited in F1)
 Scenarios: none (focused core, local-server and native acceptance in M8)
 
+Frozen reference (plan, "Anki server work: frozen", 2026-10-26): Anki server transfers are not required, not built further and not part of delivery, milestone or release acceptance. This file is kept as the contract to resume from after a new scope decision. Where it says "required" or "must" about server transfers, server media or their evidence (F1, M5, M8), that is the frozen contract, not a current requirement. Routine sync is CloudKit (`sync/policy`, KTD25, KTD26).
+
 This contract governs explicitly selected self-hosted server transfers. Routine sync uses CloudKit.
 Collection Import and Export are directional; separately authorized media reconciliation changes both sides.
-Collection-only is a valid selected scope, but does not complete the full include-media delivery requirement.
-File import/export follows its package/native contracts and remains independent of server eligibility.
+Collection-only is a valid selected scope, but does not complete the full include-media delivery requirement (frozen).
+File import and export follow their own contracts (`package/container`, P16 for a local collection-file import; `package/file-export`) and remain independent of server eligibility.
 
 ## F1. Retained protocol facts and proof limits
 
@@ -24,8 +26,9 @@ O6.1 permits another client's change between preview, server copy and upload; th
 O12 permits remote acceptance without a received/durable OK. Local cancellation does not prove remote rollback.
 `sync/media-sync#Y3` pulls and pushes; Y6–Y11 define decisions, durable batches, acknowledgements and sanity checking.
 These are retained compatibility facts, not permission to run requests automatically or reconcile without consent.
-U109 one-way and U110/U111 media contracts are integrated. Their code, scenarios and acceptance remain pending;
-M5 support is still required. U107 normal/hold-back contracts remain a deferred dependency, not an implied exchange.
+U109 one-way and U110/U111 media contracts are integrated. Their code, scenarios and acceptance remain pending and are
+frozen; M5 media support is frozen reference, not a current requirement. U107 normal/hold-back contracts remain a
+deferred, frozen dependency, not an implied exchange.
 
 ## M1. Entry, credentials and isolation
 
@@ -218,6 +221,10 @@ Legacy manual reconciliation/sanity bookkeeping is separate; pendingScm/timestam
 An Anki login is not a CloudKit identity or authorization. Local review does not require resolving cloud publication.
 
 ## M8. Focused acceptance and complete delivery scope
+
+Frozen reference (2026-10-26): nothing in M8 is current acceptance. Server-transfer media, manual-server round trips
+and native transfer evidence are excluded from delivery, milestone and release acceptance. Existing evidence stays as
+recorded and a failed check stays failed; M8 applies again only after a new scope decision.
 
 Use the pinned local official-server rig and scripted faults; never AnkiWeb. Cover path-prefix login and redirects,
 both direction confirmations, no hidden incremental merge, real local backup before mutation and server-copy restore.

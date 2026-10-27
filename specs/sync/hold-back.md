@@ -1,9 +1,11 @@
 # Hold-back sync: snapshot and stage
 
 Spec: sync/hold-back
-Requirements: R88, R726, R1495, R1845, R2006 (not delayed by sync), R1520 (undo and queues), R1530 (the outgoing view), R1554, R2012, R2060, R2062, R2063; KTD6, KTD7, KTD26; AE9 (core part), AE27 (core part), AE68 (first clause)
+Requirements: R1495, R1845, R2006 (not delayed by sync), R1520 (undo and queues), R1530 (the outgoing view), R2012, R2060, R2062, R2063; KTD6, KTD7, KTD26; AE9 (core part), AE27 (core part), AE68 (first clause)
 Anki: none. Meguri design from KTD6, KTD7 and U107; Anki does not sync during a review session (R726) and blocks its collection while it syncs (R1495), so nothing here comes from Anki. The data a round leaves on both sides is `normal-sync.md`'s.
 Scenarios: conformance/scenarios/sync/holdback/ (with the deviations of H17); mechanism tests in core/crates/meguri-sync/tests/normal_sync.rs (H18)
+
+Manual-transfer compatibility (KTD26; frozen with U107): this is the hold-back of a manual Anki normal sync. CloudKit hold-back during review (R88, R726, R2047) is `sync/policy#P8`, and background expiry (R1554) is `sync/policy#P11.2`. Where this file cites R88, R726 or R1554, it means only the manual-transfer case.
 
 How Meguri runs the normal sync of `normal-sync.md` without ever making an answer wait, while keeping the newest answer run of a review session undoable and off the server. The round reads what it sends from a read snapshot taken between two ops, with the held-back run's rows replaced by their earlier images; it stages what the server sends in a scratch file; and it applies the stage in one short write that respects every write made meanwhile. The undo side of the contract (the held-back run, upload states, the merge rule) is `engine/undo` M8 and M9; ops, sources and declared writes are `engine/op-model`.
 

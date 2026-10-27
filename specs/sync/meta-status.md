@@ -1,11 +1,13 @@
 # The `meta` status check and the sync status
 
 Spec: sync/meta-status
-Requirements: R1513, R1514, R1515, R1516 (core: the message is passed through), R1517, R1518, R1559 (computation); AE63
+Requirements: R1513, R1514, R1515, R1516 (core: the message is passed through), R1517, R1518; AE63
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/meta/
 
-Every collection sync starts with the status check: a `meta` request whose answer decides whether the sync stops, runs normally or needs a one-way transfer. The same check, with an offline shortcut and a short memory, answers "what is the sync status?" for the app's indicator (R1558, U113). This file says what the check sends, what it refuses, how it compares the two sides, how the status is computed, and the meta probe the optimizer gate uses (KTD8). The `meta` body is `wire-format.md` W3; the request, its redirect and its errors are `transport.md`; error kinds are `errors.md`.
+Manual-transfer compatibility (KTD26; frozen with U106): the status here is the Anki server status shown in Settings Anki Transfers (R1560). The iCloud status and its pending computation (R1558, R1559) are `sync/policy#P14`; the optimizer's commit gate is `sync/policy#P18` (KTD8). Where this file cites R1558 or R1559, it means only the Anki half.
+
+Every collection sync starts with the status check: a `meta` request whose answer decides whether the sync stops, runs normally or needs a one-way transfer. The same check, with an offline shortcut and a short memory, answers "what is the Anki server's sync status?" for Settings Anki Transfers (R1560). This file says what the check sends, what it refuses, how it compares the two sides, how the status is computed, and a retained meta probe (M7). The `meta` body is `wire-format.md` W3; the request, its redirect and its errors are `transport.md`; error kinds are `errors.md`.
 
 This status API describes protocol facts, not authority to transfer. For manual delivery, all network probes
 are explicit Settings actions under `sync/anki-transfers` M1–M2. No status or remembered outcome starts
@@ -99,11 +101,13 @@ Computed from the local `col` row alone, with no network:
 
 ## M6. The sync status
 
-The status the app asks for (U113 calls it for the indicator, R1558) combines M5, a remembered answer and M2:
+The status Settings Anki Transfers asks for (R1560; the iCloud indicator is `sync/policy#P14`, not this) combines M5, a remembered answer and M2:
 
 1. Compute the offline status (M5). "One-way sync needed" and "local changes pending" are the status. No request is made, and the remembered answer is neither read nor changed.
 2. Otherwise ("unknown" or "nothing pending locally"), when a remembered answer exists for the same base and host key and is less than 300 seconds old, it is the status. No request is made.
 3. Otherwise run the check (M2, M3) and give its result: no changes, normal sync needed (the server has changes), or one-way sync needed. Remember it with the time the check began. A check that fails (any error kind) returns the error and leaves the remembered answer as it was.
+
+Step 3 sends a request, so the status runs only as an explicit Settings action (`sync/anki-transfers` M1–M2). Opening Settings makes no request: it shows the offline status (M5) and the last manual-transfer result (R1560). (2026-10-27: this limits when the app calls the status; the computation is unchanged.)
 
 The status result also carries `newEndpoint` when step 3 followed a redirect, which the app stores as for a sync (`login-endpoints.md` L4). It carries no server message: messages are shown only after a sync (R1516).
 
@@ -132,9 +136,11 @@ The status result also carries `newEndpoint` when step 3 followed a redirect, wh
 | a note added since the last sync | normal sync needed (offline) | no |
 | `scm` moved past `ls` | one-way sync needed (offline) | no |
 
-## M7. Meta probe (KTD8)
+## M7. Meta probe (retained reference)
 
-A job that only asks the server for its current record, for the optimizer's commit gate (U47, U51): it runs M2 steps 1 to 3 and returns the answer's `mod`, `scm`, `usn`, `media_usn` and `ts`, plus `newEndpoint` when it followed a redirect. It compares nothing, writes nothing, and neither reads nor changes the remembered answer (M6.1). Its failures are the check's (`server_message`, `clock_incorrect`, every transport kind); the gate treats any failure as "server state not confirmed".
+Retained reference (2026-10-27): the optimizer's commit gate does not use this job. KTD8 replaced it with a CloudKit fetch and a revision check (`sync/policy#P18`, U47), and nothing runs this job outside an explicit manual transfer.
+
+A job that only asks the server for its current record: it runs M2 steps 1 to 3 and returns the answer's `mod`, `scm`, `usn`, `media_usn` and `ts`, plus `newEndpoint` when it followed a redirect. It compares nothing, writes nothing, and neither reads nor changes the remembered answer (M6.1). Its failures are the check's (`server_message`, `clock_incorrect`, every transport kind); a caller treats any failure as "server state not confirmed".
 
 ## M8. Errors
 

@@ -1,9 +1,11 @@
 # One-way sync: full upload and full download
 
 Spec: sync/one-way
-Requirements: R1518 (directions in the flow), R1536 (core: no direction chosen), R1537, R1538 (core: the facts the warnings use), R1539, R1540, R1541, R1542, R1543, R1544, R1545, R1546, R1547, R1548 (fresh cloud decision after manual Import), R1563, R1564, R2019, R158, R1593, R1554 (one-way part), R1655 (compaction before upload), R2015 (full sync), R2060, R2061, R2062, R2063, R2064; AE62, AE86 (sync part)
+Requirements: R1518 (directions in the flow), R1536 (core: no direction chosen), R1537, R1538 (core: the facts the warnings use), R1539, R1540, R1541, R1542, R1543, R1544, R1545, R1546, R1547, R1548 (fresh cloud decision after manual Import), R1563, R1564, R2019, R1655 (compaction before upload), R2015 (full sync), R2060, R2061, R2062, R2063, R2064; AE62, AE86 (sync part)
 Anki: 26.09.3 for O2, O6.2, O6.4, O7.4 and O9 (what Anki's client and the official server do); every other section is Meguri design from the Product Contract and the plan (U109)
 Scenarios: conformance/scenarios/sync/oneway/ (prepared; integration and activation remain deferred)
+
+Manual-transfer compatibility (KTD26; frozen with U109). Connecting to iCloud (R158, R1593) is `sync/cloudkit-recovery#V13`, and background expiry (R1554) is `sync/policy#P11.2`. Where this file cites R158, R1593 or R1554, it means only the manual transfer.
 
 A one-way sync replaces one side's collection with the other's, whole. An upload sends the device's collection, prepared as O6.2 says, and the server keeps it in place of its own; a download fetches the server's collection and swaps it in for the device's. This file says when one is needed and which directions are possible (O2), the facts the choice shows (O3), how a job starts (O4), the safety backup (O5), each direction (O6, O7), what follows a success (O8), the AnkiWeb limits (O9), the free-space check (O10), progress (O11), cancellation and kills (O12) and the errors (O13).
 
@@ -40,7 +42,7 @@ is absent or may be discarded. Preserve historical direction hints as protocol f
 dispatch the UI. The local collection has cards exactly when `cards` contains a row.
 
 - **Server-forced one-way sync (R1564).** When the server's collection file is larger than its limit (the official server: 300 MiB with its default settings, O9), the server answers every `meta` with `scm` set to its current time. Every status check then finds the schema times different and reports a one-way sync, which Meguri presents as a protocol fact within the explicit transfer preview. Nothing in the answer tells this case apart, and Meguri does not try: after a download the next check asks again, as it does in Anki, until the server's collection is smaller.
-- **Force a one-way sync (R1547).** The setting runs the `force_one_way` op of `notetypes/schema-changes` G2: it sets `scm` to now (and `mod` with it, G5), without a confirmation, even when `scm` is already past `ls`. The offline status then says one-way sync needed (`meta-status.md` M5), and the next explicitly requested check reports it (M3); a transfer still requires manual direction confirmation. Anki's desktop option does the same (it sets `scm` whether or not it was already past `ls`).
+- **Force a one-way Anki transfer (R1547).** A choice made for one transfer inside Settings Anki Transfers, never a standing setting, and never in the iCloud sync popover; it changes nothing in CloudKit (`sync/policy#P16`). The choice runs the `force_one_way` op of `notetypes/schema-changes` G2: it sets `scm` to now (and `mod` with it, G5), without a confirmation, even when `scm` is already past `ls`. The offline status then says one-way sync needed (`meta-status.md` M5), and the next explicitly requested check reports it (M3); a transfer still requires manual direction confirmation. Anki's desktop option does the same (it sets `scm` whether or not it was already past `ls`).
 
 ## O3. The choice facts (R1537, R1538, R2019)
 
@@ -230,7 +232,7 @@ A refused file ends the job with `download_invalid` and its `reason`:
 - The derived store rebuilds, or revalidates after upload, under `storage/derived-store` (R1489, U26).
 - Clear only the successful manual transfer's legacy sanity/reconciliation state, and persist its actual stage outcome under `sync/anki-transfers#M4`. Any remembered no-changes status is observational and schedules no request.
 - Manual Import creates a fresh pending publication generation using current `engine/collection-replace#R6` and `sync/anki-transfers#M7`, even if the old cloud decision was clear. Export never clears an existing cloud fence. A pendingScm/timestamp comparison is not cloud recovery evidence.
-- Collection transfer leaves media unchanged. Only a selected and separately authorized M5 media stage may follow; neither a successful result nor lifecycle event starts media automatically. Full selected-media delivery remains required separately.
+- Collection transfer leaves media unchanged. Only a selected and separately authorized M5 media stage may follow; neither a successful result nor lifecycle event starts media automatically. Selected-media delivery is frozen reference (plan, "Anki server work: frozen"), not a current requirement.
 
 ## O9. AnkiWeb size limits (R1563; feature `ankiweb` only)
 

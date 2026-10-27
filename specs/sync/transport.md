@@ -1,9 +1,11 @@
 # Sync transport (protocol v11)
 
 Spec: sync/transport
-Requirements: R1504, R1505, R1506, R1507, R1508, R1509, R1510, R1511, R1512, R2030; core parts of R1501, R1561 (status codes), R1852 (bounded bodies); AE70 (transport half)
+Requirements: R1504, R1505, R1506, R1507, R1508, R1509, R1510, R1511, R1512, R2030; core parts of R1501, R1852 (bounded bodies); AE70 (transport half)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/transport/
+
+Manual-transfer compatibility (KTD26; frozen with U105): every request here belongs to an explicit manual Anki transfer. Routine CloudKit sync uses no part of this transport; its error classes (R1561) are `sync/policy#P15`.
 
 How one request of the sync protocol travels between Meguri and a sync server: the URL, the `anki-sync` header, the client identity and the session key, compressed bodies, how a response is checked, the one redirect that may be followed, the stall timeout, cancellation, TLS and proxies, and the error categories the transport reports. Every sync path uses it: login, the status check, the normal sync, one-way upload and download, and media sync.
 
@@ -107,7 +109,7 @@ The official server's error bodies are the bare status code as text (`403`) or a
   4. Host rule, by the job's server kind (`login-endpoints.md` L3):
      - `ankiweb` (only with feature `ankiweb`): the new host is `ankiweb.net` or ends with `.ankiweb.net`, compared in ASCII lower case. An IP address never passes.
      - `self_hosted`: the new host equals the current one (names compared in ASCII lower case, addresses as addresses). The port may change.
-- When every check passes, the job sends `meta` again, once, to `<new base>sync/meta`, with the same session key. Every later request of the job, collection and media, goes to the new base. The job's result carries the new base, exactly as normalised, as `newEndpoint`. The core keeps nothing: the app stores it as the account's endpoint and passes it as the base of later jobs until the user changes server or logs out (R1502, `login-endpoints.md` L4).
+- When every check passes, the job sends `meta` again, once, to the URL `<new base>sync/meta` (a protocol path, T1), with the same session key. Every later request of the job, collection and media, goes to the new base. The job's result carries the new base, exactly as normalised, as `newEndpoint`. The core keeps nothing: the app stores it as the account's endpoint and passes it as the base of later jobs until the user changes server or logs out (R1502, `login-endpoints.md` L4).
 - A job follows at most one redirect. A 3xx answer to the repeated `meta` is a `redirect` error.
 - Every other case is a `redirect` error (T11) that stops the job at once: a `308` on `meta` without `Location` or failing a check; any other 3xx on `meta`; any 3xx on any other method (R1511), `hostKey` included. Nothing is retried, and the result has no `newEndpoint`. The error keeps the status and the `Location` text as received, for logs.
 - Anki's client follows a `308` on `meta` without checking scheme or host; the checks above are Meguri's own (R1510).

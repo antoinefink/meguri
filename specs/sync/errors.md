@@ -1,9 +1,11 @@
 # Sync error kinds
 
 Spec: sync/errors
-Requirements: R1561 (classification), R1499 (kind), R1562 (core: no panic or crash path), R1514, R1515, R1516; supports R165, R1555, R1556
+Requirements: R1499 (kind), R1562 (core: no panic or crash path), R1514, R1515, R1516; supports R165
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/meta/, conformance/scenarios/sync/transport/
+
+Manual-transfer compatibility (KTD26; frozen with U106): these kinds belong to manual Anki transfers only. Routine CloudKit errors and their requirements (R1561, R1555, R1556) are `sync/policy#P15`. Where this file names U113, U114, U151 or U160, it means their manual-transfer path; where it cites R1561, R1555 or R1556, it means only their manual-transfer clause.
 
 Every way a sync job can fail, sorted into one list of kinds that the app presents (U151, U160) and the sync policy acts on (U113). The kinds are Meguri's own classification; E9 compares them with Anki's. Transport failures arrive as the categories of `transport.md` T11; this file maps them, the HTTP statuses, decode failures and local failures to kinds.
 
