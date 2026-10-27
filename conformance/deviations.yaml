@@ -1287,3 +1287,20 @@ deviations:
     scenarios: [maintenance/check-media/case/other-content]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [["<img src=\"Cat.jpg\">|<img src=\"cat.jpg\">", 1894701600, -1]]}
+  # specs/stats/card-info.md C13.4: Card Info never writes; Anki's card stats
+  # write an lrt into data that has none, and give no retrievability for a
+  # computed memory state.
+  - id: card-info-no-lrt-backfill
+    requirement: R1252
+    summary: After card_stats on a card whose data has no lrt, Meguri's card data still has none; Anki's card stats wrote the lrt of the latest rated non-cram row (specs/stats/card-info.md C1, C13.3).
+    test: stats/card-info/ae46-no-state
+    scenarios: [stats/card-info/ae46-no-state]
+    pointer: /steps/5/card/#c1/data
+    transform: {replace: {}}
+  - id: card-info-computed-retrievability
+    requirement: R1251
+    summary: For a card whose data has no memory state, Meguri gives the retrievability of the computed state (lrt from the latest rated non-cram row, the home preset's decay); Anki gives none (specs/stats/card-info.md C3.5, AE46).
+    test: stats/card-info/ae46-no-state
+    scenarios: [stats/card-info/ae46-no-state]
+    pointer: /steps/4/card_stats/#c1/fsrs_retrievability
+    transform: {replace: 0.9710832}

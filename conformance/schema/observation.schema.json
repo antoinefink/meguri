@@ -11,6 +11,26 @@
     "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } }
   },
   "$defs": {
+    "search_text_outputs": {
+      "description": "specs/conformance/search-ops.md S6: {text} or a parse error (never a run error), one per case.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": ["text"],
+            "additionalProperties": false,
+            "properties": { "text": { "type": "string" } }
+          },
+          {
+            "allOf": [
+              { "$ref": "#/$defs/search_error" },
+              { "properties": { "error": { "not": { "enum": ["invalid_regex", "search_failed"] } } } }
+            ]
+          }
+        ]
+      }
+    },
     "import_log_list": {
       "description": "package-ops.md E6.3: I13's entries; note a target note's logical id or a real id.",
       "type": "array",
@@ -996,6 +1016,150 @@
             }
           }
         },
+        "stats": {
+          "description": "stats-ops.md H10, stats/graphs-common G14: per request, in order, the requested parts of Anki's graph data in protobuf field names (map keys decimal strings, scalars at 0 and empty maps omitted), or a search error, or unreadable_row.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/search_error" },
+              { "type": "object", "required": ["error"], "additionalProperties": false, "properties": { "error": { "const": "unreadable_row" } } },
+              {
+                "type": "object",
+                "minProperties": 1,
+                "not": { "required": ["error"] },
+                "additionalProperties": false,
+                "properties": {
+                  "reviews": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": { "count": { "$ref": "#/$defs/graph_review_days" }, "time": { "$ref": "#/$defs/graph_review_days" } }
+                  },
+                  "true_retention": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "today": { "$ref": "#/$defs/graph_retention" }, "yesterday": { "$ref": "#/$defs/graph_retention" },
+                      "week": { "$ref": "#/$defs/graph_retention" }, "month": { "$ref": "#/$defs/graph_retention" },
+                      "year": { "$ref": "#/$defs/graph_retention" }, "all_time": { "$ref": "#/$defs/graph_retention" }
+                    }
+                  },
+                  "hours": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "one_month": { "$ref": "#/$defs/graph_hours" }, "three_months": { "$ref": "#/$defs/graph_hours" },
+                      "one_year": { "$ref": "#/$defs/graph_hours" }, "all_time": { "$ref": "#/$defs/graph_hours" }
+                    }
+                  },
+                  "buttons": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "one_month": { "$ref": "#/$defs/graph_buttons" }, "three_months": { "$ref": "#/$defs/graph_buttons" },
+                      "one_year": { "$ref": "#/$defs/graph_buttons" }, "all_time": { "$ref": "#/$defs/graph_buttons" }
+                    }
+                  },
+                  "future_due": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "future_due": { "$ref": "#/$defs/graph_int_map" },
+                      "have_backlog": { "const": true },
+                      "daily_load": { "type": "integer", "minimum": 1 }
+                    }
+                  },
+                  "card_counts": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": { "including_inactive": { "$ref": "#/$defs/graph_card_counts" }, "excluding_inactive": { "$ref": "#/$defs/graph_card_counts" } }
+                  },
+                  "intervals": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
+                  "stability": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
+                  "difficulty": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": { "eases": { "$ref": "#/$defs/graph_int_map" }, "average": { "$ref": "#/$defs/f32" } }
+                  },
+                  "retrievability": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "retrievability": { "$ref": "#/$defs/graph_int_map" },
+                      "average": { "$ref": "#/$defs/f32" },
+                      "sum_by_card": { "$ref": "#/$defs/f32" },
+                      "sum_by_note": { "$ref": "#/$defs/f32" }
+                    }
+                  },
+                  "added": { "type": "object", "additionalProperties": false, "properties": { "added": { "$ref": "#/$defs/graph_int_map" } } },
+                  "context": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": { "rollover_hour": { "type": "integer", "minimum": 1, "maximum": 23 }, "fsrs": { "const": true } }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "card_stats": {
+          "description": "stats-ops.md H9, stats/card-info C3 and C6.1: the backend's card stats per requested card; every member present, null for an unset optional.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "card_id", "note_id", "deck", "original_deck", "card_type", "notetype", "preset", "custom_data", "added", "first_review",
+              "latest_review", "due_date", "due_position", "interval", "ease", "reviews", "lapses", "average_secs", "total_secs",
+              "desired_retention", "fsrs_retrievability", "memory_state", "fsrs_params", "revlog"
+            ],
+            "properties": {
+              "card_id": { "$ref": "#/$defs/card_key" },
+              "note_id": { "$ref": "#/$defs/note_key" },
+              "deck": { "type": "string" },
+              "original_deck": { "type": ["string", "null"] },
+              "card_type": { "type": "string" },
+              "notetype": { "type": "string" },
+              "preset": { "type": "string" },
+              "custom_data": { "type": "string" },
+              "added": { "type": "integer" },
+              "first_review": { "type": ["integer", "null"] },
+              "latest_review": { "type": ["integer", "null"] },
+              "due_date": { "type": ["integer", "null"] },
+              "due_position": { "type": ["integer", "null"] },
+              "interval": { "type": "integer", "minimum": 0 },
+              "ease": { "type": "integer", "minimum": 0 },
+              "reviews": { "type": "integer", "minimum": 0 },
+              "lapses": { "type": "integer", "minimum": 0 },
+              "average_secs": { "$ref": "#/$defs/f32" },
+              "total_secs": { "$ref": "#/$defs/f32" },
+              "desired_retention": { "anyOf": [{ "$ref": "#/$defs/f32" }, { "type": "null" }] },
+              "fsrs_retrievability": { "anyOf": [{ "$ref": "#/$defs/f32" }, { "type": "null" }] },
+              "memory_state": { "anyOf": [{ "$ref": "#/$defs/memory_state" }, { "type": "null" }] },
+              "fsrs_params": { "type": "array", "items": { "$ref": "#/$defs/f32" } },
+              "revlog": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["time", "review_kind", "button_chosen", "interval", "ease", "taken_secs", "memory_state", "last_interval"],
+                  "properties": {
+                    "time": { "type": "integer" },
+                    "review_kind": { "type": "integer", "minimum": 0, "maximum": 5 },
+                    "button_chosen": { "type": "integer", "minimum": 0 },
+                    "interval": { "type": "integer", "minimum": 0 },
+                    "ease": { "type": "integer", "minimum": 0 },
+                    "taken_secs": { "$ref": "#/$defs/f32" },
+                    "memory_state": { "anyOf": [{ "$ref": "#/$defs/memory_state" }, { "type": "null" }] },
+                    "last_interval": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              }
+            }
+          }
+        },
         "browser_config": {
           "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",
           "type": "object",
@@ -1094,6 +1258,35 @@
           "description": "tag-ops.md G9: top-level nodes of the tag tree (specs/tags/tags.md T13).",
           "type": "array",
           "items": { "$ref": "#/$defs/tag_node" }
+        },
+        "tag_complete": {
+          "description": "specs/tags/complete.md C7: one list of registered tag names per case, in the order returned.",
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string" } }
+        },
+        "add_defaults": {
+          "description": "specs/notes/add-defaults.md D7: the starting deck and note type by stored name (the deck in human form), or D1's error kind.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["deck", "notetype"],
+              "additionalProperties": false,
+              "properties": { "deck": { "type": "string" }, "notetype": { "type": "string" } }
+            },
+            {
+              "type": "object",
+              "required": ["error"],
+              "additionalProperties": false,
+              "properties": { "error": { "enum": ["invalid_argument", "not_found"] } }
+            }
+          ]
+        },
+        "notetype_last_deck": {
+          "description": "specs/notes/add-defaults.md D7: the note type's default deck (D2) by stored name in human form, or null for none.",
+          "type": "object",
+          "required": ["deck"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": ["string", "null"] } }
         },
         "set_due": {
           "description": "specs/conformance/sched-ops.md J6: the op has no output, so only the rejection invalid_days appears.",
@@ -1233,6 +1426,9 @@
             }
           }
         },
+        "search_build": { "$ref": "#/$defs/search_text_outputs", "description": "specs/conformance/search-ops.md S6: one output per built item, in order." },
+        "search_join": { "$ref": "#/$defs/search_text_outputs", "description": "specs/conformance/search-ops.md S6: one output per join case, in order." },
+        "search_replace": { "$ref": "#/$defs/search_text_outputs", "description": "specs/conformance/search-ops.md S6: one output per replace case, in order." },
         "canonical_search": {
           "description": "specs/conformance/search-ops.md S2: one output per query text, in order; parse errors only.",
           "type": "array",
@@ -1799,6 +1995,64 @@
         "factor": { "type": "integer" },
         "time": { "type": "integer" },
         "type": { "type": "integer" }
+      }
+    },
+    "graph_int_map": {
+      "description": "stats/graphs-common G14: a protobuf map with integer keys as decimal strings; omitted when empty.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^(0|-?[1-9][0-9]*)$" },
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "graph_review_days": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^(0|-?[1-9][0-9]*)$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "learn": { "type": "integer", "minimum": 1 }, "relearn": { "type": "integer", "minimum": 1 },
+          "young": { "type": "integer", "minimum": 1 }, "mature": { "type": "integer", "minimum": 1 },
+          "filtered": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "graph_retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "young_passed": { "type": "integer", "minimum": 1 }, "young_failed": { "type": "integer", "minimum": 1 },
+        "mature_passed": { "type": "integer", "minimum": 1 }, "mature_failed": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "graph_hours": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "total": { "type": "integer", "minimum": 1 }, "correct": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "graph_buttons": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "learning": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "young": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "mature": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "graph_card_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "newCards": { "type": "integer", "minimum": 1 }, "learn": { "type": "integer", "minimum": 1 },
+        "relearn": { "type": "integer", "minimum": 1 }, "young": { "type": "integer", "minimum": 1 },
+        "mature": { "type": "integer", "minimum": 1 }, "suspended": { "type": "integer", "minimum": 1 },
+        "buried": { "type": "integer", "minimum": 1 }
       }
     },
     "memory_state": {

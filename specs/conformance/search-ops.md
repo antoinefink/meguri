@@ -1,11 +1,11 @@
 # Search observations
 
 Spec: conformance/search-ops
-Requirements: R1075, R1076, R1080, R1085, R1887, R1916, R1919
+Requirements: R1075, R1076, R1078, R1079, R1080, R1085, R1887, R1916, R1919
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/
 
-The two observation kinds the search scenarios use: `search` (results and errors of searches on the scenario's collection) and `canonical_search` (canonical texts and parse errors, independent of the collection). Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What they exercise is `specs/search/*.md`.
+The observation kinds the search scenarios use: `search` (results and errors of searches on the scenario's collection), `canonical_search` (canonical texts and parse errors, independent of the collection), and `search_build`, `search_join` and `search_replace` (the text of built searches, `specs/search/join-and-replace.md`, S5 and S6). Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What they exercise is `specs/search/*.md`.
 
 ## S1. `search` (observation kind)
 
@@ -34,6 +34,49 @@ The two observation kinds the search scenarios use: `search` (results and errors
 
 ## S4. Status
 
-Stable: the oracle driver implements both kinds, and every scenario under `conformance/scenarios/search/` has its golden. Meguri's executor implements them in the search adapter of the testkit (U80).
+Stable: the oracle driver implements all five kinds, and every scenario under `conformance/scenarios/search/` has its golden. Meguri's executor implements `search` and `canonical_search` in the search adapter of the testkit (U80). `search_build`, `search_join` and `search_replace` (S5, S6) are stable on the oracle side, with the goldens of `search/builder/` and `search/join-replace/`; those scenarios stay `pending` until U88's adapter lands.
 
-Result scenarios name the term families they need beyond the whole collection in their `tags`: `needs-text` (U81); `needs-tag`, `needs-deck` (`deck:`, `preset:`, `did:`), `needs-notetype` (`note:`), `needs-template` (`card:`), `needs-ids` (`nid:`, `cid:`, `mid:`), `needs-dupe`, `needs-state` (`is:`, `flag:`), `needs-prop` (`prop:` other than `rated` and `resched`, `has-cd:`) and `needs-history` (`added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:rated`, `prop:resched`) (U82). Executors ignore tags (`dsl.md` D4); they tell the area which scenarios can become active (`dsl.md` D9.1) as each unit lands. Scenarios without such a tag need only U80.
+Result scenarios name the term families they need beyond the whole collection in their `tags`: `needs-text` (U81); `needs-tag`, `needs-deck` (`deck:`, `preset:`, `did:`), `needs-notetype` (`note:`), `needs-template` (`card:`), `needs-ids` (`nid:`, `cid:`, `mid:`), `needs-dupe`, `needs-state` (`is:`, `flag:`), `needs-prop` (`prop:` other than `rated` and `resched`, `has-cd:`) and `needs-history` (`added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:rated`, `prop:resched`) (U82). Executors ignore tags (`dsl.md` D4); they tell the area which scenarios can become active (`dsl.md` D9.1) as each unit lands. Scenarios without such a tag need only U80, except that every scenario using S6's kinds (all of `search/builder/` and `search/join-replace/`) also needs U88's adapter.
+
+## S5. Built items (neutral form)
+
+The built items of `specs/search/join-and-replace.md` J3, written in scenarios as JSON. An item is one of the words or a mapping with one key (the parsed-text item may also carry `field_text`):
+
+| Neutral item | J3 item | Anki's structured search item (oracle) |
+|---|---|---|
+| `whole_collection` | whole collection | an item with no filter |
+| `current_deck` | current deck | deck item `current` |
+| `any_deck` | any deck | deck item `_*` |
+| `any_tag` | any tag | tag item `_*` |
+| `untagged` | untagged | negation of tag item `_*` |
+| `any_notetype` | any note type | note type item `_*` |
+| `{deck: <name>}` | deck by name (full name, `::` between levels) | deck item |
+| `{tag: <name>}` | tag by name | tag item |
+| `{notetype: <name>}` | note type by name | note type item |
+| `{template: <k>}`, k 0–65534 | template by ordinal (0-based) | template item |
+| `{field_present: <f>}` | field present | field-name item |
+| `{field: {name: <f>, text: <t>}}` | field text | field item, normal mode |
+| `{literal: <t>}` | literal text | literal-text item |
+| `{flag: "any" \| "none" \| 1–7}` | any flag, no flag, flag n | flag item: any, none, the n-th color |
+| `{state: new \| learn \| review \| due \| suspended \| buried}` | state | card-state item |
+| `{added: d}`, `{edited: d}`, `{introduced: d}`, d 1–4294967295 | added, edited, first review in d days | added-, edited- and introduced-in-days items |
+| `{answered: {days: d, button?: 1–4}}`, d 1–4294967295 | answered in d days, any button or button b | rated item, any rating or the button's |
+| `{rescheduled: d}`, d 0–4294967295 | rescheduled in d days | rated item, by reschedule |
+| `{due_on: i}`, `{due_within: i}`, i signed 32-bit | due on day i, due within i days | due-on-day and due-in-days items |
+| `{note_ids: [<id>, ...]}`, non-empty, ids 0–2^53−1 | note ids, in the given order | note-id list item |
+| `{dupe: {notetype_id: <m>, text: <t>}}` | duplicates of t in note type m | duplicates item |
+| `{text: <s>, field_text?: <boolean>}` | parsed text (`field_text` false when missing) | parsable-text item |
+| `{group: {joiner: and \| or, items: [<item>, ...]}}`, one or more items | group | group item |
+| `{negated: <item>}` | negation of an item (J5) | negated item |
+
+- J3's note type by id, card-id and deck-id lists and the states `buried-manually` and `buried-sibling` have no structured counterpart in Anki and no neutral form; U88's tests cover them (J11).
+- Scenarios hold neither J10's inputs nor what J3 refuses (`invalid_item`): Meguri writes another text there, by design. The oracle refuses them as `invalid_scenario`: a name `_*`; a deck named `current` or `filtered` and a tag named `none`; a deck or note type name J3.5 lists; a tag, field name, field text, literal or dupe text holding White_Space other than U+0020 or U+001C–U+001F; a field named like a reserved key (J3.3); an empty name or literal; 0 days for added, edited, first review and answered. The schema fixes the shapes and number ranges.
+
+## S6. `search_build`, `search_join`, `search_replace` (observation kinds)
+
+- **Requests.** `{search_build: [<item>, ...]}`; `{search_join: [{existing, item, joiner: and | or, negate}, ...]}`; `{search_replace: [{existing, item}, ...]}`: non-empty lists, `existing` a search text, `item` S5, `negate` a boolean.
+- **Value** a list with one output per entry, in order: `{text: <search text>}` (J4 for `search_build`, J6 for `search_join`, J7 for `search_replace`) or a parse error (S3) of `existing` or of a parsed-text item. Run errors (`invalid_regex`, `search_failed`) never occur. `source` (J1) and ranges are not observed. Scenarios give at most one text per entry that fails to parse, since which error comes first is not specified.
+- **Search-field text.** `existing`, and the text of a parsed-text item with `field_text` true, get J2 first (U+001C–U+001F become U+0020).
+- **Oracle.** The item's structured search item (S5) given to Anki's backend: its search-string builder for `search_build`; its join of `existing` as one parsable-text item with the item, wrapped in a negated item when `negate` is true (the desktop browser's sidebar join), for `search_join`; its replacement of `existing`'s terms of the item's kind for `search_replace`. J2 is the desktop search field's rule, which the backend does not apply, so the oracle applies it before. Parse errors are read from Anki's message as in S1.
+- **Meguri.** Its executor maps the item to the core's built item (J3) and calls `build`, `join` or `replace` (U88), recording a parse error's kind and texts. An `invalid_item` is a run error of the executor, since scenarios hold none.
+- They never read or change the scenario's collection, so they may appear in any observe step, with or without setup.

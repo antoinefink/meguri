@@ -237,7 +237,7 @@ The Calendar's dates, `max_count` and item texts (V3.4) are not in Anki's graph 
 
 ## V10. Scenarios
 
-For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (V8) once `oracle/driver/ops/stats.py` exists (none does yet, `stats/graphs-common` G15). Review-log rows come from `db_exec` (`conformance/stats-ops` H3), on a deleted card's id unless a scope is named. All in Europe/Paris, rollover 4, now 2026-10-12 12:00 +02:00 (`N` = 1791856800), Collection scope and `year`, unless named. "Today at hh:mm" is local time on 2026-10-12; a row given only as "today" is at 12:00, and a row given as "k days ago" at 12:00 on that date. A row is type 1, `lastIvl` 30, `ease` 3, `factor` 2500, `time` 0 unless named. Values are this file's; the goldens are the authority once recorded.
+For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (V8) of `oracle/driver/ops/stats.py`; as of 2026-10-27 every scenario below is in the tree with its golden (`buttons/tz-matrix` as `buttons/tz-matrix/<zone>`, one scenario per zone, and AE58's heatmap side held with the add-on image, `conformance/stats-ops` H4). Review-log rows come from `db_exec` (`conformance/stats-ops` H3), on a deleted card's id unless a scope is named. All in Europe/Paris, rollover 4, now 2026-10-12 12:00 +02:00 (`N` = 1791856800), Collection scope and `year`, unless named. "Today at hh:mm" is local time on 2026-10-12; a row given only as "today" is at 12:00, and a row given as "k days ago" at 12:00 on that date. A row is type 1, `lastIvl` 30, `ease` 3, `factor` 2500, `time` 0 unless named. Values are this file's; the goldens are the authority once recorded.
 
 | Scenario | Pins | Expected |
 |---|---|---|

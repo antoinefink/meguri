@@ -3,7 +3,7 @@
 Spec: notes/add-defaults
 Requirements: R798, R799, R800, R801, R803, R806; supports R48, R80, R796, R805, R816, R817, R1174, R1214, R1785
 Anki: 26.09.3
-Scenarios: conformance/scenarios/notes/add-defaults/
+Scenarios: conformance/scenarios/notes/add-defaults/ (listed in D7, recorded on the Linux oracle)
 
 The core services the Add screen (U195) calls for its starting deck and note type and for a note type's default deck (U191), and the Add-screen rules around them: when the screen asks, what a blank draft is, what happens to a selection that stops existing, and what the next note holds after an add. The rules that pick the deck and the note type are `editor/config-keys` K4; this file does not restate them. The keys an add writes are `notes/note-records` A4. The live check of a draft is `notes/field-check`; tag suggestions are `tags/complete`.
 
@@ -84,12 +84,13 @@ A change that leaves the selection valid changes nothing: the draft, its note ty
 
 ## D7. Scenarios
 
-Requested from the oracle maintainer. None is recorded yet: the oracle driver has no op or observation kind for D1 or D2. The K4 scenarios already requested in `editor/config-keys` K7 (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) need the same two observation kinds, so one driver change serves both directories.
+Status (2026-10-27): the oracle driver has both observation kinds, and the five scenarios below are recorded on the Linux oracle. The K4 scenarios requested in `editor/config-keys` K7 (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) need only these two kinds and `set_config`/`db_exec`; they are not recorded yet.
 
-Requested observation kinds, modeled on `fields_check` (`conformance/note-ops` N4). Both read the collection and change nothing:
+The observation kinds, modeled on `fields_check` (`conformance/note-ops` N4). Both read the collection and change nothing, and each may be requested once per observe step:
 
-- `add_defaults`: request `{review_card?: #cN}`. Value `{deck: <deck name>, notetype: <note type name>}`, or the error kind for D1's errors. Oracle: the backend's defaults request, with the home deck of the card (`odid` when not 0, else `did`), or 0 without a card. A `#cN` that names a card the scenario has deleted is sent as home deck 0 (no review deck), as D1 treats it. `preset_deck` has no oracle counterpart and is not part of the request.
-- `notetype_last_deck`: request `{notetype: <name>}` or `{notetype_id: <integer>}`; the raw id form names a note type that does not exist. Value `{deck: <deck name>}` or `{deck: null}`. Oracle: the backend's default-deck request for that note type id, with 0 read as null.
+- `add_defaults`: request `{review_card?: #cN}`. Value `{deck: <deck name>, notetype: <note type name>}` (stored names, the deck in human form), or `{error: <kind>}` for D1's errors: `invalid_argument` for `InvalidArgument`, `not_found` for `NotFound`. Oracle: the backend's defaults request, with the home deck of the card (`odid` when not 0, else `did`), or 0 without a card. A `#cN` that names a card the scenario has deleted is sent as home deck 0 (no review deck), as D1 treats it; a `#cN` the scenario never assigned is `unknown_ref`. `preset_deck` has no oracle counterpart and is not part of the request.
+- `notetype_last_deck`: request `{notetype: <name>}` or `{notetype_id: <integer>}`; the raw id form names a note type that does not exist (naming one that exists is `invalid_scenario`), and a name that no note type holds exactly is `unknown_ref`. Value `{deck: <deck name>}` or `{deck: null}`. Oracle: the backend's default-deck request for that note type id, with 0 read as null.
+- Anki answers both through its deck and note type caches, which survive a `db_exec` write, so the oracle reopens the collection before each request, after its references are checked. The reopen drops Anki's undo history, a held queue (`conformance/queue-ops` Q2), the cached scheduler day and the sync status memory, which Meguri keeps: a scenario never undoes across either observation and never relies on a held queue or the day across it. An add writes the keys of `notes/note-records` A4, setup notes included: a scenario arranges those keys after its setup.
 
 | Scenario (`notes/add-defaults/`) | Covers |
 |---|---|
