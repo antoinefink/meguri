@@ -5,4 +5,7 @@
 - Day-0 edges differ on purpose: studied today counts `id > S`, the Stats Today section `id >= S`, graph day indices truncate toward zero.
 - Two number writers, never shared (`studied-today` T5): the Home line rounds binary32 values and never groups digits (Anki's core; the oracle compares its text); every Stats-screen line rounds the shortest decimal of a binary64 value and groups with `,` (Anki's web page; no oracle text, tested from spec tables).
 - Stats-screen deck scopes match `did` or `odid` in the subtree (`deck:` semantics); deck-page heatmaps use the home deck only.
+- Graph ownership (`graphs-common` G12): scopes, history, row reading, aggregate shape and caches in `graphs-common`; bins, ranges, quantiles, labels and bar queries in `graph-presentation` (U226); scope text, join and fixed-item queries in `browse-queries`. Per-graph rules in `graphs-revlog`/`graphs-cards`.
+- The Stats browse join is not canonical text: `(<scope>) AND <item>`, deck as `deck:"<escaped>"` (AE60 is byte-exact; Q2.2's names take `deck:"Current"`/`deck:"Filtered"` or `did:`). Never route it through the canonical writer or U88's `join`, whatever `search/join-and-replace` and the plan say (`browse-queries` intro).
+- Graph `time` reads 0 outside `u32` (`model/row-records` R5); the Home line sums stored `time`. A card's missing `lrt` is never filled from the review log in graph data.
 - No stats scenario, golden, deviation entry, schema shape or driver kind is in the tree yet (`conformance/stats-ops` H4, H8). B7, N9 and T9 list the scenarios that land with them.
