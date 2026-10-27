@@ -138,7 +138,7 @@ Examples: a target note type 1001 with fields `Front`, `Back`; the package's 100
 
 ## I8. The merge port (U121; R1605, R1606)
 
-With Merge note types on, I7's table is replaced by U121's merge for every taken note type whose id the target has; a note type whose id the target lacks is added as I7 says. U121 (`package/notetype-merge`, to be written) specifies the merge itself. This spec fixes what it receives and returns.
+With Merge note types on, I7's table is replaced by U121's merge for every taken note type whose id the target has; a note type whose id the target lacks is added as I7 says. U121 (`package/notetype-merge`, J1 to J14) specifies the merge itself. This spec fixes what it receives and returns.
 
 - **Called** during the plan (I14 step 3), after I6, with: the taken note types, the target's note types read from the plan's snapshot, the package notes' (GUID, `mid`) pairs, and the target notes' (GUID, id, `mid`) for the GUIDs both hold. It is called before any note decision.
 - **Returns**, or an error that ends the whole import with nothing written:
@@ -147,9 +147,9 @@ With Merge note types on, I7's table is replaced by U121's merge for every taken
   - the structural reasons (`notetypes_merged`, and whatever else its effect is, `notetypes/schema-changes#G2`, G3) and the structure report of `engine/change-stream#S2.5` (layouts, removed note types, type changes);
   - a **preview** of destructive mappings (fields or templates whose content would be dropped), empty when there are none.
 - **Errors**: `NotetypeKindConflict{incoming, target}` when a standard and a cloze note type would merge (R1606). Anki 26.9.3 ends the whole import there with nothing changed; Meguri does the same.
-- **This spec then**: reorders each incoming note's fields by its field map before I9 (an unfilled position gets the empty string); with merge on, a GUID match never logs `conflicting` (I9), since U121 moved the target note to a common note type; maps each added card's `ord` by the template map, and applies I11's "pair exists" test to the mapped ordinal (Meguri: Anki tests the package's ordinal, which can add a second card for one pair after a reorder; U121 records the case).
+- **This spec then**: reorders each incoming note's fields by its field map before I9 (an unfilled position gets the empty string); with merge on, a GUID match never logs `conflicting` (I9), since U121 moved the target note to a common note type (`package/notetype-merge#J6`), and I9 step 5 compares against the `mod` that `package/notetype-merge#J11` gives; maps each added card's `ord` by the template map, and applies I11's "pair exists" test to the mapped ordinal (Meguri: Anki tests the package's ordinal, which can add a second card for one pair after a reorder; `package/notetype-merge#J14` records the case).
 - **Confirmation**: when the preview is not empty, `apply` returns `ConfirmationRequired{preview, token}` and writes nothing; the caller shows the preview (U162) and calls `apply` again with the token. Decided 2026-10-27: a token holds the session, the five options and a digest of the preview (SHA-256 of its canonical encoding, the implementer's); the plan's snapshot seq is recorded in it for diagnostics only and never checked. A later `apply` accepts the token when it names this session and its new plan has equal options and an equal preview digest, so answers committed in between never invalidate a confirmation; otherwise it returns `ConfirmationRequired` again with a new token and writes nothing. The same test runs after every replan inside one apply (I14.2): a replan whose preview digest differs ends the apply with `ConfirmationRequired` and a new token, its staged media deleted, nothing written (a safety backup already published stays).
-- **Backup**: a merge is a structural edit; I14 takes its safety backup after the confirmation and before the first write.
+- **Backup**: a merge with a structural effect (`package/notetype-merge#J9`) is a structural edit; I14 takes its safety backup after the confirmation and before the first write.
 
 ## I9. Notes (R1602, R1603)
 
