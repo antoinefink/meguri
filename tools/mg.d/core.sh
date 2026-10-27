@@ -378,3 +378,43 @@ mg_core_format() {
     mg_status fail
   fi
 }
+
+mg_job core-update docker:dev mg_core_update \
+  "Update one Rust dependency: core-update <package> <exact-version>; Cargo may resolve required transitive updates"
+mg_core_update() {
+  local LC_ALL=C
+  local package_pattern='^[A-Za-z0-9][A-Za-z0-9_-]*$'
+  local version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?$'
+  if [ "$#" -ne 2 ] || ! [[ "${1:-}" =~ $package_pattern ]] || ! [[ "${2:-}" =~ $version_pattern ]]; then
+    mg_failure usage "usage: tools/mg core-update <package> <exact-version>"
+    mg_status error
+    return 0
+  fi
+  if [ ! -f core/Cargo.toml ]; then
+    mg_failure workspace-missing "core/Cargo.toml is missing; no dependency was updated"
+    mg_status error
+    return 0
+  fi
+
+  local rc
+  if (cd core && cargo update --package "$1" --precise "$2"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ -f core/Cargo.lock ]; then
+    if ! cp core/Cargo.lock "$MG_RUN_DIR/Cargo.lock"; then
+      mg_failure lockfile-artifact "could not retain Cargo.lock after cargo update; see log.txt"
+      mg_status fail
+      return 0
+    fi
+    mg_artifact cargo-lock "$MG_RUN_DIR/Cargo.lock" "lockfile after cargo update (exit $rc)"
+  fi
+  if [ "$rc" -eq 0 ]; then
+    mg_message "core-update: updated $1 to $2"
+    mg_status pass
+  else
+    mg_failure "cargo-update-exit-$rc" "cargo update exited with code $rc; see log.txt"
+    mg_status fail
+  fi
+}

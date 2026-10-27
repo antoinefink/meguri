@@ -757,6 +757,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: core-update, why: "explicitly changes a dependency; core-deny, lint and tests verify its result"}
   - {job: package-interop-check, why: "explicit generated native RF4 proof with independent bounded pre-client DB and media archive decode; requires frozen generated build inputs"}
   - {job: local-sync, why: "user-owned persistent loopback service; explicitly managed outside automated test lifecycle"}
   - {job: css-reference, why: "spec-side public compiler check: neutral JSON facts only; runtime tests verify the resulting contract"}

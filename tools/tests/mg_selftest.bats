@@ -730,6 +730,91 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   assert_read_only_calls
 }
 
+# --- core-update (fake Cargo, isolated workspace) --------------------------
+
+make_core_update_stub() {
+  local stubs="$BATS_TEST_TMPDIR/core-update-bin"
+  mkdir -p "$stubs"
+  export MG_CONTAINER=dev STUB_LOG="$BATS_TEST_TMPDIR/core-update.log"
+  : >"$STUB_LOG"
+  printf '[workspace]\n' >"$SB/core/Cargo.toml"
+  cat >"$stubs/cargo" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$PWD" "$#" "$@" >>"$STUB_LOG"
+printf '# fixture lockfile\n' >Cargo.lock
+exit "${STUB_CARGO_RC:-0}"
+EOF
+  chmod +x "$stubs/cargo"
+  export PATH="$stubs:$PATH"
+}
+
+assert_core_update_usage() {
+  mg core-update "$@"
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = usage ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "core-update passes only literal update operands to Cargo in core and retains the lockfile" {
+  make_core_update_stub
+  local package version
+  for package in zstd 1crate_with-hyphen; do
+    for version in 0.14.3 1.2.3-rc.1+build-2.abc; do
+      : >"$STUB_LOG"
+      mg core-update "$package" "$version"
+      [ "$status" -eq 0 ]
+      [ "$(field .status)" = pass ]
+      [ "$(field .placement)" = docker ]
+      [ "$(field .service)" = dev ]
+      [ "$(cat "$STUB_LOG")" = "$(printf '%s\n' "$(cd "$SB/core" && pwd -P)" 5 update --package "$package" --precise "$version")" ]
+      [ "$(field -c .args)" = "$(jq -nc --arg p "$package" --arg v "$version" '[$p, $v]')" ]
+      local lock
+      lock="$(field '.artifacts[] | select(.kind == "cargo-lock") | .path')"
+      cmp "$SB/core/Cargo.lock" "$lock"
+    done
+  done
+}
+
+@test "core-update rejects malformed operands before Cargo" {
+  make_core_update_stub
+  assert_core_update_usage
+  assert_core_update_usage zstd
+  assert_core_update_usage zstd 0.14.3 extra
+  local package version
+  for package in '' --workspace -zstd _zstd 'zstd;touch injected' '$(touch injected)' 'two words' 'zstd/path' 'écrate'; do
+    assert_core_update_usage "$package" 0.14.3
+  done
+  for version in '' --offline -1.2.3 1 1.2 1.2.3.4 v1.2.3 01.2.3 '^1.2.3' '1.2.*' '1.2.3;touch injected' '$(touch injected)' '1.2.3 two' '1.2.3-' '1.2.3+' '1.2.3-rc..1' '1.2.3+büild' $'1.2.3\n'; do
+    assert_core_update_usage zstd "$version"
+  done
+  [ ! -e "$SB/core/injected" ]
+}
+
+@test "core-update reports Cargo failure with its exit code" {
+  make_core_update_stub
+  STUB_CARGO_RC=42 mg core-update zstd 0.14.3
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = cargo-update-exit-42 ]
+  [[ "$(field '.failures[0].message')" == *"code 42"* ]]
+  [ "$(wc -l <"$STUB_LOG")" -eq 7 ]
+}
+
+@test "core-update errors on an absent workspace and dry-run never calls Cargo" {
+  make_core_update_stub
+  rm "$SB/core/Cargo.toml"
+  mg core-update zstd 0.14.3
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = workspace-missing ]
+  [ ! -s "$STUB_LOG" ]
+  mg core-update --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(field .dry_run)" = true ]
+  [ ! -s "$STUB_LOG" ]
+}
+
 # --- core-test (runs cargo in this container) -------------------------------
 
 @test "core-test with no Cargo workspace reports zero tests and passes inside the dev container" {

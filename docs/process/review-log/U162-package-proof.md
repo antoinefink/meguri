@@ -801,3 +801,22 @@ other filesystems retain the previous expectation. All fixture, archive, hash
 and preservation checks remain. Independent round two review is clear.
 Focused Rust `20261027T023425Z-71703` passes the affected test. Dependency
 repair and integration verification remain pending. No unit acceptance changes.
+
+## Compression dependency repair
+
+Work starts at `6fef4051`. Filtered implementation
+`20261027T023233Z-69456` and fix `20261027T023704Z-73919` update the compression
+requirement and add a narrow Docker dependency-update command. Review found
+and resolved its missing utility classification and incorrect test placement
+expectation. Final independent source review is clear.
+
+`core-update/20261027T023832Z-75056` generated the lockfile. Only Zstandard
+0.14.3, its safe wrapper 8.2.0 and system wrapper 2.1.2 changed. Checksums came
+from Cargo. No advisory exception or dependency policy changed.
+
+Focused tool tests `20261027T023804Z-74663` pass four cases. Dependency scan
+`20261027T023927Z-75964` and lint `20261027T023926Z-75747` pass all checks.
+Package suite `20261027T024012Z-76959` passes all 71 tests without skips.
+`gate/20261027T023927Z-76093` validates the plan only. It supplies no integration
+pass. Native proofs retain their original build bindings; rebuilt integration
+verification remains required. No unit or milestone acceptance changes.
