@@ -221,7 +221,8 @@ impl EntryInspection {
         let media = stage.media_counts();
         let reference = stage.media_reference();
         let current_media = media.clone();
-        exclusive
+        progress.set_phase(ProgressPhase::Named("preparing replacement"));
+        let outcome = exclusive
             .replace_verified_before_commit(
                 stage,
                 ReplaceReason::ColpkgImport,
@@ -231,9 +232,9 @@ impl EntryInspection {
                     cancel.check()?;
                     let counts = current_media.lock().unwrap().clone();
                     progress.report_collection_media_prepared(&counts);
+                    progress.set_phase(ProgressPhase::Named("ready to rename"));
                     self.source_cancel.check()?;
                     cancel.check()?;
-                    progress.set_phase(ProgressPhase::Committing);
                     Ok(())
                 },
             )
@@ -253,7 +254,15 @@ impl EntryInspection {
                     }
                 }
             })
-            .map_err(|e| e.with_media(&media, &reference))
+            .map_err(|e| e.with_media(&media, &reference));
+        drop(exclusive);
+        // Only the owned replacement outcome proves activation. Capture its
+        // facts before unlocked listener delivery; late cancellation cannot
+        // replace them with a cancellation result or a fresh generation read.
+        if outcome.is_ok() || outcome.as_ref().is_err_and(EntryError::candidate_active) {
+            progress.set_phase(ProgressPhase::Committing);
+        }
+        outcome
     }
 
     /// Host passes its actual composed OpenConfig. This calls the one initial
@@ -280,37 +289,45 @@ impl EntryInspection {
         let media = stage.media_counts();
         let reference = stage.media_reference();
         let current_media = media.clone();
-        slot.replace_verified_initial_before_commit(
-            &self.facts.destination,
-            config,
-            stage,
-            ReplaceReason::ColpkgImport,
-            |_| Ok(()),
-            || {
-                self.source_cancel.check()?;
-                cancel.check()?;
-                let counts = current_media.lock().unwrap().clone();
-                progress.report_collection_media_prepared(&counts);
-                self.source_cancel.check()?;
-                cancel.check()?;
-                progress.set_phase(ProgressPhase::Committing);
-                Ok(())
-            },
-        )
-        .map(|c| Activation {
-            generation: c.generation(),
-            backup: None,
-            media: media.lock().unwrap().clone(),
-            media_retention_reference: reference.lock().unwrap().clone(),
-        })
-        .map_err(|error| {
-            if error == ReplaceError::Lifecycle(EngineError::Cancelled) {
-                EntryError::Cancelled
-            } else {
-                EntryError::Replacement { error, backup: None }
-            }
-        })
-        .map_err(|e| e.with_media(&media, &reference))
+        progress.set_phase(ProgressPhase::Named("preparing replacement"));
+        let outcome = slot
+            .replace_verified_initial_before_commit(
+                &self.facts.destination,
+                config,
+                stage,
+                ReplaceReason::ColpkgImport,
+                |_| Ok(()),
+                || {
+                    self.source_cancel.check()?;
+                    cancel.check()?;
+                    let counts = current_media.lock().unwrap().clone();
+                    progress.report_collection_media_prepared(&counts);
+                    progress.set_phase(ProgressPhase::Named("ready to rename"));
+                    self.source_cancel.check()?;
+                    cancel.check()?;
+                    Ok(())
+                },
+            )
+            .map(|c| Activation {
+                generation: c.generation(),
+                backup: None,
+                media: media.lock().unwrap().clone(),
+                media_retention_reference: reference.lock().unwrap().clone(),
+            })
+            .map_err(|error| {
+                if error == ReplaceError::Lifecycle(EngineError::Cancelled) {
+                    EntryError::Cancelled
+                } else {
+                    EntryError::Replacement { error, backup: None }
+                }
+            })
+            .map_err(|e| e.with_media(&media, &reference));
+        // Initial replacement also returns after releasing lifecycle locks,
+        // with typed activation authority even when reopen/recovery failed.
+        if outcome.is_ok() || outcome.as_ref().is_err_and(EntryError::candidate_active) {
+            progress.set_phase(ProgressPhase::Committing);
+        }
+        outcome
     }
 }
 

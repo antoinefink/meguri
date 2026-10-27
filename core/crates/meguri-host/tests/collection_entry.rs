@@ -1402,23 +1402,30 @@ fn ready_and_initial_validation_remain_cancellable_by_both_tokens() {
     }
 }
 
-struct CancelOnCommitting {
+struct CancelAtEntryPhase {
     engine: Engine,
-    activation_cancel: Arc<CancelToken>,
-    inspection_cancel: Arc<CancelToken>,
-    deliveries: Mutex<usize>,
+    progress: std::sync::Weak<ProgressSink>,
+    phase: ProgressPhase,
+    tokens: Vec<Arc<CancelToken>>,
+    deliveries: Mutex<Vec<ProgressPhase>>,
 }
-impl ProgressListener for CancelOnCommitting {
+impl ProgressListener for CancelAtEntryPhase {
     fn on_progress(&self, progress: &Progress) {
-        if progress.phase == ProgressPhase::Committing {
-            // Reenter read APIs to cover callback delivery outside core locks.
-            let _ = self.engine.state();
+        self.deliveries.lock().unwrap().push(progress.phase.clone());
+        if progress.phase == self.phase {
+            // Reenter both the sink and core read APIs to prove neither lock
+            // is held during public callback delivery.
+            assert_eq!(self.progress.upgrade().unwrap().phase(), progress.phase);
+            let state = self.engine.state();
+            if progress.phase == ProgressPhase::Committing {
+                assert!(matches!(state, meguri_engine::LifecycleState::Ready { .. }));
+            }
             if let Ok(collection) = self.engine.collection() {
                 collection.reader(ReaderRole::Query).unwrap().col().unwrap();
             }
-            *self.deliveries.lock().unwrap() += 1;
-            self.activation_cancel.cancel();
-            self.inspection_cancel.cancel();
+            for token in &self.tokens {
+                token.cancel();
+            }
         }
     }
 }
@@ -1426,85 +1433,284 @@ impl ProgressListener for CancelOnCommitting {
 fn cancellation_after_committing_still_activates_and_finishes_recovery() {
     let _lane = LANE.lock().unwrap();
     for initial in [false, true] {
-        let root = tempfile::tempdir().unwrap();
-        let source = package(root.path());
-        let options = config(&root.path().join("target"));
-        if !initial {
-            seed(&options);
-        }
-        let process = ProcessCore::new(options.engine.clone()).unwrap();
-        let host = (!initial).then(|| process.open(options.clone()).unwrap());
-        let generation = process.engine().generation();
-        let source_cancel = CancelToken::new();
-        let candidate = entry::inspect_entry(
-            process.engine(),
-            &source,
-            &options.entry_inputs(),
-            source_cancel.clone(),
-            &ProgressSink::new(),
-        )
-        .unwrap();
-        let engine = process.engine().clone();
-        let importer = process.clone();
-        let inputs = options.clone();
-        let backup = host.as_ref().map(CoreHost::backup);
-        meguri_model::faultpoint::arm(
-            "replace.after_dir_sync",
-            meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
-        );
-        let (outcome, imported_host, deliveries) = job(process.engine(), move |ctx| {
-            let listener = Arc::new(CancelOnCommitting {
-                engine,
-                activation_cancel: ctx.cancel.clone(),
-                inspection_cancel: source_cancel,
-                deliveries: Mutex::new(0),
-            });
-            ctx.progress.set_listener(listener.clone());
-            let (outcome, imported_host) = if let Some(backup) = backup {
-                (
-                    candidate.activate_ready(ctx.slot().unwrap(), backup.as_ref(), &ctx.cancel, &ctx.progress),
-                    None,
+        for with_media in [false, true] {
+            for fail_after_rename in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let source = if with_media {
+                    package_media(root.path(), IMPORT_MEDIA)
+                } else {
+                    package(root.path())
+                };
+                let source_bytes = fs::read(&source).unwrap();
+                let options = config(&root.path().join("target"));
+                if !initial {
+                    seed(&options);
+                }
+                let process = ProcessCore::new(options.engine.clone()).unwrap();
+                let host = (!initial).then(|| process.open(options.clone()).unwrap());
+                if with_media && let Some(host) = &host {
+                    old_import_media(host);
+                }
+                let generation = process.engine().generation();
+                let source_cancel = CancelToken::new();
+                let candidate = entry::inspect_entry(
+                    process.engine(),
+                    &source,
+                    &options.entry_inputs(),
+                    source_cancel.clone(),
+                    &ProgressSink::new(),
                 )
-            } else {
-                let completed = importer
-                    .import_initial(inputs, candidate, ctx.slot().unwrap(), &ctx.cancel, &ctx.progress)
-                    .unwrap();
-                (completed.outcome, Some(completed.host))
-            };
-            let deliveries = *listener.deliveries.lock().unwrap();
-            (outcome, imported_host, deliveries)
-        });
-        meguri_model::faultpoint::disarm("replace.after_dir_sync");
-        assert_eq!(deliveries, 1);
-        let Err(EntryError::Replacement {
-            error:
-                ReplaceError::AfterActivation {
-                    generation: Some(active),
-                    ..
-                },
-            backup,
-        }) = outcome
-        else {
-            panic!("late cancellation must finish activation and recovery")
-        };
-        assert!(active > generation);
-        assert_eq!(process.engine().generation(), active);
-        assert_eq!(
-            DeviceState::for_collection(&options.collection_directory.join("collection.anki2"))
-                .publication()
-                .unwrap()
-                .unwrap()
-                .decision,
-            PublicationDecision::Pending
-        );
-        assert_eq!(backup.is_some(), !initial);
-        if let Some(receipt) = backup {
-            assert!(options.backups_directory.join(receipt.name).is_file());
+                .unwrap();
+                let engine = process.engine().clone();
+                let importer = process.clone();
+                let inputs = options.clone();
+                let backup = host.as_ref().map(CoreHost::backup);
+                if fail_after_rename {
+                    meguri_model::faultpoint::arm(
+                        "replace.after_dir_sync",
+                        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+                    );
+                }
+                let (outcome, imported_host, deliveries) = job(process.engine(), move |ctx| {
+                    let progress = Arc::new(ctx.progress.clone());
+                    let listener = Arc::new(CancelAtEntryPhase {
+                        engine,
+                        progress: Arc::downgrade(&progress),
+                        phase: ProgressPhase::Committing,
+                        tokens: vec![ctx.cancel.clone(), source_cancel],
+                        deliveries: Mutex::new(Vec::new()),
+                    });
+                    ctx.progress.set_listener(listener.clone());
+                    let (outcome, imported_host) = if let Some(backup) = backup {
+                        (
+                            candidate.activate_ready(ctx.slot().unwrap(), backup.as_ref(), &ctx.cancel, &ctx.progress),
+                            None,
+                        )
+                    } else {
+                        let completed = importer
+                            .import_initial(inputs, candidate, ctx.slot().unwrap(), &ctx.cancel, &ctx.progress)
+                            .unwrap_or_else(|error| {
+                                panic!("initial={initial}, media={with_media}, fault={fail_after_rename}, import_initial={error:?}")
+                            });
+                        (completed.outcome, Some(completed.host))
+                    };
+                    let deliveries = listener
+                        .deliveries
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|phase| **phase == ProgressPhase::Committing)
+                        .count();
+                    for token in &listener.tokens {
+                        assert!(
+                            token.is_cancelled(),
+                            "initial={initial}, media={with_media}, fault={fail_after_rename}, outcome={outcome:?}"
+                        );
+                    }
+                    (outcome, imported_host, deliveries)
+                });
+                meguri_model::faultpoint::disarm("replace.after_dir_sync");
+                assert_eq!(
+                    deliveries, 1,
+                    "initial={initial}, media={with_media}, outcome={outcome:?}"
+                );
+                let (active, backup) = if fail_after_rename {
+                    let error = outcome.as_ref().unwrap_err();
+                    assert!(error.candidate_active(), "{error:?}");
+                    let EntryError::Replacement {
+                        error:
+                            ReplaceError::AfterActivation {
+                                generation: Some(active),
+                                source: activation_error,
+                            },
+                        backup,
+                    } = entry_cause(error)
+                    else {
+                        panic!(
+                            "late cancellation must finish activation and recovery: initial={initial}, media={with_media}, outcome={outcome:?}"
+                        )
+                    };
+                    assert!(
+                        matches!(
+                            activation_error.as_ref(),
+                            ReplaceError::Staging(meguri_storage::verified_replace::ReplaceError::Io(StorageError::Io {
+                                detail
+                            })) if detail == "injected fault at replace.after_dir_sync"
+                        ),
+                        "initial={initial}, media={with_media}, outcome={outcome:?}"
+                    );
+                    if with_media {
+                        let EntryError::MediaOutcome {
+                            media,
+                            retained_reference,
+                            ..
+                        } = error
+                        else {
+                            panic!("activated media failure must retain its facts: {error:?}")
+                        };
+                        assert_eq!(media.incoming, IMPORT_MEDIA.len() as u64);
+                        assert!(!retained_reference.is_empty());
+                    }
+                    (*active, backup.as_deref())
+                } else {
+                    let activation = outcome.as_ref().unwrap();
+                    assert_eq!(
+                        activation.media.incoming,
+                        if with_media { IMPORT_MEDIA.len() as u64 } else { 0 }
+                    );
+                    (activation.generation, activation.backup.as_ref())
+                };
+                assert!(active > generation);
+                assert_eq!(process.engine().generation(), active);
+                assert_eq!(
+                    process.engine().state(),
+                    meguri_engine::LifecycleState::Ready { generation: active }
+                );
+                assert_eq!(
+                    DeviceState::for_collection(&options.collection_directory.join("collection.anki2"))
+                        .publication()
+                        .unwrap()
+                        .unwrap()
+                        .decision,
+                    PublicationDecision::Pending
+                );
+                assert_eq!(backup.is_some(), !initial);
+                if let Some(receipt) = backup {
+                    assert!(options.backups_directory.join(&receipt.name).is_file());
+                }
+                assert_no_entry_staging(&options.collection_directory);
+                assert_eq!(fs::read(&source).unwrap(), source_bytes);
+                let host = host.or(imported_host).unwrap();
+                if with_media {
+                    assert_import_media(&host, !initial);
+                }
+                answer(&host);
+                host.close().unwrap();
+            }
         }
-        assert_no_entry_staging(&options.collection_directory);
-        let host = host.or(imported_host).unwrap();
-        answer(&host);
-        host.close().unwrap();
+    }
+}
+
+#[test]
+fn cancellation_from_last_public_pre_rename_phase_restores_old_view_or_absence() {
+    let _lane = LANE.lock().unwrap();
+    for initial in [false, true] {
+        for cancel_inspection in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let source = package_media(root.path(), IMPORT_MEDIA);
+            let source_bytes = fs::read(&source).unwrap();
+            let options = config(&root.path().join("target"));
+            if !initial {
+                seed(&options);
+            }
+            let process = ProcessCore::new(options.engine.clone()).unwrap();
+            let host = (!initial).then(|| process.open(options.clone()).unwrap());
+            if let Some(host) = &host {
+                old_import_media(host);
+            }
+            let store = host.as_ref().map(|host| host.media().unwrap().store().clone());
+            let old_journal = store
+                .as_ref()
+                .map(|store| (store.pending().unwrap(), store.change_counter().unwrap()));
+            let live = options.collection_directory.join("collection.anki2");
+            let old_bytes = fs::read(&live).ok();
+            let generation = process.engine().generation();
+            let fence = DeviceState::for_collection(&live).publication().unwrap();
+            let source_cancel = CancelToken::new();
+            let candidate = entry::inspect_entry(
+                process.engine(),
+                &source,
+                &options.entry_inputs(),
+                source_cancel.clone(),
+                &ProgressSink::new(),
+            )
+            .unwrap();
+            let importer = process.clone();
+            let engine = process.engine().clone();
+            let inputs = options.clone();
+            let backup = host.as_ref().map(CoreHost::backup);
+            let (outcome, phases) = job(process.engine(), move |ctx| {
+                let progress = Arc::new(ctx.progress.clone());
+                let listener = Arc::new(CancelAtEntryPhase {
+                    engine,
+                    progress: Arc::downgrade(&progress),
+                    phase: ProgressPhase::Named("ready to rename"),
+                    tokens: vec![if cancel_inspection {
+                        source_cancel
+                    } else {
+                        ctx.cancel.clone()
+                    }],
+                    deliveries: Mutex::new(Vec::new()),
+                });
+                ctx.progress.set_listener(listener.clone());
+                let outcome = if let Some(backup) = backup {
+                    candidate.activate_ready(ctx.slot().unwrap(), backup.as_ref(), &ctx.cancel, &ctx.progress)
+                } else {
+                    importer
+                        .import_initial(inputs, candidate, ctx.slot().unwrap(), &ctx.cancel, &ctx.progress)
+                        .and_then(|completed| completed.outcome)
+                };
+                assert!(listener.tokens[0].is_cancelled(), "{outcome:?}");
+                let phases = listener.deliveries.lock().unwrap().clone();
+                (outcome, phases)
+            });
+            assert!(ProgressPhase::Named("ready to rename").cancellable());
+            assert_eq!(phases.last(), Some(&ProgressPhase::Named("ready to rename")));
+            assert!(!phases.contains(&ProgressPhase::Committing), "{phases:?}");
+            let error = outcome.unwrap_err();
+            if initial {
+                assert_eq!(entry_cause(&error), &EntryError::Cancelled, "{error:?}");
+                for suffix in ["", "-wal", "-shm", "-journal"] {
+                    assert!(
+                        !options
+                            .collection_directory
+                            .join(format!("meguri-media.db{suffix}"))
+                            .exists()
+                    );
+                }
+                for (name, _) in IMPORT_MEDIA {
+                    assert!(
+                        !options
+                            .collection_directory
+                            .join("collection.media")
+                            .join(name)
+                            .exists()
+                    );
+                }
+                assert!(meguri_storage::lockfile::CollectionLock::acquire(&options.collection_directory).is_ok());
+            } else {
+                let EntryError::CancelledAfterBackup(receipt) = entry_cause(&error) else {
+                    panic!("pre-rename cancellation must retain the safety receipt: {error:?}")
+                };
+                assert!(options.backups_directory.join(&receipt.name).is_file());
+                let store = store.as_ref().unwrap();
+                assert_eq!(
+                    Some((store.pending().unwrap(), store.change_counter().unwrap())),
+                    old_journal
+                );
+                assert_eq!(fs::read(store.media_dir().join("collision.bin")).unwrap(), b"old bytes");
+                assert_eq!(fs::read(store.media_dir().join("same.bin")).unwrap(), b"equal bytes");
+                assert_eq!(
+                    fs::read(store.media_dir().join("unrelated.bin")).unwrap(),
+                    b"keep unrelated"
+                );
+                for name in ["_static.css", "empty.dat", "unused.bin"] {
+                    assert!(!store.media_dir().join(name).exists());
+                }
+            }
+            assert_eq!(fs::read(&live).ok(), old_bytes);
+            assert_eq!(process.engine().generation(), generation);
+            assert_eq!(DeviceState::for_collection(&live).publication().unwrap(), fence);
+            assert_no_entry_staging(&options.collection_directory);
+            assert_no_r6_preparation(&options.collection_directory);
+            assert_eq!(fs::read(&source).unwrap(), source_bytes);
+            if let Some(host) = host {
+                assert_eq!(count(&host, Table::Notes), 0);
+                meguri_engine::decks::add(&host.collection().unwrap(), "after public phase cancellation".into())
+                    .unwrap();
+                host.close().unwrap();
+            }
+        }
     }
 }
 
