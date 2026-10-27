@@ -1,0 +1,26 @@
+# C5 step 2 of specs/maintenance/check-media.md on a case-sensitive volume
+# (media-ops.md F14.4): Cat.jpg and CAT.jpg with the same bytes, referenced
+# by both spellings, and no file named as their case key cat.jpg. Meguri
+# keeps the greatest name by UTF-8 bytes, Cat.jpg, maps CAT.jpg to it,
+# rewrites the references and trashes CAT.jpg; Anki writes a lowercase copy
+# cat.jpg for CAT.jpg instead (deviations
+# check-media-case-variant-merge-greatest, C20).
+id: maintenance/check-media/case/same-content-no-key
+tags: [media-case-variants]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"Cat.jpg\">", "<img src=\"CAT.jpg\">"]}
+  media_files:
+    - {name: Cat.jpg, text: "cat image"}
+    - {name: CAT.jpg, text: "cat image"}
+steps:
+  - observe: [media_pending]
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod, usn FROM notes"}
