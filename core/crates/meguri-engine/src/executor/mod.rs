@@ -256,7 +256,7 @@ impl ExecShared {
             let queue = &mut *guard;
             if matches!(admission, Admission::Corrupt) {
                 // Queue -> commit follows the executor lock order. Writers
-                // inspect this flag only under commit, without taking queue.
+                // recheck this flag under commit, without taking queue.
                 let _commit = self.lock_commit();
                 self.corrupt.store(true, Ordering::Release);
             }

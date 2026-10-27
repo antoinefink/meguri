@@ -306,8 +306,8 @@ impl WalFlush {
     }
 }
 
-/// Why a dequeued task must not run: cancelled while it waited, or planned on
-/// an older generation.
+/// Why a dequeued task must not run: corruption, cancellation while it waited,
+/// or planning on an older generation.
 fn refusal(shared: &ExecShared, meta: &TaskMeta) -> Option<EngineError> {
     if meta.control {
         return None;
@@ -323,6 +323,7 @@ fn refusal(shared: &ExecShared, meta: &TaskMeta) -> Option<EngineError> {
     let current = shared.generation();
     match meta.planned {
         Some(planned) if planned != current => Some(EngineError::StaleGeneration { planned, current }),
+        _ if shared.corrupt.load(Ordering::Acquire) => Some(EngineError::CollectionCorrupt),
         _ => None,
     }
 }

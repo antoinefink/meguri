@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{Harness, add_note_with_card, copy_fixture, drain, note, open_config};
+use meguri_engine::executor::catalog;
 use meguri_engine::{
     Collection, Engine, EngineConfig, EngineError, EventKind, FailedReason, Generation, GenerationListener,
     LifecycleState, LongOp, OpSpec, OpenStep, Ports,
@@ -337,6 +338,7 @@ fn closing_commits_queued_ops_then_refuses_every_op() {
 #[test]
 fn a_corrupt_collection_refuses_ops_and_lets_only_restore_and_one_way_sync_take_the_slot() {
     let h = Harness::open();
+    let generation = h.engine.generation();
     h.engine.mark_corrupt("page 12 is damaged");
     let refused = h
         .collection
@@ -357,7 +359,18 @@ fn a_corrupt_collection_refuses_ops_and_lets_only_restore_and_one_way_sync_take_
         )
         .unwrap_err();
     assert_eq!(refused, EngineError::CollectionCorrupt);
+    let refused = exclusive
+        .collection()
+        .submit_maintenance(
+            catalog::ANALYZE,
+            Duration::from_millis(10),
+            |_| -> Result<(), EngineError> { panic!("corrupt collection must refuse maintenance work") },
+        )
+        .wait()
+        .unwrap_err();
+    assert_eq!(refused, EngineError::CollectionCorrupt);
     drop(exclusive);
+    assert_eq!(h.engine.generation(), generation);
     assert!(
         matches!(h.engine.state(), LifecycleState::Failed { .. }),
         "no swap: still corrupt"
