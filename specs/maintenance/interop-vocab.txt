@@ -1,0 +1,25 @@
+# Interface names the maintenance specs use that are not ordinary words: the
+# SQLite statements, pragmas, objects and result codes of the optimize and the
+# integrity checks. Ordinary words (vacuum, analyze, memory, file) stay unmasked.
+# Statements and pragmas
+reindex
+quick_check
+integrity_check
+freelist_count
+page_count
+temp_store
+wal_checkpoint
+# Objects
+sqlite_stat1
+sqlite_stat4
+# Result codes
+SQLITE_CORRUPT
+SQLITE_NOTADB
+SQLITE_INTERRUPT
+SQLITE_IOERR
+SQLITE_NOMEM
+SQLITE_BUSY
+SQLITE_FULL
+# Environment
+SQLITE_TMPDIR
+TMPDIR

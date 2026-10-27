@@ -96,7 +96,7 @@ Exactly one per open collection, owned by the engine's writer thread (U24); ever
 | `locking_mode` | `NORMAL` (SQLite's default; never set `EXCLUSIVE`) | readers on other connections (R1452). Anki holds an exclusive lock that keeps every other connection out; Meguri deliberately does not (deviation from Anki, no golden can see it) |
 | `page_size` | 4096 | before `journal_mode`: it only takes effect for a file that has no page yet (U28's new collection), and switching to WAL writes the first page; a no-op otherwise, as in Anki |
 | `cache_size` | -40960 (40 MiB) | Anki's value |
-| `temp_store` | `MEMORY` | |
+| `temp_store` | `MEMORY`, except during an in-place `VACUUM` | an in-place `VACUUM` builds its copy of the whole file in temporary storage, so it runs with `FILE` and sets `MEMORY` back after it (`maintenance/optimize-integrity` M8.1) |
 | `journal_mode` | `WAL` | persistent in the file; Anki writes and uploads WAL-mode files. A no-op when the file is already in WAL mode |
 | `synchronous` | `NORMAL` (C9) | a commit returns without a sync; the writer's flush (C9.2) makes it durable within 1 s |
 | `fullfsync`, `checkpoint_fullfsync` | `ON` on Apple platforms, whatever `synchronous` is (C9) | every sync SQLite still issues (checkpoints, the WAL header on restart) then flushes the drive's cache; a plain `fsync` on Apple does not |
