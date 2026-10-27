@@ -1,0 +1,43 @@
+# specs/browser/sorting.md S4, S5 (cardReps, cardLapses): cards mode by the
+# stored counters; notes mode by their sums over the note's cards, equal sums
+# in note id order, reversed when descending (R1126, R1144).
+id: browser/sort/counts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [none, g]}
+    - {notetype: Solo, fields: [r3-l1, g]}
+    - {notetype: Solo, fields: [r5-l0, g]}
+    - {notetype: Solo, fields: [r5-l2, g]}
+    - {notetype: Pair, fields: [sum-r5-l1, x]}
+    - {notetype: Pair, fields: [pair-none, x]}
+    - {notetype: Solo, fields: [r12-l3, g]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 3, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 5, lapses = 0 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 5, lapses = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 2, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 3, lapses = 0 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2500, reps = 12, lapses = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: cardReps}}
+          - {query: '', order: {column: cardReps, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardReps}}
+          - {query: '', kind: notes, order: {column: cardReps, reverse: true}}
+          - {query: '', order: {column: cardLapses}}
+          - {query: '', order: {column: cardLapses, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardLapses}}
+          - {query: '', kind: notes, order: {column: cardLapses, reverse: true}}

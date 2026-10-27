@@ -1,0 +1,67 @@
+# specs/browser/columns.md C4, C5, C7 in cards mode, every column, one card
+# per state. The clock moves 100 days after setup, so today is 100 and now is
+# 1903341600 (2030-04-25 10:00 UTC). #c11 is AE44's card: flag 1, its note
+# tagged Marked, suspended (tint flag_1). #c15 stores flags 9 (no flag tint),
+# #c16's note is tagged marked (stored with the spelling Marked, which the
+# collection already has). #c13 and #c14 are in the filtered-deck form
+# (in Cram, home deck Lang::Spanish, R1268). #c12 is a suspended learning card,
+# whose Due is empty. #c18 has a memory state without lrt (retrievability
+# from due and interval), #c19 "s" without "d" (no FSRS cells).
+id: browser/columns/cards-mode
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Lang::Spanish", Cram]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [new-5, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [new-suspended, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [new-buried, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [learning, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [relearning, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [interday-learning, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [review-overdue, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [review-today, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [review-future, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [review-suspended, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [flagged-marked-suspended, g], tags: [Marked]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [learning-suspended, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [filtered-review, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [filtered-new-buried, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [flags-9, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [marked-only, g], tags: [marked]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [fsrs-lrt, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [fsrs-no-lrt, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [s-only, g]}
+    - {notetype: Solo, deck: "Lang::Spanish", fields: [pos-3, g]}
+    - {notetype: Solo, fields: ["<b>Dog</b> <img src=\"dog.png\">", "a &amp; b"]}
+steps:
+  - advance: 100d
+  - db_exec: {sql: "UPDATE cards SET due = 5 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1, due = 6 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2, due = 7 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1903342800, reps = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1903342200, ivl = 0, factor = 2300, reps = 9, lapses = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 101, reps = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 98, ivl = 10, factor = 2505, reps = 4, mod = 1900000000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 100, ivl = 1, factor = 2500, reps = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 130, ivl = 40, factor = 2500, reps = 5 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 102, ivl = 400, factor = 2500, reps = 12, lapses = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 9)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 105, ivl = 45, factor = 2500, reps = 6, flags = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 10)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = -1, due = 1903342800, reps = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 11)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 8, factor = 2500, reps = 3, odid = did, odue = 104, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -100000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 12)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2, odid = did, odue = 9, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -99999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 13)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 103, ivl = 5, factor = 2500, reps = 2, flags = 9 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 14)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 105, ivl = 6, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 16)", params: ['{"s":12.5,"d":5.0,"lrt":1902823200}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 103, ivl = 10, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 17)", params: ['{"s":10.0,"d":3.0}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 104, ivl = 4, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 18)", params: ['{"s":1.0}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 104, ivl = 4, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 19)", params: ['{"pos":3}']}
+  - db_exec: {sql: "UPDATE notes SET mod = 1900000500 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, question, answer, template, deck, cardDue, cardEase, cardIvl, cardReps, cardLapses, noteCrt, cardMod, noteMod, note, noteTags, originalPosition, stability, difficulty, retrievability]
+          rows: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11", "#c12", "#c13", "#c14", "#c15", "#c16", "#c17", "#c18", "#c19", "#c20", "#c21"]

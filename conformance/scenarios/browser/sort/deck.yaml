@@ -1,0 +1,47 @@
+# specs/browser/sorting.md S3, S4, S5 (deck): decks rank by stored name under
+# unicase, where the "::" separator sorts before every printable character, so
+# "A::B" comes right after "A" and before "A B". A card in a filtered deck
+# (Cram, home deck A) sorts by the deck it is in (R1268). Notes mode sorts by
+# the number of distinct decks, then the deck of the note's first card, then
+# note id: #n11 (first card in AB, second in Ä) comes before #n10 (first card
+# in Z, second in A), although #n10 has the smaller deck name.
+id: browser/sort/deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["A", "A::B", "A B", "AB", "a2", "_x", "Z", "Ä", "Cram"]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, deck: "Z", fields: [z, g]}
+    - {notetype: Solo, deck: "a2", fields: [a2, g]}
+    - {notetype: Solo, deck: "A B", fields: [a-space-b, g]}
+    - {notetype: Solo, deck: "_x", fields: [underscore, g]}
+    - {notetype: Solo, deck: "Ä", fields: [umlaut, g]}
+    - {notetype: Solo, deck: "A::B", fields: [a-child-b, g]}
+    - {notetype: Solo, deck: "AB", fields: [ab, g]}
+    - {notetype: Solo, deck: "A", fields: [a, g]}
+    - {notetype: Solo, deck: "A", fields: [crammed, g]}
+    - {notetype: Pair, deck: "Z", fields: [p, q]}
+    - {notetype: Pair, deck: "AB", fields: [r, s]}
+steps:
+  # #c9 (#n9) moves to the filtered-deck form: in Cram, home deck A.
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = due, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -100000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 8) AND ord = 0"}
+  # #c11, the Backward card of #n10, moves to A; #c13, of #n11, to Ä.
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'A') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 9) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Ä') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 10) AND ord = 1"}
+  - observe:
+      - search:
+          - {query: '', order: {column: deck}}
+          - {query: '', order: {column: deck, reverse: true}}
+          - {query: '', kind: notes, order: {column: deck}}
+          - {query: '', kind: notes, order: {column: deck, reverse: true}}

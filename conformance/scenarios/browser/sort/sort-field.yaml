@@ -1,0 +1,42 @@
+# specs/browser/sorting.md S2, S4, S5 (noteFld): sort fields stored as numbers
+# come first by value (" 12 " is stored as 12), then the empty text, then texts
+# by SQLite's NOCASE (ASCII letters folded, "éclair" after "zebra" by byte);
+# in cards mode the ordinal follows, reversed in a descending sort. "apple" and
+# "<b>Apple</b>" (stored "Apple"), "Banana" and "banana" are equal-key runs
+# (specs/conformance/browser-ops.md B2).
+id: browser/sort/sort-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Labelled
+      fields: [Label, Body]
+      templates:
+        - {name: Show, front: "{{Body}}", back: "{{Label}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Labelled, fields: ["10", "b"]}
+    - {notetype: Labelled, fields: ["9", "b"]}
+    - {notetype: Labelled, fields: ["apple", "b"]}
+    - {notetype: Labelled, fields: ["Banana", "b"]}
+    - {notetype: Labelled, fields: ["", "b"]}
+    - {notetype: Labelled, fields: ["1.5", "b"]}
+    - {notetype: Labelled, fields: [" 12 ", "b"]}
+    - {notetype: Labelled, fields: ["-4", "b"]}
+    - {notetype: Labelled, fields: ["banana", "b"]}
+    - {notetype: Labelled, fields: ["<b>Apple</b>", "b"]}
+    - {notetype: Labelled, fields: ["zebra", "b"]}
+    - {notetype: Labelled, fields: ["éclair", "b"]}
+    - {notetype: Pair, fields: ["quartz", "q"]}
+steps:
+  - observe:
+      - search:
+          - {query: '', order: {column: noteFld}}
+          - {query: '', order: {column: noteFld, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteFld}}
+          - {query: '', kind: notes, order: {column: noteFld, reverse: true}}

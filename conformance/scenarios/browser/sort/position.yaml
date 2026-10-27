@@ -1,0 +1,50 @@
+# specs/browser/sorting.md S4, S5, S5.1 (originalPosition): a note's position
+# value comes from its first card (lowest card id): the card data "pos" when
+# present, else the stored due of a new card, else 0. #n6's first card is its
+# Backward card (the Forward card is created later by edit_note), whose pos 2
+# decides, not the Forward card's position 50 (adopt names that card #c10,
+# note-ops.md N3). Cards of one note share their keys and form an equal-key
+# run; equal values (#n3, #n8) keep note id order (R1129, R1144).
+id: browser/sort/position
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Cram]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [new-5, g]}
+    - {notetype: Solo, fields: [review-pos-3, g]}
+    - {notetype: Solo, fields: [review-no-pos, g]}
+    - {notetype: Solo, fields: [filtered-new, g]}
+    - {notetype: Pair, fields: [pair-new-8, x]}
+    - {notetype: Pair, fields: ["", backward-first]}
+    - {notetype: Solo, fields: [learning-pos-6, g]}
+    - {notetype: Solo, fields: [review-no-pos-2, g]}
+steps:
+  - edit_note: {note: "#n6", fields: {Front: forward-later}}
+  - adopt: {}
+  - db_exec: {sql: "UPDATE cards SET due = 5 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 3, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)", params: ['{"pos":3}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = 4, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -100000 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET due = 8 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 3, factor = 2500, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5) AND ord = 1", params: ['{"pos":2}']}
+  - db_exec: {sql: "UPDATE cards SET due = 50 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200, data = ? WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)", params: ['{"pos":6}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 7)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: originalPosition}}
+          - {query: '', order: {column: originalPosition, reverse: true}}
+          - {query: '', kind: notes, order: {column: originalPosition}}
+          - {query: '', kind: notes, order: {column: originalPosition, reverse: true}}

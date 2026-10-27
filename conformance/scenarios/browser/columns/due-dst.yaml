@@ -1,0 +1,34 @@
+# specs/browser/columns.md C7.5, C7.9 in a zone with daylight-saving time.
+# Now is 2030-03-09 23:30 EST; daylight-saving time starts on 2030-03-10 at
+# 02:00. A card due tomorrow (#c1, #c5) is shown at now + 86400 seconds, which
+# is 2030-03-11 00:30 EDT, so its date is 2030-03-11, not the calendar's
+# tomorrow. Today's and yesterday's reviews and a learning card due after the
+# change show their local dates; Created and the modification stamps show
+# local date and time.
+id: browser/columns/due-dst
+clock: {tz: America/New_York, start: "2030-03-09T23:30:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [review-tomorrow, g]}
+    - {notetype: Solo, fields: [review-today, g]}
+    - {notetype: Solo, fields: [review-yesterday, g]}
+    - {notetype: Solo, fields: [learning-after-change, g]}
+    - {notetype: Solo, fields: [interday-tomorrow, g]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 3, factor = 2500, mod = 1899354600 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -1, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1899361800 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1899361800 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - observe:
+      - timing
+      - browser_rows:
+          columns: [cardDue, noteCrt, cardMod, noteMod]
+          rows: ["#c1", "#c2", "#c3", "#c4", "#c5"]

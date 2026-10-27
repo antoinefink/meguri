@@ -1,0 +1,48 @@
+# specs/browser/columns.md C10: Question and Answer cells. Browser mode leaves
+# FrontSide empty (Plain's answer shows only Back); an answer that repeats the
+# question text (Repeat) loses that beginning; sound tags show their names
+# between U+1F509, TTS directives their content between U+1F4AC, other
+# directives their normal form; <br>, <div> and line breaks become spaces and
+# image names stay. Notes mode renders each note's first card: #n5's is its
+# Rich card and #n6's its c1 card, both created before the others by edit_note.
+# edit_note gives the cards it adds no logical id (note-ops.md N3): adopt
+# names #n5's Plain and Repeat cards #c14 and #c15 and #n6's c2 card #c16.
+# #n4 is left out of notes mode: Anki creates the cards of a cloze note added
+# with several clozes in no set order, so its first card is not fixed.
+id: browser/columns/question-answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Qa
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Plain, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+        - {name: Repeat, front: "Q: {{Front}}", back: "Q: {{Front}}<br>{{Back}}"}
+        - {name: Rich, front: "{{Front}} {{Extra}}", back: "{{Extra}}|{{Back}}"}
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Qa, fields: [newt, salamandra, "[sound:newt call.mp3]"]}
+    - {notetype: Qa, fields: ["one<br>two<div>three</div>", "[anki:tts lang=en_US]hello[/anki:tts]", "<img src=\"pic one.png\">"]}
+    - {notetype: Qa, fields: ["a &amp; b", "[anki:foo  x=1]bar[/anki:foo]", "[sound:a&amp;b.mp3]"]}
+    - {notetype: Gap, fields: ["{{c1::plum::stone}} and {{c2::fig}}", "<div>memo</div>"]}
+    - {notetype: Qa, fields: ["", back5, extra5]}
+    - {notetype: Gap, fields: ["{{c1::solo}}", "line\nbreak"]}
+steps:
+  - edit_note: {note: "#n5", fields: {Front: front5}}
+  - edit_note: {note: "#n6", fields: {Text: "{{c1::solo}} {{c2::duo}}"}}
+  - adopt: {}
+  - observe:
+      - browser_rows:
+          columns: [question, answer, template, noteFld]
+          rows: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11", "#c12", "#c13", "#c14", "#c15", "#c16"]
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [question, answer, template, noteFld]
+          rows: ["#n1", "#n2", "#n3", "#n5", "#n6"]

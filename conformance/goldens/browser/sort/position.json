@@ -1,0 +1,86 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "adopt": {
+          "cards": 1,
+          "notes": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c4", "#c3", "#c9", "#c7", "#c10", "#c2", "#c1", "#c8", "#c5", "#c6"]
+          },
+          {
+            "ids": ["#c5", "#c6", "#c8", "#c1", "#c2", "#c7", "#c10", "#c9", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n4", "#n3", "#n8", "#n6", "#n2", "#n1", "#n7", "#n5"]
+          },
+          {
+            "ids": ["#n5", "#n7", "#n1", "#n2", "#n6", "#n8", "#n3", "#n4"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/sort/position",
+  "scenario_sha256": "54653a1c032369f66af76ceb970f5544a5fdeb2a05147a5a9b12e003614671d3",
+  "tz": "UTC"
+}

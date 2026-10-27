@@ -1,0 +1,392 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "adopt": {
+          "cards": 3,
+          "notes": 0
+        }
+      },
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "answer": {
+                "text": "salamandra"
+              },
+              "noteFld": {
+                "text": "newt"
+              },
+              "question": {
+                "text": "newt"
+              },
+              "template": {
+                "text": "Plain"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "salamandra"
+              },
+              "noteFld": {
+                "text": "newt"
+              },
+              "question": {
+                "text": "Q: newt"
+              },
+              "template": {
+                "text": "Repeat"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "🔉newt call.mp3🔉|salamandra"
+              },
+              "noteFld": {
+                "text": "newt"
+              },
+              "question": {
+                "text": "newt 🔉newt call.mp3🔉"
+              },
+              "template": {
+                "text": "Rich"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "💬hello💬"
+              },
+              "noteFld": {
+                "text": "one two three"
+              },
+              "question": {
+                "text": "one two three"
+              },
+              "template": {
+                "text": "Plain"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "💬hello💬"
+              },
+              "noteFld": {
+                "text": "one two three"
+              },
+              "question": {
+                "text": "Q: one two three"
+              },
+              "template": {
+                "text": "Repeat"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "pic one.png |💬hello💬"
+              },
+              "noteFld": {
+                "text": "one two three"
+              },
+              "question": {
+                "text": "one two three  pic one.png"
+              },
+              "template": {
+                "text": "Rich"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "[anki:foo x=1]bar[/anki:foo]"
+              },
+              "noteFld": {
+                "text": "a & b"
+              },
+              "question": {
+                "text": "a & b"
+              },
+              "template": {
+                "text": "Plain"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "[anki:foo x=1]bar[/anki:foo]"
+              },
+              "noteFld": {
+                "text": "a & b"
+              },
+              "question": {
+                "text": "Q: a & b"
+              },
+              "template": {
+                "text": "Repeat"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "🔉a&b.mp3🔉|[anki:foo x=1]bar[/anki:foo]"
+              },
+              "noteFld": {
+                "text": "a & b"
+              },
+              "question": {
+                "text": "a & b 🔉a&b.mp3🔉"
+              },
+              "template": {
+                "text": "Rich"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "plum and fig  memo"
+              },
+              "noteFld": {
+                "text": "{{c1::plum::stone}} and {{c2::fig}}"
+              },
+              "question": {
+                "text": "[stone] and fig"
+              },
+              "template": {
+                "text": "Gap 1"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "plum and fig  memo"
+              },
+              "noteFld": {
+                "text": "{{c1::plum::stone}} and {{c2::fig}}"
+              },
+              "question": {
+                "text": "plum and [...]"
+              },
+              "template": {
+                "text": "Gap 2"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "extra5|back5"
+              },
+              "noteFld": {
+                "text": "front5"
+              },
+              "question": {
+                "text": "front5 extra5"
+              },
+              "template": {
+                "text": "Rich"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "solo duo line break"
+              },
+              "noteFld": {
+                "text": "{{c1::solo}} {{c2::duo}}"
+              },
+              "question": {
+                "text": "[...] duo"
+              },
+              "template": {
+                "text": "Gap 1"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "back5"
+              },
+              "noteFld": {
+                "text": "front5"
+              },
+              "question": {
+                "text": "front5"
+              },
+              "template": {
+                "text": "Plain"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "back5"
+              },
+              "noteFld": {
+                "text": "front5"
+              },
+              "question": {
+                "text": "Q: front5"
+              },
+              "template": {
+                "text": "Repeat"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "solo duo line break"
+              },
+              "noteFld": {
+                "text": "{{c1::solo}} {{c2::duo}}"
+              },
+              "question": {
+                "text": "solo [...]"
+              },
+              "template": {
+                "text": "Gap 2"
+              }
+            },
+            "tint": "none"
+          }
+        ]
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "answer": {
+                "text": "salamandra"
+              },
+              "noteFld": {
+                "text": "newt"
+              },
+              "question": {
+                "text": "newt"
+              },
+              "template": {
+                "count": 3
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "💬hello💬"
+              },
+              "noteFld": {
+                "text": "one two three"
+              },
+              "question": {
+                "text": "one two three"
+              },
+              "template": {
+                "count": 3
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "[anki:foo x=1]bar[/anki:foo]"
+              },
+              "noteFld": {
+                "text": "a & b"
+              },
+              "question": {
+                "text": "a & b"
+              },
+              "template": {
+                "count": 3
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "extra5|back5"
+              },
+              "noteFld": {
+                "text": "front5"
+              },
+              "question": {
+                "text": "front5 extra5"
+              },
+              "template": {
+                "count": 3
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "answer": {
+                "text": "solo duo line break"
+              },
+              "noteFld": {
+                "text": "{{c1::solo}} {{c2::duo}}"
+              },
+              "question": {
+                "text": "[...] duo"
+              },
+              "template": {
+                "count": 2
+              }
+            },
+            "tint": "none"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/columns/question-answer",
+  "scenario_sha256": "f760c6d63a21da41038f2f42b8c057d60bf0e693cde5f193fe78900bf145b629",
+  "tz": "UTC"
+}

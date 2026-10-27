@@ -1,0 +1,119 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c12", "#c13", "#c1", "#c2", "#c14", "#c16", "#c17", "#c18", "#c5", "#c4", "#c3", "#c11", "#c10", "#c6", "#c7", "#c8", "#c9", "#c15"]
+          },
+          {
+            "ids": ["#c15", "#c9", "#c8", "#c6", "#c7", "#c10", "#c11", "#c3", "#c4", "#c5", "#c18", "#c16", "#c17", "#c14", "#c2", "#c1", "#c13", "#c12"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n8", "#n9", "#n11", "#n12", "#n13", "#n15", "#n16", "#n5", "#n4", "#n3", "#n10", "#n6", "#n7", "#n14"]
+          },
+          {
+            "ids": ["#n14", "#n7", "#n6", "#n10", "#n3", "#n4", "#n5", "#n1", "#n2", "#n8", "#n9", "#n11", "#n12", "#n13", "#n15", "#n16"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/sort/due",
+  "scenario_sha256": "5bbf718a2bc544bb6a9c4bead5100082036d723bb689be2e251f5882df04cbf9",
+  "tz": "UTC"
+}

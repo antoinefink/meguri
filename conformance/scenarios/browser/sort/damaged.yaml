@@ -1,0 +1,50 @@
+# specs/browser/sorting.md S3, S9 on a damaged collection: #c2 loses its note
+# (#n2), #n4 loses its card, #c5 points to a deck that does not exist, and the
+# Backward card of #n6 (#c7) moves to an ordinal with no template. In cards
+# mode the note-column sorts (Sort Field, Card Type, Created, Note Type, Tags)
+# leave #c2 out, the others keep it; a missing deck ranks as nothing (first
+# ascending); #c7 takes the rank of #n6's ordinal-0 template. In notes mode
+# #n4 has no card keys, and #n5 no deck key.
+id: browser/sort/damaged
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [alpha, g]}
+    - {notetype: Solo, fields: [beta, g]}
+    - {notetype: Solo, fields: [gamma, g]}
+    - {notetype: Solo, fields: [delta, g]}
+    - {notetype: Solo, fields: [epsilon, g]}
+    - {notetype: Pair, fields: [zeta, x]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = 424242 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET ord = 5 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5) AND ord = 1"}
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: noteFld}}
+          - {query: '', order: {column: template}}
+          - {query: '', order: {column: template, reverse: true}}
+          - {query: '', order: {column: noteCrt}}
+          - {query: '', order: {column: note}}
+          - {query: '', order: {column: noteTags}}
+          - {query: '', order: {column: cardMod}}
+          - {query: '', order: {column: deck}}
+          - {query: '', order: {column: deck, reverse: true}}
+          - {query: '', kind: notes, order: {column: template}}
+          - {query: '', kind: notes, order: {column: template, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardMod}}
+          - {query: '', kind: notes, order: {column: deck}}
+          - {query: '', kind: notes, order: {column: noteFld}}

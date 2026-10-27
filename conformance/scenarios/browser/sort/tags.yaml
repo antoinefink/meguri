@@ -1,0 +1,35 @@
+# specs/browser/sorting.md S4, S5 (noteTags): by the note's stored tags text,
+# byte order: untagged notes first, capital letters before small ones,
+# non-ASCII after ASCII. Notes with the same stored tags, and the cards of one
+# note, are equal-key runs (specs/conformance/browser-ops.md B2) (R1128).
+id: browser/sort/tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [one, g], tags: [Zeta]}
+    - {notetype: Solo, fields: [two, g], tags: [alpha]}
+    - {notetype: Solo, fields: [three, g]}
+    - {notetype: Solo, fields: [four, g], tags: [beta, Gamma]}
+    - {notetype: Solo, fields: [five, g], tags: [éclair]}
+    - {notetype: Pair, fields: [six, x], tags: [Zeta]}
+    - {notetype: Solo, fields: [seven, g], tags: ["alpha::child"]}
+    - {notetype: Solo, fields: [eight, g], tags: [Mid]}
+steps:
+  - observe:
+      - search:
+          - {query: '', order: {column: noteTags}}
+          - {query: '', order: {column: noteTags, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteTags}}
+          - {query: '', kind: notes, order: {column: noteTags, reverse: true}}

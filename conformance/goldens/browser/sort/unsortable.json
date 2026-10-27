@@ -1,0 +1,61 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search": [
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "invalid_regex"
+          },
+          {
+            "error": "unsortable"
+          },
+          {
+            "error": "search_failed"
+          },
+          {
+            "ids": ["#c2", "#c1"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/sort/unsortable",
+  "scenario_sha256": "13b023eda0a6f340b3ff265c9e0bda4e19ec75008f2fd22902cdbcc71dfa625a",
+  "tz": "UTC"
+}
