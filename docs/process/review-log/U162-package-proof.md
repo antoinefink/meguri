@@ -785,3 +785,19 @@ preserves patches, manifests, logs and reports. More than 40 GB remains free.
 
 Independent checkpoint review is clear. Final documentation privacy
 `20261027T015830Z-34322` passes; failed wording scans remain retained.
+
+## Integration check and package-test correction
+
+Gate `20261027T020206Z-36035` ran from the retained integration base at
+`2157ede1`. Static checks, canaries, lint and native durability passed. Rust
+ran 3,127 tests: 3,126 passed and one failed. The dependency scan also failed
+on compression advisories. The gate was stopped after those failures; its
+incomplete result and all child receipts remain. No gate pass is claimed.
+
+The failed package test assumed media inspection always returned
+`UnsupportedMedia`. A case-distinct fixture must first fail the incoming-name
+check. Filtered fix `20261027T022337Z-61031` asserts that exact conflict error;
+other filesystems retain the previous expectation. All fixture, archive, hash
+and preservation checks remain. Independent round two review is clear.
+Focused Rust `20261027T023425Z-71703` passes the affected test. Dependency
+repair and integration verification remain pending. No unit acceptance changes.

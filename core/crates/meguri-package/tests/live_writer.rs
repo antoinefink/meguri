@@ -629,10 +629,15 @@ fn user_export_includes_direct_unregistered_empty_large_unicode_and_case_variant
         space: &StatvfsSpace,
         is_cancelled: &|| false,
     };
-    assert!(matches!(
-        meguri_package::inspect_collection_package(&output, &inspection_context),
-        Err(Error::UnsupportedMedia)
-    ));
+    let inspection = meguri_package::inspect_collection_package(&output, &inspection_context);
+    if case_distinct {
+        assert!(matches!(
+            inspection,
+            Err(Error::Corrupt { detail }) if detail == "duplicate or conflicting media names"
+        ));
+    } else {
+        assert!(matches!(inspection, Err(Error::UnsupportedMedia)));
+    }
     assert_preserved(&source);
     assert_eq!(listing(&media), names);
     for (name, length, hash) in &expected {
