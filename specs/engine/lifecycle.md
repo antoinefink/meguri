@@ -31,7 +31,15 @@ Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only 
 
 A gate refusal or error, or an open step's error, leaves `Failed{reason}` with nothing open.
 
-A recorded corrupt verdict (`lastQuickCheck.passed` false, `maintenance/optimize-integrity#M5.1`) is read after step 2 and before step 3. The open then ends in `Failed{Corrupt}` with the new generation: no open step runs and nothing writes the file. Its connections stay as they are: the writer admits nothing (L4), and readers can still be leased, so Check Database's integrity stage (L4) and the maintenance status record (`maintenance/optimize-integrity#M10`) can read the file. A corrupt verdict in `Ready` (U132) moves to the same state the same way.
+When `lastQuickCheck.passed` is false (`maintenance/optimize-integrity#M5.1`):
+
+- Read this result before the storage gate may alter the collection.
+- Probes may read. The normal open may not upgrade the schema, roll back a journal, run a checkpoint, set journal mode or otherwise write the collection.
+- Enter `Failed{Corrupt}` with a new generation. Skip every open step.
+- Keep the collection owner so L4 recovery requests, read-only readers, maintenance status (`maintenance/optimize-integrity#M10`) and close remain available. Neither a writable connection nor a completed probe is needed to keep this owner.
+- If a read needs journal recovery, return its error without recovery. Keep the owner for a later recovery request.
+- A corrupt result found in `Ready` (U132) also enters `Failed{Corrupt}`. Keep that generation and stop ordinary collection writes.
+- Remedies and file replacement retain their existing contracts.
 
 ## L3. Generations
 
@@ -113,7 +121,7 @@ The CloudKit rows were added for CloudKit (`sync/policy#P23`); the others do not
 
 ## L10. Close
 
-Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the undo history is dropped (`engine/undo` M6), the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`. The long-operation slot is freed and an exclusive phase ends (L5, L7). Once the writer is stopping, every task submitted to it fails at once with `CollectionUnavailable`, a replace's included, so nothing waits on a writer that is gone.
+Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the undo history is dropped (`engine/undo` M6), the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`. Closing from `Failed{Corrupt}` instead performs no checkpoint, journal recovery or other collection write; it releases connections and ownership without changing the collection or its existing recovery journals. The long-operation slot is freed and an exclusive phase ends (L5, L7). Once the writer is stopping, every task submitted to it fails at once with `CollectionUnavailable`, a replace's included, so nothing waits on a writer that is gone.
 
 ## L11. Readers
 
