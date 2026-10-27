@@ -843,7 +843,7 @@ mod host_tests {
         assert_eq!(session.storage.backup_directory_for_testing(), backups);
         assert_eq!(
             session.storage.collection().unwrap().path(),
-            live.join("collection.anki2")
+            live.join("collection.anki2").canonicalize().unwrap()
         );
         let produced = fs::read(backups.join(name)).unwrap();
         assert!(!produced.is_empty());

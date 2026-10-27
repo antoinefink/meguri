@@ -15,6 +15,7 @@ setup_file() {
 }
 
 setup() {
+  CONFORMANCE_CANCEL_PID=
   SB="$BATS_TEST_TMPDIR/repo"
   cp -R "$BATS_FILE_TMPDIR/template" "$SB"
   export CALLS="$BATS_TEST_TMPDIR/calls" LIVE_STATUS=pass LIVE_REPORT=yes
@@ -23,8 +24,15 @@ setup() {
 #!/bin/sh
 echo testkit >>"$CALLS"
 printf '%s\n' "$@" >>"$CALLS.cargo-args"
+jq -nc --arg exe "$PWD/stub-testkit" \
+  '{reason:"compiler-artifact",profile:{test:true},target:{name:"testkit",kind:["lib"]},executable:$exe}'
+echo '{"reason":"build-finished","success":true}'
 EOF
-  chmod +x "$SB/stubs/cargo"
+  cat >"$SB/core/stub-testkit" <<'EOF'
+#!/bin/sh
+echo testkit-child >>"$CALLS"
+EOF
+  chmod +x "$SB/stubs/cargo" "$SB/core/stub-testkit"
   export PATH="$SB/stubs:$PATH"
   cat >"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
 fixture_report() {
@@ -33,6 +41,23 @@ fixture_report() {
       scenarios:[{scenario:"smoke/fixture", status:$status, fails:($status!="pass" and $status!="reference"), message:"fixture", repro:"fixture"}]}' >"$2"
 }
 mg_conf__edges_cleanup() { echo edges-cleanup >>"$CALLS"; }
+mg_conf__scratch() {
+  echo "$1" >>"$CALLS.scratch"
+  printf '%s\t%s\t%s\n' "$1" "$MG_RUN_ID" "${MG_CONF_NATIVE_OWNER:-}" >>"$CALLS.owners"
+  [ "${SCRATCH_FAIL:-}" != "$1" ] || return 1
+  case "$1" in
+    selected) echo "${SCRATCH_SELECTED:-true}" ;;
+    prepare)
+      mkdir "$MG_RUN_DIR/native-scratch" || return 1
+      mkdir -p "$MG_RUN_DIR/native-scratch/mount/tmp"
+      ;;
+    check) [ -d "$MG_RUN_DIR/native-scratch/mount/tmp" ] ;;
+    cleanup)
+      [ -d "$MG_RUN_DIR/native-scratch" ] || return 0
+      rmdir "$MG_RUN_DIR/native-scratch/mount/tmp" "$MG_RUN_DIR/native-scratch/mount" "$MG_RUN_DIR/native-scratch"
+      ;;
+  esac
+}
 mg_conf__docker_ok() { echo docker-check >>"$CALLS"; }
 mg_conf__record_stale() { echo freshness >>"$CALLS"; }
 mg_oracle__actor_scenarios() { echo actors >>"$CALLS"; echo smoke/fixture; }
@@ -64,13 +89,26 @@ mg_conf__cli_native() {
 EOF
 }
 
+teardown() {
+  if [ -n "$CONFORMANCE_CANCEL_PID" ]; then
+    # These tests own one background job. Resolve it through this shell's job
+    # table so teardown cannot signal a recycled PID or a fixture-supplied PID.
+    if [ "$(jobs -pr %+ 2>/dev/null)" = "$CONFORMANCE_CANCEL_PID" ]; then
+      kill -TERM %+ 2>/dev/null || :
+    fi
+    wait "$CONFORMANCE_CANCEL_PID" 2>/dev/null || :
+    CONFORMANCE_CANCEL_PID=
+  fi
+}
+
 mg() {
   run --separate-stderr "$SB/tools/mg" "$@"
   result="${lines[${#lines[@]} - 1]:-}"
 }
 
 native_scratch_stubs() {
-  export STUB_CLI="$SB/core/stub-cli" CLI_EXIT=0 CLI_WAIT=no
+  export STUB_CLI="$SB/core/stub-cli" STUB_TESTKIT="$SB/core/test binaries" CLI_EXIT=0 CLI_WAIT=no
+  mkdir -p "$STUB_TESTKIT"
   cat >"$SB/stubs/cargo" <<'EOF'
 #!/bin/sh
 printf '%s\n' "${TMPDIR-unset}" >>"$CALLS.build-tmp"
@@ -78,8 +116,56 @@ printf '%s\n' "$PWD" >>"$CALLS.build-cwd"
 printf '%s\n' "$*" >>"$CALLS.build-args"
 if [ "$1" = build ]; then
   jq -nc --arg exe "$STUB_CLI" '{reason:"compiler-artifact",target:{name:"meguri-cli"},executable:$exe}'
+elif [ "$1" = test ]; then
+  python3 -I -B "$STUB_TESTKIT/artifacts.py"
+  exit "${TESTKIT_BUILD_EXIT:-0}"
 fi
 EOF
+  cat >"$STUB_TESTKIT/artifacts.py" <<'PY'
+import json, os
+from pathlib import Path
+root = Path(os.environ["STUB_TESTKIT"])
+messages = [{"reason": "compiler-artifact", "profile": {"test": False},
+             "target": {"name": "dependency", "kind": ["lib"]}, "executable": None}]
+for name, kind in (("unit", "lib"), ("integration", "test"), ("conformance", "test")):
+    messages.append({"reason": "compiler-artifact", "profile": {"test": True},
+                     "target": {"name": name, "kind": [kind]}, "executable": str(root / name)})
+mode = os.environ.get("TESTKIT_ARTIFACT_CASE", "valid")
+if mode == "zero":
+    messages = messages[:1]
+elif mode == "missing":
+    del messages[-1]["executable"]
+elif mode in ("null", "invalid-type", "missing-file", "nonexec", "directory", "relative"):
+    messages[-1]["executable"] = {"null": None, "invalid-type": [], "missing-file": str(root / "absent"),
+        "nonexec": str(root / "artifacts.py"), "directory": str(root), "relative": "conformance"}[mode]
+elif mode == "profile":
+    del messages[-1]["profile"]
+elif mode == "target":
+    del messages[-1]["target"]
+elif mode == "duplicate":
+    messages.append(messages[-1])
+if mode != "incomplete":
+    messages.append({"reason": "build-finished", "success": mode != "failed"})
+for message in messages:
+    print(json.dumps(message))
+if mode == "malformed":
+    print("{broken")
+PY
+  cat >"$STUB_TESTKIT/unit" <<'EOF'
+#!/bin/sh
+name="${0##*/}"
+printf '%s\n' "$name" >>"$CALLS.tests"
+printf '%s\n' "$TMPDIR" >>"$CALLS.test-tmp"
+printf '%s\n' "$PWD" >>"$CALLS.test-cwd"
+printf '%s\n' "$#" >>"$CALLS.test-argc"
+if [ "${TESTKIT_WAIT:-no}" = yes ]; then
+  echo "$$" >"$CALLS.ready"
+  exec sleep 300
+fi
+[ "${TESTKIT_FAIL:-}" != "$name" ]
+EOF
+  cp "$STUB_TESTKIT/unit" "$STUB_TESTKIT/integration"
+  cp "$STUB_TESTKIT/unit" "$STUB_TESTKIT/conformance"
   cat >"$STUB_CLI" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$TMPDIR" >>"$CALLS.child-tmp"
@@ -98,22 +184,10 @@ jq -n --arg tier "$tier" '{tier:$tier,totals:{pending:0,reference:0,pass:1},fail
   scenarios:[{scenario:"smoke/fixture",status:"pass",fails:false,message:"fixture",repro:"fixture"}]}' >"$report"
 exit "$CLI_EXIT"
 EOF
-  chmod +x "$SB/stubs/cargo" "$STUB_CLI"
+  chmod +x "$SB/stubs/cargo" "$STUB_CLI" "$STUB_TESTKIT/unit" \
+    "$STUB_TESTKIT/integration" "$STUB_TESTKIT/conformance"
   cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
 eval "$(declare -f mg_fixture__real_native | sed '1s/mg_fixture__real_native/mg_conf__cli_native/')"
-mg_conf__scratch() {
-  echo "$1" >>"$CALLS.scratch"
-  [ "${SCRATCH_FAIL:-}" != "$1" ] || return 1
-  case "$1" in
-    selected) echo "${SCRATCH_SELECTED:-true}" ;;
-    prepare) mkdir -p "$MG_RUN_DIR/native-scratch/mount/tmp" ;;
-    check) [ -d "$MG_RUN_DIR/native-scratch/mount/tmp" ] ;;
-    cleanup)
-      [ -d "$MG_RUN_DIR/native-scratch" ] || return 0
-      rmdir "$MG_RUN_DIR/native-scratch/mount/tmp" "$MG_RUN_DIR/native-scratch/mount" "$MG_RUN_DIR/native-scratch"
-      ;;
-  esac
-}
 mg_conf__record_stale() {
   mg_conf__cli_native conformance run --lane plan --report "$MG_RUN_DIR/stale-before.json" "$@"
 }
@@ -135,6 +209,113 @@ EOF
   ! grep -q TMPDIR "$CALLS.docker-args"
   grep -qx docker-t0 "$CALLS"
   [ ! -e "$run_dir/native-scratch" ]
+}
+
+@test "unfiltered native testkit builds outside scratch and runs every target with defaults on the shared owner" {
+  native_scratch_stubs
+  local inherited="${TMPDIR-unset}"
+  mg conformance --live --lane all
+  [ "$status" -eq 0 ]
+  local run_dir="$(dirname "$result")"
+  [ "$(cat "$CALLS.tests")" = $'unit\nintegration\nconformance' ]
+  [ "$(grep -cx 0 "$CALLS.test-argc")" -eq 3 ]
+  [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.test-tmp")" -eq 3 ]
+  [ "$(grep -Fxc -- "$SB/core" "$CALLS.test-cwd")" -eq 3 ]
+  [ "$(grep -Fxc -- "$inherited" "$CALLS.build-tmp")" -eq 4 ]
+  [ "$(grep -Fxc -- "$SB/core" "$CALLS.build-cwd")" -eq 4 ]
+  grep -qx 'test -q -p meguri-testkit --tests --no-run --message-format=json' "$CALLS.build-args"
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ "$(grep -cx check "$CALLS.scratch")" -eq 6 ]
+  [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.child-tmp")" -eq 3 ]
+  python3 - "$CALLS.owners" <<'PY'
+import re, sys
+rows = [line.rstrip("\n").split("\t") for line in open(sys.argv[1])]
+owned = [row for row in rows if row[0] != "selected"]
+assert {row[0] for row in owned} == {"prepare", "check", "cleanup"}
+assert len({(row[1], row[2]) for row in owned}) == 1
+assert all(re.fullmatch("[0-9a-f]{32}", row[2]) for row in owned)
+PY
+  [ -s "$run_dir/native-testkit-build.jsonl" ]
+  [ -s "$run_dir/native-build.jsonl" ]
+  [ ! -e "$run_dir/native-scratch" ]
+}
+
+@test "native testkit failure continues all remaining binaries and CLI before final failure" {
+  native_scratch_stubs
+  export TESTKIT_FAIL=unit
+  mg conformance --lane native
+  [ "$status" -eq 1 ]
+  jq -e '.status=="fail" and any(.failures[]; .id=="native/testkit" and .repro=="tools/mg conformance --lane native")' "$result"
+  [ "$(cat "$CALLS.tests")" = $'unit\nintegration\nconformance' ]
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ "$(grep -cx check "$CALLS.scratch")" -eq 4 ]
+  [ "$(wc -l <"$CALLS.child-tmp")" -eq 1 ]
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+}
+
+@test "native testkit refuses zero malformed incomplete or invalid artifacts before any binary executes" {
+  native_scratch_stubs
+  local mode
+  for mode in zero malformed incomplete missing null invalid-type missing-file nonexec directory relative profile target duplicate failed; do
+    export TESTKIT_ARTIFACT_CASE="$mode"
+    mg conformance --lane native
+    [ "$status" -eq 2 ]
+    jq -e '.status=="error" and any(.failures[]; .id=="native/testkit-build")' "$result"
+    [ ! -e "$CALLS.tests" ]
+    [ ! -e "$CALLS.child-tmp" ]
+    [ ! -s "$(dirname "$result")/native-testkit-executables" ]
+    [ ! -e "$(dirname "$result")/native-scratch" ]
+  done
+  ! grep -qx prepare "$CALLS.scratch"
+  [ "$(grep -cx cleanup "$CALLS.scratch")" -eq 14 ]
+}
+
+@test "native testkit compilation failure preserves host environment and cleans earlier replay scratch" {
+  native_scratch_stubs
+  export TESTKIT_BUILD_EXIT=9
+  local inherited="${TMPDIR-unset}"
+  mg conformance --live --lane native
+  [ "$status" -eq 2 ]
+  jq -e '.status=="error" and any(.failures[]; .id=="native/testkit-build")' "$result"
+  [ ! -e "$CALLS.tests" ]
+  [ "$(grep -Fxc -- "$inherited" "$CALLS.build-tmp")" -eq 2 ]
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ "$(grep -cx cleanup "$CALLS.scratch")" -eq 1 ]
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+}
+
+@test "native testkit scratch check failure cleans without executing or falling back" {
+  native_scratch_stubs
+  export SCRATCH_FAIL=check
+  mg conformance --lane native
+  [ "$status" -eq 2 ]
+  jq -e '.status=="error" and any(.failures[]; .id=="native/scratch")' "$result"
+  [ ! -e "$CALLS.tests" ]
+  [ ! -e "$CALLS.child-tmp" ]
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
+  [ "$(grep -cx cleanup "$CALLS.scratch")" -eq 1 ]
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+}
+
+@test "separate native testkit runs use distinct scratch roots and owner tokens" {
+  native_scratch_stubs
+  mg conformance --lane native
+  [ "$status" -eq 0 ]
+  local first="$(dirname "$result")"
+  mg conformance --lane native
+  [ "$status" -eq 0 ]
+  local second="$(dirname "$result")"
+  [ "$first" != "$second" ]
+  [ "$(grep -Fxc -- "$first/native-scratch/mount/tmp" "$CALLS.test-tmp")" -eq 3 ]
+  [ "$(grep -Fxc -- "$second/native-scratch/mount/tmp" "$CALLS.test-tmp")" -eq 3 ]
+  python3 - "$CALLS.owners" <<'PY'
+import sys
+rows = [line.rstrip("\n").split("\t") for line in open(sys.argv[1])]
+tokens = [row[2] for row in rows if row[0] == "prepare"]
+assert len(tokens) == len(set(tokens)) == 2
+PY
+  [ ! -e "$first/native-scratch" ]
+  [ ! -e "$second/native-scratch" ]
 }
 
 @test "native process failure cleans scratch and preserves failure" {
@@ -160,8 +341,9 @@ EOF
   native_scratch_stubs
   export CLI_WAIT=yes
   local out="$BATS_TEST_TMPDIR/out" pid rc=0 ready=
-  "$SB/tools/mg" conformance --lane native smoke/fixture >"$out" 2>"$BATS_TEST_TMPDIR/err" 3>&- &
+  "$SB/tools/mg" conformance --lane native smoke/fixture </dev/null >"$out" 2>"$BATS_TEST_TMPDIR/err" 3>&- &
   pid=$!
+  CONFORMANCE_CANCEL_PID=$pid
   for _ in $(seq 100); do
     ready="$(cat "$CALLS.ready" 2>/dev/null)" && [ -n "$ready" ] && break
     sleep 0.1
@@ -169,10 +351,36 @@ EOF
   [ -n "$ready" ]
   kill -TERM "$pid"
   wait "$pid" || rc=$?
+  CONFORMANCE_CANCEL_PID=
   [ "$rc" -eq 2 ]
   result="$(cat "$out")"
   jq -e '.status=="error" and any(.failures[]; .id=="cancelled")' "$result"
   ! kill -0 "$ready" 2>/dev/null
+  [ ! -e "$(dirname "$result")/native-scratch" ]
+  grep -qx cleanup "$CALLS.scratch"
+}
+
+@test "MG cancellation stops native testkit before owner cleanup and never starts later targets" {
+  native_scratch_stubs
+  export TESTKIT_WAIT=yes
+  local out="$BATS_TEST_TMPDIR/out" pid rc=0 ready=
+  "$SB/tools/mg" conformance --lane native </dev/null >"$out" 2>"$BATS_TEST_TMPDIR/err" 3>&- &
+  pid=$!
+  CONFORMANCE_CANCEL_PID=$pid
+  for _ in $(seq 100); do
+    ready="$(cat "$CALLS.ready" 2>/dev/null)" && [ -n "$ready" ] && break
+    sleep 0.1
+  done
+  [ -n "$ready" ]
+  kill -TERM "$pid"
+  wait "$pid" || rc=$?
+  CONFORMANCE_CANCEL_PID=
+  [ "$rc" -eq 2 ]
+  result="$(cat "$out")"
+  jq -e '.status=="error" and any(.failures[]; .id=="cancelled")' "$result"
+  ! kill -0 "$ready" 2>/dev/null
+  [ "$(cat "$CALLS.tests")" = unit ]
+  [ ! -e "$CALLS.child-tmp" ]
   [ ! -e "$(dirname "$result")/native-scratch" ]
   grep -qx cleanup "$CALLS.scratch"
 }
@@ -241,7 +449,7 @@ EOF
 import json, pathlib, shlex, sys
 calls, run_dir, root = sys.argv[1:]
 assert pathlib.Path(calls + '.cargo-args').read_text().splitlines() == [
-    'test', '-q', '-p', 'meguri-testkit', '--tests', '--no-fail-fast',
+    'test', '-q', '-p', 'meguri-testkit', '--tests', '--no-run', '--message-format=json',
 ]
 native = [json.loads(line) for line in pathlib.Path(calls + '.args').read_text().splitlines()]
 assert len(native) == 2

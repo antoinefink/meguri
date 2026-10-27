@@ -111,6 +111,48 @@ mg_conf__native_cleanup() {
   mg_conf__scratch cleanup || { mg_conf__native_error; return 1; }
 }
 
+# Shared by testkit binaries and CLI/replay, always in the job shell.
+mg_conf__native_owner() {
+  [ "${MG_CONF_NATIVE_ERROR:-false}" = false ] || return 2
+  if [ -z "${MG_CONF_NATIVE_OWNER:-}" ]; then
+    MG_CONF_NATIVE_OWNER="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" \
+      || { mg_conf__native_error; return 2; }
+    mg_on_exit mg_conf__native_cleanup
+  fi
+}
+
+mg_conf__native_ready() {
+  [ "${MG_CONF_NATIVE_ERROR:-false}" = false ] || return 2
+  if [ -z "${MG_CONF_NATIVE_TMPDIR:-}" ]; then
+    mg_conf__scratch prepare || { mg_conf__native_error; return 2; }
+    MG_CONF_NATIVE_TMPDIR="$MG_RUN_DIR/native-scratch/mount/tmp"
+  fi
+  mg_conf__scratch check || { mg_conf__native_error; return 2; }
+}
+
+# Same lib + integration coverage as cargo test --tests (including harness=false;
+# no doctests). Build outside scratch, validate the entire artifact stream before
+# launching anything, then retain --no-fail-fast across the emitted binaries.
+mg_conf__testkit_native() {
+  local executable rc=0
+  mg_conf__native_owner || return 2
+  if ! (cd "$MG_ROOT/core" && cargo test -q -p meguri-testkit --tests --no-run --message-format=json) \
+      >"$MG_RUN_DIR/native-testkit-build.jsonl" \
+    || ! python3 -I -B "$MG_ROOT/tools/mg.d/conformance-test-executables.py" \
+      "$MG_RUN_DIR/native-testkit-build.jsonl" >"$MG_RUN_DIR/native-testkit-executables"; then
+    mg_failure native/testkit-build "Cargo did not report a complete executable testkit suite; see log.txt" \
+      "tools/mg conformance --lane native"
+    MG_CONF_NATIVE_ERROR=true
+    mg_status error
+    return 2
+  fi
+  while IFS= read -r -d '' executable; do
+    mg_conf__native_ready || return 2
+    (cd "$MG_ROOT/core" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable") || rc=1
+  done <"$MG_RUN_DIR/native-testkit-executables"
+  return "$rc"
+}
+
 # mg_conf__cli_native <args...>: meguri-cli on the host (macOS).
 # Only scenario execution inherits scratch TMPDIR; Cargo and metadata commands
 # retain the host environment. This also covers the T0 freshness replay and
@@ -127,12 +169,7 @@ mg_conf__cli_native() {
     (cd "$MG_ROOT/core" && cargo run -q -p meguri-cli -- "$@")
     return $?
   fi
-  [ "${MG_CONF_NATIVE_ERROR:-false}" = false ] || return 2
-  # Register in the job shell, before any allocation (never in $(...)).
-  if [ -z "${MG_CONF_NATIVE_TMPDIR:-}" ]; then
-    MG_CONF_NATIVE_OWNER="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 2
-    mg_on_exit mg_conf__native_cleanup
-  fi
+  mg_conf__native_owner || return 2
   (cd "$MG_ROOT/core" && cargo build -q -p meguri-cli --message-format=json) \
     >"$MG_RUN_DIR/native-build.jsonl" || { MG_CONF_NATIVE_ERROR=true; mg_status error; return 2; }
   if ! executable="$(jq -ers '[.[] | select(.reason=="compiler-artifact" and .target.name=="meguri-cli" and .executable!=null) | .executable]
@@ -145,11 +182,7 @@ mg_conf__cli_native() {
     MG_CONF_NATIVE_ERROR=true
     return 2
   fi
-  if [ -z "${MG_CONF_NATIVE_TMPDIR:-}" ]; then
-    mg_conf__scratch prepare || { mg_conf__native_error; return 2; }
-    MG_CONF_NATIVE_TMPDIR="$MG_RUN_DIR/native-scratch/mount/tmp"
-  fi
-  mg_conf__scratch check || { mg_conf__native_error; return 2; }
+  mg_conf__native_ready || return 2
   (cd "$MG_ROOT/core" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "$@")
   rc=$?
   return "$rc"
@@ -228,11 +261,13 @@ mg_conformance() {
     local native="$MG_RUN_DIR/t0-native.json"
     if [ "${#filters[@]}" -eq 0 ]; then
       echo "conformance: testkit tests (macOS native)" >&2
-      if ! (cd core && cargo test -q -p meguri-testkit --tests --no-fail-fast) >&2; then
+      mg_conf__testkit_native >&2
+      rc=$?
+      if [ "$rc" -eq 1 ]; then
         mg_failure native/testkit "meguri-testkit tests failed natively on macOS; see log.txt" \
-          "cd core && cargo test -p meguri-testkit --tests"
-        failed=true
+          "tools/mg conformance --lane native"
       fi
+      [ "$rc" -eq 0 ] || failed=true
     fi
     mg_conf__cli_native conformance run --conformance "$MG_ROOT/conformance" --lane macos-native \
       --report "$native" ${filters[0]+"${filters[@]}"}
@@ -282,7 +317,7 @@ mg_conformance() {
     tiers="T0 and T1"
   fi
   if [ "${MG_CONF_NATIVE_ERROR:-false}" = true ]; then
-    mg_message "conformance: native scratch environment error; see log.txt"
+    mg_message "conformance: native build or scratch environment error; see log.txt"
     mg_status error
   elif [ "$failed" = true ] || [ -s "$MG_STATE/failures.jsonl" ]; then
     mg_message "conformance: $tiers failed ($summary)"
