@@ -901,7 +901,8 @@ mod host_tests {
                 &path,
                 format!(
                     "id: host/actor-backup\nclock: {{tz: UTC, start: '2030-01-15T10:00:00'}}\n\
-                     actors: [meguri]\nsetup: {{decks: [Protected]}}\nsteps:\n  - {op}\n"
+                     actors: [meguri]\nsetup:\n  decks: [Protected]\n  \
+                     notes: [{{notetype: Basic, deck: Protected, fields: [front, back]}}]\nsteps:\n  - {op}\n"
                 ),
             )
             .unwrap();
@@ -910,6 +911,7 @@ mod host_tests {
             let actor = loaded.scenario.actors()[0].clone();
             let mut actors = executor.actors(&loaded, std::slice::from_ref(&actor)).unwrap();
             let ids = actors.setup(&actor).unwrap();
+            assert_eq!(ids.cards.len(), 1);
             let (output, _) = actors.step(&actor, &loaded.scenario.steps[0], &ids).unwrap();
             let session = actors.session(&actor).unwrap();
             let backups = session.storage.backup_directory_for_testing();
