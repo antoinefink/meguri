@@ -1,0 +1,39 @@
+# A live chain (T1; specs/package/legacy-export.md L7, L12; apkg-export.md
+# A3, A4, A5, A7; package-ops.md E6, E8; R1619, R1620). apkg-export/
+# deck-with-subdecks with Support older Anki versions on: Meguri writes the
+# legacy deck package of A (A, A::B, empty A::C, A::B::D on preset Slow)
+# with scheduling and presets, then deletes A and its subdecks; Anki imports
+# the package with scheduling and presets. The dump must equal the oracle's
+# own legacy export and import: A's notes, cards and review log back, A, A::B
+# and A::B::D added again (A::C, empty, was not exported), Slow kept. Note
+# types are not compared: Meguri's new collection has its own stock note
+# types.
+id: package/legacy-export/apkg-oracle-import
+description: A legacy deck package written by Meguri imports in Anki as Anki's own legacy export does.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5}
+  decks: [{name: A, preset: Slow}, "A::B", "A::C", "A::B::D", Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: A, fields: [one, a]}
+    - {notetype: Pair, deck: "A::B", fields: [two, b]}
+    - {notetype: Pair, deck: "A::B::D", fields: [three, c]}
+    - {notetype: Pair, deck: Other, fields: [four, d]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  - advance: 1m
+  - export: {format: apkg, name: a.apkg, limit: {deck: A}, scheduling: true, presets: true, media: false, legacy: true}
+  - delete_decks: {decks: [A]}
+  - advance: 1m
+  - handoff: oracle
+  - observe: [timing]
+  - import: {format: apkg, name: a.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks, deck_config, graves]}

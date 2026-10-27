@@ -1,0 +1,31 @@
+# A live chain (T1; specs/package/legacy-export.md L8, L12; apkg-export.md
+# A14; package-ops.md E2, E9; engine/collection-replace.md R7; R1619,
+# R1625). Meguri opens the standard collection, puts two files in its media
+# folder and writes a legacy collection package with media. Anki removes the
+# two files, imports the package and finds the source's rows and files: the
+# dump equals Anki's own legacy export and import (D7's documented fields as
+# the downgrade leaves them; col.scm and col.mod the import instant) and the
+# media folder holds the two files again. Nothing is observed between the
+# export and the import (L13).
+id: package/legacy-export/colpkg-oracle-import
+description: A legacy collection package with media written by Meguri imports in Anki to the source's rows and files.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - advance: 1m
+  - media_outside:
+      - {name: p.png, text: "picture"}
+      - {name: q.txt, text: "unused text"}
+  - observe: [db_dump]
+  - observe: [media_dir]
+  - export: {format: colpkg, name: legacy.colpkg, legacy: true, media: true}
+  - handoff: oracle
+  - media_outside:
+      - {name: p.png, remove: true}
+      - {name: q.txt, remove: true}
+  - advance: 1m
+  - import: {format: colpkg, name: legacy.colpkg}
+  - observe: [timing]
+  - observe: [db_dump]
+  - observe: [media_dir]

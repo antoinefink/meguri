@@ -1,0 +1,31 @@
+# A live chain (T1; specs/package/apkg-export.md A14; container.md P15;
+# file-export.md E7; package-ops.md E2, E9; engine/collection-replace.md R7;
+# R1619, R1625). Meguri opens the standard collection, puts two files in its
+# media folder and writes a collection package with media (latest format).
+# Anki removes the two files, imports the package and finds the source's
+# rows and files: the dump equals the source's except col.scm and col.mod,
+# the import instant, and the media folder holds the two files again.
+id: package/apkg-export/colpkg/export-with-media
+description: A collection package with media written by Meguri imports in Anki to the source's rows and files.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - advance: 1m
+  - media_outside:
+      - {name: p.png, text: "picture"}
+      - {name: q.txt, text: "unused text"}
+  - observe: [db_dump]
+  - observe: [media_dir]
+  - export: {format: colpkg, name: media.colpkg, media: true}
+  - handoff: oracle
+  - media_outside:
+      - {name: p.png, remove: true}
+      - {name: q.txt, remove: true}
+  - advance: 1m
+  - import: {format: colpkg, name: media.colpkg}
+  - observe: [timing]
+  - observe: [db_dump]
+  - observe: [media_dir]
+  - observe:
+      - package_listing: {name: media.colpkg}

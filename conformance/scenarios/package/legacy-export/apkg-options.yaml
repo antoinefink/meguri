@@ -1,0 +1,65 @@
+# A legacy deck package without scheduling, presets on (specs/package/
+# legacy-export.md L1, L4, L7; apkg-export.md A3, A6, A7; package-ops.md E8,
+# E11; model-ops.md L7). Deck Lang (with Lang::Verbs on preset Slow) holds a
+# review card, a suspended learning card, a buried card with a pos key and a
+# flagged relearning card with memory state; a card of Lang::Verbs held by
+# the filtered deck Cram does not select its note (A2), and Other is not
+# exported. The schema-11 file holds A6's scrubbed rows: every card new at
+# its position or from nextPos on, flags 0, no review log; marked and leech
+# tags gone; its decks and presets (read with package_col) are Lang,
+# Lang::Verbs and the default deck on their presets, limits dropped. The
+# package's models and conf columns are not read (stock note types,
+# curModel: L13).
+id: package/legacy-export/apkg-options
+description: A legacy deck package without scheduling holds A6's scrubbed rows at schema 11.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5, fsrs_params: [0.4, 1.2, 3.1, 15.6, 7.2, 0.5, 1.4, 0.005, 1.5, 0.12, 1.0, 1.9, 0.11, 0.3, 2.3, 0.23, 2.9, 0.5, 0.67, 0.1, 0.2]}
+  decks: [Lang, {name: "Lang::Verbs", preset: Slow}, Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a], tags: [marked, Leech, keep]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [three, c]}
+    - {notetype: Pair, deck: Lang, fields: [four, d]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [five, e]}
+    - {notetype: Pair, deck: Lang, fields: [six, f]}
+    - {notetype: Pair, deck: Other, fields: [seven, g]}
+steps:
+  - observe: [timing]
+  - save_deck_options: {deck: Lang, limits: {new: 5, review: 50, new_today: 3, review_today: 30}}
+  - answer: {card: "#c1", rating: good}
+  # Card states by row number (ascending id), every card stamped alike.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6, reps = v.column7, lapses = v.column8, left = v.column9, flags = v.column10, data = v.column11, mod = 1894701000, usn = 0
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, 5, 10, 2500, 3, 0, 0, 0, '{}'),
+          (2, 1, -1, 1894702200, 0, 2500, 1, 0, 1002, 0, '{}'),
+          (3, 2, -2, 4, 8, 2500, 4, 0, 0, 2, '{"pos":2}'),
+          (4, 3, 1, 1894702200, 3, 2100, 6, 2, 1, 3, '{"s":3.5,"d":5.0,"dr":0.9,"lrt":1894600000}'),
+          (5, 0, 0, 3, 0, 0, 0, 0, 0, 0, '{}'),
+          (6, 0, 0, 6, 0, 0, 0, 0, 0, 0, '{}'),
+          (7, 0, 0, 7, 0, 0, 0, 0, 0, 0, '{}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # A filtered deck Cram (fixed id 900) holds c5, its home deck Lang::Verbs.
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = 3, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+  - set_config: {key: nextPos, value: 8}
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: lang.apkg, limit: {deck: Lang}, scheduling: false, presets: true, media: false, legacy: true}
+  - observe:
+      - package_db_dump: {name: lang.apkg, tables: [notes, cards, revlog, graves]}
+  - observe:
+      - package_col: {name: lang.apkg, columns: [ver, decks, dconf, tags]}
