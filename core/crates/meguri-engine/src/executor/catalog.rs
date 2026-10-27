@@ -135,6 +135,8 @@ pub const UNDO_LONG_WRITE: OpDef = OpDef::long_write("undo_long_write", UndoClas
 /// Redo of a step whose op declared a long write.
 pub const REDO_LONG_WRITE: OpDef = OpDef::long_write("redo_long_write", UndoClass::Undoable, false);
 
+/// Stable no-writer window for the damaged main/WAL copy (backup-triggers T7).
+pub const DAMAGED_BACKUP: OpDef = OpDef::maintenance("damaged_backup");
 /// `VACUUM` (U128, U132).
 pub const VACUUM: OpDef = OpDef::maintenance("vacuum");
 /// `REINDEX` (U128).
@@ -145,7 +147,7 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 15] = [
+pub const CATALOG: [OpDef; 16] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
@@ -161,6 +163,7 @@ pub const CATALOG: [OpDef; 15] = [
     REINDEX,
     ANALYZE,
     WAL_CHECKPOINT,
+    DAMAGED_BACKUP,
 ];
 
 /// The catalog entry named `name`.

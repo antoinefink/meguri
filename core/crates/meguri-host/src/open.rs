@@ -189,6 +189,8 @@ pub struct CoreHost {
     media: Arc<MediaPort>,
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
+    backup_inputs: meguri_package::entry::EntryInputs,
+    initial_open: OpenConfig,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
 }
@@ -255,6 +257,7 @@ impl CoreHost {
             config.disk_space_provider.clone(),
         ));
         let export = crate::collection_export::ExportInputs::new(&config);
+        let backup_inputs = config.entry_inputs();
         #[cfg(feature = "test-hooks")]
         let backup = config.test_backup.unwrap_or(backup);
         let mut options = OpenConfig::new(config.clock.clone(), config.random.clone())
@@ -262,6 +265,7 @@ impl CoreHost {
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();
+        options.backup_entry_times = config.backup_entry_times.clone();
         let manual_transfers = meguri_sync::oneway::ManualTransfers::new(meguri_sync::oneway::TransferInputs {
             engine: engine.clone(),
             collection_directory: config.collection_directory.clone(),
@@ -275,6 +279,8 @@ impl CoreHost {
         });
         let host = Self {
             manual_transfers,
+            backup_inputs,
+            initial_open: options.clone(),
             export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),
@@ -307,6 +313,23 @@ impl CoreHost {
 
     pub fn review(&self) -> &meguri_engine::session::ReviewService {
         &self.review
+    }
+
+    pub fn restore_backup(
+        &self,
+        name: &str,
+        cancel: &Arc<meguri_engine::CancelToken>,
+        progress: &meguri_engine::ProgressSink,
+    ) -> Result<meguri_package::restore::RestoredBackup, meguri_package::restore::RestoreError> {
+        meguri_package::restore::restore_backup(
+            &self.engine,
+            &self.backup_inputs,
+            self.initial_open.clone(),
+            self.backup.as_ref(),
+            name,
+            cancel,
+            progress,
+        )
     }
 
     pub fn backup(&self) -> Arc<dyn BackupService> {

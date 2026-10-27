@@ -31,6 +31,7 @@ pub(super) fn register(registry: &mut Registry) {
     registry.observation("package_listing", listing);
     registry.op("add_backup_files", add_backup_files);
     registry.op("force_backup", force_backup);
+    registry.op("backup", backup);
     registry.op("save_backup_settings", save_backup_settings);
     registry.observation("backup_files", backup_files);
     registry.observation("backup_settings", backup_settings);
@@ -301,6 +302,38 @@ fn force_backup(session: &mut Session<'_>, step: &Step) -> Result<OpResult, Exec
         fs::copy(directory.join(&receipt.name), session.storage.dir()?.join(name)).map_err(error)?;
     }
     Ok(OpResult::Output(json!({"name": receipt.name})))
+}
+
+// H2: each entry appears newly created under the oracle's frozen clock.
+pub(super) struct ScenarioBackupEntryTimes(pub std::sync::Arc<dyn Clock>);
+impl meguri_engine::maintenance::BackupEntryTimes for ScenarioBackupEntryTimes {
+    fn read(&self, directory: &std::path::Path) -> Result<Vec<i128>, meguri_engine::EngineError> {
+        match fs::read_dir(directory) {
+            Ok(entries) => entries
+                .map(|entry| {
+                    entry
+                        .map(|_| i128::from(self.0.now_ms()) * 1_000_000)
+                        .map_err(|e| meguri_storage::StorageError::from(e).into())
+                })
+                .collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(meguri_storage::StorageError::from(e).into()),
+        }
+    }
+}
+fn backup(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::Backup(args) = step else {
+        return Err(invalid("expected backup"));
+    };
+    session.engine_collection()?;
+    let host = session.storage.host()?;
+    let cancel = meguri_engine::CancelToken::default();
+    let written = if args.force {
+        Some(host.engine().back_up_now(&cancel).map_err(error)?)
+    } else {
+        host.engine().backup_if_changed(&cancel).map_err(error)?
+    };
+    Ok(OpResult::Output(json!({"name": written.map(|w| w.receipt.name)})))
 }
 
 fn save_backup_settings(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {

@@ -238,6 +238,7 @@ impl Exclusive<'_> {
                     tracked,
                     media,
                     threads,
+                    None,
                 )
                 .map_err(|e| {
                     *record.lock().unwrap() = Some(e.clone());
@@ -275,17 +276,24 @@ pub(crate) fn swap(
     binding: &AccountBinding,
     random: &dyn meguri_model::rng::RandomSource,
     activated: &std::sync::atomic::AtomicBool,
-    mut media: Option<&mut PreparedMedia>,
+    recovery: (Option<&mut PreparedMedia>, Option<device_state::RawRestoreAuthority>),
 ) -> Result<(), ReplaceError> {
+    let (mut media, raw) = recovery;
     use meguri_storage::{atomic_file, verified_replace as storage};
-    let cancel = media.as_ref().and_then(|m| m.cancel.clone());
+    let cancel = media
+        .as_ref()
+        .and_then(|m| m.cancel.clone())
+        .or_else(|| stage.media_cancel.clone());
     let cancelled = || cancel.as_ref().is_some_and(|c| c());
     if cancelled() {
         return Err(EngineError::Cancelled.into());
     }
     storage::check_device(&stage, live)?;
     meguri_model::faultpoint!("replace.before_live_wal_check")?;
-    storage::check_live_wal(live)?;
+    let retained_wal = raw.is_some();
+    if !retained_wal {
+        storage::check_live_wal(live)?;
+    }
     // Every replacement retires queued tokens. Manual Import requires a new
     // publication decision; Export preserves the exact prior decision.
     let intent = media.as_ref().map(|m| m.intent.clone());
@@ -294,7 +302,7 @@ pub(crate) fn swap(
         reason,
         binding,
         random,
-        intent,
+        (intent, raw),
         &cancelled,
         || {
             if let Some(m) = media.as_mut() {
@@ -312,6 +320,10 @@ pub(crate) fn swap(
         }
     })?;
     meguri_model::faultpoint!("replace.after_pause_recorded")?;
+    if retained_wal {
+        device_state::retire_restore_wal(live)?;
+    }
+    storage::check_live_wal(live)?;
     storage::remove_empty_live_sidecars(live)?;
     meguri_model::faultpoint!("replace.after_live_wal_removed")?;
     if let Some(media) = media.as_mut() {
@@ -343,6 +355,7 @@ pub(crate) fn swap(
     if cancelled() {
         return Err(EngineError::Cancelled.into());
     }
+    storage::check_live_wal(live)?;
     std::fs::rename(stage.path(), live)?;
     activated.store(true, std::sync::atomic::Ordering::Release);
     meguri_model::faultpoint!("replace.after_rename")?;
@@ -350,7 +363,11 @@ pub(crate) fn swap(
     meguri_model::faultpoint!("replace.after_dir_sync")?;
     // Media completion is reconciled by run_swap before any writer reopens.
     if media.is_none() {
-        device_state::activate(live, binding)?;
+        if retained_wal {
+            device_state::finish_restore_wal(live, binding)?;
+        } else {
+            device_state::activate(live, binding)?;
+        }
     }
     // TempDir removes only the operation-owned directory, best effort.
     drop(stage);
@@ -561,9 +578,10 @@ pub(crate) fn run_swap(
     activated: Arc<std::sync::atomic::AtomicBool>,
     mut media: Option<PreparedMedia>,
     threads: crate::ThreadRegistry,
+    raw: Option<device_state::RawRestoreAuthority>,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
-        return swap(live, stage, reason, &binding, random.as_ref(), &activated, None);
+        return swap(live, stage, reason, &binding, random.as_ref(), &activated, (None, raw));
     }
     let cleanup_error = media.as_ref().unwrap().cleanup_error.clone();
     let live = live.to_owned();
@@ -585,7 +603,7 @@ pub(crate) fn run_swap(
                         &binding,
                         random.as_ref(),
                         &activated,
-                        media.as_mut(),
+                        (media.as_mut(), raw),
                     )
                 }))
                 .unwrap_or_else(|_| {

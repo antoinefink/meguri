@@ -1,9 +1,12 @@
 //! B8 / R1848 / R1852: production streamed backup plus retention, U12 harness.
 //! MG discovers this Cargo target; fixtures are prepared by the existing job.
 use criterion::Criterion;
-use meguri_engine::CancelToken;
-use meguri_model::clock::{StepClock, UtcOffset};
+use meguri_engine::{
+    CancelToken, backup_limits, browser_config, device_state::DeviceState, maintenance::MaintenanceTrigger,
+};
+use meguri_model::clock::{Clock, StepClock, UtcOffset};
 use meguri_package::backup::naming;
+use meguri_storage::{ReadRows, ReaderRole};
 use meguri_testkit::bench::{
     fixtures,
     peak_alloc::PeakAlloc,
@@ -24,6 +27,7 @@ fn main() -> ExitCode {
     group.sample_size(10);
     for size in sizes.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let fixture = fixtures::profile_collection(size).expect("prepared generated fixture");
+        assert!(fixture.reused, "prepare fixtures before the benchmark process");
         let copy = fixture.working_copy().expect("isolated working copy");
         let backup_directory = tempfile::tempdir().expect("isolated backup directory");
         let backups = backup_directory.path().join("backups");
@@ -54,6 +58,50 @@ fn main() -> ExitCode {
             })
         });
         suite.push(measurement.finish());
+        if size == "150k" {
+            // Use the public settings operation so OS entry times cannot defer
+            // these Quit backups. Keep the real writer and retention limits.
+            let mut limits = backup_limits::read(&*collection.reader(ReaderRole::Query).unwrap()).unwrap();
+            limits.minimum_interval_mins = 0;
+            backup_limits::save(&collection, limits).unwrap();
+            let state = DeviceState::for_collection(collection.path());
+            let mut quit = Measurement::start("package.backup.quit", Some(size));
+            group.bench_function(format!("quit_with_pending_change/{size}"), |b| {
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        // Prepare a real committed change before each sample,
+                        // including Criterion warm-up. Never write col.mod.
+                        let previous = state.last_backup().unwrap().unwrap();
+                        clock.step_ms(86_400_000);
+                        let search = format!("deck:quit-benchmark-{}", clock.now_ms());
+                        assert!(
+                            browser_config::set_default_search_text(&collection, &search)
+                                .unwrap()
+                                .value
+                        );
+                        let modified = collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified;
+                        assert_ne!(modified.0, previous.snapshot_mod);
+                        let mut outcome = None;
+                        total += quit.run(1, |_| {
+                            outcome = Some(host.engine().run_due_maintenance(MaintenanceTrigger::Quit));
+                        });
+                        // Quit may report writer failure through logging. Prove
+                        // publication as well as a successful entry-point return.
+                        assert_eq!(outcome.unwrap().unwrap(), None);
+                        let published = state.last_backup().unwrap().unwrap();
+                        assert_ne!(published.name, previous.name);
+                        assert_eq!(published.snapshot_mod, modified.0);
+                        assert_eq!(published.instant, clock.now_ms());
+                        let path = backups.join(&published.name);
+                        assert!(fs::symlink_metadata(path).unwrap().is_file());
+                        assert!(fs::metadata(backups.join(&published.name)).unwrap().len() > 0);
+                    }
+                    total
+                })
+            });
+            suite.push(quit.finish());
+        }
         host.close().unwrap();
     }
     group.finish();
@@ -66,7 +114,8 @@ fn main() -> ExitCode {
     for record in suite.records() {
         let maximum = record.percentile(Percentile::Max);
         eprintln!(
-            "backup {}: max {maximum:?}, peak {} bytes",
+            "{} {}: max {maximum:?}, peak {} bytes",
+            record.name,
             record.fixture.as_deref().unwrap_or("-"),
             record.memory_peak_bytes
         );

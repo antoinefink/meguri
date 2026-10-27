@@ -53,9 +53,24 @@ impl SlotGuard {
     /// `check_verified_review` again after exclusive entry, before write-bearing
     /// preparation or remote mutation.
     pub fn check_verified_review(&self, reason: crate::replace::ReplaceReason) -> Result<(), EngineError> {
+        self.check_review(reason.refuses_active_review())
+    }
+
+    /// T8 consumer admission; the legacy low-level Restore primitive keeps its
+    /// existing semantics. Call before entry and again after exclusive drain.
+    pub fn check_restore_review(&self) -> Result<(), EngineError> {
+        if self.op != LongOp::Restore {
+            return Err(EngineError::InvalidArgument {
+                message: "restore slot required".into(),
+            });
+        }
+        self.check_review(true)
+    }
+
+    fn check_review(&self, refuses: bool) -> Result<(), EngineError> {
         let state = self.engine.lock_state();
         self.check_held(&state)?;
-        if reason.refuses_active_review()
+        if refuses
             && state
                 .current
                 .as_ref()
@@ -88,10 +103,40 @@ impl SlotGuard {
         &self,
         live: &std::path::Path,
         config: crate::OpenConfig,
-        mut stage: crate::replace::ReplacementStage,
+        stage: crate::replace::ReplacementStage,
         reason: crate::replace::ReplaceReason,
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
         before_commit: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<Collection, crate::replace::ReplaceError> {
+        self.replace_verified_initial_with_raw(live, config, stage, reason, change, || before_commit().map(|()| None))
+    }
+
+    /// T8 initial entry alone may supply T7 authority after candidate validation.
+    pub fn restore_verified_initial_before_commit(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        stage: crate::replace::ReplacementStage,
+        before_commit: impl FnOnce() -> Result<Option<crate::device_state::RawRestoreAuthority>, EngineError>,
+    ) -> Result<Collection, crate::replace::ReplaceError> {
+        self.replace_verified_initial_with_raw(
+            live,
+            config,
+            stage,
+            crate::replace::ReplaceReason::Restore,
+            |_| Ok(()),
+            before_commit,
+        )
+    }
+
+    fn replace_verified_initial_with_raw(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        mut stage: crate::replace::ReplacementStage,
+        reason: crate::replace::ReplaceReason,
+        change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
+        before_commit: impl FnOnce() -> Result<Option<crate::device_state::RawRestoreAuthority>, EngineError>,
     ) -> Result<Collection, crate::replace::ReplaceError> {
         use crate::replace::ReplaceError;
         if self.op != reason.long_op() {
@@ -170,11 +215,17 @@ impl SlotGuard {
             } else {
                 None
             };
-            if let Err(error) = before_commit() {
-                return Err(match media {
-                    Some(media) => media.abort(error.into()),
-                    None => error.into(),
-                });
+            let raw = match before_commit() {
+                Ok(raw) => raw,
+                Err(error) => {
+                    return Err(match media {
+                        Some(media) => media.abort(error.into()),
+                        None => error.into(),
+                    });
+                }
+            };
+            if raw.is_some() {
+                meguri_model::faultpoint!("replace.wal.after_authority")?;
             }
             let media_recovered = media.as_ref().map(|m| m.recovered.clone());
             // Retain the existing identity before beginning the first intent.
@@ -199,6 +250,7 @@ impl SlotGuard {
                 activated.clone(),
                 media,
                 self.engine.threads().clone(),
+                raw,
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
             if media_recovered

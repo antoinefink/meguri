@@ -15,6 +15,7 @@ public struct CoreEvent: Sendable, Hashable {
     public enum Kind: Sendable, Hashable {
         case lifecycle(CollectionLifecycle)
         case mediaArrived(names: [String])
+        case maintenanceDeadline(at: Int64?)
         case available
         case sessionStarted(sessionId: UInt64, deckId: Int64)
         case sessionEnded(sessionId: UInt64)
@@ -50,6 +51,7 @@ public struct CoreEvent: Sendable, Hashable {
         switch event.kind {
         case .lifecycle(let state): kind = .lifecycle(CollectionLifecycle(state))
         case .mediaArrived(let names): kind = .mediaArrived(names: names)
+        case .maintenanceDeadline(let at): kind = .maintenanceDeadline(at: at)
         case .available: kind = .available
         case .sessionStarted(let sessionId, let deckId):
             kind = .sessionStarted(sessionId: sessionId, deckId: deckId)

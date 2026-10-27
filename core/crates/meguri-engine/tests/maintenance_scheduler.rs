@@ -1,5 +1,7 @@
 //! The first U127 slice: shared T6 safety admission, not periodic scheduling.
 mod common;
+#[path = "maintenance_scheduler/periodic.rs"]
+mod periodic;
 use common::{Harness, NOW_MS};
 use meguri_engine::{
     CancelToken, ClearCause, Collection, EngineError, OpSource, OpSpec, Ports, SchemaReason, UndoScope, deck_config,

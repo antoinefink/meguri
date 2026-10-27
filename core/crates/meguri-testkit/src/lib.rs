@@ -23,3 +23,6 @@ pub mod wallclock;
 
 pub mod native_review;
 pub mod normal_support;
+
+/// Local backup/recovery composition helpers.
+pub mod backup_support;

@@ -44,6 +44,9 @@ pub struct CoreEvent {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum CoreEventKind {
+    MaintenanceDeadline {
+        at: Option<i64>,
+    },
     Lifecycle {
         state: crate::lifecycle::CollectionLifecycle,
     },
@@ -155,7 +158,8 @@ fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
             id: JobId(id),
             outcome: outcome.into(),
         }),
-        CoreEventKind::Lifecycle { .. }
+        CoreEventKind::MaintenanceDeadline { .. }
+        | CoreEventKind::Lifecycle { .. }
         | CoreEventKind::MediaArrived { .. }
         | CoreEventKind::Available
         | CoreEventKind::SessionStarted { .. }
@@ -207,6 +211,7 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
             state: state.clone().into(),
         },
         EventKind::Available => CoreEventKind::Available,
+        EventKind::MaintenanceDeadline { at } => CoreEventKind::MaintenanceDeadline { at: *at },
         EventKind::WriteDelay { .. } | EventKind::WriteDelayEnded { .. } => return None,
     };
     Some(CoreEvent {
@@ -522,6 +527,7 @@ mod tests {
                 zone_id: "UTC".to_owned(),
             },
             CoreEventKind::NextDayAtChanged { next_day_at: 1 },
+            CoreEventKind::MaintenanceDeadline { at: Some(1) },
         ] {
             assert!(matches!(publish(1, None, kind), Err(CoreError::InvalidArgument { .. })));
         }

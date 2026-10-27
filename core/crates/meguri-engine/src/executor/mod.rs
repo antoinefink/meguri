@@ -63,6 +63,7 @@ pub(crate) struct ExecShared {
     pub(crate) generation_cell: Arc<AtomicU64>,
     pub(crate) stream: ChangeStream,
     pub(crate) observers: Vec<Arc<dyn ChangeObserver>>,
+    pub(crate) maintenance: std::sync::OnceLock<std::sync::Weak<crate::maintenance::Maintenance>>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) path: PathBuf,
     /// The undo history (`engine/undo`), changed on the writer after each
@@ -123,6 +124,7 @@ impl ExecShared {
             generation_cell,
             day_clock: Arc::new(DayClock::new(Arc::clone(&clock), stream.clone())),
             stream,
+            maintenance: std::sync::OnceLock::new(),
             observers,
             clock,
             path: path.to_path_buf(),

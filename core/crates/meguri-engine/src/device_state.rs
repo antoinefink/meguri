@@ -1,6 +1,8 @@
 //! R6 publication identities and replacement journal. No network or decision resolver.
+mod retained_wal;
 use meguri_model::rng::RandomSource;
 use meguri_storage::{StorageError, sidecar};
+pub use retained_wal::RawRestoreAuthority;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -150,6 +152,9 @@ fn fingerprint_native_checked(
 pub(crate) enum Phase {
     Intent,
     Activated,
+    // Required enum values make main-only readers reject this intent.
+    WalIntent,
+    WalActivated,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Intent {
@@ -160,6 +165,8 @@ struct Intent {
     old_file: Option<FileIdentity>,
     candidate_file: FileIdentity,
     phase: Phase,
+    #[serde(default)]
+    wal: Option<retained_wal::WalRecovery>,
     #[serde(default)]
     old_native: Option<NativeIdentity>,
     #[serde(default)]
@@ -231,8 +238,11 @@ fn bound(state: &State, binding: &AccountBinding) -> Result<(), StorageError> {
         };
         if intent.candidate.decision != expected
             || intent.prior.identity == intent.candidate.identity
-            || (intent.phase == Phase::Intent && state.active != intent.prior)
-            || (intent.phase == Phase::Activated && state.active != intent.candidate)
+            || (matches!(intent.phase, Phase::Intent | Phase::WalIntent) && state.active != intent.prior)
+            || (matches!(intent.phase, Phase::Activated | Phase::WalActivated) && state.active != intent.candidate)
+            || (intent.wal.is_some() != matches!(intent.phase, Phase::WalIntent | Phase::WalActivated))
+            || (intent.wal.is_some()
+                && (intent.reason != crate::replace::ReplaceReason::Restore || intent.media.is_some()))
         {
             return Err(failure("inconsistent publication journal"));
         }
@@ -698,8 +708,12 @@ pub(crate) fn reconcile_with_media(
     if state.intent.is_none() {
         return cleanup_completed_media(live, binding);
     }
+    if state.intent.as_ref().is_some_and(|intent| intent.wal.is_some()) {
+        return retained_wal::reconcile_wal(live, state, binding);
+    }
     let intent = state.intent.unwrap();
     let decision = match intent.phase {
+        Phase::WalIntent | Phase::WalActivated => return Err(failure("WAL intent lacks its authority")),
         Phase::Activated => {
             let expected = if intent.reason.requires_publication_decision() {
                 PublicationDecision::Pending
@@ -770,11 +784,15 @@ pub(crate) fn begin(
     reason: crate::replace::ReplaceReason,
     binding: &AccountBinding,
     random: &dyn RandomSource,
-    media: Option<meguri_storage::media::CollectionMediaIntent>,
+    recovery: (
+        Option<meguri_storage::media::CollectionMediaIntent>,
+        Option<RawRestoreAuthority>,
+    ),
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
     let (live, candidate) = paths;
+    let (media, raw) = recovery;
     ensure(live, binding, random)?;
     let old_identity = fingerprint_native_checked(live, cancel, false)?;
     let (candidate_file, candidate_native) =
@@ -803,14 +821,25 @@ pub(crate) fn begin(
         if candidate.identity == state.active.identity {
             return Err(failure("random source reused publication identity"));
         }
+        let operation = PublicationId::successor(random, candidate.identity);
+        let wal = raw
+            .map(|raw| {
+                if reason != crate::replace::ReplaceReason::Restore || media.is_some() {
+                    return Err(failure("raw WAL authority is Restore-only"));
+                }
+                retained_wal::WalRecovery::prepare(live, raw, operation, old_file.as_ref(), &candidate_file)
+            })
+            .transpose()?;
+        let phase = if wal.is_some() { Phase::WalIntent } else { Phase::Intent };
         state.intent = Some(Intent {
-            operation: PublicationId::successor(random, candidate.identity),
+            operation,
             reason,
             prior: state.active.clone(),
             candidate,
             old_file,
             candidate_file,
-            phase: Phase::Intent,
+            phase,
+            wal,
             old_native,
             candidate_native,
             media,
@@ -833,6 +862,7 @@ pub(crate) fn verify_swap_files(live: &Path, candidate: &Path, cancel: &dyn Fn()
     let state =
         sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing final swap evidence"))?;
     let intent = state.intent.ok_or_else(|| failure("missing final swap intent"))?;
+    retained_wal::verify_retired(live, &intent)?;
     let old = fingerprint_native_checked(live, cancel, true)?;
     let incoming =
         fingerprint_native_checked(candidate, cancel, true)?.ok_or_else(|| failure("final candidate missing"))?;
@@ -1027,7 +1057,11 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         let mut retained = retained_replacements(&state)?;
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
         state.active = intent.candidate.clone();
-        intent.phase = Phase::Activated;
+        if intent.wal.is_some() {
+            intent.phase = Phase::WalActivated;
+        } else {
+            intent.phase = Phase::Activated;
+        }
         let evidence = ReplacementEvidence {
             reason: intent.reason,
             prior: intent.prior.clone(),
@@ -1053,6 +1087,7 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing completed journal"))?;
         bound(&state, binding)?;
+        retained_wal::complete_wal(live, &mut state)?;
         if let Some(intent) = state.intent.take()
             && let Some(media) = intent.media
         {
@@ -1481,4 +1516,15 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&state.path).unwrap(), before);
         assert_eq!(state.last_backup().unwrap(), Some(backup()));
     }
+}
+
+/// Continues the just-recorded R6 Restore intent; ordinary replacement never calls this.
+pub(crate) fn retire_restore_wal(live: &Path) -> Result<(), StorageError> {
+    retained_wal::retire(live)
+}
+
+pub(crate) fn finish_restore_wal(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    let state = sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing WAL state"))?;
+    bound(&state, binding)?;
+    retained_wal::reconcile_wal(live, state, binding)
 }

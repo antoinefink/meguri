@@ -583,7 +583,13 @@ fn replacement_crash_worker() {
     let point = std::env::var("MEGURI_REPLACE_POINT").unwrap();
     let reason: ReplaceReason = serde_json::from_str(&std::env::var("MEGURI_REPLACE_REASON").unwrap()).unwrap();
     let engine = Engine::new(EngineConfig::default()).unwrap();
-    let initial = mode == "absent" || mode == "identical";
+    if mode == "raw-recover" {
+        faultpoint::arm(&point, Fault::Abort);
+        let _ = engine.open_raw(&live, config(binding(), 991));
+        panic!("recovery fault point was not reached: {point}");
+    }
+    let raw = mode == "raw" || mode == "raw-identical";
+    let initial = mode == "absent" || mode == "identical" || raw;
     if !initial {
         engine.open_raw(&live, config(binding(), 991)).unwrap();
     }
@@ -613,7 +619,7 @@ fn replacement_crash_worker() {
     if point != "replace.after_pause_recorded" {
         faultpoint::arm(&point, Fault::Abort);
     }
-    if mode == "identical" {
+    if mode == "identical" || mode == "raw-identical" {
         faultpoint::arm("replace.after_finalise", Fault::Callback(make_identical_before_intent));
     }
     let slot = engine.acquire_slot(replacement_op(reason)).unwrap();
@@ -624,7 +630,20 @@ fn replacement_crash_worker() {
         scope.put_col(&col)?;
         Ok(())
     };
-    if initial {
+    if raw {
+        let backups = directory.parent().unwrap().join("raw-backups");
+        fs::create_dir_all(&backups).unwrap();
+        slot.restore_verified_initial_before_commit(&live, config(binding(), 991), candidate, || {
+            let main = backups.join("retained-main.anki2");
+            let wal = backups.join("retained-main.anki2-wal");
+            fs::copy(&live, &main).map_err(StorageError::from)?;
+            fs::copy(live.with_file_name("collection.anki2-wal"), &wal).map_err(StorageError::from)?;
+            meguri_engine::device_state::RawRestoreAuthority::verify(&live, &main, &wal)
+                .map(Some)
+                .map_err(Into::into)
+        })
+        .unwrap();
+    } else if initial {
         slot.replace_verified_initial(&live, config(binding(), 991), candidate, reason, change)
             .unwrap();
     } else {
@@ -1294,4 +1313,347 @@ fn legacy_r6_last_replacement_migrates_to_chain_before_second_activation() {
     assert!(proof.after() == publication(&h.path).identity);
     assert!(proof.after() != before);
     h.engine.close().unwrap();
+}
+
+#[test]
+fn local_restore_consumer_checks_review_before_entry_and_after_a_session_wins_the_race() {
+    use meguri_engine::SuspendParticipant;
+    let h = session_support::Harness::new(3);
+    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    slot.check_restore_review().unwrap();
+    let (id, _) = h.start();
+    h.review.flush().unwrap();
+    let live = h.dir.path().join("collection.anki2");
+    let before = (
+        fs::read(&live).unwrap(),
+        fs::read(live.with_extension("anki2-wal")).unwrap(),
+    );
+    assert_eq!(slot.check_restore_review(), Err(EngineError::SessionActive));
+    let exclusive = slot.enter_exclusive(true).unwrap();
+    assert_eq!(slot.check_restore_review(), Err(EngineError::SessionActive));
+    drop(exclusive);
+    assert_eq!(h.review.active_session(), Some(id));
+    assert_eq!(
+        (
+            fs::read(&live).unwrap(),
+            fs::read(live.with_extension("anki2-wal")).unwrap()
+        ),
+        before
+    );
+    assert_eq!(h.engine.generation(), h.collection.generation());
+}
+
+fn raw_recovery_fixture() -> (tempfile::TempDir, PathBuf, Publication) {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("collection");
+    fs::create_dir(&directory).unwrap();
+    let live = directory.join("collection.anki2");
+    fs::copy(common::fixture("schema-18.anki2"), &live).unwrap();
+    settled_old(&live);
+    let prior = publication(&live);
+    fs::write(&live, b"damaged main retained without SQLite writes").unwrap();
+    fs::write(
+        live.with_file_name("collection.anki2-wal"),
+        b"nonempty old WAL recovery bytes",
+    )
+    .unwrap();
+    (root, live, prior)
+}
+fn r6_document(live: &Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(live.parent().unwrap().join("meguri-sidecar.json")).unwrap()).unwrap()
+}
+fn old_reader_rejects_wal_intent(live: &Path) {
+    #[derive(serde::Deserialize)]
+    enum LegacyPhase {
+        Intent,
+        Activated,
+    }
+    let path = live.parent().unwrap().join("meguri-sidecar.json");
+    let before = fs::read(&path).unwrap();
+    let document: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    // This is the required strict field used by the existing main-only reader.
+    // Neither an optional member nor a version number participates in refusal.
+    assert!(serde_json::from_value::<LegacyPhase>(document["deviceState"]["intent"]["phase"].clone()).is_err());
+    assert_eq!(fs::read(path).unwrap(), before);
+}
+fn assert_raw_copies(root: &Path) {
+    assert_eq!(
+        fs::read(root.join("raw-backups/retained-main.anki2")).unwrap(),
+        b"damaged main retained without SQLite writes"
+    );
+    assert_eq!(
+        fs::read(root.join("raw-backups/retained-main.anki2-wal")).unwrap(),
+        b"nonempty old WAL recovery bytes"
+    );
+}
+fn reopen_raw_twice(root: &Path, live: &Path, prior: &Publication, candidate: bool) {
+    for _ in 0..2 {
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let opened = engine.open_raw(live, config(binding(), 177));
+        if candidate {
+            let c = opened.unwrap();
+            assert!(meguri_storage::integrity::integrity_check(c.path()).unwrap().is_ok());
+            assert_eq!(publication(live).decision, PublicationDecision::Pending);
+            assert_ne!(publication(live).identity, prior.identity);
+            engine.close().unwrap();
+        } else {
+            assert!(opened.is_err(), "the damaged old main is never repaired by recovery");
+            assert_eq!(&publication(live), prior);
+            assert_eq!(fs::read(live).unwrap(), b"damaged main retained without SQLite writes");
+            assert_eq!(
+                fs::read(live.with_file_name("collection.anki2-wal")).unwrap(),
+                b"nonempty old WAL recovery bytes"
+            );
+        }
+        assert!(r6_document(live)["deviceState"]["intent"].is_null());
+        assert_raw_copies(root);
+    }
+}
+#[test]
+fn retained_wal_kills_reconcile_exact_old_pair_or_isolated_candidate_before_open() {
+    for point in [
+        "replace.wal.after_authority",
+        "replace.after_pause_recorded",
+        "storage.recovery_move.before_directory_sync",
+        "replace.wal.after_retire",
+        "replace.wal.after_retired_record",
+        "replace.after_live_wal_removed",
+        "replace.after_rename",
+        "replace.after_dir_sync",
+        "replace.wal.after_resolution",
+        "replace.after_durable_activation",
+        "replace.media.before_completion",
+        "replace.media.after_completion",
+    ] {
+        let (root, live, prior) = raw_recovery_fixture();
+        crash(&live, point, "raw", ReplaceReason::Restore);
+        let candidate = matches!(
+            point,
+            "replace.after_rename"
+                | "replace.after_dir_sync"
+                | "replace.wal.after_resolution"
+                | "replace.after_durable_activation"
+                | "replace.media.before_completion"
+                | "replace.media.after_completion"
+        );
+        if point != "replace.wal.after_authority" && point != "replace.media.after_completion" {
+            old_reader_rejects_wal_intent(&live);
+        }
+        if candidate {
+            assert!(!live.with_file_name("collection.anki2-wal").exists());
+            assert_eq!(
+                fs::read(&live).unwrap(),
+                fs::read(live.with_extension("candidate-final")).unwrap()
+            );
+        }
+        reopen_raw_twice(root.path(), &live, &prior, candidate);
+    }
+}
+#[test]
+fn retained_wal_rollback_kills_restart_the_same_move_before_any_old_open() {
+    for point in [
+        "replace.wal.before_restore_move",
+        "storage.recovery_move.before_directory_sync",
+        "replace.wal.after_restore_move",
+        "replace.wal.after_resolution",
+        "replace.media.before_completion",
+        "replace.media.after_completion",
+    ] {
+        let (root, live, prior) = raw_recovery_fixture();
+        crash(&live, "replace.wal.after_retired_record", "raw", ReplaceReason::Restore);
+        crash(&live, point, "raw-recover", ReplaceReason::Restore);
+        if point != "replace.media.after_completion" {
+            old_reader_rejects_wal_intent(&live);
+        }
+        assert_eq!(fs::read(&live).unwrap(), b"damaged main retained without SQLite writes");
+        reopen_raw_twice(root.path(), &live, &prior, false);
+    }
+}
+fn recovery_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    fn visit(root: &Path, result: &mut Vec<(PathBuf, Vec<u8>)>) {
+        for entry in fs::read_dir(root).unwrap() {
+            let entry = entry.unwrap();
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                visit(&entry.path(), result);
+            } else if kind.is_file() && entry.file_name() != "meguri.lock" {
+                result.push((entry.path(), fs::read(entry.path()).unwrap()));
+            } else if kind.is_symlink() {
+                use std::os::unix::ffi::OsStrExt;
+                result.push((
+                    entry.path(),
+                    fs::read_link(entry.path()).unwrap().as_os_str().as_bytes().to_vec(),
+                ));
+            }
+        }
+    }
+    let mut result = Vec::new();
+    visit(root, &mut result);
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result
+}
+#[test]
+fn retained_wal_substituted_missing_corrupt_and_ambiguous_evidence_is_never_consumed() {
+    for point in [
+        "replace.after_pause_recorded",
+        "replace.after_rename",
+        "replace.after_durable_activation",
+    ] {
+        for damage in [
+            "main-native",
+            "main-missing",
+            "main-corrupt",
+            "wal-native",
+            "wal-corrupt",
+            "copy-native",
+            "copy-missing",
+            "copy-corrupt",
+            "backup-root",
+            "backup-root-link",
+            "collection-root",
+            "copy-link",
+            "copy-hardlink",
+            "both-wals",
+            "neither-wal",
+            "equal-main",
+        ] {
+            let (root, live, _) = raw_recovery_fixture();
+            crash(&live, point, "raw", ReplaceReason::Restore);
+            let document = r6_document(&live);
+            let wal = &document["deviceState"]["intent"]["wal"];
+            let retired = PathBuf::from(wal["retired"].as_str().unwrap());
+            let original = live.with_file_name("collection.anki2-wal");
+            let present = if original.exists() { &original } else { &retired };
+            let copy = root.path().join("raw-backups/retained-main.anki2-wal");
+            match damage {
+                "main-native" | "wal-native" | "copy-native" => {
+                    let path = match damage {
+                        "main-native" => &live,
+                        "wal-native" => present,
+                        _ => &copy,
+                    };
+                    let bytes = fs::read(path).unwrap();
+                    fs::rename(path, path.with_extension("held-evidence")).unwrap();
+                    fs::write(path, bytes).unwrap();
+                }
+                "main-missing" => {
+                    fs::rename(&live, live.with_extension("held-main")).unwrap();
+                }
+                "main-corrupt" => {
+                    fs::write(&live, b"changed main bytes").unwrap();
+                }
+                "wal-corrupt" => {
+                    fs::write(present, b"changed WAL bytes").unwrap();
+                }
+                "copy-missing" => {
+                    fs::rename(&copy, copy.with_extension("held-evidence")).unwrap();
+                }
+                "copy-corrupt" => {
+                    fs::write(&copy, b"changed retained bytes").unwrap();
+                }
+                "backup-root" => {
+                    let path = root.path().join("raw-backups");
+                    fs::rename(&path, root.path().join("held-backups")).unwrap();
+                    fs::create_dir(&path).unwrap();
+                    for name in ["retained-main.anki2", "retained-main.anki2-wal"] {
+                        fs::copy(root.path().join("held-backups").join(name), path.join(name)).unwrap();
+                    }
+                }
+                "copy-link" | "copy-hardlink" => {
+                    let held = copy.with_extension("held-evidence");
+                    fs::rename(&copy, &held).unwrap();
+                    if damage == "copy-link" {
+                        std::os::unix::fs::symlink(&held, &copy).unwrap();
+                    } else {
+                        fs::hard_link(&held, &copy).unwrap();
+                    }
+                }
+                "backup-root-link" => {
+                    let path = root.path().join("raw-backups");
+                    let held = root.path().join("held-backups");
+                    fs::rename(&path, &held).unwrap();
+                    std::os::unix::fs::symlink(&held, &path).unwrap();
+                }
+                "equal-main" => {
+                    let mut document = r6_document(&live);
+                    document["deviceState"]["intent"]["candidate_file"] =
+                        document["deviceState"]["intent"]["old_file"].clone();
+                    fs::write(
+                        live.parent().unwrap().join("meguri-sidecar.json"),
+                        serde_json::to_vec(&document).unwrap(),
+                    )
+                    .unwrap();
+                }
+                "collection-root" => {
+                    let path = live.parent().unwrap();
+                    let held = root.path().join("held-collection");
+                    fs::rename(path, &held).unwrap();
+                    fs::create_dir(path).unwrap();
+                    for entry in fs::read_dir(held).unwrap() {
+                        let entry = entry.unwrap();
+                        if entry.file_type().unwrap().is_file() {
+                            fs::copy(entry.path(), path.join(entry.file_name())).unwrap();
+                        }
+                    }
+                }
+                "both-wals" => {
+                    fs::copy(present, if original.exists() { &retired } else { &original }).unwrap();
+                }
+                "neither-wal" => {
+                    fs::rename(present, present.with_extension("held-evidence")).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let before = recovery_files(root.path());
+            for _ in 0..2 {
+                let engine = Engine::new(EngineConfig::default()).unwrap();
+                assert!(
+                    engine.open_raw(&live, config(binding(), 199)).is_err(),
+                    "{point}: {damage}"
+                );
+                drop(engine);
+                assert_eq!(recovery_files(root.path()), before, "{point}: {damage}");
+                old_reader_rejects_wal_intent(&live);
+            }
+        }
+    }
+}
+
+#[test]
+fn raw_restore_matching_final_databases_block_the_old_wal_move() {
+    let (root, live, _) = raw_recovery_fixture();
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    let candidate = stage(live.parent().unwrap(), "schema-18.anki2");
+    let candidate_path = candidate.path();
+    let backups = root.path().join("raw-backups");
+    fs::create_dir(&backups).unwrap();
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let result = slot.restore_verified_initial_before_commit(&live, config(binding(), 200), candidate, || {
+        // Force equality only after R7 finalisation, under the existing hook.
+        fs::copy(&candidate_path, &live).map_err(StorageError::from)?;
+        let main = backups.join("retained-main.anki2");
+        let wal = backups.join("retained-main.anki2-wal");
+        fs::copy(&live, &main).map_err(StorageError::from)?;
+        fs::copy(live.with_file_name("collection.anki2-wal"), &wal).map_err(StorageError::from)?;
+        meguri_engine::device_state::RawRestoreAuthority::verify(&live, &main, &wal)
+            .map(Some)
+            .map_err(Into::into)
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read(&live).unwrap(),
+        fs::read(backups.join("retained-main.anki2")).unwrap()
+    );
+    assert_eq!(
+        fs::read(live.with_file_name("collection.anki2-wal")).unwrap(),
+        b"nonempty old WAL recovery bytes"
+    );
+    assert!(r6_document(&live)["deviceState"]["intent"].is_null());
+    assert!(!fs::read_dir(live.parent().unwrap()).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".meguri-restore-wal-")
+    }));
 }

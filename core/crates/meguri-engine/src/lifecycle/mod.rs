@@ -60,6 +60,7 @@ pub struct OpenConfig {
     pub ports: Ports,
     pub backups_directory: Option<PathBuf>,
     pub disk_space_provider: Arc<dyn crate::DiskSpaceProvider>,
+    pub backup_entry_times: Arc<dyn crate::maintenance::BackupEntryTimes>,
 }
 
 impl fmt::Debug for OpenConfig {
@@ -81,6 +82,7 @@ impl OpenConfig {
             ports: Ports::default(),
             backups_directory: None,
             disk_space_provider: Arc::new(meguri_storage::space::StatvfsSpace),
+            backup_entry_times: Arc::new(crate::maintenance::OsBackupEntryTimes),
         }
     }
 
@@ -140,6 +142,7 @@ pub(crate) struct EngineInner {
     pub(crate) stream: ChangeStream,
     pub(crate) threads: ThreadRegistry,
     pub(crate) jobs: JobRegistry,
+    pub(crate) maintenance: std::sync::OnceLock<Arc<crate::maintenance::Maintenance>>,
     generation: Arc<AtomicU64>,
     state: Mutex<LcState>,
     pub(crate) changed: Condvar,
@@ -183,11 +186,12 @@ impl Engine {
         let threads = ThreadRegistry::new();
         let jobs = JobRegistry::new(&threads, stream.clone(), config.job_workers.max(1))
             .map_err(|e| EngineError::internal(format!("cannot start the job pool: {e}")))?;
-        Ok(Engine {
+        let engine = Engine {
             inner: Arc::new(EngineInner {
                 stream,
                 threads,
                 jobs,
+                maintenance: std::sync::OnceLock::new(),
                 generation: Arc::new(AtomicU64::new(0)),
                 state: Mutex::new(LcState {
                     suspended: false,
@@ -202,7 +206,13 @@ impl Engine {
                 next_token: AtomicU64::new(1),
                 control_lane: Mutex::new(()),
             }),
-        })
+        };
+        let _ = engine.inner.maintenance.set(crate::maintenance::Maintenance::new(
+            engine.downgrade(),
+            engine.stream().clone(),
+            engine.jobs().clone(),
+        ));
+        Ok(engine)
     }
 
     pub fn stream(&self) -> &ChangeStream {
@@ -265,6 +275,7 @@ impl Engine {
             return;
         }
         guard.state = state.clone();
+        self.maintenance().lifecycle(&state, self.generation());
         self.inner
             .stream
             .publish(self.generation(), None, EventKind::Lifecycle(state));
@@ -347,6 +358,8 @@ impl Engine {
             }
             self.set_state_locked(&mut guard, LifecycleState::Opening);
         }
+        self.maintenance().configure(path, &config);
+        config.ports.suspend_participants.push(self.maintenance().clone());
         let initial_replacement = retained.is_some();
         let ownership = (|| -> Result<_, EngineError> {
             let directory = path
@@ -430,6 +443,7 @@ impl Engine {
             path,
             last_seq,
         ));
+        let _ = exec.maintenance.set(Arc::downgrade(self.maintenance()));
         let core = Arc::new(CollectionCore {
             backup: config.ports.backup_service.clone(),
             exec: Arc::clone(&exec),

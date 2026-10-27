@@ -211,6 +211,11 @@ impl Collection {
         self.reader_checked(role, index, false)
     }
 
+    /// Live backup admission is checked while its maintenance lease is held.
+    pub fn backup_reader(&self) -> Result<ReaderLease<'_>, EngineError> {
+        self.reader_checked(ReaderRole::Maintenance, 0, true)
+    }
+
     pub(crate) fn operation_reader(&self, role: ReaderRole) -> Result<ReaderLease<'_>, EngineError> {
         self.reader_checked(role, 0, true)
     }

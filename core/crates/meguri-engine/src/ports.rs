@@ -181,6 +181,28 @@ pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
 pub trait BackupService: Send + Sync {
     fn before_deck_delete(&self) -> Result<(), EngineError>;
 
+    /// Restore owns an exclusive drained phase, or initial advisory ownership.
+    fn before_restore(
+        &self,
+        _collection: Option<&Collection>,
+        _damaged: bool,
+        _cancel: &crate::CancelToken,
+    ) -> Result<GuardedTransferBackup, EngineError> {
+        Err(EngineError::Unsupported {
+            feature: "restore safety backup".into(),
+        })
+    }
+
+    fn backup_live(
+        &self,
+        _collection: &Collection,
+        _cancel: &crate::CancelToken,
+    ) -> Result<crate::maintenance::LiveBackup, EngineError> {
+        Err(EngineError::Unsupported {
+            feature: "live backup writer".into(),
+        })
+    }
+
     /// Shared T6 admission, on the caller's worker. Legacy explicit test
     /// witnesses remain valid but provide no reuse proof.
     fn before_safety_operation(
@@ -240,6 +262,13 @@ impl fmt::Debug for GuardedBackup {
             .field("receipt", &self.receipt)
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Clone)]
+pub struct GuardedTransferBackup {
+    pub backup: TransferBackup,
+    pub raw_restore: Option<crate::device_state::RawRestoreAuthority>,
+    pub protection: Option<Arc<dyn BackupProtection>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

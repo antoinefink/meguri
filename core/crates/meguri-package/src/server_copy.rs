@@ -103,17 +103,56 @@ pub fn preserve_server_copy(
 }
 
 pub(crate) fn copy_raw(source: &Path, destination: &Path) -> Result<(), Error> {
-    let expected = sha1(source)?;
+    // Frozen manual-transfer path retains its pre-copy source witness.
+    copy_raw_checked(source, destination, Some(sha1(source)?), &|| false, false).map(RawCopy::keep)
+}
+
+pub(crate) fn copy_raw_cancellable(
+    source: &Path,
+    destination: &Path,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<RawCopy, Error> {
+    copy_raw_checked(source, destination, None, cancelled, true)
+}
+fn copy_raw_checked(
+    source: &Path,
+    destination: &Path,
+    expected: Option<(u64, [u8; 20])>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    strict: bool,
+) -> Result<RawCopy, Error> {
     let mut output = AtomicFile::new(destination, Purpose::Backup)?;
     let mut input = fs::File::open(source)?;
+    let mut digest = Sha1::new();
+    let mut size = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        crate::cancelled(cancelled)?;
         let n = input.read(&mut buffer)?;
         if n == 0 {
             break;
         }
+        digest.update(&buffer[..n]);
+        size += n as u64;
         output.file_mut().write_all(&buffer[..n])?;
     }
+    let copied = (size, digest.finalize().into());
+    // The local caller holds a stable writer window. Manual transfer also
+    // compares against its existing pre-copy witness.
+    let expected = expected.unwrap_or(copied);
+    if copied != expected {
+        return Err(Error::Io {
+            detail: "raw recovery copy changed".into(),
+        });
+    }
+    crate::cancelled(cancelled)?;
+    use std::os::unix::fs::MetadataExt;
+    let metadata = output.file_mut().metadata()?;
+    let mut published = RawCopy {
+        path: destination.to_owned(),
+        identity: (metadata.dev(), metadata.ino()),
+        cleanup: strict,
+    };
     output.publish_new(|path| {
         if sha1(path).map_err(|_| StorageError::Io {
             detail: "raw recovery copy verification".into(),
@@ -123,10 +162,40 @@ pub(crate) fn copy_raw(source: &Path, destination: &Path) -> Result<(), Error> {
                 detail: "raw recovery copy changed".into(),
             });
         }
+        if cancelled() {
+            return Err(StorageError::Io {
+                detail: "raw recovery copy cancelled".into(),
+            });
+        }
         Ok(())
     })?;
-    Ok(())
+    published.cleanup = true;
+    Ok(published)
 }
+
+/// Own only the inode we published; never remove a collision or a replacement.
+pub(crate) struct RawCopy {
+    path: PathBuf,
+    identity: (u64, u64),
+    cleanup: bool,
+}
+impl RawCopy {
+    pub(crate) fn keep(mut self) {
+        self.cleanup = false;
+    }
+}
+impl Drop for RawCopy {
+    fn drop(&mut self) {
+        use std::os::unix::fs::MetadataExt;
+        if self.cleanup && fs::symlink_metadata(&self.path).is_ok_and(|m| (m.dev(), m.ino()) == self.identity) {
+            let _ = fs::remove_file(&self.path);
+            if let Some(parent) = self.path.parent() {
+                let _ = meguri_storage::atomic_file::sync_directory(parent);
+            }
+        }
+    }
+}
+
 fn sha1(path: &Path) -> Result<(u64, [u8; 20]), Error> {
     let mut input = fs::File::open(path)?;
     let mut hash = Sha1::new();

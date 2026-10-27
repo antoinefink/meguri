@@ -67,6 +67,11 @@ impl JobRegistry {
         })
     }
 
+    /// Value-triggered backup reevaluation on the existing pool; no timer.
+    pub(crate) fn maintenance_work(&self, work: impl FnOnce() + Send + 'static) {
+        self.inner.pool.run(work);
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, RegistryState> {
         self.inner.running.lock().unwrap_or_else(PoisonError::into_inner)
     }

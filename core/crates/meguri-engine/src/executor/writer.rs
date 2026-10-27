@@ -476,6 +476,11 @@ fn run_op<T>(
         (committed, reservation)
     };
     let seq = reservation.seq();
+    if let Some(mark) = derived.collection
+        && let Some(maintenance) = shared.maintenance.get().and_then(std::sync::Weak::upgrade)
+    {
+        maintenance.committed(generation, mark.col_mod);
+    }
     if derived.local_modification {
         env.touched.record_local_modification(seq);
     }

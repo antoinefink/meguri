@@ -182,14 +182,15 @@ impl Storage {
             .expect("an open collection owns its directory")
             .path()
             .to_path_buf();
-        let config = HostConfig::new(
+        let mut config = HostConfig::new(
             directory,
             backups,
             data.join("app-group/widget.snapshot"),
-            clock,
+            clock.clone(),
             random,
             std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
         );
+        config.backup_entry_times = std::sync::Arc::new(super::package::ScenarioBackupEntryTimes(clock));
         let config = if self.fixture_backup_witness {
             config.with_backup_for_testing(self.backup.clone())
         } else {

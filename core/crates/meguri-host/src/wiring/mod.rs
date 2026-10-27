@@ -18,7 +18,7 @@ pub const PROVIDED: [Binding; 5] = [
         port: ServicePort::Backup,
         name: "forced-safety-backup",
         unit: "U127",
-        roles: &[], // Synchronous service port, no lifecycle registrations.
+        roles: &[], // Engine owns registration of the backup maintenance participant.
     },
     Binding {
         port: ServicePort::Review,

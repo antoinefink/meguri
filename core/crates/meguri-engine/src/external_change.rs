@@ -11,6 +11,9 @@ use std::sync::Arc;
 
 pub(crate) fn notify(shared: &ExecShared, writer: &Writer, touched: &mut TouchIndex) -> Result<(), EngineError> {
     let col = writer.col()?;
+    if let Some(maintenance) = shared.maintenance.get().and_then(std::sync::Weak::upgrade) {
+        maintenance.committed(shared.generation(), col.modified.0);
+    }
     shared.undo.reset(DisabledReason::ChangedExternally);
     shared.day_clock.drop_cached();
     shared.answer_caches.invalidate_all();

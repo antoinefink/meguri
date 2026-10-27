@@ -14,6 +14,7 @@ mod inspection;
 mod inspection_zip;
 mod media_map;
 mod reader;
+pub mod restore;
 /// Decode P3 metadata for package observations using the production reader.
 pub fn package_meta_version(bytes: &[u8]) -> std::result::Result<i32, CollectionPackageWriteError> {
     if bytes.len() > 64 * 1024 {

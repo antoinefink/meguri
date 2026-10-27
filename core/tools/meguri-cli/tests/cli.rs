@@ -41,6 +41,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "adopt",
             "advance",
             "answer",
+            "backup",
             "browser_config_set",
             "bury",
             "clear_unused_tags",
@@ -207,7 +208,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "{op}"
         );
         assert!(
-            json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op) == (op != "backup"),
+            json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
         );
     }

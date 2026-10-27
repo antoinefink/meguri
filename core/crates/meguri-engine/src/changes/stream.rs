@@ -41,6 +41,10 @@ pub enum EventKind {
         generation: Generation,
     },
     Lifecycle(LifecycleState),
+    /// Local backup deadline, epoch milliseconds; None disarms the host timer.
+    MaintenanceDeadline {
+        at: Option<i64>,
+    },
     /// The collection is available again (`engine/lifecycle` L6).
     Available,
     /// A declared long write or a maintenance task started on the writer.

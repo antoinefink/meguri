@@ -33,6 +33,7 @@ pub mod flags;
 pub mod image_occlusion;
 pub mod jobs;
 pub mod lifecycle;
+pub mod maintenance;
 pub mod marked;
 pub mod media;
 pub mod monotonic;

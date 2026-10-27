@@ -110,18 +110,55 @@ pub fn sync_directory(path: &Path) -> Result<(), StorageError> {
 
 /// Move an already synchronized file without replacing another directory entry.
 pub fn move_new(source: &Path, destination: &Path) -> Result<(), StorageError> {
+    move_new_relative(
+        libc::AT_FDCWD,
+        source.as_os_str(),
+        libc::AT_FDCWD,
+        destination.as_os_str(),
+    )?;
+    sync_directory(parent(destination))?;
+    if parent(source) != parent(destination) {
+        sync_directory(parent(source))?;
+    }
+    Ok(())
+}
+
+/// No-replace move between names in one already-pinned recovery directory.
+pub fn move_new_in(
+    directory: &File,
+    source: &std::ffi::OsStr,
+    destination: &std::ffi::OsStr,
+) -> Result<(), StorageError> {
+    use std::os::fd::AsRawFd;
+    for name in [source, destination] {
+        let mut parts = Path::new(name).components();
+        if !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
+            return Err(StorageError::Io {
+                detail: "recovery move requires a single filename".into(),
+            });
+        }
+    }
+    move_new_relative(directory.as_raw_fd(), source, directory.as_raw_fd(), destination)?;
+    meguri_model::faultpoint!("storage.recovery_move.before_directory_sync")?;
+    directory.sync_all().map_err(Into::into)
+}
+fn move_new_relative(
+    source_directory: libc::c_int,
+    source: &std::ffi::OsStr,
+    destination_directory: libc::c_int,
+    destination: &std::ffi::OsStr,
+) -> Result<(), StorageError> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
-    let from = CString::new(source.as_os_str().as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
-    let to =
-        CString::new(destination.as_os_str().as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
+    let from = CString::new(source.as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
+    let to = CString::new(destination.as_bytes()).map_err(|e| StorageError::Io { detail: e.to_string() })?;
     // SAFETY: both paths are NUL-terminated and live throughout the call.
     #[cfg(target_os = "linux")]
     let result = unsafe {
         libc::renameat2(
-            libc::AT_FDCWD,
+            source_directory,
             from.as_ptr(),
-            libc::AT_FDCWD,
+            destination_directory,
             to.as_ptr(),
             libc::RENAME_NOREPLACE,
         )
@@ -129,9 +166,9 @@ pub fn move_new(source: &Path, destination: &Path) -> Result<(), StorageError> {
     #[cfg(target_vendor = "apple")]
     let result = unsafe {
         libc::renameatx_np(
-            libc::AT_FDCWD,
+            source_directory,
             from.as_ptr(),
-            libc::AT_FDCWD,
+            destination_directory,
             to.as_ptr(),
             libc::RENAME_EXCL,
         )
@@ -143,10 +180,6 @@ pub fn move_new(source: &Path, destination: &Path) -> Result<(), StorageError> {
         } else {
             error.into()
         });
-    }
-    sync_directory(parent(destination))?;
-    if parent(source) != parent(destination) {
-        sync_directory(parent(source))?;
     }
     Ok(())
 }

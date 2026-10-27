@@ -94,3 +94,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-sync) and test(=normal::repeated::repeated_note_replay_declares_long_write_and_hands_off_durable_answer)'
 threads-required = "num-test-threads"
+
+# U127 Quit admission waits retain the existing end-to-end two-second budget.
+[[profile.default.overrides]]
+filter = 'test(=periodic::quit_expires_while_periodic_owner_is_still_blocked) or test(=quit_expires_before_the_forced_provider_owner_releases_its_copy)'
+threads-required = "num-test-threads"

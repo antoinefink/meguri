@@ -18,6 +18,7 @@ pub struct HostConfig {
     pub random: Arc<dyn RandomSource>,
     pub disk_space_provider: Arc<dyn DiskSpaceProvider>,
     pub engine: EngineConfig,
+    pub backup_entry_times: Arc<dyn meguri_engine::maintenance::BackupEntryTimes>,
     #[cfg(feature = "test-hooks")]
     pub(crate) test_backup: Option<Arc<dyn meguri_engine::ports::BackupService>>,
 }
@@ -45,6 +46,7 @@ impl HostConfig {
             random,
             disk_space_provider,
             engine: EngineConfig::default(),
+            backup_entry_times: Arc::new(meguri_engine::maintenance::OsBackupEntryTimes),
             #[cfg(feature = "test-hooks")]
             test_backup: None,
         }

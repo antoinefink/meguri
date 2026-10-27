@@ -24,10 +24,11 @@ use meguri_engine::{
     ports::{BackupFailureCause, BackupPublication, BackupReceipt, BackupService, SafetyBackupFailure},
 };
 use meguri_model::{clock::Clock, rng::RandomSource, time::EpochMillis};
-use meguri_storage::{ReaderRole, StorageError, atomic_file::Purpose, space::SpaceProvider};
+use meguri_storage::{StorageError, atomic_file::Purpose, space::SpaceProvider};
 
 use crate::{CollectionPackageWriteContext, CollectionPackageWriteError as WriteError, Finalisation};
 
+#[derive(Clone)]
 pub struct ForcedBackupProvider {
     engine: WeakEngine,
     collection: PathBuf,
@@ -37,7 +38,7 @@ pub struct ForcedBackupProvider {
     space: Arc<dyn SpaceProvider>,
     // Snapshot order, not numeric col.mod order (undo can lower it), owns the
     // device reference. Keep the lane through durable metadata publication.
-    lane: Mutex<()>,
+    lane: Arc<meguri_engine::cancel::SerializationLane>,
     protected: Arc<Mutex<std::collections::BTreeMap<String, usize>>>,
 }
 
@@ -57,13 +58,140 @@ impl ForcedBackupProvider {
             clock,
             random,
             space,
-            lane: Mutex::new(()),
+            lane: Arc::default(),
             protected: Arc::default(),
         }
     }
 
     pub fn force(&self, collection: &Collection, cancel: &CancelToken) -> Result<BackupWritten, EngineError> {
         self.force_inner(collection, cancel, false)
+    }
+
+    fn raw_copy(
+        &self,
+        cancel: &CancelToken,
+        strict: bool,
+    ) -> Result<meguri_engine::ports::TransferBackup, EngineError> {
+        use meguri_engine::ports::TransferBackup;
+        // Caller holds Working (writer drained) or initial replacement's
+        // advisory ownership. No checkpoint or quick_check is run for T7.
+        let fail = |cause| failure(cause, BackupPublication::Unpublished);
+        cancel.check().map_err(|e| fail(engine_cause(e)))?;
+
+        let main_size = match fs::symlink_metadata(&self.collection) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(TransferBackup::Absent),
+            Err(e) => return Err(fail(io_cause(e))),
+            Ok(m) if m.file_type().is_file() => m.len(),
+            Ok(_) => {
+                return Err(fail(BackupFailureCause::Io {
+                    detail: "raw backup source is not regular".into(),
+                }));
+            }
+        };
+        let wal_path = self.collection.with_file_name("collection.anki2-wal");
+        let wal_size = match fs::symlink_metadata(&wal_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(fail(io_cause(e))),
+            Ok(m) if m.file_type().is_file() => m.len(),
+            Ok(_) => {
+                return Err(fail(BackupFailureCause::Io {
+                    detail: "raw WAL is not regular".into(),
+                }));
+            }
+        };
+        let needed = main_size
+            .checked_add(wal_size)
+            .and_then(|s| s.checked_add(4 * 1024 * 1024))
+            .ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup space overflow".into(),
+                })
+            })?;
+        let mut ancestor = self.backups.as_path();
+        while !ancestor.exists() {
+            ancestor = ancestor.parent().ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "backup ancestor".into(),
+                })
+            })?;
+        }
+        meguri_storage::space::require_space(self.space.as_ref(), ancestor, needed).map_err(|e| {
+            fail(match e {
+                StorageError::InsufficientSpace { required, available } if strict => {
+                    BackupFailureCause::InsufficientSpace {
+                        needed: required,
+                        available,
+                    }
+                }
+                other => engine_cause(other.into()),
+            })
+        })?;
+        create_backup_directory(&self.backups).map_err(|e| fail(engine_cause(e.into())))?;
+        let instant = EpochMillis(self.clock.now_ms());
+        let wall = instant
+            .0
+            .div_euclid(1000)
+            .checked_add(i64::from(self.clock.utc_offset_at(instant.0).seconds()))
+            .ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup time overflow".into(),
+                })
+            })?;
+        for advance in 0..=60 {
+            let name = backup_name(wall.checked_add(advance).ok_or_else(|| {
+                fail(BackupFailureCause::Io {
+                    detail: "raw backup time overflow".into(),
+                })
+            })?)
+            .map_err(|e| fail(e.into()))?;
+            let main = name.replacen("backup-", "corrupt-", 1).replace(".colpkg", ".anki2");
+            let wal = format!("{main}-wal");
+            if self.backups.join(&main).symlink_metadata().is_ok() || self.backups.join(&wal).symlink_metadata().is_ok()
+            {
+                continue;
+            }
+            cancel.check().map_err(|e| fail(engine_cause(e)))?;
+            let mut wal_copy = None;
+            if wal_size > 0 {
+                if strict {
+                    wal_copy = Some(
+                        crate::server_copy::copy_raw_cancellable(&wal_path, &self.backups.join(&wal), &|| {
+                            cancel.is_cancelled()
+                        })
+                        .map_err(|e| fail(e.into()))?,
+                    );
+                } else {
+                    crate::server_copy::copy_raw(&wal_path, &self.backups.join(&wal)).map_err(|e| fail(e.into()))?;
+                }
+            }
+            if strict {
+                // WAL ownership rolls back on every main failure/cancel. The
+                // helper removes only its own inode, including a post-rename IO
+                // failure, and leaves any colliding foreign entry untouched.
+                let main_copy =
+                    crate::server_copy::copy_raw_cancellable(&self.collection, &self.backups.join(&main), &|| {
+                        cancel.is_cancelled()
+                    })
+                    .map_err(|e| fail(e.into()))?;
+                main_copy.keep();
+                if let Some(wal_copy) = wal_copy {
+                    wal_copy.keep();
+                }
+            } else if let Err(error) = crate::server_copy::copy_raw(&self.collection, &self.backups.join(&main)) {
+                // Preserve frozen manual-transfer uncertain-publication behavior.
+                if self.backups.join(&main).symlink_metadata().is_err() && wal_size > 0 {
+                    let _ = fs::remove_file(self.backups.join(&wal));
+                    let _ = meguri_storage::atomic_file::sync_directory(&self.backups);
+                }
+                return Err(fail(error.into()));
+            }
+            return Ok(TransferBackup::Raw {
+                main,
+                wal: (wal_size > 0).then_some(wal),
+                instant,
+            });
+        }
+        Err(fail(BackupFailureCause::DestinationExists))
     }
 
     fn engine(&self) -> Result<Engine, EngineError> {
@@ -96,14 +224,13 @@ impl ForcedBackupProvider {
         cancel: &CancelToken,
         protect: bool,
     ) -> Result<BackupWritten, EngineError> {
-        let _lane = self.lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ended = BackupEnded(self.engine.clone());
         let fail = |cause| failure(cause, BackupPublication::Unpublished);
+        let _lane = self.lane.lock(Some(cancel)).map_err(|e| fail(engine_cause(e)))?;
         cancel.check().map_err(|e| fail(engine_cause(e)))?;
         let engine = self.engine()?;
         // Read through the handle supplied by the exclusive caller.
-        let lease = collection
-            .reader(ReaderRole::Maintenance)
-            .map_err(|e| fail(engine_cause(e)))?;
+        let lease = collection.backup_reader().map_err(|e| fail(engine_cause(e)))?;
         if collection.generation() != engine.generation() {
             return Err(fail(engine_cause(EngineError::StaleGeneration {
                 planned: collection.generation(),
@@ -230,6 +357,15 @@ impl ForcedBackupProvider {
     }
 }
 
+struct BackupEnded(WeakEngine);
+impl Drop for BackupEnded {
+    fn drop(&mut self) {
+        if let Some(engine) = self.0.upgrade() {
+            engine.maintenance().backup_ended();
+        }
+    }
+}
+
 struct BackupPin {
     name: String,
     protected: Arc<Mutex<std::collections::BTreeMap<String, usize>>>,
@@ -247,19 +383,100 @@ impl Drop for BackupPin {
 }
 
 impl BackupService for ForcedBackupProvider {
+    fn before_restore(
+        &self,
+        collection: Option<&Collection>,
+        damaged: bool,
+        cancel: &CancelToken,
+    ) -> Result<meguri_engine::ports::GuardedTransferBackup, EngineError> {
+        use meguri_engine::ports::{GuardedTransferBackup, TransferBackup};
+        if !damaged && let Some(collection) = collection {
+            match self.force_inner(collection, cancel, true) {
+                Ok(written) => {
+                    return Ok(GuardedTransferBackup {
+                        backup: TransferBackup::Collection(written.receipt),
+                        raw_restore: None,
+                        protection: written.guard.protection,
+                    });
+                }
+                Err(EngineError::SafetyBackupFailed(ref failure)) if corrupt_snapshot(&failure.cause) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let _ended = BackupEnded(self.engine.clone());
+        let _engine = self.engine()?;
+        let _lane = self
+            .lane
+            .lock(Some(cancel))
+            .map_err(|e| failure(engine_cause(e), BackupPublication::Unpublished))?;
+        let backup = self.raw_copy(cancel, true)?;
+        let raw_restore = match &backup {
+            TransferBackup::Raw {
+                main, wal: Some(wal), ..
+            } => Some(
+                meguri_engine::device_state::RawRestoreAuthority::verify(
+                    &self.collection,
+                    &self.backups.join(main),
+                    &self.backups.join(wal),
+                )
+                .map_err(|e| failure(engine_cause(e.into()), BackupPublication::Unpublished))?,
+            ),
+            _ => None,
+        };
+        Ok(GuardedTransferBackup {
+            backup,
+            raw_restore,
+            protection: None,
+        })
+    }
+
+    fn backup_live(
+        &self,
+        collection: &Collection,
+        cancel: &CancelToken,
+    ) -> Result<meguri_engine::maintenance::LiveBackup, EngineError> {
+        self.force(collection, cancel)
+            .map(|written| meguri_engine::maintenance::LiveBackup {
+                receipt: written.receipt,
+                deleted_names: written.deleted_names,
+            })
+    }
+
     fn before_safety_operation(
         &self,
         collection: &Collection,
         cancel: &CancelToken,
     ) -> Result<meguri_engine::ports::GuardedBackup, EngineError> {
-        self.force_inner(collection, cancel, true).map(|written| written.guard)
+        match self.force_inner(collection, cancel, true) {
+            Ok(written) => Ok(written.guard),
+            Err(EngineError::SafetyBackupFailed(ref failure)) if corrupt_snapshot(&failure.cause) => {
+                let _ended = BackupEnded(self.engine.clone());
+                let provider = self.clone();
+                // This rare fallback alone occupies the writer: no commit or
+                // checkpoint can race a damaged main/WAL recovery pair.
+                let cancel = cancel.clone();
+                collection
+                    .submit_maintenance(
+                        meguri_engine::executor::catalog::DAMAGED_BACKUP,
+                        std::time::Duration::from_secs(2),
+                        move |_| {
+                            let _lane = provider.lane.lock(Some(&cancel))?;
+                            provider
+                                .raw_copy(&cancel, true)
+                                .map(|_| meguri_engine::ports::GuardedBackup::default())
+                        },
+                    )
+                    .wait()
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn protect_backup(
         &self,
         name: &str,
     ) -> Result<Option<Arc<dyn meguri_engine::ports::BackupProtection>>, EngineError> {
-        let _lane = self.lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lane = self.lane.lock(None)?;
         let _engine = self.engine()?;
         // Missing/unreadable proof falls back to a fresh backup.
         Ok(listing::list(&self.backups)
@@ -281,94 +498,8 @@ impl BackupService for ForcedBackupProvider {
                 Err(error) => return Err(error),
             }
         }
-        // Caller holds Working (writer drained) or initial replacement's
-        // advisory ownership. No checkpoint or quick_check is run for T7.
-        let fail = |cause| failure(cause, BackupPublication::Unpublished);
-        cancel.check().map_err(|e| fail(engine_cause(e)))?;
         let _engine = self.engine()?;
-        let main_size = match fs::symlink_metadata(&self.collection) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(TransferBackup::Absent),
-            Err(e) => return Err(fail(io_cause(e))),
-            Ok(m) if m.file_type().is_file() => m.len(),
-            Ok(_) => {
-                return Err(fail(BackupFailureCause::Io {
-                    detail: "raw backup source is not regular".into(),
-                }));
-            }
-        };
-        let wal_path = self.collection.with_file_name("collection.anki2-wal");
-        let wal_size = match fs::symlink_metadata(&wal_path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
-            Err(e) => return Err(fail(io_cause(e))),
-            Ok(m) if m.file_type().is_file() => m.len(),
-            Ok(_) => {
-                return Err(fail(BackupFailureCause::Io {
-                    detail: "raw WAL is not regular".into(),
-                }));
-            }
-        };
-        let needed = main_size
-            .checked_add(wal_size)
-            .and_then(|s| s.checked_add(4 * 1024 * 1024))
-            .ok_or_else(|| {
-                fail(BackupFailureCause::Io {
-                    detail: "raw backup space overflow".into(),
-                })
-            })?;
-        let mut ancestor = self.backups.as_path();
-        while !ancestor.exists() {
-            ancestor = ancestor.parent().ok_or_else(|| {
-                fail(BackupFailureCause::Io {
-                    detail: "backup ancestor".into(),
-                })
-            })?;
-        }
-        meguri_storage::space::require_space(self.space.as_ref(), ancestor, needed)
-            .map_err(|e| fail(engine_cause(e.into())))?;
-        create_backup_directory(&self.backups).map_err(|e| fail(engine_cause(e.into())))?;
-        let instant = EpochMillis(self.clock.now_ms());
-        let wall = instant
-            .0
-            .div_euclid(1000)
-            .checked_add(i64::from(self.clock.utc_offset_at(instant.0).seconds()))
-            .ok_or_else(|| {
-                fail(BackupFailureCause::Io {
-                    detail: "raw backup time overflow".into(),
-                })
-            })?;
-        for advance in 0..=60 {
-            let name = backup_name(wall.checked_add(advance).ok_or_else(|| {
-                fail(BackupFailureCause::Io {
-                    detail: "raw backup time overflow".into(),
-                })
-            })?)
-            .map_err(|e| fail(e.into()))?;
-            let main = name.replacen("backup-", "corrupt-", 1).replace(".colpkg", ".anki2");
-            let wal = format!("{main}-wal");
-            if self.backups.join(&main).symlink_metadata().is_ok() || self.backups.join(&wal).symlink_metadata().is_ok()
-            {
-                continue;
-            }
-            cancel.check().map_err(|e| fail(engine_cause(e)))?;
-            if wal_size > 0 {
-                crate::server_copy::copy_raw(&wal_path, &self.backups.join(&wal)).map_err(|e| fail(e.into()))?;
-            }
-            if let Err(error) = crate::server_copy::copy_raw(&self.collection, &self.backups.join(&main)) {
-                // A sync error can follow publication of the main file. Keep
-                // both recovery files whenever that destination is visible.
-                if self.backups.join(&main).symlink_metadata().is_err() && wal_size > 0 {
-                    let _ = fs::remove_file(self.backups.join(&wal));
-                    let _ = meguri_storage::atomic_file::sync_directory(&self.backups);
-                }
-                return Err(fail(error.into()));
-            }
-            return Ok(TransferBackup::Raw {
-                main,
-                wal: (wal_size > 0).then_some(wal),
-                instant,
-            });
-        }
-        Err(fail(BackupFailureCause::DestinationExists))
+        self.raw_copy(cancel, false)
     }
 
     fn before_deck_delete(&self) -> Result<(), EngineError> {
