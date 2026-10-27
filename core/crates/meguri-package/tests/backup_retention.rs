@@ -408,7 +408,7 @@ fn limits_write_keeps_other_members_and_equal_values_keep_bytes_stamps_and_histo
     f.clock.step_ms(3_600_000);
     let result = backup_limits::save(c, requested).unwrap();
     assert_eq!(result.changes.config_keys.len(), 1);
-    assert_eq!(result.changes.config_keys[0].name, "backups");
+    assert_eq!(result.changes.config_keys[0].key, "backups");
     assert!(result.value);
     assert!(result.undo.is_none());
     assert_eq!(c.peek_undo(UndoScope::Global).unwrap().name(), None);
