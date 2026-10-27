@@ -1,0 +1,35 @@
+# Which registered tags match a partial tag (specs/tags/complete.md C2, C3):
+# the input splits into filters at each "::"; each filter takes the first
+# later component that contains it, letters compared by simple case folding;
+# a match is a prefix match when filter k took component k at its start.
+# Prefix matches come first, then inner matches, each in registry order
+# (C4). Rows: German::Verb::modal, japan, Japanese::Audio. limit 500.
+# Needs the tag_complete observation (C7).
+id: tags/complete/components
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["German::Verb::modal"]}
+    - {notetype: Plain, fields: [two], tags: [japan]}
+    - {notetype: Plain, fields: [three], tags: ["Japanese::Audio"]}
+steps:
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: jap, limit: 500}
+            - {input: "jap::aud", limit: 500}
+            - {input: "jap::", limit: 500}
+            - {input: "JAPANESE::AUDIO", limit: 500}
+            - {input: "verb::mod", limit: 500}
+            - {input: verb, limit: 500}
+            - {input: "ger::modal", limit: 500}
+            - {input: "GERMAN::V", limit: 500}
+            - {input: erman, limit: 500}
+            - {input: pan, limit: 500}
+            - {input: a, limit: 500}
+            - {input: "audio::jap", limit: 500}
+            - {input: "", limit: 500}
+            - {input: "::", limit: 500}
