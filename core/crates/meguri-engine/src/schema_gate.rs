@@ -1,13 +1,5 @@
-//! Schema changes and the confirmation gate (`specs/notetypes/schema-changes.md`):
-//! the classification table every op that can force a one-way sync declares
-//! its reasons from (G2), the gate that asks first after a sync (G4), the
-//! stamp that marks the schema modified (G5), and the storage guard under
-//! them (G6).
-//!
-//! An op calls [`mark_schema_change`] inside its write scope once it knows
-//! its effect and before it writes anything: the gate refuses with
-//! [`EngineError::NeedsSchemaConfirmation`] or sets `col.scm` to now. The
-//! guard runs at every op's commit on the writer (`executor/writer.rs`).
+//! Schema classification, stamping and the storage guard (G2–G6).
+//! Plans declare their effect before safety admission; stamping stays in the op.
 
 use std::collections::BTreeMap;
 
@@ -16,9 +8,8 @@ use meguri_model::ids::NotetypeId;
 use meguri_model::time::EpochMillis;
 use meguri_storage::journal::Journal;
 use meguri_storage::rows::col::COL_KEY;
-use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StorageError, Table, WriteScope};
+use meguri_storage::{ReadRows, Record, RowKey, StorageError, Table, WriteScope};
 
-use crate::collection::Collection;
 use crate::error::EngineError;
 
 /// Why an op changes the schema (G2). The table is the whole list: no other
@@ -56,11 +47,13 @@ pub enum SchemaReason {
     /// The "Force a one-way sync on next sync" setting (U113/U160, R1547):
     /// the setting is the user's request.
     ForceOneWay,
+    /// Classification only; incoming CloudKit execution belongs to U114.
+    CloudkitStructureApplied,
 }
 
 impl SchemaReason {
     /// Every reason, in G2's order.
-    pub const ALL: [SchemaReason; 13] = [
+    pub const ALL: [SchemaReason; 14] = [
         SchemaReason::FieldsChanged,
         SchemaReason::SortFieldChanged,
         SchemaReason::TemplatesChanged,
@@ -74,6 +67,7 @@ impl SchemaReason {
         SchemaReason::SyncSanityFailed,
         SchemaReason::FullUpload,
         SchemaReason::ForceOneWay,
+        SchemaReason::CloudkitStructureApplied,
     ];
 
     /// G2's name of the reason.
@@ -92,27 +86,23 @@ impl SchemaReason {
             SchemaReason::SyncSanityFailed => "sync_sanity_failed",
             SchemaReason::FullUpload => "full_upload",
             SchemaReason::ForceOneWay => "force_one_way",
+            SchemaReason::CloudkitStructureApplied => "cloudkit_structure_applied",
         }
     }
 
-    /// G2's last column: whether an op for this reason asks the user first
-    /// when the schema is not modified since the last sync.
-    pub const fn asks_first(self) -> bool {
-        match self {
-            SchemaReason::FieldsChanged
-            | SchemaReason::SortFieldChanged
-            | SchemaReason::TemplatesChanged
-            | SchemaReason::NotetypeRemoved
-            | SchemaReason::NotetypeRestored
-            | SchemaReason::NotesNotetypeChanged
-            | SchemaReason::PresetRemoved
-            | SchemaReason::NotetypesMerged => true,
-            SchemaReason::CollectionReplaced
-            | SchemaReason::CheckDatabaseRepair
-            | SchemaReason::SyncSanityFailed
-            | SchemaReason::FullUpload
-            | SchemaReason::ForceOneWay => false,
-        }
+    /// G2's structural-edit classification, independent of `scm` and `ls`.
+    pub const fn is_structural(self) -> bool {
+        matches!(
+            self,
+            Self::FieldsChanged
+                | Self::SortFieldChanged
+                | Self::TemplatesChanged
+                | Self::NotetypeRemoved
+                | Self::NotetypeRestored
+                | Self::NotesNotetypeChanged
+                | Self::PresetRemoved
+                | Self::NotetypesMerged
+        )
     }
 }
 
@@ -121,36 +111,13 @@ pub fn is_modified(col: &Col) -> bool {
     col.schema_modified.0 > col.last_sync.0
 }
 
-/// G4, for the UI: whether a schema change that asks first would ask now,
-/// read from the live `col` row. The op's own check is the one that counts:
-/// a sync can finish in between.
-pub fn would_ask(collection: &Collection) -> Result<bool, EngineError> {
-    let reader = collection.reader(ReaderRole::Query)?;
-    Ok(!is_modified(&reader.col()?))
-}
-
-/// G4 and G5 inside an op's write scope, after the op has computed its effect
-/// and before it writes anything. With no reason it does nothing. When a
-/// reason asks first, `confirmed` is false and the live `col` row has
-/// `scm <= ls`, it refuses with [`EngineError::NeedsSchemaConfirmation`]
-/// (the op then writes nothing). Otherwise it sets `scm` to now in the
-/// scope, confirmed or not and also when `scm > ls` already: the write moves
-/// `col.mod` with the op, is in its change set and in its undo step.
-pub fn mark_schema_change(
-    scope: &mut WriteScope<'_>,
-    reasons: &[SchemaReason],
-    confirmed: bool,
-) -> Result<(), EngineError> {
+/// G5: stamp inside the transaction, after safety admission and before writing
+/// structure. The stamp participates in the normal change set and undo journal.
+pub fn mark_schema_change(scope: &mut WriteScope<'_>, reasons: &[SchemaReason]) -> Result<(), EngineError> {
     if reasons.is_empty() {
         return Ok(());
     }
     let mut col = scope.col()?;
-    if !confirmed && !is_modified(&col) && reasons.iter().any(|r| r.asks_first()) {
-        let mut asked: Vec<SchemaReason> = reasons.to_vec();
-        asked.sort();
-        asked.dedup();
-        return Err(EngineError::NeedsSchemaConfirmation { reasons: asked });
-    }
     col.schema_modified = EpochMillis(scope.now().0);
     scope.put_col(&col)?;
     Ok(())

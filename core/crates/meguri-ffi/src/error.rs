@@ -32,9 +32,6 @@ pub enum CoreError {
     UndoUnavailable {
         reason: ReviewDisabledReason,
     },
-    NeedsSchemaConfirmation {
-        reasons: Vec<SchemaChangeReason>,
-    },
     NotetypeRefused {
         refusal: NotetypeRefusal,
     },
@@ -108,7 +105,6 @@ impl fmt::Display for CoreError {
             CoreError::Stale { .. } => write!(f, "{self:?}"),
             CoreError::StaleGeneration { .. } => write!(f, "{self:?}"),
             CoreError::UndoUnavailable { .. } => write!(f, "{self:?}"),
-            CoreError::NeedsSchemaConfirmation { .. } => write!(f, "{self:?}"),
             CoreError::NotetypeRefused { .. } => write!(f, "{self:?}"),
             CoreError::DeckRefused { .. } => write!(f, "{self:?}"),
             CoreError::NoteNotFound { .. } => write!(f, "{self:?}"),
@@ -164,9 +160,6 @@ impl From<EngineError> for CoreError {
                 current: current.0,
             },
             EngineError::UndoUnavailable { reason } => CoreError::UndoUnavailable { reason: reason.into() },
-            EngineError::NeedsSchemaConfirmation { reasons } => CoreError::NeedsSchemaConfirmation {
-                reasons: reasons.into_iter().map(Into::into).collect(),
-            },
             EngineError::NotetypeRefused(refusal) => CoreError::NotetypeRefused {
                 refusal: refusal.into(),
             },
@@ -220,9 +213,6 @@ impl From<CoreError> for EngineError {
                 current: meguri_engine::Generation(current),
             },
             CoreError::UndoUnavailable { reason } => EngineError::UndoUnavailable { reason: reason.into() },
-            CoreError::NeedsSchemaConfirmation { reasons } => EngineError::NeedsSchemaConfirmation {
-                reasons: reasons.into_iter().map(Into::into).collect(),
-            },
             CoreError::NotetypeRefused { refusal } => EngineError::NotetypeRefused(refusal.into()),
             CoreError::DeckRefused { refusal } => EngineError::DeckRefused(refusal.into()),
             CoreError::NoteNotFound { id } => EngineError::NoteNotFound {

@@ -537,7 +537,7 @@ fn c5_c6_held_stamp_unknown_runtime_unused_and_unselected_bytes_add_no_invalidat
     // Add an unselected template before the session; it has no card at ord 0.
     let first = h.cards[0];
     edit(&h, move |s| {
-        meguri_engine::mark_schema_change(s, &[meguri_engine::schema_gate::SchemaReason::TemplatesChanged], true)?;
+        meguri_engine::mark_schema_change(s, &[meguri_engine::schema_gate::SchemaReason::TemplatesChanged])?;
         let c = s.card(first)?.unwrap();
         let n = s.note(c.note_id)?.unwrap();
         let mut nt = s.notetype(n.notetype_id)?.unwrap();

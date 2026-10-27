@@ -44,6 +44,7 @@ public enum SchemaChangeReason: Sendable, Hashable {
     case checkDatabaseRepair
     case syncSanityFailed
     case fullUpload
+    case cloudkitStructureApplied
     case forceOneWay
     init(_ raw: MeguriCoreBindings.SchemaChangeReason) {
         switch raw {
@@ -59,6 +60,7 @@ public enum SchemaChangeReason: Sendable, Hashable {
         case .checkDatabaseRepair: self = .checkDatabaseRepair
         case .syncSanityFailed: self = .syncSanityFailed
         case .fullUpload: self = .fullUpload
+        case .cloudkitStructureApplied: self = .cloudkitStructureApplied
         case .forceOneWay: self = .forceOneWay
         }
     }

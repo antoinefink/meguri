@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use common::{Harness, drain};
 use meguri_engine::notetypes::{self, Draft, NewNotetype, NewTemplate, SaveOptions};
-use meguri_engine::schema_gate::{SchemaReason, would_ask};
+use meguri_engine::schema_gate::{SchemaReason, is_modified};
 use meguri_engine::undo::names::UPDATE_NOTE_TYPE;
 use meguri_engine::{EngineError, EventKind, OpContext, OpSpec, StepKind, UndoScope, UndoStatus, mark_schema_change};
 use meguri_model::changes::OpSource;
@@ -76,22 +76,21 @@ fn just_synced(h: &Harness) {
     h.clock.step_ms(60_000);
 }
 
-/// A test-only structure op: declares `reasons` to the gate (submitted with
-/// `confirmed`), then changes the note type with `change`. With no reason
-/// it consults no gate, as a non-schema op.
+/// A test-only structure op declares its effect before safety admission.
 fn structure_op(
     h: &Harness,
     id: NotetypeId,
     reasons: &'static [SchemaReason],
-    confirmed: bool,
     change: fn(&mut Notetype, &OpContext<'_, '_>),
 ) -> Result<(), EngineError> {
     h.collection
         .run(
-            OpSpec::named("test_structure_change", OpSource::UserUndoable).undo_step(UPDATE_NOTE_TYPE, StepKind::Other),
+            OpSpec::named("test_structure_change", OpSource::UserUndoable)
+                .schema_changes(reasons.iter().copied())
+                .undo_step(UPDATE_NOTE_TYPE, StepKind::Other),
             move |ctx| {
                 let mut notetype = ctx.scope().notetype(id)?.expect("the note type exists");
-                mark_schema_change(ctx.scope(), reasons, confirmed)?;
+                mark_schema_change(ctx.scope(), reasons)?;
                 change(&mut notetype, ctx);
                 ctx.scope().put_notetype(&notetype)?;
                 Ok(())
@@ -128,74 +127,24 @@ const FIELDS: &[SchemaReason] = &[SchemaReason::FieldsChanged];
 const TEMPLATES: &[SchemaReason] = &[SchemaReason::TemplatesChanged];
 
 #[test]
-fn ae39_after_a_sync_only_the_first_schema_change_asks() {
+fn a_schema_op_commits_at_once_while_scm_is_at_ls() {
     let h = Harness::open();
     let id = pair(&h);
     just_synced(&h);
     let synced = col(&h);
-    assert!(would_ask(&h.collection).unwrap());
-
-    // Renaming a field is no schema change: no request, `scm` stays.
-    structure_op(&h, id, &[], false, rename_back).unwrap();
+    assert!(!is_modified(&synced));
+    structure_op(&h, id, &[], rename_back).unwrap();
     assert_eq!(notetype(&h, id).fields[1].name, "Answer");
     assert_eq!(col(&h).schema_modified, synced.schema_modified);
-
-    // Adding a field asks first and writes nothing: no row, no `col.mod`,
-    // no undo step, no change set.
-    h.clock.step_ms(1_000);
-    // Earlier col writes enqueue Rollover ops on the same FIFO writer queue.
-    // Settle those before asserting that this refusal commits no new seq.
-    h.collection
-        .run(
-            OpSpec::named("test_schema_refusal_barrier", OpSource::Rollover).stamp(StampMode::Raw),
-            |_| Ok(()),
-        )
-        .unwrap();
-    let events = h.engine.stream().subscribe();
-    let before = (
-        col(&h),
-        h.collection.last_seq(),
-        h.collection.peek_undo(UndoScope::Global).unwrap(),
-    );
-    let refused = structure_op(&h, id, FIELDS, false, add_field);
-    assert_eq!(
-        refused,
-        Err(EngineError::NeedsSchemaConfirmation {
-            reasons: vec![SchemaReason::FieldsChanged]
-        })
-    );
-    assert_eq!(notetype(&h, id).fields.len(), 2);
-    assert_eq!(
-        (
-            col(&h),
-            h.collection.last_seq(),
-            h.collection.peek_undo(UndoScope::Global).unwrap()
-        ),
-        before
-    );
-    assert!(
-        drain(&events, Duration::from_millis(50))
-            .iter()
-            .all(|e| !matches!(e.kind, EventKind::Changes(_)))
-    );
-
-    // Submitted again confirmed: the field is added and `scm` set to now.
-    h.clock.step_ms(1_000);
     let now = h.clock.now_ms();
-    structure_op(&h, id, FIELDS, true, add_field).unwrap();
+    structure_op(&h, id, FIELDS, add_field).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 3);
-    let after = col(&h);
-    assert_eq!(after.schema_modified.0, now);
-    assert!(after.schema_modified.0 > after.last_sync.0);
-    assert!(!would_ask(&h.collection).unwrap());
-
-    // Reordering templates before the next sync asks nothing, and sets `scm`
-    // again.
+    assert_eq!(col(&h).schema_modified.0, now);
+    assert!(is_modified(&col(&h)));
     h.clock.step_ms(1_000);
-    let later = h.clock.now_ms();
-    structure_op(&h, id, TEMPLATES, false, swap_templates).unwrap();
+    structure_op(&h, id, TEMPLATES, swap_templates).unwrap();
     assert_eq!(notetype(&h, id).templates[0].name, "Reverse");
-    assert_eq!(col(&h).schema_modified.0, later);
+    assert_eq!(col(&h).schema_modified.0, h.clock.now_ms());
 }
 
 #[test]
@@ -204,7 +153,7 @@ fn a_plain_save_cannot_move_templates_that_have_no_id() {
     // draft moves it, also without the optional ids of legacy note types.
     // After a sync, two such templates with the same texts swapped in a
     // draft look like two renames; the plain save must refuse the move,
-    // which asks first and rewrites card ordinals (U34), and write nothing.
+    // which rewrites card ordinals (U34), and write nothing.
     let h = Harness::open();
     let new = NewNotetype {
         name: "Twins".to_owned(),
@@ -279,10 +228,10 @@ fn a_second_field_add_needs_no_confirmation_and_sets_scm_again() {
     let h = Harness::open();
     let id = pair(&h);
     just_synced(&h);
-    structure_op(&h, id, FIELDS, true, add_field).unwrap();
+    structure_op(&h, id, FIELDS, add_field).unwrap();
     h.clock.step_ms(5_000);
     let now = h.clock.now_ms();
-    structure_op(&h, id, FIELDS, false, add_field).unwrap();
+    structure_op(&h, id, FIELDS, add_field).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 4);
     assert_eq!(col(&h).schema_modified.0, now);
 }
@@ -296,7 +245,7 @@ fn a_change_set_and_the_undo_step_carry_the_schema_stamp() {
     just_synced(&h);
     let synced = col(&h);
     let events = h.engine.stream().subscribe();
-    structure_op(&h, id, FIELDS, true, add_field).unwrap();
+    structure_op(&h, id, FIELDS, add_field).unwrap();
     let after = col(&h);
     assert_eq!(after.modified.0, h.clock.now_ms());
     let changes: Vec<_> = drain(&events, Duration::from_millis(50))
@@ -320,16 +269,16 @@ fn the_storage_guard_refuses_a_count_change_that_leaves_scm_at_ls() {
     let id = pair(&h);
     just_synced(&h);
     let before = (col(&h), notetype(&h, id).fields.len());
-    let refused = structure_op(&h, id, &[], false, add_field);
+    let refused = structure_op(&h, id, &[], add_field);
     assert_eq!(refused, Err(EngineError::SchemaNotMarked { notetype_id: id }));
     assert_eq!((col(&h), notetype(&h, id).fields.len()), before);
     // A template count too.
-    let refused = structure_op(&h, id, &[], false, add_template);
+    let refused = structure_op(&h, id, &[], add_template);
     assert_eq!(refused, Err(EngineError::SchemaNotMarked { notetype_id: id }));
     assert_eq!(notetype(&h, id).templates.len(), 2);
     // A reorder keeps the counts: the guard lets it through (G2 and G3 are
     // the ops' to declare).
-    structure_op(&h, id, &[], false, swap_templates).unwrap();
+    structure_op(&h, id, &[], swap_templates).unwrap();
 }
 
 #[test]
@@ -340,8 +289,8 @@ fn the_guard_lets_count_changes_through_once_the_schema_is_modified() {
     let id = pair(&h);
     // Never synced: `ls` 0 (G1).
     assert_eq!(col(&h).last_sync.0, 0);
-    assert!(!would_ask(&h.collection).unwrap());
-    structure_op(&h, id, &[], false, add_field).unwrap();
+    assert!(is_modified(&col(&h)));
+    structure_op(&h, id, &[], add_field).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 3);
 }
 
@@ -378,7 +327,7 @@ fn undo_and_redo_of_a_template_add_both_commit() {
     let id = pair(&h);
     just_synced(&h);
     let synced = col(&h);
-    structure_op(&h, id, TEMPLATES, true, add_template).unwrap();
+    structure_op(&h, id, TEMPLATES, add_template).unwrap();
     let added = col(&h);
     assert_eq!(notetype(&h, id).templates.len(), 3);
     assert!(matches!(
@@ -400,50 +349,47 @@ fn undo_and_redo_of_a_template_add_both_commit() {
 }
 
 #[test]
-fn ops_that_do_not_ask_set_scm_unconfirmed() {
-    // G2: a full upload, a sanity failure, Check Database's repairs, a
-    // replaced collection and the force setting never ask, even after a sync.
-    for reason in SchemaReason::ALL.into_iter().filter(|r| !r.asks_first()) {
+fn no_op_takes_a_schema_confirmation_input() {
+    // A function-pointer assertion freezes the confirmation-free public signature.
+    let stamp: fn(&mut meguri_storage::WriteScope<'_>, &[SchemaReason]) -> Result<(), EngineError> = mark_schema_change;
+    for reason in SchemaReason::ALL {
         let h = Harness::open();
         just_synced(&h);
         let now = h.clock.now_ms();
         h.collection
-            .run(OpSpec::named("test_schema_op", OpSource::UserNonUndoable), move |ctx| {
-                mark_schema_change(ctx.scope(), &[reason], false)
-            })
+            .run(
+                OpSpec::named("test_schema_op", OpSource::UserUndoable).schema_changes([reason]),
+                move |ctx| stamp(ctx.scope(), &[reason]),
+            )
             .unwrap();
         assert_eq!(col(&h).schema_modified.0, now, "{reason:?}");
     }
 }
 
 #[test]
-fn an_op_with_several_reasons_asks_once_and_names_them_all() {
+fn an_op_with_several_reasons_stamps_once() {
     let h = Harness::open();
     just_synced(&h);
-    let refused = h
-        .collection
-        .run(OpSpec::named("test_schema_op", OpSource::UserUndoable), |ctx| {
-            mark_schema_change(
-                ctx.scope(),
-                &[
-                    SchemaReason::TemplatesChanged,
-                    SchemaReason::FieldsChanged,
-                    SchemaReason::FieldsChanged,
-                ],
-                false,
-            )
-        });
-    assert_eq!(
-        refused.map(|_| ()),
-        Err(EngineError::NeedsSchemaConfirmation {
-            reasons: vec![SchemaReason::FieldsChanged, SchemaReason::TemplatesChanged]
-        })
-    );
+    let before = col(&h);
+    let reasons = [
+        SchemaReason::TemplatesChanged,
+        SchemaReason::FieldsChanged,
+        SchemaReason::FieldsChanged,
+    ];
+    h.collection
+        .run(
+            OpSpec::named("test_schema_op", OpSource::UserUndoable).schema_changes(reasons),
+            move |ctx| mark_schema_change(ctx.scope(), &reasons),
+        )
+        .unwrap();
+    assert_eq!(col(&h).schema_modified.0, h.clock.now_ms());
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(col(&h).schema_modified, before.schema_modified);
 }
 
 #[test]
 fn the_classification_is_the_table_of_g2() {
-    // R949, R950, R1475: every reason of G2 with its "asks first" column,
+    // R949, R950, R1475: every reason of G2 with its structural-edit column,
     // read from the spec.
     let spec = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../specs/notetypes/schema-changes.md"),
@@ -464,7 +410,7 @@ fn the_classification_is_the_table_of_g2() {
         .collect();
     let ours: Vec<(String, bool)> = SchemaReason::ALL
         .iter()
-        .map(|r| (r.name().to_owned(), r.asks_first()))
+        .map(|r| (r.name().to_owned(), r.is_structural()))
         .collect();
     assert_eq!(ours, listed);
 }

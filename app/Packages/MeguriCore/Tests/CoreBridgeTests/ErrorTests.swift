@@ -8,7 +8,6 @@ import Testing
         (.Stale(table: .notetypes, key: "37"), .stale(table: .notetypes, key: "37")),
         (.StaleGeneration(planned: 37, current: 41), .staleGeneration(planned: 37, current: 41)),
         (.UndoUnavailable(reason: .alreadyUploaded), .undoUnavailable(reason: .alreadyUploaded)),
-        (.NeedsSchemaConfirmation(reasons: [.presetRemoved, .forceOneWay]), .needsSchemaConfirmation(reasons: [.presetRemoved, .forceOneWay])),
         (.NotetypeRefused(refusal: .template(kind: .unknownField, template: 3, side: .back, name: "Missing", earlier: nil)),
          .notetypeRefused(.template(kind: .unknownField, template: 3, side: .back, name: "Missing", earlier: nil))),
         (.NotetypeRefused(refusal: .invalid(reason: .emptyFieldName(ord: 7))), .notetypeRefused(.invalid(reason: .emptyFieldName(ord: 7)))),

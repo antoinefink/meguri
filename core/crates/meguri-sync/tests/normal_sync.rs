@@ -587,7 +587,6 @@ fn schema_change_during_delayed_meta(structural: bool, count: usize, server_empt
                     } else {
                         meguri_engine::schema_gate::SchemaReason::ForceOneWay
                     }],
-                    true,
                 )?;
                 if structural {
                     let (scope, random) = ctx.scope_and_random();

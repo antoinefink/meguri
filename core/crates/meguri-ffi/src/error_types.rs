@@ -65,6 +65,7 @@ pub enum SchemaChangeReason {
     SyncSanityFailed,
     FullUpload,
     ForceOneWay,
+    CloudkitStructureApplied,
 }
 impl From<meguri_engine::schema_gate::SchemaReason> for SchemaChangeReason {
     fn from(v: meguri_engine::schema_gate::SchemaReason) -> Self {
@@ -82,6 +83,7 @@ impl From<meguri_engine::schema_gate::SchemaReason> for SchemaChangeReason {
             meguri_engine::schema_gate::SchemaReason::SyncSanityFailed => Self::SyncSanityFailed,
             meguri_engine::schema_gate::SchemaReason::FullUpload => Self::FullUpload,
             meguri_engine::schema_gate::SchemaReason::ForceOneWay => Self::ForceOneWay,
+            meguri_engine::schema_gate::SchemaReason::CloudkitStructureApplied => Self::CloudkitStructureApplied,
         }
     }
 }
@@ -101,6 +103,7 @@ impl From<SchemaChangeReason> for meguri_engine::schema_gate::SchemaReason {
             SchemaChangeReason::SyncSanityFailed => Self::SyncSanityFailed,
             SchemaChangeReason::FullUpload => Self::FullUpload,
             SchemaChangeReason::ForceOneWay => Self::ForceOneWay,
+            SchemaChangeReason::CloudkitStructureApplied => Self::CloudkitStructureApplied,
         }
     }
 }
