@@ -286,3 +286,8 @@ file_query
 invalid_json
 pragma_journal_mode
 pragma_integrity_check
+# CloudKit acceptance and faults (cloudkit-acceptance.md Q5, cloudkit-faults.md
+# F2): the SQLite integrity pragma the checks run.
+integrity_check
+# cloudkit-faults.md F3, F8: the macOS fcntl command the power-loss shim models.
+F_FULLFSYNC
