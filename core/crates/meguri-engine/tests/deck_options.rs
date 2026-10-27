@@ -126,18 +126,16 @@ fn validation_stale_default_and_schema_refusals_leave_no_partial_effects() {
         })
         .unwrap();
     let mut d = draft(&h, DeckId(1));
-    let before = dump(&h);
-    assert!(matches!(
-        d.remove(preset.0, false),
-        Err(EngineError::NeedsSchemaConfirmation { .. })
-    ));
-    d.removals.insert(preset.0);
-    d.presets.retain(|p| p.key != preset.0);
-    assert!(matches!(
-        options::save(&h.collection, d, &Default::default()),
-        Err(EngineError::NeedsSchemaConfirmation { .. })
-    ));
-    assert_eq!(dump(&h), before);
+    d.remove(preset.0).unwrap();
+    options::save(&h.collection, d, &Default::default()).unwrap();
+    assert!(
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .deck_config(preset)
+            .unwrap()
+            .is_none()
+    );
 }
 #[test]
 fn subtree_removed_and_missing_presets_receive_the_targets_five_values() {
@@ -149,7 +147,7 @@ fn subtree_removed_and_missing_presets_receive_the_targets_five_values() {
     deck_config::assign(&h.collection, orphan, removed, false).unwrap();
     let mut d = draft(&h, parent);
     d.subtree = true;
-    d.remove(removed.0, true).unwrap();
+    d.remove(removed.0).unwrap();
     d.edit(None, Field::NewLimit, Value::Number(17.)).unwrap();
     d.edit(None, Field::ReviewLimitToday, Value::Number(52.)).unwrap();
     d.edit(None, Field::DeckDesiredRetention, Value::Number(0.85)).unwrap();
@@ -602,12 +600,12 @@ fn snapshot_order_use_counts_staging_removal_and_ignore_count_are_real_reads() {
     assert_eq!(d.use_count(1).unwrap(), 0);
     d.subtree = true;
     assert_eq!(d.use_count(z.0).unwrap(), 2);
-    d.remove(z.0, true).unwrap();
+    d.remove(z.0).unwrap();
     assert_eq!(d.selected, 1);
     assert!(d.removals.contains(&z.0));
     let new = d.add(" Fresh ", false, h.clock.as_ref()).unwrap().unwrap();
     assert_eq!(d.preset(new).unwrap().name, "Fresh");
-    d.remove(new, false).unwrap();
+    d.remove(new).unwrap();
     assert!(!d.removals.contains(&new));
     let count = options::ignored_before_count(&h.collection, &d, a.0, "2030-01-01").unwrap();
     assert_eq!((count.included, count.total), (0, 0));
@@ -676,4 +674,28 @@ fn selecting_limit_and_retention_tabs_clears_only_more_specific_draft_values() {
     d.set_retention(false, 0.92).unwrap();
     assert_eq!(d.deck_values[&Field::DeckDesiredRetention], Value::None);
     assert_eq!(d.presets[0].values[&Field::DesiredRetention], Value::Number(0.92));
+}
+
+#[test]
+fn removing_a_preset_with_scm_at_ls_commits_without_confirmation() {
+    let h = common::fresh();
+    let preset = deck_config::add(&h.collection, "Remove".into()).unwrap().value;
+    h.collection
+        .run(OpSpec::named("synced", OpSource::Maintenance), |ctx| {
+            let mut col = ctx.scope().col()?;
+            col.last_sync = col.schema_modified;
+            ctx.scope().put_col(&col)?;
+            Ok(())
+        })
+        .unwrap();
+    let before = dump(&h);
+    let mut d = draft(&h, DeckId(1));
+    h.clock.step_ms(1_000);
+    d.remove(preset.0).unwrap();
+    assert_eq!(d.schema_reasons(), [meguri_engine::SchemaReason::PresetRemoved]);
+    options::save(&h.collection, d, &Default::default()).unwrap();
+    let col = h.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    assert!(col.schema_modified > col.last_sync);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), before);
 }

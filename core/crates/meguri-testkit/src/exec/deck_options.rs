@@ -63,11 +63,10 @@ fn save(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
         if key == 1 {
             return Ok(OpResult::Rejected("default_preset"));
         }
-        draft.remove(key, true).map_err(core)?;
+        draft.remove(key).map_err(core)?;
     }
     draft.select(selected).map_err(core)?;
     draft.subtree = args.subtree;
-    draft.schema_confirmed = true;
     if let Some(options) = &args.options {
         macro_rules! numeric {
             ($from:ident,$field:ident) => {

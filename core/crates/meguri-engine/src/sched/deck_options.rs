@@ -75,7 +75,6 @@ pub struct Draft {
     pub deck_values: BTreeMap<Field, Value>,
     pub globals: BTreeMap<Field, Value>,
     pub subtree: bool,
-    pub schema_confirmed: bool,
     next_handle: i64,
 }
 fn invalid(message: impl Into<String>) -> EngineError {
@@ -287,7 +286,6 @@ impl Draft {
             base,
             removals: BTreeSet::new(),
             subtree: false,
-            schema_confirmed: false,
             next_handle: -1,
         }
     }
@@ -445,7 +443,7 @@ impl Draft {
         sort(&mut self.presets);
         Ok(())
     }
-    pub fn remove(&mut self, key: i64, confirmed: bool) -> Result<(), EngineError> {
+    pub fn remove(&mut self, key: i64) -> Result<(), EngineError> {
         if key == 1 {
             return Err(crate::decks::refused(crate::decks::Refusal::DefaultPreset));
         }
@@ -454,14 +452,8 @@ impl Draft {
             .iter()
             .position(|p| p.key == key)
             .ok_or_else(|| invalid("unknown draft preset"))?;
-        if key > 0 && !self.base.schema_modified && self.removals.is_empty() && !confirmed {
-            return Err(EngineError::NeedsSchemaConfirmation {
-                reasons: vec![SchemaReason::PresetRemoved],
-            });
-        }
         if key > 0 {
             self.removals.insert(key);
-            self.schema_confirmed |= confirmed;
         }
         self.presets.remove(index);
         self.selected = self.presets[index.saturating_sub(1).min(self.presets.len() - 1)].key;
@@ -521,6 +513,13 @@ impl Draft {
         }
         issues
     }
+    pub fn schema_reasons(&self) -> Vec<SchemaReason> {
+        if self.removals.is_empty() {
+            Vec::new()
+        } else {
+            vec![SchemaReason::PresetRemoved]
+        }
+    }
     pub fn has_changes(&self) -> bool {
         !self.removals.is_empty()
             || self.selected != self.base.opening
@@ -572,6 +571,7 @@ fn save_spec(draft: &Draft, options: &RunOptions) -> OpSpec {
     // M4.3 permits a user's combined save to use the memory-recompute catalog
     // operation. Its cancellable transaction also owns all other U49 writes.
     let mut spec = OpSpec::new(catalog::MEMORY_RECOMPUTE, OpSource::UserUndoable)
+        .schema_changes(draft.schema_reasons())
         .undo_step(names::DECK_OPTIONS, StepKind::Other)
         .declare_long_write(Duration::from_secs(1));
     for table in [Table::Decks, Table::DeckConfig, Table::Config] {
@@ -587,6 +587,38 @@ fn save_spec(draft: &Draft, options: &RunOptions) -> OpSpec {
         spec = spec.progress(progress.clone());
     }
     spec
+}
+fn validate_save(rows: &impl ReadRows, draft: &Draft) -> Result<(), EngineError> {
+    let target = crate::decks::require(rows, draft.base.deck)?;
+    if !matches!(target.kind.kind, DeckKind::Normal(_)) {
+        return Err(crate::decks::refused(crate::decks::Refusal::FilteredDeck));
+    }
+    if draft.removals.contains(&1) {
+        return Err(crate::decks::refused(crate::decks::Refusal::DefaultPreset));
+    }
+    if draft.removals.contains(&draft.selected) {
+        return Err(invalid("selected preset is removed"));
+    }
+    let keys = draft.presets.iter().map(|p| p.key).collect::<BTreeSet<_>>();
+    if keys.len() != draft.presets.len() || !keys.contains(&draft.selected) {
+        return Err(invalid("invalid preset handles"));
+    }
+    for &key in &draft.removals {
+        crate::deck_config::require(rows, DeckConfigId(key))?;
+    }
+    for p in &draft.presets {
+        if p.key > 0 {
+            crate::deck_config::require(rows, DeckConfigId(p.key))?;
+        }
+        if p.values.len() != Field::PRESET.len() || p.values.keys().any(|f| !Field::PRESET.contains(f)) {
+            return Err(invalid("invalid preset fields"));
+        }
+        draft.materialize(p)?;
+    }
+    if draft.deck_values.len() != Field::DECK.len() || draft.globals.len() != Field::GLOBAL.len() {
+        return Err(invalid("incomplete deck options"));
+    }
+    Ok(())
 }
 pub fn save(collection: &Collection, draft: Draft, options: &RunOptions) -> Result<OpResult<Saved>, EngineError> {
     save_with(collection, draft, options, |_| Ok(()))
@@ -609,33 +641,49 @@ where
             current: collection.generation(),
         });
     }
-    let day = collection.check_rollover()?;
-    let date = today_date(collection, day.next_day_at)?;
-    let issues = draft.validate(&date);
-    if issues.iter().any(|i| i.severity == Severity::Error) {
-        return Err(EngineError::DeckOptionsInvalid(issues));
+    if let Some(cancel) = &options.cancel {
+        cancel.check()?;
     }
-    let spec = save_spec(&draft, options);
+    // Planning must not run check_rollover: it can unbury and clear history.
+    {
+        let lease = collection.reader(ReaderRole::Maintenance)?;
+        let rows = lease.snapshot()?;
+        validate_save(&*rows, &draft)?;
+        let clock = &collection.core.exec.clock;
+        let now = clock.now_ms();
+        let read_integer = |key| -> Result<Option<i128>, EngineError> {
+            Ok(match rows.config_value(key)? {
+                Some(meguri_storage::ConfigValue::Integer(value)) => Some(value),
+                _ => None,
+            })
+        };
+        let day = meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
+            crt: rows.col()?.created.0,
+            creation_offset: meguri_sched::timing::creation_offset(read_integer("creationOffset")?),
+            rollover_hour: meguri_sched::timing::rollover_hour(read_integer("rollover")?).unwrap_or(4),
+            now: now.div_euclid(1000),
+            offset: clock.utc_offset_at(now),
+        });
+        let issues = draft.validate(&today_date(collection, day.next_day_at)?);
+        if issues.iter().any(|i| i.severity == Severity::Error) {
+            return Err(EngineError::DeckOptionsInvalid(issues));
+        }
+    }
+    let mut spec = save_spec(&draft, options);
+    if spec.needs_safety_backup() {
+        spec.safety_backup = Some(collection.admit_safety(&spec)?);
+        spec.safety_admitted = true;
+    }
+    // No guarded collection write, including mutating preparation, precedes admission.
+    if let Some(cancel) = &options.cancel {
+        cancel.check()?;
+    }
+    let day = collection.check_rollover()?;
     let cancel = options.cancel.clone();
     let progress = options.progress.clone();
     collection.run(spec, move |ctx| {
+        validate_save(ctx.scope(), &draft)?;
         let target = crate::decks::require(ctx.scope(), draft.base.deck)?;
-        if !matches!(target.kind.kind, DeckKind::Normal(_)) {
-            return Err(crate::decks::refused(crate::decks::Refusal::FilteredDeck));
-        }
-        if draft.removals.contains(&1) {
-            return Err(crate::decks::refused(crate::decks::Refusal::DefaultPreset));
-        }
-        if draft.removals.contains(&draft.selected) {
-            return Err(invalid("selected preset is removed"));
-        }
-        let keys = draft.presets.iter().map(|p| p.key).collect::<BTreeSet<_>>();
-        if keys.len() != draft.presets.len() || !keys.contains(&draft.selected) {
-            return Err(invalid("invalid preset handles"));
-        }
-        for &key in &draft.removals {
-            crate::deck_config::require(ctx.scope(), DeckConfigId(key))?;
-        }
         let before_decks = ctx.scope().deck_rows()?;
         let before = ctx
             .scope()
@@ -657,9 +705,9 @@ where
             return Err(invalid("incomplete deck options"));
         }
         ctx.check_cancel()?;
-        // O7.2.1: confirmation before the first mutation, then remove rows.
+        // O7.2.1: admission preceded rollover; stamp before structural writes.
         if !draft.removals.is_empty() {
-            crate::mark_schema_change(ctx.scope(), &[SchemaReason::PresetRemoved], draft.schema_confirmed)?;
+            crate::mark_schema_change(ctx.scope(), &[SchemaReason::PresetRemoved])?;
         }
         for &key in &draft.removals {
             ctx.scope().remove_deck_config(DeckConfigId(key))?;

@@ -295,9 +295,9 @@ public enum DeckOptionsEdit: Sendable, Hashable {
     case setLimit(review: Bool, scope: OptionLimitScope, value: Double)
     case setRetention(thisDeck: Bool, value: Double)
     case set(preset: Int64?, field: OptionField, value: OptionValue)
-    case select(preset: Int64), add(name: String), clone(name: String), rename(name: String), remove(preset: Int64, confirmed: Bool)
+    case select(preset: Int64), add(name: String), clone(name: String), rename(name: String), remove(preset: Int64)
     case restoreDefault(preset: Int64?, field: OptionField)
-    case configure(subtree: Bool, schemaConfirmed: Bool)
+    case configure(subtree: Bool)
     var raw: MeguriCoreBindings.DeckOptionsEdit {
         switch self {
         case .setLimit(let review, let scope, let value): return .setLimit(review: review, scope: scope.raw, value: value)
@@ -307,9 +307,9 @@ public enum DeckOptionsEdit: Sendable, Hashable {
         case .add(let name): return .add(name: name)
         case .clone(let name): return .clone(name: name)
         case .rename(let name): return .rename(name: name)
-        case .remove(let preset, let confirmed): return .remove(preset: preset, confirmed: confirmed)
+        case .remove(let preset): return .remove(preset: preset)
         case .restoreDefault(let preset, let field): return .restoreDefault(preset: preset, field: field.raw)
-        case .configure(let subtree, let confirmed): return .configure(subtree: subtree, schemaConfirmed: confirmed)
+        case .configure(let subtree): return .configure(subtree: subtree)
         }
     }
 }

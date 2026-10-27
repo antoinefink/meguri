@@ -533,7 +533,6 @@ pub enum DeckOptionsEdit {
     },
     Remove {
         preset: i64,
-        confirmed: bool,
     },
     RestoreDefault {
         preset: Option<i64>,
@@ -541,7 +540,6 @@ pub enum DeckOptionsEdit {
     },
     Configure {
         subtree: bool,
-        schema_confirmed: bool,
     },
 }
 #[derive(Debug, uniffi::Object)]
@@ -571,14 +569,10 @@ impl DeckOptionsEditor {
                 engine::stage_add(&self.collection, &mut d, &name, true)?;
             }
             DeckOptionsEdit::Rename { name } => engine::stage_rename(&self.collection, &mut d, &name)?,
-            DeckOptionsEdit::Remove { preset, confirmed } => d.remove(preset, confirmed)?,
+            DeckOptionsEdit::Remove { preset } => d.remove(preset)?,
             DeckOptionsEdit::RestoreDefault { preset, field } => d.restore_default(preset, field.into())?,
-            DeckOptionsEdit::Configure {
-                subtree,
-                schema_confirmed,
-            } => {
+            DeckOptionsEdit::Configure { subtree } => {
                 d.subtree = subtree;
-                d.schema_confirmed = schema_confirmed;
             }
         }
         let snapshot = view(&d);
