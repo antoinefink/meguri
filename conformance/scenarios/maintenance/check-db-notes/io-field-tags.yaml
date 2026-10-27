@@ -1,0 +1,36 @@
+# N5 of specs/maintenance/check-database-notes.md: the stock Image Occlusion
+# note type with one note, its Header field's tag removed and protection
+# cleared by an update_notetype field_options edit (notetype-ops.md T5.1,
+# draft). Check Database gives Header tag 2 and its protection back and
+# writes the note type with local stamps; nothing is counted and scm stays.
+# Anki writes every such note type on every run, so its second run stamps it
+# again; Meguri writes it only when a field's config changes (deviation
+# check-db-io-unchanged-skip). Each reopen after a db_exec on notetypes drops
+# Anki's note type cache (N10.2). Stock-kind interop (R1959): only names,
+# structure and stamps are observed.
+id: maintenance/check-db-notes/io-field-tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - ensure_io_notetype: {}
+  - add_note:
+      notetype: Image Occlusion
+      fields: ["{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}", "<img src=\"pic.png\">", "", "", ""]
+  - update_notetype:
+      notetype: Image Occlusion
+      edits:
+        - field_options: {field: Header, tag: null, prevent_deletion: false}
+  - db_exec: {sql: "UPDATE notetypes SET usn = 5 WHERE name = 'Image Occlusion'"}
+  - reopen: {}
+  - observe:
+      - notetype_structure: {notetypes: [Image Occlusion]}
+  - advance: 1h
+  - check_db: {}
+  - observe:
+      - notetype_structure: {notetypes: [Image Occlusion]}
+  - db_exec: {sql: "SELECT mtime_secs, usn FROM notetypes WHERE name = 'Image Occlusion'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - db_exec: {sql: "UPDATE notetypes SET usn = 5 WHERE name = 'Image Occlusion'"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT mtime_secs, usn FROM notetypes WHERE name = 'Image Occlusion'"}
