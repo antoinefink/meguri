@@ -30,9 +30,109 @@
 
 mg_job snapshots host mg_snapshots \
   "Snapshot matrix (R1970-R1975): [--platform iphone|ipad|mac[,...]] [--device <leased udid>]... [--filter <glob>[,...]] [--record <glob>[,...]] [--rebaseline]; app-hosted renders compared with app/Snapshots/<model>-<os build>/ at perceptual precision 0.98, diff PNGs for failures, the approved-baseline guard (needs-human-review)"
+mg_job mac-hosted-test host mg_mac_hosted_test \
+  "Focused Mac app-hosted test in the dedicated VM: --suite <Class/method> (required, one exact method of MeguriSnapshotTests); Debug Snapshot build, one executed pass and zero skips/failures required; no snapshot export or full-suite receipt"
 
 MG_SNAP_DEFAULT_GROUP=rt0-rm0-t50
 MG_SNAP_SUITES="GalleryComponentSnapshots ScreenSnapshots"
+
+mg_mac_hosted_test__usage() {
+  mg_failure usage "mac-hosted-test: $1" "tools/mg mac-hosted-test --suite NativeAudioFileTests/retainedDescriptorPreparation"
+  mg_message "mac-hosted-test: $1"
+  mg_status error
+}
+
+mg_mac_hosted_test() {
+  local suite input prefix="$MG_RUN_DIR/selected" rc tree receipt
+  # No target, platform, build setting or command passthrough. Validate before
+  # probing the VM, hashing sources or touching build products.
+  if [ "$#" -ne 2 ] || [ "$1" != --suite ] ||
+      ! printf '%s\n' "$2" | LC_ALL=C grep -Eq '^[A-Za-z_][A-Za-z0-9_]*/[A-Za-z_][A-Za-z0-9_]*$' ||
+      [[ "$2" = *$'\n'* ]]; then
+    mg_mac_hosted_test__usage "require exactly --suite Class/method (ASCII identifiers, no target prefix, wildcards or parentheses)"
+    return 0
+  fi
+  suite="$2"
+  if [ "$(uname -s)" != Darwin ]; then
+    mg_mac_hosted_test__usage "requires a macOS host builder and the dedicated test VM"
+    return 0
+  fi
+  if ! mg_word_in "${MEGURI_APP_SIGNING-adhoc}" "adhoc team"; then
+    mg_mac_hosted_test__usage "MEGURI_APP_SIGNING takes adhoc or team"
+    return 0
+  fi
+  mg_detail hosted_test "$(jq -nc --arg s "$suite" \
+    '{platform: "mac", target: "MeguriSnapshotTests", suite: $s, config: "Debug", plan: "Snapshot", scope: "selected-test", full_suite: false}')"
+  MEGURI_SIM_ALLOW_HOST=0
+  export MEGURI_SIM_ALLOW_HOST
+  MG_VM_PART="the selected Mac app-hosted test ($suite)"
+  mg_sim_begin || { mg_queued_settle; return 0; }
+  input="$(mg_app_input_digest)"
+  if [ -z "$input" ]; then
+    mg_failure source-binding "could not bind the selected test to the app/core sources"
+    mg_status error
+    return 0
+  fi
+  mg_detail input "$(jq -nc --arg d "$input" '$d')"
+  # Incremental host builder retains unchanged products, native Debug hooks
+  # and the existing signing guards; it never launches the app here.
+  mg_app_build mac Debug Snapshot || { mg_queued_settle; return 0; }
+  mg_artifact xcresult "$MG_RUN_DIR/build-mac-Debug-Snapshot.xcresult" "selected-test host build result"
+  if [ "$input" != "$(mg_app_input_digest)" ]; then
+    mg_failure source-binding "app/core sources changed during the selected-test build"
+    mg_status error
+    return 0
+  fi
+  mg_sim_take || { mg_queued_settle; return 0; }
+  if [ "$input" != "$(mg_app_input_digest)" ]; then
+    mg_failure source-binding "app/core sources changed while preparing the VM; selected test was not run"
+    mg_status error
+    return 0
+  fi
+  MG_SNAP_BROKEN=0
+  mg_snapshots__xcodebuild "$prefix" "platform=macOS,arch=arm64" "$suite" --result-only
+  rc=$?
+  [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "selected Mac app-hosted test only"
+  case "$rc" in
+    2) mg_queued_settle; return 0 ;;
+    0) ;;
+    *) mg_status error; return 0 ;;
+  esac
+  tree="$(xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ne 0 ] || ! receipt="$(jq -ec --arg s "$suite" --argjson summary "$MG_SNAP_TEST_SUMMARY" --argjson exit "$MG_SNAP_TEST_EXIT" '
+      select(type == "object" and (.testNodes | type) == "array")
+      | [.. | objects | select(.nodeType? == "Test Case")
+        | {id: ((.nodeIdentifier // "") | sub("^MeguriSnapshotTests/"; "") | sub("\\(\\)$"; "")), result}] as $cases
+      | [$cases[] | select(.id == $s)] as $selected
+      | {target: "MeguriSnapshotTests", suite: $s, scope: "selected-test", full_suite: false,
+         exit: $exit, summary: $summary, cases: $cases,
+         total: ($selected | length), passed: ([$selected[] | select(.result == "Passed")] | length),
+         failed: ([$selected[] | select(.result == "Failed")] | length),
+         skipped: ([$selected[] | select(.result == "Skipped")] | length)}
+      | .executed = (.passed + .failed)' <<<"$tree")"; then
+    mg_failure selected-result "could not read the selected test execution from $prefix.xcresult"
+    mg_status error
+    return 0
+  fi
+  printf '%s\n' "$receipt" >"$MG_RUN_DIR/selected-test.json"
+  mg_artifact test-counts "$MG_RUN_DIR/selected-test.json" "focused selected-test execution receipt"
+  mg_detail selected_test "$receipt"
+  local count
+  for count in total passed failed skipped; do mg_count "$count" "$(jq -r ".$count" <<<"$receipt")"; done
+  if [ "$input" != "$(mg_app_input_digest)" ]; then
+    mg_failure source-binding "app/core sources changed before the selected-test receipt completed"
+    mg_status error
+  elif jq -e '.exit == 0 and .total == 1 and .executed == 1 and .passed == 1 and .failed == 0 and .skipped == 0
+      and (.cases | length) == 1 and .summary == {result: "Passed", passed: 1, failed: 0, skipped: 0}' <<<"$receipt" >/dev/null; then
+    mg_message "mac-hosted-test: MeguriSnapshotTests/$suite: one executed pass, zero skips/failures (focused receipt)"
+    mg_status pass
+  else
+    mg_failure selected-test "MeguriSnapshotTests/$suite requires exactly one executed pass and zero skips/failures, with no other cases; see selected-test.json and selected.log"
+    mg_message "mac-hosted-test: selected method did not produce the required execution receipt"
+    mg_status fail
+  fi
+}
 
 # mg_snapshots__kinds <platform>: the pool kinds (tools/sim-devices.json) a
 # platform's device classes render on (SnapshotTarget in SnapshotMatrix.swift).
@@ -189,11 +289,19 @@ mg_snapshots__session() {
 # suites (their snapshot failures come from results.jsonl). Returns 2 when
 # the test VM could not be reached (queued, mg__mac_vm_unreachable).
 # MG_SNAP_NO_OUTPUT marks a failed test that legitimately wrote no output.
+# Optional --result-only after suites returns MG_SNAP_TEST_SUMMARY and
+# MG_SNAP_TEST_EXIT without snapshot failure/output handling. Default callers
+# retain their existing behavior; only mac-hosted-test consumes this seam.
 mg_snapshots__xcodebuild() {
   local out="$1" dest="$2" suites="$3" only=() s rc summary e sdk=iphonesimulator
-  local output="" failures probe err="$1.output.log"
+  local output="" failures probe err="$1.output.log" result_only=false
   MG_SNAP_NO_OUTPUT=""
   shift 3
+  if [ "${1:-}" = --result-only ]; then
+    result_only=true
+    MG_SNAP_TEST_SUMMARY="" MG_SNAP_TEST_EXIT=""
+    shift
+  fi
   mg_snapshots__session || return
   if [ "$suites" != all ]; then
     for s in $suites; do only[${#only[@]}]="-only-testing:MeguriSnapshotTests/$s"; done
@@ -226,6 +334,10 @@ mg_snapshots__xcodebuild() {
     mg_failure xcodebuild-test "xcodebuild test-without-building could not run (exit $rc); see $out.log"
     MG_SNAP_BROKEN=1
     return 1
+  fi
+  if [ "$result_only" = true ]; then
+    MG_SNAP_TEST_SUMMARY="$summary" MG_SNAP_TEST_EXIT="$rc"
+    return 0
   fi
   failures="$(xcrun xcresulttool get test-results tests --path "$out.xcresult" 2>/dev/null | jq -c '
     [.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed")
