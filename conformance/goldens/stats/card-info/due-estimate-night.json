@@ -1,0 +1,65 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894762800,
+          "now": 1894755600,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1894842000,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9196237,
+            "interval": 5,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": {
+              "difficulty": 5.0,
+              "stability": 6.0
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 2,
+            "revlog": [],
+            "total_secs": 0.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/due-estimate-night",
+  "scenario_sha256": "75aadbc32e7543ffe05c68418ab0c452d8aa6398ae956a5d5ff0a3da864212e0",
+  "tz": "Europe/Paris"
+}

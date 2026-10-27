@@ -1,0 +1,114 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 2.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1895130000,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": 1892970000,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9362816,
+            "interval": 10,
+            "lapses": 0,
+            "latest_review": 1894438800,
+            "memory_state": {
+              "difficulty": 5.0,
+              "stability": 10.0
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 3,
+            "revlog": [
+              {
+                "button_chosen": 3,
+                "ease": 0,
+                "interval": 0,
+                "last_interval": 0,
+                "memory_state": {
+                  "difficulty": 2.1043313,
+                  "stability": 40.18323
+                },
+                "review_kind": 3,
+                "taken_secs": 2.0,
+                "time": 1894438800
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 864000,
+                "last_interval": 864000,
+                "memory_state": {
+                  "difficulty": 2.1043313,
+                  "stability": 40.18323
+                },
+                "review_kind": 4,
+                "taken_secs": 0.0,
+                "time": 1894179600
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 864000,
+                "last_interval": 86400,
+                "memory_state": {
+                  "difficulty": 2.1112142,
+                  "stability": 25.10873
+                },
+                "review_kind": 1,
+                "taken_secs": 3.0,
+                "time": 1893834000
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 86400,
+                "last_interval": 600,
+                "memory_state": {
+                  "difficulty": 2.118104,
+                  "stability": 2.3065
+                },
+                "review_kind": 0,
+                "taken_secs": 3.0,
+                "time": 1892970000
+              }
+            ],
+            "total_secs": 8.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/no-lrt-elapsed",
+  "scenario_sha256": "0ad7d4bea1e789728144687d975853689b56ec43b51b0df87f87aad894e316cf",
+  "tz": "Europe/Paris"
+}

@@ -1,0 +1,75 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 3.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1894698600,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": 1894697940,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.99983716,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": 1894697940,
+            "memory_state": {
+              "difficulty": 6.0,
+              "stability": 0.5
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 1,
+            "revlog": [
+              {
+                "button_chosen": 3,
+                "ease": 0,
+                "interval": 600,
+                "last_interval": 0,
+                "memory_state": {
+                  "difficulty": 2.118104,
+                  "stability": 2.3065
+                },
+                "review_kind": 0,
+                "taken_secs": 3.0,
+                "time": 1894697940
+              }
+            ],
+            "total_secs": 3.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/intraday-learning",
+  "scenario_sha256": "b850cae2e818abd1214ebdf37c758206f54a742503ce2d1f35f50759608fbd62",
+  "tz": "Europe/Paris"
+}

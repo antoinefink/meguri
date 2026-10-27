@@ -1,0 +1,15 @@
+# stats/card-info C14.1 (C3.3, C4.1 rows 1, 5, 10, 11, 14 to 19): a new card.
+# Expected: position from due, no due date, no memory state, an empty history
+# and total 0. FSRS on (stats-ops.md H9), Europe/Paris, rollover 4.
+id: stats/card-info/new-card
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"observe": [{"card_stats": ["#c1", "#c2"]}]}

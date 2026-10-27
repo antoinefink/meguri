@@ -1,0 +1,40 @@
+# stats/card-info C14.1 (C3.3, C6.3, C7.2): two cards answered Good three
+# times (their data keeps pos), then Reset (forget) with and without
+# restoring the position; the first card is then answered Good twice more.
+# Expected: the position (restored, or the new end of the queue), the Reset
+# marker (Manual, factor 0) in the history, no memory state on the entries
+# up to it, and states from a fresh start on the first card's entries after
+# it.
+id: stats/card-info/reset-position
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+steps:
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 3000}}
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 3000}}
+  - {"advance": "10m"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 3000}}
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 3000}}
+  - {"advance": "4d"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 3000}}
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 3000}}
+  - {"advance": "1d"}
+  - {"forget": {"cards": ["#c1"], "restore_position": true, "reset_counts": false}}
+  - {"forget": {"cards": ["#c2"], "restore_position": false, "reset_counts": false}}
+  - {"advance": "1m"}
+  - {"observe": [{"card": ["#c1", "#c2"]}]}
+  - {"observe": [{"card_stats": ["#c1", "#c2"]}]}
+  - {"advance": "1h"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 2000}}
+  - {"advance": "10m"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 2000}}
+  - {"advance": "1d"}
+  - {"observe": [{"card": ["#c1"]}]}
+  - {"observe": [{"card_stats": ["#c1", "#c2"]}]}

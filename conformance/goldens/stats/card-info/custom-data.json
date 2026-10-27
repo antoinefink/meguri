@@ -1,0 +1,363 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "{\"a\":1,\"b\":\"x\"}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 1,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c10": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c10",
+            "card_type": "Forward",
+            "custom_data": "xyz",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 10,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n10",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c11": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c11",
+            "card_type": "Forward",
+            "custom_data": "null",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 11,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n11",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c2": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c2",
+            "card_type": "Forward",
+            "custom_data": "{\"2\":1,\"1\":2,\"z\":3}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 2,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n2",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c3": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c3",
+            "card_type": "Forward",
+            "custom_data": "{\"v\":null,\"t\":true,\"f\":1.50}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 3,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n3",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c4": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c4",
+            "card_type": "Forward",
+            "custom_data": "{\"n\":[1,2],\"o\":{\"p\":1}}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 4,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n4",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c5": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c5",
+            "card_type": "Forward",
+            "custom_data": "{\"a\":1,\"b\":2,\"a\":3}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 5,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n5",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c6": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c6",
+            "card_type": "Forward",
+            "custom_data": "{\"a\":1e21}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 6,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n6",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c7": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c7",
+            "card_type": "Forward",
+            "custom_data": "{}",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 7,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n7",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c8": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c8",
+            "card_type": "Forward",
+            "custom_data": "5",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 8,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n8",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c9": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c9",
+            "card_type": "Forward",
+            "custom_data": "true",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": 9,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n9",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/custom-data",
+  "scenario_sha256": "85ffe9df54272b33139e11635c1131685fbc4367f0a8f0a7664a427e5d6603f2",
+  "tz": "Europe/Paris"
+}
