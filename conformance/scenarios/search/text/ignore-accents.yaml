@@ -1,0 +1,57 @@
+# R1038; specs/search/text-matching.md T6, T8, T9, T10: with
+# ignoreAccentsInSearch true, plain text, sc: and w: take the combining-free
+# path of nc:; field searches (normal and nc), re: and all-fields searches are
+# unaffected. The same searches again with the key false. Searches whose
+# result depends on the fold mode are in search/folding/ignore-accents.
+id: search/text/ignore-accents
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {ignoreAccentsInSearch: true}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["über", x]}
+    - {notetype: Single, fields: ["ÜBER", x]}
+    - {notetype: Single, fields: [uber, x]}
+    - {notetype: Gap, fields: ["{{c1::über}} all", x]}
+    - {notetype: Single, fields: ["Straße", x]}
+    - {notetype: Single, fields: ["a％b", x]}
+steps:
+  - observe:
+      - search:
+          - {query: uber, kind: notes}
+          - {query: über, kind: notes}
+          - {query: 'w:uber', kind: notes}
+          - {query: 'w:ÜBER', kind: notes}
+          - {query: 'sc:uber', kind: notes}
+          - {query: 'sc:"uber all"', kind: notes}
+          - {query: 'nc:uber', kind: notes}
+          - {query: 'front:uber', kind: notes}
+          - {query: 'front:nc:uber', kind: notes}
+          - {query: 're:uber', kind: notes}
+          - {query: '*:uber', kind: notes}
+          - {query: '*:nc:uber', kind: notes}
+          - {query: strasse, kind: notes}
+          - {query: strase, kind: notes}
+          - {query: 'w:strase', kind: notes}
+          - {query: 'a％b', kind: notes}
+          - {query: 'a\_b', kind: notes}
+  - set_config: {key: ignoreAccentsInSearch, value: false}
+  - observe:
+      - search:
+          - {query: uber, kind: notes}
+          - {query: 'w:uber', kind: notes}
+          - {query: 'sc:uber', kind: notes}
+          - {query: 'sc:über', kind: notes}
+          - {query: 'nc:uber', kind: notes}
+          - {query: strase, kind: notes}
+          - {query: 'a％b', kind: notes}
