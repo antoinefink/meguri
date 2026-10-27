@@ -3286,7 +3286,8 @@ fn held_browser_rows_follow_browser_config_mode_switches() {
     // The mode accepts only true or false; each other JSON type is rejected.
     for invalid_mode in [json!(null), json!(0), json!(1), json!("false"), json!([]), json!({})] {
         assert!(
-            held_steps(json!([{"browser_config_set": {"key": "browserTableShowNotesMode", "value": invalid_mode}}])).is_err()
+            held_steps(json!([{"browser_config_set": {"key": "browserTableShowNotesMode", "value": invalid_mode}}]))
+                .is_err()
         );
     }
 }
