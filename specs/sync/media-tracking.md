@@ -5,6 +5,8 @@ Requirements: R1567, R1573, R1574, R1582, R1583, R1502, R1581, R1855, R2060, R20
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/media/tracking/ (prepared; integration/activation remain pending)
 
+Manual-transfer compatibility (KTD26): the state below serves manual Anki media transfers only. CloudKit media state is separate (`sync/cloudkit-records#K9.4`, K10; `media/media-files#M16`) and reads the journal only through the file-fact feed (`media/media-journal#J6`). Nothing in this file, T11 included, changes CloudKit state.
+
 The per-file state that media sync (U111, `specs/sync/media-sync.md`) builds on, the change check that brings it up to date before each media sync, and the reset that makes the next media sync compare every file with the server. Which directory entries count as media, how a registration hashes files and what makes an entry pending are `media/media-files#M7` and M11; this file states the sync side of them and what media sync needs on top. The scenario vocabulary for these behaviors is `conformance/media-sync-ops`.
 
 Anki keeps the equivalent state in its own media database next to the media folder. Meguri never reads or writes that file (`media/media-files#M1`): the state below lives in Meguri's media journal database (U31, `media/media-journal`), so nothing is ever added to `collection.anki2` (KTD3, R2016). It is device-only state and never syncs (KTD12).
@@ -183,6 +185,7 @@ Reset makes the next media sync compare every file with the server from the star
   with an old cursor. Keep file facts, media files, manual history, receipts, retained deadline history and unresolved-operation
   guards. Reset alone starts no requests. Logout invalidates the active binding; an unbound baseline must be
   initialized this way before later use. A same-owner sanity reset may retain its binding within the authorized job.
+- Reset leaves CloudKit alone (R1572, R2052, R2057): it never changes the CloudKit tracking store, and it keeps every file-fact feed item above the feed floor, the floor and the feed identity (`media/media-journal#J6`). An entry that step 1 removes leaves a removal item when the floor needs one. So a deletion or a change that CloudKit has not yet consumed still reaches CloudKit after an Anki logout, a server change or a sanity reset.
 - The next check is therefore a full comparison. By T4.3 it makes every syncable file a pending `live` entry, hashing only files whose size or time changed since they were last registered, and removes the entries of files that are gone, without recording a deletion for them.
 - Media sync then receives the server's whole change list from USN 0 and applies U111's decision rules (R1576): a pending file whose content equals the server's becomes clean without a transfer; a file the server holds and the folder lacks is downloaded; a pending file the server does not hold is uploaded.
 - A deletion that was pending at reset time is forgotten: the server still holds the file, so the next media sync downloads it again (as R1585 says for deletions made before media is in sync).

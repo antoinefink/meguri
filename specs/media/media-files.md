@@ -1,11 +1,13 @@
 # Media files: adding, names, lookup, registration and trash
 
 Spec: media/media-files
-Requirements: R978, R980, R981, R982, R983, R984, R985, R986, R1568, R1569, R1570, R1571, R1587, R2018; core side of R1582 and R1855; supports R1650, R1702
+Requirements: R978, R980, R981, R982, R983, R984, R985, R986, R1568, R1569, R1570, R1571, R1587, R2018; core side of R1582 and R1855; supports R1572, R1650, R1702, R2057
 Anki: 26.09.3
 Scenarios: conformance/scenarios/media/
 
 What the media store does with files: the name a new file gets (dedupe, lowercasing, hash names), how a name in a field finds its file, which files in the folder count as media and are tracked for media sync, the trash, and writes under an exact name. The name transform every new name goes through is `text/media-filenames#F1`. The change journal, staging inside an op, crash recovery, the media lock and change events are Meguri's own design, in `media/media-journal` (written by U31's implementer); this file states only the rules they must keep. The scenario vocabulary is `conformance/media-ops`.
+
+Two sync paths use this store. Routine sync is CloudKit (KTD25): its media state lives in the CloudKit tracking store (`sync/cloudkit-records#K9`, K10), fed by the journal's file-fact feed (`media/media-journal#J6`). Anki media sync (U111) is a manual transfer only (KTD26, R1572): its state is the journal's pending flag, sync state and media USN (`sync/media-tracking`). In this file, "media sync" and "pending" mean the Anki media-sync state unless a sentence names CloudKit (M16).
 
 ## M1. Folder layout
 
@@ -117,7 +119,7 @@ Resolving a name to the file that holds it, for rendering (U67), Check Media (U1
 
 ## M6. Exact-name writes (R1587)
 
-The path for bytes whose name is fixed by someone else: bundled static files such as an integration's `_`-prefixed fonts (`ensure_static_media`, R1587, AE66), files ingested from an external folder under their own names (U143), and, where U111's `specs/sync/media-sync.md` says so, media sync downloads of normalized names. No lowercasing and no hash name: the name stays as given.
+The path for bytes whose name is fixed by someone else: bundled static files such as an integration's `_`-prefixed fonts (`ensure_static_media`, R1587, AE66), files ingested from an external folder under their own names (U143), CloudKit blob installs (`sync/cloudkit-records#K9.3`, U114), and, where U111's `specs/sync/media-sync.md` says so, media sync downloads of normalized names. No lowercasing and no hash name: the name stays as given.
 
 Input: name N and bytes B with content hash H.
 
@@ -127,6 +129,8 @@ Input: name N and bytes B with content hash H.
 4. No present case variant: B is written as N and recorded, pending.
 
 To decide step 2 the store may trust the journal's hash when the file's size and modification time still match what the journal recorded; otherwise it hashes the file.
+
+For a CloudKit blob install (`sync/cloudkit-records#K9.3`), steps 2 and 3 apply only when the present file's exact name equals N. A present case variant whose exact name differs from N is a **case collision**: the install refuses with `case_collision`, writes nothing, trashes nothing and records no deletion, so the journal and the feed (`media/media-journal#J6`) do not change. CloudKit tracking then resolves it or reports it under needs attention (`sync/cloudkit-records#K9.3`, K15.9). The other callers keep steps 2 and 3 as written.
 
 ## M7. Which files are media: tracking and registration (R985, R1855, R1582)
 
@@ -143,6 +147,8 @@ A directory entry of the media folder is a **tracked file** when all hold:
 A tracked file is **syncable** when its size is at least 1 byte and at most 104,857,600 bytes (100 MiB). Only syncable files are ever pending for media sync (M11). Empty and larger files stay tracked: lookup finds them and they render, but they never sync; Check Media reports the large ones (R1645).
 
 Names starting with `_` are ordinary media here; only Check Media treats them specially (R985, U130).
+
+CloudKit uses the same range: a media-name entity starts only for a syncable file; a live entity whose file leaves the range stays and is marked unsyncable (`sync/cloudkit-records#K7`, K9.4). If CloudKit's asset limit proves lower than 104,857,600 bytes (`sync/cloudkit-records` K23 A2), K7 sets its own limit and this rule stays for manual Anki transfers.
 
 ### M7.2 Registration
 
@@ -198,7 +204,7 @@ The trash holds every media file Meguri removes. Emptying it is the only permane
 - If it resolves to nothing but the journal still records the name as live (the file vanished without a registration), the entry becomes a deletion, pending.
 - Otherwise the name is skipped. A missing name never stops the names after it.
 
-Every Meguri path that removes a media file goes through this (R2018, U130's enumeration): Check Media fixes and Delete Unused, server deletions in media sync (U111), AnkiConnect's `deleteMediaFile` (U143), replacements by M4 step 4 and M6 step 3, and M13's launch recovery.
+Every Meguri path that removes a media file goes through this (R2018, U130's enumeration): Check Media fixes and Delete Unused, server deletions in media sync (U111), incoming CloudKit media-name tombstones and content conflicts (`sync/cloudkit-records#K9.4`, K15.9; U114), AnkiConnect's `deleteMediaFile` (U143), replacements by M4 step 4 and M6 step 3, and M13's launch recovery.
 
 ### M10.2 Restoring
 
@@ -226,9 +232,11 @@ Nothing else marks an entry, and an entry whose name and content are unchanged i
 
 Media sync (U111) clears the flag after the server accepts the change; the journal's sync fields are `media/media-journal`'s.
 
+This flag is the Anki media-sync flag, used only by manual transfers (R1572). CloudKit does not read it, clear it or depend on it: M16.
+
 ## M12. Events
 
-Each operation's change set lists the media names it added and removed, so views can refresh; files that media sync downloads are announced as `MediaArrived(names)` (U111, U67). The event shapes are `media/media-journal`'s.
+Each operation's change set lists the media names it added and removed, so views can refresh; files that media sync downloads, and files that a CloudKit blob install writes (`sync/cloudkit-records#K9.3`), are announced as `MediaArrived(names)` (U111, U114, U67). The event shapes are `media/media-journal`'s.
 
 ## M13. Files written inside an op (C9, R1702)
 
@@ -282,3 +290,10 @@ Neutral scenarios under `conformance/scenarios/media/` use the vocabulary of `co
 - `corpus/names-01`: 2,000 generated adds with case variants and collisions (`conformance/corpora/media/generate.py`), the naming differential.
 
 Meguri-only behavior has no golden and is tested in Meguri's own tests (U31's test files): M5 lookup, M6 (`ensure_static_media`), M9, M10.3 `summary`, M13 staging and its crash cases, the M7.3 change-check cost and the tombstone index, and the refusals.
+
+## M16. CloudKit media state (R1572, R2057, KTD25)
+
+- CloudKit media state (media-name entities, blob upload and download state, acknowledgements, unsyncable marks, tombstones) lives only in the CloudKit tracking store (`sync/cloudkit-records#K9`, K10.3). The journal holds none of it.
+- Every store write that changes a name's file facts, including M3 rows b and c, M4 step 4, M6 steps 3 and 4, M7.2, M10.1, M10.2, M13's publish and recovery, the move of a local file to its hash name (`sync/cloudkit-records#K15.9`) and Check Media renames (U130), is also an item of the journal's file-fact feed (`media/media-journal#J6`). CloudKit tracking learns local media changes only from that feed and from its reconcile scan (`sync/cloudkit-records#K9.4`, K11.4).
+- The Anki media-sync state (M11's pending flag, `sync/media-tracking`'s sync state, media USN, change marker and baseline owner) is separate. Clearing a pending flag after an Anki server accepts a change, an Anki media reset (`sync/media-tracking#T11`, after a logout, a server or account change or a sanity mismatch) and every other manual-transfer step leave CloudKit tracking, the feed's retained items and its floor unchanged (J6).
+- So a file that Meguri removes (absence cause `removed`, `media/media-journal#J6`) while an Anki media transfer runs, or before an Anki logout, still reaches CloudKit as a tombstone, and a file whose content changes then still reaches it as a new version. A file that disappears outside Meguri (deleted in Finder, evicted, left out by a restore: cause `missing`) makes no tombstone; CloudKit tracking treats it as a missing local file (`sync/cloudkit-records#K9.4`).
