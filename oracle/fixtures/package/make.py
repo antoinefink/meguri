@@ -11,8 +11,8 @@ at 2030-01-14T12:00:00Z (run.sh). Driven by make.sh; see README.md.
       write OUT/backup/standard.colpkg and OUT/variants/*.colpkg (E4) from the
       storage fixtures in STORAGE and Anki's backup
   python3 make.py apkg STORAGE OUT
-      write the deck-package refusal fixtures OUT/*.apkg (apkg.py, E4) from
-      STORAGE/schema-11.anki2
+      write the crafted deck-package fixtures OUT/*.apkg (apkg.py, E4) from
+      STORAGE/schema-11.anki2 (the 2.1.26 ones come from oldclient.py)
   python3 make.py sqlite-files PACKAGES OUT
       for the stock check: every SQLite file the packages under PACKAGES hold,
       raw or in one of this maker's raw-block frames, and the collection Anki

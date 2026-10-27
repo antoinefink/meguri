@@ -17,20 +17,32 @@ it holds and copies OUT to conformance/fixtures/package/apkg/:
                               the JSON map {"0": "../x.jpg"}
     legacy-map-not-json.apkg  as legacy-traversal without entry 0, map `not json`
     not-a-zip.apkg            the 26 ASCII bytes `this is not a zip archive` LF
+    card-ids-ahead.apkg       legacy 2 as legacy-traversal, no entry 0, map {}:
+                              collection.anki21 is schema-11.anki2 with its card
+                              ids, in ascending order, set to 2030-01-18T10:00:00Z
+                              in ms plus 0, 1, ... (revlog cid follows)
+    deck-tree.apkg            the same layout: decks Lang renamed A::B and
+                              Lang::Verbs renamed F::x (no deck A, no deck F)
 
-Stored entries dated 1980-01-01 00:00:00, in the order above. Every other
+Stored entries dated 1980-01-01 00:00:00, in the order above. The two edited
+collections are rewritten with sqlite3 on a scratch copy, secure_delete on. Every other
 deck-package input of the apkg scenarios is the scenario's own export.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import sqlite3
 import sys
+import tempfile
 import zipfile
 
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 RAW_BLOCK = 128 * 1024
 NOT_A_ZIP = b"this is not a zip archive\n"
+# 2030-01-18T10:00:00Z: three days after the apkg scenarios' clock start.
+AHEAD_MS = 1894960800000
 
 
 def raw_frame(data: bytes) -> bytes:
@@ -58,6 +70,51 @@ def write_zip(path: str, entries: list[tuple[str, bytes]]) -> None:
             z.writestr(info, data)
 
 
+def edited(schema11: bytes, edit) -> bytes:
+    """schema11 after edit(connection), in one transaction."""
+    work = tempfile.mkdtemp(prefix="apkg-")
+    path = os.path.join(work, "collection.anki2")
+    with open(path, "wb") as f:
+        f.write(schema11)
+    con = sqlite3.connect(path, isolation_level=None)
+    con.create_collation("unicase", lambda a, b: (a.casefold() > b.casefold()) - (a.casefold() < b.casefold()))
+    con.execute("pragma secure_delete = on")
+    if con.execute("select ver from col").fetchone()[0] != 11:
+        raise SystemExit("apkg.py: schema-11.anki2 is not at schema 11")
+    con.execute("begin")
+    edit(con)
+    con.execute("commit")
+    con.close()
+    for suffix in ("-wal", "-shm", "-journal"):
+        if os.path.exists(path + suffix):
+            raise SystemExit("apkg.py: %s was left behind" % suffix)
+    with open(path, "rb") as f:
+        data = f.read()
+    os.unlink(path)
+    os.rmdir(work)
+    return data
+
+
+def card_ids_ahead(con) -> None:
+    old = [r[0] for r in con.execute("select id from cards order by id")]
+    if not old or max(old) >= AHEAD_MS:
+        raise SystemExit("apkg.py: schema-11.anki2 has no card or a card already ahead")
+    for k, cid in enumerate(old):
+        con.execute("update cards set id = ? where id = ?", (AHEAD_MS + k, cid))
+        con.execute("update revlog set cid = ? where cid = ?", (AHEAD_MS + k, cid))
+
+
+def deck_tree(con) -> None:
+    decks = json.loads(con.execute("select decks from col").fetchone()[0])
+    renames = {"Lang": "A::B", "Lang::Verbs": "F::x"}
+    names = sorted(d["name"] for d in decks.values())
+    if not set(renames) <= set(names) or {"A", "F"} & set(names):
+        raise SystemExit("apkg.py: schema-11.anki2 has decks %s" % names)
+    for d in decks.values():
+        d["name"] = renames.get(d["name"], d["name"])
+    con.execute("update col set decks = ?", (json.dumps(decks, ensure_ascii=False),))
+
+
 def make(storage: str, out: str) -> None:
     with open(os.path.join(storage, "schema-11.anki2"), "rb") as f:
         schema11 = f.read()
@@ -71,7 +128,11 @@ def make(storage: str, out: str) -> None:
     write_zip(os.path.join(out, "legacy-map-not-json.apkg"), legacy + [("media", b"not json")])
     with open(os.path.join(out, "not-a-zip.apkg"), "wb") as f:
         f.write(NOT_A_ZIP)
-    print(f"apkg.py: wrote 4 packages to {out}", file=sys.stderr)
+    for name, edit in (("card-ids-ahead", card_ids_ahead), ("deck-tree", deck_tree)):
+        write_zip(os.path.join(out, name + ".apkg"), [
+            ("collection.anki21", edited(schema11, edit)), ("collection.anki2", schema11), ("media", b"{}"),
+        ])
+    print(f"apkg.py: wrote 6 packages to {out}", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:
