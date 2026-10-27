@@ -39,7 +39,7 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 
 **Removing a format from an element** that counts as it:
 
-- an element of the format's own tags (`b`, `strong`; `i`, `em`; `u`; `sup`; `sub`) is unwrapped: its children take its place, and its attributes go with it;
+- an element of the format's own tags (`b`, `strong`; `i`, `em`; `u`; `sup`; `sub`) is unwrapped: its children take its place. Decided 2026-10-27: when it has attributes, they are not dropped; the element is replaced by a `span` with the same attributes holding its children, and that `span` then follows the next rule (the format's own property, if its `style` has one, is removed, and a `span` with no attribute left is unwrapped). So `<b style="color: red;">x</b>` loses Bold as `<span style="color: red;">x</span>` and `<strong lang="ja">x</strong>` as `<span lang="ja">x</span>` (F16, `editor-format-unwrap-own-tag-attributes`). Content of the element outside the selection gets its format back inside that `span` (F4);
 - otherwise the matching property is removed from the element's `style`. When no property is left the `style` attribute is removed, and then, when the element is a `span` with no attribute left, it is unwrapped. Any other element, and a `span` that keeps another attribute such as `lang`, stays (F16, `editor-format-unwrap-non-span`).
 
 ## F4. Applying and removing with a selection
@@ -64,6 +64,7 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 | `<strong>a[b]c</strong>` | Bold | `<b>a</b>b<b>c</b>` |
 | `<span style="font-weight: bold; color: red;">[x]</span>` | Bold | `<span style="color: red;">x</span>` |
 | `<span style="font-weight: 700;">[x]</span>` | Bold | `x` |
+| `<b style="color: red;">[x]</b>` | Bold | `<span style="color: red;">x</span>` |
 | `<b>a</b>[b]` | Bold | `<b>ab</b>` |
 | `[<i>x</i>]` | Bold | `<b><i>x</i></b>` |
 | `<div>[a</div><div>b]</div>` | Bold | `<div><b>a</b></div><div><b>b</b></div>` |
@@ -77,6 +78,7 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 - The next text the user inserts at the caret (one typed character, or the committed text of an input-method composition) gets the format: the toggle decision of F4 is taken at the caret, so the new text is wrapped when the caret is outside the format and taken out of it when the caret is inside. The caret then stays at the end of the new text, inside its wrapper, so further typing continues in the same format.
 - A space typed while a format is pending is inserted as U+00A0 (stored `&nbsp;`).
 - Pending states are cancelled when the field loses focus, on a pointer press in the field, and when the selection moves.
+- Decided 2026-10-27: any other insertion while a state is pending (Return, Shift-Return, a spelling or autocorrect replacement, dictation, a paste, a drop or an F10 insertion) first cancels every pending state and then acts as it does with nothing pending; its text gets no pending format. So `a‸`, Bold, Return, type `x` gives a new line holding a plain `x` (F16, `editor-pending-return`).
 - Pending Superscript removes Subscript from the new text, and the reverse. Pending colours are F7's, pending removal F8's.
 - Example: `a‸`, Bold, type `x`: `a<b>x</b>`. `<b>ab‸cd</b>`, Bold, type `x`: `<b>ab</b>x<b>cd</b>`.
 
@@ -93,9 +95,14 @@ Inline format, list and alignment controls show their state as selected toggles 
 ## F7. Text colour and highlight (R838, R839, R840)
 
 - **Apply Text Color** (F7, ⌃⌘C, the colour button) applies the last text colour to the selection. It is not a toggle: it replaces every text colour inside the selection.
-- An element **has a text colour** when its inline style has a `color` property, or when it is a `font` element with a non-empty `color` attribute.
-- Applying: every text colour inside the selection is removed (a `color` property as F3's style rule; a `font` element's `color` attribute is removed and the element is unwrapped when it has no attribute left, F16 `editor-color-font-attributes`). Then the selection is wrapped as F4 says, in `<span style="color: rgb(R, G, B);">`, R, G, B in decimal. When step 4 of F4 places the wrapper exactly around an existing `span`, that span gets the `color` property instead of a new wrapper. Adjacent wrappers merge only when their colours are equal. Content of an old coloured element outside the selection keeps its old colour.
-- **Choose Text Color…** (F8, ⌃⇧⌘C, the colour button's chevron) opens the system colour picker: the shared `NSColorPanel` on macOS, `UIColorPickerViewController` on iOS and iPadOS, with the palette of `editor/config-keys` K9 (F12 says where the swatches show). When the user picks a colour it becomes the last text colour and is applied to the selection that was current when the picker opened. All changes made while the picker stays open are one input and one history entry; closing the picker without a pick changes nothing.
+- An element **has a text colour** when its inline style has a `color` property, or when it is a `font` element with a non-empty `color` attribute. A `font` element can have both; both count, and both are removed (F16, `editor-color-font-style`: Anki reads only a `font` element's attribute).
+- Applying: every text colour inside the selection is removed (a `color` property as F3's style rule; a `font` element's `color` attribute is removed too, and a `font` element left with no attribute is unwrapped, F16 `editor-color-font-attributes`). Then the selection is wrapped as F4 says, in `<span style="color: rgb(R, G, B);">`, R, G, B in decimal. When step 4 of F4 places the wrapper exactly around an existing `span`, that span gets the `color` property instead of a new wrapper. Adjacent wrappers merge only when their colours are equal. Content of an old coloured element outside the selection keeps its old colour.
+- **Choose Text Color…** (F8, ⌃⇧⌘C, the colour button's chevron) opens the system colour picker: the shared `NSColorPanel` on macOS, `UIColorPickerViewController` on iOS and iPadOS, with the palette of `editor/config-keys` K9 (F12 says where the swatches show). It runs a **picker session**:
+  - Opening. With a non-collapsed selection the host, before it presents the picker, sends `colorSession` with `state` `start` (F13). The page records the session's field and its selection then; the field keeps that selection (`editor/field-html` F4) when the picker takes focus and the field blurs. The blur commits as usual (`editor/field-html` S1). Without a focused rich field the command is disabled (F2).
+  - A **pick** is every colour change the picker reports (a click on a swatch, each change while the user drags across the colour area). Each pick becomes the last text colour at once. In a session the host sends it as `format` `textColor` with the session's `session`; the page applies it to the recorded selection, first restoring the content as it was when the session started, so only the latest pick's result remains. The session's changes are one input and one history entry, which closes when the session ends; the field commits by S1's idle rule, and at once when the session ends.
+  - Ending. The session ends when the picker closes, when another field or the tag editor gets focus, when the field switches mode or collapses, and when the page reloads or the note closes (the host sends `colorSession` `end` for the picker closing and for its own loads and closes; the page ends the session itself on a focus move, mode switch or collapse and sends `colorSessionEnded`). After the end, picks from a picker that stays open (the macOS panel) only set the last colour; a new Choose… starts a new session. When the picker closes, the host gives the field its focus back (`setFocus`), with the selection covering the recoloured content (F2).
+  - A session with no pick changes nothing and makes no history entry.
+  - With a collapsed selection, Choose… opens the picker without a session: picks only set the last colour, and nothing becomes pending.
 - **Highlight** works the same with the `background-color` property: wrapper `<span style="background-color: rgb(R, G, B);">`. `font` elements play no part. Apply Highlight Color and Choose Highlight Color… have no shortcut (R839).
 - With a collapsed selection, Apply Text Color and Apply Highlight Color set a pending colour for the next inserted text (F5); it is applied, never toggled.
 - Colours are taken off only by Remove Formatting (F8, R838).
@@ -106,6 +113,7 @@ Inline format, list and alignment controls show their state as selected toggles 
 | `<span style="color: rgb(255, 0, 0);">[x]</span>` | `#0000ff` | `<span style="color: rgb(0, 0, 255);">x</span>` |
 | `<span class="k" style="color: red;">[x]</span>` | `#0000ff` | `<span class="k" style="color: rgb(0, 0, 255);">x</span>` |
 | `<font color="red">[x]</font>` | `#0000ff` | `<span style="color: rgb(0, 0, 255);">x</span>` |
+| `<font style="color: red;">[x]</font>` | `#0000ff` | `<span style="color: rgb(0, 0, 255);">x</span>` (the emptied `style` is removed, then the `font` without attributes is unwrapped) |
 | `<span style="color: rgb(255, 0, 0);">a[b]c</span>` | `#0000ff` | `<span style="color: rgb(255, 0, 0);">a</span><span style="color: rgb(0, 0, 255);">b</span><span style="color: rgb(255, 0, 0);">c</span>` |
 
 **Last colours** (R840). The last text colour and the last highlight colour are device-local preferences (KTD12, `storage/config-table` C8), never collection config. Each is a lower-case `#rrggbb` string; both default to `#0000ff`, as in Anki, which keeps them per profile. Only a pick in the picker changes them; applying does not. The toolbar's colour buttons show them.
@@ -124,20 +132,27 @@ Inline format, list and alignment controls show their state as selected toggles 
 | `[<b>a</b><span style="color: rgb(255, 0, 0); background-color: rgb(255, 255, 0);">b</span>]` | Highlight Color | `a<span style="background-color: rgb(255, 255, 0);">b</span>` |
 | `<ul><li>[<b>a</b>]</li></ul>` | none | `<ul><li>a</li></ul>` |
 | `[<span>a</span><span lang="ja">b</span>]` | none | `a<span lang="ja">b</span>` |
+| `<b style="color: red;">[x]</b>` | Text Color | `<span style="color: red;">x</span>` (F3: the `b` becomes a `span` keeping its `style`) |
 
 ## F9. Lists, indent and alignment (R843 to R846, R258)
 
-- **Bulleted List** (⌘,) and **Numbered List** (⌘.) toggle the blocks the selection touches between plain blocks and items of an `<ul>` or `<ol>` list: blocks not in a list become items of a new list of that kind; items of a list of that kind leave it; items of the other kind change their list to this kind. Expected shape: `a[b]c` gives `<ul><li>abc</li></ul>`.
-- **Increase Indent** (⌘] or ⇧⌘.) and **Decrease Indent** (⌘[ or ⇧⌘,) act only when the selection's start lies inside an `li`. Indent moves the item one level deeper, as an item of a list nested in its list; outdent moves it one level up, or out of the list at the top level. Elsewhere they change nothing and show an alert with the message "Indent/unindent currently only works with lists." and an OK button (R845). They stay enabled in rich mode, so the message is reachable.
-- **Alignment** (Align Left, Center, Align Right, Justify; no shortcut, R844) sets `text-align` (`left`, `center`, `right`, `justify`) on the blocks the selection touches. Inline content directly in the field gets a block for it: expected shape `a[b]c` with Center gives `<div style="text-align: center;">abc</div>`. A block that already has the alignment keeps it.
-- The exact markup of all three is the goldens' (F17 list group). These commands never add inline formats.
+- **Paragraph.** These commands act on paragraphs. A paragraph is a maximal run of inline content (text, inline elements, void elements other than `br`) bounded by the edges of block elements (`editor/field-html` E1) and by `<br>` elements. The `<br>` that ends a paragraph belongs to it: when the paragraph moves into a new `li` or a new `div`, or when the paragraph after it does, that `<br>` is removed, since a block edge now ends the line. A paragraph **fills** a block when it is that block's whole content, apart from its own final `<br>`. A selection **touches** every paragraph it contains or overlaps; a collapsed selection touches the paragraph holding the caret.
+- **Bulleted List** (⌘,) and **Numbered List** (⌘.):
+  - when every touched paragraph is in an item of a list of this kind (the innermost list around it), they leave it: each touched item's content takes the list's place as paragraphs in order, separated by `<br>` where two paragraphs of inline content meet. Untouched items before or after stay in a list of this kind, so the list is split around them. An item that has attributes (such as an alignment `style`) becomes a `div` with those attributes holding its content, so they are kept;
+  - otherwise each touched paragraph that is in no list becomes its own `li`, holding the paragraph's inline content, and touched items of a list of this kind stay as they are. A paragraph that fills a `div` or `p` replaces that element, whose attributes go onto the `li`. A paragraph already in a list of the other kind changes kind: when the list's every item is touched, the list element is replaced by one of this kind with the same attributes and children; otherwise it is split, and the touched items form a list of this kind between the untouched parts. Consecutive new items go into one list, which merges with a list of this kind that is its node right before or right after;
+  - examples: `a[b]c` gives `<ul><li>abc</li></ul>`; `[a<br>b]` gives `<ul><li>a</li><li>b</li></ul>`; `a<br>[b]` gives `a<ul><li>b</li></ul>`; `a<br>[b<br>c]` with Numbered List gives `a<ol><li>b</li><li>c</li></ol>`; `<ul><li>[a]</li></ul>` with Bulleted List gives `a`; `<ul><li>[a</li><li>b]</li></ul>` gives `a<br>b`; `<ul><li>a</li><li>[b]</li><li>c</li></ul>` gives `<ul><li>a</li></ul>b<ul><li>c</li></ul>`; `<ul><li>[a]</li></ul>` with Numbered List gives `<ol><li>a</li></ol>`; `<ul><li>[a</li></ul>b]` with Bulleted List gives `<ul><li>a</li><li>b</li></ul>`.
+- **Increase Indent** (⌘] or ⇧⌘.) and **Decrease Indent** (⌘[ or ⇧⌘,) act only when the selection's start lies inside an `li`. They act on every `li` the selection touches, in its innermost list. Elsewhere they change nothing and show an alert with the message "Indent/unindent currently only works with lists." and an OK button (R845). They stay enabled in rich mode, so the message is reachable.
+  - Indent moves each touched item one level deeper: consecutive touched items are wrapped together in a new list of their list's kind, placed where they were, as a child of the list itself (not inside the previous `li`, which is the pinned engine's structure). That nested list merges with a list of the same kind that is its node right before or right after. `<ul><li>a</li><li>[b]</li></ul>` gives `<ul><li>a</li><ul><li>b</li></ul></ul>`.
+  - Outdent moves each touched item one level up. An item of a nested list goes into the enclosing list at the nested list's place, which is split around it, and an emptied nested list is removed: the last example back gives `<ul><li>a</li><li>b</li></ul>`. An item of a top-level list leaves the list as Bulleted List's first rule says, so a second outdent gives `<ul><li>a</li></ul>b`.
+- **Alignment** (Align Left, Center, Align Right, Justify; no shortcut, R844) sets `text-align` (`left`, `center`, `right`, `justify`) for each touched paragraph. A paragraph that fills a block (a `div`, `p`, `li`, `h1` to `h6`, `blockquote`, `td` or any other block element) gets the property in that block's `style`, replacing any `text-align` there. Any other paragraph is wrapped in a new `<div style="text-align: …;">` of its own. A block that already has the alignment keeps it. Examples: `a[b]c` with Center gives `<div style="text-align: center;">abc</div>`; `a<br>[b]` with Center gives `a<div style="text-align: center;">b</div>`; `[a<br>b]` gives `<div style="text-align: center;">a</div><div style="text-align: center;">b</div>`; `<ul><li>[a]</li></ul>` gives `<ul><li style="text-align: center;">a</li></ul>`.
+- **Goldens.** The goldens of F17's list group decide the exact markup of their scenarios, and for each one Meguri's result must equal the golden byte for byte. The rules above are normative for every case no scenario covers, and are implemented now; a golden that contradicts a rule changes the rule, which is then corrected here, as `editor/field-html` H4 does for Return. These commands never add inline formats.
 - The indent controls' symbols follow the interface layout direction, as system symbols do, so they are mirrored in a right-to-left interface. A field's `rtl` option (`editor/field-html` F2) does not change them, so the shared toolbar does not flip as focus moves between fields.
 
 ## F10. Inserting HTML
 
 The editor's one insertion step, used by `editor/paste` for attached media, photos and recordings (P5, P6, P20) and for paste and drop (P16), and by `editor/cloze-wrap` W4:
 
-- An HTML fragment, parsed as `editor/field-html` H1 step 2 parses field HTML, replaces the focused rich field's selection: the selected content is deleted, a text node at that point is split, and the fragment's nodes are placed there. The caret ends after the last inserted node.
+- An HTML fragment, parsed as `editor/field-html` H1 step 2 parses field HTML, but in an inert document and with no `<br>` appended (as H3 step 1 parses HTML-mode text), replaces the focused rich field's selection: the selected content is deleted, a text node at that point is split, and the fragment's nodes are placed there. The caret ends after the last inserted node.
 - No wrapper, style or `span` is added around the inserted nodes. Where the goldens show that Anki's page adds or merges markup, Meguri's runtime matches the golden for that scenario.
 - It is one input and one history entry. An empty fragment inserts nothing and is no input.
 - Only the focused rich field takes insertions; commands that insert are disabled in HTML mode (F2).
@@ -156,12 +171,13 @@ The toolbar is a native control row: a row above the fields on macOS, the keyboa
 | Options | a menu button (`options`): Shrink Images, Close HTML Tags |
 | Inline | Bold (`bold`), Italic (`italic`), Underline (`underline`); Superscript (`superscript`), Subscript (`subscript`); Text Color (`textColor`) with its chevron (`textColorPicker`), Highlight Color (`highlight`) with its chevron (`highlightPicker`); Remove Formatting (`removeFormatting`) with its menu of check boxes (`removeFormattingMenu`) |
 | Block | Bulleted List (`bulletedList`), Numbered List (`numberedList`), an Alignment menu (`alignment`) with the four alignments, Decrease Indent (`outdent`), Increase Indent (`indent`) |
-| Media | U194's controls (`editor/paste` P5, P6, P20) |
+| Media | Attach (`attach`; on iPhone and iPad a menu of its sources, `editor/paste` P5, P6), Record Audio (`record`, `editor/paste` P20) |
 | Cloze | `editor/cloze-wrap` W2 |
 
 - **Fields…** and **Cards…** (⌘L) flush the editor, then open the field editor (U201) or the card templates editor (U200) for the note's type, with the current note, or the Add screen's draft, in the preview (R847, R253). They are enabled whenever the editor shows a note, wherever keyboard focus is in its window (context `editor.note`, F14).
 - **Shrink Images** and **Close HTML Tags** are toggles with check marks. Choosing one writes its key at once (`editor/config-keys` K8), and every open editor applies the new value without reloading (message `setOptions`, F13). Shrink Images' effect is `editor/paste` P18 (R878).
 - **Close HTML Tags**, while on, acts in a field's HTML mode as the user types:
+  - **the scan**: the text before the caret is tokenized as the HTML Standard's tokenizer does, so comments, doctypes and quoted attribute values are skipped and the text of `script`, `style`, `textarea` and `title` is raw text. A stack holds the names of start tags, lower-cased, leaving out void elements (below) and tags written with `/>`. An end tag pops the stack down to and including the innermost entry of its name and is ignored when there is none. Decided 2026-10-27: nothing is closed implicitly, so `<ul><li>a<li>b` leaves `ul`, `li`, `li` open (F16). The **innermost element still open** is the top of the stack. A typed `>` **ends an opening tag** only when the tokenizer is then in a start tag's name or attribute state, outside a quoted value: in `<a title="x>y">` only the last `>` does;
   - typing `>` that ends an opening tag `<name …>` inserts `</name>` right after the caret, unless the tag ends in `/>`, `name` is a void element (`area`, `base`, `br`, `col`, `command`, `embed`, `hr`, `img`, `input`, `keygen`, `link`, `meta`, `param`, `source`, `track`, `wbr`, compared ignoring case) or a closing tag for it already follows; the caret stays between the two tags;
   - typing `/` right after `<` inserts the name of the innermost element still open before the caret, and `>`, unless no element is open or a closing tag for that element already follows;
   - a closing tag for `name` **already follows** when, with n the number of consecutive innermost open elements named `name` around the caret (plus one for the tag just typed in the `>` case), the next n closing tags after the caret that close no element opened after the caret are all `</name>`. Example: with `‸</b>`, typing `<b>` inserts nothing more. Decided 2026-10-27: Meguri searches the rest of the field; Anki stops after 500 lines, which no field in a scenario reaches;
@@ -181,8 +197,10 @@ Additions to `editor/field-html` B2 and B3, same rules (B1).
 | host to page | `format` | `loadId`, `ord`, `command` (`bold`, `italic`, `underline`, `superscript`, `subscript`, `textColor`, `highlight`, `removeFormatting`, `bulletedList`, `numberedList`, `indent`, `outdent`, `alignLeft`, `alignCenter`, `alignRight`, `justify`), `color` (`#rrggbb`, colour commands only), `remove` (an array of the tokens of F8's checked formats, from `bold`, `italic`, `underline`, `superscript`, `subscript`, `textColor` and `highlight`; `removeFormatting` only) | `changed` (boolean); `notInList: true` when indent or outdent found no list item, and the host then shows F9's alert |
 | host to page | `wrap` | `loadId`, `ord`, `prefix`, `suffix` (`editor/cloze-wrap` W4) | `changed` (boolean) |
 | host to page | `setOptions` | `closeHTMLTags`, `shrinkImages` | done |
+| host to page | `colorSession` | `loadId`, `ord`, `session` (an integer the host picks, new for each session), `state` (`start` or `end`) | `started` (boolean) for `start`: false when `ord` is not the focused rich field or its selection is collapsed; done for `end` |
+| page to host | `colorSessionEnded` | `loadId`, `session` | when the page ends a session itself (F7: focus moved, mode switch, collapse) |
 
-The page refuses `format` and `wrap` for an `ord` that is not the focused rich field and replies `changed: false`.
+`format` takes an optional `session` member, only with `textColor` or `highlight` (F7's picker session). The page refuses `format` and `wrap` for an `ord` that is not the focused rich field and replies `changed: false`, except a `format` whose `session` is the open session of that `ord`, which acts on the session's recorded selection. `editor/paste` P25 adds the insertion and image messages.
 
 ## F14. Shortcuts and contexts (R861, R249, R250, R258, R197, R200)
 
@@ -216,7 +234,9 @@ Contexts, registered with U158's shortcut registry:
 | Cards… | ⌘L | | `editor.note` | Ctrl+L |
 | Fields… | none | | `editor.note` | none |
 | Shrink Images, Close HTML Tags | none | | `editor.note` | none |
-| Attach, Record, Tags, Add-screen keys | U194 (`editor/paste`), U193, U195 | | | |
+| Attach… | ⌥⌘A | F3 | `editor.richText` (`editor/paste` P5) | F3 |
+| Record Audio… | ⌥⌘R | F5 | `editor.richText` (`editor/paste` P20) | F5 |
+| Tags, Add-screen keys | U193, U195 | | | |
 
 - **Superscript and Subscript.** Decided 2026-10-27: ⌘= is Superscript and ⇧⌘= Subscript, as in Anki 26.09.3. R249, R837 and R861 name the opposite keys while R861 and R249 also say the keys are Anki's with Ctrl mapped to ⌘; Anki compatibility settles the conflict. The `=` key is the key that types `=` without Shift on the active layout.
 - **Primary and other keys.** Decided 2026-10-27: a menu item shows the key that every Apple keyboard can type (⌃⌘C rather than F7, which needs Fn on many keyboards) and Apple's usual indent keys (⌘] and ⌘[). The other keys run the same command and are listed in Help › Keyboard Shortcuts (R201); they are not shown again in the iPad ⌘ overlay.
@@ -226,8 +246,9 @@ Contexts, registered with U158's shortcut registry:
   - ⌘, opens Settings (R214) except while `editor.richText` is active, when it is Bulleted List; the Settings item keeps its title and loses its key equivalent in that context (R843). With focus in the tag editor or HTML mode, ⌘, opens Settings.
   - ⌘. is Numbered List while `editor.richText` is active and then never cancels or dismisses a sheet; Esc keeps its role (R259).
   - View › Zoom In (⌘+, R218) loses its keys while `editor.richText` is active, because on most layouts ⌘+ is ⇧⌘=; Zoom Out and Actual Size keep theirs. This settles the shell coverage note's collision.
+  - ⌥⌘A is Attach… while `editor.richText` is active, also in Browse's editor; Browse's Select All then keeps only ⌘A in the table (R1153, R1225, `browse.browser`), as the browser-ui coverage note proposes. While `editor.any` is active in another way (a field in HTML mode, the tag editor), ⌥⌘A does nothing; with focus elsewhere in Browse it is Select All.
   - The system's Show Colors and Show Fonts commands are not in the menus: Meguri's Format menu replaces the system's text formatting commands (⇧⌘C is Cloze Deletion; ⌘T is unbound).
-  - The registry test lists the enabled bindings per context (editor over review, editor in Browse, Add panel over Browse, editor focused in each mode, tag editor focused, Add screen with focus on its Deck row) and fails on any duplicate (R200).
+  - The registry test lists the enabled bindings per context (editor over review, editor in Browse with ⌥⌘A in rich mode, in HTML mode, in the tag editor and in the table, Add panel over Browse, editor focused in each mode, tag editor focused, Add screen with focus on its Deck row) and fails on any duplicate (R200).
 - A disabled command's key does nothing: it neither types nor reaches another context (for example ⇧⌘C in a field that is not a cloze field).
 
 ## F15. Menus (R864, R865, R278, N4, N11.3)
@@ -238,7 +259,7 @@ Contexts, registered with U158's shortcut registry:
   3. Remove Formatting, and the submenu Formatting to Remove with F8's seven check boxes
   4. Bulleted List, Numbered List, Increase Indent, Decrease Indent, and the submenu Alignment (Align Left, Center, Align Right, Justify)
   5. Cloze Deletion, Cloze Deletion (Same Number) (`editor/cloze-wrap` W2)
-  6. the media items of U194 (`editor/paste` P5, P20)
+  6. Attach…, Record Audio… (`editor/paste` P5, P20)
   7. HTML Editor (F11)
   8. Fields…, Cards…
   9. Shrink Images, Close HTML Tags
@@ -253,7 +274,11 @@ Proposed `conformance/deviations.yaml` ids, to be entered with the goldens that 
 | Situation | Anki 26.09.3 | Meguri | Deviation |
 |---|---|---|---|
 | An element whose only style was the removed property: a non-`span` element such as `<a href="u" style="color: red;">` under Remove Formatting or `<div style="font-weight: bold;">` under Bold, or a `span` with another attribute such as `<span lang="ja" style="font-weight: bold;">` under Bold | unwrapped when it has no class, so the link, the block or the `lang` is lost | only the property is removed; only a `span` with no attribute left is unwrapped (F3) | `editor-format-unwrap-non-span` |
+| An element of a format's own tag with other attributes, such as `<b style="color: red;">`, `<b class="k">` or `<strong lang="ja">`, under that format or Remove Formatting | unwrapped with its attributes, so the colour, class or `lang` is lost even when Text Color is unchecked | replaced by a `span` keeping those attributes (F3) | `editor-format-unwrap-own-tag-attributes` |
 | `<font color="red" face="Arial">` when a text colour is applied or removed | the whole `font` element is unwrapped | only `color` is removed; the element stays while it has attributes (F7) | `editor-color-font-attributes` |
+| `<font style="color: red;">` when a text colour is applied or removed | only a `font` element's `color` attribute is read, so the style colour stays (the new colour's `span` goes inside) | the style colour counts and is removed (F7) | `editor-color-font-style` |
+| Return, a replacement or another non-typing insertion while a format or colour is pending | the insertion is taken over: a formatted U+00A0 (or the replacement's text, formatted) is inserted and no line starts | every pending state is cancelled and the insertion acts as usual (F5) | `editor-pending-return` |
+| Close HTML Tags after an element that HTML closes implicitly, such as `<ul><li>a<li>b</li>` then `</` | open elements are closed implicitly by later tags (a second `li` closes the first, a `div` closes a `p`), so `</ul>` is completed | no implicit closing, so `</li>` is completed (F12) | none (no golden) |
 | Remove Formatting on `<span lang="ja">` or a `span` with `data-` attributes | unwrapped (only `class` and `style` are looked at) | kept (F8) | `editor-bare-span-attributes` |
 | Close HTML Tags after an opening block tag such as `div`, `p`, `ul`, `ol`, `table`, `blockquote` or `h1` | the closing tag goes two lines down and the caret waits on an indented blank line between the tags | `</name>` right after the caret, no line break (F12) | `editor-close-tags-no-indent` |
 | Remove Formatting choices | kept per editor window until it closes | per app session, shared (F8) | none (no golden) |
@@ -261,7 +286,7 @@ Proposed `conformance/deviations.yaml` ids, to be entered with the goldens that 
 | Zoom In while a rich field has focus | Ctrl+= is both zoom and superscript; the page takes it | Zoom In has no key in that context (F14) | none (no golden) |
 | The option keys' undo and reading | `editor/config-keys` K10 | | none (no golden) |
 
-These keep data the user did not ask to remove (data safety first). Everything else in this file is meant to match the goldens.
+The formatting rows keep data the user did not ask to remove (data safety first); the pending-insertion and implicit-closing rows keep the rules simple and easy to predict. Everything else in this file is meant to match the goldens.
 
 ## F17. Scenarios for the oracle maintainer
 
@@ -281,7 +306,9 @@ Inline group (F3, F4):
 | `bold-around-inline` | `[<i>x</i>]` | Bold |
 | `bold-two-blocks` | `<div>[a</div><div>b]</div>` | Bold |
 | `bold-with-image` | `[a<img src="x.png">b]` | Bold |
-| `bold-classed-strong` | `<b class="k">[x]</b>` | Bold |
+| `bold-classed-strong` | `<b class="k">[x]</b>` | Bold (F16) |
+| `bold-styled-b` | `<b style="color: red;">[x]</b>` | Bold (F16) |
+| `bold-lang-strong` | `<strong lang="ja">a[b]c</strong>` | Bold (F16) |
 | `italic-oblique` | `<span style="font-style: oblique">[x]</span>` | Italic, probe, Italic |
 | `italic-em` | `<em>a[b]c</em>` | Italic |
 | `underline-decoration` | `<span style="text-decoration: underline">[x]</span>` | Underline |
@@ -300,6 +327,7 @@ Pending group (F5):
 | `pending-space` | `a‸` | Bold, type ` ` then `x` |
 | `pending-moved` | `ab‸` | Bold, press Left, type `x` |
 | `pending-sup-sub` | `<sub>a‸</sub>` | Superscript, type `x` |
+| `pending-return` | `a‸` | Bold, press Return, type `x` (F16) |
 
 Colour group (F7):
 
@@ -310,6 +338,7 @@ Colour group (F7):
 | `color-classed-span` | `<span class="k" style="color: red;">[x]</span>` | text `#0000ff` | Text Color |
 | `color-font` | `<font color="red">[x]</font>` | text `#0000ff` | Text Color |
 | `color-font-face` | `<font color="red" face="Arial">[x]</font>` | text `#0000ff` | Text Color (F16) |
+| `color-font-style` | `<font style="color: red;">[x]</font>` | text `#0000ff` | Text Color (F16) |
 | `color-middle` | `<span style="color: rgb(255, 0, 0);">a[b]c</span>` | text `#0000ff` | Text Color |
 | `color-merge-same` | `<span style="color: rgb(0, 0, 255);">a</span>[b]` | text `#0000ff` | Text Color |
 | `color-pending` | `a‸` | text `#00ff00` | Text Color, type `x` |
@@ -329,6 +358,7 @@ Remove group (F8):
 | `remove-link-color` | `[<a href="u" style="color: red;">a</a>]` | none | Remove Formatting (F16) |
 | `remove-pending` | `<b>a‸</b>` | none | Remove Formatting, type `x` |
 | `remove-partial` | `<b>a[b]c</b>` | none | Remove Formatting |
+| `remove-keep-color-on-b` | `<b style="color: red;">[x]</b>` | Text Color | Remove Formatting (F16) |
 
 List, indent and alignment group (F9):
 
@@ -340,11 +370,20 @@ List, indent and alignment group (F9):
 | `list-switch-kind` | `<ul><li>[a]</li></ul>` | Numbered List |
 | `list-two-blocks` | `<div>[a</div><div>b]</div>` | Bulleted List |
 | `list-after-text` | `a<br>[b]` | Bulleted List |
+| `list-multiline` | `[a<br>b]` | Bulleted List, probe, Bulleted List |
+| `list-multiline-partial` | `a<br>[b<br>c]` | Numbered List |
+| `list-middle-off` | `<ul><li>a</li><li>[b]</li><li>c</li></ul>` | Bulleted List |
+| `list-mixed` | `<ul><li>[a</li></ul>b]` | Bulleted List |
+| `list-styled-item-off` | `<ul><li style="text-align: center;">[a]</li></ul>` | Bulleted List |
 | `indent-item` | `<ul><li>a</li><li>[b]</li></ul>` | Indent, probe, Outdent, probe, Outdent |
+| `indent-two-items` | `<ol><li>a</li><li>[b</li><li>c]</li></ol>` | Indent, probe, Outdent |
 | `indent-outside-list` | `a[b]c` | Indent (Anki's alert shows; the field is unchanged) |
 | `align-center` | `a[b]c` | Center |
 | `align-in-div` | `<div>a</div><div>[b]</div>` | Align Right |
 | `align-justify-then-left` | `[a]` | Justify, probe, Align Left |
+| `align-multiline` | `a<br>[b]` | Center |
+| `align-multiline-all` | `[a<br>b]` | Center |
+| `align-list-item` | `<ul><li>[a]</li></ul>` | Center |
 
 Insertion group (F10), through Anki's attach of an existing media file `x.png` and through cloze (`editor/cloze-wrap` W9) only, since those are the page's insertions a scenario can drive:
 
@@ -363,10 +402,11 @@ HTML mode group (F11, F12):
 | `close-tags-block` | `‸` in HTML mode, `closeHTMLTags` true | type `<div>`, probe; type `y</` (F16) |
 | `close-tags-existing` | `‸</b>` in HTML mode, `closeHTMLTags` true | type `<b>`, probe; type `x</` |
 | `close-tags-self-closing` | `‸` in HTML mode, `closeHTMLTags` true | type `<img src="a.png"/>`, type `<keygen>`, type `<span class="k">` |
+| `close-tags-quoted` | `‸` in HTML mode, `closeHTMLTags` true | type `<a title="x>y">`, probe; type `<!-- <i> -->`, type `</` |
 
 ## F18. Meguri tests without goldens
 
-The plan's U192 tests cover what no golden shows: F2's disabled states (HTML mode, tag editor, no focus), the toolbar keeping focus and selection, F6's toolbar states, F7's pickers on macOS and iOS and the last colours' defaults and persistence, F8's session memory, F12's options applying to every open editor and the palette swatches, F14's registry test and the collisions (⌘, in rich mode and in the tags, ⌘. in a sheet, Zoom In, ⇧⌘= on a layout where `=` needs Shift), WebKit's ⌘B and the iOS edit menu routed to F3, held keys acting once, AE10's typed `e` with the edit panel over a review, and F15's menu enabling, ⌘ overlay and Help listing. Each runs on macOS and on the iOS simulator.
+The plan's U192 tests cover what no golden shows: F2's disabled states (HTML mode, tag editor, no focus), the toolbar keeping focus and selection, F6's toolbar states, F7's pickers on macOS and iOS (a session over a drag of many picks giving one history entry and the last pick's colour, a collapsed selection setting only the last colour, focus moving to another field while the macOS panel stays open, a reload during a session) and the last colours' defaults and persistence, F8's session memory, F12's options applying to every open editor and the palette swatches, F14's registry test and the collisions (⌘, in rich mode and in the tags, ⌘. in a sheet, Zoom In, ⇧⌘= on a layout where `=` needs Shift), WebKit's ⌘B and the iOS edit menu routed to F3, held keys acting once, AE10's typed `e` with the edit panel over a review, and F15's menu enabling, ⌘ overlay and Help listing. Each runs on macOS and on the iOS simulator.
 
 ## F19. Strings
 
@@ -374,7 +414,7 @@ Meguri's own wording, for the String Catalog. Anki's English is shown where an i
 
 | Where | Meguri | Anki |
 |---|---|---|
-| Menu and toolbar labels | Format · Bold · Italic · Underline · Superscript · Subscript · Apply Text Color · Choose Text Color… · Apply Highlight Color · Choose Highlight Color… · Remove Formatting · Formatting to Remove · Text Color · Highlight Color · Bulleted List · Numbered List · Increase Indent · Decrease Indent · Alignment · Align Left · Center · Align Right · Justify · Cloze Deletion · Cloze Deletion (Same Number) · HTML Editor · Fields… · Cards… · Options · Shrink Images · Close HTML Tags · Add to Palette · Remove from Palette | Bold text · Italic text · Underline text · Superscript · Subscript · Text color · Change color · Text highlight color · Remove formatting · Select formatting to remove · Unordered list · Ordered list · Increase indent · Decrease indent · Alignment · Align left · Center · Align right · Justify · Cloze deletion (new card) · Cloze deletion (same card) · Toggle HTML Editor · Fields... · Cards... · Options · Shrink Images · Auto-close HTML tags |
+| Menu and toolbar labels | Format · Bold · Italic · Underline · Superscript · Subscript · Apply Text Color · Choose Text Color… · Apply Highlight Color · Choose Highlight Color… · Remove Formatting · Formatting to Remove · Text Color · Highlight Color · Bulleted List · Numbered List · Increase Indent · Decrease Indent · Alignment · Align Left · Center · Align Right · Justify · Cloze Deletion · Cloze Deletion (Same Number) · Attach… · Record Audio… (their other strings: `editor/paste` P21) · HTML Editor · Fields… · Cards… · Options · Shrink Images · Close HTML Tags · Add to Palette · Remove from Palette | Bold text · Italic text · Underline text · Superscript · Subscript · Text color · Change color · Text highlight color · Remove formatting · Select formatting to remove · Unordered list · Ordered list · Increase indent · Decrease indent · Alignment · Align left · Center · Align right · Justify · Cloze deletion (new card) · Cloze deletion (same card) · Toggle HTML Editor · Fields... · Cards... · Options · Shrink Images · Auto-close HTML tags |
 | Indent outside a list (F9) | alert message "Indent/unindent currently only works with lists." with button "OK" | the same message |
 
 The screen contracts (`docs/design`) own placement and appearance.

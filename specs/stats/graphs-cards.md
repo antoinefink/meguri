@@ -5,7 +5,7 @@ Requirements: R1285, R1293, R1294, R1373, R1374, R1375, R1378, R1390, R1391, R13
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/future-due/, conformance/scenarios/stats/graphs/card-counts/, conformance/scenarios/stats/graphs/intervals/, conformance/scenarios/stats/graphs/fsrs/, conformance/scenarios/stats/graphs/added/
 
-The data of the seven card graphs (U101): Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability and Added. They run on the machinery of `stats/graphs-common` (scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, preferences G7, requests G8, caches G9). This file says, per graph, which cards count, the value each card gives, the record's keys and its extras. Ranges, bins, quantiles, medians of Intervals and Stability, cumulative series, tooltip and table text, and every histogram bar's query are `stats/graph-presentation` (U226, `stats/graphs-common` G12.1). Card Counts' label queries are `stats/browse-queries` Q4.1.
+The data of the seven card graphs (U101): Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability and Added. They run on the machinery of `stats/graphs-common` (scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, preferences G7, requests G8, caches G9). This file says, per graph, which cards count, the value each card gives, the record's keys and its extras. Ranges, bins, quantiles, medians of Intervals and Stability, cumulative series, tooltip and table text, and every histogram bar's query are `stats/graph-presentation` (U226, `stats/graphs-common` G12, item 1). Card Counts' label queries are `stats/browse-queries` Q4.1.
 
 Every value here equals Anki's graph data for the same collection, scope and clock (R1446). Meguri adds a few extras that Anki's data does not have (C4.2, C6.2); they change none of Anki's values.
 
@@ -173,7 +173,7 @@ The f32 steps matter: d 2.08 and 4.6 fall one key below the decimal reading.
 
 ### C9.1 Elapsed seconds
 
-For each card of C6.1, the elapsed seconds e, an unsigned 32-bit value. Differences are taken in 64-bit integers; "mod 2^32" keeps the low 32 bits (two's complement, so a negative difference becomes a large e).
+For each card of C6.1, the elapsed seconds e, an unsigned 32-bit value. Differences and products are taken in 64-bit integers with wrapping (two's-complement) arithmetic, so no stored value overflows or stops the request: an `lrt` of −2^63, which `model/card-data-json` C3 accepts, gives now_s − `lrt` = now_s − 2^63 after the wrap. "mod 2^32" then keeps the low 32 bits (so a negative difference becomes a large e, and that `lrt` gives e = now_s mod 2^32).
 
 A card is **day-due** when its `type` is not 0 and H ≤ 365,000, or its `queue` is 2 or 3, or its `type` is 2 and its `queue` is below 0.
 
@@ -188,7 +188,7 @@ H is C2's. The review log is never read for a missing `lrt` (`stats/graphs-commo
 
 ### C9.2 Value
 
-R is `search/card-extractors` X5 steps 3 to 6 with e from C9.1: t = e as f32 / 86,400 in f32, decay = the card's `decay` or 0.5, R = `fsrs::current_retrievability` of the pinned `fsrs` crate, in f32 (R1402). Meguri calls that function; it does not reimplement it.
+R is `search/card-extractors` X5 steps 3 to 5 with e from C9.1: t = e as f32 / 86,400 in f32, decay = the card's `decay` or 0.5, R = `fsrs::current_retrievability` of the pinned `fsrs` crate, in f32 (R1402). Meguri calls that function; it does not reimplement it. X5's step 6 does not apply: R stays f32 for the bins (C9.3) and the sums (C9.4).
 
 ### C9.3 Bins
 
@@ -199,7 +199,7 @@ x = R × 100 in f32. The key is 99 when x is exactly 100, and otherwise ⌊x⌋ 
 - `sum_by_card`: the f32 sum of R over the cards of C6.1 (C1 order).
 - `average`: `sum_by_card` × 100 / (number of cards of C6.1), in f32; 0 when there is none (R1403).
 - `sum_by_note`: for each note with a card in the scope, the mean of R over its scope cards, a card without a memory state adding 0 (f32 sum in C1 order, divided in f32 by the number of its scope cards); then the f32 sum of those means in ascending note id. Anki adds the notes in an unspecified order, so its last bits can vary between runs; scenarios keep the note count small and compare within `stats/graphs-common` G14's tolerance.
-- A NaN R (a stability of 0 with e 0, a negative stability: X5) gets key 0 and makes the sums NaN, as in Anki. No scenario has one.
+- A NaN R (a stability of 0 with e 0, or a negative stability when t / s × factor + 1 is below 0: X5) gets key 0 and makes the sums NaN, as in Anki. Otherwise a negative stability gives R of 1 or more, as X5's formula does: key 99 at e 0, key 100 or above for a small e (s −3 with e 3,600: key 100), and +∞ (key 4,294,967,295, infinite sums) when the base is exactly 0. No scenario has one.
 
 Example: note A with a card of R 0.7182781 and a card without a memory state, note B with one card of R 0.7661308: `sum_by_card` 1.4844089, `average` 74.22044, `sum_by_note` 1.1252699 (0.35913906 + 0.7661308).
 
@@ -266,12 +266,15 @@ U101's parts of the `stats` kind (`stats/graphs-common` G14), in G14's form (fie
 - `difficulty`: `{eases: {<key>: <cards>}, average}`;
 - `retrievability`: `{retrievability: {<key>: <cards>}, average, sum_by_card, sum_by_note}`;
 - `card_counts` and `added` as G14 defines them.
+- A map member with no key is omitted, by G14's default rule, as in `stats/graphs-revlog` V8: `stability` with no card is `{}`, and `future_due` with no counted card holds at most `daily_load`.
 
 Meguri maps the record's Anki members into these shapes; the Meguri extras are not observed. The oracle's graph data reads Anki's clock, which the scenario's `set_clock` and `advance` fix (time stands still between ops), so R is reproducible. Numbers compare with G14's tolerance (1e-6 relative); keys and counts compare exactly, so retrievability scenarios keep every R at least 1e-4 from a whole percent, where a last-bit difference of the platform's power function (KTD24) could move a key.
 
 ## C13. Scenarios
 
-For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (C12) once `oracle/driver/ops/stats.py` exists (none does yet, `stats/graphs-common` G15). Cards come from setup notes, then `db_exec` sets `type`, `queue`, `due`, `ivl`, `odue`, `odid`, `data` and, for Added, `id` (`conformance/stats-ops` H3). All in Europe/Paris, rollover 4, Collection scope and `year` unless named. "Day t + k" is the day number `today` + k. Values are this file's; the goldens are the authority once recorded.
+For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (C12) once `oracle/driver/ops/stats.py` exists (none does yet, `stats/graphs-common` G15). Cards come from setup notes, then `db_exec` sets `type`, `queue`, `due`, `ivl`, `odue`, `odid`, `data`, `did` and, for Added, `id` (`conformance/stats-ops` H3). `did` and `odid` take deck ids from the `decks` table by name (H3, "Card moves"). A filtered deck (`F`) comes from `build_filtered` (`conformance/dsl.md`) with a search that matches the cards meant for it, before `db_exec` sets their columns. All in Europe/Paris, rollover 4, Collection scope and `year` unless named.
+
+The retrievability clock, for the scenarios that name it: `clock.start` 2030-01-15T11:00:00 (Paris wall time, 10:00 UTC), so the new collection's `crt` is 2030-01-15 04:00 +01:00 (`sched/day-clock` D11), then `advance` 30d before `db_exec` and the observation. Now is then 2030-02-14 10:00:00 UTC (now_s 1897293600), `today` 30 and `N` 1897354800, the values of C9.6's table. "Day t + k" is the day number `today` + k. Values are this file's; the goldens are the authority once recorded.
 
 | Scenario | Pins | Expected |
 |---|---|---|
@@ -285,10 +288,10 @@ For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the
 | `intervals/types-and-queues` | C5 | review cards with `ivl` 0, 1, 21 and 36,500, a suspended review card with `ivl` 21, a relearning card with `ivl` 1, a new card and a learning card with `ivl` 5: {0: 1, 1: 2, 21: 2, 36500: 1} |
 | `fsrs/stability-rounding` | C6.1, C7 | observing `stability`: review cards with d 5 and s 0.4, 0.5, 2.5, 20.49, −3 and `1e40`, a new card with s 2.5 and d 5, a review card with s 7 and no `d`: {0: 2, 1: 1, 3: 2, 20: 1, 4294967295: 1} |
 | `fsrs/difficulty-bins` | C8 | observing `difficulty`: review cards with s 5 and the eight d values of C8.1: {0: 2, 1: 1, 11: 1, 39: 1, 50: 1, 99: 1, 111: 1}, `average` 26 |
-| `fsrs/retrievability-elapsed` | C9.1 to C9.3, C9.6 | the first seven rows of C9.6, one card each, at now 2030-02-14 10:00:00 UTC with `today` 30: `retrievability` {2: 2, 3: 1, 61: 1, 71: 1, 76: 1, 99: 1} |
-| `fsrs/retrievability-sums` | C9.4 | the example of C9.4, at the clock of `fsrs/retrievability-elapsed` (now 2030-02-14 10:00:00 UTC, `today` 30): note A with the first card of C9.6 (`lrt` now_s − 864,000, s 2.5, d 5) and a second card with no `s` and `d`; note B with the second card of C9.6 (review, no `lrt`, H 35, `ivl` 20, s 5, d 5): `sum_by_card` 1.4844089, `average` 74.22044, `sum_by_note` 1.1252699 |
+| `fsrs/retrievability-elapsed` | C9.1 to C9.3, C9.6 | the first seven rows of C9.6, one card each, at the retrievability clock: `retrievability` {2: 2, 3: 1, 61: 1, 71: 1, 76: 1, 99: 1} |
+| `fsrs/retrievability-sums` | C9.4 | the example of C9.4, at the retrievability clock: note A with the first card of C9.6 (`lrt` now_s − 864,000, s 2.5, d 5) and a second card with no `s` and `d`; note B with the second card of C9.6 (review, no `lrt`, H 35, `ivl` 20, s 5, d 5): `sum_by_card` 1.4844089, `average` 74.22044, `sum_by_note` 1.1252699 |
 | `fsrs/retrievability-now` | C9.5, R1294 | review cards with `lrt`: `stats` with `year`, `advance` 10 days, `stats` with `year` and `all`: the keys move between the first two outputs and the last two are equal |
 | `fsrs/fsrs-off` | C6.3 | two review cards with s 5, d 5 and an `lrt` 10 days back, observed with `fsrs` true and then false: the `stability`, `difficulty` and `retrievability` parts are equal; `context` has `fsrs` only the first time |
 | `added/day-edges` | C10 | `clock.start` 2026-10-12T12:00:00 (Paris wall time, 10:00 UTC), so `N` = 1791856800 as in C10's table; cards with the six ids of that table: {0: 2, −1: 2, 1: 1, −400: 1}, with `year` and `all` |
 
-Meguri-only tests (no oracle field): due tomorrow (C3.6), the notes count (C4.2), the label texts in the record for both settings (C4.3), the left-out count (C6.2), f32 summation order (C1, C9.4), the difficulty median from distinct-value counts against a sort of all values (C8.2), and that R is recomputed on every request after a clock change with the caches warm (C9.5).
+Meguri-only tests (no oracle field): due tomorrow (C3.6), the notes count (C4.2), the label texts in the record for both settings (C4.3), the left-out count (C6.2), f32 summation order (C1, C9.4), an `lrt` of −9223372036854775808 with no overflow and e = now_s mod 2^32 (C9.1), the difficulty median from distinct-value counts against a sort of all values (C8.2), and that R is recomputed on every request after a clock change with the caches warm (C9.5).

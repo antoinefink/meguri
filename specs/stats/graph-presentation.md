@@ -17,7 +17,7 @@ Every rule reproduces Anki's graphs page at the pinned version unless P21 names 
 |---|---|---|---|
 | Today | `today` | the Today payload | `stats/studied-today` T6.2 (not presented here) |
 | Future Due | `future_due` | `future_due`, have backlog, daily load, due tomorrow | `stats/graphs-cards` C3.6 |
-| Calendar | `calendar` | cells (day index → count), `day0_date`, `today_date`, `max_count` | `stats/graphs-revlog` V3.4 |
+| Calendar | `calendar` | cells (each its date, its count and, when one of its day indices is 0 or below, its item text), `today_date`, `max_count` | `stats/graphs-revlog` V3.4 |
 | Reviews | `reviews` | `count` and `time`, day index → the five kinds | `stats/graphs-revlog` V2.2 |
 | Card Counts | `card_counts` | both count sets, notes, label texts | `stats/graphs-cards` C4.4 |
 | Intervals | `intervals` | interval → cards | `stats/graphs-cards` C5 |
@@ -90,6 +90,8 @@ D(a, b) names the days of a bin from a to b. Let big = max(|a|, |b|) and small =
 | −1, 1 | `Yesterday` |
 
 Each graph says which a and b it passes (P6, P8, P15).
+
+Decided 2026-10-27: the plan's U226 test "−10…−6 → `10-6 days ago`" is superseded by this table. The bin holding days −10 to −6 is [−10, −5), and D(−10, −5) is `6-10 days ago`, the smaller number first, as on Anki's page.
 
 ## P4. Binning
 
@@ -167,6 +169,8 @@ The desired count of P4.1 is at most 70 for every histogram (the 70-bin rule), a
 
 A number inside a bar query is written as the shortest decimal that reads back as the same binary64 value, with `-` for negative values, no grouping and no exponent: `0.07`, `-500`, `124.5`. Every bar query is Anki search syntax only (P10 decides the one case where Anki's page writes a query its search rejects) and parses with the core's parser (R1420, `stats/browse-queries` Q6). The Browser receives it through `stats/browse-queries` Q3 (R1417).
 
+Decided 2026-10-27: bar queries are written by these rules as plain text and joined only by `StatsBrowseLink` (`stats/browse-queries` intro, Q3). They never go through U88's builder, its `join` or the canonical writer; the plan's U226 line "Bar queries built through U88's builder" is superseded. Its expected texts still hold (`"prop:ivl>=3" "prop:ivl<=5"`, `<=` on Difficulty's last bar, `added:` bounds).
+
 ## P5. Ranges and controls
 
 ### P5.1 Ranges
@@ -207,6 +211,8 @@ Reviews, Hourly Breakdown and Answer Buttons follow the history control (R1367):
 
 **Data.** The `future_due` map of `stats/graphs-cards` C3.6. With Backlog off, entries with a key below 0 are left out (AE57).
 
+**Backlog** in this section is the stored `futureDueShowBacklog` value (`stats/graphs-common` G7, default true), whether or not the toggle is shown (P5.1). So with have backlog false and the value true, x0 is the smallest key, which can be above 0.
+
 **Domain.** x0 is 0 with Backlog off, else the smallest key. x1 is 31, 90 or 365 for 1 month, 3 months and 1 year, and the largest key for all (R1376). Desired count min(70, x1 − x0). Thresholds T(x0, x1, that count) (P4.1), bins by P4.3.
 
 **Empty.** No data (P16.5) when the map, after Backlog's filter, is empty or no bin has a value.
@@ -237,17 +243,21 @@ Example, `future_due` {0: 3, 1: 4, 5: 1, 30: 2, 31: 5, 40: 1}, Backlog off, 1 mo
 
 Total `15 reviews`, Average `0 reviews/day`, Due tomorrow `4 reviews`. The [30, 31) bar counts day 30 only while its text and query cover days 30 and 31, as in Anki; day 31's cards are in no visible bar.
 
+No backlog, toggle hidden: `future_due` {1: 45}, have backlog false, `futureDueShowBacklog` true, 1 month: domain [1, 31], desired count 30, 31 bins: [1, 2) `Tomorrow:` with `"prop:due=1"`, …, [30, 31) `In 30-31 days:`, [31, 31] not drawn. Total `45 reviews`, Average round(45 ÷ 30) = `2 reviews/day`. With `futureDueShowBacklog` false: domain [0, 31], 32 bins, the first [0, 1) `Today:` empty, Average round(45 ÷ 31) = `1 review/day`.
+
 More bins: 1 year without backlog gives [0, 5) `In 0-4 days` … [360, 365) `In 360-365 days` and [365, 365] undrawn (74 bins). With Backlog on and a smallest key of −500, 1 month gives a step of 10: [−500, −490) `491-500 days ago` with query `"prop:due>=-500" AND "prop:due<=-491"`, …, [20, 30) `In 20-29 days`, [30, 31] `In 30-31 days` (drawn, closed).
 
 ## P7. Calendar
 
-The grid is U227's component (`stats/heatmap-presentation`, U227, not yet written). A cell's date is `day0_date` + d (`stats/graphs-revlog` V3.2, R1384). This section gives what the Calendar adds; "today" is the record's `today_date`.
+The grid is U227's component, defined in `stats/heatmap-presentation`, which U227's spec writer writes before U227 is built (the plan's execution note for U227); it is not in the tree yet. A cell's date is the cell's own date (`stats/graphs-revlog` V3.2, V3.3, R1384): a date that two day indices share is one cell with the summed count, and no date is computed from a day index. This section gives what the Calendar adds; "today" is the record's `today_date`.
+
+Decided 2026-10-27: the Calendar box's drawing (grid, palette, colour stops, empty colour) and its `AXChartDescriptor` (P18.3) wait for `stats/heatmap-presentation`; U226 builds them only after it lands. The rules below (years, drawn dates, tooltip, query) do not wait and are tested now (P23).
 
 - **Years.** The year shown starts at the current year (the year of `today_date`). Back stops at the previous year with `last12Months` and at 2000 with `allHistory`; forward never passes the current year (R1380). When the history changes to `last12Months` while an earlier year is shown, the shown year becomes the previous year.
 - **Cells.** A date of the shown year is drawn when it is not after today and either it has reviews, or the history is `allHistory`, or it is after the same date one year ago (today's date with the year one less, a 02-29 date read as 03-01) (R1380). So with `last12Months` an empty date one year old or older is not drawn, and a date after today is never drawn, even with reviews from clock skew (P21). Every date of the year can be drawn, 31 December of a leap year included. Decided 2026-10-27: Anki compares each date's midnight with the current time one year back, which gives the same dates except at exactly midnight, and it fills only the first 365 dates of a year, so it never draws an empty 31 December of a leap year (P21).
 - **Colour.** A day with reviews takes a square-root scale over [0, `max_count`] (all years, dates after today included); a day without reviews takes the empty colour (R1382). The palette is U227's.
 - **Tooltip.** Two lines: the date as `<weekday>, <month> <day>, <year>` with English names (`Monday, October 12, 2026`), then `<count> review(s)` (R1383).
-- **Query.** `stats/browse-queries` Q4.2.
+- **Query.** The cell's item text, when its record cell carries one (`stats/graphs-revlog` V3.4, `stats/browse-queries` Q4.2). A drawn date without a record cell has none.
 - **No data** (P16.5) when the record has no cell, whatever the year shown.
 
 ## P8. Reviews
@@ -471,7 +481,7 @@ The record's three groups for the selected range (`stats/graphs-revlog` V6.2, ra
 |---|---|
 | Future Due, Intervals, Stability, Difficulty, Retrievability, Added | each drawn bin that holds data (P4.3), with its query |
 | Card Counts | each type and inactive row label (`stats/browse-queries` Q4.1) |
-| Calendar | each cell with reviews whose day index is 0 or below (`stats/browse-queries` Q4.2) |
+| Calendar | each drawn cell whose record cell carries an item text (`stats/graphs-revlog` V3.4, `stats/browse-queries` Q4.2) |
 | Reviews, Hourly Breakdown, Answer Buttons, Retention, Today | nothing |
 
 A drawn bin without data still shows its tooltip (with 0), but has no query.
@@ -541,17 +551,33 @@ Example (P6's data with a daily load of 3, Deck `Japanese`): `Future Due. The nu
 
 - Swift Charts' automatic mark elements are replaced by one element per drawn bin, in axis order (R1440). Its label is the bin's tooltip lines joined with `, `, without the colon that ends the first line of Future Due and Added; a label-value line reads `<label> <value>`.
 - Clickable items expose `Show in Browser` as a named accessibility action that opens the Browser as P16 does. Non-clickable graphs expose no such action.
-- Bins are grouped in runs of ten consecutive drawn bins (the last run may be shorter), each run a container labelled `<first bin's day or value text> to <last bin's>`, so a 70-bar chart can be skimmed by run and then explored (R1440).
+- Bins are grouped in runs of ten consecutive drawn bins (the last run may be shorter), each run a container labelled `<first bin's name> to <last bin's name>` with the bin names of P18.5, so a 70-bar chart can be skimmed by run and then explored (R1440). Example, Reviews over 1 month (P8): the first run reads `30 days ago to 21 days ago`. A run of one bin reads that bin's name alone.
 - Card Counts sectors and rows, Retention rows, Hourly bars and Answer Buttons bars are elements labelled with their row or tooltip text.
 
 ### P18.3 Audio Graphs
 
-Each chart with marks publishes an `AXChartDescriptor` (R1439): an x axis of categories, one per drawn bin, named by its day or value text; a numeric y axis named by its unit (cards, reviews, minutes, percent); one data series per stacked kind (Reviews), per bar and line (Hourly), or one series. The Calendar's descriptor is U227's. Retention, a table, has none.
+Each chart with marks publishes an `AXChartDescriptor` (R1439): an x axis of categories, one per drawn bin, hour or bar, named by its bin name (P18.5); a numeric y axis named by its unit (cards, reviews, minutes, percent); one data series per stacked kind (Reviews), per bar and line (Hourly), or one series. The Calendar's descriptor is U227's. Retention, a table, has none.
 
 ### P18.4 Text size and motion
 
 - Every stats text uses platform text styles and follows Dynamic Type up to the largest accessibility size (R1444). At accessibility sizes, table rows stack the value under its label, and the plot keeps its default height (it never shrinks to make room for text).
 - Range changes use the system's default chart animation, which Reduce Motion already shortens; no custom motion (R1368, `docs/design/native-interface-contract.md` N11.7).
+
+### P18.5 Bin names
+
+The short name of a drawn bin [a, b), a bar or a sector, used by the run labels of P18.2 and the Audio Graphs categories of P18.3. Decided 2026-10-27 (Meguri's own; Anki's page has no such text):
+
+| Graph | Name | Examples |
+|---|---|---|
+| Future Due | D(a, e), e as P6's bin text | `Tomorrow`, `In 30-31 days` |
+| Reviews | P8's day text of the bin | `30 days ago`, `0-4 days ago` |
+| Added | D(a, b) | `31 days ago`, `Today` |
+| Intervals, Stability | `<a> day(s)` when b − a ≤ 1, else `<a>~<b − 1> days`, the numbers written as in P10's tooltip | `0 days`, `1 day`, `1~2 days`, `129~130 days` |
+| Difficulty, Retrievability | `<a>%-<b>%`, a and b as in P11's tooltip | `40%-41%`, `95%-100%` |
+| Hourly Breakdown | `<h>:00`, h by F | `9:00`, `23:00` |
+| Answer Buttons | `<group>, <button name>` (P14's group labels and button names) | `Young, Good` |
+| Card Counts | the row label (P9) | `Suspended` |
+| Calendar | `stats/heatmap-presentation` (P7) | |
 
 ## P19. Strings
 
@@ -590,6 +616,7 @@ Meguri takes these texts only from this table. `<…>` marks a number or name; `
 | Memory-state footnote (Meguri) | `1 review card without a memory state is not included.`, `<n> review cards without a memory state are not included.` |
 | Empty state (Meguri) | `No Data` |
 | Action | `Show in Browser` |
+| Accessibility (Meguri, P18) | summary scope parts `Collection`, `Deck <name>`, `Search <text>`; run label `<a> to <b>`; bin names `<n> day(s)`, `<a>~<b> days`, `<a>%-<b>%`, `<h>:00`, `<group>, <button name>`; y axis names `cards`, `reviews`, `minutes`, `percent` |
 
 ## P20. Decisions
 
@@ -606,6 +633,9 @@ Decided 2026-10-27:
 9. **Drawn bins by their edges.** P4.4: every bin with x1 > x0 is drawn, whatever its width on screen.
 10. **Calendar's empty dates.** P7: after the same date one year ago, every date of the year.
 11. **Range labels and motion.** P19 title-cases the range labels and P18.4 keeps the system animation, both with `docs/design/native-interface-contract.md` N11.7.
+12. **Bin names.** P18.5 gives each bin a short name for VoiceOver runs and Audio Graphs categories.
+13. **Calendar drawing waits.** P7: the grid, palette and descriptor come from `stats/heatmap-presentation`; the Calendar's other rules are in force now.
+14. **Plan tests superseded.** P3 (`6-10 days ago`) and P4.7 (no U88 builder).
 
 ## P21. Differences from Anki
 
@@ -645,7 +675,7 @@ A draft observation kind, `stats_presentation` (`conformance/observations` O4), 
 
 | Scenario | Pins | Requests |
 |---|---|---|
-| `future-due-ranges` | P6, P4.3, P4.4 | the P6 example cards; every range, Backlog on and off |
+| `future-due-ranges` | P6, P4.3, P4.4 | the P6 example cards; every range, Backlog on and off; and cards due only from tomorrow (the {1: 45} example, have backlog false), 1 month, `futureDueShowBacklog` true and false |
 | `future-due-large-backlog` | P4.1 steps | overdue to −500 days; 1 month, Backlog on |
 | `reviews-ranges` | P8 domain steps 1 to 4 | the P8 example rows, count and Time, every range with `all` history |
 | `reviews-aligned-start` | P8 step 2 | oldest row 403 days ago, all |
@@ -661,4 +691,4 @@ A draft observation kind, `stats_presentation` (`conformance/observations` O4), 
 | `added-ranges` | P15 | the P15 example cards, every range |
 | `empty-collection` | P16.5 | every graph |
 
-Meguri-only tests (no oracle): P2's writers and spans and P3's labels from their tables; P4.1 and P4.2 from their tables; range memory and history following (P5.2, P5.3); the Calendar's year bounds, drawn cells and future dates (P7); selection, tooltips and the Browser hand-off (P16, U226 UI tests); the summary, element tree and actions of a 70-bar chart (P18); the P21 Meguri additions; every bar query parsed by the core's parser (P4.7); the fractional Intervals edge of P10 (keys 1, 2, 3, 4, 50%: `"prop:ivl=4"`, which parses and finds interval 4); the Calendar's empty dates around one year ago and 31 December of a leap year (P7); re-binning the largest Reviews and Intervals records within 16 ms with no core call (R1290); the quantile rules computed from cumulative counts with no per-card array (R1293).
+Meguri-only tests (no oracle): P2's writers and spans and P3's labels from their tables; P4.1 and P4.2 from their tables; range memory and history following (P5.2, P5.3); the Calendar's year bounds, drawn cells and future dates (P7); selection, tooltips and the Browser hand-off (P16, U226 UI tests); the summary, element tree and actions of a 70-bar chart (P18), with the run labels and P18.5's bin names for every graph; the P21 Meguri additions; every bar query parsed by the core's parser (P4.7); the fractional Intervals edge of P10 (keys 1, 2, 3, 4, 50%: `"prop:ivl=4"`, which parses and finds interval 4); the Calendar's empty dates around one year ago and 31 December of a leap year (P7); re-binning the largest Reviews and Intervals records within 16 ms with no core call (R1290); the quantile rules computed from cumulative counts with no per-card array (R1293).

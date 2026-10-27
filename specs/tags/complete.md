@@ -103,7 +103,7 @@ Anki's request takes `match_limit` and returns at most `match_limit` + 1 tags. M
 - Anki's editor removes the outer single colons only when the text between them is at least two characters long and neither begins nor ends with a colon. So it sends `a:`, `:a` and `::ab:` unchanged. Decided 2026-10-27: Meguri applies C5's rule, so a tag being typed keeps its suggestions while its separator is half typed. This changes only what the editor sends. The query is Anki's.
 - Anki's Browse tag entry (the Add Tags and Remove Tags prompts) sends the tag being typed unchanged, with no colon removal, also when it is empty, and with `match_limit` 500, so it also shows up to 501 suggestions. Meguri's Browse entry (U218) applies C5's preparation and `limit`.
 
-Neither difference is visible to a scenario, which calls the query directly. So neither has a `conformance/deviations.yaml` entry.
+None of these differences is visible to a scenario, which calls the query directly, so none has a `conformance/deviations.yaml` entry.
 
 ## C7. Scenarios
 

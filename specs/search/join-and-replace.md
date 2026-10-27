@@ -16,7 +16,8 @@ The search text Meguri writes for UI actions: searches built from structured ite
 | `replace(existing, item)` | the search field's text, a built item | J7 |
 
 - They read no collection, config or clock: the same input always gives the same text.
-- Errors: a parse error of `existing` (`errors.md` E1, with its range in `existing`) or of a parsed-text item (J3), and `invalid_item{reason}` for a built item J3 refuses. No run error (E3) is raised here; running the result may raise one.
+- Errors: a parse error of `existing` (`errors.md` E1) or of a parsed-text item (J3), and `invalid_item{reason}` for a built item J3 refuses. No run error (E3) is raised here; running the result may raise one.
+- A parse error carries a `source`: `existing`, or the path of the parsed-text item in the built item, which is the list of steps from the top item down to it (in a group, the item's index; under a negation, 0). Its range lies in that text: U214 highlights it in the field only when `source` is `existing`, or a parsed-text item with `field_text` set (J3).
 - Ranges cross the FFI in UTF-16 code units (`errors.md` E5).
 
 ## J2. Search-field text
@@ -31,13 +32,13 @@ Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is 
 
 | Item | Query item | Refused (`invalid_item`) |
 |---|---|---|
-| deck by name n | deck term with E(n) (J3.1) | n empty |
+| deck by name n | deck term with E(n) (J3.1) | n empty; n not writable exactly (J3.5) |
 | current deck | deck term `current` | |
 | any deck | deck term `_*` | |
 | tag by name n | tag term, normal mode, E(n) (J3.1); n holding White_Space other than U+0020 or U+001C–U+001F: J3.2 | n empty |
 | any tag | tag term `_*` | |
 | untagged | NOT (tag term `_*`) | |
-| note type by name n | `note:` with E(n) | n empty |
+| note type by name n | `note:` with E(n) | n empty; n not writable exactly (J3.5) |
 | any note type | `note:_*` | |
 | note type by id | `mid:` with the id | |
 | template by ordinal k | `card:` with ordinal k (0-based) | k > 65534 |
@@ -56,12 +57,13 @@ Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is 
 | note ids, card ids, deck ids | `nid:`, `cid:`, `did:` with the ids in the given order, joined by `,`, in decimal | an empty list; a negative id |
 | duplicates of text t in note type m | `dupe:` with m and t | t holding White_Space other than U+0020, or U+001C–U+001F (J3.4) |
 | whole collection | the whole-collection term | |
-| parsed text s | the items `grammar.md` reads from s (field text: J2 first): one item when s has one, otherwise a group of all of them | a parse error of s |
+| parsed text s, with a flag `field_text` | the items `grammar.md` reads from s (J2 first when `field_text` is set): one item when s has one, otherwise a group of all of them | a parse error of s |
 | group | AND or OR over 1 or more built items | no items |
 | negation of an item | J5 | |
 
 - A group of one item is that item, with no brackets. A group of two or more items is a group (`query-model.md` Q1) of the items joined by its joiner.
 - Days, ids and numbers are those of `grammar.md` G8 and G9; the item stores them as numbers, so `canonical-form.md` F5 and F6 write them.
+- `field_text` is set by a caller whose text comes from a search field (typed, pasted or picked from history, J2). Saved searches, AnkiConnect texts and other stored texts leave it unset. `existing` is always field text (J2).
 
 ### J3.1 Names that are special values
 
@@ -80,6 +82,16 @@ A field whose name, with ASCII letters lowered, is a reserved key of `grammar.md
 ### J3.4 Duplicates
 
 The `dupe:` text is compared exactly (`names-and-ids.md` N6), so no character may change on the way back: text holding White_Space other than U+0020, or U+001C–U+001F, is refused, and the caller (the editor's Show Duplicates, R807) builds a note-ids item from the duplicate notes it already found.
+
+### J3.5 Deck and note type names that cannot be written exactly
+
+E puts `_` in place of some characters, and `_` matches any character, so the built search would also find look-alikes: deck `a` U+00A0 `b` would give `deck:a_b`, which also finds `axb`. Decided 2026-10-27 (data safety first, as J3.1): the builder refuses such a name with `invalid_item{reason: unrepresentable_name}`, and the caller builds the exact item instead.
+
+- **Deck by name n** (n is the full name with `::` between levels) is refused when a level of n, split at `::`, holds White_Space other than U+0020 or an ASCII control character (U+001C–U+001F included), is not in NFC, is empty, or starts or ends with White_Space or `:`. This is the list of `stats/browse-queries` Q2.2. The caller builds the deck-ids item with the deck's id and the ids of all its descendants, which finds that deck and its subdecks, as the deck term would (`names-and-ids.md` N3.5). A caller holding a deck one of whose stored levels holds `::` (which n cannot show, N3.3) builds the same deck-ids item without calling the name item.
+- **Note type by name n** is refused when n holds White_Space other than U+0020 or a character U+001C–U+001F, or is not in NFC (`names-and-ids.md` N4.1 puts the value in NFC). The caller builds the note-type-id item (`mid:`).
+- A negative id cannot be written (J3), so a deck or note type that needs these items and has a negative id gets no built search: the UI offers none for it, as for J3.3.
+
+These callers are the sidebar, Home "Browse", Select Notes and the suggestions of `search/editing-services` D6.6. The deck-ids text does not follow a later rename; a built search is used at once.
 
 ## J4. Writing a built item
 
@@ -191,7 +203,8 @@ Meguri writes Anki's text for every built item except these, where Anki's text w
 |---|---|---|
 | deck `current`, `filtered`; tag `none` | `deck:current`, `deck:filtered`, `tag:none` (special values) | `deck:Current`, `deck:Filtered`, `tag:None` (J3.1) |
 | a deck, tag or note type named `_*`; a "field present" item for a field named `_*` | `deck:_*` (every deck); `_*:_*` (any field) | `deck:\_\*`; `\_\*:_*` (J3.1) |
-| a name holding White_Space other than U+0020, or U+001C–U+001F | the character kept; the search splits there | `_` (J3), or J3.2 for tags |
+| a deck or note type name that J3.5 lists (other White_Space, control characters, not NFC; for a deck, also empty levels and levels with outer White_Space or `:`) | the name as written; the search splits there, normalizes the name, or finds look-alikes | refused (J3.5); the caller builds `did:` or `mid:` |
+| a tag, field name or text holding White_Space other than U+0020, or U+001C–U+001F | the character kept; the search splits there | `_` (J3), or J3.2 for tags |
 | a field named like a reserved key | the reserved term (`deck:_*`) | refused (J3.3) |
 | duplicates text holding such a character | the character kept | refused (J3.4) |
 | an empty id list, a negative id, an empty name or text | text that fails to parse or searches something else | refused (J3) |
@@ -199,12 +212,12 @@ Meguri writes Anki's text for every built item except these, where Anki's text w
 
 ## J11. Scenarios
 
-Neither directory exists yet. Both need observation kinds the oracle does not have: `search_build`, `search_join` and `search_replace`, each taking built items in a neutral JSON form (`{deck: "<name>"}`, `{tag: ...}`, `{flag: "any" | "none" | 1–7}`, `{group: {joiner, items}}`, `{negated: ...}`, `{text: "<search>"}` and so on) and returning the text or the parse error. The oracle maps each item to Anki's own structured search item. To record (oracle maintainer):
+Neither directory exists yet. Both need observation kinds the oracle does not have: `search_build`, `search_join` and `search_replace`, each taking built items in a neutral JSON form (`{deck: "<name>"}`, `{tag: ...}`, `{flag: "any" | "none" | 1–7}`, `{group: {joiner, items}}`, `{negated: ...}`, `{text: "<search>"}` and so on) and returning the text or the parse error. The oracle maps each item to Anki's own structured search item. These J3 items have no structured counterpart in Anki and stay out of the oracle scenarios: note type by id (`mid:`), card-id and deck-id lists, and the states `buried-manually` and `buried-sibling`. U88's `tests/builder.rs` covers them from this text. To record (oracle maintainer):
 
 | Scenario | Covers |
 |---|---|
 | `search/builder/names` | J3, J4: deck, tag, note type and field names with spaces, brackets, quotes, `\`, `*`, `_`, `:`, a leading `-`, `::` and non-ASCII; each built search also run with `search` on a collection holding the named object and look-alikes (`a_b*` next to `axb`), so the built text finds only the named one (R1078) |
-| `search/builder/items` | J3: flags, states, day items, due items, id lists, duplicates, template ordinal, groups of one and of several items, nested groups, double negation |
+| `search/builder/items` | J3: flags, the six states Anki's item has, day items, due items, note-id lists, duplicates, template ordinal, groups of one and of several items, nested groups, double negation |
 | `search/join-replace/join` | J6: existing searches of one item, of several items, of one group, empty; AND and OR; negated items, negated groups; F7's shapes in `existing`; parse errors of `existing` |
 | `search/join-replace/replace` | J7: every kind of the table, replacements at depth and under negation, negated and grouped items (nothing replaced), the empty field, `existing` with nothing of the kind |
 | `search/join-replace/ae43` | AE43 (core part): the two calls of J9 |

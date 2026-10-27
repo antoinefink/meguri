@@ -46,14 +46,19 @@ Only when both note types are standard: the rule of M2 applied to template names
 The info query and the change take a list of note ids, Browse's selection (R944, R1189).
 
 - A note listed twice counts once, at its first position. The selection's order is the list order.
+
+At the info query (M5), in this order:
+
 - An empty list is an invalid argument (a caller error).
 - The first listed note must exist, or the result is `not_found`.
 - Every other listed note must exist and use the first note's note type, or the result is `multiple_notetypes` ("Please select notes from only one note type." is Anki's message; the wording is U87's). A missing note other than the first gives `multiple_notetypes`, as in Anki.
 - The old note type is the first note's.
 
+The change does not use these rules: M8 checks 1 and 4 check its selection, and there a missing note is `not_found` wherever it is listed (decided 2026-10-27: one answer per input).
+
 ## M5. The info query
 
-Input: a selection (M4) and the new note type. It reads one snapshot and writes nothing. Refusals: M4's.
+Input: a selection (M4) and the new note type. It reads one snapshot and writes nothing. Refusals: M4's, then `not_found` when the new note type id names no note type (as in Anki, whose info query fails the same way for a missing old or new note type).
 
 Result:
 
@@ -79,7 +84,7 @@ For a field map and a template map (or none), the selected notes would lose:
 - **Discarded fields**: the old fields no field-map entry names, in ascending ordinal. Anki lists them under "Will discard content on the following fields:"; with the field content counts the screen can also say how many notes hold text in each.
 - **Dropped templates**: with a template map, the old templates no entry names, in ascending ordinal (Anki: "Will remove the following cards:"); none without a template map.
 - **Removed cards**: how many cards of the selected notes M9 deletes, from the card counts:
-  - with a template map: the cards whose ordinal is a dropped template's ordinal (a card whose ordinal is not below the old template count is kept, M9.1);
+  - with a template map: the cards whose ordinal is a dropped template's ordinal, and the cards without a template (ordinal not below the old template count) whose ordinal is the position of an entry that names an old template (M9.1); other cards without a template are kept;
   - cloze to standard: the cards whose ordinal is not below the new note type's template count;
   - to cloze: none.
 
@@ -89,7 +94,9 @@ This preview is the change's destructive-mapping preview (`notetypes/schema-chan
 
 ## M7. Requests that change nothing
 
-A change whose new note type is the old one, whose field map is the identity (entry i names old field i, for every i) and whose template map is the identity or absent is refused with `no_changes` and writes nothing. Anki's screen refuses such a save ("No changes to save") before its backend sees it; Meguri checks in the op so that every caller gets the same answer.
+A change whose new note type is the old one, whose field map is the identity (entry i names old field i, for every i) and whose template map is the identity or absent is refused with `no_changes` and writes nothing. Meguri checks in the op so that every caller gets the same answer.
+
+Anki's screen refuses such a save ("No changes to save") before its backend sees it only when the change has a template map (two standard note types). For a cloze note type to itself there is none, its test fails, and the screen sends the save: Anki's backend then sets `col.scm`, stamps every selected note and removes control characters from its fields (M9 step 3). Decided 2026-10-27 (data safety: a schema change that changes nothing would make the next manual Anki transfer one-way for no reason): Meguri refuses that case with `no_changes` too. The oracle runs Anki's change for it, as Anki's screen does (`change-notetype-ops` H3: "as Anki's screen decides it" is the screen's test above); a scenario that sends it gets the deviation entry `change-notetype-cloze-unchanged` in `conformance/deviations.yaml` with its golden.
 
 ## M8. The change: input, checks and safety backup
 
@@ -99,13 +106,13 @@ Changed 2026-10-27: the input had a schema confirmation flag and the checks ende
 
 The checks and the backup run in this order. A failed check writes nothing, takes no undo step and publishes nothing.
 
-1. **Shape.** The field map has one entry per new field and each entry is an old field ordinal or none; a template map is present exactly when both note types are standard, has one entry per new template, each entry an old template ordinal or none, no ordinal twice. Otherwise: an invalid argument (a caller error, not a refusal the user sees).
+1. **Shape.** The list of note ids is not empty (otherwise an invalid argument). The old and the new note type ids name note types of the live collection, or the result is `not_found` (a note type deleted since the info query; Anki's change fails the same way on a missing new note type). Then the field map has one entry per new field and each entry is an old field ordinal or none; a template map is present exactly when both note types are standard, has one entry per new template, each entry an old template ordinal or none, no ordinal twice. Otherwise: an invalid argument (a caller error, not a refusal the user sees).
 2. **Nothing to change**: M7, `no_changes`.
 3. **Schema stamp**: when `col.scm` differs from the stamp, `schema_changed` (R948). The screen explains it and stays open (U203). Anki refuses with an invalid-input error here.
-4. **Selection**: every listed note still exists, or `not_found` (a note deleted since the info query; Anki fails the same way and keeps nothing), and every one still uses the old note type, or `multiple_notetypes`. Anki does not check the note type here; without a schema change, which check 3 refuses, no note can have left the old note type.
+4. **Selection**: every listed note, the first included, still exists, or `not_found` (a note deleted since the info query; Anki fails the same way and keeps nothing); then every one still uses the old note type, or `multiple_notetypes`. M4's info-query rules do not apply: a missing note other than the first is `not_found` here, not `multiple_notetypes`. Anki does not check the note type here; without a schema change, which check 3 refuses, no note can have left the old note type.
 5. **Safety backup.** A change that passes checks 1 and 2 is a structural edit (`notetypes/schema-changes` G2, reason `notes_notetype_changed`; every such change rewrites notes or cards, so G3 always classifies it). It takes the safety backup of `package/backup-triggers#T6.1`'s structural-edit row, with that row's coalescing, after checks 1 to 4 and before its write transaction (T6.2). A failed backup refuses the change with `SafetyBackupFailed { cause }` and writes nothing.
 
-Decided 2026-10-27: checks 3 and 4 run twice. Before the backup the change runs them on a read of the live collection, so a screen opened on a stale stamp or a deleted note gets its refusal without a backup being taken. Inside the write transaction it runs them again on live rows, and only that run decides: a schema change or deletion committed between the backup and the write transaction refuses the change there, and the backup already published stays (T6.2). Checks 1 and 2 need no rows and run once, first.
+Decided 2026-10-27: checks 3 and 4 run twice. Before the backup the change runs them on a read of the live collection, so a screen opened on a stale stamp or a deleted note gets its refusal without a backup being taken. Inside the write transaction it runs them again on live rows, and only that run decides: a schema change or deletion committed between the backup and the write transaction refuses the change there, and the backup already published stays (T6.2). Checks 1 and 2 need only the two note type records (their kinds and their field and template counts), read from the live collection, and run once, first. Inside the write transaction, check 3's stamp comparison guarantees that those records did not change since: an edit of a note type's fields or templates and a note type deletion set `col.scm` (`notetypes/schema-changes` G2).
 
 ## M9. The change: effects
 
@@ -113,22 +120,24 @@ In one write transaction, after checks 3 and 4 passed on live rows, every value 
 
 1. `col.scm` is set to `now_ms` (`notetypes/schema-changes` G5).
 2. The cards of the selected notes:
-   - **M9.1 With a template map** (standard to standard): every card whose ordinal is a dropped template's ordinal is deleted with its card grave (`storage/graves` G3). Then every card whose ordinal o (its ordinal before the change) is named by the entry at position n, with n ≠ o, gets ordinal n and is stamped as a local change (`mod` `now_s`, `usn` -1); its other columns stay, deck and scheduling included. A card whose ordinal is named by the entry at its own position, and a card whose ordinal is not below the old template count (a card without a template), is not touched.
-   - **M9.2 Cloze to standard**: every card whose ordinal is not below the new note type's template count is deleted with its card grave. The other cards keep their ordinals and are not touched, also when the new template at their ordinal requires no card for the note (Empty Cards finds them, `notes/empty-cards`).
+   - **M9.1 With a template map** (standard to standard): every card whose ordinal is a dropped template's ordinal is deleted with its card grave only (`notes/note-records` D2's plain removal, not its variant; `storage/graves` G2): its note stays, also when it is left with no card, and step 3 gives it one. A card whose ordinal is not below the old template count (a card without a template, `notes/empty-cards` E1) is deleted the same way when the entry at the position equal to its ordinal names an old template, because a renumbered card may take that ordinal. Then every card whose ordinal o (its ordinal before the change) is named by the entry at position n, with n ≠ o, gets ordinal n and is stamped as a local change (`mod` `now_s`, `usn` -1); its other columns stay, deck and scheduling included. A card whose ordinal is named by the entry at its own position, and any other card without a template, is not touched.
+
+     Decided 2026-10-27 (data safety): Anki 26.09.3 keeps a card without a template at a renumbering's target, so a note with cards of ordinals 0, 1 and 2 on two templates, moved with the map none, 1, 0, ends with two cards of ordinal 2. Nothing refuses that (the `cards` table has no unique index on `nid` and `ord`, `storage/schema-18`), and the next Check Database deletes the one with the higher id, without a grave (`maintenance/check-database-notes` N6.2), which may be the user's renumbered card. Meguri deletes the card that has no template instead, with its grave, and the preview counts it (M6). No scenario has such a card, so no deviation entry is needed; U35's tests cover it (M12).
+   - **M9.2 Cloze to standard**: every card whose ordinal is not below the new note type's template count is deleted with its card grave only, as in M9.1. The other cards keep their ordinals and are not touched, also when the new template at their ordinal requires no card for the note (Empty Cards finds them, `notes/empty-cards`).
    - **M9.3 To cloze** (from either kind): no card is deleted or changed. Each card's ordinal is now its cloze number minus one.
 3. Each selected note, in selection order (M4):
    - **Fields.** New field i gets the stored text of the old field its field-map entry names (an ordinal beyond the note's stored fields reads as empty), or the empty string for none. The same text may go to several fields.
    - **Normalization.** Control characters other than TAB and LF are removed from every field (`text/checksum-and-sort-field` C1, first step). NFC is not applied, whatever `normalize_note_text` holds: text stays decomposed if it was (unlike an edit's save, `notes/note-records` N2).
    - **Row.** `mid` becomes the new note type's id; `sfld` and `csum` are computed from the new fields with the new note type's sort field (`text/checksum-and-sort-field` C2 to C4); `mod` `now_s` and `usn` -1. `guid`, `tags`, `flags` and `data` stay; tags are not registered again.
-   - A note whose built row equals its stored row is not written (`storage/ids-usn-mtime` S4). That happens only when the new note type is the old one and the field map leaves every field's text as it was (a change of the template map alone). Anki stamps such a note anyway; no scenario observes it.
-   - **Cards.** The note's cards are then generated as for an updated note: `notes/card-generation` G7 over the note's live cards, and G6 when the note now has no card and requires none (the card of ordinal 0). Each new card is placed by `notes/deck-placement-and-position` D3, whose item 3 is the **new** note type's last deck, and positioned by P2 (one counter value per note that needs one). Every selected note is visited, also one with no card, unlike note type regeneration (G9, D4). New cards are created in note order, then ascending ordinal (G8).
+   - Every selected note is stamped and written, also one whose fields, `mid`, `sfld` and `csum` stay as they were (the new note type is the old one and only the template map changes), as Anki does. Changed 2026-10-27: such a note was left unwritten, which `notetypes/change/template-map` would show against Anki's stamped row. The row handed to `storage/ids-usn-mtime` S4 is already stamped, so S4 skips it only when the stored row already has that `mod` and `usn` -1.
+   - **Cards.** The note's cards are then generated as for an updated note: `notes/card-generation` G7 over the note's live cards, and G6 when the note now has no card and requires none (the card of ordinal 0). Each new card is placed by `notes/deck-placement-and-position` D3, whose item 3 is the **new** note type's last deck. For a note that steps 2 left with no card, D3 has no item 2: a card its template generates may take item 1, and G6's card of ordinal 0 never does (G6), so that card goes to the new note type's last deck, else Default, as `maintenance/check-database-notes` N6.6 places such a card (Anki 26.09.3 does the same). New cards are positioned by P2 (one counter value per note that needs one). Every selected note is visited, also one with no card, unlike note type regeneration (G9, D4). New cards are created in note order, then ascending ordinal (G8).
 4. `col.mod` becomes `now_ms` (`storage/ids-usn-mtime` S5).
 
-The change writes notes, cards, graves and the `col` row; it never writes a note type row (`notetypes/records` N10).
+The change writes notes, cards, graves, the `nextPos` config key when P2 draws a position (`notes/deck-placement-and-position` P1) and the `col` row; it never writes a note type row (`notetypes/records` N10).
 
 Result: the number of notes in the selection, duplicates counted once. The screen says "N notes updated." (R948; Anki counts the notes it was given).
 
-The change is one undo step, "Change Note Type" (R948): undo restores the cards, notes, graves and `col.scm` (G5) and redo applies them again (`engine/undo`). Its change set (`engine/change-stream#S1`) lists the notes and the cards it changed, with `collection_row` true (`col.scm` changed). It lists no note type, and graves are not listed (S1).
+The change is one undo step, "Change Note Type" (R948): undo restores the cards, notes, graves and `col.scm` (G5) and redo applies them again (`engine/undo`). Its change set (`engine/change-stream#S1`) lists the notes and the cards it changed, `nextPos` under `config_keys` when step 3 wrote it, and `collection_row` true (`col.scm` changed). It lists no note type, and graves are not listed (S1).
 
 | Situation (scenario) | Effect |
 |---|---|
@@ -137,7 +146,7 @@ The change is one undo step, "Change Note Type" (R948): undo restores the cards,
 | Cloze with c1, c2, c3 to a standard type with two templates (`notetypes/change/cloze`) | ordinals 0 and 1 untouched, ordinal 2 deleted with a grave |
 | Standard with two templates, fields holding c1 and c3, to cloze (`notetypes/change/cloze`) | ordinals 0 and 1 untouched, ordinal 2 created for c3 |
 | Pair to Pair Reverse with template map none, 0 (`notetypes/change/template-map`) | the old card becomes ordinal 1 (same id, stamped), a new ordinal 0 card at its position |
-| Pair Reverse to itself with template map 0, none (`notetypes/change/template-map`) | card 2 deleted with a grave, then created again as a new card: its scheduling is lost (its review-log rows stay) |
+| Pair Reverse to itself with template map 0, none (`notetypes/change/template-map`) | card 2 deleted with a grave, then created again as a new card: its scheduling is lost (its review-log rows stay); the note stamped although its fields stay |
 | every template dropped, nothing required (`notetypes/change/placement`) | all cards deleted, then a new card of ordinal 0 (G6) in the new note type's last deck |
 | cards split over two decks, a third template now required (`notetypes/change/placement`) | the new card goes to the new note type's last deck |
 
@@ -147,7 +156,14 @@ The change is one undo step, "Change Note Type" (R948): undo restores the cards,
 - The change selects and reads everything inside its write transaction, so edits, reviews and deletions made after the info query are seen and kept (the field remap is re-derived from the live note, `engine/op-model` O7). The only values carried from the info query are the selection, the old note type, the user's mappings and the schema stamp, which check 3 compares.
 - It reports progress as notes done out of notes selected. On a large selection its write phase can pass ~200 ms: it declares a long write (`engine/op-model` O8) through an op catalog entry for Change Note Type, added with the implementation. Once the write starts it is not cancellable (O5). Cancelling while the safety backup runs cancels the backup and ends the change `Cancelled`, with nothing written (`package/backup-triggers` T6.2).
 - It is schema-classified (`notetypes/schema-changes` G2, `notes_notetype_changed`): it sets `col.scm` (G5) and takes its safety backup (M8 check 5, R2008). It asks no confirmation (G4).
-- Transfers. Setting `scm` makes the schema modified since the last Anki sync (G1), so the next manual Anki transfer is one-way and its preview says so before anything is sent or replaced (R1476, KTD26; `notetypes/schema-changes` G7). Routine CloudKit sync never becomes one-way: the change reports its structure (`engine/change-stream#S2.5`, once approved with R2066: the reason code and, under `type_changes`, the old and new note type ids with the field map and the template map of M1) and reaches the other devices as one coherent generation (R1189, R2053; `sync/cloudkit-records#K19`). How a change without a template map (a cloze side, M1) fills the template map there is settled with that review.
+- Transfers. Setting `scm` makes the schema modified since the last Anki sync (G1), so the next manual Anki transfer is one-way and its preview says so before anything is sent or replaced (R1476, KTD26; `notetypes/schema-changes` G7). Routine CloudKit sync never becomes one-way: the change reaches the other devices as one coherent generation (R1189, R2053; `sync/cloudkit-records#K19`), built from the structure report it fills before it returns (`engine/change-stream#S2.5`):
+  - `reasons`: 6 `notes_notetype_changed`;
+  - `type_changes`: one entry with the old note type id, the new note type id, the field map of M1 (-1 for none) and a template map: M1's (-1 for none) when both note types are standard; otherwise K19.2's prefix map ("No template map"), empty when the old note type is a cloze note type and the identity list of the old note type's template count (0, 1, …, n-1) when it is standard;
+  - no `layouts` and no `removed`: the change writes no note type row.
+
+  S2.5's guard rolls back a commit whose notes changed `mid` without that entry (`StructureNotReported`, nothing written), so every build needs the report, whether or not iCloud sync is on.
+
+  Decided 2026-10-27 (data safety): a change whose new note type is the old one reports the same entry, with old id = new id and both maps, although no note's `mid` changes and the guard does not ask for it. Its maps move field contents (a swap of two fields) or cards (a renumbering) within the note type, so its notes move to a new layout as much as moved notes do: a receiver maps a pending local version of such a note through the entry as for any type change (K15.1, K19.5). Without it, a receiver's pending edit of field 0 would merge into the field that now holds what was field 1.
 
 ## M11. Anki inputs Meguri refuses
 
@@ -168,4 +184,4 @@ Anki 26.09.3's backend takes any mapping its screen sends. Given other inputs (n
 
 Decided 2026-10-27: the scenarios are specified here and in `change-notetype-ops` but are not in `conformance/` until both executors have the two ops; H4 gives the order.
 
-U35's Rust tests (`core/crates/meguri-engine/tests/change_notetype.rs`) cover, against expectations built from this spec: undo and redo of the change, `col.scm` included; that the change takes no confirmation input and commits at once while `scm <= ls`; the safety backup (taken after the checks and before the write transaction, none for a refused `no_changes` or a stale stamp found by the first run of checks 3 and 4, T6.1's coalescing, `SafetyBackupFailed` writing nothing); the shape check; `multiple_notetypes` at the change; duplicates in the selection; the unchanged-note case of M9 step 3; progress; and the structure report once `engine/change-stream#S2.5` is approved (its `op_catalog.rs` test).
+U35's Rust tests (`core/crates/meguri-engine/tests/change_notetype.rs`) cover, against expectations built from this spec: undo and redo of the change, `col.scm` included; that the change takes no confirmation input and commits at once while `scm <= ls`; the safety backup (taken after the checks and before the write transaction, none for a refused `no_changes` or a stale stamp found by the first run of checks 3 and 4, T6.1's coalescing, `SafetyBackupFailed` writing nothing); the shape check, with an empty list and a missing old or new note type id (also at the info query, M5); a missing listed note other than the first (`multiple_notetypes` at the info query, `not_found` at the change); `multiple_notetypes` at the change; duplicates in the selection; a cloze note type to itself with the identity field map refused with `no_changes` (M7); a card without a template at a renumbering's target deleted with its grave and counted by M6, and one at another ordinal kept (M9.1); a note whose every card is dropped kept, with its G6 card in the new note type's last deck, and `nextPos` in the change set (M9 step 3); every selected note stamped when only the template map changes (M9 step 3); progress; and the structure report (M10; its `op_catalog.rs` test, `engine/change-stream#S2.5`): reason 6 and the `type_changes` entry between two standard note types, from a cloze note type (an empty template map), from a standard note type to a cloze one (the identity list of the old template count), and to the same note type (old id = new id).

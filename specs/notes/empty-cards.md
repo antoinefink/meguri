@@ -17,7 +17,7 @@ A card is **empty** when its ordinal is not among the ordinals its note requires
 The note's existing cards play no part, and G6 (the card of ordinal 0 a note gets when it requires none) does not apply: a note that requires nothing has all its cards empty. Consequences:
 
 - A card whose template's front does not parse, or renders nothing for the note (a front of `{{^Deck}}{{Back}}{{/Deck}}`: `Deck` is never empty), is empty.
-- A card whose ordinal has no template (a standard note type with fewer templates than the ordinal, left by another program or an older client) is empty.
+- A card whose ordinal has no template (a standard note type whose template count is not above the ordinal, left by another program or an older client) is empty.
 - An image-occlusion note follows the cloze rule: the card of a mask that was removed is empty (R1015).
 - Cards of ordinal 499 are not empty while the note has a cloze number of 500 or more, whatever their count.
 
@@ -28,6 +28,7 @@ The scan looks at every note type and, for each, every note of that type that ha
 Result: per note type that has at least one note with an empty card, the list of those notes; note types without one are left out. For each note:
 
 - the note id;
+- its first field (index 0) as the scan's snapshot holds it, stripped by `text/strip-html` H4, the empty string for a note with no stored field: the text that identifies the note in U131's report and on U163's screen (R1652). Anki's report shows the note id instead, as a link to Browse. Like the labels below, it is display text;
 - its empty cards, as (ordinal, card id), sorted by ordinal, then card id;
 - its number of cards (all of them, empty or not);
 - **all empty**: true when every card of the note is empty, so that deleting them would remove the note (R952 "marks notes that would lose all their cards").
@@ -36,10 +37,10 @@ Order: note types by name in the note type list's order (the `unicase` collation
 
 Each empty card also carries what the report line shows for it (the wording and layout of the line are U131's and U163's):
 
-- standard note type: its template's name stripped by `text/strip-html` H4, or, when the note type has no template at that ordinal, the card number (ordinal + 1), which Anki shows as "Card <number>";
+- standard note type: its template's name as stored, or, when the note type has no template at that ordinal, the card number (ordinal + 1), which Anki shows as "Card <number>";
 - cloze note type: the cloze number, ordinal + 1 (Anki: "Cloze 1, 3").
 
-The note type's name in the report is stripped the same way. Anki's report line is "<empty count> of <card count> cards empty (<labels joined with ", ">)." under "Empty cards for <note type>:", with notes that are all empty shown in red.
+A note's label text is its labels joined with ", " in E2's card order (for a cloze note type, the word Cloze, a space, then the numbers so joined), then stripped by `text/strip-html` H4 as one string, as Anki does. So markup that spans two template names goes with the text between them: names `a<b` and `c>d` give `ad`. The note type's name in the report is stripped by H4 too. Anki's report line is "<empty count> of <card count> cards empty (<labels joined with ", ">)." under "Empty cards for <note type>:", with notes that are all empty shown in red.
 
 ## E3. Running the scan
 
@@ -62,7 +63,7 @@ Inside one write transaction, from the live rows (`engine/op-model` O7, re-deriv
 4. **Delete.** Every other listed card that step 2 found still empty is deleted with its card grave; each note left with no card is then deleted with its note grave (`notes/note-records` D2, the variant that removes the notes it leaves empty; `storage/graves` G3). Nothing is appended to the deleted-notes log (`notes/deleted-notes-log` L3). Review-log rows stay.
 5. `col.mod` becomes `now_ms` when anything was deleted (`storage/ids-usn-mtime` S5). A delete that deletes nothing changes nothing and takes no undo step.
 
-Result: the number of cards deleted and the number of listed cards kept as valid (step 2). Anki's screen then says "Deleted N cards."; U131's also says how many cards were kept because they became valid.
+Result: the number of cards deleted (the cards step 4 removed; a skipped or kept card is not counted) and the number of listed cards kept as valid (step 2). Anki's screen then says "Deleted N cards.", with N the number of card ids it sent to the delete (the listed cards less the ones keep notes leaves), so it counts a card that no longer exists; its delete itself counts only the cards it removed, as Meguri's does. U131's message and U163's screen show the op's count, and also say how many cards were kept because they became valid.
 
 The delete is one undo step, "Empty Cards": undo restores the cards and notes and removes the graves the delete added, redo deletes them again (`engine/undo`, `storage/graves` G6).
 
@@ -86,10 +87,12 @@ With no change between the scan and the delete, the result is Anki's: the same c
 
 Anki 26.09.3 deletes the cards its scan listed, as listed: a card that became valid between the scan and the delete is deleted with the rest, and "keep notes" keeps a card of every note the scan marked all empty. Meguri's delete re-evaluates each card against live rows (E4 steps 2 and 3) and keeps the cards that became valid (plan U35, the write-phase rule of U24). Scenario `cardgen/empty/recheck` shows it; its golden is transformed by the deviation entries `empty-cards-recheck`, `empty-cards-recheck-cards`, `empty-cards-recheck-review-log` and `empty-cards-recheck-graves` (R952), which `conformance/deviations.yaml` gets together with that golden (`empty-cards-ops` Y4).
 
+The message differs too (E4 Result): for a listed card that vanished before the delete, Anki's "Deleted N cards." counts it and Meguri's does not. No scenario observes the message: the ops' `deleted` is the delete's own count, which skips such a card on both sides, so this needs no deviation entry.
+
 ## E6. Running the delete
 
-- U131 calls it after U127's safety backup (R2008, U131; `package/backup-triggers#T6.1` row "Empty Cards deletion", taken when the list of cards is not empty); this spec's op does not take the backup itself.
-- On a long list the write phase can pass ~200 ms; it then declares a long write (`engine/op-model` O8) through an op catalog entry added with the implementation. A card whose note and note type are provably unchanged since the scan's snapshot (`engine/op-model` O7 `Untouched`) gives the same answer in step 2, so the implementation may skip its re-evaluation; the result is the same.
+- The safety backup (R2008; `package/backup-triggers#T6.1` row "Empty Cards deletion", taken when the list of cards is not empty) is the executor's, as T6.2 says: the delete op's descriptor carries that safety class with the row's condition, and the executor takes U127's backup before the op's write phase is queued. Decided 2026-10-27: U35 gives the op that class when it adds the op, so no caller can reach the delete without the backup; U131's flow, which the plan gives the delete's backup, submits the op and does not call the backup itself, so each delete takes one backup. U131's tests check it.
+- On a long list the write phase can pass ~200 ms; it then declares a long write (`engine/op-model` O8) through an op catalog entry added with the implementation. Every listed card is re-evaluated in step 2. Changed 2026-10-27: this bullet allowed skipping a card unchanged since the scan's snapshot (`engine/op-model` O7 `Untouched`); the input carries no snapshot `seq` to prove it, and the re-evaluation reads only the note and note type the delete reads anyway.
 
 ## E7. Scenarios
 

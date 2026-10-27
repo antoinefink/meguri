@@ -17,7 +17,7 @@ Related specs: card columns `model/row-records#R4`, review-log columns and read 
 - **Reads.** The card row, its note's note type id, the note type (name, kind, template names), the card's current deck (`did`), its home deck (`sched/presets#V1`), the home deck's preset, the card's review-log rows (by `cid`, ascending `id`), and the `rollover` config value for the debug dump. One indexed read per table on a reader connection; 500 review-log rows must still fit R1841's 100 ms budget.
 - **No writes (R1252, R1425).** Building the snapshot never writes: not the card row (`data`, `mod`, `usn`), not `col.mod`, not the WAL. A missing memory state and a missing `lrt` are computed in memory (C3.4, C3.5) and dropped with the snapshot. When it builds its card stats and the data has no `lrt`, Anki rewrites the card's data with one (C13.3); Meguri never does.
 - **Contents.** The raw values (C3), the stats rows (C4), the history entries (C6), the curve (C7), and on request the debug dump (C8).
-- **Errors (C11).** When a record the snapshot needs is missing, the snapshot fails with a typed error and the view shows its unavailable state.
+- **Errors (C11).** When a record the snapshot needs is missing, or the home preset's cutoff date or parameter list is refused, the snapshot fails with a typed error and the view shows its unavailable state.
 
 ## C2. Terms
 
@@ -189,7 +189,7 @@ A time span writes a number of seconds `x` (binary64) with one unit:
 
 1. The unit, by `|x|`: below 60 seconds; below 3,600 minutes; below 86,400 hours; below 2,628,000 (a twelfth of 365 days) days; below 31,536,000 (365 days) months; otherwise years. A largest unit, when given, caps it (C4.2 step 2 caps at days).
 2. The amount: `x` divided by the unit's seconds (1, 60, 3,600, 86,400, 2,628,000 or 31,536,000) in binary64.
-3. The rounded form (Stability only) rounds the amount to an integer, halves toward positive infinity, when the unit is seconds, minutes, hours or days; months and years keep their fraction.
+3. The rounded form (the Stability row of C4.2 and the history Stability column of C6.2 only) rounds the amount to an integer, halves toward positive infinity, when the unit is seconds, minutes, hours or days; months and years keep their fraction.
 4. The amount is written by `stats/studied-today#T5.2` (shortest decimal, two fraction digits with halves away from zero, trailing zeros dropped, `,` grouping).
 5. **Long form**: `<amount> <unit>`, with the unit singular exactly when the amount is written `1` (`second`, `minute`, `hour`, `day`, `month`, `year`), plural otherwise (`seconds` … `years`). **Short form** (history Time column): `<amount><suffix>` with no space; suffixes `s`, `m`, `h`, `d`, `mo`, `y`.
 
@@ -271,9 +271,9 @@ One entry per review-log row of the card, newest first (descending `id`). Each e
 | Interval | Interval | long time span of the interval seconds (`0 seconds` for a Reset marker's 0) |
 | Ease | Ease | C6.4 |
 | Time | Time | short time span of the time taken (`3.5s`, `0.13s` for 125 ms, `1.02m` for 61,000 ms) |
-| Stability | Stability | long time span of `stability × 86,400` from the entry's memory state; `""` when the entry has none or its stability is 0 |
+| Stability | Stability | long rounded time span (C5.2, as C4.2 step 1, no days in brackets) of `stability × 86,400` from the entry's memory state; `""` when the entry has none or its stability is 0 |
 
-- The Stability column is Meguri's (R1254); Anki computes the values but hides the column.
+- The Stability column is Meguri's (R1254); Anki computes the values but hides the column. Decided 2026-10-27: it is rounded like the Stability row, so one stability reads the same in both (2.3065 is `2 days`, 45 is `1.48 months`); only the curve tooltip (C7.6) writes the precise span.
 - Colouring is U222's (R1426): Learn uses the New state colour, Review the Review state colour, Relearn the Learn state colour, Filtered, Manual and Rescheduled no colour; a rating of 1 is drawn in the Learn state colour.
 
 ### C6.3 Per-entry memory states
@@ -343,7 +343,7 @@ Decided 2026-10-27: the plan's U92 example ("a 10-day history offers only First 
 
 - Retrievability at instant `τ`, given a stability `S` and the instant `t` of the review it follows: with `x = (τ − t) ÷ 86,400`, `c = 0.9^(1 ÷ −decay) − 1`, `R = (x ÷ S × c + 1)^(−decay)`, all in binary64, times 100 for percent. The decay is the home preset's (`sched/presets#V6`), the same rule for a stored or a computed state.
 - Between `t(r_i)` and `t(r_{i+1})` the curve follows `S(r_i)` from `t(r_i)`; at each later review it returns to 100 % (R1255, R1427). After `t(rN)` it follows `S(rN)`, through `now` and into the future.
-- A range covers the instants from `t(r0)` to `t(r0) + span × 86,400`. Instants up to `now` are the past (drawn solid), instants from `now` on the future (drawn dashed); the point at `now` belongs to both.
+- A range covers the instants from `t(r0)` to its end `t(r0) + span × 86,400`, both included. Instants before `now` are the past (drawn solid), instants after `now` the future (drawn dashed); `now` itself is in both (C7.5 gives it two points).
 - The desired retention line (R1255): the retention in force for the card's home deck (`sched/presets#V7`: deck override, else preset), whatever the card's `dr` says. Decided 2026-10-27: Anki draws the card's stored `dr`, or 0.9 when the card has none; Meguri follows R1255's effective retention, because a stored `dr` is out of date once the deck or preset retention changes. Only the drawn line and the tooltip's retention (C7.6) differ; no observation carries them, and the raw `desired_retention` value (C3.1) stays the card's `dr`.
 
 ### C7.5 Points (Meguri design)
@@ -351,9 +351,13 @@ Decided 2026-10-27: the plan's U92 example ("a 10-day history offers only First 
 The core returns, per offered range, a list of points so that the UI only draws (U92). Anki samples its curve in its web page, which no oracle observes; Meguri's rule is its own and is tested from this section:
 
 - `step` = min(`span ÷ 1,000`, 1) days.
-- Points: each curve review instant; inside each segment (between reviews, and from `t(rN)` to the range end), the instants `t + k × step` days for k = 1, 2, … strictly before the segment's end; the instant `now` when inside the range; the range end.
+- Clipping (decided 2026-10-27): only instants from `t(r0)` to the range end, both included, give points. A segment that crosses the range end ends there; a curve review after the range end gives no point and no drop.
+- Points: each curve review instant inside the range; inside each segment (between reviews, and from `t(rN)`), the instants `t + k × step` days for k = 1, 2, … strictly before the segment's end, the segment's end being the next review or the range end, whichever is earlier; the instant `now` when inside the range; the range end.
 - At each review after `r0` two points share the instant: first the end value of the previous segment, then 100 %, so the line drops vertically.
-- Each point holds: instant (binary64 epoch seconds), days since `t(r0)`, days since the review it follows, retrievability percent, the stability it follows, and past or future.
+- `now` (decided 2026-10-27): when `now` is inside the range, the core returns two points at `now` with the same values, first one flagged past, then one flagged future, so the solid and the dashed line meet without a gap. When `now` is also a review instant, the two `now` points come after that review's points. When `now` is the range end, these two points are the range end's and no third point is added. A sampled instant equal to `now` or to a review gives no extra point.
+- Points are in ascending instant order. Only a review drop and the `now` pair share an instant.
+- Example, C7.3's fifth row (reviews 20 and 5 days ago, `M` 37.5): First Week has span 7 and step 0.007 days; its points are `r0` at day 0, the samples of `S(r0)` up to day 7 and the range end at day 7, all past; the review at day 15 and `now` at day 20 are outside it. First Month (span 30) has the drop at day 15, the `now` pair at day 20 and future points up to day 30.
+- Each point holds: instant (binary64 epoch seconds), days since `t(r0)`, days since the review it follows, retrievability percent, the stability it follows, and a flag, past or future: past for instants before `now`, future for instants after it, and at `now` as above. Review points are past.
 - Per range the core also returns `y_min = max(0, 100 − 1.2 × (100 − the smallest retrievability of its points))`; the view draws the desired-retention line only when that retention × 100 is above `y_min`.
 
 ### C7.6 Tooltip
@@ -366,11 +370,11 @@ For a point the core writes (R1256, R1428): elapsed time, the long time span of 
 
 | Member | Content |
 |---|---|
-| `stats` | the raw values of C3 only, under the names of `conformance/stats-ops` H9, without the names `deck`, `original_deck`, `notetype`, `card_type` and `preset`; no `revlog` (the history is the `revlog` member below); `card_id` and `note_id` as JSON integers; an absent optional value as `null` (every member is always present) |
+| `stats` | the raw values of C3 only, under the names of `conformance/stats-ops` H9, in this order: `card_id`, `note_id`, `custom_data`, `added`, `first_review`, `latest_review`, `due_date`, `due_position`, `interval`, `ease`, `reviews`, `lapses`, `average_secs`, `total_secs`, `desired_retention`, `fsrs_retrievability`, `memory_state` (`{stability, difficulty}`), `fsrs_params`, then Meguri's `memory_state_source` (C3.4: `"stored"` or `"computed"`). No `deck`, `original_deck`, `notetype`, `card_type`, `preset` or `revlog` (the history is the `revlog` member below); `card_id` and `note_id` as JSON integers; an absent optional value as `null` (every member is always present; `memory_state_source` is `null` when there is no memory state) |
 | `card` | the card row: every column of `model/row-records#R4` in table order, integers as JSON integers, `data` as its stored text |
-| `revlog` | newest first, one object per row: `row` (every column of R5 in table order, as stored) and `info` (C6.1's raw values for that row) |
+| `revlog` | newest first, one object per row: `row` (every column of R5 in table order, as stored) and `info` (C6.1's raw values for that row, under C6.1's Oracle names in that table's order: `time`, `review_kind`, `button_chosen`, `interval`, `last_interval`, `ease`, `taken_secs`, `memory_state`, the last `{stability, difficulty}` or `null`) |
 | `deck` | the current deck as its schema-11 object (`model/schema11-json`) without `name`, `desc` and `usn` |
-| `homeDeck` | only for a card in a filtered deck: the home deck likewise |
+| `homeDeck` | only when C3.1 gives a home deck name (`odid` is not 0 and names another deck than `did`): the home deck likewise; otherwise the member is left out |
 | `preset` | the home preset as its schema-11 object without `name` |
 | `rollover` | the `rollover` config value as stored, `null` when absent |
 
@@ -393,7 +397,24 @@ For a point the core writes (R1256, R1428): elapsed time, the long time span of 
 
 ## C11. Errors and damaged records
 
-The snapshot fails with a typed error naming the missing record when: the card does not exist (`not_found`, the view shows "(No card to display.)"); its note, note type, the template its `ord` names (normal note types), its current deck or its home deck does not exist; its home deck is a filtered deck; its home preset does not exist; the home preset's cutoff date is refused (`sched/fsrs-items#I1.3`); or the crate fails while replaying the history. Anki's card stats fail in each of these cases. Check Database repairs the damaged references (U128).
+The snapshot fails as a whole, with no rows, history or curve, and one typed error. Decided 2026-10-27, the kinds (when several apply, the first in this list is returned):
+
+| Kind | When |
+|---|---|
+| `not_found` | the card does not exist (the view shows "(No card to display.)") |
+| `missing_note` | its note does not exist |
+| `missing_notetype` | its note's note type does not exist |
+| `missing_template` | a normal note type has no template at the card's `ord` |
+| `missing_deck` | its current deck (`did`) does not exist |
+| `missing_home_deck` | its home deck (`odid` when not 0) does not exist |
+| `filtered_home_deck` | its home deck is a filtered deck |
+| `missing_preset` | the home deck's preset does not exist |
+| `invalid_cutoff` | the home preset's cutoff date is refused (`sched/fsrs-items#I1.3`) |
+| `fsrs_failed` | the crate refuses the home preset's parameter list (a length other than 0, 17, 19 or 21, `sched/presets#V6`), or fails while computing the memory state (C3.4) or replaying the history (C6.3) |
+
+- The parameter list and the cutoff date are checked for every card, new cards and cards with a stored memory state included, even when there is no row to replay: Anki builds the model and reads the cutoff from the preset before it looks at the history, so its card stats fail for every card of such a preset.
+- Anki's card stats fail in each of these cases. Check Database repairs the damaged references (U128), the kinds `missing_note` to `missing_preset`; it does not change a preset's cutoff date or parameter list.
+- The view's texts for each kind are C12's.
 
 ## C12. Strings
 
@@ -406,6 +427,7 @@ Labels are the UI's (String Catalog, English values here); value texts are the c
 | kinds (core) | `Learn`, `Review`, `Relearn`, `Filtered`, `Manual`, `Rescheduled` |
 | curve | `Forgetting Curve`, `First Week`, `First Month`, `First Year`, `All Time`, `Desired Retention`, `Elapsed Time`, `Retrievability`, `Stability`; tooltip date label `Date` (spans of 365 days or more) or `Date Time` (shorter spans) |
 | actions and states | `Card Info`, `Previous Card Info`, `Copy Debug Info`, `Copied to clipboard`, `(No card to display.)` |
+| unavailable view (Meguri, C11), title `Card Info Unavailable` | `missing_note` `This card's note is missing.`; `missing_notetype` `This card's note type is missing.`; `missing_template` `This card's card type is missing from its note type.`; `missing_deck` `This card's deck is missing.`; `missing_home_deck` `This card's home deck is missing.`; `filtered_home_deck` `This card's home deck is a filtered deck.`; `missing_preset` `This card's preset is missing.`; each followed by `Check Database can repair it.` Then `invalid_cutoff` `The “Ignore cards reviewed before” date of this card's preset cannot be read. Change it in Deck Options.`; `fsrs_failed` `This card's memory state cannot be computed with its preset's FSRS parameters.` |
 | time span units (core) | `second`/`seconds`, `minute`/`minutes`, `hour`/`hours`, `day`/`days`, `month`/`months`, `year`/`years`; short `s`, `m`, `h`, `d`, `mo`, `y` |
 | value patterns (core) | `<date> @ <HH:MM>`, `<deck> (<home deck>)`, `D:<n>%`, `<n>%`, `<a> (<b> days)`, `<key>=<value>` |
 
@@ -460,7 +482,7 @@ None is in the tree: the driver has no `card_stats` op and the runner no adapter
 | `times` | rated and unrated rows with times, one of 8,855 ms: `average_secs`, `total_secs`; a card whose rows all have time 0 |
 | `custom-data` | `cd` values of C5.5 as stored text (each card's data with an `lrt`, C13.4), `{}` giving `custom_data` `{}` |
 | `cloze-type` | a cloze card with `ord` 2: `card_type` is the first template's name |
-| `damaged` | a card whose deck was removed with `db_exec`: run error on both sides |
+| `damaged` | a card whose deck was removed with `db_exec`: run error on both sides; and a new card with no review-log row in a deck whose preset holds an 18-value `fsrs_params_6` list: run error on both sides (`fsrs_failed`) |
 
 ### C14.2 Unit tests
 

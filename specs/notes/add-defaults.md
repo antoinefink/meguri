@@ -54,7 +54,7 @@ A read-only query on the query lane. It writes nothing.
 | Create Copy (R817, R1214) | the note's | the card's `odid` when not 0, otherwise its `did` (D5 applies when that deck is missing or filtered) |
 | a prefilled draft (`guiAddCards`, U146, R1784) | the draft's | the draft's |
 
-- The two open rows: the Add screen asks when it opens and when it is opened again while its draft is blank (D4). Each request carries the `review_card` of that moment. A draft that is not blank is kept as it is, with its note type and deck, and a `preset_deck` from the new entry is ignored (R803).
+- The two open rows: the Add screen asks when it opens and when it is opened again while its draft is blank (D4). Each request carries the `review_card` of that moment. A draft that is not blank keeps its fields, tags and note type, and the last added note (D4) stays (R803). Its deck stays too, except that an entry from a deck with a `preset_deck` that names an existing normal deck selects that deck (R48). D1 is not asked. Decided 2026-10-27: Anki also applies the preset deck to a draft that is not blank, and R48 asks for the deck the user picked; only the selection changes, so no input is lost.
 - The two replacing rows (Create Copy and a prefilled draft) never ask D1. When the draft is unchanged since the last add (D4), they replace it directly: note type, deck, fields and tags. Otherwise the user decides first. Create Copy asks R816's "Discard current input?": Discard replaces the draft, Keep Editing keeps it and drops the copy. A prefilled draft asks R1785's Replace draft / Keep draft prompt (U146). Decided 2026-10-27, for data safety; Anki replaces silently (D8).
 - The Add screen does not ask again after an add (D6), after a note type change (K4.2) or when another operation changes decks or note types (D5).
 
@@ -62,7 +62,7 @@ A read-only query on the query lane. It writes nothing.
 
 - A field value is **empty** when it is empty after every `<br>` is removed and Unicode White_Space is trimmed from both ends. `&nbsp;`, `<br/>`, `<div></div>` and an `<img>` are not empty.
 - A draft is **blank** when every field is empty. Tags are not looked at. D3 uses this rule.
-- A draft is **unchanged since the last add** when every field is empty, or is sticky and, after the same removal and trim, equals that field's value in the last added note. Tags are not looked at. Before the first add, after a note type change (K4.2 or D5) and after Create Copy or a prefilled draft replaces the draft (D3), there is no last added note, so the draft must be blank. The close prompt of R816 shows when the draft is not unchanged (U195).
+- A draft is **unchanged since the last add** when every field is empty, or is sticky and, after the same removal and trim on both sides, equals that field's value in the last added note. That value is the one the draft held when the add ran, the value D6 carries over, before save normalization, and not the stored note's value. So a sticky field whose text a save normalizes (NFC, control characters removed) is unchanged right after the add. Tags are not looked at. Before the first add, after a note type change (K4.2 or D5) and after Create Copy or a prefilled draft replaces the draft (D3), there is no last added note, so the draft must be blank. Decided 2026-10-27, for data safety: a replaced draft is new input, so Meguri forgets the last added note also when the replacement keeps the note type, which Anki does not (D8). The close prompt of R816 shows when the draft is not unchanged (U195).
 - Anki trims with its own white-space set, which also holds U+001C to U+001F. Decided 2026-10-27: Meguri trims Unicode White_Space only. A draft holding only those characters is not blank in Meguri. A save removes them anyway (`text/checksum-and-sort-field` C1).
 
 ## D5. A selection that stops existing
@@ -70,7 +70,8 @@ A read-only query on the query lane. It writes nothing.
 Another operation (a deck or note type deletion, a deck turned filtered, an incoming sync) can remove what the Add screen has selected. The Add screen checks its selection after each such change and before an add:
 
 - a selected note type that no longer exists is replaced by the first note type in name order (K4.1's fallback). The draft's content is mapped to it as for a note type change (R802), and the last added note is forgotten (D4). D2 is not consulted: the selected deck stays;
-- a selected deck that no longer exists, or that is now filtered, is replaced by the default deck (id 1).
+- a selected deck that no longer exists, or that is now filtered, is replaced by the default deck (id 1);
+- when no note type exists at all (D1's `InvalidArgument`), the draft and its selection stay as they are, Add is disabled and the screen says that the collection has no note type. When a note type exists again, the first rule applies. When the selected deck must be replaced and deck 1 does not exist either (a damaged collection), the selection stays and an add is refused with `NotFound` (D1) and writes nothing.
 
 A change that leaves the selection valid changes nothing: the draft, its note type and deck, and the last added note all stay. Neither replacement writes anything. Decided 2026-10-27, so that the user's selection is not changed under them more than the change forces; Anki differs in two ways (D8).
 
@@ -96,15 +97,15 @@ Requested observation kinds, modeled on `fields_check` (`conformance/note-ops` N
 | `review-card` | D1: a review card in a filtered deck (`odid` set), in a normal deck, and a deleted card; each with `curDeck` naming a filtered deck and a deleted deck |
 | `no-notetype` | D1: every note type removed by `db_exec`, then `InvalidArgument` |
 | `missing-default-deck` | D1: deck 1's row deleted by `db_exec`, `curDeck` naming a filtered deck, no review card, then `NotFound` |
-| `after-add` | D6: `add_note` to `Spanish::Mining` with `Vocab`, then `add_defaults` with each value of `addToCur` and `notetype_last_deck` for `Vocab` |
+| `after-add` | D6: `add_note` to `Spanish::Mining` with `Vocab`; then, with `curDeck` set to `Spanish::Mining`, `add_defaults` with `addToCur` `true`; then, with `addToCur` `false`, `add_defaults` and `notetype_last_deck` for `Vocab` |
 
-Meguri's tests cover what no oracle shows: `preset_deck` (D1), D3 to D5 in the Add screen model, sticky carry-over (D6), and `update_add_defaults` false (`notes/note-records` A4).
+Meguri's tests cover what no oracle shows: `preset_deck` (D1), D3 to D5 in the Add screen model (a `preset_deck` applied to a draft that is not blank; no note type left; deck 1 missing), sticky carry-over (D6), a sticky field whose value a save normalizes (`e` U+0301, a U+001F character), unchanged right after the add (D4), and `update_add_defaults` false (`notes/note-records` A4).
 
 ## D8. Differences from Anki
 
-The Add screen of Anki 26.09.3 differs from D3 and D5 in these ways. None is visible to a scenario, which calls D1 and D2 directly, so none has a `conformance/deviations.yaml` entry.
+The Add screen of Anki 26.09.3 differs from D3 to D5 in these ways. None is visible to a scenario, which calls D1 and D2 directly, so none has a `conformance/deviations.yaml` entry.
 
 - **Another screen's deck or note type change.** After any operation from another screen that changes decks or note types, Anki rebuilds the draft in place: the same note type and deck, the fields mapped as for a note type change, and the last added note forgotten, so the close prompt then shows for a sticky field that still holds its value. It requests the starting defaults but uses nothing from them. Meguri keeps the last added note unless the note type is replaced (D5).
 - **A replaced note type.** When Anki replaces a missing note type with the first by name, it treats that as a note type change: with `addToCur` `false` it also applies that note type's last deck (D2). Meguri keeps the selected deck (D5).
-- **Create Copy and prefilled drafts.** Anki replaces a draft that is not blank without asking. Meguri asks first (D3).
-- **Browse's sidebar Add.** Anki presets the deck and then selects the note type of Browse's current note, which with `addToCur` `false` can apply that note type's last deck over the preset. Meguri uses D1 with `preset_deck` (R48, R1174).
+- **Create Copy and prefilled drafts.** Anki replaces a draft that is not blank without asking. Meguri asks first (D3). When the replacement keeps the note type, Anki keeps the last added note; Meguri forgets it (D4).
+- **Browse's sidebar Add.** Anki presets the deck and then selects the note type of Browse's current note, which with `addToCur` `false` can apply that note type's last deck over the preset. It does both also for a draft that is not blank, whose fields are then mapped to that note type. Meguri uses D1 with `preset_deck` for a blank draft and changes only the deck of one that is not blank (D3, R48, R1174).

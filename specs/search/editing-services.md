@@ -201,6 +201,8 @@ With the cursor at the end of the text unless shown by `|`:
 
 Decided 2026-10-27: suggestions are computed by this service in the core, as U88 states; U215 shows them, adds recent searches (R1102) and handles the keys (R1105), and needs no reading of search text of its own.
 
+This replaces these parts of the plan's U215: `CursorContext.swift` and `CursorContextTests.swift` (the current term, its key and the note type scope are D6.2 and D6.4), the matching and ranking of `SuggestionEngine` (D6.4, D6.5), the `SearchVocabulary` snapshot and its prepared match keys (the core's name index, D6.7), and the budget of 8 ms ranking on the main thread (D6.7's core budget). U215 keeps the list view, recent searches, the keys, and one `suggest` call per keystroke off the main thread. Its plan test `note:Kaishi Mea` gives `as_typed`, then the field key `Meaning:` (D6.3, row W); the forms `Meaning:_*`, `Meaning:`, `Meaning:re:` and `Meaning:nc:` come only once `Meaning:` is typed (R1098, D6.6). The owner of U215's plan text updates those lines.
+
 ### D6.1 The call
 
 `suggest(text, cursor, limit, recent)` returns candidates in display order.
@@ -214,6 +216,7 @@ Decided 2026-10-27: suggestions are computed by this service in the core, as U88
 - The **current term** is the term of the text (`grammar.md` G3 forms) whose range holds the cursor or ends at it, its negating `-` left out. When no term does (the cursor at the start, or after a space, `(` or `)`), or the term is the bare plain term `-` ending at the cursor, the current term is empty at the cursor. A term with an unclosed quote ends at the cursor. When G3 cannot read the term at the cursor (a backslash before a space in it), there are no candidates.
 - Its **typed part** T is its text from its start to the cursor, without its opening `"` for a quoted term, with `\"` read as `"`. T is split at its first unescaped colon (G6): no colon gives a **word** W = T; otherwise a **key** K (ASCII letters lowered) and a **partial value** V, the rest of T (inside the quotes for a partly quoted term).
 - W and V are read as G7's kind U, without its errors (a backslash pair it does not know stays as written), then as `names-and-ids.md` N1's exact text: `\_` gives `_`, and a typed `*` or `_` is matched as that character, not as a wildcard.
+- K, with ASCII letters lowered, picks a reserved key's context of D6.3. Any other K is a field key: it is read like W and V (so `my\:field` gives `my:field`) before it is compared with field names.
 
 ### D6.3 Sources
 
@@ -224,8 +227,8 @@ The field is **empty** when the text is empty or only spaces. Otherwise the cont
 | empty field | every saved search (R1102; U215 puts recent searches first) |
 | W empty | every keyword; every saved search |
 | W | `as_typed`; keywords whose name begins with W, ASCII case ignored; field keys of the scoped note types (D6.4) matching W; saved searches matching W (R1094, R1098, R1101) |
-| `deck:` | the specials `current`, `filtered` and `*` that begin with V; decks matching V, each deck with subdecks followed by `Name::*`; filtered decks carry the marker (R1095) |
-| `tag:` | `none` when it begins with V; registered tags (`tags` rows) matching V (R1096). Accepting `animal` puts `tag:animal` at the cursor, whose candidates then hold `animal::mammal` |
+| `deck:` | the specials `current`, `filtered` and `*` that begin with V, ASCII case ignored; decks matching V, each deck with subdecks followed by `Name::*`; filtered decks carry the marker (R1095) |
+| `tag:` | `none` when it begins with V, ASCII case ignored; registered tags (`tags` rows) matching V (R1096). Accepting `animal` puts `tag:animal` at the cursor, whose candidates then hold `animal::mammal` |
 | `tag:re:`, `tag:nc:` | none |
 | `note:` | note type names matching V (R1097) |
 | `card:` | template numbers 1 to N, N the largest template count of a scoped note type, whose decimal text begins with V; template names of the scoped note types matching V (R1097) |
@@ -255,13 +258,13 @@ So `prop:r` gives `reps`, `rated`, `resched`, then the six operators for `r`.
 
 - **Decks and tags** match by `tags/complete` C2 and C3, with V as the input after C5's removal of one single leading and one single trailing `:`. A deck's components are the levels of its name with `::` between them (`names-and-ids.md` N3.1). C3's prefix matches are the **prefix** class, its inner matches the **inner** class: with the decks `Japanese::Lesson1` and `Lessons`, `deck:lesson` gives `Lessons` (prefix) before `Japanese::Lesson1` (inner).
 - **Other names** (note types, templates, fields, presets, saved searches, flag names): V matches when it occurs in the name, both compared character by character under simple case folding (`case-folding.md` C3), without other normalization. It is in the prefix class when it occurs at the start, otherwise in the inner class.
-- **Scoped note types.** The note types named by the non-negated `note:` and `mid:` terms of the current term's AND-run (a sequence is the OR of its runs of AND-joined items, `query-model.md` Q1), and of each AND-run that holds a group around the current term. `note:` resolves by `names-and-ids.md` N4.1 and `mid:` by id. Only items read before the text's first parse error count, and the current term never does. When there are none, every note type is in scope. `note:"Basic" card:` gives only Basic's templates.
+- **Scoped note types.** The note types named by the non-negated `note:` and `mid:` terms of the current term's AND-run (a sequence is the OR of its runs of AND-joined items, `query-model.md` Q1), and of each AND-run that holds a group around the current term. `note:` resolves by `names-and-ids.md` N4.1 and `mid:` by id. Only items read before the text's first parse error count, and the current term never does. When there are no such terms, every note type is in scope. When there are some and they name no note type (a typo, a deleted id), the scope is empty: `card:` and a field key then give only `as_typed`, and a word W gets no field keys. `note:"Basic" card:` gives only Basic's templates.
 
 ### D6.5 Order and limit
 
 1. `as_typed`, when the context has it.
-2. The fixed candidates of the context, in the order D6.3 lists them: keywords, specials, `none`, template numbers, field forms, flags by number (a flag that matches by number and by name is listed once), states, properties, operators, days, buttons, the value hint.
-3. The name candidates of the prefix class, then those of the inner class. In a context with several name sources, each class lists field keys before saved searches. Within a class, each source's names are in the order `ORDER BY name COLLATE unicase, name` (`storage/schema-18`): deck human names, tags, note type, template, field and preset names, saved search names. A deck's `Name::*` follows the deck.
+2. The fixed candidates of the context, in the order D6.3 lists them: keywords, specials, `none`, template numbers, field forms, flags in flag-number order, whether they match by number or by shown name (a flag that matches both ways is listed once; D6.4's classes do not reorder flags), states, properties, operators, days, buttons, the value hint.
+3. The name candidates of the prefix class, then those of the inner class. In a context with several name sources, each class lists field keys before saved searches. Within a class, each source's names are in the order `ORDER BY name COLLATE unicase, name` (`storage/schema-18`): stored deck names (levels separated by U+001F, so `a::b` comes before `a b` and `a-b`), tags, note type, template, field and preset names, saved search names. A deck's `Name::*` follows the deck.
 4. Recent use reorders only inside one group: within step 2, and within each class of step 3 (prefix, inner) on its own, a candidate whose `insert_text` is in `recent` comes first, newest first; the others keep their order. Decided 2026-10-27: R1104 names both orders, and the class wins, so a recent inner match never comes before a prefix match, and no candidate moves across steps.
 5. The list is cut after `limit` candidates.
 
@@ -273,7 +276,7 @@ So `prop:r` gives `reps`, `rated`, `resched`, then the six operators for `r`.
   | Candidate | `insert_text` |
   |---|---|
   | keyword k | `k` (`deck:`) |
-  | deck d; tag t; note type n | J3's deck, tag and note type items by name (`deck:Current` for a deck named `current`, J3.1) |
+  | deck d; tag t; note type n | J3's deck, tag and note type items by name (`deck:Current` for a deck named `current`, J3.1); for a deck or note type that J3.5 refuses, its exact item: `did:` with the deck's id and its descendants' ids, or `mid:` with the note type's id |
   | specials | `deck:current`, `deck:filtered`, `deck:*`, `tag:none` |
   | `Name::*` | Q(`deck:` + E(name) + `::*`), with E of J3 and Q of `canonical-form.md` F4 |
   | template number k; template name s | `card:` + k; Q(`card:` + E(s)) |
@@ -284,7 +287,7 @@ So `prop:r` gives `reps`, `rated`, `resched`, then the six operators for `r`.
   | preset p | Q(`preset:` + p) |
   | saved search with text s | s in an empty field; otherwise `(` + s + `)` |
 
-- **Names that cannot be written.** A template or preset name is offered only when its `insert_text` reads back (`grammar.md`) as a term of that kind holding exactly that name: so no preset name holding `"` (`names-and-ids.md` N3.6) or White_Space other than U+0020, and no template name that reads back as a number. Field names that `join-and-replace.md` J3.3 refuses are not offered.
+- **Names that cannot be written.** A template or preset name is offered only when its `insert_text` reads back (`grammar.md`) as a term of that kind holding exactly that name: so no preset name holding `"` (`names-and-ids.md` N3.6) or White_Space other than U+0020, and no template name that reads back as a number. Field names that `join-and-replace.md` J3.3 refuses are not offered. A deck that J3.5 refuses has no `Name::*` candidate (its subdecks are offered each with its own exact item), and a deck or note type whose exact item has a negative id is not offered.
 - **`completes`** is true when the inserted text is a whole term or a saved search: names, specials, template numbers, `K:_*` and `K:`, flags, states, days, buttons, presets, saved searches, and `as_typed`. It is false for keywords, field keys, `K:re:` and `K:nc:`, properties and operators, after which the user goes on typing. Decided 2026-10-27: accepting a candidate commits the search (R1109) only when `completes` is true. Committing `prop:` would show an error the user did not make.
 - **`cursor_after`**: the end of the inserted text; when `completes` is false and `insert_text` ends with a closing `"`, just before that `"`, so the value is typed inside the quotes.
 
@@ -297,13 +300,14 @@ Examples:
 | `deck:fre` | deck `Languages::French` | `deck:Languages::French` |
 | `deck:a_` | deck `a_b* (x)` | `"deck:a\_b\* (x)"` |
 | `Ext` | field key `Extra Info` | `"Extra Info:"`, cursor before the last `"` |
+| `note:Kaishi Mea` (candidates: `as_typed`, then field key `Meaning`) | field key `Meaning` | `note:Kaishi Meaning:`; its candidates are then `as_typed`, `Meaning:_*`, `Meaning:`, `Meaning:re:`, `Meaning:nc:` |
 | `flag:imp` | flag 3 | `flag:3` |
 | `deck:x lee` | saved search `Leeches` (`tag:leech`) | `deck:x (tag:leech)` |
 | (empty) | saved search `Leeches` | `tag:leech` |
 
 ### D6.7 The name index
 
-- `suggest` reads an in-memory index, never the collection: deck names with their ids, filtered state and whether they have subdecks; registered tags; note types with their template names by ordinal and field names; preset names; saved searches as `browser/config-keys` K7.1 reads `savedFilters`; flag shown names as `tags/flags-and-marked` F4 reads `flagLabels`.
+- `suggest` reads an in-memory index, never the collection: deck names with their ids, filtered state and whether they have subdecks; registered tags; note types with their ids, template names by ordinal and field names; preset names; saved searches as `browser/config-keys` K7.1 reads `savedFilters`; flag shown names as `tags/flags-and-marked` F4 reads `flagLabels`.
 - The engine builds it when the collection opens and rebuilds the affected part from the change stream after each change set that touches decks, tags, note types, presets or those two keys. A call reads the index as last built and never waits for a write or a reader. A candidate can therefore lag a very recent change; accepting it only puts search text in the field and changes no data.
 - R1104: a call returns within one frame on a 150k-card collection with thousands of tags; U88's micro-benchmark checks at most 50 candidates in under 4 ms with 10,000 tags.
 
@@ -314,5 +318,5 @@ No oracle scenario applies: Anki has none of these services. `core/crates/meguri
 - `spans` over every kind of D3.1, negated and grouped, with error texts of D3.3; FFI offsets in UTF-16 for text holding characters above U+FFFF; `invalid_offset` for a cursor inside a surrogate pair.
 - `edit`: each action and each removal rule of D4.3, on terms, groups, runs and negated operator words; `replace_with` of a negation item (any flag, untagged, a negated item) on a negated and on a plain target; every result parses, reads back (`grammar.md`) to the query it was written from, and equals its own canonical text, except the empty text. Like `join-and-replace.md` J8, these checks exclude inputs holding one of `canonical-form.md` F7's first three shapes, and for its fourth shape check the meaning only.
 - `classify_tail`: each form of D5.1 at, before and after the cursor; AE42 (core part): the D5.2 row, then `canonicalize` of the same text gives `unclosed_quote` with the range from the `"`.
-- `suggest`: each context of D6.3, the scope of D6.4 (an AND-run, an OR between runs, an enclosing group, a negated `note:`), the order of D6.5 with and without `recent`, the cut at `limit`, and the insertions of D6.6. For each deck, tag and note type candidate whose name J3 writes exactly (in NFC; for a deck or note type, no White_Space other than U+0020; for a deck, no level that is empty or starts or ends with White_Space or `:`), the field text after acceptance, run on the fixture collection, finds that object and none of its look-alikes (`a_b*` next to `axb`; R1103). For the other names (`join-and-replace.md` J10; for decks, `stats/browse-queries` Q2.2's list), the expected rows are those `names-and-ids.md` N2–N4 give for the inserted text, which can include look-alikes; the fixture holds at least one such name of each case.
+- `suggest`: each context of D6.3, the scope of D6.4 (an AND-run, an OR between runs, an enclosing group, a negated `note:`, and `note:Kaishx card:` with no note type `Kaishx`, which gives only `as_typed`), the order of D6.5 with and without `recent` (decks `a::b`, `a b` and `a-b` for `deck:a`), the cut at `limit`, the insertions of D6.6, an escaped field key (`my\:field:` gives the forms of field `my:field`), and `deck:Cur` offering `current`. For each deck and note type candidate, and each tag candidate whose name J3 writes exactly (in NFC), the field text after acceptance, run on the fixture collection, finds that object and none of its look-alikes (`a_b*` next to `axb`; `a` U+00A0 `b` next to `axb`, inserted as `did:`; R1103). For the other tag names (`join-and-replace.md` J10), the expected rows are those `names-and-ids.md` N2 gives for the inserted text; the fixture holds at least one such name.
 - The micro-benchmark of D6.7.

@@ -17,7 +17,7 @@ The editor's two cloze commands (U192): Cloze Deletion (⇧⌘C), which wraps th
 
 ## W2. Where the commands are offered (R857, R251)
 
-- The toolbar's cloze group (Cloze Deletion, `editor.toolbar.clozeNew`; Cloze Deletion (Same Number), `editor.toolbar.clozeSame`) and the two Format menu items are shown when the note type is a cloze note type with at least one shown cloze field. Otherwise the group is hidden and the menu items are disabled. Decided 2026-10-27: an image occlusion note type, whose only cloze field in its stock templates is the hidden Occlusion field, so shows no cloze group (Anki shows it disabled).
+- The toolbar's cloze group (Cloze Deletion, `editor.toolbar.clozeNew`; Cloze Deletion (Same Number), `editor.toolbar.clozeSame`) and the two Format menu items are shown when the note type is a cloze note type with at least one shown cloze field. Otherwise the group is hidden and the menu items are disabled. Decided 2026-10-27: a cloze note type with no shown cloze field shows no cloze group, where Anki shows it disabled for every cloze note type (W8). That covers an image occlusion note type, whose only cloze field in its stock templates is the hidden Occlusion field, and a cloze note type whose first template's front names no field with a cloze reference (for example a front of `{{Text}}`).
 - The commands are enabled only while the focused rich field (`editor/formatting` F1) is a cloze field. In HTML mode, in a field that is not a cloze field, in the tag editor or with no focus they are disabled: the controls are dimmed, the menu items disabled, and ⇧⌘C and ⌥⇧⌘C do nothing to any field.
 - Keys and context: `editor/formatting` F14 (`editor.richText`). Labels, with Anki's counterparts: `editor/formatting` F19.
 - The group follows the note type: it appears, hides or changes enabled state when the Add screen changes the note type.
@@ -94,7 +94,7 @@ Proposed `conformance/deviations.yaml` ids, to be entered with the goldens that 
 | Situation | Anki 26.09.3 | Meguri | Deviation |
 |---|---|---|---|
 | U+00A0 in the selection | every `&nbsp;` in the selected markup, in L, M and T, becomes an ordinary space before wrapping | kept as it was (W4 step 3; R860 keeps outer non-breaking spaces as they are) | `editor-cloze-nbsp-kept` |
-| Image occlusion note type | the cloze group is shown, always disabled | hidden (W2) | none (no golden) |
+| A cloze note type with no shown cloze field: image occlusion, or a cloze type whose first front template names no field with a cloze reference | the cloze group is shown, always disabled (its visibility follows only the note type's kind) | hidden (W2) | none (no golden) |
 | A digit run above 2^53 − 1 | the value is computed inexactly, and the new number can be written in exponent form such as `1e+21` | saturates at 9007199254740991 and is written in decimal digits (W3) | none (no golden) |
 | Which fields are scanned | the page's current field contents, display-encoded media names included | the session values, with raw media names (`text/media-references` M7) | none (only a media name containing `{{c` differs) |
 
@@ -131,4 +131,4 @@ Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance
 | `html-mode` | Text `a[b]c` in HTML mode | Cloze Deletion (the field is unchanged) |
 | `two-in-a-row` | Text `[a] b` | Cloze Deletion, then select `b`, Cloze Deletion |
 
-Meguri tests without goldens (plan U192): W2's shown, hidden and disabled states for a standard note type, a cloze note type, an image occlusion note type and a note type change in the Add screen; W6 with a template that makes Header a cloze field; W3's saturation; and the keys in the registry test (`editor/formatting` F14).
+Meguri tests without goldens (plan U192): W2's shown, hidden and disabled states for a standard note type, a cloze note type, a cloze note type whose front is `{{Text}}`, an image occlusion note type and a note type change in the Add screen; W6 with a template that makes Header a cloze field; W3's saturation; and the keys in the registry test (`editor/formatting` F14).
