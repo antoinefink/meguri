@@ -410,7 +410,8 @@ For every committed change set that is not the session's own answer, undo or red
 
 ## C15. Undo and redo in a session (R720, R722, R1811, R1812)
 
-- Every op the session submits carries its session id; every undo step made while the session is active carries it (`engine/undo#M1`). U107's hold-back reads it (KTD6); `endSession` closes the scope.
+- Every op the session submits carries its session id; every undo step made while the session is active carries it (`engine/undo#M1`). The CloudKit hold-back reads it (`sync/policy#P8`, KTD6); `endSession` closes the scope.
+- An incoming CloudKit change can end undo of a session answer. A `CloudIncoming` op (a CloudKit apply of another device's changes, `sync/cloudkit-records#K13.2`) or a `CloudRekey` op (a CloudKit re-key of a colliding local object, K14.2), published as `engine/change-stream#S1.2` says, cuts the history and redo below the newest step that touches one of its targets (`engine/undo#M9.8`, `sync/policy#P8.3`). When that step is a session answer, the answer and every older step stop being undoable, and `peek` reports the remaining history (`ClearedBySync` when the oldest step went). The queue follows C13 for the change set itself.
 - `peek`, `undo` and `redo` with scope `Session(id)` are answered by the session first: its uncommitted answers come before U25's history, newest first.
 - **Undo of the session's newest answer**, within 50 ms (R1811):
   - The queue goes back by P9 at once, and the card is the current card on its question side (R722). When the build identity changed since the answer, the session builds afresh at once and puts the card first (C4's current-card rule).

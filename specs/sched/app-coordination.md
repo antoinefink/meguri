@@ -23,7 +23,7 @@ On return to the foreground the monitor makes no call of its own: U151's foregro
 
 Before a call caused by a zone or clock change, the clock the app supplies to the core (the current offset and zone id of `sched/day-clock#D1`, through the host configuration, U37/U38) must already report the new zone and offset. A zone value cached before the change makes the check find nothing (Foundation can keep the system zone it read earlier until its cache is reset).
 
-The other checks run in the core and need nothing from the monitor: the open-time check, the check before every sync and after every sync (U107), and the check before every answer (U43) (`sched/day-clock#D8`).
+The other checks run in the core and need nothing from the monitor (`sched/day-clock#D8`): the open-time check; the check before every CloudKit incoming apply (the policy's `ApplyReady`, `sync/policy#P4`, `sync/cloudkit-records#K13.2`) and once after every Sync Now exchange, whatever its result (`sync/policy#P12.7`), both U113 and U114; the check before and after a manual Anki transfer (U107, frozen, KTD26); and the check before every answer (U43).
 
 ## A2. The timer
 
@@ -77,8 +77,8 @@ Europe/Paris, `crt` 1894676400 (2030-01-15 04:00 +01:00), `creationOffset` -60, 
 The FSRS policy coordinator reads `fsrsPolicyStatus()` (`sched/fsrs-policy#S1`) on the query lane:
 
 1. after the collection opens;
-2. after `CollectionReplaced` (one-way sync, restore, `.colpkg` import): the new collection can have `fsrs` off even when the old one had it on;
-3. after every sync that completes;
+2. after `CollectionReplaced` (Replace local collection from iCloud, `sync/cloudkit-recovery#V14`; a manual Anki import; restore; `.colpkg` import): the new collection can have `fsrs` off even when the old one had it on;
+3. after every sync: every Sync Now exchange, whatever its result (its `ExchangeEnded` result, `sync/policy#P12.7` and P12.6, early stops included; an exchange ended by a close or a replacement records nothing, and the new generation's open read follows item 2; a failed exchange may still have applied entries, and the read is idempotent), each committed change set with source `CloudIncoming` (`sync/cloudkit-records#K13.2`) whose `config_keys` include `fsrs` (`engine/change-stream#S1`), and a completed manual Anki transfer (KTD26);
 4. when a review session ends, if a read during the session found a status other than `ok` (F3);
 5. when a study entry point is refused with `FsrsPolicyPending` (F4).
 

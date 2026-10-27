@@ -121,7 +121,7 @@ A **flag-only** entry is an updated card with both images present and no changed
 
 | Change set | Result |
 |---|---|
-| `whole_collection` is true, its source is `SyncIncoming`, or the collection generation changed (including a collection-replacement event) | rebuild |
+| `whole_collection` is true, its source is `SyncIncoming`, `CloudIncoming` or `CloudRekey` (`engine/change-stream#S1.2`), or the collection generation changed (including a collection-replacement event) | rebuild |
 | the session identifies this commit as its own answer, or its own undo or redo of that answer, in the same generation | none: the session updates its queue itself (U43) |
 | any `cards` entry that is not proven flag-only | rebuild |
 | a `decks` or `deck_configs` entry | rebuild |
@@ -130,6 +130,7 @@ A **flag-only** entry is an updated card with both images present and no changed
 | anything else (tags, review log, media, other config keys, the `col` row) | none |
 
 - A new day also rebuilds: the day clock's rollover (`sched/day-clock#D8`) discards the queue.
+- The first row's sources are the remote-apply ops (`engine/op-model#O1.1`): `SyncIncoming`, a manual Anki transfer's merge (U107, frozen); `CloudIncoming`, a CloudKit apply of another device's changes (`sync/cloudkit-records#K13.2`); and `CloudRekey`, a CloudKit re-key that gives a colliding local card, note or deck a new id (`sync/cloudkit-records#K14.2`), so a queue that holds the old id must rebuild.
 - Anki rebuilds after every operation that changes cards (except setting a flag), decks or presets, after selecting a deck, saving preferences, saving deck options or toggling the load balancer, after any raw database write, and when the day changes; an answer updates its queue in place. The table gives the same results for the operations Meguri has.
 - `whole_collection` also covers external raw changes reported with source `Maintenance`; it wins even when no row lists are available. A full replacement is recognized by its generation/event, not an invented full-sync source.
 - Examples: setting a flag → none; saving a preset → rebuild; editing note fields → patch; adding a note and its cards → rebuild. A registry-only tag change → none. A tag rename that changes notes → patch, unless an earlier rebuild rule applies.
