@@ -9,6 +9,9 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    Maintenance {
+        cause: crate::maintenance::MaintenanceError,
+    },
     /// The file export must restart against fresh source authority.
     ExportSourceChanged,
     /// Correct an unsafe or unreadable media item before retrying.
@@ -97,6 +100,7 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
             CoreError::ExportSourceInvalid => f.write_str("export source item refused"),
             CoreError::ExportFormatLimit => f.write_str("export format limit"),
@@ -203,6 +207,9 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::Maintenance { cause } => EngineError::Internal {
+                message: format!("maintenance: {cause:?}"),
+            },
             CoreError::DeckOptionsInvalid { issues } => {
                 EngineError::DeckOptionsInvalid(issues.into_iter().map(Into::into).collect())
             }

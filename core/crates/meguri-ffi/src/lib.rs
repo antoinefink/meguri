@@ -25,6 +25,7 @@ pub mod fsrs_policy;
 pub mod image_occlusion;
 pub mod jobs;
 pub mod lifecycle;
+pub mod maintenance;
 pub mod manual_transfers;
 pub mod media;
 pub mod mutations;

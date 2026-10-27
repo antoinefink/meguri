@@ -292,6 +292,17 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     public static let validateSchedulingPreferences = BridgeCall("validate_scheduling_preferences")
 
+    public static let startCreateBackup = BridgeCall("start_create_backup")
+    public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
+    public static let startRestoreBackup = BridgeCall("start_restore_backup")
+    public static let restoreBackupResultOutcome = BridgeCall("RestoreBackupResult.outcome")
+    public static let startRunDueMaintenance = BridgeCall("start_run_due_maintenance")
+    public static let dueMaintenanceResultOutcome = BridgeCall("DueMaintenanceResult.outcome")
+    public static let listBackups = BridgeCall("list_backups")
+    public static let backupLimits = BridgeCall("backup_limits")
+    public static let setBackupLimits = BridgeCall("set_backup_limits")
+    public static let maintenanceStatus = BridgeCall("maintenance_status")
+
     public static let startCollectionExport = BridgeCall("start_collection_export")
     public static let collectionExportResultOutcome = BridgeCall("CollectionExportResult.outcome")
     public static let collectionExportArtifactMetadata = BridgeCall("CollectionExportArtifact.metadata")
@@ -332,6 +343,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let all: [BridgeCall] = [
         ManualMediaCalls.preview, ManualMediaCalls.run, ManualMediaCalls.cancelPrepared, ManualMediaCalls.forgetOwner, ManualMediaCalls.readPreview, ManualMediaCalls.readProgress, ManualMediaCalls.stop,
         normalizeManualEndpoint, manualTransferSessionNew, manualTransferSessionStartSetup, manualTransferSessionStartLogin, manualTransferSessionStartHistory, manualTransferSessionStartPrepare, manualTransferSessionStartConfirm, manualTransferSessionStartRecoveryPreview, manualTransferSessionStartCancelHistory, manualTransferSessionStartCancelPreview, manualTransferSessionStartSaveCopy, manualTransferResultOutcome, manualTransferResultOperationID, manualTransferPreviewRecord, manualTransferHistoryEntryRecord,
+        startCreateBackup, createBackupResultOutcome, startRestoreBackup, restoreBackupResultOutcome, startRunDueMaintenance, dueMaintenanceResultOutcome, listBackups, backupLimits, setBackupLimits, maintenanceStatus,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
         startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,

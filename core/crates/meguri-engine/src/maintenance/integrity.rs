@@ -86,8 +86,11 @@ impl Maintenance {
     }
     /// Serialized only against other integrity evaluations. No reader or SQL
     /// handle is retained on the caller after this method returns.
-    pub(super) fn check_idle(&self) -> Result<bool, EngineError> {
-        let _lane = self.health_lane.lock(None)?;
+    pub(super) fn check_idle(&self, caller: Option<&Arc<CancelToken>>) -> Result<bool, EngineError> {
+        // Session/lifecycle interruptions belong only to this health check.
+        // The exported owner also wakes lane waits and is polled by SQLite.
+        let cancel = CancelToken::new();
+        let _lane = self.health_lane.lock(caller.map(|token| token.as_ref()))?;
         let Some(engine) = self.engine.upgrade() else {
             return Ok(false);
         };
@@ -110,7 +113,6 @@ impl Maintenance {
         if (unreadable && unreadable_checked && !unclean) || !quick_check_due(inputs.clock.now_ms(), last, unclean) {
             return Ok(true);
         }
-        let cancel = CancelToken::new();
         {
             let lifecycle = engine.lock_state();
             if idle_in(&engine, &lifecycle).is_none() {
@@ -125,16 +127,18 @@ impl Maintenance {
         }
         let _active = Active(self);
         let reader = collection.reader(ReaderRole::Maintenance);
-        let result = reader
-            .as_ref()
-            .map(|reader| reader.quick_check_cancellable(&|| cancel.is_cancelled()));
+        let result = reader.as_ref().map(|reader| {
+            reader
+                .quick_check_cancellable(&|| cancel.is_cancelled() || caller.is_some_and(|token| token.is_cancelled()))
+        });
         self.lock().checking = None;
         let result = match result {
             Ok(result) => result,
             Err(error) => return Err(error.clone()),
         };
         let outcome = verdict(&result);
-        let outcome = if cancel.is_cancelled() && outcome != Some(Verdict::Corrupt) {
+        let stopped = cancel.is_cancelled() || caller.is_some_and(|token| token.is_cancelled());
+        let outcome = if stopped && outcome != Some(Verdict::Corrupt) {
             None
         } else {
             outcome
@@ -166,6 +170,9 @@ impl Maintenance {
                 engine.mark_corrupt_generation(collection.generation(), "quick check found a damaged collection");
                 return Ok(false);
             }
+        }
+        if let Some(caller) = caller {
+            caller.check()?;
         }
         Ok(outcome == Some(Verdict::Sound))
     }

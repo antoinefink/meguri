@@ -42,3 +42,7 @@ meguri-storage = { workspace = true, features = ["test-hooks"] }
 meguri-testkit.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+
+[[test]]
+name = "maintenance_ffi"
+required-features = ["test-hooks"]

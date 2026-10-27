@@ -62,8 +62,8 @@ pub(crate) fn review() -> Result<&'static meguri_engine::session::ReviewService,
 enum HostState {
     Empty,
     Opening,
-    Open(Arc<meguri_host::CoreHost>),
-    Closing(Arc<meguri_host::CoreHost>),
+    Open(Arc<meguri_host::CoreHost>, std::path::PathBuf),
+    Closing(Arc<meguri_host::CoreHost>, std::path::PathBuf),
 }
 
 pub(crate) struct OpenReservation {
@@ -93,26 +93,29 @@ impl OpenReservation {
         cancel: &Arc<meguri_engine::CancelToken>,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<meguri_package::entry::Activation, meguri_package::entry::EntryError> {
+        let backups = config.backups_directory.clone();
         let completed = self
             .runtime
             .process
             .import_initial(config, inspection, slot, cancel, progress)?;
         let host = Arc::new(completed.host);
         // Retain first, then propagate the typed afteractivation outcome.
-        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;
         completed.outcome
     }
     pub(crate) fn open_manual(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
+        let backups = config.backups_directory.clone();
         let host = Arc::new(self.runtime.process.open_for_manual_import(config)?);
-        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;
         Ok(())
     }
     pub(crate) fn open(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
+        let backups = config.backups_directory.clone();
         let host = Arc::new(self.runtime.process.open(config)?);
         // No fallible call between receiving the host and retaining it.
-        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host);
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;
         Ok(())
     }
@@ -126,7 +129,16 @@ impl Drop for OpenReservation {
 }
 pub(crate) fn host() -> Result<Arc<meguri_host::CoreHost>, CoreError> {
     match &*runtime()?.host.lock().unwrap_or_else(PoisonError::into_inner) {
-        HostState::Open(host) => Ok(host.clone()),
+        HostState::Open(host, _) => Ok(host.clone()),
+        _ => Err(CoreError::Unavailable {
+            reason: "collection host is not ready".into(),
+        }),
+    }
+}
+/// Snapshot the retained host's actual configured directory, including FailedCorrupt.
+pub(crate) fn backup_listing_inputs() -> Result<(Arc<meguri_host::CoreHost>, std::path::PathBuf), CoreError> {
+    match &*runtime()?.host.lock().unwrap_or_else(PoisonError::into_inner) {
+        HostState::Open(host, backups) => Ok((host.clone(), backups.clone())),
         _ => Err(CoreError::Unavailable {
             reason: "collection host is not ready".into(),
         }),
@@ -138,9 +150,9 @@ pub(crate) fn close() -> Result<(), CoreError> {
         let mut state = runtime.host.lock().unwrap_or_else(PoisonError::into_inner);
         match &*state {
             HostState::Empty => return Ok(()),
-            HostState::Open(host) => {
+            HostState::Open(host, backups) => {
                 let host = host.clone();
-                *state = HostState::Closing(host.clone());
+                *state = HostState::Closing(host.clone(), backups.clone());
                 host
             }
             _ => {
@@ -154,8 +166,8 @@ pub(crate) fn close() -> Result<(), CoreError> {
     impl Drop for Restore<'_> {
         fn drop(&mut self) {
             let mut state = self.0.host.lock().unwrap_or_else(PoisonError::into_inner);
-            if let HostState::Closing(host) = &*state {
-                *state = HostState::Open(host.clone());
+            if let HostState::Closing(host, backups) = &*state {
+                *state = HostState::Open(host.clone(), backups.clone());
             }
         }
     }
@@ -516,7 +528,7 @@ mod tests {
             })
         ));
         let host = match &*runtime.host.lock().unwrap() {
-            HostState::Open(host) => host.clone(),
+            HostState::Open(host, _) => host.clone(),
             _ => panic!("live host lost"),
         };
         assert!(host.collection().is_ok());

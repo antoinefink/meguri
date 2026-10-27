@@ -438,19 +438,33 @@ impl Maintenance {
     }
     /// Worker entry point. There is no engine timer; U133a/U154 own delivery.
     pub fn run_due(&self, trigger: MaintenanceTrigger) -> Result<Option<EpochMillis>, EngineError> {
+        self.run_due_inner(trigger, None)
+    }
+    fn run_due_inner(
+        &self,
+        trigger: MaintenanceTrigger,
+        caller: Option<&Arc<CancelToken>>,
+    ) -> Result<Option<EpochMillis>, EngineError> {
         worker_only()?;
+        if let Some(cancel) = caller {
+            cancel.check()?;
+        }
         let idle_trigger = integrity::idle_trigger(trigger);
-        let optimize_allowed = if idle_trigger { self.check_idle()? } else { false };
+        let optimize_allowed = if idle_trigger { self.check_idle(caller)? } else { false };
         // A no-verdict check still permits U127's backup (M5).
-        let result = self.run_due_backup(trigger)?;
+        let result = self.run_due_backup(trigger, caller)?;
         if optimize_allowed {
             self.schedule_optimize()?;
         }
         Ok(result)
     }
-    fn run_due_backup(&self, trigger: MaintenanceTrigger) -> Result<Option<EpochMillis>, EngineError> {
+    fn run_due_backup(
+        &self,
+        trigger: MaintenanceTrigger,
+        caller: Option<&Arc<CancelToken>>,
+    ) -> Result<Option<EpochMillis>, EngineError> {
         worker_only()?;
-        let cancel = CancelToken::new();
+        let cancel = caller.cloned().unwrap_or_else(CancelToken::new);
         if trigger == MaintenanceTrigger::Quit {
             cancel.limit_until(crate::monotonic::now() + Duration::from_secs(2));
         }
@@ -516,14 +530,34 @@ impl Maintenance {
             let suspended_cancel = cancel.stop_cause() == Some(StopCause::System) && s.suspended;
             if suspended_cancel {
                 s.last_attempt = prior_attempt;
-            } else if let Err(error) = outcome {
-                tracing::warn!(%error, "periodic backup failed");
+            }
+            drop(s);
+            if let Err(error) = outcome {
+                if caller.is_some() {
+                    // The provider owns publication evidence. In particular, a
+                    // successful durable backup outranks a late cancel request.
+                    return Err(error);
+                }
+                if !suspended_cancel {
+                    tracing::warn!(%error, "periodic backup failed");
+                }
             }
             Ok(!suspended_cancel)
         })();
         drop(active);
-        if result? {
-            self.evaluate(true)?;
+        match result {
+            Ok(true) => {
+                self.evaluate(true)?;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                // Keep deadline/floor reevaluation even when an exported caller
+                // receives the provider's primary typed failure.
+                if let Err(secondary) = self.evaluate(true) {
+                    tracing::warn!(%secondary, "backup deadline reevaluation failed");
+                }
+                return Err(error);
+            }
         }
         Ok(self.deadline())
     }
@@ -580,6 +614,15 @@ impl Engine {
     }
     pub fn run_due_maintenance(&self, trigger: MaintenanceTrigger) -> Result<Option<EpochMillis>, EngineError> {
         self.maintenance().run_due(trigger)
+    }
+    /// Exported due jobs attach their existing token to waiting and active work.
+    /// Internal callers retain their independent health and backup cancellation.
+    pub fn run_due_maintenance_cancellable(
+        &self,
+        trigger: MaintenanceTrigger,
+        cancel: &Arc<CancelToken>,
+    ) -> Result<Option<EpochMillis>, EngineError> {
+        self.maintenance().run_due_inner(trigger, Some(cancel))
     }
     /// T2 alone, without scheduler cadence, for deterministic local adapters.
     /// Forced and periodic publication still use the one real live writer.

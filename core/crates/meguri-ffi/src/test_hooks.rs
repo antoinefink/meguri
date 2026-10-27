@@ -147,3 +147,171 @@ pub fn collection_for_testing() -> Result<meguri_engine::Collection, CoreError> 
 pub fn engine_for_testing() -> Result<meguri_engine::Engine, CoreError> {
     runtime::engine().cloned()
 }
+
+// Swift cannot arm Rust function-pointer faults. This narrow KTD18 adapter
+// exposes the existing restore boundaries, never a replacement result or event.
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum MaintenanceTestBoundary {
+    BeforeRename,
+    AfterActivation,
+}
+#[derive(Default)]
+struct MaintenanceGateState {
+    reached: bool,
+    released: bool,
+}
+#[derive(uniffi::Object)]
+pub struct MaintenanceTestGate {
+    state: std::sync::Mutex<MaintenanceGateState>,
+    changed: std::sync::Condvar,
+    point: &'static str,
+    cleared: std::sync::atomic::AtomicBool,
+}
+static MAINTENANCE_GATE: std::sync::Mutex<Option<std::sync::Weak<MaintenanceTestGate>>> = std::sync::Mutex::new(None);
+fn maintenance_boundary() {
+    let gate = MAINTENANCE_GATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade);
+    if let Some(gate) = gate {
+        let mut state = gate.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.reached = true;
+        gate.changed.notify_all();
+        drop(
+            gate.changed
+                .wait_timeout_while(state, Duration::from_secs(20), |s| !s.released)
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+    }
+}
+#[uniffi::export]
+pub fn test_arm_maintenance_boundary(
+    boundary: MaintenanceTestBoundary,
+    fail_reevaluation: bool,
+) -> Result<Arc<MaintenanceTestGate>, CoreError> {
+    callback::enter("test_arm_maintenance_boundary");
+    use meguri_model::faultpoint::{self, Fault};
+    let mut active = MAINTENANCE_GATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if active.as_ref().and_then(std::sync::Weak::upgrade).is_some() {
+        return Err(CoreError::Busy {
+            running_op: "maintenance fault fixture".into(),
+        });
+    }
+    let point = match boundary {
+        MaintenanceTestBoundary::BeforeRename => "replace.after_check",
+        MaintenanceTestBoundary::AfterActivation => "replace.after_dir_sync",
+    };
+    let gate = Arc::new(MaintenanceTestGate {
+        state: std::sync::Mutex::new(MaintenanceGateState::default()),
+        changed: std::sync::Condvar::new(),
+        point,
+        cleared: std::sync::atomic::AtomicBool::new(false),
+    });
+    *active = Some(Arc::downgrade(&gate));
+    drop(active);
+    faultpoint::arm(point, Fault::Callback(maintenance_boundary));
+    if fail_reevaluation {
+        faultpoint::arm(
+            "restore.before_maintenance_reevaluation",
+            Fault::IoError(std::io::ErrorKind::Other),
+        );
+    }
+    Ok(gate)
+}
+#[uniffi::export]
+impl MaintenanceTestGate {
+    /// The test waits on the query lane; release/cancel remain available on control.
+    pub fn wait_until_reached(&self) -> Result<(), CoreError> {
+        callback::enter("MaintenanceTestGate.wait_until_reached");
+        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(20), |s| !s.reached)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.reached {
+            Ok(())
+        } else {
+            Err(CoreError::Internal {
+                message: "maintenance boundary was not reached".into(),
+            })
+        }
+    }
+    pub fn release(&self) -> Result<(), CoreError> {
+        callback::enter("MaintenanceTestGate.release");
+        self.unblock();
+        Ok(())
+    }
+    /// Call after drain so the injected reevaluation error is not cleared early.
+    pub fn reset(&self) -> Result<(), CoreError> {
+        callback::enter("MaintenanceTestGate.reset");
+        self.clear();
+        Ok(())
+    }
+}
+impl MaintenanceTestGate {
+    fn unblock(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .released = true;
+        self.changed.notify_all();
+    }
+    fn clear(&self) {
+        self.unblock();
+        if self.cleared.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        meguri_model::faultpoint::disarm(self.point);
+        meguri_model::faultpoint::disarm("restore.before_maintenance_reevaluation");
+        MAINTENANCE_GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+}
+impl Drop for MaintenanceTestGate {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+/// Read the real notes b-tree location and flush WAL before the caller closes
+/// publicly and damages the on-disk page. This supplies layout, never a verdict.
+#[uniffi::export]
+pub fn test_maintenance_notes_page_offset() -> Result<u64, CoreError> {
+    callback::enter("test_maintenance_notes_page_offset");
+    use meguri_storage::{ReaderRole, raw::SqlValue};
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let integer = |sql: &str| -> Result<i64, CoreError> {
+        let rows = reader.execute_raw(sql, &[])?;
+        match rows.rows.first().and_then(|row| row.first()) {
+            Some(SqlValue::Integer(value)) => Ok(*value),
+            _ => Err(CoreError::Internal {
+                message: "expected SQLite page metadata".into(),
+            }),
+        }
+    };
+    let root = integer("SELECT rootpage FROM sqlite_master WHERE name='notes'")?;
+    let size = integer("PRAGMA page_size")?;
+    drop(reader);
+    let offset = root
+        .checked_sub(1)
+        .filter(|page| *page > 0)
+        .and_then(|page| page.checked_mul(size))
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| CoreError::Internal {
+            message: "invalid notes page location".into(),
+        })?;
+    collection
+        .submit_maintenance(
+            meguri_engine::executor::catalog::ANALYZE,
+            Duration::from_secs(1),
+            |writer| Ok(writer.execute_raw("PRAGMA wal_checkpoint(TRUNCATE)", &[])?),
+        )
+        .wait()?;
+    Ok(offset)
+}
