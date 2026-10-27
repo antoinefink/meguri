@@ -679,3 +679,25 @@ The original R12 error stays retained. A fresh combined native run is required;
 no unit or integration acceptance follows from these focused checks.
 
 Independent R2 review is clear; required coverage and the production proof stay.
+
+## Combined Mac proof passes; mobile picker caption
+
+On clean `fa2bf6fc`, `ui-test/20261027T005741Z-91447` passes the complete
+Mac F11.2 case: one test, zero failures or skips, 125.096 seconds. All six
+xcresult files are collected. Frozen input, actual image/audio, accepted answer,
+normal close/reopen and exact package/client proof pass. Its independent client
+result is `package-interop-check/20261027T010030Z-94103`. This is one native
+case, not unit or milestone acceptance; all earlier failed runs stay retained.
+
+The first iPhone case `ui-test/20261027T010127Z-95134` fails before import.
+The installer publishes the frozen source as `review.colpkg` for Files, while
+the test searches for the original `input.colpkg` caption. The actual Files
+hierarchy contains the published file. Filtered `cleanroom/20261027T010510Z-98651`
+changes only the iOS test labels to the existing installer contract. Independent
+review is clear; privacy `20261027T010656Z-99657` and similarity
+`20261027T010658Z-99896` pass. Actual mobile verification remains pending.
+
+Production and the Mac test branch are unchanged. Reuse the passing Mac proof
+under its original exact build/revision; never rewrite its binding or repeat
+that workflow for this inactive-branch test-only edit. Both mobile cases remain
+required before the local workflow checkpoint closes.

@@ -1287,7 +1287,8 @@ import notify
         }
         try click(open, app, bundle)
         #else
-        let labels = [source.deletingPathExtension().lastPathComponent, source.lastPathComponent]
+        // ImportSource publishes every admitted package under this fixed Files name.
+        let labels = ["review", "review.colpkg"]
         let file = app.cells.containing(NSPredicate(format: "label IN %@", labels)).firstMatch
         let rememberedFile = file.waitForExistence(timeout: 2)
         capturePicker(app)
