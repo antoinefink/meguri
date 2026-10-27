@@ -1500,3 +1500,12 @@ screens:
       to: built
       by: tools/mg critic
       reason: critic run 20261022T215823Z-82548 graded its snapshots
+  shell.damagedCollection:
+    status: sketch
+    fix_rounds: 0
+  home.deckMenu:
+    status: sketch
+    fix_rounds: 0
+  home.deckName:
+    status: sketch
+    fix_rounds: 0

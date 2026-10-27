@@ -174,3 +174,65 @@ This bounded change does not resume the larger application goal.
 - Preserve named accessible actions, contrast and platform hit-target limits (R1977, R1979–R1982).
 - Apply R1987's maximum three self-directed render/fix rounds before critic and gates.
 - Native preview evidence does not replace the later full suites, independent review, provenance checks or human acceptance.
+
+## N11. Full-app decisions (2026-10-27)
+
+These decisions carry N1–N10 from the macOS preview to every platform and to the units that build the screens. Where plan text says otherwise, this section wins; each subsection names the plan text it replaces. The screen contracts are the purposes in `screen-inventory.yaml`.
+
+### N11.1 Review corners (U175, U177, U179, U182)
+
+Decided 2026-10-27:
+
+- Every platform uses N3's quiet corners. There is no top bar with its own background, no title and no remaining counts.
+- Upper left, the exit. Sidebar layout (Mac, iPad and unfolded iPhone at regular width): a labelled "Back to Decks" button with the `chevron.backward` symbol. Compact layout: a close button with the `xmark` symbol, accessibility label and Voice Control name "Back to Decks". Esc does the same when nothing above the card owns it (R243).
+- Upper right, leading to trailing: the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; its states come from the iCloud status contract under review). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
+- The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls.
+- The review area's background is the card's computed `body` background (R335), so the user's card styling reaches the window edges. Corner controls and the answer region use system control styles, with a foreground chosen for contrast against that background. Need: preserving user-authored card styling. No other chrome tint.
+- The sidebar stays hidden for the whole session; Show Sidebar is disabled during review.
+- Replaces: R333's ✕ and trailing undo/⋯ on Mac, R336's "✕ is the only exit", R337's and R21's re-showing of the sidebar during a session, U177's layout bullet.
+
+### N11.2 Show Answer and answer buttons (U178, U180, U181)
+
+Decided 2026-10-27:
+
+- A bottom action region of one answer row's height is reserved on both sides (N3), above the home indicator and outside the fold region (R9).
+- Question side: one "Show Answer" button in that region on every platform, in the prominent style. Taps and clicks on card content and the tap zones still reveal (R346, U180).
+- Answer side: R351–R356's four buttons. No key hints on any button, on any platform (N4). Shortcuts show beside the menu commands (Mac, iPad menu bar), in the iPad ⌘ overlay and in Help › Keyboard Shortcuts. Good has the prominent style. Space and Return answer Good only through the review key map and its setting (R134), never through a default-button key binding, so there is one key path (N4).
+- Replaces: R346's "The question side shows no buttons", R184's limit of the Show Answer button to assistive technologies, R357, U178's key-hint bullet.
+
+### N11.3 Menu commands (U159, U181)
+
+Decided 2026-10-27:
+
+- Now, before U159: N4's commands are in the menu bar: Import… and Export… (File), Study (selected deck), Show Answer, Again, Hard, Good, Easy and Back to Decks, each disabled outside its context and routed through the action and guard of its visible control. One Study menu holds these study commands until U159 lands.
+- Undo and Redo, from now on: they replace the system Edit menu's undo group with R173's titles and route through the focused undo target. They never appear in the Study menu.
+- When U159 mounts R280–R285: Study moves to the Deck menu (R283); Show Answer, the ratings and Back to Decks to the Card menu (R284), "Back to Decks" replacing "Close Review". Other R284 and R339 items arrive with their units.
+- A menu item shows its unmodified key, but the card page keeps the first claim on that key (R426) and N4's input ownership holds. Spike S3 (U181) picks the mechanism; a key equivalent that takes the key before the page is not allowed.
+- Replaces: U181's deferral of these commands to U159, and the Study menu's Undo Answer and Redo Answer items of the current app.
+
+### N11.4 Settings (U160, U161, U163, U163a, U164)
+
+Decided 2026-10-27:
+
+- Mac: N5's separate Settings scene is the whole app's Settings, opened by Meguri › Settings… (⌘,). Its sidebar sections, in order: Account & Sync, Review, Editing, Browsing, Appearance, Heatmap, Collection, Anki Server, Backups, Maintenance, Integrations, About. A section whose unit has not landed is absent (U152's registry). A search field above the sections filters by name and keywords (R111). The Mac main window has no Settings sidebar section.
+- Collection keeps N5's file import and export and the Anki Transfers actions (R118). The preview's Connection section becomes Anki Server, with N6 and N7 unchanged; the new name keeps it apart from Account & Sync.
+- Each section is a grouped form. Changes apply at once, with no Save button (R115). The selected section is restored as a device-local preference (N5).
+- iPad and iPhone: Settings stays a sidebar section (regular width) or a tab (compact) of the main window (R109), listing the same sections as rows in the same order; Integrations is Mac only.
+- About is a section on every platform. On Mac, Meguri › About Meguri shows the standard About panel.
+- Backups: a Settings section on every platform; on Mac also File › Back Up Now and File › Restore from Backup… (R280). The restore sheet opens on the window its command came from; from the damaged-collection screen, on the main window (`settings.backups`).
+- Replaces: R6's single window for Settings, R109's "Mac included; ⌘, selects it", R110, R1661's Settings placement on Mac (the Tools menu stays), U160's "Sidebar layout: a section with page list" for Mac, U152's test "the sidebar shows Home, Settings and the Decks group" for Mac, R151's and U163a's "Show Backups" label (now "Show in Finder" or "Show in Files"), and U163a's "this unit adds no menu" (it adds the two File items). N5's "exactly Connection and Collection" remains the preview's scope only.
+
+### N11.5 Deck workspace and import (U152, U155, U162, U228a, U228)
+
+Decided 2026-10-27:
+
+- Decks root (the detail area with no deck selected; the compact Decks tab): one native List. A deck row is its last name component in ordinary weight, with system disclosure for children (R36), and trailing secondary text with the non-zero counts in New, Learning, To Review order, for example "20 new · 3 learning · 12 to review"; all zero shows no count text. No column headers and no count colours in deck lists.
+- Mac and iPad sidebar deck rows: the name and a native badge with the To Review count, hidden at zero. The accessibility value gives all three counts with their names (R182); hover help gives the full path (N2).
+- Deck page: the three counts labelled New, Learning and To Review, with the numbers in the system blue, red and green (R32 kept here only: labels always shown, contrast checked) and the buried "+N" (R71).
+- Activity (studied-today line, heatmap, streak stats; R28, R43, R44): a section of the same List after the deck rows, on every layout; never a side-by-side panel. On the deck page it follows the counts and Study.
+- Import is in File › Import… (Mac, iPad menu bar), Settings › Collection, the empty-collection state and onboarding, file drops and Open in Meguri (R51, R52). Home, the deck page and the empty-deck state have no Import File action; the empty deck offers Add Note once U195 attaches it.
+- Replaces: R29, R30's columns and headers, R32 for deck lists and the sidebar, R33, R182's count names "New/Learn/Due" (now New, Learning and To Review), R1299's Mac and iPad placement beside the deck tree, R50's Import File, R80's Import File, U152's layout bullet and its bottom Import File action.
+
+### N11.6 Session end (U157, U186)
+
+Decided 2026-10-27: Back to Decks after at least one answer restores the deck workspace and shows the session summary over it as a sheet (`home.sessionSummary`); with no answer it shows none (R91). The summary has no chart.
