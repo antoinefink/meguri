@@ -37,3 +37,59 @@ review_count
 relearn_count
 early_review_count
 mature_count
+# Heatmap grid data and the widget snapshot (specs/stats/heatmap-addon.md,
+# specs/stats/widget-snapshot.md, U96, U100): card and collection columns and
+# the config key they read.
+odue
+crt
+firstDayOfWeek
+# Card Info (specs/stats/card-info.md, U92): the card-stats protobuf message
+# and its fields the card_stats observation reads, and the card, review-log and
+# card data keys the snapshot uses.
+card_stats
+CardStatsResponse
+card_id
+note_id
+first_review
+latest_review
+due_date
+due_position
+average_secs
+total_secs
+card_type
+notetype
+memory_state
+fsrs_retrievability
+custom_data
+original_deck
+desired_retention
+fsrs_params
+review_kind
+button_chosen
+taken_secs
+last_interval
+nid
+ord
+ivl
+reps
+pos
+lrt
+cd
+dr
+# Stats graphs (specs/stats/graphs-common.md, browse-queries.md, U98):
+# graph preference and timing config keys, card and review-log columns,
+# protobuf fields of Anki's graph data the stats observation reads, and
+# the search keywords of the generated browse queries.
+cardCountsSeparateInactive
+futureDueShowBacklog
+fsrs
+curDeck
+localOffset
+rollover_hour
+card_counts
+including_inactive
+excluding_inactive
+newCards
+decay
+prop
+rated
