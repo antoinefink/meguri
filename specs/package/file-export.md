@@ -16,6 +16,7 @@ Produce a latest-format whole-collection .colpkg including media by default (E7)
 Show that media is included before creation; no separate option is needed in this delivery.
 No deck/selection scope, legacy format or scheduling switch is implied.
 R1625’s complete option set remains part of U124/U162; this extension does not accept those units.
+That option set and `.apkg` deck and selection export are `package/apkg-export` (A14, A1–A13).
 Local file export needs no Apple account, server, network, sync permission or cooldown.
 FSRS admission and unsupported presets cannot block a faithful collection snapshot.
 Require an open Ready collection; explain NoCollection, failed and exclusive-busy states.
