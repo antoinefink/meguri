@@ -11,7 +11,7 @@
 
 - `cleanroom-image` builds the pinned Codex Linux runtime. `cleanroom --check` proves its boundaries without credentials; implementation/fixer runs require clean master plus a recorded session and export a patch, never write the real checkout. See `cleanroom/README.md`. Keep the command sandbox mandatory and forbidden sources/history/caches absent from its mounts.
 - Completed cleanroom source copies can consume hundreds of MB each. Reclaim only finished passing copies with complete exports and a reachable base; retain patches, seed patches, manifests, results, logs and reports. Never discard unfinished or unexported prepared work.
-- Completed app-hosted runs may retain compiler caches under `retained/DerivedData-tests`. After the run exits, clear only module, SDK, index and intermediate caches when space is low; keep `Build/Products`, fixtures, logs and results.
+- Apple compiler caches also remain in `build/xcode-check/*DerivedData*`, `build/swift-test/*/*/out` and completed runs' `retained/DerivedData-tests`. With no compiler active, clear only module, SDK, index and intermediate caches; keep `Build/Products`, fixtures, logs and results.
 - Dependency bumps can leave many old hashed test binaries in the main Docker Rust cache. When that exact Meguri volume is idle, retain the newest binary per name and all libraries; remove only older executable variants. Keep receipts and app products. Incremental cleanup alone misses these files.
 - For disk cleanup, check old `core/target/*/release/deps/libmeguri_ffi-*.a` files. With no active build, preserve current libraries, the last few builds, app products and reports; remove only older cache files.
 
