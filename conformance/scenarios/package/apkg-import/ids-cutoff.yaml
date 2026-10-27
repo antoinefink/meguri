@@ -1,0 +1,24 @@
+# Card ids past the cutoff (specs/package/apkg-import.md I3.1; package-ops.md
+# E4, E6). The fixture is storage/schema-11.anki2 in a legacy 2 package with
+# its eleven card ids set to 2030-01-18T10:00:00Z in ms plus 0 to 10, three
+# days after this scenario's clock (oracle/fixtures/package/apkg.py). The
+# import repairs them before anything else: in ascending order they take the
+# ids from now upward, and their review-log rows follow.
+id: package/apkg-import/ids-cutoff
+description: Card ids more than a day ahead are repaired to ids from now upward.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/card-ids-ahead.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, nid, ord FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT id, cid FROM revlog ORDER BY id"}

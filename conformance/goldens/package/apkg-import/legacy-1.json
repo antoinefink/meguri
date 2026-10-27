@@ -1,0 +1,589 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 12,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["alpha", "ALPHA"],
+              "note": 1788249600044
+            },
+            {
+              "fields": ["beta", "BETA"],
+              "note": 1788249600047
+            },
+            {
+              "fields": ["gamma", "GAMMA"],
+              "note": 1788249600050
+            },
+            {
+              "fields": ["delta", "DELTA"],
+              "note": 1788249600053
+            },
+            {
+              "fields": ["epsilon", "EPSILON"],
+              "note": 1788249600056
+            },
+            {
+              "fields": ["zeta", "ZETA  dot.png "],
+              "note": 1788249600059
+            },
+            {
+              "fields": ["eta", "ETA"],
+              "note": 1788249600062
+            },
+            {
+              "fields": ["theta", "THETA"],
+              "note": 1788249600065
+            },
+            {
+              "fields": ["iota", "IOTA"],
+              "note": 1788249600068
+            },
+            {
+              "fields": ["kappa", "KAPPA"],
+              "note": 1788249600071
+            },
+            {
+              "fields": ["lambda", "LAMBDA"],
+              "note": 1788249600074
+            },
+            {
+              "fields": ["mu", "MU"],
+              "note": 1788249600077
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1788249600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 7,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600044,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 8,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600047,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600002": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 9,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1001,
+              "mod": 1788682260,
+              "nid": 1788249600050,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600003": {
+              "data": "{}",
+              "did": 1894701660002,
+              "due": 10,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600053,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600004": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 11,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1001,
+              "mod": 1788682260,
+              "nid": 1788249600056,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600005": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 6,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600005,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600059,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600006": {
+              "data": "{}",
+              "did": 1894701660000,
+              "due": 12,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600006,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600062,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600007": {
+              "data": "{}",
+              "did": 1894701660000,
+              "due": 13,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600007,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 3003,
+              "mod": 1788682260,
+              "nid": 1788249600065,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600008": {
+              "data": "{}",
+              "did": 1894701660000,
+              "due": 14,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600008,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600068,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600009": {
+              "data": "{}",
+              "did": 1894701660001,
+              "due": -100000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249600009,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249600,
+              "nid": 1788249600071,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600010": {
+              "data": "{}",
+              "did": 1894701660001,
+              "due": 15,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600010,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600074,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249600011": {
+              "data": "{}",
+              "did": 1894701660001,
+              "due": 16,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788249600011,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1002,
+              "mod": 1788682260,
+              "nid": 1788249600077,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1894701660000": {
+              "common": {
+                "sha256": "72ef0c5dcb4fc8aff8c3366d71c97c1f0ba476d95b35da7ac6566a70b7a71bef"
+              },
+              "id": 1894701660000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701660,
+              "name": "Cram",
+              "usn": -1
+            },
+            "1894701660001": {
+              "common": {
+                "sha256": "72ef0c5dcb4fc8aff8c3366d71c97c1f0ba476d95b35da7ac6566a70b7a71bef"
+              },
+              "id": 1894701660001,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701660,
+              "name": "Peek",
+              "usn": -1
+            },
+            "1894701660002": {
+              "common": {
+                "sha256": "ed4aea35d7b3ec9edaea744ab7a61eb5ad15f134c6a0f58ef2e7741f69733e4f"
+              },
+              "id": 1894701660002,
+              "kind": {
+                "sha256": "0d34c2f5b6f5516852c947411c4844cfaf097157298f78e2597fb616871ea9e9"
+              },
+              "mtime_secs": 1894701660,
+              "name": "Lang\u001fSub",
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1788249600044": {
+              "csum": 3195417371,
+              "data": "",
+              "flags": 0,
+              "flds": "alpha\u001fALPHA",
+              "guid": "#random",
+              "id": 1788249600044,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "alpha",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600047": {
+              "csum": 2727731389,
+              "data": "",
+              "flags": 0,
+              "flds": "beta\u001fBETA",
+              "guid": "#random",
+              "id": 1788249600047,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "beta",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600050": {
+              "csum": 4285592771,
+              "data": "",
+              "flags": 0,
+              "flds": "gamma\u001fGAMMA",
+              "guid": "#random",
+              "id": 1788249600050,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "gamma",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600053": {
+              "csum": 1936706228,
+              "data": "",
+              "flags": 0,
+              "flds": "delta\u001fDELTA",
+              "guid": "#random",
+              "id": 1788249600053,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "delta",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600056": {
+              "csum": 226047486,
+              "data": "",
+              "flags": 0,
+              "flds": "epsilon\u001fEPSILON",
+              "guid": "#random",
+              "id": 1788249600056,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "epsilon",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600059": {
+              "csum": 3173797603,
+              "data": "",
+              "flags": 0,
+              "flds": "zeta\u001fZETA <img src=\"dot.png\">",
+              "guid": "#random",
+              "id": 1788249600059,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "zeta",
+              "tags": " media ",
+              "usn": -1
+            },
+            "1788249600062": {
+              "csum": 1312522900,
+              "data": "",
+              "flags": 0,
+              "flds": "eta\u001fETA",
+              "guid": "#random",
+              "id": 1788249600062,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "eta",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600065": {
+              "csum": 4064552633,
+              "data": "",
+              "flags": 0,
+              "flds": "theta\u001fTHETA",
+              "guid": "#random",
+              "id": 1788249600065,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "theta",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600068": {
+              "csum": 1712079941,
+              "data": "",
+              "flags": 0,
+              "flds": "iota\u001fIOTA",
+              "guid": "#random",
+              "id": 1788249600068,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "iota",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600071": {
+              "csum": 2105014601,
+              "data": "",
+              "flags": 0,
+              "flds": "kappa\u001fKAPPA",
+              "guid": "#random",
+              "id": 1788249600071,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "kappa",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600074": {
+              "csum": 1211088374,
+              "data": "",
+              "flags": 0,
+              "flds": "lambda\u001fLAMBDA",
+              "guid": "#random",
+              "id": 1788249600074,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "lambda",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249600077": {
+              "csum": 306700324,
+              "data": "",
+              "flags": 0,
+              "flds": "mu\u001fMU",
+              "guid": "#random",
+              "id": 1788249600077,
+              "mid": 1788249600021,
+              "mod": 1788249600,
+              "sfld": "mu",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "revlog": {},
+          "tags": {
+            "media": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "media",
+              "usn": -1
+            }
+          }
+        },
+        "media_dir": {
+          "dot.png": {
+            "sha1": "55ea1216904b3cc3c4249799838f4eda415f2bca",
+            "size": 12
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Front"],
+            [1, "Back"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f56dfee581132fb4520f3c81c0e71d532e710ff1542696ad5e809b2dfb75e465",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/legacy-1",
+  "scenario_sha256": "ef494978e89879ed50a93f767f2d8ecb3a2e2f08a543a304c6835d7718faa175",
+  "tz": "UTC"
+}

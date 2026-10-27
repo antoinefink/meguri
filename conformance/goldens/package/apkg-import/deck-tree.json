@@ -1,0 +1,183 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 6,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["Water boils at {{c1::one hundred}} degrees.", "at sea level"],
+              "note": 1788249600344
+            },
+            {
+              "fields": ["river", "rio"],
+              "note": 1788249600347
+            },
+            {
+              "fields": ["bridge", "puente"],
+              "note": 1788249600354
+            },
+            {
+              "fields": ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "weather"],
+              "note": 1788249600358
+            },
+            {
+              "fields": ["to walk", "andar"],
+              "note": 1788249600366
+            },
+            {
+              "fields": ["to read", "leer"],
+              "note": 1788249600375
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "B"
+              }
+            ],
+            "name": "A"
+          },
+          {
+            "children": [],
+            "name": "Cram"
+          },
+          {
+            "children": [],
+            "name": "F"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "x"
+              }
+            ],
+            "name": "F 1894701660"
+          }
+        ],
+        "decks": {
+          "A": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660001,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "A::B": {
+            "browser_collapsed": false,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660002,
+            "mtime_secs": 1894701660,
+            "study_collapsed": false,
+            "usn": -1
+          },
+          "Cram": {
+            "browser_collapsed": false,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660000,
+            "mtime_secs": 1894701660,
+            "study_collapsed": false,
+            "usn": -1
+          },
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "F": {
+            "browser_collapsed": true,
+            "config_id": null,
+            "filtered": true,
+            "id": 900,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "F 1894701660": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660003,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "F 1894701660::x": {
+            "browser_collapsed": false,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701660004,
+            "mtime_secs": 1894701660,
+            "study_collapsed": false,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Water boils at {{c1::one hundred}} degrees.", "Cram"],
+            ["river", "A\u001fB"],
+            ["river", "A\u001fB"],
+            ["bridge", "A\u001fB"],
+            ["bridge", "A\u001fB"],
+            ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "A\u001fB"],
+            ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "A\u001fB"],
+            ["to walk", "F 1894701660\u001fx"],
+            ["to walk", "F 1894701660\u001fx"],
+            ["to read", "F 1894701660\u001fx"],
+            ["to read", "F 1894701660\u001fx"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f56dfee581132fb4520f3c81c0e71d532e710ff1542696ad5e809b2dfb75e465",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/deck-tree",
+  "scenario_sha256": "396432555dcc130306921c60c20d931a66df649fb0742fa63c0e5b5049013424",
+  "tz": "UTC"
+}

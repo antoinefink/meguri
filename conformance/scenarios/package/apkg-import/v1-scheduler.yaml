@@ -1,0 +1,23 @@
+# A v1-scheduler package (specs/package/apkg-import.md I3.2; package-ops.md
+# E4, E6). The fixture is Anki 2.1.26's own export with scheduling of a
+# v1-scheduler collection (oracle/fixtures/package/oldclient.py, legacy 1
+# layout): review cards, intraday and interday learning cards (preset Steps:
+# new delays 1m 1d, lapse delays 10m 1d), relearning cards in both queues,
+# the filtered deck Cram (rescheduling, delays 5m 30m 60m) holding a due
+# review, a review not due and a card learning with Cram's three delays, and
+# Peek (no rescheduling) holding a new card, a review not due and a learning
+# card; its review log has learning and relearning answers with ease 2 and 3.
+# The import converts the package collection to the v2 scheduler first: the
+# imported cards and review log show the conversion.
+id: package/apkg-import/v1-scheduler
+description: A v1-scheduler package is converted before its cards and review log are imported.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/v1-scheduler.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - timing
+      - db_dump: {tables: [notes, cards, revlog, decks, deck_config]}
