@@ -1126,6 +1126,17 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
     Ok(())
 }
 
+/// Continues the just-recorded R6 Restore intent; ordinary replacement never calls this.
+pub(crate) fn retire_restore_wal(live: &Path) -> Result<(), StorageError> {
+    retained_wal::retire(live)
+}
+
+pub(crate) fn finish_restore_wal(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    let state = sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing WAL state"))?;
+    bound(&state, binding)?;
+    retained_wal::reconcile_wal(live, state, binding)
+}
+
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
@@ -1516,15 +1527,4 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&state.path).unwrap(), before);
         assert_eq!(state.last_backup().unwrap(), Some(backup()));
     }
-}
-
-/// Continues the just-recorded R6 Restore intent; ordinary replacement never calls this.
-pub(crate) fn retire_restore_wal(live: &Path) -> Result<(), StorageError> {
-    retained_wal::retire(live)
-}
-
-pub(crate) fn finish_restore_wal(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
-    let state = sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing WAL state"))?;
-    bound(&state, binding)?;
-    retained_wal::reconcile_wal(live, state, binding)
 }
