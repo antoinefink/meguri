@@ -23,3 +23,61 @@ SQLITE_FULL
 # Environment
 SQLITE_TMPDIR
 TMPDIR
+# Check Database (check-database.md, check-database-notes.md): the K5 problem
+# kinds of the report schema, the scenario and catalog op names, the columns,
+# config keys, field-config fields and device-state keys the repairs name.
+card_properties
+new_positions_too_high
+card_last_review_time
+cards_without_note
+decks_missing
+field_counts
+duplicate_card_ords
+cards_without_template
+revlog_properties
+notes_invalid_utf8
+future_ids
+notetypes_recovered
+recovered_notetypes
+missing_indexes
+device_records_repaired
+check_db
+check_database
+db_exec
+db-check
+nextPos
+curModel
+lrt
+odid
+odue
+ivl
+lastIvl
+nid
+did
+mid
+ord
+usn
+scm
+flds
+sfld
+csum
+revlog
+prevent_deletion
+original_stock_kind
+normalize_note_text
+deviceState
+lastCheckDatabase
+lastQuickCheck
+lastOptimize
+optimizeCadenceStart
+lastBackup
+mtime_secs
+guid
+set_config
+undo_status
+# Check Media (check-media.md): the tag value it writes, the inline-image
+# data URL encoding, the note type key and the LaTeX environment it hashes.
+missing-media
+base64
+latexsvg
+displaymath
