@@ -11,6 +11,12 @@ import Testing
         var descriptorURL = Observation.notRun
         var descriptorWAVHint = Observation.notRun
         var backend = Observation.notRun
+        var fileURLMs: Int?
+        var descriptorURLMs: Int?
+        var descriptorWAVHintMs: Int?
+        var backendPrepareMs: Int?
+        var clipStopMs: Int?
+        var mediaCloseMs: Int?
         var setupError = "null"
         do {
             let manager = FileManager.default
@@ -26,12 +32,18 @@ import Testing
             guard descriptor >= 0 else { throw Self.posixError() }
             defer { Darwin.close(descriptor) }
 
+            let fileURLStart = ContinuousClock.now
             fileURL = Self.observe(url)
+            fileURLMs = Self.elapsedMilliseconds(since: fileURLStart)
             let retainedURL = URL(fileURLWithPath: "/dev/fd/\(descriptor)")
             try Self.rewind(descriptor)
+            let descriptorURLStart = ContinuousClock.now
             descriptorURL = Self.observe(retainedURL)
+            descriptorURLMs = Self.elapsedMilliseconds(since: descriptorURLStart)
             try Self.rewind(descriptor)
+            let descriptorWAVHintStart = ContinuousClock.now
             descriptorWAVHint = Self.observe(retainedURL, hint: AVFileType.wav.rawValue)
+            descriptorWAVHintMs = Self.elapsedMilliseconds(since: descriptorWAVHintStart)
 
             try Self.rewind(descriptor)
             let duplicate = Darwin.dup(descriptor)
@@ -43,14 +55,21 @@ import Testing
             }
             // Ownership transfers to MediaFile; close it even if preparation throws.
             let media = MediaFile(descriptor: duplicate, name: "silence.wav", opening: opening)
+            let backendPrepareStart = ContinuousClock.now
             do {
                 let clip = try await AVQueuePlayback().prepare(media)
+                backendPrepareMs = Self.elapsedMilliseconds(since: backendPrepareStart)
                 backend = .success(duration: clip.duration)
+                let clipStopStart = ContinuousClock.now
                 await clip.stop()
+                clipStopMs = Self.elapsedMilliseconds(since: clipStopStart)
             } catch {
+                backendPrepareMs = Self.elapsedMilliseconds(since: backendPrepareStart)
                 backend = .failure(error)
             }
+            let mediaCloseStart = ContinuousClock.now
             await media.close()
+            mediaCloseMs = Self.elapsedMilliseconds(since: mediaCloseStart)
         } catch {
             setupError = Self.errorJSON(error)
         }
@@ -59,9 +78,31 @@ import Testing
         print("{\"nativeAudioFile\":1,\"setupError\":\(setupError),\"fileURL\":\(fileURL.json),"
               + "\"descriptorURL\":\(descriptorURL.json),\"descriptorWAVHint\":\(descriptorWAVHint.json),"
               + "\"backend\":\(backend.json)}")
+        print("{\"nativeAudioFileTiming\":1,"
+              + "\"fileURL\":\(Self.timingJSON(fileURLMs, succeeded: fileURL.succeeded)),"
+              + "\"descriptorURL\":\(Self.timingJSON(descriptorURLMs, succeeded: descriptorURL.succeeded)),"
+              + "\"descriptorWAVHint\":\(Self.timingJSON(descriptorWAVHintMs, succeeded: descriptorWAVHint.succeeded)),"
+              + "\"backendPrepare\":\(Self.timingJSON(backendPrepareMs, succeeded: backend.succeeded)),"
+              + "\"clipStop\":\(Self.timingJSON(clipStopMs)),"
+              + "\"mediaClose\":\(Self.timingJSON(mediaCloseMs))}")
         #expect(fileURL.succeeded && fileURL.duration == 2)
         // Descriptor controls are diagnostic facts, separate from this verdict.
         #expect(backend.succeeded && backend.duration == 2)
+    }
+
+    private static func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = start.duration(to: .now)
+        guard elapsed > .zero else { return 0 }
+        let components = elapsed.components
+        guard components.seconds < 600 else { return 600_000 }
+        let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+        return Int(max(0, min(600_000, milliseconds)))
+    }
+
+    private static func timingJSON(_ elapsed: Int?, succeeded: Bool = true) -> String {
+        guard let elapsed else { return #"{"outcome":"notRun","elapsedMs":null}"# }
+        let outcome = succeeded ? "success" : "failure"
+        return "{\"outcome\":\"\(outcome)\",\"elapsedMs\":\(elapsed)}"
     }
 
     @MainActor private struct Observation {
