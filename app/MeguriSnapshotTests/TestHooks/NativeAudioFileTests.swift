@@ -17,6 +17,7 @@ import Testing
         var backendPrepareMs: Int?
         var clipStopMs: Int?
         var mediaCloseMs: Int?
+        let preparationTimings = PreparationTimings()
         var setupError = "null"
         do {
             let manager = FileManager.default
@@ -56,8 +57,12 @@ import Testing
             // Ownership transfers to MediaFile; close it even if preparation throws.
             let media = MediaFile(descriptor: duplicate, name: "silence.wav", opening: opening)
             let backendPrepareStart = ContinuousClock.now
+            let playback = AVQueuePlayback()
+            playback.onNativePreparationInterval = { phase, elapsedMs in
+                preparationTimings.record(phase, elapsedMs: elapsedMs)
+            }
             do {
-                let clip = try await AVQueuePlayback().prepare(media)
+                let clip = try await playback.prepare(media)
                 backendPrepareMs = Self.elapsedMilliseconds(since: backendPrepareStart)
                 backend = .success(duration: clip.duration)
                 let clipStopStart = ContinuousClock.now
@@ -85,9 +90,41 @@ import Testing
               + "\"backendPrepare\":\(Self.timingJSON(backendPrepareMs, succeeded: backend.succeeded)),"
               + "\"clipStop\":\(Self.timingJSON(clipStopMs)),"
               + "\"mediaClose\":\(Self.timingJSON(mediaCloseMs))}")
+        print(preparationTimings.json)
         #expect(fileURL.succeeded && fileURL.duration == 2)
         // Descriptor controls are diagnostic facts, separate from this verdict.
         #expect(backend.succeeded && backend.duration == 2)
+    }
+
+    private nonisolated final class PreparationTimings: @unchecked Sendable {
+        private let lock = NSLock()
+        private var beginNativePlayback: UInt64?
+        private var playerConstructor: UInt64?
+        private var prepareToPlay: UInt64?
+        private var metadata: UInt64?
+        private var requireNativePlaybackOpen: UInt64?
+
+        func record(_ phase: AVQueuePlayback.NativePreparationPhase, elapsedMs: UInt64) {
+            lock.lock(); defer { lock.unlock() }
+            switch phase {
+            case .beginNativePlayback: beginNativePlayback = elapsedMs
+            case .playerConstructor: playerConstructor = elapsedMs
+            case .prepareToPlay: prepareToPlay = elapsedMs
+            case .metadata: metadata = elapsedMs
+            case .requireNativePlaybackOpen: requireNativePlaybackOpen = elapsedMs
+            }
+        }
+
+        var json: String {
+            lock.lock(); defer { lock.unlock() }
+            func number(_ value: UInt64?) -> String { value.map { String($0) } ?? "null" }
+            return "{\"nativeAudioPreparationTiming\":1,"
+                + "\"beginNativePlaybackMs\":\(number(beginNativePlayback)),"
+                + "\"playerConstructorMs\":\(number(playerConstructor)),"
+                + "\"prepareToPlayMs\":\(number(prepareToPlay)),"
+                + "\"metadataMs\":\(number(metadata)),"
+                + "\"requireNativePlaybackOpenMs\":\(number(requireNativePlaybackOpen))}"
+        }
     }
 
     private static func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {

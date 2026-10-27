@@ -9,22 +9,43 @@ public final class AVQueuePlayback: CardAudioBackend {
     var onNativePlayInterval: ((TimeInterval, TimeInterval) -> Void)?
     // Temporary, nil-by-default test diagnostics; no app/UI observation or logging.
     var onNativeCompletionInterval: (@MainActor (TimeInterval, TimeInterval) -> Void)?
+    nonisolated enum NativePreparationPhase: Sendable {
+        case beginNativePlayback, playerConstructor, prepareToPlay, metadata, requireNativePlaybackOpen
+    }
+    // Fixed, bounded elapsed milliseconds only; safe on the concurrent constructor.
+    var onNativePreparationInterval: (@Sendable (NativePreparationPhase, UInt64) -> Void)?
     // Internal deterministic close/cancel barrier after native initialization.
     // Nil in production; never receives the player or its private URL.
     var beforeNativeTransfer: (@Sendable () -> Void)?
     public init() {}
     public func prepare(_ file: MediaFile) async throws -> any CardAudioClip {
+        let onPreparation = onNativePreparationInterval
         var ownsNativeInput = false
         do {
             try Task.checkCancellation()
             let ext = (file.name as NSString).pathExtension.lowercased()
             guard NativePlaybackCopy.extensions.contains(ext) else { throw Failure.unsupported }
-            let url = try await file.beginNativePlayback()
-            ownsNativeInput = true
-            let owner = PlayerOwner(player: try await Self.makePlayer(at: url, beforeTransfer: beforeNativeTransfer), file: file)
+            let url: URL
             do {
-                let metadata = await owner.metadata()
-                try await file.requireNativePlaybackOpen()
+                let startedAt = onPreparation.map { _ in ContinuousClock.now }
+                defer { Self.recordPreparation(.beginNativePlayback, since: startedAt, observer: onPreparation) }
+                url = try await file.beginNativePlayback()
+            }
+            ownsNativeInput = true
+            let owner = PlayerOwner(player: try await Self.makePlayer(at: url, beforeTransfer: beforeNativeTransfer,
+                                                                    onPreparation: onPreparation), file: file)
+            do {
+                let metadata: PlayerOwner.Metadata
+                do {
+                    let startedAt = onPreparation.map { _ in ContinuousClock.now }
+                    defer { Self.recordPreparation(.metadata, since: startedAt, observer: onPreparation) }
+                    metadata = await owner.metadata()
+                }
+                do {
+                    let startedAt = onPreparation.map { _ in ContinuousClock.now }
+                    defer { Self.recordPreparation(.requireNativePlaybackOpen, since: startedAt, observer: onPreparation) }
+                    try await file.requireNativePlaybackOpen()
+                }
                 try Task.checkCancellation()
                 return NativeClip(owner: owner, duration: metadata.duration, seekable: metadata.seekable,
                                   onPlay: onNativePlayInterval, onCompletion: onNativeCompletionInterval)
@@ -40,12 +61,26 @@ public final class AVQueuePlayback: CardAudioBackend {
         }
     }
 
+    private nonisolated static func recordPreparation(_ phase: NativePreparationPhase,
+        since start: ContinuousClock.Instant?, observer: (@Sendable (NativePreparationPhase, UInt64) -> Void)?) {
+        guard let start, let observer else { return }
+        let elapsed = start.duration(to: .now)
+        guard elapsed > .zero else { observer(phase, 0); return }
+        let components = elapsed.components
+        guard components.seconds < 600 else { observer(phase, 600_000); return }
+        let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+        observer(phase, UInt64(max(0, min(600_000, milliseconds))))
+    }
+
     // Transfer the sole player reference into its actor after bounded preparation.
     @concurrent private nonisolated static func makePlayer(at url: URL,
-        beforeTransfer: (@Sendable () -> Void)?) async throws -> sending AVAudioPlayer {
+        beforeTransfer: (@Sendable () -> Void)?,
+        onPreparation: (@Sendable (NativePreparationPhase, UInt64) -> Void)?) async throws -> sending AVAudioPlayer {
         try Task.checkCancellation()
         let player: AVAudioPlayer
         do {
+            let startedAt = onPreparation.map { _ in ContinuousClock.now }
+            defer { recordPreparation(.playerConstructor, since: startedAt, observer: onPreparation) }
             player = try AVAudioPlayer(contentsOf: url)
         } catch {
             // AVFoundation may attach the private URL to userInfo. Preserve only
@@ -59,7 +94,11 @@ public final class AVQueuePlayback: CardAudioBackend {
         defer { if !prepared { player.stop(); player.delegate = nil } }
         try Task.checkCancellation()
         #if os(macOS)
-        guard player.prepareToPlay() else { throw Failure.unsupported }
+        do {
+            let startedAt = onPreparation.map { _ in ContinuousClock.now }
+            defer { recordPreparation(.prepareToPlay, since: startedAt, observer: onPreparation) }
+            guard player.prepareToPlay() else { throw Failure.unsupported }
+        }
         #endif
         // On iOS preparation must not activate the playback/ducking session.
         beforeTransfer?()
