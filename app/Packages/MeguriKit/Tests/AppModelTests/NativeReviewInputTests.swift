@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 @testable import CardRendering
 import Testing
+@testable import CoreBridge
 @testable import AppModel
 
 // These byte fixtures exercise facts and lifecycle, without native media proof.
@@ -97,6 +98,150 @@ import Testing
         #expect(description.contains("other(current="))
         #expect(description.contains("bridgeReasons: "))
         #expect(description.hasSuffix("; more"))
+    }
+
+    @Test func firstFailureSurvivesStatusAndCurrentOwnerRefusals() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        try await owner.prepare()
+        #expect(owner.safeFailureDiagnostic.isEmpty)
+        let original = NativeReviewInput.Refusal(reason: "native playback timeline")
+        owner.failed(original)
+        #expect(await owner.evidenceStatus() == "failed")
+        do {
+            _ = try owner.phaseTransportOwner()
+            Issue.record("A failed owner must still refuse status transport ownership")
+        } catch {
+            #expect((error as? NativeReviewInput.Refusal)?.reason == "case already refused")
+            owner.failed(error)
+        }
+        #expect(await owner.evidenceStatus() == "failed")
+        let receipt = try sample.receipt(owner)
+        #expect(receipt.failure == original.description)
+        #expect(owner.safeFailureDiagnostic == "media.playback-timeline")
+        #expect(receipt.admission == nil && receipt.completion == nil)
+    }
+
+    @Test func laterEntryFailureRetainsCommittedActivationAndPreparedMedia() async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        try await owner.prepare()
+        let original = NativeReviewInput.Refusal(reason: "media visit owner/update")
+        owner.failed(original)
+        let privateText = "synthetic-private-" + UUID().uuidString
+        let activation = CollectionActivation(.init(generation: 19, backup: nil,
+            media: .init(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1),
+            mediaRetentionReference: privateText))
+        owner.failed(CollectionEntryFailure(after: activation, issue: .core(.internal(privateText))))
+        let prepared = CollectionImportMedia(incoming: 7, decodedBytes: 321, reused: 1, added: 6, trashed: 2)
+        owner.failed(CollectionEntryFailure(issue: .core(.internal(privateText)), preparedMedia: prepared))
+        // A later direct activation also keeps its facts without replacing the refusal.
+        owner.activated(NativeReviewInput.Activation(activation))
+        #expect(await owner.evidenceStatus() == "failed")
+        let receipt = try sample.receipt(owner)
+        #expect(receipt.failure == original.description)
+        #expect(receipt.activation?.generation == activation.generation)
+        #expect(receipt.activation?.backup == nil)
+        #expect(receipt.activation?.media == NativeReviewInput.Media(activation.media))
+        #expect(receipt.activation?.retention == privateText)
+        #expect(receipt.prepared == NativeReviewInput.Media(prepared))
+        #expect(owner.safeFailureDiagnostic == "media.visit-owner-update")
+        #expect(!owner.safeFailureDiagnostic.contains(privateText))
+    }
+
+    @Test(arguments: ["media renderer current page not presented", "actual initialized media journal", "natural WAV completion"])
+    func knownGuardEmitsOnlyItsSafeCode(reason: String) async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        try await owner.prepare()
+        owner.failed(NativeReviewInput.Refusal(reason: reason))
+        #expect(await owner.evidenceStatus() == "failed")
+        let expected = ["media renderer current page not presented": "renderer.presentation",
+                        "actual initialized media journal": "journal.facts", "natural WAV completion": "media.wav-completion"]
+        #expect(owner.safeFailureDiagnostic == expected[reason])
+        #expect(!owner.safeFailureDiagnostic.contains(reason))
+        #expect(owner.safeFailureDiagnostic.utf8.count <= 900)
+    }
+
+    @Test(arguments: ["opaque", "opaque-known", "reason", "known-prefix", "summary-prefix", "summary-copy", "ns-error"])
+    func arbitraryErrorTextNeverEntersSafeStatus(kind: String) async throws {
+        let sample = try NativeReviewInputFixture(); defer { sample.remove() }
+        let owner = sample.owner()
+        try await owner.prepare()
+        let privateText = "/private/" + UUID().uuidString + "/card-<script>-connection-secret"
+        let error: any Error
+        switch kind {
+        case "opaque": error = NativeReviewOpaqueError(description: privateText)
+        case "opaque-known": error = NativeReviewOpaqueError(description: "native playback timeline")
+        case "reason": error = NativeReviewInput.Refusal(reason: privateText)
+        case "known-prefix": error = NativeReviewInput.Refusal(reason: "native playback timeline " + privateText)
+        case "summary-prefix": error = NativeReviewInput.Refusal(reason: "media renderer diagnostics present: " + privateText)
+        case "summary-copy":
+            let update = CardUpdate(card: 1, generation: 2, side: .answer)
+            let entries = [CardDiagnostics.Entry(update: update, kind: "bridgeRejected", name: privateText,
+                index: nil, script: nil, repeats: 1, bridgeRejectionReason: .world)]
+            // Even safe-looking text has no provenance without the actual guard.
+            error = NativeReviewInput.Refusal(reason: NativeReviewInput.diagnosticSummary(entries, currentUpdate: update))
+        default:
+            error = NSError(domain: privateText, code: 42,
+                userInfo: [NSLocalizedDescriptionKey: privateText, NSFilePathErrorKey: privateText])
+        }
+        owner.failed(error)
+        #expect(await owner.evidenceStatus() == "failed")
+        #expect(owner.safeFailureDiagnostic == "failure.unknown")
+        #expect(!owner.safeFailureDiagnostic.contains(privateText))
+        #expect(try sample.receipt(owner).failure == String(describing: error).prefix(1024).description)
+    }
+
+    @Test func rendererGuardCachesFirstTypedSummary() async throws {
+        let fixture = try NativeReviewInputFixture()
+        defer { fixture.remove() }
+        let input = fixture.owner()
+        try await input.prepare()
+
+        let visible = CardUpdate(card: 1, generation: 2, side: .answer)
+        let previous = CardUpdate(card: 1, generation: 1, side: .question)
+        let opaqueValues = (0..<5).map { _ in UUID().uuidString }
+        let records = [
+            CardDiagnostics.Entry(update: visible, kind: "bridgeRejected", name: opaqueValues[0],
+                index: nil, script: nil, repeats: 64_000, bridgeRejectionReason: .world),
+            CardDiagnostics.Entry(update: previous, kind: "bridgeRejected", name: opaqueValues[1],
+                index: nil, script: nil, repeats: 1, bridgeRejectionReason: .olderGeneration),
+            CardDiagnostics.Entry(update: visible, kind: "script." + opaqueValues[2], name: opaqueValues[0],
+                index: nil, script: .init(errorClass: opaqueValues[3], line: 11, column: 17,
+                    source: opaqueValues[4]), repeats: 1),
+        ]
+        let summary = [
+            "media renderer diagnostics present: bridgeRejected(current=1,earlier/other=1)",
+            "script(current=1,earlier/other=0)",
+            "bridgeReasons: world(current=1,earlier/other=0)",
+            "olderGeneration(current=0,earlier/other=1)",
+        ].joined(separator: "; ")
+        let expectedDiagnostic = "renderer.diagnostics; " + summary
+        let expectedFailure = NativeReviewInput.Refusal(reason: summary).description
+
+        do {
+            try input.requireNoRendererDiagnostics(records, currentUpdate: visible)
+            Issue.record("Expected the initial renderer guard to refuse")
+        } catch {
+            input.failed(error)
+        }
+        #expect(await input.evidenceStatus() == "failed")
+        #expect(input.safeFailureDiagnostic == expectedDiagnostic)
+        for value in opaqueValues {
+            #expect(!input.safeFailureDiagnostic.contains(value))
+        }
+        #expect(input.safeFailureDiagnostic.utf8.count <= 900)
+
+        do {
+            try input.requireNoRendererDiagnostics([records[0]], currentUpdate: visible)
+            Issue.record("Expected the subsequent renderer guard to refuse")
+        } catch {
+            input.failed(error)
+        }
+        #expect(await input.evidenceStatus() == "failed")
+        #expect(input.safeFailureDiagnostic == expectedDiagnostic)
+        #expect(try fixture.receipt(input).failure == expectedFailure)
     }
 
     @Test func phaseTransferReturnsOriginalFileBytesAndConsumesNonceOnce() async throws {
@@ -819,8 +964,15 @@ import Testing
         }
         if failure == "write" {
             if case .failed = owner.flushStatus {} else { Issue.record("Write failure was lost") }
+            #expect(owner.safeFailureDiagnostic == "evidence.persistence")
+            #expect(await owner.evidenceStatus() == "failed")
+            #expect(owner.safeFailureDiagnostic == "evidence.persistence")
         }
     }
+}
+
+private nonisolated struct NativeReviewOpaqueError: Error, CustomStringConvertible {
+    let description: String
 }
 
 @MainActor final class NativeReviewInputFixture {

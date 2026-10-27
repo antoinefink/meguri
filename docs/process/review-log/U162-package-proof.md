@@ -543,3 +543,29 @@ passes those to the receiver. Invalid userInfo still fails; every other
 validation and byte check stays unchanged. Independent review is clear.
 The model and app-hosted implementation files are unchanged, so their prior
 checks remain valid. Actual UI compilation and native capture remain pending.
+
+## Native status — preserve the first failure
+
+Start `8fdf9268`. Mac `ui-test/20261026T234614Z-44363` compiles and reaches
+answer reveal, then fails its media-ready check. Subsequent status requests
+replace the original receipt failure with `case already refused`, masking the
+cause. No native acceptance is claimed.
+
+Filtered `cleanroom/20261027T000036Z-50682` preserves the first failure while
+retaining later committed activation and prepared-media facts. The existing
+Mac status response adds fixed diagnostic codes, or a bounded summary produced
+only by the typed renderer guard. Unknown errors never export their text.
+No media guard, timeline, phase transport or proof requirement changes.
+Independent R1 review is clear. Model `swift-test/20261027T001200Z-55101`
+passes all 41 tests; similarity `20261027T001200Z-55143` passes.
+
+Privacy `20261027T001200Z-55096` fails in one new test. The full test is
+rewritten by `cleanroom/20261027T001241Z-56937`; production and assertions
+stay unchanged. Privacy `20261027T001420Z-58488` passes. Preserve the failed
+scan. The next native run must show the first cause before a media repair.
+Unit, workflow and integration acceptance remain open.
+
+Final R2 review is clear. `swift-test/20261027T001420Z-58716` passes all
+41 tests, zero skips; similarity `20261027T001421Z-58962` passes. VM readiness
+`doctor/20261027T001401Z-57939` reports no failed checks; existing account and
+host-session warnings remain. The dedicated VM is available.

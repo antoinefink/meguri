@@ -124,6 +124,56 @@ import Darwin
         if !details.isEmpty { summary += heading + details.joined(separator: "; ") }
         return summary
     }
+    /// Exact owned guard literals only. Error descriptions and associated
+    /// backend values never participate in the development status response.
+    static func failureCode(_ error: any Error) -> String {
+        guard let refusal = error as? Refusal else { return "failure.unknown" }
+        switch refusal.reason {
+        case "stale input owner": return "input.stale-owner"
+        case "case already refused": return "input.already-refused"
+        case "evidence persistence failed": return "evidence.persistence"
+        case "input not loaded": return "input.not-loaded"
+        case "bound input changed": return "input.changed"
+        case "actual activation differs from declared initial case": return "activation.facts"
+        case "missing native renderer": return "renderer.missing"
+        case "media renderer input not loaded": return "renderer.input"
+        case "media renderer session owner missing": return "renderer.owner"
+        case "media renderer coordinator mismatch": return "renderer.coordinator"
+        case "media renderer session mismatch": return "renderer.session"
+        case "media renderer generation mismatch": return "renderer.generation"
+        case "media renderer current update missing": return "renderer.update"
+        case "media renderer declared card mismatch": return "renderer.card"
+        case "media renderer answer side required": return "renderer.side"
+        case "media renderer current page not presented": return "renderer.presentation"
+        case "stale/failed native image decode": return "media.image-decode"
+        case "media visit owner/update": return "media.visit-owner-update"
+        case "media visit changed": return "media.visit-changed"
+        case "actual WAV entry": return "media.wav-entry"
+        case "repeated playback": return "media.playback-repeated"
+        case "native playback timeline": return "media.playback-timeline"
+        case "natural WAV completion": return "media.wav-completion"
+        case "media evidence no longer belongs to current presentation": return "media.presentation"
+        case "actual initialized media journal": return "journal.facts"
+        case "import journal generation": return "journal.generation"
+        default: return "failure.unknown"
+        }
+    }
+    /// The sole cache producer is the renderer's typed diagnostic guard.
+    /// Matching a raw error prefix cannot grant access to the status response.
+    func requireNoRendererDiagnostics(_ entries: [CardDiagnostics.Entry], currentUpdate: CardUpdate) throws {
+        guard entries.isEmpty else {
+            let summary = Self.diagnosticSummary(entries, currentUpdate: currentUpdate)
+            if rendererDiagnosticSummary == nil { rendererDiagnosticSummary = summary }
+            throw Refusal(reason: summary)
+        }
+    }
+    private func diagnostic(for error: any Error) -> String {
+        if let refusal = error as? Refusal, let rendererDiagnosticSummary,
+           refusal.reason == rendererDiagnosticSummary {
+            return "renderer.diagnostics; " + rendererDiagnosticSummary
+        }
+        return Self.failureCode(error)
+    }
     nonisolated public struct AnswerUse: Codable, Sendable, Equatable {
         public let owner: UUID, coordinator: UUID, session: UInt64, generation: UInt64
         public let deck: Int64, card: Int64, token: [UInt8], rating: String, elapsed: UInt64, wall: Int64, cap: UInt32
@@ -216,6 +266,11 @@ import Darwin
     private var loading: Task<FrozenNativeReviewInput.Loaded, any Error>?
     private var persistence: Task<Void, Never>?
     private var persistenceFailure: String?
+    private var firstFailureDiagnostic: String?
+    private var rendererDiagnosticSummary: String?
+    /// Fixed codes and an optional typed summary only; at most 900 UTF-8 bytes.
+    /// Exposed by the existing guarded development hook, never product chrome.
+    public var safeFailureDiagnostic: String { firstFailureDiagnostic ?? "" }
     private var writeRevision: UInt64 = 0
     private var sessionOwner: (coordinator: UUID, session: UInt64, generation: UInt64)?
     private var reload = false
@@ -375,7 +430,10 @@ import Darwin
            activation.media.incoming == 3, activation.media.added == 3, activation.media.reused == 0,
            activation.media.trashed == 0, activation.media.decodedBytes == input.mediaBytes {
             receipt?.phase = "activated"
-        } else { receipt?.failure = "actual activation differs from declared initial case" }
+        } else if receipt?.failure == nil {
+            receipt?.failure = "actual activation differs from declared initial case"
+            firstFailureDiagnostic = firstFailureDiagnostic ?? "activation.facts"
+        }
         enqueueReceipt()
     }
     public func failed(_ error: any Error) {
@@ -384,7 +442,10 @@ import Darwin
             if let activation = entry.completedActivation { receipt?.activation = Activation(activation) }
             if let prepared = entry.preparedMedia { receipt?.prepared = Media(prepared) }
         }
-        receipt?.failure = String(describing: error).prefix(1024).description
+        if receipt?.failure == nil {
+            receipt?.failure = String(describing: error).prefix(1024).description
+            firstFailureDiagnostic = firstFailureDiagnostic ?? diagnostic(for: error)
+        }
         enqueueReceipt()
     }
     public func reopenSeed() async throws -> UInt64 {
@@ -501,9 +562,7 @@ import Darwin
         guard update.card == input.chosen.card_id else { throw Refusal(reason: "media renderer declared card mismatch") }
         guard update.side == .answer else { throw Refusal(reason: "media renderer answer side required") }
         guard pair.current.presented else { throw Refusal(reason: "media renderer current page not presented") }
-        guard pair.diagnostics.entries.isEmpty else {
-            throw Refusal(reason: Self.diagnosticSummary(pair.diagnostics.entries, currentUpdate: update))
-        }
+        try requireNoRendererDiagnostics(pair.diagnostics.entries, currentUpdate: update)
         let page = pair.current, terminations = page.terminations
         let documentURL = page.webView.url
         let binding = try mediaVisit(pair: pair, coordinator: coordinator, session: session, generation: generation)
@@ -705,6 +764,7 @@ import Darwin
             data = try encoder.encode(receipt)
             try FrozenNativeReviewInput.check(data.count <= PhaseTransport.fileLimit, "receipt bound")
         } catch {
+            firstFailureDiagnostic = firstFailureDiagnostic ?? "evidence.persistence"
             persistenceFailure = String(describing: error); flushStatus = .failed(String(describing: error)); return
         }
         writeRevision &+= 1
@@ -728,6 +788,7 @@ import Darwin
                 }.value
                 if self.writeRevision == revision { self.flushStatus = .saved }
             } catch {
+                self.firstFailureDiagnostic = self.firstFailureDiagnostic ?? "evidence.persistence"
                 self.persistenceFailure = String(describing: error)
                 self.flushStatus = .failed(String(describing: error))
             }

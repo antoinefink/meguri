@@ -382,6 +382,7 @@ import notify
         var phase = ""
         var directory: String?
         var owner: String?
+        var diagnostic = ""
     }
     /// Flush/query only the requested dev owner. No visible test controls.
     private func waitNativeReview(_ phase: String, _ app: XCUIApplication, _ bundle: String) throws -> NativeReviewAcknowledgement {
@@ -389,12 +390,15 @@ import notify
         #if os(macOS)
         let center = DistributedNotificationCenter.default()
         let observer = center.addObserver(forName: Notification.Name("\(bundle).testhooks.nativeReviewStatus"), object: nil, queue: .main) { notification in
-            guard notification.userInfo == nil, let value = notification.object as? String, value.utf8.count <= 4096,
-                  let data = value.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+            let fields: [String: String]? = {
+                guard notification.userInfo == nil, let value = notification.object as? String,
+                      value.utf8.count <= 4096, let data = value.data(using: .utf8) else { return nil }
+                return (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+            }()
             MainActor.assumeIsolated {
-                acknowledgement.phase = object["status"] ?? ""; acknowledgement.directory = object["directory"]
-                acknowledgement.owner = object["owner"]
+                guard let fields, (fields["diagnostic"] ?? "").utf8.count <= 900 else { return }
+                acknowledgement.phase = fields["status"] ?? ""; acknowledgement.directory = fields["directory"]
+                acknowledgement.owner = fields["owner"]; acknowledgement.diagnostic = fields["diagnostic"] ?? ""
             }
         }
         defer { center.removeObserver(observer) }
@@ -421,7 +425,7 @@ import notify
         var diagnostics = ""
         if result != .completed || acknowledgement.phase != phase {
             let notice = element(app, "review.session.notice")
-            diagnostics = "last native phase=\(acknowledgement.phase.debugDescription); review.session.notice=\(notice.exists ? text(notice).debugDescription : "<absent>")"
+            diagnostics = "last native phase=\(acknowledgement.phase.debugDescription); native diagnostic=\(acknowledgement.diagnostic.debugDescription); review.session.notice=\(notice.exists ? text(notice).debugDescription : "<absent>")"
             if !notice.exists { diagnostics += "\n\(app.debugDescription)" }
         }
         XCTAssertEqual(result, .completed, "Native evidence did not reach \(phase); \(diagnostics)")
