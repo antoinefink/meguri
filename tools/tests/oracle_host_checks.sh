@@ -73,7 +73,7 @@ t_editing_a_driver_file_changes_tag_and_driver_hash() {
 editing_a_driver_file() {
   local edited="$1" tag rc
   rm -rf "$edited" && mkdir -p "$edited"
-  (cd "$ORACLE" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.lock "$edited/" &&
+  (cd "$ORACLE" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh worker_holder.py requirements.lock "$edited/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$edited")
   printf '\n# edited by oracle_host_checks.sh\n' >>"$edited/driver/observe/ids.py"
   tag="$(mg_oracle__tag "$edited")" || return 1
