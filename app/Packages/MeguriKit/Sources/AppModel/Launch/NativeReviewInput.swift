@@ -683,6 +683,12 @@ import Darwin
             "positionFinite=\(position?.isFinite == true) positionMS=\(milliseconds(position)) " +
             "naturalCompletionPresent=\(audio?.completedAt != nil) " +
             "audioControllerPresent=\(playback != nil) audioEntryPresent=\(playback?.entryPresent == true) " +
+            "audioStage=\(playback?.stage.rawValue ?? "idle") audioClipPresent=\(playback?.clipPresent == true) " +
+            "audioLoadStored=\(playback?.loadingTaskStored == true) audioLoadPending=\(playback?.loadingPending == true) " +
+            "audioObserverRegistered=\(playback?.observerRegistered == true) audioObserverStored=\(playback?.observerTaskStored == true) " +
+            "audioOwnerCurrent=\(playback?.transportOwnerCurrent == true) audioPlayingIntent=\(playback?.playingIntent == true) " +
+            "audioReturnedSamples=\(playback?.returnedSamples ?? 0) " +
+            "audioSampleFinite=\(playback?.lastFinitePosition != nil) audioSampleMS=\(milliseconds(playback?.lastFinitePosition)) " +
             "audioPaused=\(playback?.paused == true) reviewPresent=\(collection.review != nil) " +
             "reviewIsActive=\(collection.reviewIsActive)"
     }

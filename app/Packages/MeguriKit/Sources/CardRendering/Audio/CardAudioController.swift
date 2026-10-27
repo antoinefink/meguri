@@ -52,6 +52,39 @@ public final class CardAudioController {
     }
     var onPlaybackObservation: ((Entry, PlaybackObservation) -> Void)?
     private var playbackObservation: Task<Void, Never>?
+    @_spi(MeguriTestHooks) public struct Readiness {
+        public enum Stage: String { case idle, resolving, preparing, ready, activating, playPending, playReturned }
+        public let entryPresent: Bool
+        public let paused: Bool
+        public let stage: Stage
+        public let clipPresent: Bool
+        public let loadingTaskStored: Bool
+        public let loadingPending: Bool
+        public let observerRegistered: Bool
+        public let observerTaskStored: Bool
+        public let transportOwnerCurrent: Bool
+        public let playingIntent: Bool
+        public let returnedSamples: Int
+        public let lastFinitePosition: TimeInterval?
+    }
+    private var readinessStage: Readiness.Stage = .idle
+    private var readinessLoadingPending = false
+    private var readinessReturnedSamples = 0
+    private var readinessLastFinitePosition: TimeInterval?
+    // Backing facts are recorded only while the existing observation hook is installed.
+    var nativeReviewReadiness: Readiness {
+        let native = transport.readiness(serial: generation)
+        return Readiness(entryPresent: current != nil, paused: paused,
+            stage: native.stage ?? readinessStage, clipPresent: clip != nil,
+            loadingTaskStored: loading != nil, loadingPending: readinessLoadingPending,
+            observerRegistered: onPlaybackObservation != nil, observerTaskStored: playbackObservation != nil,
+            transportOwnerCurrent: native.ownerCurrent, playingIntent: native.playingIntent,
+            returnedSamples: readinessReturnedSamples, lastFinitePosition: readinessLastFinitePosition)
+    }
+    private func resetReadiness() {
+        readinessStage = .idle; readinessLoadingPending = false
+        readinessReturnedSamples = 0; readinessLastFinitePosition = nil
+    }
     public private(set) var current: Entry?
     public private(set) var paused = false
     private let resolver: MediaPathResolver
@@ -196,6 +229,7 @@ public final class CardAudioController {
         let entry = queue.removeFirst()
         current = entry
         generation += 1
+        resetReadiness()
         let serial = generation
         if let ready = nextClip, ready.0 == entry {
             nextClip = nil
@@ -208,10 +242,19 @@ public final class CardAudioController {
         }
         cancelPreparation(entry.update)
         let resolver = self.resolver, backend = self.backend
+        if onPlaybackObservation != nil {
+            readinessStage = .resolving; readinessLoadingPending = true
+        }
         loading = Task { [weak self] in
+            defer {
+                if self?.generation == serial { self?.readinessLoadingPending = false }
+            }
             do {
                 try Task.checkCancellation()
                 let file = try await resolver.openAudioName(entry.name)
+                if self?.generation == serial, self?.onPlaybackObservation != nil {
+                    self?.readinessStage = .preparing
+                }
                 let clip = try await Self.prepareFile(file, backend: backend)
                 guard let self, !Task.isCancelled, self.generation == serial, !self.closed else { await clip.stop(); return }
                 self.start(clip, entry: entry, serial: serial)
@@ -275,8 +318,10 @@ public final class CardAudioController {
 
     private func start(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
         self.clip = clip
+        if onPlaybackObservation != nil { readinessStage = .ready }
         armCompletion(clip, serial: serial)
-        transport.install(clip, entry: entry, serial: serial, paused: paused)
+        transport.install(clip, entry: entry, serial: serial, paused: paused,
+                          diagnosticEnabled: onPlaybackObservation != nil)
         drain()
     }
     private func armCompletion(_ clip: any CardAudioClip, serial: UInt64) {
@@ -309,6 +354,7 @@ public final class CardAudioController {
     }
     private func observePlayback(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
         playbackObservation?.cancel()
+        readinessReturnedSamples = 0; readinessLastFinitePosition = nil
         guard onPlaybackObservation != nil else { return }
         playbackObservation = Task { [weak self, weak clip] in
             var previous: TimeInterval = 0
@@ -319,6 +365,10 @@ public final class CardAudioController {
                 guard !Task.isCancelled, self?.generation == serial, self?.clip === clip,
                       self?.paused == false, self?.closed == false else { return }
                 let position = sample.position
+                if self?.onPlaybackObservation != nil {
+                    self?.readinessReturnedSamples = min((self?.readinessReturnedSamples ?? 0) + 1, 9_999)
+                    if position.isFinite { self?.readinessLastFinitePosition = min(max(position, 0), 600) }
+                }
                 if position.isFinite, position > previous {
                     previous = position
                     self?.onPlaybackObservation?(entry, .advanced(position: position, duration: clip.duration,
@@ -334,6 +384,7 @@ public final class CardAudioController {
         playbackObservation?.cancel(); playbackObservation = nil
         if clip != nil { onPlaybackObservation?(entry, .completed(success: success, observedAt: ProcessInfo.processInfo.systemUptime)) }
         generation += 1; seekGeneration += 1; callbackGeneration += 1
+        resetReadiness()
         if !success && reportFailure { diagnostics.record("audioDecode", update: diagnosticUpdate(entry), name: entry.name, index: entry.index) }
         clip?.onEnd = nil; clip = nil
         current = nil; paused = paused && !queue.isEmpty
@@ -389,6 +440,7 @@ public final class CardAudioController {
         cancelNext()
         if !keepPreload { cancelPreload() }
         generation += 1; seekGeneration += 1; callbackGeneration += 1
+        resetReadiness()
         loading?.cancel(); loading = nil
         clip?.onEnd = nil; clip = nil
         current = nil; paused = false; queue.removeAll()
@@ -417,6 +469,7 @@ private final class AudioTransport {
         let serial: UInt64
         var intent: Intent
         var playing = false
+        var readinessStage: CardAudioController.Readiness.Stage?
         var pauseRequired = false
         var keepSession = false
         var seek: (seconds: TimeInterval, revision: UInt64)?
@@ -437,9 +490,15 @@ private final class AudioTransport {
     var onSeekEnd: ((UInt64) -> Void)?
     init(session: any CardAudioSession) { self.session = session }
 
-    func install(_ clip: any CardAudioClip, entry: CardAudioController.Entry, serial: UInt64, paused: Bool) {
+    func readiness(serial: UInt64) -> (stage: CardAudioController.Readiness.Stage?, ownerCurrent: Bool, playingIntent: Bool) {
+        guard let owned, owned.serial == serial else { return (nil, false, false) }
+        return (owned.readinessStage, true, owned.intent == .playing)
+    }
+    func install(_ clip: any CardAudioClip, entry: CardAudioController.Entry, serial: UInt64, paused: Bool,
+                 diagnosticEnabled: Bool) {
         precondition(owned == nil)
         owned = OwnedClip(clip, entry: entry, serial: serial, paused: paused)
+        if diagnosticEnabled { owned?.readinessStage = .ready }
     }
     func pause() {
         guard let owned, owned.intent != .stopped else { return }
@@ -517,6 +576,7 @@ private final class AudioTransport {
             if lease == nil {
                 let owner = UUID()
                 lease = owner
+                if item.readinessStage != nil { item.readinessStage = .activating }
                 do { try await session.activate(owner) }
                 catch {
                     release()
@@ -527,7 +587,9 @@ private final class AudioTransport {
                 continue
             }
             do {
+                if item.readinessStage != nil { item.readinessStage = .playPending }
                 try await item.clip.play()
+                if item.readinessStage != nil { item.readinessStage = .playReturned }
                 item.playing = true
                 if item.intent == .playing, !item.pauseRequired {
                     onStarted?(item.clip, item.entry, item.serial)

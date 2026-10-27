@@ -32,8 +32,8 @@ public final class CardPagePair {
         set { audio.onPlaybackObservation = newValue }
     }
     /// Synchronous facts for the guarded development status request only.
-    @_spi(MeguriTestHooks) public var nativeReviewAudioReadiness: (entryPresent: Bool, paused: Bool) {
-        (audio.current != nil, audio.paused)
+    @_spi(MeguriTestHooks) public var nativeReviewAudioReadiness: CardAudioController.Readiness {
+        audio.nativeReviewReadiness
     }
     public var typedValue: CardTypedValue? { current.typedValue }
     public var behaviorPresenter: (any CardBehaviorPresenting)? {
