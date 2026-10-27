@@ -1,7 +1,7 @@
 //! Preset-only behavior (deck-presets P3, P7, P8, P10, P13).
 mod common;
 use common::{NOW_MS, col_mod, query_int};
-use meguri_engine::{EngineError, OpSource, OpSpec, SchemaReason, UndoScope, deck_config, decks};
+use meguri_engine::{EngineError, OpSource, OpSpec, UndoScope, deck_config, decks};
 use meguri_model::{
     ids::{DeckConfigId, DeckId},
     proto::ProtoBlob,
@@ -113,7 +113,7 @@ fn equal_bounded_preset_edit_keeps_invalid_blob_and_stamps_until_a_real_change()
 }
 
 #[test]
-fn removal_requires_confirmation_and_undo_restores_schema_and_rows() {
+fn removal_commits_without_confirmation_and_undo_restores_schema_and_rows() {
     let h = common::fresh();
     let a = decks::add(&h.collection, "A::B".into()).unwrap().value.id;
     let p = deck_config::add(&h.collection, "Custom".into()).unwrap().value;
@@ -128,14 +128,8 @@ fn removal_requires_confirmation_and_undo_restores_schema_and_rows() {
         .unwrap();
     let before = col_mod(&h.collection);
     h.clock.step_ms(60_000);
-    assert_eq!(
-        deck_config::remove(&h.collection, p, DeckConfigId(1), false).unwrap_err(),
-        EngineError::NeedsSchemaConfirmation {
-            reasons: vec![SchemaReason::PresetRemoved]
-        }
-    );
-    assert_eq!(col_mod(&h.collection), before);
-    let done = deck_config::remove(&h.collection, p, DeckConfigId(1), true).unwrap();
+    let done = deck_config::remove(&h.collection, p, DeckConfigId(1)).unwrap();
+    assert_ne!(col_mod(&h.collection), before);
     assert_eq!(done.changes.deck_configs.len(), 1);
     assert_eq!(done.changes.decks.len(), 1);
     assert_eq!(query_int(&h.collection, "SELECT scm FROM col"), NOW_MS + 60_000);

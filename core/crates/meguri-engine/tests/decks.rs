@@ -223,7 +223,7 @@ fn bulk_deck_edits_at_2000_decks_are_bounded() {
     assert_eq!(assigned.changes.decks.len(), 1999);
 
     let timer = Stopwatch::start();
-    let removed = deck_config::remove(&h.collection, preset, DeckConfigId(1), true).unwrap();
+    let removed = deck_config::remove(&h.collection, preset, DeckConfigId(1)).unwrap();
     let remove_time = timer.elapsed();
     assert_eq!(removed.changes.decks.len(), 1999);
     let rows = h.collection.reader(ReaderRole::Query).unwrap().deck_rows().unwrap();
@@ -311,7 +311,7 @@ fn backup_failure_aborts_and_concurrent_card_addition_replans() {
     });
     let deleted = decks::delete(&h.collection, vec![a], backup.clone()).unwrap();
     assert_eq!(deleted.value, decks::DeletionSummary { cards: 2, decks: 1 });
-    assert_eq!(backup.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(backup.calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

@@ -72,22 +72,23 @@ pub fn assign_in(
     Ok(())
 }
 
-pub fn remove_in(
-    scope: &mut WriteScope<'_>,
-    id: DeckConfigId,
-    fallback: DeckConfigId,
-    confirmed: bool,
-) -> Result<(), EngineError> {
+fn validate_removal(rows: &impl ReadRows, id: DeckConfigId, fallback: DeckConfigId) -> Result<(), EngineError> {
     if id == DeckConfigId(1) {
         return Err(decks::refused(Refusal::DefaultPreset));
     }
-    require(scope, id)?;
-    if id == fallback || scope.deck_config(fallback)?.is_none() {
+    require(rows, id)?;
+    if id == fallback || rows.deck_config(fallback)?.is_none() {
         return Err(EngineError::InvalidArgument {
             message: "fallback must exist and differ from the removed preset".into(),
         });
     }
-    crate::mark_schema_change(scope, &[SchemaReason::PresetRemoved], confirmed)?;
+    Ok(())
+}
+
+/// Transaction primitive; its caller owns the pre-write safety admission.
+pub fn remove_in(scope: &mut WriteScope<'_>, id: DeckConfigId, fallback: DeckConfigId) -> Result<(), EngineError> {
+    validate_removal(scope, id, fallback)?;
+    crate::mark_schema_change(scope, &[SchemaReason::PresetRemoved])?;
     for mut deck in scope.deck_rows()? {
         if let DeckKind::Normal(ref mut normal) = deck.kind.kind
             && (normal.config_id == id.0 || scope.deck_config(DeckConfigId(normal.config_id))?.is_none())
@@ -116,13 +117,24 @@ pub fn assign(c: &Collection, deck: DeckId, preset: DeckConfigId, subtree: bool)
         assign_in(ctx.scope(), deck, preset, subtree)
     })
 }
-pub fn remove(
-    c: &Collection,
-    id: DeckConfigId,
-    fallback: DeckConfigId,
-    confirmed: bool,
-) -> Result<OpResult<()>, EngineError> {
-    c.run(spec("remove_preset"), move |ctx| {
-        remove_in(ctx.scope(), id, fallback, confirmed)
-    })
+pub fn remove(c: &Collection, id: DeckConfigId, fallback: DeckConfigId) -> Result<OpResult<()>, EngineError> {
+    crate::executor::plan_commit::plan_and_commit(
+        c,
+        meguri_storage::ReaderRole::Maintenance,
+        spec("remove_preset").schema_changes([SchemaReason::PresetRemoved]),
+        move |plan| {
+            validate_removal(&**plan.snapshot(), id, fallback)?;
+            Ok(crate::executor::plan_commit::Plan {
+                value: (),
+                preconditions: [meguri_storage::Table::DeckConfig, meguri_storage::Table::Decks]
+                    .into_iter()
+                    .map(|table| crate::Precondition::TableUntouched {
+                        table,
+                        since: plan.seq(),
+                    })
+                    .collect(),
+            })
+        },
+        move |ctx, ()| remove_in(ctx.scope(), id, fallback),
+    )
 }

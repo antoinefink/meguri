@@ -110,7 +110,7 @@ fn run(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
             deck_config::rename(&c, preset_id(s, &a.preset)?, a.name.clone()).map(|_| OpResult::Done)
         }
         Step::RemovePreset(a) => {
-            deck_config::remove(&c, preset_id(s, &a.preset)?, preset_id(s, &a.fallback)?, true).map(|_| OpResult::Done)
+            deck_config::remove(&c, preset_id(s, &a.preset)?, preset_id(s, &a.fallback)?).map(|_| OpResult::Done)
         }
         Step::SetDeckPreset(a) => {
             deck_config::assign(&c, deck_id(s, &a.deck)?, preset_id(s, &a.preset)?, a.subtree).map(|_| OpResult::Done)

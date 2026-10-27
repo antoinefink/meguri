@@ -80,7 +80,7 @@ pub fn delete_in(scope: &mut WriteScope<'_>, ids: &[DeckId]) -> Result<DeletionS
 }
 
 /// Back up off the writer, then commit only if decks/cards still match
-/// that snapshot. A concurrent change replans and backs up the new state.
+/// that snapshot. A concurrent change replans with the same protected backup.
 pub fn delete(
     collection: &Collection,
     ids: Vec<DeckId>,
@@ -96,6 +96,7 @@ pub fn delete_controlled(
     cancel: Arc<CancelToken>,
     progress: ProgressSink,
 ) -> Result<OpResult<DeletionSummary>, EngineError> {
+    let mut safety = None;
     for attempt in 0..=crate::executor::plan_commit::REPLANS {
         cancel.check()?;
         progress.set_phase(crate::ProgressPhase::Planning);
@@ -105,8 +106,8 @@ pub fn delete_controlled(
             (deletion_summary(&*snapshot, &ids)?, snapshot.seq())
         };
         cancel.check()?;
-        if summary.cards > 0 {
-            backup.before_deck_delete()?;
+        if summary.cards > 0 && safety.is_none() {
+            safety = Some(backup.before_safety_operation(collection, &cancel)?);
         }
         cancel.check()?;
         let preconditions = [Table::Decks, Table::Cards]
