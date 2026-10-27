@@ -1,11 +1,11 @@
 # Built searches, joining and replacing
 
 Spec: search/join-and-replace
-Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (AE43 and AE60, core part)
+Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (AE43, core part; AE60 only for J11's test that its text parses and that its canonical form equals a golden)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/ (not yet recorded: J11)
 
-The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search goes through these services (U88): sidebar and chips, Stats "Show in Browser", Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
+The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
 
 ## J1. The services
 
@@ -209,4 +209,4 @@ Neither directory exists yet. Both need observation kinds the oracle does not ha
 | `search/join-replace/replace` | J7: every kind of the table, replacements at depth and under negation, negated and grouped items (nothing replaced), the empty field, `existing` with nothing of the kind |
 | `search/join-replace/ae43` | AE43 (core part): the two calls of J9 |
 
-J10's inputs stay out of these scenarios; Meguri's builder tests (U88 `tests/builder.rs`) cover them from this text.
+J10's inputs stay out of these scenarios; Meguri's builder tests (U88 `tests/builder.rs`) cover them from this text. The same tests hold AE60's check: the joined text of `stats/browse-queries` Q3's AE60 row parses, and its canonical text (`canonical-form.md` F2–F6) equals the golden `(deck:Japanese) (is:review -is:learn) prop:ivl<21 -(is:buried OR is:suspended)`. They never write the Stats text through `build` or `join`.

@@ -98,3 +98,8 @@ csum
 ix_notes_csum
 meguri_regex_tags
 meguri_custom_data
+# U88 (editing-services): the tail classification service and the config
+# keys the suggestion index reads.
+classify_tail
+savedFilters
+flagLabels

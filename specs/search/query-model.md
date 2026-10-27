@@ -101,8 +101,8 @@ Searching never calls scheduling or engine code (KTD2). Every outside value a qu
 |---|---|---|
 | now (epoch seconds) | the clock | `is:due`, `prop:r` |
 | today (days elapsed) | U40 day clock | `is:due`, `prop:due`, `prop:r` |
-| next-day-at (epoch seconds of the next day boundary) | U40 | `added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:due`, `prop:rated`, `prop:resched`, `prop:r` |
-| learn-ahead seconds | config `collapseTime` (1200 when missing) | `is:due` |
+| next-day-at (epoch seconds of the next day boundary) | U40 | `added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:due`, `prop:rated`, `prop:resched` |
+| learn-ahead seconds | config `collapseTime` when it reads as an unsigned 32-bit integer; 1200 when it is missing or reads otherwise (`"x"`, −1, 60.0; `state-and-flags.md` S3) | `is:due` |
 | current deck id | config `curDeck` | `deck:current` |
 | note text normalization | config `normalize_note_text` (true when missing) | plain text, field text, `re:`, `nc:`, `sc:`, `w:`, `dupe:` |
 | ignore accents | config `ignoreAccentsInSearch` (false when missing) | plain text, `sc:`, `w:` |
@@ -118,7 +118,7 @@ Compiling a parsed query gives a plan for one mode:
 - **Terms.** AND, OR, NOT and groups compile to their SQL forms, keeping Q7's logic. Each term compiles through its owning unit (U81, U82); until that unit lands, a term may compile to a stub, and scenarios that need it stay inactive.
 - **Slow terms.** Terms that call Meguri's SQL functions per row (regex, `nc:`, Unicode folding, `prop:r` and any other U81/U82 marks) are recorded as slow, so that U85 can choose streaming execution.
 - **Context reads.** The set of Q8 values the plan read (Q8).
-- **Errors.** Building the plan raises the run errors of `errors.md` E3 that do not need the database: `search_failed` for a negated operator word or a non-ASCII digit in an id list, `invalid_regex` (U81). Errors the database raises when the statement runs map to `search_failed`.
+- **Errors.** Building the plan raises every cause of `errors.md` E3 except a database refusal: `search_failed` for a negated operator word, a non-ASCII digit in an id list, a pattern longer than the limit, a regular expression over the compiled size limit, no searchable field, all fields excluded, `sc:` with no cloze note type and a `prop:` operand out of range (`properties.md` P14), and `invalid_regex` (U81). They are checked in the order of `errors.md` E4 step 3, and the first one met is the error. Errors the database raises when the statement runs (the refusals of E3) map to `search_failed`.
 
 ## Q10. Streaming execution
 

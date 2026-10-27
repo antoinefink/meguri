@@ -5,7 +5,7 @@ Requirements: R617, R618, R1068, R1070, R1130, R2016
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/extractors/
 
-The four SQL scalar functions that read a card's `cards.data` for queries: a memory-state field, retrievability, relative retrievability and original position. This file is their only definition. U41's review orders (difficulty, retrievability, relative overdueness), U82's `prop:s`, `prop:d`, `prop:r` and `prop:pos` (`search/properties`) and U84's sorts and cells call them and do not restate them. The custom-data function stays with U82 (`search/properties`).
+The four SQL scalar functions that read a card's `cards.data` for queries: a memory-state field, retrievability, relative retrievability and original position. This file is their only definition. U41's review orders (difficulty, retrievability, relative overdueness), U82's `prop:s`, `prop:d` and `prop:r` (`search/properties`) and U84's sorts and cells call them and do not restate them. No search term calls the original-position function (X7): `prop:pos` reads the card's due, `odue` when it is not 0 and `due` otherwise (`search/properties` P5, P13). The custom-data function stays with U82 (`search/properties`).
 
 X3, X5, X6, X7 and the four rows of X2 were moved from `search/properties` P10, P11, P11.1, P13 and P15 when U82a was split from U82; their wording is kept, with section references renamed. Everything else here was added from oracle observations (scenarios in X9).
 
