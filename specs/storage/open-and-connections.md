@@ -4,7 +4,7 @@ Spec: storage/open-and-connections
 Requirements: R1449, R1451, R1452, R1454, R1479, R1482, R2013, R2016; supports R1823, R1491 and R2006 (C9, with U24's writer and U32), R2051 (C9.2's covered seq) and R2066 (the `cloud` reader of C6)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/open/
-Status: Under review (R2066) for the `cloud` row and bullet of C6 and the covered seq of C9.2, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for the `cloud` row and bullet of C6 and the covered seq of C9.2, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 How Meguri decides whether it may open a file, opens it without touching files it must refuse, and which SQLite connections it then keeps with which settings. The file layout is `storage/schema-18`; the upgrade of schemas 11 to 17 is `storage/schema-upgrade`. Close orchestration, suspension, the sidecar and the advisory lock that keeps a second Meguri process out (R2014) are U32's; this spec gives the storage primitives they use.
 

@@ -4,7 +4,7 @@ Spec: engine/change-stream
 Requirements: R1490, R1658, R1792 (core side); supports R45, R173, R447, R1286, R1434, R1559, R2051 (S1.2, S2.4)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Under review (R2066) for S1.2, S2.4, S2.5 and the CloudKit wording of S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for S1.2, S2.4, S2.5 and the CloudKit wording of S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 What a committed op reports (the change set), who sees it inside the core before anyone else (in-core observers), and the one ordered queue that carries it and every other core→Swift event (the change stream). Ops are `engine/op-model`.
 

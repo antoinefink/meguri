@@ -4,7 +4,7 @@ Spec: engine/op-model
 Requirements: R1490, R1494, R1495, R1658, R1790, R1860, R2002, R2006, R727 (mechanism); supports R2047, R2051 (O1.1)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Under review (R2066) for O1.1, the `CloudIncoming` and `CloudRekey` rows of O1, the CloudKit wording of O2 and O5, and the `cloud_incoming_apply` row of O9, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for O1.1, the `CloudIncoming` and `CloudRekey` rows of O1, the CloudKit wording of O2 and O5, and the `cloud_incoming_apply` row of O9, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (`engine/undo`, U25) consumes the op journal described here.
 

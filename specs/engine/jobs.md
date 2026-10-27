@@ -4,7 +4,7 @@ Spec: engine/jobs
 Requirements: R170 (core side), R171, R1494, R1858, R1860
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Under review (R2066) for J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 Long work in the core runs as jobs (KTD9): a short call starts one and returns its handle at once; the work runs on core-owned threads; its end is one event. This spec also covers the cancel token and the progress sink every long operation takes, and the thread registry every core thread is created through.
 

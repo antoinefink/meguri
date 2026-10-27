@@ -4,6 +4,7 @@ Spec: media/media-journal
 Requirements: R986, R1582, R1702, R1855, R2018; supports R1572, R2057
 Anki: none (Meguri design; no Anki source or database layout)
 Scenarios: none (Meguri's own store tests, U31 and U114; J6 lists the feed's)
+Status: Approved 2026-10-27 (R2066) for J6 and the CloudKit parts of J1 and J5, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 ## J1. Ownership and files
 
@@ -49,7 +50,7 @@ including outside names that already use the filesystem's component limit.
 Recovery also accepts the earlier flat identity-prefixed filenames.
 Trash metadata records the supplied collection time. Restore processes newer identities first.
 It follows `media/media-files#M10`, and never overwrites an existing file.
-Only an explicit empty-trash call permanently removes trash bytes.
+Only an explicit empty-trash call permanently removes trash bytes (`maintenance/check-media#C17`).
 
 ## J4. Staging and recovery
 

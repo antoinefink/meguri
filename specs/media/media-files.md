@@ -4,6 +4,7 @@ Spec: media/media-files
 Requirements: R978, R980, R981, R982, R983, R984, R985, R986, R1568, R1569, R1570, R1571, R1587, R2018; core side of R1582 and R1855; supports R1572, R1650, R1702, R2057
 Anki: 26.09.3
 Scenarios: conformance/scenarios/media/
+Status: Approved 2026-10-27 (R2066) for the CloudKit parts of M6, M7.1, M10.1, M11, M12, M15 and M16, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 What the media store does with files: the name a new file gets (dedupe, lowercasing, hash names), how a name in a field finds its file, which files in the folder count as media and are tracked for media sync, the trash, and writes under an exact name. The name transform every new name goes through is `text/media-filenames#F1`. The change journal, staging inside an op, crash recovery, the media lock and change events are Meguri's own design, in `media/media-journal` (written by U31's implementer); this file states only the rules they must keep. The scenario vocabulary is `conformance/media-ops`.
 
@@ -13,7 +14,7 @@ Two sync paths use this store. Routine sync is CloudKit (KTD25): its media state
 
 - Media lives in one flat folder (R978): `collection.media/`, next to the collection file. Its siblings on the same volume: `media.trash/` (M10) and `media.staging/` (files written inside an op, M13), plus the journal database (`media/media-journal`). Moving a file between them is a rename, never a copy.
 - `media.trash` is also the name of Anki's trash folder next to its media folder. Meguri never shares a folder with Anki and never reads or writes Anki's media database; its journal replaces it, so the journal's layout is free.
-- A subdirectory inside the media folder is never media: nothing in Meguri creates one, registration skips it (M7) and Check Media reports it (U130).
+- A subdirectory inside the media folder is never media: nothing in Meguri creates one, registration skips it (M7) and Check Media reports it (U130, `maintenance/check-media#C3`).
 - Fields hold raw, unencoded names (R978). Percent-encoding for display and the reference scan are `text/media-references`.
 
 ## M2. Terms
@@ -41,7 +42,7 @@ Two sync paths use this store. Routine sync is CloudKit (KTD25): its media state
 
 ## M3. Adding a file (R980–R983, R1568–R1571)
 
-The path for every new file whose name Meguri chooses: the editor's attach and paste, `/receive` (staged, M13), imports, restoring a trash entry whose name is taken (M10.2), Check Media's renames (U130). Input: a desired name D and the bytes B, with content hash H. Adding a file from disk uses the file's last path component as D.
+The path for every new file whose name Meguri chooses: the editor's attach and paste, `/receive` (staged, M13), imports, restoring a trash entry whose name is taken (M10.2), Check Media's renames (U130, `maintenance/check-media#C4`). Input: a desired name D and the bytes B, with content hash H. Adding a file from disk uses the file's last path component as D.
 
 1. N = transform(D).
 2. Refusals; nothing changes:
@@ -109,7 +110,7 @@ A hash name that ends with a space or `.` (no extension, or an extension cut aft
 
 ## M5. Lookup (R984)
 
-Resolving a name to the file that holds it, for rendering (U67), Check Media (U130), the trash (M10), the integrations (U143) and media sync (U111):
+Resolving a name to the file that holds it, for rendering (U67), Check Media (U130, `maintenance/check-media#C6`, C11), the trash (M10), the integrations (U143) and media sync (U111):
 
 1. Take the name in NFC.
 2. A regular file with exactly that name is the result: a tracked file (M7.1) from the journal, or any other regular file found by checking that one name on the file system (an untracked hash name, M4; an empty or oversized file).
@@ -194,7 +195,7 @@ Ignored files are never tracked (M7.1), so they are never pending or synced and 
 
 ## M10. Trash (R2018)
 
-The trash holds every media file Meguri removes. Emptying it is the only permanent deletion of media bytes, and runs only when the user asks (U130's Empty Trash); nothing empties it automatically (R1650). The trash is never synced and is not part of the media sync state. It survives relaunch.
+The trash holds every media file Meguri removes. Emptying it is the only permanent deletion of media bytes, and runs only when the user asks (U130's Empty Trash, `maintenance/check-media#C17`); nothing empties it automatically (R1650). The trash is never synced and is not part of the media sync state. It survives relaunch.
 
 ### M10.1 Moving files to the trash
 
@@ -217,8 +218,8 @@ Restoring never overwrites a file (R1649). With two versions of `a.jpg` in the t
 
 ### M10.3 Emptying and size
 
-- `empty()` deletes every trash entry permanently. The media folder and the journal do not change.
-- `summary()` returns the number of entries and their total size in bytes (Check Media shows it before emptying).
+- `empty()` deletes every trash entry permanently. The media folder and the journal do not change. (Check Media's Empty Trash uses identity forms of these two calls and deletes only the entries its preflight listed: `maintenance/check-media#C17`.)
+- `summary()` returns the number of entries and their total size in bytes (Check Media shows it before emptying, `maintenance/check-media#C17`).
 
 ## M11. What makes a file pending for the next media sync (R986)
 
@@ -295,5 +296,6 @@ Meguri-only behavior has no golden and is tested in Meguri's own tests (U31's te
 
 - CloudKit media state (media-name entities, blob upload and download state, acknowledgements, unsyncable marks, tombstones) lives only in the CloudKit tracking store (`sync/cloudkit-records#K9`, K10.3). The journal holds none of it.
 - Every store write that changes a name's file facts, including M3 rows b and c, M4 step 4, M6 steps 3 and 4, M7.2, M10.1, M10.2, M13's publish and recovery, the move of a local file to its hash name (`sync/cloudkit-records#K15.9`) and Check Media renames (U130), is also an item of the journal's file-fact feed (`media/media-journal#J6`). CloudKit tracking learns local media changes only from that feed and from its reconcile scan (`sync/cloudkit-records#K9.4`, K11.4).
+- **Feed hook** (decided 2026-10-27, `sync/cloudkit-records#K11.1` "When the feed is read"). After each of the store operations listed above, and after each registration step (M7.2), whose journal transaction committed at least one feed item, the store calls CloudKit tracking's feed consume (`consume_media_feed`) once, after that commit and outside the journal transaction. The call consumes the feed up to the journal's current counter for the usable binding and returns; with no usable binding it does nothing, and the items wait for the next consume (at open, `resume()` or a Sync Now capture). A tracking failure in it is CloudKit's (`sync/policy#P15.2`) and never fails or rolls back the store operation. The store calls that CloudKit tracking itself makes for a media apply (`sync/cloudkit-records#K9.3`) call it too. Decided 2026-10-27, so that no item of an apply is read after its intent is removed: that consume runs before the store call returns to tracking, while the apply's intent exists, so it reads the call's items under the intent's expected states. The apply's own items make no dirty mark, and a local write that one of the apply's calls replaced gets its conflict copy in that consume (K9.3 "Feed items", K16). So a picture added through the editor, a Delete Unused or a Check Media fix reaches CloudKit tracking as a local change at once.
 - The Anki media-sync state (M11's pending flag, `sync/media-tracking`'s sync state, media USN, change marker and baseline owner) is separate. Clearing a pending flag after an Anki server accepts a change, an Anki media reset (`sync/media-tracking#T11`, after a logout, a server or account change or a sanity mismatch) and every other manual-transfer step leave CloudKit tracking, the feed's retained items and its floor unchanged (J6).
 - So a file that Meguri removes (absence cause `removed`, `media/media-journal#J6`) while an Anki media transfer runs, or before an Anki logout, still reaches CloudKit as a tombstone, and a file whose content changes then still reaches it as a new version. A file that disappears outside Meguri (deleted in Finder, evicted, left out by a restore: cause `missing`) makes no tombstone; CloudKit tracking treats it as a missing local file (`sync/cloudkit-records#K9.4`).

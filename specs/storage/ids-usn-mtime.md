@@ -4,7 +4,7 @@ Spec: storage/ids-usn-mtime
 Requirements: R772, R776, R906, R1456, R1469, R1470, R1471, R1472, R1474; supports R2052 (I5) and R2066 (the CloudKit rows of I4, I5 and S3)
 Anki: 26.09.3; I5 and the CloudKit rows of I4 and S3 are Meguri design
 Scenarios: conformance/scenarios/storage/ids/, conformance/scenarios/storage/noop/, conformance/scenarios/storage/stamps/
-Status: Under review (R2066) for I5 and the `CloudIncoming` and `CloudRekey` parts of I4 and S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for I5 and the `CloudIncoming` and `CloudRekey` parts of I4 and S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 How a row of `collection.anki2` gets its id when it is created, what a write does to its `usn` and modification time, when a write is skipped because it changes nothing, and how `col.mod` follows changes. Graves are in `graves.md`, the `config` table in `config-table.md`. "Now" is the U21 clock seam's current instant: `now_ms` in epoch milliseconds, `now_s` = `now_ms` divided by 1000, rounded down.
 

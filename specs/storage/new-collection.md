@@ -4,7 +4,7 @@ Spec: storage/new-collection
 Requirements: R161, R913, R596, R1449, R2016
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/new-collection/
-Status: Under review (R2066) for the iCloud bullet of B1, with `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for the iCloud bullet of B1, with `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 What a collection that Meguri creates holds ("Start Empty", R161, and every other path that needs an empty collection), so that it equals, row for row, the collection Anki creates at the same instant in the same time zone, apart from the stock note types' template text and CSS (R908). The file format is `storage/schema-18`; the day-clock values are `sched/day-clock` D11; the stock note types `notetypes/stock-kinds` K2; the deck and preset records `decks/decks` D4 and `decks/deck-presets` P2. "The creation instant" `t` is the clock's current instant when the collection is created: `now_ms` and `now_s` below are taken at `t`.
 

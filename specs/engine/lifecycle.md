@@ -4,7 +4,7 @@ Spec: engine/lifecycle
 Requirements: R171 (core arbitration), R1489 (generation side), R1670 (core side), R1706, R1797 (waits); supports R458, R1659, R2056 (`CloudAdopt`)
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Under review (R2066) for the `CloudAdopt` and CloudKit parts of L4, L5, L6, L9 and L11, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force: L1's transitions to and from `Failed{Corrupt}`, L2's recorded corrupt verdict and the Check Database parts of L4 and L5 were updated for `maintenance/optimize-integrity#M7.2` (U132, U128) and are in force; the rest is unchanged.
+Status: Approved 2026-10-27 (R2066) for the `CloudAdopt` and CloudKit parts of L4, L5, L6, L9 and L11, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force: L1's transitions to and from `Failed{Corrupt}`, L2's recorded corrupt verdict and the Check Database parts of L4 and L5 were updated for `maintenance/optimize-integrity#M7.2` (U132, U128) and are in force; the rest is unchanged.
 
 The states of the collection the engine holds (C7), the generation that keys every handle, which ops the executor admits in which state, the long-operation slot, the availability wait the local servers use, the exclusive phase, and the generation change after a collection swap. Ops are `engine/op-model`; jobs are `engine/jobs`.
 
