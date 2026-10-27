@@ -106,6 +106,7 @@ maintenance records, not collection or sync fields:
 | `lastCheckDatabase` | object with `instant` (signed 64-bit epoch milliseconds) and `result` as defined below |
 | `lastOptimize` | signed 64-bit epoch milliseconds; keep the existing scalar representation |
 | `lastQuickCheck` | object with `instant` (signed 64-bit epoch milliseconds) and `passed` (JSON boolean) |
+| `optimizerLog` | the object of `sched/optimizer#O14` (`lastRun`, `presets`); written only by U47 at a run's end, and removed when malformed only by Check Database's repair (below) |
 
 `lastCheckDatabase.result` reuses the machine summary in
 `conformance/collection-check#K5`: either every documented problem kind with an
@@ -120,6 +121,16 @@ number outside its declared integer range is an error, never absence or a
 successful default. An unreadable document or invalid existing R6 state stays
 an error. Reads do not repair it, and a setter must not replace corrupt data
 with a new record. Maintenance accessors cannot initialize or reset R6 identity.
+
+Decided 2026-10-27: the one exception is the explicit accessor
+`replace_malformed_device_record(key, value)`, which only Check Database calls
+(`maintenance/check-database` C14). Under the same lock and durable
+read/modify/write, it replaces the record at one `deviceState` maintenance key
+(this table's, or another maintenance record C14 lists) with `value`, or removes it when `value` is none, only when the stored record is
+present and malformed; for a valid or absent record it changes nothing and
+reports that. It never touches R6 identity, publication or intent state, and
+keeps unknown members elsewhere. The ordinary setters keep refusing to replace a
+malformed record.
 
 Use the existing sidecar lock and durable read/modify/write seam, with no nested
 accessor calls. Merge only the supplied known fields. Preserve unknown members

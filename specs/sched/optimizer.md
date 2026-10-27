@@ -57,7 +57,7 @@ Meguri has no optimizer UI (R691) and runs one automatic all-preset path. It fol
 
   The white-space row holds because the search parser turns every such character into U+0020 before it parses, inside quotes too (`search/grammar#G1`), so the value no longer equals the stored name. When the name with U+0020 in those places is another preset's name, Anki finds that preset's cards instead (the unicase row). Training a preset on its own cards is the purpose of the default search, and a name never changes which cards a preset schedules. For every other name the sets are equal. The all-preset column is read from Anki's search writer and parser; scenario `sched/optimizer/preset-names` (O17) confirms it on the oracle. The count of `sched/memory-state#M5` already counts such a preset's cards (`sched/memory-state#M10`).
 - Decided 2026-10-27: white space alone in `param_search` means the default set, as in Anki's all-preset path. Anki's one-preset path trains on the whole collection's review log instead, rows of cards that no longer exist included (O1); Meguri never reads those rows (above, O16). The M5 count reads it as a search (`sched/memory-state#M5`); the two features stay as Anki has them.
-- `sched/fsrs-items#I7`'s card-set bullet, which still states the `preset:` search text, is superseded by this section until its owner updates it (O18).
+- `sched/fsrs-items#I7`'s card-set bullet states this section's default set (O18 item 2, made).
 
 ## O3. Presets a run skips
 
@@ -261,6 +261,7 @@ Policy tests (U113's table and property tests, optimizer cases): session end on 
 
 - **One after the other.** Device B's gate fetch brings A's commit (preset rows, `lastFsrsOptimize`, cards). Those `CloudIncoming` writes touch O8's tables after B's `S`, so B's commit abandons with `inputChanged`, and B's cadence is then not due. B never adopts from a history older than A's.
 - **At the same time.** A fetch is not a lock: both may pass their gates and send. The CloudKit merge then decides (`sync/cloudkit-records#K15`): a preset's `config` changed on both sides takes the later version and keeps a conflict copy of the other (K15.7); `lastFsrsOptimize` holds the same day on both sides; cards follow the card rule, so a card's memory state may come from the other device's parameters until its next answer or the next refresh. Every list kept is one a device adopted from the same history, so no data is lost and scheduling stays valid. This is KTD8's accepted race.
+- Decided 2026-10-27 (data safety): a preset `config` conflict between two optimizer writes that differ only in `fsrs_params_6` keeps `sync/cloudkit-records#K15.7`'s conflict copy; nothing is dropped as a duplicate, and K15.7 is unchanged. So the accepted race may list one preset conflict per such preset in Review Conflicts (`sync/cloudkit-recovery#V17`).
 - U248's soak runs this race with two devices due on the same day (CloudKit fake and the signed lane) and checks that the collections converge.
 
 ## O14. Diagnostics (R701, R1468)
@@ -335,7 +336,7 @@ Decided 2026-10-27:
 - The `engine/op-model` O9 catalog row this file needs (O9): `optimizer_commit`, source `Optimizer`, not destructive, not undoable, long write, write cancellable between batches.
 - The deviation ids proposed for `conformance/deviations.yaml` (O16): `optimizer-preset-by-id`, `optimizer-blank-search-default`, `optimizer-min-items`, `optimizer-unadopted-unwritten`, `optimizer-relearning-steps-in-day`, `optimizer-invalid-cutoff-skips`, `optimizer-not-undoable`. U47's spec-writer pass adds them with the scenarios of O17, whose goldens they explain.
 
-Corrections other specs need (each owner makes them; until then this file decides):
+Corrections other specs need (each owner makes them; until then this file decides). Made 2026-10-27: items 1 to 5, in `sched/review-session#C2` step 0, `sched/fsrs-items#I7`, `engine/collection-replace#R6.1`, `maintenance/check-database` C14, and `sync/policy#P3`, `#P4`, `#P5`, `#P10.1` and `#P18`; the `engine/op-model#O9` row above is made too. The items stay listed as the record of what changed:
 
 1. `sched/review-session#C2` (required): a new step before step 1, "On submission, before the start is queued for the writer: request cancellation of a running optimizer commit op without waiting (`sched/optimizer#O10`). It fires for every submitted start, also one that admission then refuses." Step 2's hook keeps its meaning (training cancel, `AwaitingGate` mark).
 2. `sched/fsrs-items#I7` card-set bullet: "the cards of `sched/optimizer#O2`'s default set (by preset id, not suspended), or the cards U80 finds for the preset's `param_search` when it is not empty after trimming white space". O2 supersedes the bullet until then.

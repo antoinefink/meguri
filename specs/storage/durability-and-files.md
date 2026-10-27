@@ -23,6 +23,8 @@ An automatic WAL-sync failure publishes `DurabilityStatus::Failed { through, err
 
 All four known members must be present with their declared types for a record to count as valid. A valid last_mod/last_scm pair of zero is compared normally; absence is tracked separately from timestamp values.
 
+The `deviceState` records of `engine/collection-replace#R6.1` share this file, its lock and its durable read, modify and write. Their ordinary setters never replace a malformed record; the only accessor that does is R6.1's `replace_malformed_device_record`, which only Check Database calls (`maintenance/check-database` C14).
+
 External changes while connections are open use `PRAGMA data_version` on the writer (which excludes its own commits), checked inside BEGIN IMMEDIATE before each write, and on resume. Suspension closes SQLite connections, so data_version tokens cannot span it: resume additionally compares the saved file identity, size, mtime/ctime and WAL state, and the sidecar mod/scm. This catches edits even when their client leaves mod/scm unchanged. The reopen establishes a fresh data-version baseline.
 
 ## F4. Atomic files

@@ -91,7 +91,7 @@ Heavy ops compute on a reader snapshot, off the writer, and then commit in one s
 - A snapshot is a read transaction on one reader (`engine/lifecycle` L11) together with the seq of the last commit it sees. The commit lock makes that seq exact: the writer holds it from `COMMIT` until the op's seq is assigned, and a snapshot is begun (its first read made) while holding it.
 - Planning is cancellable and reports progress in the `Planning` phase. It produces the planned writes and the preconditions (O7) that make them safe.
 - The write phase is submitted as an ordinary op. Ops without a declared write (O8) aim at a write phase of at most about 200 ms, so answers stay durable within 1 s (R2006).
-- On a `Stale` precondition the op is planned again on a new snapshot, at most 3 more times; after that the result is `Stale`.
+- On a `Stale` precondition the op is planned again on a new snapshot, at most 3 more times; after that the result is `Stale`. Exception: the optimizer commit (`optimizer_commit`) is never planned again. A `Stale` precondition ends its job `Abandoned{inputChanged}` with nothing written (`sched/optimizer#O8`, `#O9`), since its training read the old state.
 
 ## O7. The write-phase rule
 
@@ -134,6 +134,8 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 | `memory_recompute` (`sched/memory-state` M4) | U46 | undoable | yes | yes |
 | `enable_fsrs` (`sched/fsrs-policy` E1-E4) | U50 | not destructive, not undoable | yes | yes |
 | `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |
+| `check_media_fix` (`maintenance/check-media`) | U130 | not destructive | yes (above 1,000 notes) | no |
+| `optimizer_commit` (`sched/optimizer#O9`) | U47 | not destructive, not undoable | yes | yes |
 | `undo` (`engine/undo` M4) | U25 | undoable | no | |
 | `redo` (`engine/undo` M5) | U25 | undoable | no | |
 | `undo_long_write`, `redo_long_write` (undo and redo of a step whose op declared a long write) | U25 | undoable | yes | no |
