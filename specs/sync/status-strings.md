@@ -517,6 +517,22 @@ Shown in one line in the sheet or row that made the call. The call's state is as
 - The rows `stagingInvalid`, `backupFailed` and `replaceFailed` say the collection is unchanged because V14.2 step 5 and V14.3 make it so: each ends the op before the R5 rename, and V14.3's first `ready` row restores the binding before. Each is shown with `sync.recovery.tryAgain` (V14.3). `InsufficientSpace` of an adoption gets its own row above, also with Try Again.
 - The calls of V26.2 show every row with `sync.recovery.tryAgain` except `NotOffered`, `ConflictNotFound`, `RecoveryInvalid` and `Cancelled`, where trying again cannot help.
 
+### T13.7 An adoption that did not finish (V14.2, V14.3)
+
+| Key | English | Use |
+|---|---|---|
+| `sync.attention.adoptWaiting` | Replacing this collection with the iCloud collection was not finished. | followed by `sync.cancelOp.adopt.message` (T13.5), with `sync.recovery.tryAgain`: in the V14 sheets (screen contracts `sync.replaceLocal` and `sync.connect`, cases d and an adoption chosen in e) after `StagingRefused`, `StagingCorrupt`, `SafetyBackupFailed`, `LiveWalNotEmpty`, `StagingNotFinalised` or `Io` |
+
+- Decided 2026-10-27: the key keeps the name the screen contracts give it, but it is not a T9 row: an `adopt` op never waits after these errors (T9.1, V14.3). Where a screen contract names this line, it stands in place of the error's T13.6 row (`stagingInvalid`, `backupFailed`, `replaceFailed`); both say that this device's collection is unchanged, which V14.2 step 5 and V14.3 make true. With no collection on this device (V13.3 case b) the line is `sync.error.cloudError` instead, since there is no collection to keep.
+
+### T13.8 Where the Review Conflicts keys appear (V17)
+
+Decided 2026-10-27, so that the screen contract `sync.reviewConflicts` and T13.4 give one answer; this section adds no key and changes none (T1):
+
+- `sync.conflicts.restored` is shown, as T13.4 says: the toast after a Restore, with the system Undo for that one undoable step (R173). The contract's "no Restore toast" note gave a missing text as its reason, and T13.4 has the text. The comparison still refreshes and the copy stays unresolved, as the contract says.
+- `sync.conflicts.different` appears only where the comparison lists every saved part: for `missing_notetype`, `structure_rollback` and `unmapped_structure`, on each part whose two versions differ. Where the page lists only the parts that differ, every part differs, so no part has the marker. When the object is gone, the current side reads `sync.conflicts.deleted` and no part has the marker.
+- The list's sections are headed by their kind's `sync.kind.*` count (T11.3), as the contract says. Inside a section, each group's header has the object label as its primary text and the `sync.conflicts.kind.*` noun as its secondary text, as T13.4 says, so a header read alone (VoiceOver's headings rotor) still names the kind.
+
 ## T14. Account & Sync (R117, R122, R123, R2046, R2058, R2059; `sync/cloudkit-recovery#V16`)
 
 | Key | English | Use |

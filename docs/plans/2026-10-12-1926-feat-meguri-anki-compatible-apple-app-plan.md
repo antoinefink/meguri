@@ -195,7 +195,7 @@ flowchart TB
 
 **Deck page (overview) and deck description**
 - R70. The deck page shows the full deck path as a breadcrumb title, the deck's description, the New / Learning / To Review counts, a prominent Study button, a Deck Options button, the deck-scoped heatmap with its four streak stats, and links to Browse and Stats for the deck.
-- R71. When the scheduler's queue counts differ from the tree counts because of burying, each affected count shows a dimmed "+N" with an explanation tooltip or popover.
+- R71. When a deck list count differs from the deck page's queue count, that count shows the signed difference, deck list count minus queue count ("+N" or "−N"), dimmed, with an explanation tooltip or popover (`specs/sched/counts.md` C5, as R1345; corrected 2026-10-27).
 - R72. An Unbury button appears only when the deck subtree has buried cards; when both manually buried and sibling-buried cards exist it offers "Manually buried cards", "Buried siblings" and "All buried cards".
 - R73. The Study button is the default action: Return or Space on Mac/iPad keyboards, and a tap anywhere on the button.
 - R74. In the sidebar layout, a single click on a deck (sidebar or Home table) opens its deck page; a double-click, Return on a selected deck, or the S key starts its review directly.
@@ -452,7 +452,7 @@ flowchart TB
 **Menu bar commands (Mac, and the iPadOS menu bar)**
 - R278. The same command set is exposed in the Mac menu bar and the iPadOS menu bar, with items enabled only when they apply to the current context.
 - R279. Meguri menu: About Meguri, Settings… (⌘,), Services, Hide/Hide Others/Show All, Quit (⌘Q).
-- R280. File menu: New Note (⌘N), New Deck… (⌥⌘N), Import… (⇧⌘I), Export… (⌘E), Export Deck… (for the selected deck), Sync (⇧⌘Y), Back Up Now, Restore from Backup…, Close (⌘W).
+- R280. File menu: New Note (⌘N), New Deck… (⌥⌘N), Import… (⇧⌘I), Export… (⌘E), Export Deck… (for the selected deck), Sync Now (⇧⌘Y; `sync.now.command`, `docs/design/native-interface-contract.md` N11.8, corrected 2026-10-27), Back Up Now, Restore from Backup…, Close (⌘W).
 - R281. Edit menu: Undo <op>, Redo <op>, Cut, Copy, Paste, Paste and Match Style, Delete, Select All, Find (⌘F), Find and Replace… (Browse), plus the system Emoji & Symbols and Dictation items.
 - R282. View menu: Show/Hide Sidebar, Home (D), Browse (B), Stats (T), Note Types (⇧⌘N), Zoom In / Zoom Out / Actual Size (card zoom), Enter Full Screen.
 - R283. Deck menu: Study (S/Return), Go to Deck… (⇧⌘O), Deck Options… (⌥⌘O), Rename… (⇧⌘R), Description…, New Subdeck…, Unbury, Export Deck…, Delete Deck… (⌘⌫), Collapse All / Expand All.
@@ -899,7 +899,7 @@ flowchart TB
 **Counts and progress**
 
 - R624. Deck list counts follow Anki: New = new cards, Learn = intraday learning due within the learn-ahead window plus interday learning due today, Due = reviews due today; children are summed into parents and then capped by each node's remaining limits (interday learning capped by the review limit first, reviews get the remainder, new capped by the new limit and, unless ignored, by the remaining review limit), and intraday learning is never capped.
-- R625. Deck list counts do not subtract siblings that would be skipped by burying, while the deck page counts come from the real queue; the deck page shows the difference as a grey "+N" note when they differ.
+- R625. Deck list counts do not subtract siblings that would be skipped by burying, while the deck page counts come from the real queue; the deck page shows the signed difference, deck list count minus queue count, as a grey "+N" or "−N" note when they differ; it can be negative for Learn (`specs/sched/counts.md` C5; corrected 2026-10-27).
 - R626. Learning counts count cards, not remaining steps.
 - R627. The review screen's progress bar is fed by queue counts (new + learning + review remaining, plus cards answered this session) and only moves backward when an undo returns a card or when cards re-enter the queue (deviation: Anki shows remaining counts instead of a bar).
 - R628. When a deck has nothing left to study, Meguri shows a finished state that says when the next learning card is due (if today), notes when today's review or new limit was reached while cards remain, and offers Unbury when buried cards exist (deviation: no Custom Study link, because custom study is out of scope).
@@ -1110,7 +1110,7 @@ flowchart TB
 **Platform adaptations**
 
 - R766. On iPhone, tapping a deck starts review at once; if nothing is due, the finished state (R628) appears instead.
-- R767. On Mac and iPad, the deck page shows New/Learn/Due counts from the real queue (with the buried "+N" difference) and its Study button; double-click or Return starts review.
+- R767. On Mac and iPad, the deck page shows New/Learn/Due counts from the real queue (with the signed "+N"/"−N" difference from the deck list counts, `specs/sched/counts.md` C5; corrected 2026-10-27) and its Study button; double-click or Return starts review.
 - R768. Scheduling operations available from the review ⋯ menu (bury card/note, suspend card/note, set due date, reset, flag, undo/redo) are also available from the browser and as keyboard shortcuts on Mac/iPad (`-`/`=` bury card/note, `@`/`!` suspend card/note, ⇧⌘D set due date, ⌥⌘N reset).
 
 #### Notes, editor, note types and templates
@@ -1911,7 +1911,7 @@ flowchart TB
 
 **Deck page stats (Mac and iPad sidebar deck page; iPhone deck Overview)**
 - R1344. The deck page shows New, Learning and To Review counts for the deck and its subdecks in Anki's colours, using the scheduler's queue counts.
-- R1345. When the deck tree count differs from the queue count because of buried cards, the page shows Anki's "+N" badge with an explanation on hover or tap.
+- R1345. When a deck list count differs from the deck page's queue count, the page shows beside that count the signed difference, deck list count minus queue count ("+N" or "−N"), with an explanation on hover or tap. It is positive when the queue build skips siblings or a subdeck limits more strictly, and can be negative for Learn; cards already buried are in neither count (`specs/sched/counts.md` C3, C5; corrected 2026-10-27).
 - R1346. The deck page shows a deck-scoped heatmap with its four streak stats, using the same component, rules and interactions as Home with deck scope (R1282, R1284).
 - R1347. The deck page has a Stats action that opens the Stats screen scoped to that deck.
 - R1348. On iPhone, where tapping a deck starts review, the same deck page is reachable from the deck's ⋯ menu → Overview.
@@ -8207,7 +8207,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 3. Request API: (scope as `Deck(id) | Collection | Search(text)`, history, requested graph set, cancel token) → results for the requested graphs; the typed deck scope keeps the id fast path. The resolved scope (bitsets and filtered row ranges) is memoized per (scope, history, generation, change seq), so the UI asks for above-the-fold graphs first and the rest right after, without repeating work (R1838). Range options needing all history are returned only with all history (R1367).
    - Conflict call-out (R1355, R1838, R1289): R1355 asks for one core call per scope or history change, while R1838 computes below-the-fold graphs only when scrolled into view. The plan makes two memoized calls per change (above the fold, then the rest as soon as the first returns), reads R1355's intent as "controls never call the core", which still holds, and reads R1838's laziness as Swift binning and rendering of below-fold cards (stats-ui coverage note). R1289's "lazy" is read as "never on the launch path": the idle-time background build in step 1 satisfies it.
 4. Aggregates (decision): per graph, the core returns finest-resolution aggregates: sparse value→count maps at unit resolution with no widening (1 day for interval, stability, Added and Future Due; 1% for difficulty and retrievability), with each entry's day offset or value. Review graphs' day series are bounded by the history window; card graphs' day series span their own domain (oldest card to today for Added, earliest overdue day to the last due day for Future Due). A graph record may also carry what cannot be derived from those maps: per-graph scalar table inputs (average retrievability, the card and note knowledge sums of R1403, daily load, due tomorrow, distinct notes), the retention row set, the per-range Hourly and Answer Buttons buckets (U99), and fixed-item query strings. No per-card or per-revlog value crosses the FFI. U226's `StatsBinning` owns Anki's bin edges, quantile ranges from cumulative histograms and every control variant (R1293, R1362, R1355, R1290).
-5. Browse queries (R1417, R1420): fixed clickable items (Card Counts labels, Calendar cells) carry their item query from the graph spec (`queries.rs`); histogram bar queries are U226's, built from its bins. Exactly one layer joins scope and item: U225's `StatsBrowseLink`, through U88's builder and `join`, with the deck scope in R1351's `deck:"<name>"` form and its wildcards escaped. `specs/stats/browse-queries.md` (this unit's spec writer) states the fixed-item queries and the join rule. Every generated string is parsed by U80 in tests.
+5. Browse queries (R1417, R1420): fixed clickable items (Card Counts labels, Calendar cells) carry their item query from the graph spec (`queries.rs`); histogram bar queries are U226's, built from its bins. Exactly one layer joins scope and item: U225's `StatsBrowseLink`, in Swift, by `specs/stats/browse-queries.md` Q2 (scope text) and Q3 (join), not through U88's builder or `join`, and without canonical form (corrected 2026-10-27). `specs/stats/browse-queries.md` (this unit's spec writer) states the fixed-item queries and the join rule. Every generated string is parsed by U80 in tests.
 
 **Execution note:** Spec writer first. The oracle-maintainer extends the stats op. The implementer then works test-first. Binning and bar-query goldens are U226's (`oracle/graphs-page/`).
 
@@ -12310,10 +12310,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriSnapshotTests/Editor/AddScreenSnapshotTests.swift`
 
 **Approach:**
+- **Screen contract (corrected 2026-10-27).** `editor.add` in `docs/design/screen-inventory.yaml` is the authority for this screen's layout, text, states, keyboard and VoiceOver, with `specs/notes/add-defaults.md` D1–D6 for defaults and drafts; where a bullet below differs, they win.
 - **Presentation (R796).**
-  - Mac: an in-window trailing panel.
-  - iPad: a sheet.
-  - iPhone: a full-screen sheet.
+  - Mac: a resizable in-window trailing panel, never a separate window.
+  - iPad: a page sheet.
+  - iPhone: a sheet at full height (large detent), so the swipe-down reaches the close prompt (`editor.add`; corrected 2026-10-27).
   - `AddPresenter` sits in AppNavigation so the draft survives layout switches (R5). Entry points are owned by their screens and call `AddEntryPoints`; the Home and deck-page toolbar "+" (U152, U155) emit AppNavigation add intents that this unit attaches. The others: Browse (U210), review ⋯ (U175), the A key (U158 catalog), AnkiConnect `guiAddCards` (U146).
 - **Choosers (R797).** Searchable lists. The deck list comes from the U28 deck snapshot: filtered decks excluded, Default hidden when it is empty and has no children. ⌘N and ⌘D open them (R246).
 - **Defaults.**
@@ -12327,20 +12328,20 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - After an add: sticky fields keep their values, the others clear, tags carry over, focus returns to field 0.
 - **Live check (R807, R812).**
   - Runs 600 ms after a change and on blur, with the session's current values, via U191.
-  - Duplicate: marks the first field and shows "Show Duplicates", which opens Browse with the canonical `dupe:<ntid>,<text>` search built by U80 (R1114 entry owned by U210).
-  - Cloze problems: show non-blocking hints.
+  - Duplicate: marks the first field and shows "Show Duplicates", which opens Browse with the `dupe:` search built by `specs/search/join-and-replace.md` J3, or `nid:` with the found notes when J3.4 refuses the text (R1114 entry owned by U210; corrected 2026-10-27).
+  - Cloze problems: show non-blocking lines under the fields; a blank draft shows no line (`editor.add`; corrected 2026-10-27).
 - **Add (⌘↩, R813, R245).**
   - Flush the session.
-  - Re-run the check. Refuse with an explanation for an empty first field (R809) or cloze misuse (R810). For a missing cloze, confirm (R811). Duplicates never block (R808).
+  - Re-run the check. Refuse for an empty first field (R809) or cloze misuse (R810) with the state's line in place, no alert (`editor.add`; corrected 2026-10-27). For a missing cloze, confirm (R811). Duplicates never block (R808).
   - Call U27's add op with `updateAddDefaults: true`. It is one undo step named "Add Note" (R814, R801).
-  - Toast (DesignSystem): plural-aware "N cards added".
+  - Toast: "1 card added" or "N cards added", with Undo (`editor.add`; corrected 2026-10-27).
 - **History (R815, ⇧⌘H).** Kept in memory since launch, newest first. Each row has the first 30 characters of the first field as a text line (U20 helper). Rows open Browse with `nid:<id>`. Rows whose note was deleted (change-stream note removals, or an existence query when shown) are disabled as "(Note deleted)".
-- **Close (R816, R259).** Esc, ⌘W, the close button and the iPhone swipe-down all go through `AddCloseGuard`. Unsaved means: any non-sticky field non-empty ignoring whitespace and `<br>`, or a sticky field changed since the last add. Tags are ignored. If unsaved, it asks "Discard current input?" (Discard / Keep Editing); iPhone uses `interactiveDismissDisabled` plus a confirmation.
+- **Close (R816, R259).** Esc, ⌘W, the close button and the iPhone swipe-down all go through `AddCloseGuard`. Unsaved means the draft is not unchanged since the last add (`specs/notes/add-defaults.md` D4: before the first add, after a type change and after Create Copy or a prefilled draft, only a blank draft is unchanged). Tags are ignored (corrected 2026-10-27). If unsaved, it asks "Discard current input?" (Discard / Keep Editing); iPhone uses `interactiveDismissDisabled` plus a confirmation.
 - **Exclusive phase (KTD17).** The same guard runs before the panel closes. Add is disabled with "Waiting for <op>".
 - **Create Copy (R817).** Opens with the note's type, fields and tags and the card's deck (its home deck when the card is in a filtered deck, since filtered decks are not offered).
 - **Image occlusion types.** When the chosen type is image occlusion, the field area hands over to U206.
 
-**Patterns to follow:** KTD10 AppNavigation ownership; U190 session and flush contract; DesignSystem sheet/panel and toast components.
+**Patterns to follow:** KTD10 AppNavigation ownership; U190 session and flush contract; system sheet and panel presentation and the `toast` reference pattern, as `editor.add` uses them (corrected 2026-10-27).
 
 **Test scenarios:**
 - Covers AE35. Sentence is sticky and tags are `german::verb`. Add → Sentence keeps its text, other fields are empty, tags are unchanged, and closing at once does not prompt. Type into a non-sticky field and close → "Discard current input?".
@@ -12783,12 +12784,13 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriUITests/Browse/BrowseEntryUITests.swift`, `app/MeguriUITests/Browse/BrowsePerformanceTests.swift` (created here; later units add cases)
 
 **Approach:**
+- Screen contract (corrected 2026-10-27): `browse.browser` in `docs/design/screen-inventory.yaml` is the authority for this screen's layout, text, states, keyboard and VoiceOver; where a bullet below differs, the contract wins.
 - `BrowseModel` is `@Observable @MainActor`, created once by the app store (U151) and kept above the layout branch (KTD10) so Mac/iPad ↔ compact switches keep search, selection and scroll (R1233). Views never call the core in `body` (R1859).
 - This unit attaches the Browse intents that earlier units emit through AppNavigation, including the session summary's "Browse missed cards" `cid:` search (U157).
 - Query pipeline, in order: text edit → 60 ms debounce (R1106) → cancel the previous run's CancelToken and bump a monotonic request id → core parse/validate (U80, through U88's `canonicalize` export) → on success, U85's `start_search` on its search worker (the query lane stays free for row pages) → apply the result only if its request id is still the latest (R1084). Results arrive from U85: `FirstPage`, then `Complete` with the count (R1826 "stream the rest"). The ordered ids stay in the core handle (U85), and Swift addresses rows by index. The pipeline publishes `resultState` = loading / results(handle, count, phase) / invalid(error, lastValidResults) / empty.
 - Incomplete-term suppression and inline errors are decided by the search-field unit (U214); the pipeline only receives "run", "keep last valid silently" or "show error and dim".
-- Commit (Return, accepted suggestion, sidebar/chip action, external entry) replaces the field with the canonical text from U88's `canonicalize` (U80 rules) and pushes it to `RecentSearchesStore` (R1109): the last 30 committed canonical searches, per device, deduplicated, never synced (R1102).
-- Entry points (R1114): one `open(search:)` API on AppNavigation used by deck menu Browse (R48), summary "Browse missed cards" (R98), heatmap/stats "Show in Browser" (R300, R1418), `meguri://browse?search=` (R319), editor "Show Duplicates" (R807), Migaku `searchNote` (R1733), AnkiConnect GUI browse. The search is canonicalised and run as committed. ⌘F from Home/deck page/review opens Browse with the field focused (R216).
+- Commit (Return, accepted suggestion, sidebar/chip action, external entry other than Stats', corrected 2026-10-27) replaces the field with the canonical text from U88's `canonicalize` (U80 rules) and pushes it to `RecentSearchesStore` (R1109): the last 30 committed canonical searches, per device, deduplicated, never synced (R1102).
+- Entry points (R1114): one `open(search:)` API on AppNavigation used by deck menu Browse (R48), summary "Browse missed cards" (R98), heatmap/stats "Show in Browser" (R300, R1418), `meguri://browse?search=` (R319), editor "Show Duplicates" (R807), Migaku `searchNote` (R1733), AnkiConnect GUI browse. The search is canonicalised and run as committed, except Stats' joined text, which shows exactly as `specs/stats/browse-queries.md` Q3 writes it (`browse.browser`; corrected 2026-10-27). Decided 2026-10-27: Stats' text is still a committed search: the field keeps it as written and "Results changed — Refresh" re-runs that text, while `RecentSearchesStore` records its canonical form from U88's `canonicalize`, so the store holds only canonical text and deduplicates as before. ⌘F from Home/deck page/review opens Browse with the field focused (R216).
 - Default search (R1112): synced `defaultSearchText` if non-empty, else `deck:current` run with an empty field and placeholder. Opening from the reviewer (R1113) passes the card id: run the default search, make the card current and scroll to it when present, else fall back to `cid:<id>`; U212 seeds its selection from the current id.
 - Counts line (R1111) reads from result count plus the selection model's O(1) count (U212).
 - Layout (R1232, R1233): a compact horizontal size class always gives the compact layout (`PhoneBrowseView`, U223; a placeholder compact view until U223 lands). In regular width, Browse decides from the detail column's measured width, because the app sidebar and a Mac Add panel share the window. It collapses the inspector first, then the filter column, and on iPad switches to the compact layout once the table would fall below the minimum table width. That width is an output of U211's spike B1 (`docs/design/decisions/browse-table-backend.md`) and a configurable value until then. The app sidebar stays under the user's control. The Mac keeps the three columns, with collapsed columns, down to its minimum window width (U150).
@@ -13293,7 +13295,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U222. Card Info and Previous Card Info
 
-**Goal:** One shared Card Info view (stats rows, review history, forgetting curve, Copy Debug Info) that follows its card live and never writes, hosted as a Browse inspector tab, from the editor, from the review panel with a Current/Previous switch, and from the summary's missed-card preview.
+**Goal:** One shared Card Info view (stats rows, review history, forgetting curve, Copy Debug Info) that follows its card live and never writes, hosted as a Browse inspector tab, from the editor, from the review sheet (corrected 2026-10-27) with a Current/Previous switch, and from the summary's missed-card preview.
 
 **Requirements:** R1247, R1248, R1249, R1250, R1253, R1254, R1255, R1256, R1257 (display; curve data from core), R1258, R1259, R1260, R1262, R1263, R1264, R272; R1422–R1430 (view, hosting modes and display; data side in U92); R1448 (display side); R1841 (UI side); UI side of R1251, R1252, R1261. Covers AE46 (UI side).
 
@@ -13310,15 +13312,16 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriUITests/CardInfo/CardInfoUITests.swift`
 
 **Approach:**
-- Shared target: `Features/CardInfo` is imported by Browse (U221 inspector tab, U223 phone note detail), Review (U183 panel), the editor (U190 ⋯ menu) and the session summary's missed-card preview, whose Card Info intent (U157) this unit attaches. It is never a separate window (R1422).
+- Screen contract (corrected 2026-10-27): `cardInfo.card` in `docs/design/screen-inventory.yaml` is the authority for this view's layout, text, states, keyboard and VoiceOver, with `specs/stats/card-info.md` for its data; where a bullet below differs, they win.
+- Shared target: `Features/CardInfo` is imported by Browse (U221 inspector tab, U223 phone note detail), Review (U183 sheet; corrected 2026-10-27), the editor (U190 ⋯ menu) and the session summary's missed-card preview, whose Card Info intent (U157) this unit attaches. It is never a separate window (R1422).
 - `CardInfoModel` takes a card id (or "previous card" from the review session) and fetches one U92 snapshot per card through U103's export: the query lane normally, the interactive lane when opened from review, so it opens within 100 ms including 500-entry histories (R1841). The snapshot holds the ordered applicable rows, history entries with optional FSRS stability, curve samples per available range with the default range and desired retention, and the debug JSON. The model never issues a write op (R1252, R1425) and relies on the core to compute display-only memory state (R1251).
 - Display: values that R1448 compares (dates, time spans, percentages, the ease column, times) are shown verbatim from the core; Swift formats none of them. Only labels come from String Catalogs.
 - Stats table (R1248–R1250, R1423, R1424): rows in the core's order; no Ease row ever.
-- History (R1253, R1254, R1426): newest first; Date (with time when width allows), Type colour-coded with state colour tokens, Rating with Again highlighted in the Again token colour, Interval, Ease ("250%" or "D:xx%"), Time; an optional Stability column toggle.
-- Curve (R1255–R1258, R1427, R1428): Swift Charts line with solid past and dashed projection, a today marker and a dashed desired-retention rule; a range picker (First week / First month / First year / All time) showing only the ranges the history supports, defaulting to the longest; a tooltip with date/time, elapsed time, retrievability (2 decimals) and stability; a hide toggle persisted per device.
+- History (R1253, R1254, R1426): newest first; Date (with time when width allows), Type in its state colour, Rating with Again in the Learn colour, Interval, Ease ("250%" or "D:xx%"), Time; a table on Mac and at regular width, two-line rows at compact width; "Show Stability" in the section header's menu, saved on the device (`cardInfo.card`; corrected 2026-10-27).
+- Curve (R1255–R1258, R1427, R1428): Swift Charts line with solid past and dashed projection, a today marker and a dashed desired-retention rule; a segmented range picker (First Week / First Month / First Year / All Time) shown only when more than one range is offered, starting on the last one (`specs/stats/card-info.md` C7.3); a tooltip with date/time, elapsed time, retrievability (2 decimals) and stability; the section is a disclosure, and collapsing it is the hide, persisted per device (`cardInfo.card`; corrected 2026-10-27).
 - Copy Debug Info (R1259, R1430) puts the core's JSON on the pasteboard.
 - Live refresh (R1260, R1429): subscribe to U103's `CardStatsChanged` for the shown card (answer, edit, sync incoming, deck or preset change) and refetch; in Browse follow-current-row mode, switch card when the current row changes.
-- Hosting modes and entry points (R1247, R272, R1422): Browse inspector tab toggled by ⌥⌘I (U221); editor ⋯ menu (U190); review ⋯ menu and key I as a panel or sheet over review (U183); the summary's missed-card preview (U157). Review mode shows a Current / Previous switch (R1263). Previous is the card of the last remaining answer in U175's session record, which drops undone answers; it is disabled before the first answer (R1262) and follows undo (R1264) because the id is refreshed after each answer and undo event.
+- Hosting modes and entry points (R1247, R272, R1422): Browse inspector tab toggled by ⌥⌘I (U221); editor ⋯ menu (U190); review ⋯ menu (Card Info, Previous Card Info; on Mac also I and ⌥⌘I) as a sheet over review (U183): a window sheet with Done on Mac, a form sheet on iPad, a sheet with medium and large detents on iPhone (`cardInfo.card`; corrected 2026-10-27); the summary's missed-card preview (U157). Review mode shows a Current / Previous segmented picker (R1263). Previous is the card of the last remaining answer in U175's session record, which drops undone answers; it is disabled before the first answer (R1262) and follows undo (R1264) because the id is refreshed after each answer and undo event.
 - Accessibility: chart summary plus per-point labels (U226 pattern); identifiers `cardInfo.row.<key>`, `cardInfo.history`, `cardInfo.curve.range`, `cardInfo.copyDebug`, `cardInfo.switch`.
 
 **Patterns to follow:** Stats chart styling, accessibility and colour tokens from U226 and DesignSystem.
@@ -13328,7 +13331,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Review card in a filtered deck → Deck reads "Filtered (Home)", Due shows the original due (values from the core).
 - Covers AE46 (UI side). Opening Card Info on a card without stored last-review time and memory state → retrievability and memory state displayed, and the fake core records zero write ops; with the live core (test hook) the card row (data, mtime, usn) and `col.mod` are byte-identical afterwards.
 - History with an Again entry → Again highlighted; an FSRS entry shows "D:42%", an SM-2-era entry "250%".
-- History of 10 days → only First week offered and selected; 400 days → all four, All time selected.
+- The rows of `specs/stats/card-info.md` C7.3's table: one learning answer 1 h ago → only First Week, so no range picker shows; the first and only answer 10 days ago, interval 1 day → First Week and First Month, First Month selected; first answer 400 days ago → all four, All Time selected (corrected 2026-10-27).
 - Hiding the curve persists across relaunch on the device and is absent from the collection.
 - Card with 500 revlog rows → opens within 100 ms (`cardInfo.open` signpost, U237) and the history scrolls without hitches.
 - Answering the shown card in another screen → Card Info updates without reopening.
@@ -13390,7 +13393,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 ### U225. Stats screen shell: entry, scope, history, layout and live refresh
 
-**Goal:** Deliver the Stats screen frame (sticky scope/history header, responsive card grid, data loading, persistence, live refresh and the click-to-browse round trip) that every graph card plugs into.
+**Goal:** Deliver the Stats screen frame (scope and history header in the window toolbar, responsive grid of graph boxes (corrected 2026-10-27), data loading, persistence, live refresh and the click-to-browse round trip) that every graph card plugs into.
 
 **Requirements:** R1349–R1356, R1357 (order), R1358 (card chrome), R1359, R1360, R1361, R1366 (persistence), R1368, R1417, R1419, R1420 (routing side), R1291, R1295, R1294 (refresh on open); AE53 (Stats side), AE59 (history side).
 
@@ -13413,17 +13416,18 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriUITests/Stats/StatsScopeFlowTests.swift`
 
 **Approach:**
+- Screen contract (corrected 2026-10-27): `stats.overview` in `docs/design/screen-inventory.yaml` and `docs/design/native-interface-contract.md` N11.7 are the authority for this screen's layout, text, states, keyboard and VoiceOver; where a bullet below differs, they win.
 - `StatsScreenModel` (@Observable @MainActor) is owned by `AppNavigation`'s Stats section state (KTD10), not by the view, so a trip to the Browser and back restores scope, controls, scroll position and selection unchanged (R1419). It holds: scope (Deck id / Collection / Search text), history (12 months / all), per-graph control state, the last `GraphsData` per scope key, load state, and the scope error.
-- Each scope or history change makes two `statsGraphs` calls on the query lane (U98 contract and its R1355/R1838 call-out): the above-the-fold set first, then the rest as soon as the first returns, not on scroll. Below-fold cards still bin and render only when scrolled into view (R1838). Both calls are memoized by U98's scope key and return finest-resolution aggregates; per-graph controls never call the core (R1355, R1290). A superseded request is cancelled through its `CancelToken` (KTD9). The scope goes to the core typed: `Deck(id)`, `Collection`, or `Search(text)` with the typed text run on Return or focus loss (R1351); a scope error from the search engine shows inline under the field and the previous graphs stay (R1351).
+- Each scope or history change makes two `statsGraphs` calls on the query lane (U98 contract and its R1355/R1838 call-out): the above-the-fold set first, then the rest as soon as the first returns, not on scroll. Below-fold cards still bin and render only when scrolled into view (R1838). Both calls are memoized by U98's scope key and return finest-resolution aggregates; per-graph controls never call the core (R1355, R1290). A superseded request is cancelled through its `CancelToken` (KTD9). The scope goes to the core typed: `Deck(id)`, `Collection`, or `Search(text)` with the typed text run on Return or focus loss (R1351); a scope error from the search engine shows in one line at the top of the content (under the search field at compact width) and the previous graphs stay (R1351; `stats.overview`, corrected 2026-10-27).
 - The screen opens instantly on the last result for that scope (or size-stable placeholders) and swaps fresh data without layout jumps (R1291); every open triggers a refresh because retrievability is time-dependent (R1294).
 - Live refresh: driven by U103's `StatsChanged{graphsStale}`, `RolledOver` and `CollectionReplaced` (U24, U40), so note, tag and deck-move changes that alter Search or Deck scope membership refresh too; the screen keeps no row filter of its own. While visible, refresh in place debounced (~500 ms) keeping every control and the scroll position (R1356); while hidden, mark stale and refresh on appear. On `CollectionReplaced` the cache is dropped by generation.
-- Header: sticky top bar with a segmented scope control, a deck picker listing every deck including filtered decks (deck list from U151), a search field, and the history segmented control. Choosing a deck never sets the current deck (R1353). Last scope/deck/search/history persist per device in app-private preferences (KTD12) and are restored, except when opened from a deck, which forces that deck's scope (R1354). Graph cards render in Anki's order without Card Ease (R1357, R1360).
+- Header, in the window toolbar, which stays in place while the graphs scroll (N11.7; corrected 2026-10-27): at regular width the segmented scope picker, then the deck pop-up button listing every deck including filtered decks (deck list from U151) or the search field, then the segmented history picker; at compact width, or when they do not fit, the title "Statistics" with the scope and history as its subtitle and one toolbar menu holding the same choices. Choosing a deck never sets the current deck (R1353). Last scope/deck/search/history persist per device in app-private preferences (KTD12) and are restored, except when opened from a deck, which forces that deck's scope (R1354). Graph cards render in Anki's order without Card Ease (R1357, R1360).
 - `StatsCardGrid`: a lazy grid whose column count is a pure function of container width (3 wide Mac, 2 medium/iPad landscape, 1 iPhone/narrow, R1359); cards below the fold are not rendered until scrolled into view (R1838 interpretation, see coverage note).
-- `ChartCard` chrome: Anki title and subtitle (String Catalog), one control row, chart slot, key/value table slot, centred "No data" overlay when the card reports empty (R1358, R1361), DesignSystem motion tokens with Reduce Motion alternates (R1368, KTD20).
-- Routes: `StatsRoute(scope:)` is registered with U150 for the sidebar Stats section, the iPhone Stats tab, the deck page/deck ⋯ menu (deck-scoped) and the `T` key on Home/deck pages (R1349). `StatsBrowseLink` is the one place that joins scope and item (rule in U98's `browse-queries.md`): it writes the deck scope with U88's builder in R1351's `deck:"<name>"` form, wildcards escaped, joins with U88's `join` (`(<scope>) AND <item>`, nothing added for Collection) and calls the U150 `openBrowser(search:)` route (R1417, R1420).
+- `ChartCard` is a system group box: Anki title and subtitle (String Catalog), one control row, chart slot, key/value table slot, and the graph's empty state when the card reports empty (R1358, R1361; `stats/graph-presentation` P16.5). No custom background, corner radius, shadow or motion tokens; system animations, which Reduce Motion already shortens (R1368; N11.7, corrected 2026-10-27).
+- Routes: `StatsRoute(scope:)` is registered with U150 for the sidebar Stats section, the iPhone Stats tab, the deck page/deck ⋯ menu (deck-scoped) and the `T` key on Home/deck pages (R1349). `StatsBrowseLink` is the one place that joins scope and item: in Swift it writes the scope text by `specs/stats/browse-queries.md` Q2 (`deck:"<name>"` with Q2.2's escapes, `deck:"Current"`/`deck:"Filtered"`, or the `did:` id list for names Q2.2 lists) and joins by Q3 (`(<scope>) AND <item>`, nothing added for Collection). The joined text is not put in canonical form and does not go through U88's builder or `join`; it then calls the U150 `openBrowser(search:)` route (R1417, R1420; corrected 2026-10-27).
 - Viewing never writes; only explicit synced graph preferences (U230) write config (R1295).
 
-**Patterns to follow:** KTD9 lanes and paged snapshots; KTD10 navigation model above the layout branch; KTD20 tokens and lint; accessibility identifiers `stats.scope.deck`, `stats.scope.collection`, `stats.scope.search`, `stats.history.all` (R1445); previews for empty/typical/overflow/error/loading.
+**Patterns to follow:** KTD9 lanes and paged snapshots; KTD10 navigation model above the layout branch; KTD20 colour tokens and lint (no motion tokens, N11.7; corrected 2026-10-27); accessibility identifiers `stats.scope.deck`, `stats.scope.collection`, `stats.scope.search`, `stats.history.all` (R1445); previews for empty/typical/overflow/error/loading.
 
 **Test scenarios:**
 - Scope Deck "Japanese" → core receives `Deck(id)`; Collection → `Collection`; Search `tag:verbs is:review` submitted on Return → core receives that text.
