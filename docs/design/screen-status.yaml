@@ -1530,3 +1530,6 @@ screens:
   sync.reviewConflicts:
     status: sketch
     fix_rounds: 0
+  sync.quitFlush:
+    status: sketch
+    fix_rounds: 0

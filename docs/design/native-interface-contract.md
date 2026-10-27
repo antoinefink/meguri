@@ -185,7 +185,7 @@ Decided 2026-10-27:
 
 - Every platform uses N3's quiet corners. There is no top bar with its own background, no title and no remaining counts.
 - Upper left, the exit. Sidebar layout (Mac, iPad and unfolded iPhone at regular width): a labelled "Back to Decks" button with the `chevron.backward` symbol. Compact layout: a close button with the `xmark` symbol, accessibility label and Voice Control name "Back to Decks". Esc does the same when nothing above the card owns it (R243).
-- Upper right, leading to trailing: the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; its states come from the iCloud status contract under review). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
+- Upper right, leading to trailing: the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
 - The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls.
 - The review area's background is the card's computed `body` background (R335), so the user's card styling reaches the window edges. Corner controls and the answer region use system control styles, with a foreground chosen for contrast against that background. Need: preserving user-authored card styling. No other chrome tint.
 - The sidebar stays hidden for the whole session; Show Sidebar is disabled during review.
@@ -261,3 +261,45 @@ Decided 2026-10-27 (screen contracts `sync.status`, `settings.accountSync`, `syn
 - All sync text comes from `sync/status-strings`; the screen contracts name its keys.
 - The sync status icon of N11.1's upper-right corner is `sync.status`'s button; its states are that contract's.
 - Replaces: R280's menu title "Sync" (now "Sync Now", `sync.now.command`), and U161's "Review Conflicts is reachable from …" for placement only (its two entry points stay).
+
+### N11.9 Deck options (U232, U233, U234)
+
+Decided 2026-10-27 (screen contract `deckOptions.options`):
+
+- Placement follows R730, except during a review session: on every platform the screen is then a sheet over the review (N11.1 keeps the sidebar hidden), which owns the keys (N4); closing it returns to the same card.
+- One grouped form. The preset picker and a Preset Actions menu lead it (R731, R732); Save to All Subdecks is in that menu and saves at once. Save is the toolbar's confirmation action (⌘S, ⌘↩).
+- Row parts are system controls: "Global" as secondary text after the label (R735), a borderless Restore Default button and a help button with a popover (R734). No badge capsule, custom banner or token colours. Issues show under their row with one symbol per severity in the system red or yellow, never colour alone.
+- Changes from elsewhere while the draft differs: a row at the top of the form with Reload and Keep Editing.
+- On iPhone, while the draft differs, Cancel replaces the back button and swipe back is off, so leaving always asks (R734).
+- A value outside its editor range shows `sched/deck-options` O4's error and disables Save; it is not silently refused.
+- Wide windows show the sections in two columns (R738); the R1988 variants vary only that arrangement.
+- Accessibility identifiers take the inventory id as their prefix (`deckOptions.options.*`, with `deckOptions.options.cancel` for the sheet's Cancel).
+- Replaces: R730's placement for the review entry; U232's KTD20 tokens and "non-modal banner"; U232's identifiers `deckOptions.*` (now `deckOptions.options.*`); U232's "Default (id 1) shows no Remove" and its test "Remove absent from the menu" (Remove Preset… is shown disabled for Default, O6.5); "save-to-all-subdecks mode" among U232's draft-only operations (Save to All Subdecks saves at once, O7); U232's "Controls only accept in-range values" (an out-of-range value shows O4's `out_of_range` and disables Save); the "Global badge" of R735, U232, U233 and U234 (plain secondary text "Global" after the label); the "rejected" outcomes in U233's and U234's test scenarios (a refused value is now an O4 error that blocks Save).
+
+### N11.10 Note types (U200, U201, U203)
+
+Decided 2026-10-27 (screen contracts `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`):
+
+- Settings › Collection holds U160's Note Types row (R915, R18). On Mac it brings the main window forward on the Note Types section. N11.4's section list is unchanged.
+- The template editor and the field editor are sheets from every entry, the Note Types list included: page-sized on Mac and iPad, full screen on iPhone. On iPhone a note type row pushes that type's page of actions.
+- No schema-change confirmation (U200's structural save, corrected 2026-10-27; `notetypes/schema-changes` G4). The questions that remain belong to the change: Add Card Type's card count, Remove Card Type's removal preview, R918's delete question, R914's restore question (Cancel is the default), R922's field delete question, and Change Note Type's loss section, which Save accepts.
+- A successful Save closes the template editor and the field editor; on errors they stay open with the draft.
+- Accessibility identifiers take the inventory ids as their prefix (`noteTypes.list.*`, `noteTypes.templates.*`, `noteTypes.fields.*`, `noteTypes.changeNoteType.*`).
+- Replaces: U200's identifiers `notetypes.row.<id>` and `templates.editor.front`, and U200's in-window sheet rule, which now also covers Fields… and Cards… opened from the Note Types list.
+
+### N11.11 Mac quit (R127, R1557)
+
+Decided 2026-10-27 (screen contract `sync.quitFlush`):
+
+- `sync/policy` P11.4's quit flush shows as a window sheet on the main window, brought forward or opened again. Other windows and commands are disabled meanwhile.
+- Its one button is "Quit Without Syncing" (`sync/status-strings` T15), the cancellation action (Esc), never the default. A second Quit command acts as that button.
+- QuitNow shows nothing. iPhone and iPad have no quit sheet.
+- Replaces: R1557's "Quit now" label.
+
+### N11.12 Heatmap settings (U229)
+
+Decided 2026-10-27 (screen contract `stats.heatmapSettings`):
+
+- Settings › Heatmap (N11.4) holds R1339's group, First day of week (`editor/config-keys` K5) and R1342's device toggles in their own On This Device group.
+- Calendar mode is a segmented picker. The day limits are written when their field commits, not per keystroke. Turning Ignore data before on starts at the collection's creation date, which `stats/heatmap-addon` A2.2 ignores, so nothing changes until a later date is chosen.
+- Replaces: U229's identifier pattern `settings.heatmap.*` (now `stats.heatmapSettings.*`).

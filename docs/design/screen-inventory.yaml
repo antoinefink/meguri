@@ -58,7 +58,7 @@ screens:
       "Check Database" (U163 once U128 lands), "Restore from Backup…" (when the backups listing holds a
       backup or server copy; opens settings.backups' restore sheet with the newest restorable backup
       preselected) and "Replace with iCloud Collection…" (only when sync/cloudkit-recovery V19's
-      conditions hold; opens its V14 preview). The first offered remedy has the prominent style, the
+      conditions hold; opens sync.replaceLocal, its V14 preview). The first offered remedy has the prominent style, the
       others the bordered style; "Copy Debug Info" is always there as a plain button below them. No
       remedy downloads from an Anki server. Empty: no remedy is offered, so the line adds "No backup or
       iCloud copy of this collection is available on this device." and only Copy Debug Info shows.
@@ -383,26 +383,181 @@ screens:
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
     variants: pairwise
-    references: [list-counts]
-    purpose: The note types with their note counts and management actions.
+    references: [list-counts, sheet-form, confirmation-dialog]
+    purpose: >-
+      The Note Types screen (U200; R915–R919; notetypes/records N5, N7, N8, notetypes/stock-kinds
+      K1, K8, notetypes/structure-changes S12, notetypes/restore-to-default; native-interface-contract
+      N11.10). Line texts are Meguri's own (String Catalog), except R914's and R918's questions.
+      Entry points (R915, R18): the Note Types sidebar section (Mac, iPad; R17); View › Note Types
+      (⇧⌘N, R282) and Tools › Note Types (R285), which select that section; the Note Types row of Settings ›
+      Collection (Mac: it brings the main window forward on the section; iPad: it selects the
+      section; iPhone: it pushes this list inside Settings); and Browse's ⋯ menu (Mac and iPad select
+      the section; iPhone pushes the list inside Browse). Layout: one native List of every note type
+      by name (unicase order); a row is the name with the note count trailing as secondary text ("1
+      note", "1,204 notes"), which a background query fills in and which stays blank until then
+      (R915). Mac and iPad: rows are selectable; the toolbar holds Add (plus) and an Actions menu
+      (ellipsis.circle) for the selected type, whose items are also the row's context menu; Return
+      or a double click opens Cards…; Delete (⌫) asks to delete. iPhone: a row pushes the type's page:
+      its note count, then Fields…, Cards…, Rename…, Restore to Default… and, in its own group,
+      Delete Note Type… in the destructive style; Add (plus) is in the navigation bar. Actions (R917
+      to R919): Fields… (noteTypes.fields) and Cards… (noteTypes.templates), each a sheet over this
+      screen (N11.10); Rename… (a sheet with one name field prefilled with the name, Cancel and Rename,
+      disabled while blank; records N8; the type stays selected); Restore to Default… (R914): the
+      confirmation-dialog "Restore “<name>” to its default fields, card types and styling?" with the
+      message that notes keep their content by field position and that fields and card types past
+      the default's count are removed with their content, Restore (destructive) and Cancel, Cancel
+      being the default so that Return cancels (R914's default No); when the op answers
+      NeedsStockKind (restore-to-default D2), a sheet lists K1's six kinds, and the chosen one is
+      submitted; Delete… (R918): disabled while it is the only note type (LastNotetype, S12);
+      otherwise the confirmation-dialog "Delete this note type and all its cards?", or "Delete this
+      unused note type?" when it has no notes, with Delete (destructive) and Cancel. Add (R916): a
+      sheet "Add Note Type" with one list of choices, an Add section of "Add: <stock kind>" for K1's
+      kinds and a Clone section of "Clone: <name>" for every note type, the first one selected, and a
+      Name field under it prefilled with the choice's name (K1's name, or "<name> copy"), following
+      the choice until the user edits it; Cancel and Add, disabled while the name is blank. The new
+      type is selected and scrolled to. Rename and Add (from a clone or a stock kind) are checked
+      saves (notetypes/validation V1): when the op refuses one with a V3 failure, the sheet stays
+      open with the name as typed and the failure's message under the name field (Meguri's wording,
+      V4, naming the card type), and nothing is written; the type's templates are fixed in Cards….
+      A restore or a delete shows the op's progress in its row and the list stays usable; nothing
+      more is asked (notetypes/schema-changes G4), and the op takes its own safety backup. While a
+      restore plans, its row's progress has a Cancel button (restore-to-default D6, structure-changes
+      S10), which ends it with Cancelled and leaves the type as it was; a delete and every write
+      phase show progress without Cancel (S12 offers none). Empty: a collection with no note type (only a damaged one) shows a
+      content-unavailable view "No Note Types" with Add. Loading: the names show at once and the
+      counts fill in. Error: a failed list read shows a content-unavailable view with its message and
+      Try Again; a count that fails stays blank; SafetyBackupFailed of a delete or a restore shows
+      R167's error alert with its cause and that nothing was changed, and the list stays as it was;
+      NoteFieldCountMismatch of a restore says Check Database can repair the note
+      (structure-changes S1.2 item 4). Overflow: hundreds of note types and long names (two lines,
+      then truncated, the full name as help text) scroll. Keyboard: ↑ and ↓ move the selection,
+      Return opens Cards…, ⌫ asks to delete, Tab reaches the toolbar. VoiceOver: a row is one element
+      with its name and note count, and Fields, Cards, Rename, Restore to Default and Delete as custom
+      actions. Identifiers noteTypes.list.row.<id>, noteTypes.list.add, noteTypes.list.fields,
+      noteTypes.list.cards, noteTypes.list.rename, noteTypes.list.restore, noteTypes.list.delete.
+      Core: the note type list and the background note counts (U29); add (stock-kinds K8, records
+      N5), clone (N7), rename (N8), restore (restore-to-default D1 to D7) and remove
+      (structure-changes S12), each with its progress and refusals.
   - id: noteTypes.templates
     title: Card templates
     units: [U200]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [typical, overflow, error]
+    states: [typical, overflow, error, loading]
     variants: pairwise
-    references: [editor, inspector]
-    purpose: Edit front, back and styling templates of a note type.
+    references: [editor, inspector, sheet-form, confirmation-dialog, toast]
+    purpose: >-
+      The card template editor (U200; R929–R937, R942, R943, R276; notetypes/structure-changes S1,
+      S9 to S11; notetypes/validation V3, V4; native-interface-contract N11.10). Entry points: Cards…
+      of noteTypes.list, the editors' Cards… (⌘L; editor.add, editor.edit, review.editCurrent; R847,
+      saving the note first) and Browse's sidebar note type and card type items. Presentation, from
+      every entry: a sheet over the current screen, page-sized and resizable on Mac, page-sized on
+      iPad, full screen on iPhone; it never changes the selected section or ends a review, and
+      closing it returns to the screen it came from, whose preview renders again. Title "Card Types
+      for “<note type>”". Layout, top to bottom: the card type picker (R931), a menu picker of "N:
+      Name" for each template with the line "Changes below will affect the N notes that use this card
+      type." under it, or for a cloze type a picker of the previewed note's cloze numbers; a
+      segmented picker Front Template, Back Template and Styling (⌘1, ⌘2, ⌘3); the code editor (R929:
+      TextKit 2, the system monospaced font, smart quotes, smart dashes, text replacement and
+      autocorrect off, Tab inserting four spaces, ⌘F the system find bar), with `{{…}}` tags
+      highlighted in the system accent colour and a delimiter change honoured (R930); under it the
+      issues list (V4, checked about 300 ms after a change): one row per failure in V4's order with
+      its message and side, which selects its range when chosen. At regular width (Mac, iPad) the
+      preview (noteTypes.preview, U202) sits beside the code with a draggable divider; at compact width
+      a segmented Code and Preview switch in the toolbar shows one of them (R938). Toolbar: Cancel
+      (cancellation action); Insert Field (a menu of the type's fields and the special fields; the
+      reference goes in at the cursor, R936); Flip (Back Template only; without `<hr id=answer>` it
+      shows the line that Flip needs it, R936); Options (ellipsis.circle, R932): Add Card Type…,
+      Remove Card Type… (disabled for the last template), Rename Card Type…, Reposition Card Type…, a
+      divider, Deck Override… (absent for a cloze type, R934), Browser Appearance…, a divider, Restore
+      to Default… and Copy Info; and Save (confirmation action, prominent; ⌘S and ⌘↩). Options flows:
+      Add Card Type copies the current template as "Card N" and, when the type has notes, asks first
+      (confirmation-dialog "This will create N cards. Proceed?", R932); Remove Card Type asks with
+      S11's preview, "Delete the 'X' card type, and its N cards?" and, when any, the line that N notes
+      will be left with no cards (R933), with Delete (destructive) and Cancel; Rename and Reposition
+      open a sheet with one field (a name; a position from 1 to N); Deck Override opens a sheet with
+      a deck field and suggestions from the deck list, empty for none, where a new name creates the
+      deck when the draft is saved (S9); Browser Appearance opens a sheet with the browser front and
+      back formats and an optional browser font and size (R935); Copy Info puts the front, back and
+      styling as three Markdown code blocks on the pasteboard, with the toast "Copied to clipboard";
+      Restore to Default asks noteTypes.list's question, whose message adds that unsaved changes in
+      this editor are discarded, and, once accepted, runs the restore op at once, discarding the
+      draft, and closes the editor when it is restored (restore-to-default D6). Every flow except
+      Restore to Default and Copy Info changes only the draft until Save. Save (R937): a draft
+      with only styling or option changes goes through the plain save (records N3, N8); any other
+      through the draft apply op (S1), one "Update Note Type" undo step. Nothing more is asked
+      (notetypes/schema-changes G4; U200's structural save as corrected 2026-10-27): each change's
+      own question was answered when it was made. While the op plans and writes, its progress
+      replaces the issues list and the editor is disabled, with Cancel while it plans (S10); the
+      safety backup is the op's. On success the sheet closes. Unsaved changes: Cancel, Esc and the
+      iPhone swipe-down ask "Discard changes?" with Discard (destructive) and Keep Editing (R937).
+      Loading: the draft opens at once from the stored note type; the note counts and the preview
+      fill in. Error: a refused checked save keeps the sheet open with the issues listed and the
+      first one selected (V4); Stale (S1.2 item 1) shows an alert that the note type changed
+      elsewhere and nothing was saved, with Reload (the draft is discarded) and Keep Editing;
+      SafetyBackupFailed shows R167's error alert with its cause and that nothing was changed, and
+      keeps the draft so that Save can be tried again; NoteFieldCountMismatch says Check Database can
+      repair the note. Overflow: long templates scroll inside the editor, many templates scroll in
+      the picker, the largest text sizes scale the issue rows (the code keeps its size, and the
+      preview follows the card zoom, R143). Keyboard: ⌘1, ⌘2, ⌘3 and ⌥1 to ⌥9 (R276), ⌘S and ⌘↩, ⌘F; Tab inserts spaces in the
+      code editor and ⌃Tab moves the focus out of it; Esc is Cancel. VoiceOver: the code editor is a
+      text area labelled with its part ("Front Template"); each issue is one element with its message
+      and side; the picker reads "Card type". Identifiers noteTypes.templates.cardType,
+      noteTypes.templates.part, noteTypes.templates.editor, noteTypes.templates.issues,
+      noteTypes.templates.insertField, noteTypes.templates.flip, noteTypes.templates.options,
+      noteTypes.templates.save, noteTypes.templates.cancel. Core: the draft validation (V3, V4) after
+      each change, the note count per template (U29), S11's removal preview, the plain save and the
+      draft apply op with its progress, Cancelled and refusals, and the deck list for Deck Override.
   - id: noteTypes.fields
     title: Fields
     units: [U201]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [typical, overflow, error]
+    states: [typical, overflow, error, loading]
     variants: pairwise
-    references: [grouped-form]
-    purpose: Add, rename, reorder and configure a note type's fields.
+    references: [grouped-form, sheet-form, confirmation-dialog]
+    purpose: >-
+      The field editor (U201; R920–R928; notetypes/validation V5; notetypes/structure-changes S1,
+      S5; notetypes/field-rename; native-interface-contract N11.10). Entry points: Fields… of
+      noteTypes.list, the editors' Fields… (R847, saving the note first) and Browse's sidebar note
+      type items; presented as noteTypes.templates is (a sheet, page-sized on Mac and iPad, full
+      screen on iPhone, returning to where it came from). Title "Fields for “<note type>”". Layout at
+      regular width: the field list leading, rows "1: Name" (R920) with drag reordering and, on Mac,
+      + and − buttons under it (Add in the toolbar on iPad); the selected field's options trailing as
+      a grouped form. At compact width: the list with Add and Edit (reorder, delete) in the toolbar; a
+      row pushes its options form. Options form: Name with Rename… (a sheet whose field is checked as
+      typed with V5; a refusal is explained in one line under it and Rename stays disabled; R921);
+      "Sort by this field", a toggle that is on for exactly one field: turning it on moves the sort
+      field there, and it cannot be turned off (R926); Editor font (the system font picker) and its
+      size; "Reverse text direction (RTL)"; "Use HTML editor by default"; "Collapse by default";
+      "Exclude from unqualified searches (slower)"; Description (R925). Sticky is not here (the Add
+      screen's pin, U195). Actions, each changing only the draft: Add Field… (a name sheet with V5's
+      check; the field goes at the end), Delete Field… (refused for the last field with "Notes require
+      at least one field." and for a protected field with the line that its note type needs it;
+      otherwise the confirmation-dialog "Delete field from N notes?" with N from U29, Delete
+      (destructive) and Cancel; R922), Rename…, Reposition… (a sheet with a position from 1 to N) and
+      drag. Save (⌘S, ⌘↩; confirmation action): a draft with only option edits goes through the plain
+      save (records N8); any other through the draft apply op (S1, skip_checks true), one "Update
+      Note Type" undo step that also rewrites the template references of renamed fields (R923).
+      Nothing more is asked (notetypes/schema-changes G4; U200's structural save): a structural draft
+      (add, delete, reorder, sort field) shows the op's progress while the notes are rewritten as a
+      job on the maintenance lane, throttled, and the rest of the app stays usable (R927); the op
+      takes its own safety backup; a rename alone takes none. On success the sheet closes. Unsaved
+      changes: Cancel, Esc and the iPhone swipe-down ask "Discard changes?" (R928) with Discard
+      (destructive) and Keep Editing. Loading: the draft opens at once; the note counts fill in.
+      Error: Stale, SafetyBackupFailed and NoteFieldCountMismatch as in noteTypes.templates, the draft
+      kept; ProtectedField and invalid_notetype, which this screen's checks prevent, show the op's
+      message in an alert if they occur. Overflow: 31 fields, long names and long descriptions
+      scroll; the options form wraps at the largest text sizes. Keyboard: ↑ and ↓ move through the
+      fields, ⌫ asks to delete the selected one, Tab moves into the options form, Esc is Cancel.
+      VoiceOver: a field row reads its position and name and offers Move Up, Move Down, Rename and
+      Delete as custom actions (Move Up and Move Down are also its context menu); the sort toggle
+      reads "Sort by this field" with its state. Identifiers noteTypes.fields.row.<ord>,
+      noteTypes.fields.add, noteTypes.fields.delete, noteTypes.fields.rename,
+      noteTypes.fields.reposition, noteTypes.fields.sortField, noteTypes.fields.save,
+      noteTypes.fields.cancel. Core: V5's name check, U29's note count per field, the plain save
+      (records N3, N8) and the draft apply op (S1, field-rename F2 to F4) with its progress and
+      refusals.
   - id: noteTypes.preview
     title: Template preview
     units: [U202]
@@ -417,10 +572,44 @@ screens:
     units: [U203]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [typical, overflow, error]
+    states: [typical, overflow, error, loading]
     variants: pairwise
-    references: [sheet-form]
-    purpose: Map fields and templates when moving notes to another note type.
+    references: [sheet-form, toast]
+    purpose: >-
+      Change Note Type (U203; R944–R948; notetypes/change-notetype M1 to M10; notetypes/schema-changes
+      G4; native-interface-contract N11.10). Entry: Browse's Change Note Type… (⇧⌘M) on selected notes
+      that share one note type; Browse disables it otherwise (M4). Presentation: a window sheet on
+      Mac, a form sheet on iPad, a sheet at the large detent on iPhone. Title "Change Note Type". One
+      grouped form: (1) "Current: <old note type>" and a menu picker "New note type" of every note
+      type, the current one included (R944), on the old type at first; choosing another runs the
+      info query again (M5) and resets both maps to its defaults (M2, M3). (2) Fields: one row per new
+      field, its name leading and a menu picker trailing with "(Nothing)" and every old field, on
+      M2's default; several rows may take the same old field (R945). (3) Card Types, only when both
+      types are standard (M1): one row per new template with "(Nothing)" and the old templates, an
+      old template another row uses shown disabled (R946); otherwise R946's note in its place, that
+      cloze numbers stay unchanged and that extra cards are removed when the target is a normal
+      type. (4) What Will Be Lost (M6, R947), recomputed in Swift from M5's counts after every picker
+      change, with no core call: "Will discard content on the following fields:" with each discarded
+      field and how many notes hold text in it; "Will remove the following cards:" with each dropped
+      template and its card count, or the removed-card count for cloze to standard; "Nothing will be
+      lost." when there is neither. Toolbar: Cancel and Save (confirmation action; ⌘↩), Save disabled
+      while M7 holds (the same type with identity maps). No confirmation dialog: the section is the
+      change's preview and Save accepts it (M6, G4). Save: progress (notes done of notes selected)
+      replaces the form, with Cancel while the safety backup runs and none once the write starts
+      (M10); on success the sheet closes, Browse refreshes, and a toast says "N notes updated." with
+      Undo (R948; ⌘Z undoes the one "Change Note Type" step). Loading: until M5 answers the rows are
+      placeholders of their final size and Save is disabled. Error: schema_changed (M8 check 3) shows
+      a line at the top, "The note types changed since this opened.", with Reload, which runs the
+      info query again for the chosen target (default maps); not_found and multiple_notetypes show a
+      line naming the cause with Close; SafetyBackupFailed shows R167's error alert with its cause and
+      that nothing was changed, and the sheet keeps its mappings. Overflow: many fields and
+      templates and long names scroll; at the largest text sizes each name stacks over its picker.
+      Keyboard: Tab through the pickers, Esc is Cancel, ⌘↩ saves. VoiceOver: each mapping row reads
+      the new field and its source ("Back, from Front"); the loss section is a container read in
+      order. Identifiers noteTypes.changeNoteType.target, noteTypes.changeNoteType.field.<ord>,
+      noteTypes.changeNoteType.template.<ord>, noteTypes.changeNoteType.loss,
+      noteTypes.changeNoteType.save, noteTypes.changeNoteType.cancel. Core: the M5 info query on a
+      reader, M6 computed from its counts, and the M8 change with its refusals and M10's progress.
 
   - id: imageOcclusion.editor
     title: Image occlusion editor
@@ -639,14 +828,59 @@ screens:
     units: [U229]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [typical]
+    states: [typical, overflow, error]
     variants: pairwise
     references: [grouped-form, calendar-grid]
     purpose: >-
-      The Heatmap settings section: Calendar mode, the Advanced disclosure with the history, forecast
-      and date limits, the deleted-card and manual-reschedule exclusions and the excluded decks
-      (R1339), first day of week, and the device-local display toggles. No colour theme: one native
-      palette (R1315); the synced theme value is kept unchanged.
+      The Heatmap section of Settings (U229; R1336–R1343, R149, R1315, R1325; stats/heatmap-config
+      K2, K3, K6; stats/heatmap-addon A2.2; native-interface-contract N11.4, N11.12). Mac: the
+      Heatmap section of the Settings window's sidebar; iPad and iPhone: the Heatmap row of Settings,
+      pushing this form. Labels are the add-on's option names (R1339); footers are Meguri's own
+      (String Catalog). One grouped form: (1) "Calendar mode", a segmented picker of Year and 9 months
+      (`mode`, R1325), and "First day of week", a menu picker of exactly Sunday, Monday, Friday and
+      Saturday (`firstDayOfWeek`, editor/config-keys K5), with the footer that it also sets the week
+      of the Stats calendar. Synced (R113): every row stored in the heatmap key or in
+      `firstDayOfWeek`, that is groups (1) and (3) with the excluded-deck row, carries the Synced
+      badge, and those groups' footers end with R113's footnote "Applies on all devices that sync
+      this collection". (2) On This Device (R1342): "Show
+      heatmap on Home", "Show heatmap on deck pages" and "Show streak stats when the heatmap is
+      hidden", all on by default, kept in the app's device settings and never in the collection, with
+      the footer that they apply to this device only. (3) An Advanced disclosure (R1339), collapsed at
+      first and remembered on the device: "History limit" and "Forecast limit", each a whole-number
+      field in days where 0 or empty shows the placeholder "No limit" (`limhist`, `limfcst`; 0 to
+      2,147,483,647), written when the field commits (Return or the focus leaving), never per
+      keystroke; "Ignore data before", a toggle and, when on, a date picker from the collection's
+      creation date to today (`limdate`; turning it on starts at the creation date, which A2.2
+      ignores, so the heatmap changes only once a later date is chosen; turning it off writes 0);
+      "Exclude deleted cards from history" (`limcdel`) and "Exclude manual reschedules from history"
+      (`limresched`, on by default), toggles; "Exclude decks from main heatmap", a row whose value is
+      the count ("None", "2 decks"), pushing the excluded-deck list (`limdecks`, R1340). That page: one
+      row per stored id in the stored order, with the deck's full name, or "Deleted deck" for an id no
+      deck has, kept until removed (stats/counting-rules N3.3); Add Deck… opens a searchable list of
+      the collection's decks without those already listed, and the chosen deck is appended; a row is
+      removed by swipe, ⌫ or Edit; the footer says subdecks are excluded too and that deck pages and
+      Stats are not affected (R1340, R1343). No colour theme (R1315): `colors` keeps its stored
+      value. Writes: each change is one K6 patch of the one member that changed (the whole new list
+      for `limdecks`), at once, with no Save and no undo step (R115); opening and closing the section
+      writes nothing, and an absent key stays absent (R1337, K6.2 step 1). A stored value a control
+      cannot show as it is is kept until that control changes it (K6.3): a `limdate` with a fraction
+      shows as the date it reads as; a `limdate` before the creation date or after today shows, with
+      the toggle on, as that date in read-only secondary text in place of the picker, whose range
+      stays the creation date to today (K6.1, U229); choosing the text shows the picker at the
+      nearest date in range, and nothing is written until a date is chosen. Error: a write that fails
+      shows its cause in the footer of the control's group and the control shows the stored value
+      again; in Failed{Corrupt} the synced rows are disabled and the On This Device rows stay
+      (shell.damagedCollection). Overflow: many excluded decks and long deck paths (two lines, then
+      truncated in the middle, the full path as help text), and the largest text sizes, where values
+      wrap under their labels. Keyboard: Tab through the controls, Return commits a number field, ⌘[
+      or the back button leaves the deck list. VoiceOver: each control reads its label and value
+      ("History limit, No limit"); a deleted deck's row reads "Deleted deck"; the Synced badge is read
+      with its row. Identifiers stats.heatmapSettings.<name> (N11.12), for the names mode,
+      firstDayOfWeek, limhist, limfcst, limdate, limcdel, limresched, limdecks, limdecks.add,
+      showOnHome, showOnDeckPages and showStreaks. Core: the effective
+      settings (K3, through U95), the K6 writer with its patch and `invalid_heatmap_setting`, the
+      `firstDayOfWeek` write of editor/config-keys K1, the collection's creation date for the picker
+      range, and the deck list for the excluded-deck picker.
 
   - id: deckOptions.options
     title: Deck options
@@ -655,8 +889,110 @@ screens:
     platforms: [iphone, ipad, mac]
     states: [typical, overflow, error, loading]
     variants: full
-    references: [grouped-form]
-    purpose: A deck's preset with daily limits, desired retention and the advanced sections.
+    references: [grouped-form, sheet-form, confirmation-dialog]
+    purpose: >-
+      A normal deck's options: its preset, the Essentials, the Advanced sections and the one undoable
+      save (U232: shell, presets and save; U233: Essentials and Daily Limits; U234: the other
+      Advanced sections; sched/deck-options O2 to O9; R730–R753; native-interface-contract N11.9).
+      Option and section names are O3's, in Anki's English; help texts, issue texts and every other
+      line are Meguri's own (String Catalog, O11). Entry points (R730): the deck menu's Deck Options…
+      (home.deckMenu), the deck page's Deck Options button and the finished state's limit links
+      (home.deckPage, U155), Deck › Deck Options… (⌥⌘O, the selected deck; R283), the O key on the
+      deck list and the deck page for the selected or shown deck (R223), and during review the
+      review ⋯ menu (iPhone, iPad; review.menu), Deck › Deck Options… (Mac) or the O key (R241,
+      R421; it opens the sheet), for the current card's home deck. A filtered deck has no options screen (O1): its menus offer none (R53).
+      Presentation: on Mac and iPad pushed in the main window's detail area above the screen it was
+      opened from, with the system back button and the sidebar selection unchanged; on iPhone pushed
+      full screen in the Decks tab's stack. Opened during a review session, on every platform, it is
+      a sheet over the review instead (window sheet on Mac, page sheet on iPad, full-height sheet on
+      iPhone; N11.9), which owns the keys (N4); Save or Cancel returns to the same card. Title "Deck
+      Options", subtitle the deck's full name. Toolbar: Save (confirmation action, prominent; ⌘S and
+      ⌘↩), disabled while an O4 error shows; in the sheet also Cancel. One grouped form, top to
+      bottom: (1) Preset: a menu picker "Preset" listing every preset as "<name> (used by N decks)"
+      in O2's order with O6.1's counts (R731), and beside it a Preset Actions menu (ellipsis.circle)
+      with Add Preset…, Clone Preset…, Rename Preset…, Remove Preset… (disabled for Default, O6.5), a
+      divider and Save to All Subdecks (disabled when the deck has no normal subdeck); when O2's
+      preset_missing holds, the footer says that the deck's preset is missing and that saving
+      assigns the selected one. (2) Essentials (R736): New cards/day and Maximum reviews/day, each
+      with a segmented Preset, This deck and Today only picker above its number field (O6.2: it opens
+      on the most specific tab that is set, choosing a tab clears the more specific ones, and Today
+      only offers its stored limit again); Desired retention with Preset and This deck tabs, as a
+      percentage (70 to 99 %, the stepper moving by one point, a stored value shown with up to two
+      decimals such as 87.5 %); the "Don't play audio automatically" toggle. (3) An Advanced
+      disclosure, collapsed at first and remembered on the device, with Anki's sections in R736's
+      order holding O3's options: Daily Limits (New cards ignore review limit, Limits start from top),
+      New Cards (Learning steps, Insertion order, with the footer that a changed order re-sorts the
+      new cards of every deck using the preset when saved, R744), Lapses, Display Order (O3's lists in
+      their order; Review sort order labels 6 and 5 ascending and descending difficulty), Burying
+      (with R747's footer), Audio (Skip question when replaying answer), Timers, Auto Advance (tenths
+      of a second, 0 shown as "Off") and Advanced (Maximum interval, Historical retention as a
+      percentage from 70 to 97 %, Ignore cards reviewed before, Load balancer). Ignore cards reviewed
+      before is a toggle and, when on, a date picker up to today's date. A stored empty text or
+      1970-01-01 (both no cutoff, sched/fsrs-items I1.3) shows the toggle off and is kept as stored
+      unless the user edits it (as O5.2 keeps an unedited field). Decided 2026-10-27: turning
+      the toggle on sets the draft to the collection's creation date, so the count shows what that
+      date keeps before a later date is chosen; turning it off sets the empty text, or the stored
+      value again when that was 1970-01-01, so toggling on and off leaves the draft unchanged; under
+      it the line "<included> of <total> cards included" (O2 item 7, asked again for each date
+      entered), with the warning symbol when its flag is set. Never shown (R752, O3's hidden options):
+      the FSRS switch, parameters, Optimize and Evaluate, the simulator, Easy Days, Custom scheduling
+      and the SM-2 options; parameter optimization runs by itself (sched/optimizer) and reports in
+      home.fsrsSheet and settings.diagnostics. Decided 2026-10-27: no notice for an unsupported preset
+      (sched/fsrs-policy U1) here, since the snapshot has no such fact; its parameter lists are hidden
+      options that a save keeps (sched/presets V8), and the study refusal (U51) names it. Every option
+      row: the label; "Global" in secondary text after it for the three global options (R735); the
+      control (a number field with a stepper, a text field for steps, a menu picker, a toggle or a
+      date picker); a Restore Default button (arrow.counterclockwise) only while the draft value
+      differs from O2's default (O6.6); a help button (info.circle) whose popover holds Meguri's help
+      text (R734; a sheet at the medium detent at compact width). O4's issues show in one line under
+      their row: an error with xmark.octagon in the system red, a warning with exclamationmark.triangle
+      in the system yellow, a strong warning with exclamationmark.triangle.fill in the system red,
+      each with its text, so colour is never the only sign. A steps field is checked as typed (O4.2,
+      naming the bad token) and shows O5.2's text once it loses the focus with a valid value. A value
+      outside its editor range shows `out_of_range` and keeps Save disabled; a stored out-of-range
+      value shows as stored and is no error until changed (O4.1); steppers stop at the range. Preset
+      menu: Add Preset…, Clone Preset… (prefilled with the current name) and Rename Preset… (prefilled)
+      open an alert with one name field, OK and Cancel, applying decks/deck-presets P7 (O6.3, O6.4);
+      Remove Preset… asks (confirmation-dialog) "Remove the preset “<name>”?" naming the decks that
+      use it, which move to the preset selected when the draft is saved (R733), with Remove
+      (destructive) and Cancel. These change only the draft (O6). Save to All Subdecks saves at once
+      with the subdeck flag (O7). Save (R737, O7): one "Deck Options" undo step; on success the screen
+      returns to where it was opened from. While it saves (a draft that removes an existing preset
+      takes the op's safety backup first) a progress indicator replaces Save and the controls are
+      disabled. Leaving with unsaved changes (O6.6: back, ⌘[, Esc, Cancel, another sidebar item or
+      deck) asks, as a confirmation-dialog, Discard Changes or Keep Editing; on iPhone, while the
+      draft differs, Cancel replaces the back button and the swipe back is off. Loading: the snapshot
+      (O2) is read on the interactive lane; until it arrives the rows are placeholders of their final
+      size and Save is disabled. Error: a refused or failed read (not_found, filtered_deck, storage)
+      shows a content-unavailable view with its message, with Try Again for a storage failure;
+      O7.1's validation refusal shows its issues on their rows; not_found at save (the deck or a
+      preset removed meanwhile) shows an alert with Reload, which reads a new snapshot;
+      SafetyBackupFailed shows R167's error alert with its cause and that nothing was changed, and
+      the draft stays. Live: a change set that touches the deck or a preset reloads silently while the
+      draft is unchanged, and otherwise shows a row at the top of the form, "These options were
+      changed elsewhere.", with Reload and Keep Editing; in the exclusive phase every control is
+      disabled under "Waiting for <operation>" (KTD17); CollectionReplaced closes the screen.
+      Overflow: Advanced expanded, many presets, long preset and deck names (middle truncation, the
+      full name as help text) and the largest text sizes, where controls wrap under their labels.
+      Layout (R738): one column on iPhone and in narrow windows; in Mac and iPad windows wide enough
+      for two form columns, the sections in two columns, Preset and Essentials first and the Advanced
+      sections continuing in Anki's order. The R1988 variants vary only this wide arrangement; the
+      controls, their order and the save stay. Keyboard: O (R223, R241, R421) and ⌥⌘O open it; Tab
+      through the controls in order; ⌘S and ⌘↩
+      save; Esc and ⌘[ go back, asking first when the draft differs; ↑ and ↓ step a focused number
+      field on Mac. VoiceOver: each option is one element with its label, "Global" when it applies,
+      its value and its issue; Restore Default and Help are also its custom actions; an issue that
+      appears after an edit is announced once; each section is a container named by its header.
+      Identifiers (N11.9) deckOptions.options.preset.picker, deckOptions.options.preset.menu,
+      deckOptions.options.preset.menu.add, deckOptions.options.preset.menu.clone,
+      deckOptions.options.preset.menu.rename, deckOptions.options.preset.menu.remove,
+      deckOptions.options.preset.menu.saveToSubdecks, deckOptions.options.save,
+      deckOptions.options.cancel, deckOptions.options.advanced, deckOptions.options.option.<key>,
+      deckOptions.options.option.<key>.restore, deckOptions.options.option.<key>.help.
+      Core (U49): the O2 snapshot, O4's validation of the draft after each edit, O5's step text
+      reading and writing, sched/memory-state M5's count for each entered date, the collection's
+      creation date for the ignore-date toggle, the decks/deck-presets P7 naming helper and the O7 save with O7.1's refusals; the change stream for
+      the live reload.
 
   - id: settings.root
     title: Settings
@@ -740,7 +1076,7 @@ screens:
       cancel_recovery_op, keep_local_only, stop_using_icloud and abandon_generation (V26.2);
       list_conflicts for the count (V17.3).
   - id: settings.sync
-    title: Anki Transfers
+    title: Anki Server and Transfers
     units: [U161]
     signature: false
     platforms: [iphone, ipad, mac]
@@ -748,10 +1084,15 @@ screens:
     variants: pairwise
     references: [grouped-form, confirmation-dialog]
     purpose: >-
-      The Anki Transfers actions in Settings › Collection (N11.4; the id is kept, while iCloud sync
-      account and status are settings.accountSync and sync.status):
-      explicit Anki collection transfers and separate both-side media consent.
-      Overflow renders media-consent; supplemental settings/anki-transfer routes
+      The manual Anki server screens of native-interface-contract N11.4 (R118, R1496–R1504;
+      sync/anki-transfers, frozen; native-interface-contract N5 to N8). Nothing here is iCloud sync, which is
+      settings.accountSync and sync.status. Decided 2026-10-27: the id stays settings.sync, since the
+      status ledger and its recorded snapshots use it. Two places: Settings › Anki Server (the
+      preview's Connection section renamed: the server address with Test beside it, the account and
+      its actions, and Connection details with Sync Logs; N6, N7) and the Anki Transfers actions of
+      Settings › Collection (R118: explicit Anki collection transfers, each opening its preparation,
+      replacement preview and separate destructive confirmation, and the separate both-side media
+      consent; N5, N8). Overflow renders media-consent; supplemental settings/anki-transfer routes
       media-progress, media-partial, media-complete and media-unknown cover Cancel,
       explicit Resume, long excluded names and unverified exclusions using the
       production controls with synthetic values and no server work.
@@ -790,7 +1131,7 @@ screens:
       progress and a refusal, and closes on success. Restore asks first (confirmation-dialog): "Replace
       the current collection with the backup from <date>?", message "The current collection is backed
       up first. The restored collection stays on this device until you choose what to do with
-      iCloud.", destructive Restore and Cancel. Loading: Back Up Now is a background job
+      iCloud." (that choice is sync.publicationChoice), destructive Restore and Cancel. Loading: Back Up Now is a background job
       (package/backup-triggers T5): a non-modal activity in its row with Cancel while stopping is safe;
       only Back Up Now and Restore from Backup… are disabled meanwhile, and study and edits go on. The
       restore runs in the exclusive phase: its progress replaces the sheet's list, with Cancel while
@@ -1189,6 +1530,35 @@ screens:
       sync.reviewConflicts.restore, sync.reviewConflicts.resolve. Core: list_conflicts, get_conflict,
       preview_recovery, recover, resolve and unresolve (V17.3), off the main thread and with no
       network; a restored edit is a local change that syncs like any other.
+  - id: sync.quitFlush
+    title: Mac quit sheet
+    units: [U161, U151]
+    signature: false
+    platforms: [mac]
+    states: [typical]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: >-
+      The bounded iCloud flush when Meguri quits on Mac (R127, R1557; sync/policy P11.4;
+      native-interface-contract N11.11). Text: sync/status-strings T15 only. On a quit (Meguri › Quit
+      Meguri, ⌘Q, the Dock menu, a logout or a restart) Meguri first ends an open review session
+      (sched/review-session C16) and flushes the editors, then U151 sends QuitRequested. The sheet
+      shows only for the QuitFlush action (P11.4: an exchange runs, or the gate is open, automatic
+      sync is on and an entity is sendable, an apply is in progress or a ready inbox entry waits),
+      never for QuitNow, which quits
+      at once. Presentation: a window sheet on the main window, brought forward or opened again when
+      it was closed; while it shows, the other windows and every menu command but Quit are disabled.
+      Layout: the title `sync.quit.title`, the message `sync.quit.message`, an indeterminate progress
+      indicator and one bordered button, `sync.quit.skip`, the cancellation action (Esc and ⌘. too),
+      never a default button, so Return does nothing; a second Quit command acts as it. When the flush
+      ends, at its limit of 10 seconds, or on Quit Without Syncing (which cancels the flush and any
+      exchange), the app quits; pending work stays saved on the Mac and is never called synced, and
+      the sheet shows no result of either kind (T15). A failure during the flush changes nothing here
+      (R166). VoiceOver announces the title when the sheet appears (T1, T15). iPhone and iPad have no
+      such sheet: their background flush (P11.2) shows nothing. Identifiers sync.quitFlush.sheet,
+      sync.quitFlush.skip. Core: QuitRequested and its QuitFlush or QuitNow action through U151's
+      SyncCoordinator (P11.4), the cancel of the flush and of an exchange, then the app's reply to the
+      system's terminate request.
 
   - id: widget.heatmap
     title: Heatmap widget
