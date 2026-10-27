@@ -1,0 +1,44 @@
+# Removing a field (specs/notetypes/structure-changes.md S2, S4, S5, S7).
+# Front is removed: its references go from every text; Forward's front, left
+# with no replacement, gets the first remaining field (Back); Reverse's
+# section on Front keeps its contents; backs get nothing appended; a browser
+# front emptied by the removal gets Back too. Every note is rewritten and
+# stamped: Front's values are dropped, csum comes from Back, sfld from the
+# sort field Extra, now at position 1. The note with only a Back value now
+# satisfies Forward's rewritten front and gets that card, at its sibling's
+# position. A schema change.
+id: notetypes/structure/remove-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}<br>{{Extra}}"}
+        - {name: Reverse, front: "{{Back}}{{#Front}} ({{Front}}){{/Front}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Trio, fields: ["<b>a</b>", b, c]}
+    - {notetype: Trio, fields: [x, "", e]}
+    - {notetype: Trio, fields: ["", y, ""]}
+steps:
+  - update_notetype:
+      notetype: Trio
+      edits:
+        - {sort_field: Extra}
+        - {template: {name: Forward, browser_front: "{{Front}} / {{Extra}}", browser_back: "{{Front}}"}}
+        - {template: {name: Reverse, browser_front: "{{Front}}", browser_back: "{{Back}}"}}
+      skip_checks: true
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 5
+  - update_notetype: {notetype: Trio, edits: [{remove_field: Front}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Trio]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Trio' ORDER BY f.ord

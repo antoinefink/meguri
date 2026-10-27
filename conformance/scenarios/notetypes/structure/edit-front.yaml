@@ -1,0 +1,33 @@
+# Editing a front template (specs/notetypes/structure-changes.md S2, S7;
+# specs/notes/card-generation.md G7, G9): the front of template Gated changes
+# from requiring Hint to requiring Back. The note with Back and no Hint gets
+# its Gated card (at its sibling's position, in its sibling's deck); the note
+# whose Gated card no longer renders keeps it; no card is removed and no grave
+# written.
+# A template text change is not a schema change (scm stays at ls) and stamps
+# no note.
+id: notetypes/structure/edit-front
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Front, Back, Hint]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Gated, front: "{{#Hint}}{{Front}}{{/Hint}}", back: "{{Hint}}"}
+  notes:
+    - {notetype: Trio, fields: [a, b, h]}
+    - {notetype: Trio, fields: [c, d, ""]}
+    - {notetype: Trio, fields: [e, "", ""]}
+    - {notetype: Trio, fields: [f, "", h]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 4
+  - update_notetype: {notetype: Trio, edits: [{template: {name: Gated, front: "{{#Back}}{{Front}}{{/Back}}"}}]}
+  - observe:
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}

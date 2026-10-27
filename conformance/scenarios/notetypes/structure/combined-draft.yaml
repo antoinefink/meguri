@@ -1,0 +1,38 @@
+# One draft with a field rename, an added field and two moves, saved once
+# (specs/notetypes/structure-changes.md S1, S2, S5): the fields are matched by
+# their origin, never by name, so the renamed field keeps its notes' values;
+# the added field is empty in every note; the moves reorder every note's
+# flds; csum comes from the new first field (the empty added field) and sfld
+# from the sort field Term wherever it now sits. One schema change.
+id: notetypes/structure/combined-draft
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Lexeme
+      fields: [Term, Meaning, Example]
+      templates:
+        - {name: Recognize, front: "{{Term}}", back: "{{Meaning}}<br>{{Example}}"}
+  notes:
+    - {notetype: Lexeme, fields: ["zib", "zab", "zib zab zub"]}
+    - {notetype: Lexeme, fields: ["chien", "dog", ""]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3: the draft
+  - update_notetype:
+      notetype: Lexeme
+      edits:
+        - {rename_field: {from: Meaning, to: Gloss}}
+        - {add_field: Audio}
+        - {move_field: {field: Audio, to: 0}}
+        - {move_field: {field: Example, to: 1}}
+      skip_checks: true
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Lexeme' ORDER BY f.ord
+  - observe:
+      - {db_dump: {tables: [notes, cards]}}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec: {sql: "SELECT mtime_secs, usn FROM notetypes WHERE name = 'Lexeme'"}

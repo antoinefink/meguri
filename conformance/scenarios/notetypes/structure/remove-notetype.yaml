@@ -1,0 +1,43 @@
+# Removing a note type (specs/notetypes/structure-changes.md S12). Pair's
+# notes go, each with its cards, card graves first and then the note grave;
+# Alpha's note and card stay. Every config key that begins with
+# _nt_<Pair's id>_ goes (its last deck and a per-template key); Alpha's
+# stays. The current note type becomes the one whose name sorts first
+# (Alpha, before the stock Basic, which has the lowest id). The note type's
+# field and template rows go too. A schema change.
+id: notetypes/structure/remove-notetype
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Alpha
+      fields: [Text]
+      templates:
+        - {name: Only, front: "{{Text}}", back: ""}
+  notes:
+    - {notetype: Pair, fields: [a, b]}
+    - {notetype: Alpha, fields: [s]}
+    - {notetype: Pair, fields: [c, ""]}
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO config (KEY, usn, mtime_secs, val)
+        SELECT '_nt_' || id || '_custom_0', 0, 0, CAST('1' AS BLOB) FROM notetypes WHERE name = 'Pair'
+  - db_exec: {sql: "SELECT n.name FROM notetypes n, config c WHERE c.KEY = 'curModel' AND CAST(c.val AS TEXT) = CAST(n.id AS TEXT)"}
+  - db_exec: {sql: "SELECT KEY FROM config WHERE KEY LIKE '\\_nt\\_%' ESCAPE '\\' ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 5
+  - remove_notetype: {notetype: Pair}
+  - observe:
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT KEY FROM config WHERE KEY LIKE '\\_nt\\_%' ESCAPE '\\' ORDER BY KEY"}
+  - db_exec: {sql: "SELECT n.name FROM notetypes n, config c WHERE c.KEY = 'curModel' AND CAST(c.val AS TEXT) = CAST(n.id AS TEXT)"}
+  - db_exec: {sql: "SELECT count(*) FROM notetypes WHERE name = 'Pair'"}
+  - db_exec: {sql: "SELECT count(*) FROM fields WHERE ntid NOT IN (SELECT id FROM notetypes)"}
+  - db_exec: {sql: "SELECT count(*) FROM templates WHERE ntid NOT IN (SELECT id FROM notetypes)"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

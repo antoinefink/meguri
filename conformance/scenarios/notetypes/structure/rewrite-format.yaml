@@ -1,0 +1,30 @@
+# How much of a template a field rename rewrites (specs/notetypes/structure-changes.md
+# S4 steps 1, 2 and 5). Extra is renamed Note. Meguri edits only the tags
+# that name Extra, writing them in the text's own delimiters: tags written
+# with spaces or extra braces that name other fields stay as they are, the
+# alternate-delimiter directive stays (so {{x}} stays plain text), empty
+# browser texts stay empty, and the back with an unclosed section (a
+# structural error) stays whole. Anki rewrites every tag of every text in
+# canonical form, drops the directive and gives every empty browser front
+# the first field (deviation template-rewrite-keeps-text, step 4); both leave
+# the broken back as it is.
+id: notetypes/structure/rewrite-format
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Styled
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Spaced, front: "{{ Front }} {{{Back}}} {{ text:Extra }}", back: "{{# Front }}x{{/ Front }}{{Back}}"}
+        - {name: Alt, front: "{{=<% %>=}}<%Back%> {{x}} <% Extra %>", back: "{{=<% %>=}}<%Front%>"}
+        - {name: Broken, front: "{{Extra}}{{Front}}", back: "{{Back}}"}
+steps:
+  # the field editor's save stores a back the template checks would refuse
+  - update_notetype: {notetype: Styled, edits: [{template: {name: Broken, back: "{{#Extra}}{{Back}}"}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Styled]}}
+  - advance: 1m
+  # step 3
+  - update_notetype: {notetype: Styled, edits: [{rename_field: {from: Extra, to: Note}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Styled]}}

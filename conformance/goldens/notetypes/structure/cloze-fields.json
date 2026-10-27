@@ -1,0 +1,105 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "update_notetype": {
+          "name": "Gap"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Gap"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Gap": [
+            {
+              "back": "{{cloze:Body}}<br>{{Extra}}",
+              "browser_back": "{{cloze:Body}} {{Extra}}",
+              "browser_front": "{{Intro}}{{^Body}}{{cloze:Body}}{{/Body}}",
+              "front": "{{Intro}}<br>{{#Body}}{{cloze:Body}}{{/Body}}",
+              "name": "Cloze"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Gap"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 3338083717,
+              "data": "",
+              "flags": 0,
+              "flds": "Lead\u001fmore",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "Lead",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_templates": {
+          "Gap": [
+            {
+              "back": "<br>{{Extra}}{{cloze:Intro}}",
+              "browser_back": " {{Extra}}{{cloze:Intro}}",
+              "browser_front": "{{Intro}}{{cloze:Intro}}",
+              "front": "{{Intro}}<br>{{cloze:Intro}}",
+              "name": "Cloze"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Lead", 0, 1, 0, 0, 1, 1894701600, -1],
+            ["Lead", 1, 1, 0, 0, 1, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "198c69dabd5be92f1047b24df542c2b46c207c59b0134cb1dbc37cbba1431a5d",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/cloze-fields",
+  "scenario_sha256": "5dc89ab8ea84950ed2a0aa3fe5aaf8d284c67b83da38fef8f020c7f77df031d3",
+  "tz": "UTC"
+}

@@ -1,0 +1,56 @@
+# Field moves and the sort field (specs/notetypes/structure-changes.md S2, S5;
+# specs/notetypes/schema-changes.md G2, G5). Each save rewrites and stamps
+# every note of the note type: flds follow the new order, sfld comes from the
+# sort field wherever it now sits (stored as an integer when its text reads as
+# a number), csum from the new first field. Each save sets col.scm again after
+# a sync. Before each save the notes are reset to a synced state (mod, usn 5)
+# and the schema to unmodified, and the clock moves, so the stamps show.
+id: notetypes/structure/reorder-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Quad
+      fields: [Word, Reading, Number, Notes]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Reading}}<br>{{Number}}"}
+  notes:
+    - {notetype: Quad, fields: ["<b>私</b>", "かきく", "007", "plain text"]}
+    - {notetype: Quad, fields: ["私", "", "12abc", ""]}
+    - {notetype: Quad, fields: ["", "<i>x</i>", "", "only notes"]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3: Number to the front; the sort field stays Word, now at position 1
+  - update_notetype: {notetype: Quad, edits: [{move_field: {field: Number, to: 0}}], skip_checks: true}
+  - observe:
+      - {db_dump: {tables: [notes]}}
+      - {notetype_structure: {notetypes: [Quad]}}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 9: sort by Number (position 0): sfld 7 for 007, text for 12abc
+  - update_notetype: {notetype: Quad, edits: [{sort_field: Number}], skip_checks: true}
+  - observe:
+      - {db_dump: {tables: [notes]}}
+      - {notetype_structure: {notetypes: [Quad]}}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 15: two moves in one save: Notes to 1, then Word to the end
+  - update_notetype:
+      notetype: Quad
+      edits:
+        - {move_field: {field: Notes, to: 1}}
+        - {move_field: {field: Word, to: 3}}
+      skip_checks: true
+  - observe:
+      - {db_dump: {tables: [notes, cards]}}
+      - {notetype_structure: {notetypes: [Quad]}}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Quad' ORDER BY f.ord

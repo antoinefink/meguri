@@ -1,0 +1,37 @@
+# Restore to Default on a Basic-kind note type that gained a field and a
+# template (specs/notetypes/restore-to-default.md D2 to D5). The stored kind
+# (Basic) decides; fields become Front and Back with stock options (Q's
+# sticky flag goes), by position: every note keeps its first two values and
+# loses the third; the template becomes the single stock Card 1, so every
+# Card 2 card is removed with a grave and the note that had only that card is
+# left with none; the sort field index 2 is lowered to 1 (Back). The name
+# and the id stay. Template text and CSS are each executor's own stock
+# version and are not observed (R908, R1959).
+id: notetypes/structure/restore-basic
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_stock_notetype: {kind: basic, name: Plain}
+  - update_notetype:
+      notetype: Plain
+      edits:
+        - {rename_field: {from: Front, to: Q}}
+        - {field_options: {field: Q, sticky: true}}
+        - {add_field: Extra}
+        - {add_template: {name: Card 2, front: "{{Back}}{{Extra}}", back: "{{Q}}"}}
+  - update_notetype: {notetype: Plain, edits: [{sort_field: Extra}], skip_checks: true}
+  - add_note: {notetype: Plain, fields: [a, b, c]}
+  - add_note: {notetype: Plain, fields: ["", y, z]}
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}
+  - db_exec: {sql: "SELECT id FROM notetypes WHERE name = 'Plain'"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 11
+  - restore_notetype: {notetype: Plain}
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT id FROM notetypes WHERE name = 'Plain'"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

@@ -1,0 +1,45 @@
+# Renaming and removing the fields of a cloze note type
+# (specs/notetypes/structure-changes.md S4 steps 3 and 4, S5, S7). Renaming
+# Text to Body rewrites the cloze replacements inside the front's
+# conditional and the browser front's negated section; every text still
+# holds a cloze replacement, so nothing is appended. Removing Body then
+# leaves the sections' contents without their tags, and every one of the
+# four texts that no longer holds a cloze replacement gets {{cloze:Intro}}
+# (Intro is the first remaining field) appended at its end, the browser
+# front although it still names Intro. The note's cards stay (generation
+# never removes cards) and no card is added: no field holds a cloze number
+# any more. Anki creates the cards of one cloze note in no fixed order, so
+# the cards are read with db_exec, never by id (note-ops.md N3).
+id: notetypes/structure/cloze-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Intro, Text, Extra]
+      templates:
+        - name: Cloze
+          front: "{{Intro}}<br>{{#Text}}{{cloze:Text}}{{/Text}}"
+          back: "{{cloze:Text}}<br>{{Extra}}"
+  notes:
+    - {notetype: Gap, fields: [Lead, "{{c1::alpha}} {{c2::beta}}", more]}
+steps:
+  - update_notetype:
+      notetype: Gap
+      edits:
+        - {template: {name: Cloze, browser_front: "{{Intro}}{{^Text}}{{cloze:Text}}{{/Text}}", browser_back: "{{cloze:Text}} {{Extra}}"}}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3
+  - update_notetype: {notetype: Gap, edits: [{rename_field: {from: Text, to: Body}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Gap]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 7
+  - update_notetype: {notetype: Gap, edits: [{remove_field: Body}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Gap]}}
+      - {db_dump: {tables: [notes]}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.did, c.type, c.queue, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
