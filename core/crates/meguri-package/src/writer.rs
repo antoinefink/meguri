@@ -195,7 +195,7 @@ pub(crate) fn publish_snapshot_with_media(
     let mut source_file = File::open(snapshot)?;
     let mut digest = Sha256::new();
     let mut length = 0_u64;
-    let mut buffer = [0_u8; 128 * 1024];
+    let mut buffer = [0_u8; 64 * 1024];
     loop {
         cancelled(context.is_cancelled)?;
         let n = source_file.read(&mut buffer)?;
