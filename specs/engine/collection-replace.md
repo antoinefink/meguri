@@ -240,7 +240,7 @@ from the candidate. Keep the existing nonempty-WAL and publication-fence tests.
 
 ### R6.6 `CloudAdopt` (U113, U114; `sync/cloudkit-recovery#V14`)
 
-Added for CloudKit. R6.1 to R6.4 do not change for the other reasons.
+Added for CloudKit. R6.1 to R6.5 do not change for the other reasons.
 
 - **Intent.** `CloudAdopt` uses R6.2's handshake with the three values R2 lists. The operation identity is the `adopt` recovery op id (`sync/cloudkit-recovery#V2.3`). The intent also records the candidate's decision: bound to the new binding's account and environment when the source is the active epoch, or local only when it is the previous epoch (`sync/cloudkit-recovery#V14.1`).
 - **Candidate identity.** The publication identity in the candidate identity column of the `adopt` op row (`sync/cloudkit-recovery#V2.3`); for the active source V14.2 step 6 also writes it into the new binding. It is fresh: no earlier collection had it.
