@@ -57,7 +57,6 @@ pub struct Snapshot {
     pub globals: BTreeMap<Field, Value>,
     pub new_today: Option<TodayLimit>,
     pub review_today: Option<TodayLimit>,
-    pub schema_modified: bool,
     pub ignore_count: Option<meguri_storage::queries::revlog_fsrs::IncludedCount>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -272,7 +271,6 @@ pub fn snapshot(collection: &Collection, deck: DeckId) -> Result<Snapshot, Engin
         globals: globals(&*rows)?,
         new_today: today_limit(&normal.new_limit_today),
         review_today: today_limit(&normal.review_limit_today),
-        schema_modified: crate::schema_gate::is_modified(&rows.col()?),
         ignore_count,
     })
 }

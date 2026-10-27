@@ -276,7 +276,6 @@ public struct DeckOptionsSnapshot: Sendable, Hashable {
     public let metadata: [OptionMetadata]
     public let newToday: OptionTodayLimit?
     public let reviewToday: OptionTodayLimit?
-    public let schemaModified: Bool
     public let ignoreCount: OptionIgnoreCount?
     public let unsavedChanges: Bool
     public let subtree: Bool
@@ -287,7 +286,7 @@ public struct DeckOptionsSnapshot: Sendable, Hashable {
         newLimitScope = OptionLimitScope(raw.newLimitScope); reviewLimitScope = OptionLimitScope(raw.reviewLimitScope); retentionThisDeck = raw.retentionThisDeck
         deck = raw.deck; name = raw.name; assignedPreset = raw.assignedPreset; selectedPreset = raw.selectedPreset; presetMissing = raw.presetMissing; today = raw.today; todayDate = raw.todayDate
         presets = raw.presets.map(OptionPreset.init); deckValues = optionFields(raw.deckValues); globals = optionFields(raw.globals); metadata = raw.metadata.map(OptionMetadata.init)
-        newToday = raw.newToday.map(OptionTodayLimit.init); reviewToday = raw.reviewToday.map(OptionTodayLimit.init); schemaModified = raw.schemaModified; ignoreCount = raw.ignoreCount.map(OptionIgnoreCount.init)
+        newToday = raw.newToday.map(OptionTodayLimit.init); reviewToday = raw.reviewToday.map(OptionTodayLimit.init); ignoreCount = raw.ignoreCount.map(OptionIgnoreCount.init)
         unsavedChanges = raw.unsavedChanges; subtree = raw.subtree; effectiveNewLimit = raw.effectiveNewLimit; effectiveReviewLimit = raw.effectiveReviewLimit; effectiveRetention = raw.effectiveRetention
     }
 }
