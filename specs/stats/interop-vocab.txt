@@ -1,0 +1,39 @@
+# Interface names the stats specs use (specs/README-format.md): the synced
+# heatmap config key and its members (Review Heatmap add-on format), config
+# keys, review-log and card columns, timing fields and the conformance
+# observation kinds of specs/conformance/stats-ops.md.
+heatmap
+limhist
+limfcst
+limdate
+limcdel
+limresched
+limdecks
+rollover
+creationOffset
+revlog
+cid
+ease
+lastIvl
+did
+odid
+next_day_at
+days_elapsed
+heatmap_totals
+studied_today_raw
+time_ms
+# Studied today and the Stats Today section (specs/stats/studied-today.md,
+# specs/conformance/stats-ops.md H5-H7, U97): observation kinds and the
+# protobuf fields of Anki's Today graph data the oracle reads.
+studied_today_text
+studied_today_format
+today_stats
+mature_correct
+answer_count
+answer_millis
+correct_count
+learn_count
+review_count
+relearn_count
+early_review_count
+mature_count
