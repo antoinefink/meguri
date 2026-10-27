@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """check_db (specs/conformance/collection-check.md K5, K10): Anki's Check
-Database on the current collection.
+Database on the current collection; optimize (specs/conformance/
+maintenance-ops.md M1): the desktop's automatic optimize on it.
 
 check_db: {}   -> {<kind>: count} for every K5 kind, or the rejection corrupt
     when the integrity check finds the file corrupt (nothing changed).
+optimize: {}   -> nothing. The collection's own optimize call: vacuum, then
+    analyze, each through the raw query API with no begin or commit request.
+    Anki then marks its proxy modified (a commit request would stamp col.mod;
+    no op sends one, as for db_exec) and empties its undo history and study
+    queues. A failure is a run error, never a rejection.
 
 Anki reports problems only as messages in the backend's language. Each kind is
 read from its message under the backend's own translations: the message for a
@@ -118,3 +124,10 @@ def check_db(session, args):
     if counts is None:
         raise Rejected("corrupt")
     return counts
+
+
+@op("optimize")
+def optimize(session, args):
+    if args != {}:
+        raise invalid("optimize takes {}")
+    session.col.optimize()

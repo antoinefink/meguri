@@ -1,0 +1,4 @@
+# specs/conformance/dsl.md D9.1. No scenario is active yet. optimize/* becomes
+# active with U132's optimize adapter (specs/conformance/maintenance-ops.md M1.4).
+area: maintenance
+active: ["optimize/*"]

@@ -411,6 +411,7 @@ impl Engine {
             op,
             generation: self.generation(),
         });
+        let _idle = self.maintenance().pause_idle();
         self.update_availability(&mut state);
         Ok(SlotGuard {
             engine: self.clone(),

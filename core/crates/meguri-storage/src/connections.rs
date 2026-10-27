@@ -236,8 +236,9 @@ pub struct Reader {
 
 /// Opens readers of an open collection from any thread (C6): the engine's
 /// writer thread owns the [`crate::OpenedCollection`], and its readers open
-/// lazily on the threads that first need them. Only an opened collection
-/// hands one out, so its writer has already set WAL mode.
+/// lazily on the threads that first need them. Normal owners have already
+/// set WAL mode; recorded-corrupt owners instead permit diagnostic failures
+/// without opening a writer or releasing recovery ownership.
 #[derive(Clone, Debug)]
 pub struct ReaderFactory {
     path: PathBuf,
@@ -250,6 +251,13 @@ impl ReaderFactory {
             path: path.to_path_buf(),
             initializers: initializers.clone(),
         }
+    }
+
+    /// Diagnostics for a recorded-corrupt owner: no writer or successful probe
+    /// is required. Readers use mode=ro and include a live WAL; SQLite may
+    /// refuse hot-journal recovery. Such refusal never releases ownership.
+    pub fn recovery(path: &Path, initializers: &Initializers) -> Self {
+        Self::new(path, initializers)
     }
 
     /// Opens a reader of `role` (C6). The caller closes it before the

@@ -60,6 +60,7 @@ pub struct OpenConfig {
     pub ports: Ports,
     pub backups_directory: Option<PathBuf>,
     pub disk_space_provider: Arc<dyn crate::DiskSpaceProvider>,
+    pub maintenance_status: Option<Arc<dyn crate::maintenance::status::StatusProvider>>,
     pub backup_entry_times: Arc<dyn crate::maintenance::BackupEntryTimes>,
 }
 
@@ -82,6 +83,7 @@ impl OpenConfig {
             ports: Ports::default(),
             backups_directory: None,
             disk_space_provider: Arc::new(meguri_storage::space::StatvfsSpace),
+            maintenance_status: None,
             backup_entry_times: Arc::new(crate::maintenance::OsBackupEntryTimes),
         }
     }
@@ -404,6 +406,12 @@ impl Engine {
                 return Err(error);
             }
         };
+        let recorded_corrupt = crate::device_state::DeviceState::for_collection(path)
+            .maintenance_records()
+            .quick_check
+            .ok()
+            .flatten()
+            .is_some_and(|record| !record.passed);
         self.jobs().pause(false);
         let progress = |event: OpenEvent| {
             let state = match event {
@@ -416,17 +424,29 @@ impl Engine {
             .initializers(config.initializers.clone())
             .progress(&progress)
             .managed();
-        let opened = match open_collection(path, &options) {
-            Ok(opened) => opened,
-            Err(error) => {
-                self.set_state(LifecycleState::Failed {
-                    reason: FailedReason::Open(error.clone()),
-                });
-                return Err(EngineError::Open(error));
-            }
+        // M5.1/L2: retain the process owner and executor even if a read-only
+        // probe would fail. No live writer exists until an authorized remedy
+        // activates a verified replacement.
+        let opened = if recorded_corrupt {
+            None
+        } else {
+            Some(match open_collection(path, &options) {
+                Ok(opened) => opened,
+                Err(error) => {
+                    self.set_state(LifecycleState::Failed {
+                        reason: FailedReason::Open(error.clone()),
+                    });
+                    return Err(EngineError::Open(error));
+                }
+            })
         };
         self.set_state(LifecycleState::Opening);
-        let previous_clean_shutdown = opened.previous_clean_shutdown;
+        let previous_clean_shutdown = opened.as_ref().is_some_and(|o| o.previous_clean_shutdown);
+        let factory = opened.as_ref().map_or_else(
+            || meguri_storage::ReaderFactory::recovery(path, &config.initializers),
+            |o| o.reader_factory(),
+        );
+        self.maintenance().opened(!previous_clean_shutdown);
 
         let generation = Generation(self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1);
         let privilege = Privilege(self.new_token());
@@ -447,7 +467,7 @@ impl Engine {
         let core = Arc::new(CollectionCore {
             backup: config.ports.backup_service.clone(),
             exec: Arc::clone(&exec),
-            readers: Readers::new(opened.reader_factory()),
+            readers: Readers::new(factory),
             derived: std::sync::OnceLock::new(),
             media: std::sync::Mutex::new(None),
             render_cache: Default::default(),
@@ -503,7 +523,7 @@ impl Engine {
             Box::new(|| crate::sched::fsrs_policy::normalize_at_open(&privileged)),
         ));
         steps.push((DAY_CLOCK_STEP, Box::new(|| privileged.restart_day_clock().map(drop))));
-        for (name, run) in steps {
+        for (name, run) in steps.into_iter().filter(|_| !recorded_corrupt) {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run))
                 .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
             if let Err(error) = result {
@@ -520,7 +540,11 @@ impl Engine {
             }
         }
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
-        exec.set_admission(Admission::Open);
+        exec.set_admission(if recorded_corrupt {
+            Admission::Corrupt
+        } else {
+            Admission::Open
+        });
         let mut guard = self.lock_state();
         guard.recovery_ownership = None;
         guard.current = Some(Current {
@@ -533,7 +557,18 @@ impl Engine {
         });
         guard.suspended = false;
         guard.suspend_flush_pending = true;
-        self.set_state_locked(&mut guard, LifecycleState::Ready { generation });
+        self.set_state_locked(
+            &mut guard,
+            if recorded_corrupt {
+                LifecycleState::Failed {
+                    reason: FailedReason::Corrupt {
+                        detail: "recorded quick check found a damaged collection".into(),
+                    },
+                }
+            } else {
+                LifecycleState::Ready { generation }
+            },
+        );
         Ok(Collection {
             core,
             generation,
@@ -603,11 +638,15 @@ impl Engine {
     /// Marks the open collection corrupt (U132): every op is refused, and
     /// only restore and the recovery download may take the slot.
     pub fn mark_corrupt(&self, detail: impl Into<String>) {
+        self.mark_corrupt_generation(self.generation(), detail);
+    }
+    pub(crate) fn mark_corrupt_generation(&self, generation: Generation, detail: impl Into<String>) {
         let mut guard = self.lock_state();
+        if self.generation() != generation || !matches!(guard.state, LifecycleState::Ready { .. }) {
+            return;
+        }
         if let Some(current) = &guard.current {
-            current.core.exec.set_admission(Admission::Closed {
-                reason: "the collection is corrupt".to_owned(),
-            });
+            current.core.exec.set_admission(Admission::Corrupt);
         }
         self.set_state_locked(
             &mut guard,
@@ -932,6 +971,9 @@ impl Drop for Exclusive<'_> {
         };
         let admission = match back {
             LifecycleState::Ready { .. } if !guard.suspended => Admission::Open,
+            LifecycleState::Failed {
+                reason: FailedReason::Corrupt { .. },
+            } => Admission::Corrupt,
             _ => Admission::Closed {
                 reason: back.describe(),
             },

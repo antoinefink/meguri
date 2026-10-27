@@ -266,6 +266,9 @@ impl CoreHost {
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();
         options.backup_entry_times = config.backup_entry_times.clone();
+        options.maintenance_status = Some(Arc::new(MaintenanceStatusSource {
+            backups: paths.backups.clone(),
+        }));
         let manual_transfers = meguri_sync::oneway::ManualTransfers::new(meguri_sync::oneway::TransferInputs {
             engine: engine.clone(),
             collection_directory: config.collection_directory.clone(),
@@ -393,5 +396,22 @@ impl Drop for CoreHost {
         if let Err(error) = self.close() {
             tracing::warn!(%error, "closing the core host");
         }
+    }
+}
+
+/// Read-only adapters; reuse B7's typed listing without changing backup policy.
+struct MaintenanceStatusSource {
+    backups: std::path::PathBuf,
+}
+impl meguri_engine::maintenance::status::StatusProvider for MaintenanceStatusSource {
+    fn media_sizes(&self, collection: &std::path::Path) -> Result<(u64, u64), EngineError> {
+        meguri_storage::media::recorded_sizes(collection).map_err(Into::into)
+    }
+    fn restore_available(&self) -> Result<bool, EngineError> {
+        use meguri_package::backup::{listing, naming::BackupKind};
+        Ok(listing::list(&self.backups)
+            .map_err(meguri_storage::StorageError::from)?
+            .iter()
+            .any(|entry| matches!(entry.kind, BackupKind::Backup | BackupKind::ServerCopy)))
     }
 }

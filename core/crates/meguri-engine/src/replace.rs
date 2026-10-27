@@ -269,15 +269,25 @@ impl Exclusive<'_> {
     }
 }
 
-pub(crate) fn swap(
+struct SwapContext<'a> {
+    binding: &'a AccountBinding,
+    random: &'a dyn meguri_model::rng::RandomSource,
+    verified_at: i64,
+}
+
+fn swap(
     live: &Path,
     stage: ReplacementStage,
     reason: ReplaceReason,
-    binding: &AccountBinding,
-    random: &dyn meguri_model::rng::RandomSource,
+    context: SwapContext<'_>,
     activated: &std::sync::atomic::AtomicBool,
     recovery: (Option<&mut PreparedMedia>, Option<device_state::RawRestoreAuthority>),
 ) -> Result<(), ReplaceError> {
+    let SwapContext {
+        binding,
+        random,
+        verified_at,
+    } = context;
     let (mut media, raw) = recovery;
     use meguri_storage::{atomic_file, verified_replace as storage};
     let cancel = media
@@ -319,6 +329,7 @@ pub(crate) fn swap(
             e.into()
         }
     })?;
+    device_state::record_verified_check(live, verified_at)?;
     meguri_model::faultpoint!("replace.after_pause_recorded")?;
     if retained_wal {
         device_state::retire_restore_wal(live)?;
@@ -581,7 +592,18 @@ pub(crate) fn run_swap(
     raw: Option<device_state::RawRestoreAuthority>,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
-        return swap(live, stage, reason, &binding, random.as_ref(), &activated, (None, raw));
+        return swap(
+            live,
+            stage,
+            reason,
+            SwapContext {
+                binding: &binding,
+                random: random.as_ref(),
+                verified_at: clock.now_ms(),
+            },
+            &activated,
+            (None, raw),
+        );
     }
     let cleanup_error = media.as_ref().unwrap().cleanup_error.clone();
     let live = live.to_owned();
@@ -600,8 +622,11 @@ pub(crate) fn run_swap(
                         &live,
                         stage,
                         reason,
-                        &binding,
-                        random.as_ref(),
+                        SwapContext {
+                            binding: &binding,
+                            random: random.as_ref(),
+                            verified_at: clock.now_ms(),
+                        },
                         &activated,
                         (media.as_mut(), raw),
                     )

@@ -42,6 +42,7 @@ struct Inner {
     next_id: AtomicU64,
     running: Mutex<RegistryState>,
     pool: JobPool,
+    threads: ThreadRegistry,
     stream: ChangeStream,
 }
 
@@ -62,6 +63,7 @@ impl JobRegistry {
                 next_id: AtomicU64::new(1),
                 running: Mutex::new(RegistryState::default()),
                 pool: JobPool::new(threads, workers)?,
+                threads: threads.clone(),
                 stream,
             }),
         })
@@ -69,7 +71,11 @@ impl JobRegistry {
 
     /// Value-triggered backup reevaluation on the existing pool; no timer.
     pub(crate) fn maintenance_work(&self, work: impl FnOnce() + Send + 'static) {
-        self.inner.pool.run(work);
+        let threads = self.inner.threads.clone();
+        self.inner.pool.run(move || {
+            let _qos = threads.utility_scope();
+            work();
+        });
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, RegistryState> {

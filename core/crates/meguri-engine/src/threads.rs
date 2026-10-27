@@ -189,6 +189,25 @@ impl ThreadRegistry {
         }
     }
 
+    pub(crate) fn utility_scope(&self) -> UtilityScope {
+        let name = thread::current().name().map(str::to_owned);
+        let mut state = self.lock();
+        let prior = state
+            .threads
+            .iter_mut()
+            .find(|(_, r)| Some(&r.name) == name.as_ref())
+            .map(|(id, r)| {
+                let old = r.qos;
+                r.qos = Qos::Utility;
+                r.reported_qos = apply_qos(Qos::Utility);
+                (*id, old)
+            });
+        UtilityScope {
+            registry: self.clone(),
+            prior,
+        }
+    }
+
     /// Adds a thread to the list under a new id.
     fn list(&self, record: Record) -> u64 {
         let mut registry = self.lock();
@@ -217,6 +236,22 @@ impl ThreadRegistry {
     /// The registered threads that are busy now.
     pub fn busy_threads(&self) -> Vec<ThreadInfo> {
         self.threads().into_iter().filter(|t| t.busy).collect()
+    }
+}
+
+pub(crate) struct UtilityScope {
+    registry: ThreadRegistry,
+    prior: Option<(u64, Qos)>,
+}
+impl Drop for UtilityScope {
+    fn drop(&mut self) {
+        if let Some((id, qos)) = self.prior {
+            let reported = apply_qos(qos);
+            if let Some(record) = self.registry.lock().threads.get_mut(&id) {
+                record.qos = qos;
+                record.reported_qos = reported;
+            }
+        }
     }
 }
 

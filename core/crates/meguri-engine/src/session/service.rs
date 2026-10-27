@@ -729,6 +729,13 @@ impl ReviewService {
     ) -> Result<(), EngineError> {
         cancel.check()?;
         let (c, _) = self.bound()?;
+        let _idle = c
+            .core
+            .exec
+            .maintenance
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .map(|m| m.pause_idle());
         // No session/presentation mutex is held across this writer wait.
         // Rollover leaves rows and history untouched for this empty op.
         c.run(
@@ -740,6 +747,14 @@ impl ReviewService {
         Ok(())
     }
     fn start_inner(&self, deck: DeckId, resume: Option<CardId>) -> Result<StartResult, EngineError> {
+        let (idle_collection, _) = self.bound()?;
+        let _idle = idle_collection
+            .core
+            .exec
+            .maintenance
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .map(|m| m.pause_idle());
         if let Some(id) = self.active_session() {
             self.end_inner(id)?;
         }
@@ -1320,6 +1335,14 @@ impl ReviewService {
         self.flush_until(crate::monotonic::now() + Duration::from_secs(5))
     }
     fn drain_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        // A fresh recovery-only host never installed a journal or accepted
+        // work. A stale/failed binding must still take the normal error path.
+        {
+            let state = self.inner.state.lock().unwrap();
+            if state.binding.is_none() && state.session.is_none() && !state.mutating {
+                return Ok(());
+            }
+        }
         let (tx, rx) = mpsc::sync_channel(1);
         self.inner.tx.send(Work::Barrier(tx, deadline)).map_err(invalid)?;
         rx.recv_timeout(deadline.saturating_sub(crate::monotonic::now()))
@@ -3222,6 +3245,14 @@ impl Drop for UnqueuedSession {
 }
 impl ReviewService {
     pub fn begin_unqueued_session(&self) -> Result<UnqueuedSession, EngineError> {
+        let (idle_collection, _) = self.bound()?;
+        let _idle = idle_collection
+            .core
+            .exec
+            .maintenance
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .map(|m| m.pause_idle());
         let _permit = self.control.acquire();
         let (collection, journal) = self.bound()?;
         journal.check(collection.generation())?;

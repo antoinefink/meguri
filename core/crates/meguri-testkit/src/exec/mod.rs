@@ -11,6 +11,7 @@ mod deck_options;
 mod decks;
 mod host_audit;
 pub mod live;
+mod maintenance;
 mod media;
 mod meguri;
 mod model;

@@ -308,8 +308,9 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 17] = [
+    pub const AREAS: [&'static str; 18] = [
         "package",
+        "maintenance",
         "sync",
         "undo",
         "media",
@@ -344,6 +345,7 @@ impl MeguriExecutor {
         for area in areas {
             match *area {
                 "package" => super::package::register(&mut registry),
+                "maintenance" => super::maintenance::register(&mut registry),
                 "sync" => super::sync::register(&mut registry),
                 "undo" => super::undo::register(&mut registry),
                 "media" => super::media::register(&mut registry),

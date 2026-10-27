@@ -13,10 +13,16 @@ pub struct Privilege(pub(crate) u64);
 pub(crate) enum Admission {
     /// `Ready`: every op.
     Open,
+    Corrupt,
     /// Opening or an exclusive phase: only ops with this token.
-    Privileged { privilege: Privilege, reason: String },
+    Privileged {
+        privilege: Privilege,
+        reason: String,
+    },
     /// Closing, closed or failed: nothing.
-    Closed { reason: String },
+    Closed {
+        reason: String,
+    },
 }
 
 pub(crate) enum Decision {
@@ -29,6 +35,7 @@ impl Admission {
     pub(crate) fn decide(&self, privilege: Option<Privilege>, park: bool) -> Decision {
         let reason = match self {
             Admission::Open => return Decision::Queue,
+            Admission::Corrupt => return Decision::Refuse(EngineError::CollectionCorrupt),
             Admission::Privileged { privilege: allowed, .. } if privilege == Some(*allowed) => {
                 return Decision::Queue;
             }

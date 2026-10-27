@@ -25,6 +25,7 @@ pub enum EngineError {
     /// Imported type-in replacement template is malformed (render/type-answer A4.5).
     InvalidTypeAnswerReplacement,
     SessionActive,
+    CollectionCorrupt,
     InvalidIgnoreBeforeDate {
         preset: meguri_model::ids::DeckConfigId,
     },
@@ -174,6 +175,7 @@ impl fmt::Display for EngineError {
                 "stale generation: planned on generation {}, the collection is at {}",
                 planned.0, current.0
             ),
+            EngineError::CollectionCorrupt => f.write_str("collection corrupt"),
             EngineError::CollectionUnavailable { reason } => write!(f, "collection unavailable: {reason}"),
             EngineError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
             EngineError::UndoUnavailable { reason } => write!(f, "undo unavailable: {reason}"),

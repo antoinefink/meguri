@@ -5,12 +5,14 @@ mod collection_import;
 mod folder;
 mod journal_db;
 mod staging;
+mod status;
 mod sync_state;
 mod trash;
 pub use collection_import::{
     CollectionMediaIntent, ImportMediaBackup, ImportMediaCounts, IncomingMedia, InitialMediaState, MediaImportOwner,
     MediaPreparationFailure, validate_incoming_name,
 };
+pub use status::recorded_sizes;
 
 pub use check_report::MediaCheckReport;
 pub use journal_db::{MediaEntry, MediaSyncState, PendingChange, TrackedMediaName};

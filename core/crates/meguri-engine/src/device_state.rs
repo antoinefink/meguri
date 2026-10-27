@@ -166,6 +166,8 @@ struct Intent {
     candidate_file: FileIdentity,
     phase: Phase,
     #[serde(default)]
+    verified_at: Option<i64>,
+    #[serde(default)]
     wal: Option<retained_wal::WalRecovery>,
     #[serde(default)]
     old_native: Option<NativeIdentity>,
@@ -333,7 +335,7 @@ fn check_record(value: &Value) -> Result<LastCheckDatabase, StorageError> {
 }
 /// Validate without rewriting. Metadata-only documents are allowed, but the
 /// presence of R6 fields requires the existing complete, consistent R6 state.
-fn maintenance_state(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<String, Value>>, StorageError> {
+fn maintenance_object(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<String, Value>>, StorageError> {
     let Some(value) = doc.and_then(|doc| doc.get("deviceState")) else {
         return Ok(None);
     };
@@ -384,6 +386,12 @@ fn maintenance_state(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<Str
         let decoded: State = typed(&Value::Object(checked))?;
         bound(&decoded, &decoded.active.binding)?;
     }
+    Ok(Some(state))
+}
+fn maintenance_state(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<String, Value>>, StorageError> {
+    let Some(state) = maintenance_object(doc)? else {
+        return Ok(None);
+    };
     for (key, value) in state {
         match key.as_str() {
             "lastBackup" => {
@@ -392,7 +400,7 @@ fn maintenance_state(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<Str
             "lastCheckDatabase" => {
                 check_record(value)?;
             }
-            "lastOptimize" => {
+            "lastOptimize" | "optimizeCadenceStart" => {
                 value.as_i64().ok_or_else(|| failure("invalid optimize instant"))?;
             }
             "lastQuickCheck" => {
@@ -413,6 +421,16 @@ fn merge_fields(target: &mut Map<String, Value>, fields: Map<String, Value>) {
             target.insert(key, value);
         }
     }
+}
+
+/// Independently readable maintenance fields; an error is never absence.
+#[derive(Clone, Debug)]
+pub struct MaintenanceRecords {
+    pub backup: Result<Option<LastBackup>, StorageError>,
+    pub check_database: Result<Option<LastCheckDatabase>, StorageError>,
+    pub optimize: Result<Option<meguri_model::time::EpochMillis>, StorageError>,
+    pub cadence_start: Result<Option<meguri_model::time::EpochMillis>, StorageError>,
+    pub quick_check: Result<Option<LastQuickCheck>, StorageError>,
 }
 
 /// Durable local-activation evidence, retained after R6 intent cleanup. This
@@ -498,6 +516,42 @@ impl DeviceState {
             merge_fields(state, Map::from_iter([(key.to_owned(), value)]));
             Ok(())
         })
+    }
+    /// M10: decode each maintenance record independently under the shared lock.
+    pub fn maintenance_records(&self) -> MaintenanceRecords {
+        fn unreadable(error: StorageError) -> MaintenanceRecords {
+            MaintenanceRecords {
+                backup: Err(error.clone()),
+                check_database: Err(error.clone()),
+                optimize: Err(error.clone()),
+                cadence_start: Err(error.clone()),
+                quick_check: Err(error),
+            }
+        }
+        sidecar::read_document(&self.path, |doc| {
+            let object = maintenance_object(doc)?;
+            let read = |key: &str| object.and_then(|o| o.get(key));
+            let instant = |key: &str| {
+                read(key)
+                    .map(|v| {
+                        v.as_i64()
+                            .map(meguri_model::time::EpochMillis)
+                            .ok_or_else(|| failure("invalid maintenance instant"))
+                    })
+                    .transpose()
+            };
+            Ok(MaintenanceRecords {
+                backup: read("lastBackup").map(typed).transpose(),
+                check_database: read("lastCheckDatabase").map(check_record).transpose(),
+                optimize: instant("lastOptimize"),
+                cadence_start: instant("optimizeCadenceStart"),
+                quick_check: read("lastQuickCheck").map(typed).transpose(),
+            })
+        })
+        .unwrap_or_else(unreadable)
+    }
+    pub fn set_optimize_cadence_start(&self, instant: meguri_model::time::EpochMillis) -> Result<(), StorageError> {
+        self.maintenance_write("optimizeCadenceStart", instant.0.into())
     }
     pub fn last_backup(&self) -> Result<Option<LastBackup>, StorageError> {
         self.maintenance_read("lastBackup", typed)
@@ -839,11 +893,25 @@ pub(crate) fn begin(
             old_file,
             candidate_file,
             phase,
+            verified_at: None,
             wal,
             old_native,
             candidate_native,
             media,
         });
+        put(doc, &state)
+    })
+}
+/// Bind the sound staged-file verdict before any live file action. The R6
+/// completion writes it only for proven candidate activation, after WAL recovery.
+pub(crate) fn record_verified_check(live: &Path, instant: i64) -> Result<(), StorageError> {
+    sidecar::update_document(&sidecar_path(live), |doc| {
+        let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing verified replacement intent"))?;
+        state
+            .intent
+            .as_mut()
+            .ok_or_else(|| failure("missing verified replacement intent"))?
+            .verified_at = Some(instant);
         put(doc, &state)
     })
 }
@@ -1088,6 +1156,23 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing completed journal"))?;
         bound(&state, binding)?;
         retained_wal::complete_wal(live, &mut state)?;
+        if let Some(intent) = state.intent.as_ref()
+            && state.active == intent.candidate
+            && let Some(instant) = intent.verified_at
+        {
+            let value = serde_json::json!({"instant": instant, "passed": true});
+            if let Some(existing) = state.extra.get_mut("lastQuickCheck") {
+                typed::<LastQuickCheck>(existing)?;
+                merge_fields(
+                    existing
+                        .as_object_mut()
+                        .ok_or_else(|| failure("invalid quick check record"))?,
+                    value.as_object().unwrap().clone(),
+                );
+            } else {
+                state.extra.insert("lastQuickCheck".into(), value);
+            }
+        }
         if let Some(intent) = state.intent.take()
             && let Some(media) = intent.media
         {

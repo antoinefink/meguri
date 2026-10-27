@@ -53,3 +53,22 @@ every ASCII letter and digit outside cloze openers replaced, whose decks carry
 A11.1 rank names and whose tag components are hashed (a probe, not the
 anonymizer: it left `sfld` and `csum` stale, so its Check Database rewrote
 `notes`).
+
+## optimize (U132)
+
+Read at tag 26.09.3 for the `optimize` op (`driver/ops/maintenance.py`);
+meanings in `specs/conformance/maintenance-ops.md` M1, the spec's sources in
+`maintenance-optimize.md`. No code was copied.
+
+| Anki file | Read for |
+|---|---|
+| `pylib/anki/collection.py` (`optimize`, `close`) | the collection's optimize call is the one the desktop's 14-day optimize makes; closing sends no commit request |
+| `pylib/anki/dbproxy.py` | the optimize's two statements go through the raw query call; only `transact` sends begin and commit requests, and the driver never calls it |
+| `rslib/src/backend/dbproxy.rs`, `rslib/src/undo/mod.rs` | a raw statement not starting with `select` empties the undo history and study queues and marks the proxy modified; only a commit request turns that mark into a `col.mod` stamp |
+
+Historical probe recorded in 1211d27a (a throwaway in-process test, not
+kept; not rerun during this preparation): after the
+optimize call `col.mod` is unchanged, and a following `transact` with nothing
+in it stamps it. `driver/tests/test_optimize.py` reads the stamps after the
+optimize and again after `reopen`, so a commit request either step started to
+send would show there.

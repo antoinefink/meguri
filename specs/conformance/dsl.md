@@ -189,6 +189,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `save_backup_settings` | `{daily, weekly, monthly, minimum_interval_mins}`: the backup limits written through the settings save | none | stable (`backup-ops.md` F4) |
 | `backup` | `{force: <boolean>}`: a forced backup, or a periodic one made only when the collection changed since the last backup and no entry of the backups folder is younger than the minimum interval; retention included | `{name}`: the new backup's file name, or `null` when none was made | stable (`backup-trigger-ops.md` H1) |
 | `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejection `corrupt` | stable (`collection-check.md` K10) |
+| `optimize` | `{}`: the automatic optimize (`VACUUM`, then `ANALYZE`) on the scenario's collection, at once | none | stable (`maintenance-ops.md` M1) |
 | `media_outside` | list of `media_files` entries (D6.8) and `{name, remove: true}`: change the media folder directly, bypassing the store | none | stable (`media-ops.md` F4) |
 | `add_media` | `{name, text}` or `{name, fill}`: add a file through the media store with this desired name | `{name}`: the stored name; rejections `invalid_name`, `ignored_name` (Meguri only) | stable (`media-ops.md` F5) |
 | `trash_media` | `{names: [...]}`: move these files to the media trash | none | stable (`media-ops.md` F6) |

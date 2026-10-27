@@ -1,6 +1,9 @@
 //! Event-driven local backup policy (package/backup-triggers T2/T3/T5).
 //! Only value notifications run on the writer. Folder and sidecar reads, and
 //! the one package writer, run on callers' workers or the existing job pool.
+pub mod integrity;
+pub mod optimize;
+pub mod status;
 use crate::{
     CancelToken, Engine, EngineError, EventKind, Generation, LifecycleState, StopCause, WeakEngine,
     device_state::DeviceState,
@@ -117,6 +120,12 @@ struct Inputs {
 #[derive(Default)]
 struct State {
     inputs: Option<Inputs>,
+    health: Option<integrity::HealthInputs>,
+    checking: Option<Arc<CancelToken>>,
+    optimizing: Option<Arc<CancelToken>>,
+    idle_pauses: usize,
+    unclean_due: bool,
+    unreadable_checked: bool,
     epoch: u64,
     generation: Generation,
     ready: bool,
@@ -143,6 +152,7 @@ pub struct Maintenance {
     idle: Condvar,
     // Never taken by a writer or lifecycle notification.
     lane: crate::cancel::SerializationLane,
+    health_lane: crate::cancel::SerializationLane,
 }
 struct Waiting<'a>(&'a Maintenance, Arc<CancelToken>);
 impl Drop for Waiting<'_> {
@@ -178,6 +188,7 @@ impl Maintenance {
             state: Mutex::new(State::default()),
             idle: Condvar::new(),
             lane: Default::default(),
+            health_lane: Default::default(),
         })
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -197,12 +208,33 @@ impl Maintenance {
                 .0;
         }
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn wait_optimizer_cancelled_for_testing(&self) {
+        let deadline = crate::monotonic::now() + Duration::from_secs(10);
+        let mut state = self.lock();
+        while !state.optimizing.as_ref().is_some_and(|token| token.is_cancelled()) {
+            let left = deadline.saturating_sub(crate::monotonic::now());
+            assert!(!left.is_zero(), "optimizer cancellation did not arrive");
+            state = self
+                .idle
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
     pub fn deadline(&self) -> Option<EpochMillis> {
         self.lock().deadline.map(EpochMillis)
     }
     pub(crate) fn configure(&self, path: &Path, config: &crate::OpenConfig) {
         let mut state = self.lock();
         state.epoch += 1;
+        state.health = Some(integrity::HealthInputs {
+            path: path.to_owned(),
+            clock: config.clock.clone(),
+            status: config.maintenance_status.clone(),
+        });
+        state.unclean_due = false;
+        state.unreadable_checked = false;
         state.inputs = config
             .backups_directory
             .as_ref()
@@ -230,6 +262,9 @@ impl Maintenance {
         state.generation = generation;
         state.ready = matches!(lifecycle, LifecycleState::Ready { .. });
         if !state.ready {
+            for token in [&state.checking, &state.optimizing].into_iter().flatten() {
+                token.interrupt();
+            }
             self.publish(&mut state, None);
         }
         let ready = state.ready;
@@ -404,6 +439,17 @@ impl Maintenance {
     /// Worker entry point. There is no engine timer; U133a/U154 own delivery.
     pub fn run_due(&self, trigger: MaintenanceTrigger) -> Result<Option<EpochMillis>, EngineError> {
         worker_only()?;
+        let idle_trigger = integrity::idle_trigger(trigger);
+        let optimize_allowed = if idle_trigger { self.check_idle()? } else { false };
+        // A no-verdict check still permits U127's backup (M5).
+        let result = self.run_due_backup(trigger)?;
+        if optimize_allowed {
+            self.schedule_optimize()?;
+        }
+        Ok(result)
+    }
+    fn run_due_backup(&self, trigger: MaintenanceTrigger) -> Result<Option<EpochMillis>, EngineError> {
+        worker_only()?;
         let cancel = CancelToken::new();
         if trigger == MaintenanceTrigger::Quit {
             cancel.limit_until(crate::monotonic::now() + Duration::from_secs(2));
@@ -492,6 +538,9 @@ impl SuspendParticipant for Maintenance {
     fn suspend_until(&self, deadline: Duration) -> Result<(), EngineError> {
         let mut state = self.lock();
         state.suspended = true;
+        for token in [&state.checking, &state.optimizing].into_iter().flatten() {
+            token.interrupt();
+        }
         for cancel in state.waiting.iter().filter_map(Weak::upgrade) {
             cancel.interrupt();
         }

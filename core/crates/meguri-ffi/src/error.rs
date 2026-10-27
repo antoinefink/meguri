@@ -147,6 +147,9 @@ impl From<EngineError> for CoreError {
             EngineError::ExportFormatLimit => CoreError::ExportFormatLimit,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::SessionActive => CoreError::SessionActive,
+            EngineError::CollectionCorrupt => CoreError::Unavailable {
+                reason: "CollectionCorrupt".into(),
+            },
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
             EngineError::SuspendDeadline { phase } => CoreError::SuspendDeadline { phase },
             EngineError::MediaCommitPending { seq, message } => CoreError::MediaCommitPending { seq: seq.0, message },

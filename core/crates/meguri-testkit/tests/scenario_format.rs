@@ -2915,3 +2915,18 @@ fn package_observation_requests_follow_the_committed_schema() {
     let request = json!({"package_listing": {"name": "x.apkg"}});
     assert!(model_accepts(json!({"observe": [request, request]})).is_err());
 }
+
+#[test]
+fn optimize_is_a_typed_empty_mapping_operation() {
+    let value = json!({"id": "maintenance/typed-optimize", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": [{"optimize": {}}]});
+    let parsed = scenario::Scenario::from_value(&value).unwrap();
+    assert!(matches!(parsed.steps[0], Step::Optimize(_)));
+    assert_eq!(parsed.steps[0].name(), "optimize");
+    assert!(Step::NAMES.contains(&"optimize"));
+    for args in [json!({"future": true}), json!([]), json!(null), json!(true)] {
+        let mut invalid = value.clone();
+        invalid["steps"] = json!([{"optimize": args}]);
+        assert!(scenario::Scenario::from_value(&invalid).is_err());
+    }
+}

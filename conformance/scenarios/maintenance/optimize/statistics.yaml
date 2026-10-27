@@ -1,0 +1,20 @@
+# ANALYZE, the optimize's second statement (specs/maintenance/optimize-integrity.md
+# M1, M2): afterwards the statistics of the notes indexes describe the notes
+# stored when it ran. Three notes of one note type, each with its own first
+# field: one note type id, three checksums, one usn.
+id: maintenance/optimize/statistics
+description: After the optimize, sqlite_stat1 describes the three notes stored.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [alpha, one]}
+    - {notetype: Single, deck: Inbox, fields: [beta, two]}
+    - {notetype: Single, deck: Inbox, fields: [gamma, three]}
+steps:
+  - optimize: {}
+  - db_exec: {sql: "SELECT idx, stat FROM sqlite_stat1 WHERE tbl = 'notes' ORDER BY idx"}

@@ -58,6 +58,7 @@ pub(crate) struct ExecShared {
     idle: Condvar,
     /// The commit lock and the last committed seq (O6).
     commit: Mutex<Seq>,
+    pub(crate) corrupt: std::sync::atomic::AtomicBool,
     delay: Mutex<Option<WriteDelay>>,
     /// The engine's current generation, shared with the lifecycle.
     pub(crate) generation_cell: Arc<AtomicU64>,
@@ -120,6 +121,7 @@ impl ExecShared {
             wake: Condvar::new(),
             idle: Condvar::new(),
             commit: Mutex::new(last_seq),
+            corrupt: std::sync::atomic::AtomicBool::new(false),
             delay: Mutex::new(None),
             generation_cell,
             day_clock: Arc::new(DayClock::new(Arc::clone(&clock), stream.clone())),
@@ -136,6 +138,21 @@ impl ExecShared {
     #[cfg(feature = "test-hooks")]
     pub(crate) fn has_queued_op(&self, name: &str) -> bool {
         self.lock_queue().queues.contains_op(name)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn wait_queued_op(&self, name: &str) {
+        let deadline = crate::monotonic::now() + Duration::from_secs(10);
+        let mut queue = self.lock_queue();
+        while !queue.queues.contains_op(name) {
+            let left = deadline.saturating_sub(crate::monotonic::now());
+            assert!(!left.is_zero(), "expected operation was never queued: {name}");
+            queue = self
+                .idle
+                .wait_timeout(queue, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
 
     fn lock_queue(&self) -> MutexGuard<'_, QueueState> {
@@ -223,6 +240,8 @@ impl ExecShared {
                 },
             }
         };
+        #[cfg(feature = "test-hooks")]
+        self.idle.notify_all();
         if let Some((task, error)) = refused {
             task.body.fail(error);
         }
@@ -235,11 +254,20 @@ impl ExecShared {
         let failed = {
             let mut guard = self.lock_queue();
             let queue = &mut *guard;
+            if matches!(admission, Admission::Corrupt) {
+                // Queue -> commit follows the executor lock order. Writers
+                // inspect this flag only under commit, without taking queue.
+                let _commit = self.lock_commit();
+                self.corrupt.store(true, Ordering::Release);
+            }
             queue.admission = admission.clone();
             let current = self.generation();
             let mut failed = Vec::new();
             for task in std::mem::take(&mut queue.parked) {
                 match (&admission, task.meta.planned) {
+                    (Admission::Corrupt, _) => {
+                        failed.push((task, EngineError::CollectionCorrupt));
+                    }
                     (Admission::Closed { reason }, _) => {
                         let error = EngineError::unavailable(reason.clone());
                         failed.push((task, error));

@@ -134,6 +134,7 @@ impl Engine {
     }
 
     fn quiesce_inner(&self, collection: &crate::Collection, deadline: Duration) -> Result<(), EngineError> {
+        let _idle = self.maintenance().pause_idle();
         let exec = &collection.core.exec;
         exec.review_accepting.store(false, std::sync::atomic::Ordering::Release);
         // Repeatable after a timeout: participants must make their flush and

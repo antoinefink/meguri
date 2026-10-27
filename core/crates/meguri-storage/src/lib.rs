@@ -26,6 +26,7 @@ pub mod journal;
 pub mod leftovers;
 mod live_snapshot;
 pub mod lockfile;
+mod maintenance;
 pub mod media;
 pub mod normal_stage;
 pub mod one_way;

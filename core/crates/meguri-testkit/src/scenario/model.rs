@@ -1028,6 +1028,8 @@ pub enum Step {
     Backup(BackupArgs),
     /// collection-check.md K10: Anki's Check Database, its K5 counts.
     CheckDb(NoArgs),
+    /// maintenance-ops M1: shared writer maintenance primitive.
+    Optimize(NoArgs),
     /// record-ops.md W1.
     DbExec(DbExecArgs),
     /// normalized-dump.md N5: bind unnumbered fixture rows, without writing.
@@ -1084,7 +1086,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 76] = [
+    pub const NAMES: [&'static str; 77] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1141,6 +1143,7 @@ impl Step {
         "save_backup_settings",
         "backup",
         "check_db",
+        "optimize",
         "db_exec",
         "adopt",
         "reopen",
@@ -1225,6 +1228,7 @@ impl Step {
             Step::SaveBackupSettings(_) => "save_backup_settings",
             Step::Backup(_) => "backup",
             Step::CheckDb(_) => "check_db",
+            Step::Optimize(_) => "optimize",
             Step::DbExec(_) => "db_exec",
             Step::Adopt(_) => "adopt",
             Step::Reopen(_) => "reopen",

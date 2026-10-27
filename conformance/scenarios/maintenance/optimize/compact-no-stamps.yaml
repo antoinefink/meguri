@@ -1,0 +1,28 @@
+# The automatic optimize (specs/maintenance/optimize-integrity.md M1, M2;
+# specs/conformance/maintenance-ops.md M1): a dropped scratch table leaves
+# free pages; after the optimize the file has none, passes the integrity
+# check, and keeps its rows and its col stamps although the clock moved on.
+id: maintenance/optimize/compact-no-stamps
+description: The optimize removes free pages and passes the integrity check without changing a row or a col stamp.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [alpha, one]}
+    - {notetype: Single, deck: Inbox, fields: [beta, two]}
+steps:
+  - db_exec: {sql: "CREATE TABLE scratch (payload BLOB)"}
+  - db_exec: {sql: "INSERT INTO scratch VALUES (zeroblob(1000000))"}
+  - db_exec: {sql: "DROP TABLE scratch"}
+  - db_exec: {sql: "SELECT freelist_count > 100 FROM pragma_freelist_count"}
+  - advance: 1h
+  - db_exec: {sql: "SELECT mod, scm, usn, ls FROM col"}
+  - optimize: {}
+  - db_exec: {sql: "SELECT * FROM pragma_freelist_count"}
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - db_exec: {sql: "SELECT mod, scm, usn, ls FROM col"}
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}, schema_objects]

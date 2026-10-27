@@ -71,6 +71,11 @@ impl Collection {
         self.core.exec.has_queued_op(name)
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn wait_queued_op_for_testing(&self, name: &str) {
+        self.core.exec.wait_queued_op(name);
+    }
+
     /// Runs once after this collection's next op publishes its committed
     /// seq, with no commit lock held, before day invalidation or observers.
     #[cfg(feature = "test-hooks")]

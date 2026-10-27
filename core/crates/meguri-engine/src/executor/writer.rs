@@ -95,16 +95,18 @@ pub(crate) fn on_writer_thread() -> bool {
 /// queues are empty.
 pub(crate) fn run(
     shared: Arc<ExecShared>,
-    collection: OpenedCollection,
+    collection: Option<OpenedCollection>,
     reopen: Reopen,
     floor: Seq,
     activity: &ThreadActivity,
 ) {
     ON_WRITER.with(|on| on.set(true));
-    let mut external_version = collection.writer().external_data_version().ok();
-    let external_at_open = collection.external_change;
+    let mut external_version = collection
+        .as_ref()
+        .and_then(|c| c.writer().external_data_version().ok());
+    let external_at_open = collection.as_ref().is_some_and(|c| c.external_change);
     let mut suspended_file = None;
-    let mut collection = Some(collection);
+    let mut collection = collection;
     let mut touched = TouchIndex::new(floor);
     if external_at_open && let Some(opened) = &collection {
         let _ = crate::external_change::notify(&shared, opened.writer(), &mut touched);
@@ -295,6 +297,11 @@ fn refusal(shared: &ExecShared, meta: &TaskMeta) -> Option<EngineError> {
     if meta.control {
         return None;
     }
+    // A corruption verdict closes even work admitted earlier; ordinary
+    // exclusive/suspend drains retain their existing admission semantics.
+    if matches!(shared.lock_queue().admission, super::exclusive::Admission::Corrupt) {
+        return Some(EngineError::CollectionCorrupt);
+    }
     if meta.cancel.as_ref().is_some_and(|token| token.is_cancelled()) {
         return Some(EngineError::Cancelled);
     }
@@ -463,6 +470,10 @@ fn run_op<T>(
     // under it knows exactly which commits it sees (O6).
     let ((committed, derived), reservation) = {
         let mut last = shared.lock_commit();
+        if shared.corrupt.load(Ordering::Acquire) {
+            scope.rollback()?;
+            return Err(EngineError::CollectionCorrupt);
+        }
         let committed = scope.commit_with(|journal, col_mod| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 changes::prepare(journal, spec.source, media, col_mod.is_some())
@@ -758,17 +769,13 @@ impl TaskBody for ReplaceTask {
         let shared = env.shared;
         // Keep the live collection installed until both journal obligations
         // succeed. An error returns its current readers without closing it.
-        let Some(current) = env.collection.as_ref() else {
-            let _ = reply.send(Replaced {
-                reopened: false,
-                error: Some(EngineError::unavailable("the collection is closed")),
-                generation: None,
-                factory: None,
-            });
-            return;
+        let recovery_only = env.collection.is_none() && shared.corrupt.load(Ordering::Acquire);
+        let journal_result = match env.collection.as_ref() {
+            Some(current) => crate::session::retire_witnesses(shared, current.writer())
+                .and_then(|()| crate::session::retire_incarnation(shared)),
+            None if recovery_only => Ok(()),
+            None => Err(EngineError::unavailable("the collection is closed")),
         };
-        let journal_result = crate::session::retire_witnesses(shared, current.writer())
-            .and_then(|()| crate::session::retire_incarnation(shared));
         if let Err(error) = journal_result {
             let _ = reply.send(Replaced {
                 reopened: false,
@@ -782,11 +789,7 @@ impl TaskBody for ReplaceTask {
         // surrender the open file to the existing replacement protocol.
         *shared.active_session.lock().unwrap() = None;
         *shared.fsrs_policy.review_active.lock().unwrap() = false;
-        let collection = env
-            .collection
-            .take()
-            .expect("validated collection remains on the writer");
-        let closed = collection.close();
+        let closed = env.collection.take().map(|collection| collection.close()).transpose();
         let live = LiveFile::before_swap(&shared.path);
         // Never replace a file whose final commit/checkpoint could not be
         // made durable. Reopen the original through the same recovery path
@@ -797,7 +800,7 @@ impl TaskBody for ReplaceTask {
             media_recovered,
         } = swap;
         let swapped = match closed {
-            Ok(outcome) if outcome.succeeded() => {
+            Ok(outcome) if outcome.is_none_or(|o| o.succeeded()) => {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
                     .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())))
             }
@@ -838,6 +841,17 @@ impl TaskBody for ReplaceTask {
             });
             return;
         }
+        if recovery_only && !replacing {
+            let _ = reply.send(Replaced {
+                // Restore only diagnostic access. Provider replay/rebinding
+                // requires an actual reopened writer, never this damaged file.
+                reopened: false,
+                error: swapped.err(),
+                generation: None,
+                factory: Some(ReaderFactory::recovery(&shared.path, &reopen.initializers)),
+            });
+            return;
+        }
         let replaced = match open_collection(&shared.path, &options) {
             Err(error) => Replaced {
                 reopened: false,
@@ -854,6 +868,7 @@ impl TaskBody for ReplaceTask {
                 *env.collection = Some(collection);
                 env.touched.reset(*shared.lock_commit());
                 if replacing {
+                    shared.corrupt.store(false, Ordering::Release);
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
                     let announce = shared.stream.reserve();
                     match first_day_check(env) {

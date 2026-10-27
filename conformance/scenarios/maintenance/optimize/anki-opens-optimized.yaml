@@ -1,0 +1,26 @@
+# A live chain (specs/conformance/dsl.md D9.2; specs/maintenance/optimize-integrity.md
+# M2): Meguri frees pages in its collection and optimizes it, then Anki opens
+# the file, finds it sound and compact, reads the statistics it holds and
+# gives Check Database nothing to repair.
+id: maintenance/optimize/anki-opens-optimized
+description: A collection Meguri optimized opens in Anki with integrity_check ok and no Check Database problem.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [alpha, one]}
+    - {notetype: Single, deck: Inbox, fields: [beta, two]}
+steps:
+  - db_exec: {sql: "CREATE TABLE scratch (payload BLOB)"}
+  - db_exec: {sql: "INSERT INTO scratch VALUES (zeroblob(1000000))"}
+  - db_exec: {sql: "DROP TABLE scratch"}
+  - optimize: {}
+  - handoff: oracle
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - db_exec: {sql: "SELECT * FROM pragma_freelist_count"}
+  - db_exec: {sql: "SELECT idx, stat FROM sqlite_stat1 WHERE tbl = 'notes' ORDER BY idx"}
+  - check_db: {}

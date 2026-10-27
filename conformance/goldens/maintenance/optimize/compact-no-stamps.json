@@ -1,0 +1,327 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000, 0, 0]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["ok"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000, 0, 0]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 3195417371,
+              "data": "",
+              "flags": 0,
+              "flds": "alpha\u001fone",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "alpha",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 2727731389,
+              "data": "",
+              "flags": 0,
+              "flds": "beta\u001ftwo",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "beta",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "schema_objects": [
+          {
+            "name": "idx_cards_odid",
+            "sql": "CREATE INDEX idx_cards_odid ON cards (odid) WHERE odid != 0",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "idx_decks_name",
+            "sql": "CREATE UNIQUE INDEX idx_decks_name ON decks (name)",
+            "tbl_name": "decks",
+            "type": "index"
+          },
+          {
+            "name": "idx_fields_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_fields_name_ntid ON fields (name, ntid)",
+            "tbl_name": "fields",
+            "type": "index"
+          },
+          {
+            "name": "idx_graves_pending",
+            "sql": "CREATE INDEX idx_graves_pending ON graves (usn)",
+            "tbl_name": "graves",
+            "type": "index"
+          },
+          {
+            "name": "idx_notes_mid",
+            "sql": "CREATE INDEX idx_notes_mid ON notes (mid)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_name",
+            "sql": "CREATE UNIQUE INDEX idx_notetypes_name ON notetypes (name)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_usn",
+            "sql": "CREATE INDEX idx_notetypes_usn ON notetypes (usn)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_templates_name_ntid ON templates (name, ntid)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_usn",
+            "sql": "CREATE INDEX idx_templates_usn ON templates (usn)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_nid",
+            "sql": "CREATE INDEX ix_cards_nid ON cards (nid)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_sched",
+            "sql": "CREATE INDEX ix_cards_sched ON cards (did, queue, due)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_usn",
+            "sql": "CREATE INDEX ix_cards_usn ON cards (usn)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_csum",
+            "sql": "CREATE INDEX ix_notes_csum ON notes (csum)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_usn",
+            "sql": "CREATE INDEX ix_notes_usn ON notes (usn)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_cid",
+            "sql": "CREATE INDEX ix_revlog_cid ON revlog (cid)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_usn",
+            "sql": "CREATE INDEX ix_revlog_usn ON revlog (usn)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "cards",
+            "sql": "CREATE TABLE cards ( id integer PRIMARY KEY, nid integer NOT NULL, did integer NOT NULL, ord integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, type integer NOT NULL, queue integer NOT NULL, due integer NOT NULL, ivl integer NOT NULL, factor integer NOT NULL, reps integer NOT NULL, lapses integer NOT NULL, left integer NOT NULL, odue integer NOT NULL, odid integer NOT NULL, flags integer NOT NULL, data text NOT NULL )",
+            "tbl_name": "cards",
+            "type": "table"
+          },
+          {
+            "name": "col",
+            "sql": "CREATE TABLE col ( id integer PRIMARY KEY, crt integer NOT NULL, mod integer NOT NULL, scm integer NOT NULL, ver integer NOT NULL, dty integer NOT NULL, usn integer NOT NULL, ls integer NOT NULL, conf text NOT NULL, models text NOT NULL, decks text NOT NULL, dconf text NOT NULL, tags text NOT NULL )",
+            "tbl_name": "col",
+            "type": "table"
+          },
+          {
+            "name": "config",
+            "sql": "CREATE TABLE config ( KEY text NOT NULL PRIMARY KEY, usn integer NOT NULL, mtime_secs integer NOT NULL, val blob NOT NULL ) without rowid",
+            "tbl_name": "config",
+            "type": "table"
+          },
+          {
+            "name": "deck_config",
+            "sql": "CREATE TABLE deck_config ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )",
+            "tbl_name": "deck_config",
+            "type": "table"
+          },
+          {
+            "name": "decks",
+            "sql": "CREATE TABLE decks ( id integer PRIMARY KEY NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, common blob NOT NULL, kind blob NOT NULL )",
+            "tbl_name": "decks",
+            "type": "table"
+          },
+          {
+            "name": "fields",
+            "sql": "CREATE TABLE fields ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid",
+            "tbl_name": "fields",
+            "type": "table"
+          },
+          {
+            "name": "graves",
+            "sql": "CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID",
+            "tbl_name": "graves",
+            "type": "table"
+          },
+          {
+            "name": "notes",
+            "sql": "CREATE TABLE notes ( id integer PRIMARY KEY, guid text NOT NULL, mid integer NOT NULL, mod integer NOT NULL, usn integer NOT NULL, tags text NOT NULL, flds text NOT NULL, sfld integer NOT NULL, csum integer NOT NULL, flags integer NOT NULL, data text NOT NULL )",
+            "tbl_name": "notes",
+            "type": "table"
+          },
+          {
+            "name": "notetypes",
+            "sql": "CREATE TABLE notetypes ( id integer NOT NULL PRIMARY KEY, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL )",
+            "tbl_name": "notetypes",
+            "type": "table"
+          },
+          {
+            "name": "revlog",
+            "sql": "CREATE TABLE revlog ( id integer PRIMARY KEY, cid integer NOT NULL, usn integer NOT NULL, ease integer NOT NULL, ivl integer NOT NULL, lastIvl integer NOT NULL, factor integer NOT NULL, time integer NOT NULL, type integer NOT NULL )",
+            "tbl_name": "revlog",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat1",
+            "sql": "CREATE TABLE sqlite_stat1(tbl,idx,stat)",
+            "tbl_name": "sqlite_stat1",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat4",
+            "sql": "CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)",
+            "tbl_name": "sqlite_stat4",
+            "type": "table"
+          },
+          {
+            "name": "tags",
+            "sql": "CREATE TABLE tags ( tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, collapsed boolean NOT NULL, config blob NULL ) without rowid",
+            "tbl_name": "tags",
+            "type": "table"
+          },
+          {
+            "name": "templates",
+            "sql": "CREATE TABLE templates ( ntid integer NOT NULL, ord integer NOT NULL, name text NOT NULL COLLATE unicase, mtime_secs integer NOT NULL, usn integer NOT NULL, config blob NOT NULL, PRIMARY KEY (ntid, ord) ) without rowid",
+            "tbl_name": "templates",
+            "type": "table"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "689a6c10a1794f99a90520cb4306d06aa813a3ffe5e9a68629579fa3ebd0e2f5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/optimize/compact-no-stamps",
+  "scenario_sha256": "f50bf70ebc38b1e529ea48ce25f4527210debbcdfe6fb3dbe02c40e379fe9c7d",
+  "tz": "UTC"
+}

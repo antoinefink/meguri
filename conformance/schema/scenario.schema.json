@@ -1353,6 +1353,11 @@
           "type": "object",
           "maxProperties": 0
         },
+        "optimize": {
+          "description": "Stable (maintenance-ops.md M1): the automatic optimize, VACUUM then ANALYZE, on the scenario's collection at once; no output, no rejection.",
+          "type": "object",
+          "maxProperties": 0
+        },
         "media_outside": {
           "description": "Stable (media-ops.md F4): change the media folder directly, bypassing the store: create or rewrite files, create empty subdirectories, remove entries.",
           "type": "array",
