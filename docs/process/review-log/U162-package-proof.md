@@ -721,3 +721,19 @@ Return, created child, destination, Save and replacement checks stay enabled.
 Independent R2 is clear. Privacy `20261027T012138Z-8726` and similarity
 `20261027T012139Z-8961` pass. Actual mobile compilation and workflow remain
 pending; the passing Mac proof keeps its original binding and coverage.
+
+## Structural navigation-bar predicate
+
+Start `c8d8b3ce`. iPhone `ui-test/20261027T012329Z-9911` again passes media,
+answer and reopen, then refuses naming. The query trace reaches structural-bar
+checks before the button/editor checks, but does not report Boolean values.
+Independent review finds the added container actionability requirement too
+strict: no action is performed on a navigation-bar container.
+
+Filtered `cleanroom/20261027T013000Z-14336` changes only those two predicates
+to structural existence. Exact local ancestry, bar/action counts, unique root,
+actual folder button/editor actionability and all Save/nonce/destination checks
+remain enabled. Independent review is clear. Privacy
+`20261027T013153Z-15572` and similarity `20261027T013151Z-15330` pass.
+Live mobile naming and export still require verification. No passing result is
+inferred from the source correction; original Mac evidence stays unchanged.

@@ -832,8 +832,8 @@ import notify
                             .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu"))
                             .allElementsBoundByIndex ?? []
                         guard actions.count <= 1 else { return false }
-                        return (folderBars.count == 1 && actionable(folderBars[0]))
-                            || (browserBars.count == 1 && actionable(browserBars[0])
+                        return (folderBars.count == 1 && folderBars[0].exists)
+                            || (browserBars.count == 1 && browserBars[0].exists
                                 && actions.count == 1 && actionable(actions[0]))
                     }
                 guard roots.count == 1, let root = roots.first, root.exists else { return nil }
