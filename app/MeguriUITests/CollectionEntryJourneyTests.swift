@@ -819,9 +819,23 @@ import notify
                 guard self.nativeExportFolderIsOpen("RF2 Import Tests", app),
                       !app.alerts.firstMatch.exists,
                       nameDialogs().isEmpty else { return nil }
-                let roots = app.descendants(matching: .any).matching(identifier:
-                    "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: RF2 Import Tests")
-                    .allElementsBoundByIndex
+                let roots = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@",
+                    "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "))
+                    .allElementsBoundByIndex.filter { root in
+                        guard root.exists else { return false }
+                        let folderBars = root.navigationBars.matching(identifier: "RF2 Import Tests")
+                            .allElementsBoundByIndex
+                        let browserBars = root.navigationBars.matching(identifier: "FullDocumentManagerViewControllerNavigationBar")
+                            .allElementsBoundByIndex
+                        guard folderBars.count <= 1, browserBars.count <= 1 else { return false }
+                        let actions = browserBars.first?.buttons
+                            .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu"))
+                            .allElementsBoundByIndex ?? []
+                        guard actions.count <= 1 else { return false }
+                        return (folderBars.count == 1 && actionable(folderBars[0]))
+                            || (browserBars.count == 1 && actionable(browserBars[0])
+                                && actions.count == 1 && actionable(actions[0]))
+                    }
                 guard roots.count == 1, let root = roots.first, root.exists else { return nil }
                 let textViews = root.descendants(matching: .textView).matching(identifier: "DOC.inlineRenameField")
                     .allElementsBoundByIndex

@@ -701,3 +701,23 @@ Production and the Mac test branch are unchanged. Reuse the passing Mac proof
 under its original exact build/revision; never rewrite its binding or repeat
 that workflow for this inactive-branch test-only edit. Both mobile cases remain
 required before the local workflow checkpoint closes.
+
+## iPhone export naming scope
+
+Start `ed9b2a9d`. `ui-test/20261027T010812Z-1039` passes actual import,
+image/audio, accepted answer and close/reopen. It then fails in native folder
+naming before export. The final synthetic picker hierarchy shows the actual
+RF2 folder toolbar and inline editor under a local-provider root with an old
+outer title. Only that exact text attachment is inspected; no screenshots or
+other test cases are exported. The test's exact outer-title match rejects it.
+
+Filtered R1 `cleanroom/20261027T011713Z-6025` binds the editor to its own
+local-provider root and exact current folder toolbar. Independent review finds
+P2 `IOS-INLINE-DIRECT-BAR-REGRESSION`: retain the existing direct folder bar
+as well as the generic document-manager form. R2
+`cleanroom/20261027T012000Z-7772` preserves both within the same root, refuses
+duplicates and keeps one actionable editor. Modal exclusions, exact nonce,
+Return, created child, destination, Save and replacement checks stay enabled.
+Independent R2 is clear. Privacy `20261027T012138Z-8726` and similarity
+`20261027T012139Z-8961` pass. Actual mobile compilation and workflow remain
+pending; the passing Mac proof keeps its original binding and coverage.
