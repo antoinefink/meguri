@@ -1687,10 +1687,13 @@ YAML
   (cd "$SB" && python3 tools/scripts/screen-status/screen_status.py init)
 }
 
-@test "design-docs passes when screens.md is generated from the inventory" {
+@test "design-docs preserves unit suffixes when generating screens.md" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   design_fixture
-  grep -q '| Home and deck list (signature) | `home.deckList` | U152 | iphone, mac | empty, typical | full covering set | `list-counts` |' "$SB/docs/design/screens.md"
+  sed -i 's/units: \[U152\]/units: [U152, U163a, U228a]/' "$SB/docs/design/screen-inventory.yaml"
+  mg design-docs --write
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  grep -q '| Home and deck list (signature) | `home.deckList` | U152, U163a, U228a | iphone, mac | empty, typical | full covering set | `list-counts` |' "$SB/docs/design/screens.md"
   mg design-docs
   [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
   [ "$(field .status)" = pass ]
@@ -1723,15 +1726,16 @@ YAML
   grep -q '^    status: sketch$' "$SB/docs/design/screen-status.yaml"
 }
 
-@test "design-docs rejects a status, an unknown state, an unknown reference and a pairwise signature screen" {
+@test "design-docs rejects invalid units, status, state, reference and signature variants" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   design_fixture
-  sed -i 's/^    variants: full/    variants: pairwise\n    status: built/; s/\[empty, typical\]/[empty, glorious]/; s/\[list-counts\]/[list-counts, tab-bar]/' \
+  sed -i 's/^    variants: full/    variants: pairwise\n    status: built/; s/\[empty, typical\]/[empty, glorious]/; s/\[list-counts\]/[list-counts, tab-bar]/; s/\[U152\]/[U163aa]/' \
     "$SB/docs/design/screen-inventory.yaml"
   mg design-docs
   [ "$status" -eq 1 ]
   local messages
   messages="$(field '.failures[].message')"
+  grep -qF 'home.deckList: units must be a non-empty list of unit ids' <<<"$messages"
   grep -qF 'home.deckList: status lives only in docs/design/screen-status.yaml' <<<"$messages"
   grep -qF 'home.deckList: states must be a non-empty list from' <<<"$messages"
   grep -qF "home.deckList: reference 'tab-bar' is not in docs/design/references/index.md" <<<"$messages"

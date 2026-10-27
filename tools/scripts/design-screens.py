@@ -25,7 +25,7 @@ VARIANTS = {"full": "full covering set", "pairwise": "pairwise set"}  # U252
 FIELDS = {"id", "title", "units", "signature", "platforms", "states", "variants", "references", "purpose"}
 PLATFORMS = ["iphone", "ipad", "mac", "widget"]
 ID = re.compile(r"[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*")
-UNIT = re.compile(r"U[0-9]+")
+UNIT = re.compile(r"U[0-9]+[a-z]?")
 REFERENCE_ROW = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|", re.M)
 
 

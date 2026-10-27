@@ -16,7 +16,7 @@ the others use the pairwise set (U252).
 |---|---|---|---|---|---|---|
 | App shell | `shell.root` | U150 | iphone, ipad, mac | typical, loading, error | pairwise set | `sidebar`, `tab-bar`, `toolbar` |
 | Keyboard shortcuts help | `shell.keyboardShortcuts` | U158 | ipad, mac | typical, overflow | pairwise set | `sheet-form` |
-| Damaged collection | `shell.damagedCollection` | U153, U163, U251 | iphone, ipad, mac | empty, typical, error, loading | pairwise set | `content-unavailable`, `confirmation-dialog` |
+| Damaged collection | `shell.damagedCollection` | U153, U163a, U251 | iphone, ipad, mac | empty, typical, error, loading | pairwise set | `content-unavailable`, `confirmation-dialog` |
 
 - `shell.root`: Root layout with the sidebar on iPad and Mac and the tab bar on iPhone, plus the status overlay.
 - `shell.keyboardShortcuts`: The list of keyboard shortcuts for the current context.
@@ -37,7 +37,7 @@ the others use the pairwise set (U252).
 | Screen | Id | Units | Platforms | States | Variants | References |
 |---|---|---|---|---|---|---|
 | Home and deck list (signature) | `home.deckList` | U152, U228 | iphone, ipad, mac | empty, typical, overflow, error, loading | full covering set | `list-counts`, `sidebar`, `content-unavailable` |
-| Deck page (signature) | `home.deckPage` | U155, U228 | iphone, ipad, mac | empty, typical, overflow, error, loading | full covering set | `list-counts`, `charts` |
+| Deck page (signature) | `home.deckPage` | U155, U228a, U228 | iphone, ipad, mac | empty, typical, overflow, error, loading | full covering set | `list-counts`, `charts` |
 | Deck menu | `home.deckMenu` | U152, U156 | iphone, ipad, mac | typical | pairwise set | `list-counts`, `confirmation-dialog` |
 | Deck name sheet | `home.deckName` | U156 | iphone, ipad, mac | typical, error | pairwise set | `sheet-form` |
 | Go to Deck | `home.goToDeck` | U156 | iphone, ipad, mac | empty, typical, overflow | pairwise set | `search-tokens`, `sheet-form` |
@@ -151,7 +151,7 @@ the others use the pairwise set (U252).
 | Settings | `settings.root` | U160 | iphone, ipad, mac | typical | pairwise set | `grouped-form`, `sidebar` |
 | Sync account and status | `settings.sync` | U161 | iphone, ipad, mac | empty, typical, error, loading, overflow | pairwise set | `grouped-form`, `confirmation-dialog` |
 | Import and export | `settings.importExport` | U162 | iphone, ipad, mac | typical, error, loading | pairwise set | `grouped-form`, `sheet-form` |
-| Backups and Restore | `settings.backups` | U163 | iphone, ipad, mac | empty, typical, overflow, error, loading | pairwise set | `grouped-form`, `sheet-form`, `list-counts`, `confirmation-dialog` |
+| Backups and Restore | `settings.backups` | U163a | iphone, ipad, mac | empty, typical, overflow, error, loading | pairwise set | `grouped-form`, `sheet-form`, `list-counts`, `confirmation-dialog` |
 | Maintenance | `settings.maintenance` | U163 | iphone, ipad, mac | typical, error, loading | pairwise set | `grouped-form` |
 | Diagnostics | `settings.diagnostics` | U51, U153 | iphone, ipad, mac | typical, error | pairwise set | `grouped-form` |
 | Integrations | `settings.integrations` | U144, U164 | mac | typical, error | pairwise set | `grouped-form` |

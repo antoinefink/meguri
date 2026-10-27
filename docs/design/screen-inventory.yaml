@@ -43,7 +43,7 @@ screens:
     purpose: The list of keyboard shortcuts for the current context.
   - id: shell.damagedCollection
     title: Damaged collection
-    units: [U153, U163, U251]  # and U163a; the validator's unit pattern rejects letter suffixes
+    units: [U153, U163a, U251]
     signature: false
     platforms: [iphone, ipad, mac]
     states: [empty, typical, error, loading]
@@ -106,7 +106,7 @@ screens:
       streak stats; U228) in the same list on every layout; and the sync button.
   - id: home.deckPage
     title: Deck page
-    units: [U155, U228]  # and U228a (counts and buried badge); the validator rejects letter suffixes
+    units: [U155, U228a, U228]
     signature: true
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
@@ -454,7 +454,7 @@ screens:
     purpose: Import packages and export decks or the collection.
   - id: settings.backups
     title: Backups and Restore
-    units: [U163]  # U163a builds it, not U163; the validator rejects letter suffixes, so U163 stands in
+    units: [U163a]
     signature: false
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
