@@ -35,7 +35,7 @@ What Anki does to keep a collection file compact and to notice a damaged one, an
 |---|---|---|
 | Automatic optimize | `VACUUM`, `ANALYZE` | U132 (this spec) |
 | Check Database | `VACUUM`, `REINDEX`, `ANALYZE`, after its integrity stage passed and before any repair (`conformance/collection-check` K3 step 7) | U128 (R1641) |
-| Before a one-way upload | `VACUUM`, `REINDEX`, `ANALYZE`, after the transaction that prepares the file for upload | U109 (R1655's pre-upload part), on the copy it uploads, never on the live file |
+| Before a one-way upload | `VACUUM`, `REINDEX`, `ANALYZE`, after the transaction that prepares the file for upload | U109 (R1655's pre-upload part; manual Anki transfer only, frozen (KTD26)), on the copy it uploads, never on the live file |
 
 - The one-way upload row is manual-transfer compatibility only: Meguri uploads a whole collection file only in an explicit Export to Anki through a server (R2060, KTD26). Routine iCloud sync never uploads the SQLite file (R2044), so it has no pre-upload optimize. U109 is frozen; this row adds no work to it.
 

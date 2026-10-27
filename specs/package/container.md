@@ -183,8 +183,10 @@ Before an operation writes anything, U32's free-space check runs on the file sys
 | write a package from a standalone file | 2 × the file's size + 4 MiB |
 | inspect (P12) | E + 4 MiB, where E is the content size the first zstd frame of `collection.anki21b` declares, or, when it declares none, the larger of 4 × the entry's compressed size and the live collection file's size |
 | inspect, after extraction, when the extracted file is below schema 18 | the extracted file's size again (the pre-upgrade copy) |
+| take the owned source copy of a local collection-file import (P16.1), before inspect | the selected file's size + 4 MiB, on the collection's file system (the copy is held in a P9 staging directory) |
 
 - A restore adds its safety backup to the first check (U127).
+- Decided 2026-10-27: the owned source copy is held in a fresh P9 staging directory of the import, in the collection directory, so U32's launch sweep removes it after a kill and the selected source is never touched. Its check runs before the copy is created; the copy stays until the operation ends, so the later inspect check, and P16.1's media checks, measure free space with it already taken.
 - A write that still fails for lack of space (another app filled the disk): `DiskFull`, with the same cleanup as any failure. U32 reports that failure as its own `InsufficientSpace` (`storage/durability-and-files#F4`, `#F5`). Once this preflight has passed, the package error for it is `DiskFull`, so a message can tell "not enough space to start" from "the disk filled during the write".
 
 ## P11. The collection-only writer

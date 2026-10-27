@@ -290,7 +290,7 @@ flowchart TB
 **Settings — Heatmap**
 - R146. Heatmap colour theme (lime, olive, ice, magenta, flame; default lime), calendar mode (year overview, default; or continuous timeline), history limit (days, 0 = none), forecast limit (days, 0 = none), "ignore data before" date, "exclude deleted cards from history" (default off), "exclude manual reschedules from history" (default on) and "decks excluded from the Home heatmap" are stored in the collection config key `heatmap`, in the Review Heatmap add-on's format.
 - R147. Meguri reads the `heatmap` key on open and after every sync, writes changed values back in the same format, and preserves any sub-keys it does not understand (including `version`).
-- R148. "Show heatmap on Home", "Show heatmap on deck page" and "Show streak stats even when the heatmap is hidden" are device-local toggles (default on, on, off).
+- R148. "Show heatmap on Home", "Show heatmap on deck page" and "Show streak stats even when the heatmap is hidden" are device-local toggles (default on, on, on; corrected 2026-10-27: all on, as R1342 and the add-on's profile-local options have them).
 - R149. "First day of week" for the heatmap uses the collection's `firstDayOfWeek` (shared with the Stats calendar; default Sunday) (deviation: the add-on always starts weeks on Monday).
 
 **Settings — Backups, Maintenance, Integrations, About**
@@ -1338,7 +1338,7 @@ flowchart TB
 - R915. A Note Types screen lists every note type with its note count (loaded in the background), and is reachable from Settings and Browse on all platforms and with ⇧⌘N on Mac.
 - R916. Add offers "Add: <stock kind>" for each stock kind and "Clone: <name>" for every existing note type (named "<name> copy"), then asks for a name, and selects the new type.
 - R917. Rename changes only the name (no schema change) and selects the renamed type.
-- R918. Delete is refused for the last note type, asks "Delete this note type and all its cards?" (or "Delete this unused note type?"), requires the schema-change confirmation, and deletes all its notes and cards.
+- R918. Delete is refused for the last note type, asks "Delete this note type and all its cards?" (or "Delete this unused note type?"), takes its safety backup after that question is accepted and before its first write, and deletes all its notes and cards. It asks no schema-change confirmation (`specs/notetypes/schema-changes.md` G4; safety backup per `specs/package/backup-triggers.md` T6.1; corrected 2026-10-27).
 - R919. Each row offers Fields, Cards and the Restore to Default action.
 
 **Note types: fields**
@@ -1383,7 +1383,7 @@ flowchart TB
 - R945. For each new field the user picks an old field or "(Nothing)", one old field may feed several new fields, and the default mapping matches names exactly first then fills gaps with unused old fields in order.
 - R946. For each new template the user picks an old template or "(Nothing)", each old template used at most once, and this mapping is hidden when either side is Cloze, with the note that cloze card numbers stay unchanged and extra cards are removed when moving to a normal type.
 - R947. Before saving, Meguri lists the fields whose content will be discarded and the cards that will be removed.
-- R948. Saving requires the schema-change confirmation, is refused if the collection schema changed since the screen opened, removes unmapped cards, renumbers remapped cards, remaps fields, generates any newly required cards, is undoable, and reports "N notes updated."
+- R948. Saving asks no schema-change confirmation and takes its safety backup as T6.1 requires (coalescing included) before its first write (`specs/notetypes/schema-changes.md` G4, `specs/package/backup-triggers.md` T6.1; corrected 2026-10-27), is refused if the collection schema changed since the screen opened, removes unmapped cards, renumbers remapped cards, remaps fields, generates any newly required cards, is undoable, and reports "N notes updated."
 
 **Schema changes and full sync**
 
@@ -3914,7 +3914,7 @@ Deferred to implementation:
 
 Deferred product decisions for Antoine. The plan follows each default until he answers:
 - M1 scope. Decided by Antoine on 2026-10-16: reviews first. Entry-point edges into deferred features are cut with U152's attach pattern, and the new milestone M1R, before M1, holds only the review path on his real collection (Delivery Milestones).
-- Heatmap streak toggle default. R148 sets "Show streak stats even when the heatmap is hidden" off; R1342 sets every display toggle on. Default: all on, per R1342 and U229.
+- Heatmap streak toggle default. Decided 2026-10-27: all on, per R1342 and U229; R148, which had set "Show streak stats even when the heatmap is hidden" off, now matches (corrected 2026-10-27).
 - Zero studied-today line. R44 says "No cards studied today"; R1298 says Anki's "Studied 0 cards in 0 seconds today (0s/card)". Default: R1298, the Anki text (U228).
 - Remote media destinations. AnkiConnect `url` sources and Migaku remote media let any allowed caller make Meguri fetch loopback or LAN hosts (U135). Refuse private, loopback and link-local destinations for requests that carry an Origin, including after redirects? That would break workflows such as Yomitan's local audio server on localhost. Default: no destination restriction, as AnkiConnect behaves.
 - R1960 and the oracle. Does "no Anki web assets in tests" cover the AGPL oracle quarantine? U190 reads it as yes (observed editor goldens, settled), while U226 records stats goldens by running the graphs page in a quarantined oracle image. Default: the oracle quarantine may run the graphs page for stats goldens; the editor keeps its observed goldens.
@@ -4102,7 +4102,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U158 | Keyboard shortcut engine, catalog and deck-list keys | `app/Packages/MeguriKit/Sources/AppModel/Keyboard/KeyStroke.swift`<br>`app/Meguri/Shell/Keyboard/`<br>`app/Meguri/Shell/KeyboardShortcutsHelpView.swift` | U150, U152 |
 | U159 | Menu bar commands, global shortcuts and undo/redo routing | `app/Meguri/Commands/MeguriCommands.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Commands/FocusedActions.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Undo/UndoStore.swift` | U25, U37, U150, U151, U156, U157, U158, U160, U161, U162, U163, U181 |
 | U160 | Settings framework and preference pages | `app/Packages/MeguriKit/Sources/Features/Settings/SettingsRoot.swift`<br>`app/Packages/MeguriKit/Sources/Features/Settings/Pages/ReviewSettingsPage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SettingsStoreTests.swift` | U23, U150, U151, U153, U158 |
-| U161 | iCloud sync status and Settings Anki Transfers | `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`<br>`app/Meguri/Mac/QuitSyncSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift` | U20, U105, U107, U109, U111, U151, U153, U160 |
+| U161 | iCloud sync status and Settings Anki Transfers | `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`<br>`app/Meguri/Mac/QuitSyncSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift` | U20, U105, U107, U109, U111, U113, U114, U151, U153, U160 (corrected 2026-10-27) |
 | U162 | Import and export UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/FileIntake.swift`<br>`app/Meguri/Shell/FileDropTargets.swift`<br>`app/Meguri/Mac/AppDelegate.swift` | U120, U122, U124, U133, U151, U153, U154, U157, U166 |
 | U163a | Backups page and restore | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsPage.swift`<br>`app/Packages/MeguriKit/Sources/Features/Settings/Collection/RestoreSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/BackupsPageTests.swift` | U7, U126, U127, U133a, U150, U152, U153, U154, U160 |
 | U163 | Maintenance UI and repair reports | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/MaintenancePage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/MaintenanceFlowTests.swift`<br>`app/MeguriUITests/MaintenanceTests.swift` | U7, U126, U127, U128, U130, U131, U133, U133a, U152, U153, U154, U160, U163a |
@@ -5552,7 +5552,7 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 
 ### U29. Note types: records, stock kinds, validation and the schema-change gate
 
-**Goal:** Read and write notetype, field and template records with full preservation, ship Meguri's six stock kinds, apply naming and validation rules, and own the schema-change classification and confirmation gate used across the core.
+**Goal:** Read and write notetype, field and template records with full preservation, ship Meguri's six stock kinds, apply naming and validation rules, and own the schema-change classification and the `scm` stamping and storage guard used across the core (no confirmation; corrected 2026-10-27).
 
 **Requirements:** R903, R904, R905, R906, R907, R908, R909, R910, R911, R912, R913, R949, R950, R951 (gate state), R1475, R1476, R1477, R1485, R1586 (notetype side), R1590 (core side); core side of R916, R917, R921, R942, R943.
 
@@ -6575,7 +6575,7 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - Insertion order Sequential → Random: new-card positions of decks using the preset are a permutation of the old set; back to Sequential sorts them by order added (oracle golden).
 - Today-only new limit 50 for today, then cleared: the stored value stays 50 and its day moves into the past; the effective limit falls back to This deck, then Preset.
 - "Save to all subdecks" assigns the preset to the deck and every descendant.
-- Removing the Default preset is refused; removing preset P reassigns its decks to the preset being saved and requires the schema-change confirmation.
+- Removing the Default preset is refused; removing preset P reassigns its decks to the preset being saved, commits without a schema-change confirmation (`specs/notetypes/schema-changes.md` G4) and takes its safety backup as `specs/package/backup-triggers.md` T6.1 requires, coalescing included (corrected 2026-10-27).
 - Validation: steps `0m`, `-5`, `5x` → errors; `1d` under FSRS → warning; reviews/day 100 with new/day 20 → warning; DR 0.68 → error, 0.96 → warning; ignore-before tomorrow → error.
 - Out-of-range stored values (0 or NaN from old clients) appear with Anki's replacement defaults in the snapshot.
 - The R645 hook on a learning card whose new deck's preset has different steps remaps its steps and recomputes its memory state (see the coverage note on R645); U87's Change Deck tests cover it end to end.
@@ -9572,7 +9572,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   4. Optimize: U132's vacuum-and-analyze primitive plus `REINDEX` (R1641), as U24 writer maintenance tasks outside the repair transaction.
   5. Run all repairs in one write op (source Maintenance, not undoable, clears undo per R725). Repairs are computed inside that write transaction against live rows, as Anki does, never on a snapshot (U24 write-phase rule).
 - **Report:** each repair category increments a counter. The counters equal the oracle's per-problem counters (R1924). Report text is Meguri's wording keyed by counter.
-- **Forced one-way sync:** `scm` is set if and only if a category listed in R1643 fired. This unit and U129 share the flag. Decided 2026-10-27: this rule stands, because the oracle sets `scm` only for those categories; `specs/conformance/collection-check.md` K5's "marks the schema changed after any repair" is broader than the oracle, and R1642-only repairs (for example card-property clamps and missing decks) leave `scm` equal (corrected 2026-10-27).
+- **Forced one-way sync:** `scm` is set if and only if a category listed in R1643 fired. This unit and U129 share the flag. Decided 2026-10-27: this rule stands, because the oracle sets `scm` only for those categories; `specs/conformance/collection-check.md` K5's earlier "marks the schema changed after any repair" was broader than the oracle and now names exactly these categories, and R1642-only repairs (for example card-property clamps and missing decks) leave `scm` equal (corrected 2026-10-27).
 - **Afterwards:** a broad ChangeSet; the derived store is marked stale (R1489).
 - **Concurrency:** lifecycle stays `Ready`, so review stays usable (R1494). Local servers wait through U24's availability wait (R1706, R1797). The vacuum task and the repair op declare their durations (U24 list), so answers that arrive meanwhile wait in U43's overlay and journal.
 - Corruption is injected in scenarios with the `db_exec` op on fixture copies (oracle-harness §2).
@@ -10993,7 +10993,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Requirements:** R89, R102–R107, R117–R127, R1496–R1504, R1536–R1548, R1558–R1562, R2046, R2048–R2050, R2054–R2063; AE89, AE91, AE94, AE95.
 
-**Dependencies:** U151, U153, U160, U105, U107, U109, U111, U20.
+**Dependencies:** U151, U153, U160, U105, U107, U109, U111, U20, U113 and U114 (its V14 preview sheet needs U114's adopt call; corrected 2026-10-27).
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Sync/SyncButton.swift`, `SyncStatusPopover.swift`, `CloudKitConnectionView.swift`
@@ -14617,7 +14617,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Approach:**
 - XCUITest drives an operation through UI identifiers.
-- Milestone legs: M1R runs kill during review, kill during a sync, kill during the first full download (AE86), background suspend, the corrupt-collection screen (restore, and download with an account), low disk space on a full download, and restore through Settings (U163a). Later legs wire in with their units: the `.colpkg` import kill and the low-disk import with U162, Check Database on the corrupt screen with U163 and U128, media trash with U130 and U163, deck delete with U156, and the editor and Browser rows of the destructive-op table with U190 and U210.
+- Milestone legs: M1R runs kill during review, kill during a sync, kill during the first full download (AE86), background suspend, the corrupt-collection screen (restore, and Replace with the iCloud collection under `sync/cloudkit-recovery` V19's conditions; its Check Database leg wires in later with U163 and U128, as below; corrected 2026-10-27), low disk space on a full download, and restore through Settings (U163a). Later legs wire in with their units: the `.colpkg` import kill and the low-disk import with U162, Check Database on the corrupt screen with U163 and U128, media trash with U130 and U163, deck delete with U156, and the editor and Browser rows of the destructive-op table with U190 and U210.
 - The test hook signals "operation in progress" through a launch-environment file channel. The host helper SIGKILLs the app process. The test relaunches and verifies through the UI and through a test-hook integrity report.
 - Suspend (R2007): the test backgrounds the app mid-session, then asserts through a test hook that no SQLite lock is held after `suspend` (U32), and that pending answers were committed by `flush_for_background`.
 - Restore (R2010): Settings → Backups (U163a) → restore an older backup. The collection matches that backup's dump, auto-sync is off, and the sync status asks for a direction.
