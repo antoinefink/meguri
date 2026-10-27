@@ -282,7 +282,7 @@ impl RecoveryJournal {
             return Ok(None);
         }
         let digest = Sha256::digest(&original);
-        let name = format!("{digest:x}");
+        let name: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         let archive = collection.with_file_name(format!("meguri-pending-answers.{name}.recovery.jsonl"));
         if archive.try_exists().map_err(error)? {
             if recovery_bytes(&archive)? != original {
