@@ -132,6 +132,7 @@ runs:
     budget_s: 600
   - id: core-test
     job: core-test
+    args: [--, --features, meguri-ffi/test-hooks]
     tier: T0
     placement: docker:dev
     class: unit
