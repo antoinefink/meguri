@@ -366,7 +366,7 @@ For a point the core writes (R1256, R1428): elapsed time, the long time span of 
 
 | Member | Content |
 |---|---|
-| `stats` | the raw values of C3 only, under C13.1's names, without the names `deck`, `original_deck`, `notetype`, `card_type` and `preset`; no `revlog` (the history is the `revlog` member below); `card_id` and `note_id` as JSON integers; an absent optional value as `null` (every member is always present) |
+| `stats` | the raw values of C3 only, under the names of `conformance/stats-ops` H9, without the names `deck`, `original_deck`, `notetype`, `card_type` and `preset`; no `revlog` (the history is the `revlog` member below); `card_id` and `note_id` as JSON integers; an absent optional value as `null` (every member is always present) |
 | `card` | the card row: every column of `model/row-records#R4` in table order, integers as JSON integers, `data` as its stored text |
 | `revlog` | newest first, one object per row: `row` (every column of R5 in table order, as stored) and `info` (C6.1's raw values for that row) |
 | `deck` | the current deck as its schema-11 object (`model/schema11-json`) without `name`, `desc` and `usn` |
@@ -415,25 +415,11 @@ No text contains U+2068 or U+2069. Anki wraps each number in that pair of invisi
 
 ### C13.1 What the driver must return
 
-- **Request.** `{card_stats: [#cN, ...]}`: a non-empty list of card references.
-- **Value.** `{"#cN": <stats>}`. `<stats>` holds the fields of the `CardStatsResponse` message for that card, as the backend returns them at the clock's current instant:
-  - `card_id` as `#cN`, `note_id` as `#nN`;
-  - `deck`, `original_deck` (`null` when not set), `card_type`, `notetype`, `preset`, `custom_data`: strings;
-  - `added`, `first_review`, `latest_review`, `due_date` (epoch seconds), `due_position`: integers, `null` when the optional field is not set;
-  - `interval`, `ease`, `reviews`, `lapses`: integers;
-  - `average_secs`, `total_secs`, `desired_retention` (`null` when not set), `fsrs_retrievability` (`null` when not set): f32 values written as their shortest f32 decimal;
-  - `memory_state`: `{stability, difficulty}` (f32) or `null`;
-  - `fsrs_params`: the list of f32 values;
-  - `revlog`: the entries in the message's order (newest first), each `{time, review_kind, button_chosen, interval, ease, taken_secs, memory_state, last_interval}`, `review_kind` as its number 0 to 5 and `memory_state` as above or `null`.
-- **Oracle.** The backend's card-stats call for the card's id. Scenarios set the config key `fsrs` to true in `setup.config` (Anki computes a missing memory state only with FSRS on, and Meguri always runs it). The frozen clock fixes `now`, including the instant the due estimate adds days to.
-- **Meguri.** The raw values of the core's snapshot (C3, C6.1) under the same names.
-- **Comparison.** Exact, except `memory_state` (top level and per entry) and `fsrs_retrievability`, within a relative 1e-5 under `conformance/observations#O7`'s rule (the row C13.2 adds there).
-- **Errors.** A card stats failure is a run error (`anki_error` in the oracle; the matching typed error in Meguri, C11).
-- **No text.** Anki's Python-side stats backend returns no display text (R1887). If U226's headless graphs-page image lands, a later `card_info_text` kind may record the card-info page's texts; until then C4 to C7 are tested from this spec.
+Moved to `conformance/stats-ops` H9 (draft): request, value, oracle and Meguri sides, comparison and errors.
 
 ### C13.2 Where it is defined
 
-When the driver support lands, the oracle-maintainer adds this kind to `specs/conformance/stats-ops.md` (as H9), to `observations.md` O4, the O7 tolerance row (1e-5 for `stability` and `difficulty` in any `memory_state` and for `fsrs_retrievability` inside `card_stats`), and its shape to `conformance/schema/`; this section then points there. The driver op belongs in `oracle/driver/ops/stats.py`.
+The kind is `conformance/stats-ops` H9. When the driver support lands, the oracle-maintainer adds it to `observations.md` O4, the O7 tolerance row (1e-5 for `stability` and `difficulty` in any `memory_state` and for `fsrs_retrievability` inside `card_stats`), and its shape to `conformance/schema/`. The driver op belongs in `oracle/driver/ops/stats.py`.
 
 ### C13.3 Anki's write
 

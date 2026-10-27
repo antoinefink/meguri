@@ -85,7 +85,7 @@ While a collection is open, the core holds these values. They are built once per
 
 1. the Home count per heatmap day (N3), under the current `heatmap` settings;
 2. counts from which any deck scope (N4) can be summed when a query runs, and from which N3.3 can be applied, without reading the review log;
-3. a card table: for each card id, whether it exists, its home deck, its current deck, its queue and its due (used by the forecast, U96, and scopes, U98);
+3. a card table: for each card id, whether it exists, its home deck, its current deck, its `type`, its queue, its `due` and its `odue` (used by the forecast, U96, which needs `type` and `odue` for cards in filtered decks, `stats/heatmap-addon` A3 items 1 and 3, and by scopes, U98);
 4. the studied-today count and time (N6) for the current window.
 
 A query for Home or a deck returns that scope's day → count map (N3 or N4, with `stats/day-buckets` B4.3 applied) and its earliest day, or no day when the map is empty. `heatmap_totals` observes the map (`specs/conformance/stats-ops.md` H1). How the heatmap and streaks use the earliest day is U96's.
