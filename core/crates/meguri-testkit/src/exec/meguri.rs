@@ -771,6 +771,159 @@ mod host_tests {
     use meguri_engine::UndoScope;
 
     #[test]
+    fn backup_adapters_share_the_disjoint_directory_before_and_after_promotion() {
+        use super::super::storage::SessionCollection;
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup-adapters.yaml");
+        fs::write(
+            &path,
+            concat!(
+                "id: host/backup-adapters\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n",
+                "  - add_backup_files: {names: ['foreign seed', 'é']}\n",
+                "  - observe: [backup_files]\n",
+                "  - force_backup: {copy_as: copy.colpkg}\n",
+                "  - observe: [backup_files]\n",
+            ),
+        )
+        .unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let executor = MeguriExecutor::new();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        assert!(matches!(session.storage.collection(), Some(SessionCollection::Raw(_))));
+        executor.step(&mut session, &loaded.scenario.steps[0]).unwrap();
+        let backups = session.storage.backup_directory_for_testing();
+        let live = session.storage.dir().unwrap();
+        assert!(!backups.starts_with(&live));
+        assert!(!live.starts_with(&backups));
+        assert!(!live.join("backups").exists());
+        assert_eq!(fs::read(backups.join("foreign seed")).unwrap(), b"");
+        assert_eq!(fs::read(backups.join("é")).unwrap(), b"");
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[1]).unwrap(),
+            json!({"backup_files": ["foreign seed", "é"]})
+        );
+
+        // F3 promotes the raw writer and must publish through the actual host
+        // provider into the folder F2 seeded; F5 must see that same publication.
+        let name = "backup-2030-01-15-10.00.00.colpkg";
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[2]).unwrap(),
+            json!({"force_backup": {"name": name}})
+        );
+        assert!(matches!(
+            session.storage.collection(),
+            Some(SessionCollection::Hosted { .. })
+        ));
+        assert_eq!(session.storage.backup_directory_for_testing(), backups);
+        assert_eq!(
+            session.storage.collection().unwrap().path(),
+            live.join("collection.anki2")
+        );
+        let produced = fs::read(backups.join(name)).unwrap();
+        assert!(!produced.is_empty());
+        assert_eq!(fs::read(live.join("copy.colpkg")).unwrap(), produced);
+        assert_eq!(fs::read(backups.join("foreign seed")).unwrap(), b"");
+        assert_eq!(fs::read(backups.join("é")).unwrap(), b"");
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[3]).unwrap(),
+            json!({"backup_files": [name, "foreign seed", "é"]})
+        );
+        assert!(!live.join("backups").exists());
+        executor.finish(&mut session).unwrap();
+    }
+
+    #[test]
+    fn backup_handoffs_replace_owned_snapshots_without_nesting_or_resurrecting_files() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup-handoff.yaml");
+        fs::write(
+            &path,
+            concat!(
+                "id: host/backup-handoff\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsteps:\n",
+                "  - add_backup_files: {names: ['é backup.colpkg', 'remove me']}\n",
+                "  - export: {format: colpkg, name: flat.colpkg}\n",
+                "  - observe: [backup_files]\n",
+            ),
+        )
+        .unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let executor = MeguriExecutor::new();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        executor.step(&mut session, &loaded.scenario.steps[0]).unwrap();
+        let backups = session.storage.backup_directory_for_testing();
+        let live = session.storage.dir().unwrap();
+        let bytes = b"\0\xffexact backup bytes\r\n";
+        fs::write(backups.join("é backup.colpkg"), bytes).unwrap();
+        fs::write(backups.join("remove me"), b"deleted later").unwrap();
+        fs::write(backups.parent().unwrap().join("host-private"), b"private").unwrap();
+        executor.step(&mut session, &loaded.scenario.steps[1]).unwrap();
+        let exported = fs::read(live.join("flat.colpkg")).unwrap();
+        fs::create_dir_all(live.join("collection.media")).unwrap();
+        fs::write(live.join("collection.media/attachment"), b"media bytes").unwrap();
+        let (out, into) = executor.registry.handoff.unwrap();
+        let wire = dir.path().join("wire");
+        out(&mut session, &wire).unwrap();
+        assert!(!session.storage.is_open());
+        assert!(wire.join("collection.anki2").is_file());
+        assert_eq!(fs::read(wire.join("flat.colpkg")).unwrap(), exported);
+        assert_eq!(
+            fs::read(wire.join("collection.media/attachment")).unwrap(),
+            b"media bytes"
+        );
+        assert_eq!(fs::read(wire.join("backups/é backup.colpkg")).unwrap(), bytes);
+        assert_eq!(fs::read(wire.join("backups/remove me")).unwrap(), b"deleted later");
+        assert!(!wire.join("host-private").exists());
+        assert!(!wire.join("app-group").exists());
+
+        // Taking the wire snapshot replaces a populated runtime directory.
+        fs::remove_file(wire.join("backups/remove me")).unwrap();
+        into(&mut session, &wire).unwrap();
+        assert!(!live.join("backups").exists());
+        assert_eq!(session.storage.backup_directory_for_testing(), backups);
+        assert_eq!(fs::read(backups.join("é backup.colpkg")).unwrap(), bytes);
+        assert!(!backups.join("remove me").exists());
+        session.engine_collection().unwrap();
+        assert_eq!(
+            executor.step(&mut session, &loaded.scenario.steps[2]).unwrap(),
+            json!({"backup_files": ["é backup.colpkg"]})
+        );
+        assert_eq!(fs::read(live.join("flat.colpkg")).unwrap(), exported);
+
+        // Publishing again replaces the prior wire snapshot, including files
+        // removed from the runtime since the previous publication.
+        fs::remove_file(backups.join("é backup.colpkg")).unwrap();
+        out(&mut session, &wire).unwrap();
+        assert_eq!(fs::read_dir(wire.join("backups")).unwrap().count(), 0);
+        assert_eq!(
+            fs::read(backups.parent().unwrap().join("host-private")).unwrap(),
+            b"private"
+        );
+
+        // Missing incoming backups mean empty even when runtime has old files.
+        // Repeat across close/open/promotion to catch accidental resurrection.
+        for _ in 0..2 {
+            fs::write(backups.join("stale"), b"must disappear").unwrap();
+            fs::remove_dir_all(wire.join("backups")).unwrap();
+            into(&mut session, &wire).unwrap();
+            assert_eq!(
+                executor.step(&mut session, &loaded.scenario.steps[2]).unwrap(),
+                json!({"backup_files": []})
+            );
+            assert!(!live.join("backups").exists());
+            session.engine_collection().unwrap();
+            out(&mut session, &wire).unwrap();
+            assert_eq!(fs::read_dir(wire.join("backups")).unwrap().count(), 0);
+            assert_eq!(fs::read(wire.join("flat.colpkg")).unwrap(), exported);
+        }
+    }
+
+    #[test]
     fn injected_unavailable_backup_refuses_deletion_without_mutation_or_history_events() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("refusal.yaml");

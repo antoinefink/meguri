@@ -54,6 +54,8 @@ pub struct Storage {
     baseline: Objects,
     dir: Option<TempDir>,
     host_data: Option<TempDir>,
+    // Only snapshots published by this session may replace an existing root.
+    backup_handoffs: BTreeSet<PathBuf>,
     backup: std::sync::Arc<super::BackupWitness>,
     fixture_backup_witness: bool,
     #[cfg(test)]
@@ -172,17 +174,8 @@ impl Storage {
             Some(SessionCollection::Raw(_)) => {}
         }
         self.close()?;
-        if self.host_data.is_none() {
-            self.host_data = Some(tempfile::tempdir().map_err(core)?);
-        }
+        let backups = self.backup_directory()?;
         let data = self.host_data.as_ref().expect("host data was initialized").path();
-        let backups = self
-            .dir
-            .as_ref()
-            .expect("open session directory")
-            .path()
-            .join("backups");
-        fs::create_dir_all(&backups).map_err(core)?;
         let directory = self
             .dir
             .as_ref()
@@ -274,13 +267,29 @@ impl Storage {
         assert!(self.collection.is_none(), "install the backup override before setup");
         self.backup_override = Some(backup);
     }
-    #[cfg(test)]
-    pub(super) fn backup_directory_for_testing(&self) -> PathBuf {
-        self.dir
+    /// F1: stable session-owned storage, disjoint from the live collection,
+    /// available to seed adapters before the raw writer becomes hosted.
+    pub(super) fn backup_directory(&mut self) -> Result<PathBuf, ExecError> {
+        if self.host_data.is_none() {
+            self.host_data = Some(tempfile::tempdir().map_err(core)?);
+        }
+        let directory = self
+            .host_data
             .as_ref()
-            .expect("session directory was initialized")
+            .expect("host data was initialized")
             .path()
-            .join("backups")
+            .join("backups");
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(core("session backups root is not a directory")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::create_dir(&directory).map_err(core)?,
+            Err(e) => return Err(core(e)),
+        }
+        Ok(directory)
+    }
+    #[cfg(test)]
+    pub(super) fn backup_directory_for_testing(&mut self) -> PathBuf {
+        self.backup_directory().expect("session backup directory")
     }
     fn collect_changes(&mut self) {
         if let Some(subscription) = &self.subscription {
@@ -910,7 +919,8 @@ fn copy_handoff(from: &Path, to: &Path) -> std::io::Result<()> {
         if matches!(
             entry.file_name().to_str(),
             Some(
-                "meguri-media.db"
+                "backups"
+                    | "meguri-media.db"
                     | "meguri-media.db-wal"
                     | "meguri-media.db-shm"
                     | "meguri-pending-answers.jsonl"
@@ -930,20 +940,98 @@ fn copy_handoff(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Only backup snapshots use replacement semantics. Stage before removing an
+/// owned destination; foreign roots and links are refused without following them.
+fn replace_backup_snapshot(from: Option<&Path>, to: &Path, owned: bool) -> std::io::Result<()> {
+    let directory = |path: &Path| -> std::io::Result<bool> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(true),
+            Ok(_) => Err(std::io::Error::other("backup root is not a directory")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    };
+    let source_exists = from.map(&directory).transpose()?.unwrap_or(false);
+    let destination_exists = directory(to)?;
+    if destination_exists && !owned {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "foreign backup snapshot",
+        ));
+    }
+    let staged = if source_exists {
+        let staged = tempfile::Builder::new().prefix(".meguri-backups-").tempdir_in(
+            to.parent()
+                .ok_or_else(|| std::io::Error::other("backup destination has no parent"))?,
+        )?;
+        copy_backup_tree(from.expect("backup source exists"), staged.path())?;
+        Some(staged)
+    } else {
+        None
+    };
+    if destination_exists {
+        fs::remove_dir_all(to)?;
+    }
+    if let Some(staged) = staged {
+        fs::rename(staged.path(), to)?;
+    }
+    Ok(())
+}
+
+fn copy_backup_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            fs::create_dir(&target)?;
+            copy_backup_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            fs::copy(entry.path(), target)?;
+        } else {
+            return Err(std::io::Error::other("backup snapshot contains a non-file entry"));
+        }
+    }
+    Ok(())
+}
+
 /// D9.2, handing over: the guard, the collection closed (C10), and the
 /// session directory copied into `dir`.
 fn hand_out(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
     session.storage.guard()?;
     session.storage.close()?;
     let from = session.storage.dir()?;
-    copy_handoff(&from, dir).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))
+    let error = |e| ExecError::new("handoff_error", format!("{}: {e}", dir.display()));
+    copy_handoff(&from, dir).map_err(error)?;
+    let backups = if session.storage.host_data.is_some() {
+        Some(session.storage.backup_directory()?)
+    } else {
+        None
+    };
+    let destination = dir.join("backups");
+    replace_backup_snapshot(
+        backups.as_deref(),
+        &destination,
+        session.storage.backup_handoffs.contains(&destination),
+    )
+    .map_err(error)?;
+    if backups.is_some() {
+        session.storage.backup_handoffs.insert(destination);
+    } else {
+        session.storage.backup_handoffs.remove(&destination);
+    }
+    Ok(())
 }
 
 /// D9.2, taking over: the handed directory copied into a new session
 /// directory and its collection opened through the gate.
 fn hand_in(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
+    session.storage.close()?;
     let to = session.storage.dir()?;
     copy_handoff(dir, &to).map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))?;
+    let backups = session.storage.backup_directory()?;
+    replace_backup_snapshot(Some(&dir.join("backups")), &backups, true)
+        .map_err(|e| ExecError::new("handoff_error", format!("{}: {e}", dir.display())))?;
     let collection = open_collection(
         &to.join(COLLECTION),
         &OpenOptions::new(&*session.clock, &*session.random).initializers(scheduler_initializers()),
@@ -1021,6 +1109,55 @@ pub(super) fn package_sqlite_listing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backup_snapshot_refuses_foreign_or_non_directory_roots_without_removing_them() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let target = root.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(source.join("new"), b"incoming").unwrap();
+        fs::write(target.join("foreign"), b"keep").unwrap();
+        assert!(replace_backup_snapshot(Some(&source), &target, false).is_err());
+        assert_eq!(fs::read(target.join("foreign")).unwrap(), b"keep");
+        fs::remove_dir_all(&source).unwrap();
+        fs::write(&source, b"not a directory").unwrap();
+        assert!(replace_backup_snapshot(Some(&source), &target, true).is_err());
+        assert_eq!(fs::read(target.join("foreign")).unwrap(), b"keep");
+        fs::remove_dir_all(&target).unwrap();
+        fs::write(&target, b"foreign root").unwrap();
+        assert!(replace_backup_snapshot(None, &target, true).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"foreign root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_refuses_symlink_roots_and_entries_without_traversal() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("keep"), b"outside bytes").unwrap();
+        let source = root.path().join("source");
+        let target = root.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("old"), b"owned snapshot").unwrap();
+        symlink(outside.path(), source.join("linked")).unwrap();
+        assert!(replace_backup_snapshot(Some(&source), &target, true).is_err());
+        assert_eq!(fs::read(target.join("old")).unwrap(), b"owned snapshot");
+        fs::remove_file(source.join("linked")).unwrap();
+        fs::remove_dir(&source).unwrap();
+        symlink(outside.path(), &source).unwrap();
+        assert!(replace_backup_snapshot(Some(&source), &target, true).is_err());
+        assert_eq!(fs::read(target.join("old")).unwrap(), b"owned snapshot");
+        fs::remove_dir_all(&target).unwrap();
+        symlink(outside.path(), &target).unwrap();
+        assert!(replace_backup_snapshot(None, &target, true).is_err());
+        assert!(fs::symlink_metadata(&target).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read(outside.path().join("keep")).unwrap(), b"outside bytes");
+    }
 
     #[test]
     fn media_handoff_copies_files_without_journal_or_recovery_state() {

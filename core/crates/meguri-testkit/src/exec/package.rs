@@ -216,11 +216,9 @@ fn listing(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Va
     Ok(json!({"entries": entries, "meta_version": meta, "sqlite": sqlite}))
 }
 
-// F1: the same directory is passed to CoreHost and copied by storage handoff.
+// F1: seeds, the real host provider and observations share disjoint storage.
 fn backups(session: &mut Session<'_>) -> Result<PathBuf, ExecError> {
-    let directory = session.storage.dir()?.join("backups");
-    fs::create_dir_all(&directory).map_err(error)?;
-    Ok(directory)
+    session.storage.backup_directory()
 }
 
 fn add_backup_files(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
