@@ -279,7 +279,8 @@ Anki 26.09.3 on Linux (the oracle that records goldens) matches references to fi
 |---|---|---|---|
 | A rename or case merge | deletes the old file permanently | moves it to the trash after the fix op | `check-media-rename-trashes-old` |
 | Case variants with different content (case-sensitive volume) | keeps the greatest name by UTF-8 bytes and adds each other one under its lowercase form: under that name when no file has it exactly (`CAT.jpg` next to `Cat.jpg` becomes `cat.jpg`), under a hash name when one does; references are rewritten to those names | keeps them all, lists them in `case_conflicts` | `check-media-case-variant-kept` (needs case-variant setup, C21) |
-| Identical case variants without a member equal to the case key | keeps the greatest name and writes a lowercase copy for the others | keeps the greatest name only | `check-media-case-variant-merge-name` (same) |
+| Identical case variants, one of them equal to the case key (`Cat.jpg` and `cat.jpg`, scenario `case/same-content`) | keeps `cat.jpg` and rewrites both references to it, but reports `cat.jpg` unused, and deletes `Cat.jpg` permanently | keeps `cat.jpg`, rewrites the references, reports nothing unused, and moves `Cat.jpg` to the trash (C5) | `check-media-case-variant-merge-name`, `check-media-case-variant-merge-name-trash` (needs case-variant setup, C21) |
+| Identical case variants without a member equal to the case key (`Cat.jpg` and `CAT.jpg`, scenario `case/same-content-no-key`) | keeps the greatest name (`Cat.jpg`) and writes a lowercase copy (`cat.jpg`) for each other one, rewriting its references to the copy, and deletes `CAT.jpg` permanently | keeps the greatest name only: `CAT.jpg` maps to `Cat.jpg` and goes to the trash (C5) | `check-media-case-variant-merge-greatest`, `check-media-case-variant-merge-greatest-trash` (same; the oracle maintainer adds the other entries the recording needs, such as `-dir` and `-note`, as for C22's other scenarios) |
 | A reference whose case differs from the file's name (case-sensitive volume) | the reference is missing and the file unused | the reference is satisfied | `check-media-case-insensitive-references` |
 | A reference whose case differs from a renamed file's old name (`Foo[.jpg` for the file `foo[.jpg`, case-sensitive volume) | not rewritten, missing | rewritten to the file's new name (C6 step 3) | `check-media-case-insensitive-references` (same) |
 | A referenced name not yet downloaded (Anki-sync `awaiting`, or a CloudKit blob not installed) | missing, its note tagged | listed under `pending_download`, not tagged (C11) | `check-media-pending-not-missing` |
@@ -308,18 +309,19 @@ The ops `check_media`, `delete_unused_media` and `tag_missing_media`, their outp
 
 - Note fields are observed with `db_dump` (`conformance/observations` O8) or the notes observation.
 - Goldens come from the Linux oracle only (`conformance/media-ops#F13`).
+- Decided 2026-10-27: a scenario whose `db_exec` writes `notetypes`, `fields` or `templates` rows runs `reopen` after those writes and before `check_media` (`conformance/media-ops#F14.1`). Anki's Check Media reads note types through the backend's cache, which `db_exec` does not clear, so without the reopen it would read the templates, CSS and `latexsvg` (C8, C9) as they were before the write. A `db_exec` on `notes` alone needs none.
 
 ## C22. Scenarios (for the oracle maintainer)
 
-Under `conformance/scenarios/maintenance/check-media/`, each with its own note type. "Seed" means `media_files`, then `media_pending` (so Anki has registered the files, `conformance/media-ops#F6`), then the step.
+Under `conformance/scenarios/maintenance/check-media/`, each with its own note type, with C21's rules (a `reopen` after a `db_exec` on note type rows). "Seed" means `media_files`, then `media_pending` (so Anki has registered the files, `conformance/media-ops#F6`), then the step.
 
 | Scenario | Setup and steps | Pins |
 |---|---|---|
 | `report/basic` | files `a.jpg` (referenced by `<img>`), `b.jpg` (unreferenced), `snd.mp3` (`[sound:]`), `_font.ttf` (unreferenced), directory `x`, a 125,829,120-byte `big.bin`, `.DS_Store`, an empty `e.txt`; fields referencing `c.png` (absent) and `https://example.org/r.png`; `check_media`, `media_dir` | C3, C11: `unused` [b.jpg], `missing` [c.png], `dirs` [x], `oversize` [big.bin] |
 | `rename/invalid-chars` | files `foo[.jpg`, `Bar?.PNG`, `con.jpg`, referenced as written by `<img>`; `check_media`, `media_dir`, `db_dump` notes | C4, C6: renames and field rewrites; trash differs (`check-media-rename-trashes-old`) |
 | `rename/long-name` | a referenced 130-byte name | C4: cut to at most 119 bytes by `text/media-filenames#F1` step 6, neither unused nor missing |
-| `rename/nfd` | file `cafe` U+0301 `.jpg` (NFD), one field referencing NFC `café.jpg`, one referencing the NFD spelling; `check_media`, `media_dir`, `media_trash`, `db_dump` notes | C2 step 2, C6: one rename, NFD reference rewritten to NFC. T5 renames in place, so the trash stays empty: this replaces the plan's U130 test expectation of "the old file in the trash", since no second copy of the bytes ever exists |
-| `rename/nfd-upper` | as `rename/nfd` with `Cafe` U+0301 `.jpg` and both spellings of `Café.jpg` | T5 keeps the case: `Café.jpg`; Anki writes `café.jpg` (`check-media-nfd-keeps-case`) |
+| `rename/nfd` | file `cafe` U+0301 `.jpg` (NFD), one field referencing NFC `café.jpg`, one referencing the NFD spelling (written by `db_exec`: Anki's note add stores fields in NFC); `check_media`, `media_dir`, `media_trash`, `db_dump` notes | C2 step 2, C6: one rename, NFD reference rewritten to NFC. T5 renames in place, so the trash stays empty: this replaces the plan's U130 test expectation of "the old file in the trash", since no second copy of the bytes ever exists |
+| `rename/nfd-upper` | as `rename/nfd` with `Cafe` U+0301 `.jpg` and both spellings of `Café.jpg`, the NFD one written by `db_exec` | T5 keeps the case: `Café.jpg`; Anki writes `café.jpg` (`check-media-nfd-keeps-case`) |
 | `rename/entities` | file `x&[y].jpg` referenced as `<img src="x&amp;[y].jpg">` | C6 step 5: `x&amp;y.jpg` written back |
 | `refs/transform-repair` | file `ab.jpg`, a field `<img src="a:b.jpg">` | C6 step 4 |
 | `refs/html-forms` | `<source>`, `<audio>`, `<object data=>`, quoted and unquoted `src`, a `>` inside another attribute, `[sound:a &amp; b.mp3]` with file `a & b.mp3` | C6 with `text/media-references` M2 to M4 |
@@ -334,7 +336,8 @@ Under `conformance/scenarios/maintenance/check-media/`, each with its own note t
 | `actions/restore-conflict` | `actions/delete-unused`, then `media_outside` a different `b.jpg`, `restore_media_trash`, `media_dir` | C16: the present `b.jpg` keeps its bytes, the trashed one becomes `b-<sha1>.jpg` |
 | `actions/empty-trash` | `actions/delete-unused`, `check_media` (trash count), `empty_media_trash`, `media_trash`, `media_dir` | C17: trash empty, folder unchanged |
 | `rerun/no-change` | `rename/invalid-chars`, then `check_media` again | C4 to C7 find nothing; avoid observing `col.mod` (`check-media-no-change-no-mod`) |
-| `case/same-content`, `case/other-content` | case-variant setup (C21): `Cat.jpg` and `cat.jpg`, same and different bytes, references to both spellings | C5 (deviations `check-media-case-variant-kept`, `check-media-case-variant-merge-name`) |
+| `case/same-content`, `case/other-content` | case-variant setup (C21): `Cat.jpg` and `cat.jpg`, same and different bytes, references to both spellings | C5 (deviations `check-media-case-variant-kept` for `other-content`; `check-media-case-variant-merge-name` and `check-media-case-variant-merge-name-trash` for `same-content`) |
+| `case/same-content-no-key` | case-variant setup (C21): `Cat.jpg` and `CAT.jpg` with the same bytes, references to both spellings; `check_media`, `media_dir`, `media_trash`, the notes' fields | C5 step 2's greatest-name rule (deviations `check-media-case-variant-merge-greatest` and `check-media-case-variant-merge-greatest-trash`, C20) |
 
 ## C23. Meguri-only tests
 

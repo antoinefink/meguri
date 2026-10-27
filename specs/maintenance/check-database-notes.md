@@ -105,7 +105,8 @@ Each is a deviation entry in `conformance/deviations.yaml`, added with the scena
 | Id | Anki 26.09.3 | Meguri |
 |---|---|---|
 | `check-db-tags-keep-rows` | empties the tag registry and rebuilds it from the notes (N2) | keeps the rows, adds the notes' new tags, then removes only rows no note uses as a tag or an ancestor |
-| `check-db-io-unchanged-skip` | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
+| `check-db-tags-keep-rows-tree` | after the rebuild (N2) the registry has no row for the implicit parent `a`, and `tag_tree` shows `a` collapsed (`tag-rebuild`) | the kept row keeps `a`'s collapse state: expanded |
+| `check-db-io-unchanged-skip` (held with `io-field-tags`, N10.2) | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
 | `check-db-recover-invalid-utf8` | stops with an error when the first note of a missing note type is not valid UTF-8 (N4) | counts the fields from the bytes and recovers |
 | `check-db-basic-stamped` | adds the fallback Basic note type with `mtime_secs` 0 and `usn` 0 (N7) | local stamps (`usn` -1, `mtime_secs` `now_s`) |
 | `check-db-default-deck-restored` | stops with an error when a card it generates has no usable deck because deck 1 is missing or filtered (N6.6) | creates deck 1 as `Default` and counts it in `decks_missing`; with deck 1 filtered, skips that card |
@@ -123,7 +124,9 @@ N6.6 matches Anki: Anki writes every note, but a note whose row would not change
 
 ### N10.2 To record (oracle maintainer)
 
-In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario ops only (`db_exec`, `check_db`, `add_note`, `set_tag_collapsed`, `ensure_io_notetype`, `advance`, setup) and the observations `db_exec`, `notetype_structure`, `tag_tree` and `db_dump`. A scenario that recovers a note type (`recover-*`, `all-notes`) or creates a missing parent deck never observes `undo_status` (`maintenance/check-database` C14). Each damages rows by `db_exec`, sets `usn` 5 on them and advances 1 hour so stamps show, observes the rows and `SELECT mod, scm FROM col`, and ends with a second `check_db` that finds nothing.
+In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario ops only (`db_exec`, `check_db`, `add_note`, `set_tag_collapsed`, `ensure_io_notetype`, `reopen`, `advance`, setup; `io-field-tags` also `update_notetype`) and the observations `db_exec`, `notetype_structure`, `tag_tree` and `db_dump`. A scenario that recovers a note type (`recover-*`, `all-notes`) or creates a missing parent deck never observes `undo_status` (`maintenance/check-database` C14). Each damages rows by `db_exec`, sets `usn` 5 on them and advances 1 hour so stamps show, observes the rows and `SELECT mod, scm FROM col`, and ends with a second `check_db` that finds nothing.
+
+Decided 2026-10-27: a scenario whose `db_exec` writes `notetypes`, `fields`, `templates` or `decks` rows runs `reopen` after those writes and before `check_db`. Anki's Check Database reads note types, and the decks its card generation looks up, through the backend's caches, which `db_exec` does not clear, so without the reopen Anki would check the records as they were before the write. `recover-notetype`, `recover-two-same-count`, `recover-one-field`, `no-notetypes`, `all-notes` and `default-deck-missing` do. Meguri reads the stored rows either way.
 
 | Scenario | Damage and observation |
 |---|---|
@@ -137,16 +140,16 @@ In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario o
 | `future-mtime` | a note `mod` two days ahead: `now_s`, `usn` kept, not counted |
 | `missing-card` | a note of a note type the scenario defines with two non-empty templates, whose `ord` 1 card was deleted by `db_exec`: card generated in the deck of its sibling, at its new sibling's position (`notes/deck-placement-and-position` P2 item 1), `nextPos` unchanged, not counted |
 | `no-notetypes` | every note, card and note type deleted by `db_exec`: Basic added, `curModel` its id, and its `mtime_secs` and `usn` (deviation `check-db-basic-stamped`) |
-| `io-field-tags` | `ensure_io_notetype`, one note, the Header field's `prevent_deletion` cleared and its `tag` removed (through the field config, by the scenario's note type update op if it can, else held): tag 2 and protection back; the note type's `mtime_secs` and `usn` (deviation `check-db-io-unchanged-skip` on the second run) |
-| `tag-rebuild` | rows `a` (expanded), `a::b` (used, collapsed), `old` (unused, expanded), a note tagged `a::b` and `New` with no row (inserted by `db_exec`): `tag_tree` and the `tags` rows (deviation `check-db-tags-keep-rows`) |
+| `io-field-tags` | `ensure_io_notetype`, one note, the Header field's `prevent_deletion` cleared and its `tag` removed by an `update_notetype` `field_options` edit (`conformance/notetype-ops#T5.1`, draft): tag 2 and protection back; the note type's `mtime_secs` and `usn` (deviation `check-db-io-unchanged-skip` on the second run) |
+| `tag-rebuild` | rows `a` (expanded), `a::b` (used, collapsed), `old` (unused, expanded), a note tagged `a::b` and `New` with no row: `tag_tree` and the `tags` rows (deviations `check-db-tags-keep-rows` for the rows, `check-db-tags-keep-rows-tree` for `tag_tree`, where Anki shows `a` collapsed and Meguri expanded). The rows and the note's tags are written by `db_exec`: Anki's note add registers a new tag collapsed and makes no row for an implicit parent such as `a` |
 | `no-card-note` | a note whose only card was deleted by `db_exec`, its note type's last deck (`_nt_<id>_lastDeck`) set to a second deck by `db_exec`: card 0 generated in that deck, at the counter's position, `nextPos` moved, not counted |
-| `all-notes` | every damage above with C18.2's card damage of `maintenance/check-database` in one collection, `future-ids-cards` left out: one report. The cards N6.6 generates take ids from `now_ms` up, which C10.4 would then need for a future card, and Anki stops on a taken id (C10.4) |
+| `all-notes` | every damage above with C18.2's card damage of `maintenance/check-database` in one collection, `future-ids-cards` left out: one report. The cards N6.6 generates take ids from `now_ms` up, which C10.4 would then need for a future card, and Anki stops on a taken id (C10.4). Also left out: `no-notetypes` (it deletes every note), `default-deck-missing` (Anki fails, below) and `io-field-tags`' damage (held, below); the tag rows are not observed (`tag-rebuild` shows them) |
 
 Recorded with the rejection `failed` of `conformance/collection-check` K10 on Anki's side, with no second `check_db`:
 
 - `default-deck-missing`: deck 1 deleted by `db_exec` while no card is in it, and a note whose only card was deleted, its note type with no last deck. Anki `failed`; Meguri creates deck 1 `Default` (`decks_missing` 1) and generates the card there. Deviation `check-db-default-deck-restored`.
 
-`io-field-tags` needs a way to change one field's `prevent_deletion` and `tag`; if no existing op can, the oracle maintainer holds it until one exists.
+Decided 2026-10-27: `io-field-tags` changes the Header field's `prevent_deletion` and `tag` with the `field_options` options of `conformance/notetype-ops#T5.1`. They are draft, so the oracle maintainer holds the scenario, and with it the deviation `check-db-io-unchanged-skip` (N9), until the oracle driver supports them (T5.1); `all-notes` may add its damage then.
 
 ### N10.3 Meguri tests (`core/crates/meguri-engine/tests/check_db.rs`)
 

@@ -14,7 +14,7 @@ Which cards a note has: which templates (standard note types) or cloze ordinals 
 | adding a note, also in a bulk add (`notes/note-records` A2, A5) | G6, G7 for a note with no card | D2 |
 | an update that changes the note (`notes/note-records` U3) | G7 | D3 |
 | Check Database, for each note (U128) | G7 | D3 |
-| an import that adds or updates notes (U120, U121) | `package/apkg-import#I7`: an update whose template fronts change runs G9 on the target's notes; with a merge, `package/notetype-merge#J5` steps 4 (G9) and 5 (Change Note Type's M9 step 3), and J6 steps 3 (G9) and 4 (M9 step 3) | D4, positioned by `notes/deck-placement-and-position#P2` from the target's `nextPos` (also for J5 step 4 and J6 step 3); J5 step 5 and J6 step 4: D3, whose item 3 is the last deck of the note type the notes move to, and P2 |
+| an import that adds or updates notes (U120, U121) | `package/apkg-import#I7`: an update whose template fronts change runs G9 on the target's notes; with a merge, `package/notetype-merge#J5` steps 4 (G9) and 5 (Change Note Type's M9 step 3), and J6 steps 3 (G9) and 4 (M9 step 3) | D4, positioned by `notes/deck-placement-and-position#P2` (rule 1: the note's existing new-card position, `nextPos` untouched; rule 2, when the note has no new card: the target's `nextPos`), also for J5 step 4 and J6 step 3; J5 step 5 and J6 step 4: D3, whose item 3 is the last deck of the note type the notes move to, and P2 |
 | a note type change that adds a template or changes a front (U34) | G9 | D4 |
 | Change Note Type, for every selected note, also one with no card (U35, `notetypes/change-notetype` M9 step 3) | G7 over the note's cards after M9's card changes, G6 for a note with no card | D3, whose item 3 is the new note type's last deck |
 

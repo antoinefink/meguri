@@ -57,7 +57,7 @@ Applies a list of edits to a note type and saves the result once, as one undoabl
   | `{remove_field: <field>}` | removes the field |
   | `{rename_field: {from, to}}` | renames the field |
   | `{move_field: {field, to}}` | moves the field to position `to` (0-based) of the draft's field list; `to` must be a position of that list |
-  | `{field_options: {field, sticky?, rtl?, font_name?, font_size?, description?, plain_text?, collapsed?, exclude_from_search?}}` | sets the given options (`model/protobuf-records` P6.2 names) |
+  | `{field_options: {field, sticky?, rtl?, font_name?, font_size?, description?, plain_text?, collapsed?, exclude_from_search?, tag?, prevent_deletion?}}` | sets the given options (`model/protobuf-records` P6.2 names); `tag` and `prevent_deletion` are draft (T5.1) |
   | `{add_template: {name, front?, back?}}` | appends a new template (N5.3, fresh random id; texts empty when missing) |
   | `{remove_template: <template>}` | removes the template |
   | `{rename_template: {from, to}}` | renames the template |
@@ -68,6 +68,15 @@ Applies a list of edits to a note type and saves the result once, as one undoabl
 - **Output** `{update_notetype: {name: <stored name after the save>}}`.
 - **Rejections** T7.
 - **Meguri's executor** maps an update to Meguri's ops: an update whose edits are only `rename`, `css`, `field_options`, `rename_template` and `template` without `front` or `back` is a plain save (U29); any other is U34's draft apply. Schema changes run as accepted (T9). Until U34 lands, scenarios that need its edits are `pending` (T10.1).
+
+### T5.1 Field options `tag` and `prevent_deletion` (draft)
+
+Decided 2026-10-27, for `maintenance/check-database-notes` N10.2's `io-field-tags`: `field_options` takes two more options, the Image Occlusion field config of `model/protobuf-records` P6.2.
+
+- `tag`: a non-negative integer that fits 32 bits, or `null`, which removes the tag (the field then has none, `tag: null` in T8).
+- `prevent_deletion`: a boolean.
+- The save is T5's, with its checks unless `skip_checks`; a scenario sets them on a note type that `ensure_io_notetype` made (T6) to damage what Check Database repairs (N5).
+- Draft (`dsl.md` D7.2): neither executor has them yet. The oracle maintainer adds them to the driver's field options, the schema and the typed model together, and may fix a detail here then. A `field_options` edit that sets either needs the capability `update_notetype.field_options.io` besides `update_notetype.field_options` (T10.1), so Meguri reports such a scenario `pending` until its notetypes adapter declares it.
 
 ## T6. `ensure_io_notetype` (op)
 
@@ -126,17 +135,18 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 
 ## T10. Status
 
-- These ops and the kind are stable (`dsl.md` D7.2, `observations.md` O4): the oracle driver implements T2 to T8 through Anki's own note type operations, with the meanings above, and the scenarios that use them have goldens. The protocol's step description lists the ops and the kind.
+- These ops and the kind are stable (`dsl.md` D7.2, `observations.md` O4), except the `field_options` options `tag` and `prevent_deletion`, which are draft (T5.1): the oracle driver implements T2 to T8 through Anki's own note type operations, with the meanings above, and the scenarios that use them have goldens. The protocol's step description lists the ops and the kind.
 - The testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these shapes with the load-time rules of the schema (non-empty note type names, field and template lists), and a scenario's needs hold the capabilities of T10.1.
 - **Meguri** (U29's implementer, with the adapters): the notetypes adapter implements `setup.notetypes` (`dsl.md` D6.4, each entry added as `add_notetype` adds it), `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` (T10.1) and `notetype_structure`; U34 adds the rest of `update_notetype`. Until then T0 reports the scenarios that use them as `pending`.
 
 ### T10.1 Capabilities of `update_notetype`
 
-So that a scenario whose edits Meguri cannot apply yet is `pending` (`dsl.md` D8, D10) and not an `error`, an `update_notetype` step needs the op `update_notetype` and, for each kind of edit it holds, the capability `update_notetype.<edit key>` (`update_notetype.css`, `update_notetype.add_field`, …). A `template` edit that sets `front` or `back` needs `update_notetype.template_text` instead of `update_notetype.template`. `skip_checks` and an empty edit list add nothing. These names are ops in the scenario's needs and in the `pending` report.
+So that a scenario whose edits Meguri cannot apply yet is `pending` (`dsl.md` D8, D10) and not an `error`, an `update_notetype` step needs the op `update_notetype` and, for each kind of edit it holds, the capability `update_notetype.<edit key>` (`update_notetype.css`, `update_notetype.add_field`, …). A `template` edit that sets `front` or `back` needs `update_notetype.template_text` instead of `update_notetype.template`. A `field_options` edit that sets `tag` or `prevent_deletion` also needs `update_notetype.field_options.io` (T5.1). `skip_checks` and an empty edit list add nothing. These names are ops in the scenario's needs and in the `pending` report.
 
 | Declared by | Capabilities |
 |---|---|
 | U29 | `update_notetype`, `update_notetype.rename`, `update_notetype.css`, `update_notetype.field_options`, `update_notetype.rename_template`, `update_notetype.template` |
+| U129, extending U29's notetypes adapter once the typed model reads T5.1 | `update_notetype.field_options.io` |
 | U34 | `update_notetype.sort_field`, `update_notetype.add_field`, `update_notetype.remove_field`, `update_notetype.rename_field`, `update_notetype.move_field`, `update_notetype.add_template`, `update_notetype.remove_template`, `update_notetype.move_template`, `update_notetype.template_text` |
 
 The oracle implements every edit and declares nothing.

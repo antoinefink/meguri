@@ -112,14 +112,15 @@ A Check Media run (`maintenance/check-media` C2) to its end.
   - `field_templates`: `[{notetype, template, side}, ...]` in C9's order, `side` `front` or `back`.
 
   C12's Meguri-only members (`pending_download`, `case_conflicts`, `invalid`, `other`, `empty`, `non_utf8`, `fix_skipped`, `notes_changed`, the trash's byte total, `hashed`, the sizes and hashes of `unused`) are not observed.
-- **Effect.** As C2 on each side: renames, note rewrites and trashed old names happen. The executor keeps the output for the next `delete_unused_media` and `tag_missing_media` steps, until the next `check_media` step replaces it.
+- **Effect.** As C2 on each side: renames, note rewrites and trashed old names happen. The executor keeps the output for the next `delete_unused_media` and `tag_missing_media` steps, until the next `check_media` step replaces it. Decided 2026-10-27: a handoff (`dsl.md` D9.2) forgets it, since the oracle keeps it in the worker's memory, which a handoff does not carry, and the other side never had it; so an action needs a `check_media` step since the start or the latest handoff (F14.2, F14.3), and a whole run refuses what a live chain cannot run.
   - Oracle: Anki's Check Media call. The driver reads `renamed`, `dirs`, `oversize`, `extracted`, `trash_count` and the template list from the report text through the backend's own translations, as `undo-ops.md` V2 maps step names; a line it cannot read is a run error.
   - Meguri: the Check Media job (C2) with no cancel, its report mapped into these members.
 - **Rejections**: none. An I/O error ends the run as a run error.
+- **Scenario rule.** Decided 2026-10-27: a scenario whose `db_exec` writes `notetypes`, `fields` or `templates` rows runs `reopen` after those writes and before `check_media`. Anki's Check Media reads note types through the backend's cache, which `db_exec` does not clear (`maintenance/check-media` C21).
 
 ### F14.2 Op `delete_unused_media`
 
-- **Argument** `{}`: trashes the `unused` list of the scenario's latest `check_media` output. Without an earlier `check_media` step: `invalid_scenario`.
+- **Argument** `{}`: trashes the `unused` list of the scenario's latest `check_media` output. Without a `check_media` step since the start or the latest handoff (F14.1): `invalid_scenario`.
 - **Scenario rule.** Between that `check_media` step and this step, the only steps allowed are `observe`, `advance`, `set_clock` and `tag_missing_media`, none of which changes the media folder, a note's fields or a template. Any other step there (`media_outside`, `add_media`, the trash ops, note edits, `db_exec`, `undo`, imports and the rest) makes the scenario `invalid_scenario`; the loader checks this when it reads the scenario.
 - **Effect.** Oracle: the trash call of F6 with that list, 25 names per call in list order, as Anki's dialog does. Meguri: Delete Unused (C14) on the latest report; its safety backup goes to the scenario's backups folder (`backup-ops.md` F1).
 - **Output** `{delete_unused_media: {count}}`: the number of files trashed.
@@ -127,7 +128,7 @@ A Check Media run (`maintenance/check-media` C2) to its end.
 
 ### F14.3 Op `tag_missing_media`
 
-- **Argument** `{}`: adds the tag `missing-media` to the `missing_notes` of the latest `check_media` output (C13). Without an earlier `check_media` step: `invalid_scenario`.
+- **Argument** `{}`: adds the tag `missing-media` to the `missing_notes` of the latest `check_media` output (C13). Without a `check_media` step since the start or the latest handoff (F14.1): `invalid_scenario`.
 - **Effect.** One undoable step, `update_tag` (`undo-ops.md` V4). Oracle: the collection's bulk tag add with those notes. Meguri: Tag Missing on the latest report.
 - **Output** `{tag_missing_media: {count}}`: the number of notes written (a note that has the tag already is not).
 - **Rejections**: none.

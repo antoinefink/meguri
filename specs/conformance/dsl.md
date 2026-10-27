@@ -136,7 +136,7 @@ A step is a mapping with exactly one key, the op name. Steps run in order. Each 
 
 ### D7.2 Ops
 
-Ops marked *draft* have no driver support yet. Their arguments are the v0 shape; the owning area fixes the arguments and the output when it adds the driver op, and updates this table, the schema and the typed model together. A scenario is checked against the arguments `scenario.schema.json` requires when it loads, in T0 too; other keys of a draft op are allowed until its area fixes it. An op records no rejection (D7.3) unless its row lists rejection kinds.
+Decided 2026-10-27, since many draft ops now have a driver op: an op's status says only whether its shapes are fixed. *Draft* means the owning area has not fixed the arguments and the output yet: they are the v0 shape or the shape its section gives, and the area may still correct a detail. *Stable* means the area has fixed them with the driver op; Meguri's typed scenario model and adapters implement them as written. Neither status says which executor runs the op: that is each executor's capabilities (D8), and a scenario that needs an op its executor lacks is `pending` (D10). A draft row may say which side implements the op already (`draft: the oracle implements it; ...`), and it stays draft, although the oracle runs it, until its area fixes the shapes; a draft row that says nothing of the kind takes its status from its own section. `reposition`, `update_preset` and `build_filtered` have no driver op yet. The owning area fixes the arguments and the output when it adds the driver op, or later, and updates this table, the schema and the typed model together. A scenario is checked against the arguments `scenario.schema.json` requires when it loads, in T0 too; other keys of a draft op are allowed until its area fixes it. An op records no rejection (D7.3) unless its row lists rejection kinds.
 
 | Op | Argument | Output | Status |
 |---|---|---|---|
@@ -213,14 +213,14 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `add_notetype` | `{name, kind?, fields, templates, css?}` as a `setup.notetypes` entry: a note type from scratch, with the template checks | `{name}`: the stored name; rejections `notetype-ops.md` T7 | stable (`notetype-ops.md` T2) |
 | `add_stock_notetype` | `{kind, name?}`: one of the six stock kinds | `{name}`; rejections T7 | stable (`notetype-ops.md` T3) |
 | `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | stable (`notetype-ops.md` T4) |
-| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5) |
+| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5), except the `field_options` options `tag` and `prevent_deletion`, draft (`notetype-ops.md` T5.1) |
 | `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | stable (`notetype-ops.md` T6) |
-| `remove_notetype` | `{notetype}` | none | draft (`notetype-structure-ops.md` M1, M5) |
-| `restore_notetype` | `{notetype, kind?}`: Restore to Default, `kind` one of the six stock kinds | none; rejection `needs_stock_kind` | draft (`notetype-structure-ops.md` M2, M5) |
-| `change_notetype_info` | `{notes: [#nN, ...], notetype}`: the change screen opened on a selection | the info object of `change-notetype-ops.md` H1; rejections `not_found`, `multiple_notetypes` | draft (`change-notetype-ops.md` H1, H4) |
-| `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | draft (`change-notetype-ops.md` H2, H4) |
-| `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | draft (`empty-cards-ops.md` Y1, Y4) |
-| `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | draft (`empty-cards-ops.md` Y2, Y4) |
+| `remove_notetype` | `{notetype}` | none | draft: the oracle implements it; Meguri's executor and the typed model pending (`notetype-structure-ops.md` M1, M5) |
+| `restore_notetype` | `{notetype, kind?}`: Restore to Default, `kind` one of the six stock kinds | none; rejection `needs_stock_kind` | draft: the oracle implements it; Meguri's executor and the typed model pending (`notetype-structure-ops.md` M2, M5) |
+| `change_notetype_info` | `{notes: [#nN, ...], notetype}`: the change screen opened on a selection | the info object of `change-notetype-ops.md` H1; rejections `not_found`, `multiple_notetypes` | draft: the oracle implements it; Meguri's executor and the typed model pending (`change-notetype-ops.md` H1, H4) |
+| `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | draft: the oracle implements it; Meguri's executor and the typed model pending (`change-notetype-ops.md` H2, H4) |
+| `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | draft: the oracle implements it; Meguri's executor and the typed model pending (`empty-cards-ops.md` Y1, Y4) |
+| `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | draft: the oracle implements it; Meguri's executor and the typed model pending (`empty-cards-ops.md` Y2, Y4) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
