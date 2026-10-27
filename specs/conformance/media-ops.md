@@ -5,7 +5,7 @@ Requirements: R1883, R980, R981, R982, R984, R985, R986, R2018
 Anki: 26.09.3
 Scenarios: conformance/scenarios/media/
 
-The scenario vocabulary for the media folder (U31, reused by Check Media in U130 and media sync in U111): the setup section `media_files`, the ops `media_outside`, `add_media`, `trash_media`, `restore_media_trash` and `empty_media_trash`, and the observations `media_dir`, `media_trash` and `media_pending`. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The behavior they observe is `specs/media/media-files.md`.
+The scenario vocabulary for the media folder (U31, reused by Check Media in U130 and media sync in U111): the setup section `media_files`, the ops `media_outside`, `add_media`, `trash_media`, `restore_media_trash` and `empty_media_trash`, and the observations `media_dir`, `media_trash` and `media_pending`. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The behavior they observe is `specs/media/media-files.md`. F14 adds, as draft, the Check Media vocabulary of `maintenance/check-media` C21 (U130).
 
 ## F1. The scenario's media folder
 
@@ -94,3 +94,48 @@ Registration tells a changed file by its modification time (Anki compares whole 
 - The oracle driver has the setup section, the five ops and the three observations (U31's oracle step), and `conformance/goldens/media/` holds their goldens. They are stable in `dsl.md` D6.8 and D7.2 and `observations.md` O4.
 - The goldens are the Linux oracle's, whose volume is case-sensitive. The native macOS oracle (`float-determinism.md`) runs on a case-insensitive volume, where Anki names case variants differently (`media/media-files#M14`): `tools/mg oracle compare --platform apple media` fails 7 of the 13 scenarios by design. These are not floating-point differences (R1889), so media scenarios get no overlays: never record them with `--platform apple`.
 - Meguri's executor needs the testkit model (`core/crates/meguri-testkit/src/scenario/`) and a media adapter (U31's implementer step). Until the model reads them, T0 reports the media scenarios as `invalid`; until the adapter runs them, `pending`.
+
+## F14. Check Media vocabulary (draft)
+
+The ops and the setup marker that the Check Media scenarios need (`maintenance/check-media` C21, C22). Draft: neither executor has them yet (`dsl.md` D7.2). The oracle maintainer implements them with C22's scenarios and fixes any detail then, here, in the schema and in the typed model together. They reuse F3 to F11.
+
+### F14.1 Op `check_media`
+
+A Check Media run (`maintenance/check-media` C2) to its end.
+
+- **Argument** `{}`.
+- **Output** `{check_media: {unused, missing, missing_notes, renamed, dirs, oversize, extracted, trash_count, field_templates}}`, the part of C12's report that Anki also gives:
+  - `unused`, `missing`, `dirs`, `oversize`: lists of names, sorted by UTF-8 bytes;
+  - `missing_notes`: the notes with a missing reference, in ascending note id order, each as its logical id, or its real id as an integer when it has none;
+  - `renamed`: an object, old name to new name (C4, C5, and the NFC renames of C2 step 2);
+  - `extracted`: the number of inline images extracted (C7); `trash_count`: the number of trash entries after the run;
+  - `field_templates`: `[{notetype, template, side}, ...]` in C9's order, `side` `front` or `back`.
+
+  C12's Meguri-only members (`pending_download`, `case_conflicts`, `invalid`, `other`, `empty`, `non_utf8`, `fix_skipped`, `notes_changed`, the trash's byte total, `hashed`, the sizes and hashes of `unused`) are not observed.
+- **Effect.** As C2 on each side: renames, note rewrites and trashed old names happen. The executor keeps the output for the next `delete_unused_media` and `tag_missing_media` steps, until the next `check_media` step replaces it.
+  - Oracle: Anki's Check Media call. The driver reads `renamed`, `dirs`, `oversize`, `extracted`, `trash_count` and the template list from the report text through the backend's own translations, as `undo-ops.md` V2 maps step names; a line it cannot read is a run error.
+  - Meguri: the Check Media job (C2) with no cancel, its report mapped into these members.
+- **Rejections**: none. An I/O error ends the run as a run error.
+
+### F14.2 Op `delete_unused_media`
+
+- **Argument** `{}`: trashes the `unused` list of the scenario's latest `check_media` output. Without an earlier `check_media` step: `invalid_scenario`.
+- **Scenario rule.** Between that `check_media` step and this step, the only steps allowed are `observe`, `advance`, `set_clock` and `tag_missing_media`, none of which changes the media folder, a note's fields or a template. Any other step there (`media_outside`, `add_media`, the trash ops, note edits, `db_exec`, `undo`, imports and the rest) makes the scenario `invalid_scenario`; the loader checks this when it reads the scenario.
+- **Effect.** Oracle: the trash call of F6 with that list, 25 names per call in list order, as Anki's dialog does. Meguri: Delete Unused (C14) on the latest report; its safety backup goes to the scenario's backups folder (`backup-ops.md` F1).
+- **Output** `{delete_unused_media: {count}}`: the number of files trashed.
+- **Rejections**: none. Under the scenario rule Meguri skips no name (C14 step 2); a skipped name is a run error, as are Meguri's `SafetyBackupFailed` and `StaleReport`.
+
+### F14.3 Op `tag_missing_media`
+
+- **Argument** `{}`: adds the tag `missing-media` to the `missing_notes` of the latest `check_media` output (C13). Without an earlier `check_media` step: `invalid_scenario`.
+- **Effect.** One undoable step, `update_tag` (`undo-ops.md` V4). Oracle: the collection's bulk tag add with those notes. Meguri: Tag Missing on the latest report.
+- **Output** `{tag_missing_media: {count}}`: the number of notes written (a note that has the tag already is not).
+- **Rejections**: none.
+
+### F14.4 Case-variant setup
+
+F3 and F4 refuse names that are case variants of each other, so that every scenario runs on case-insensitive volumes. The scenarios of C5 (`case/same-content`, `case/other-content`) need such names.
+
+- A scenario tagged `media-case-variants` (`dsl.md` D4 `tags`) may list case variants in `media_files` and `media_outside`; names equal after NFC (byte comparison) still may not appear together. The loader reads the tag; executors do not.
+- For every scenario with the tag, the loader adds the need `media_files.case_variants` (`dsl.md` D4, D8.1), a capability an executor declares only when its media folder is on a case-sensitive volume: the Linux oracle and Meguri's Linux lane. On macOS the scenario is `pending` and never runs. Its golden is the Linux oracle's (F13).
+- An area lists such a scenario as active only once the runner reports it apart from other `pending` scenarios on case-insensitive lanes; the oracle maintainer and the runner fix that report with the first such scenario.

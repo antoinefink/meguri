@@ -7,9 +7,11 @@ Scenarios: conformance/scenarios/package/collection-package/
 
 The scenario vocabulary for collection packages (U124a): the collection-package form of `export`, the collection-package forms of `import`, the observation `package_listing`, and the fixture packages under `conformance/fixtures/package/`. `export` and `import` belong to the package area (`dsl.md` D7.2); the forms this file does not fix stay draft for U120, U122, U123 and U124, and the legacy package form of `export` stays as `model-ops.md` L6 fixes it. The behavior observed is `specs/package/container.md` and `specs/engine/collection-replace.md`.
 
+E6 to E11 fix, as draft, the deck-package forms and options that U120, U122, U123 and U124 need (`package/apkg-import#I18.1`, `package/apkg-export#A17`, `package/legacy-export#L14`): the deck-package `import` form (E6), the latest and legacy deck-package `export` forms (E7, E8), the collection package export options (E9), and the observations `package_media` (E10) and `package_db_dump` (E11). Draft means no executor has them yet (`dsl.md` D7.2): the oracle maintainer implements them with the scenarios of those sections and may correct a detail then, in this file, the schema and the typed model together.
+
 ## E1. `export`, collection package form
 
-- **Argument** `{format: colpkg, name: <file name>}`, with no other key. `name` is a file name of ASCII letters, digits, `.`, `_` and `-` that starts with a letter or digit and ends in `.colpkg`. U124 adds the options for media and for older clients; each must default to the behavior below.
+- **Argument** `{format: colpkg, name: <file name>}`, with no other key. `name` is a file name of ASCII letters, digits, `.`, `_` and `-` that starts with a letter or digit and ends in `.colpkg`. E1 is exactly this form, without `media` and `legacy`; a step that carries either key is E9's draft form (U124), even when the key is false.
 - **Effect.** Writes the whole collection as a collection-only package in the latest format (`package/container#P11`) to the file `name` in the session directory, replacing a file of that name. The collection does not change.
   - Oracle: Anki's collection package export with media off and the option for older clients off. It needs the collection closed: the driver closes it, exports, and opens it again. That reopen empties the undo history and writes nothing; scenarios observe no undo state across an export.
   - Meguri: the collection-only writer on the live collection; nothing closes.
@@ -32,7 +34,8 @@ Replaces the scenario's collection with the package's, as a restore of a backup 
 
 - Oracle: Anki's collection package import into the session's `collection.anki2`, with the session's media folder and media database. It needs the collection closed: the driver closes it, imports, and opens `collection.anki2` again, after a refusal too.
 - Meguri: inspect (`package/container#P12`), then the verified replace with the reason `Restore` (`engine/collection-replace`), which reopens the collection and restarts its day clock (`engine/lifecycle#L8`).
-- On success the collection holds the package's rows, upgraded when older, with `col.scm` and `col.mod` set to the current instant in milliseconds (`engine/collection-replace#R7`); the undo history is empty. A collection-only package leaves the media folder unchanged on both sides (U124 adds packages with media).
+- On success the collection holds the package's rows, upgraded when older, with `col.scm` and `col.mod` set to the current instant in milliseconds (`engine/collection-replace#R7`); the undo history is empty. A collection-only package leaves the media folder unchanged on both sides.
+- Package with media (draft, U124). Oracle: Anki writes each of the package's files into the media folder under its name, replacing a file of that name whose bytes differ, and leaves every other file in place. Meguri: the merge of `package/container#P16`, which also keeps the replaced bytes in the trash, so a scenario that replaces a file observes `media_trash` only with a deviation. Until U124 lands Meguri refuses such a package, so a scenario imports one only in a segment the oracle runs (a live chain after `handoff: oracle`, `package/apkg-export#A17`, `package/legacy-export#L14`); U124 lifts this rule here.
 - For the runner's schema guard (`storage/schema-18#S6.2`) a successful import counts as an open: the baseline becomes `sqlite_master` of the imported file, upgrade included. A refused import keeps the baseline.
 - **Output**: none; the step records `{}`.
 
@@ -46,7 +49,7 @@ Replaces the scenario's collection with the package's, as a restore of a backup 
 | `corrupt` | any other error Anki's collection package import raises before it replaces the collection: its "not a valid file" import error (a missing collection entry, a collection it cannot open or whose integrity check fails, an unsafe media name), a protobuf decode error, an archive that does not read as zip, an error while reading or decoding an entry | `Corrupt`, `SchemaUnsupported` |
 
 - The oracle tells its two import errors apart through the backend's own translations (`oracle/AGENTS.md` rule for messages), never by literal text. Any other failure (the driver's own, the worker's) stays a run error.
-- Meguri's `UnsupportedFormat` (a legacy package before U120), `InsufficientSpace`, `DiskFull` and `Io` are run errors. No scenario of this file imports a legacy-format package.
+- Meguri's `UnsupportedFormat` (a legacy package before U120), `InsufficientSpace`, `DiskFull` and `Io` are run errors. No scenario of this file imports a legacy-format package. Draft (U120, U124): Anki imports a legacy `.colpkg` (`package/container#P17`); until U124 gives Meguri's side, a scenario imports one only in a segment the oracle runs, as E2.2 says for a package with media.
 - A v1-scheduler collection inside a package: Meguri refuses (`SchemaUnsupported`, recorded `corrupt`), Anki imports it. No scenario carries one; one that did would need a deviation like `storage-v1-scheduler-refused`.
 
 ### E2.4 Scenario rules
@@ -117,5 +120,111 @@ The maker checks that no fixture holds stock note type text (the storage maker's
 | `refused-meta`, `refused-entries`, `refused-collection`, `refused-media-map` | each refusal kind, collection unchanged | `open`, `timing`, `import.colpkg`, `db_dump` |
 | `missing-media-map` | Meguri imports, Anki refuses (deviation `package-latest-missing-media-map`) | `open`, `timing`, `import.colpkg` |
 
-- **Capabilities** (`dsl.md` D8). An `export` step needs the op `export` and the capability of its form: `export.colpkg` (E1) or `export.apkg_legacy` (`model-ops.md` L6); the package units add theirs (`export.apkg`, U122; the colpkg options, U124). A collection-package `import` step needs `import` and `import.colpkg`. Meguri declares `export`, `export.colpkg`, `import`, `import.colpkg` and the kind `package_listing` with U124a's adapter (`core/crates/meguri-testkit/src/exec/package.rs`). The oracle implements every form this file fixes.
+- **Capabilities** (`dsl.md` D8). An `export` step needs the op `export` and the capability of its form: `export.colpkg` (E1), `export.apkg_legacy` (`model-ops.md` L6), `export.apkg` (E7, U122) or `export.apkg` and `export.apkg.legacy` (E8, U123: E8 is E7's form plus a key, so it needs both); a `colpkg` export with `media: true` also needs `export.colpkg.media` and one with `legacy: true` also needs `export.colpkg.legacy` (E9, U124). Capabilities compare by exact string: `export.apkg_legacy` (L6's whole-collection form) and `export.apkg.legacy` (`package/legacy-export#L14`'s deck form) are two capabilities that differ only in a separator, and the vocabulary scan's separator folding never applies to capability names. A collection-package `import` step needs `import` and `import.colpkg`; a deck-package one needs `import` and `import.apkg` (E6, U120). The observations `package_media` (E10) and `package_db_dump` (E11) are kinds of their own. Meguri declares `export`, `export.colpkg`, `import`, `import.colpkg` and the kind `package_listing` with U124a's adapter (`core/crates/meguri-testkit/src/exec/package.rs`). The oracle implements every stable form this file fixes (E1 to E3); E6 to E11 are draft, in neither executor yet.
 - The oracle driver implements E1 to E3; the testkit model reads their shapes with the load-time rules above (E2.4 included). Every scenario has a golden, recorded with `tools/mg oracle record package/collection-package`.
+
+## E6. `import`, deck package form (draft)
+
+The deck package import of `package/apkg-import` (U120), as its sheet's Import runs it with the options given.
+
+### E6.1 Argument
+
+`{format: apkg, fixture: <path>, merge_notetypes, update_notes, update_notetypes, with_scheduling, with_deck_configs}`, or the same with `name: <file name>` in place of `fixture`: exactly one of `fixture` and `name`, every option, no other key.
+
+- `fixture`: E2.1's rules, ending in `.apkg`. The deck-package fixtures live under `conformance/fixtures/package/apkg/` (`package/apkg-import#I18.1`), made as E4 says.
+- `name`: a package in the session directory written by an earlier `export` step (E7, E8, `model-ops.md` L6), one before a handoff included; E1's name rule with `.apkg` in place of `.colpkg`. No such file: `unknown_ref`.
+- The five options of `package/apkg-import#I5`, in its order: `merge_notetypes` (Merge note types), `update_notes` and `update_notetypes` (`if_newer`, `always` or `never`), `with_scheduling` (Import any learning progress) and `with_deck_configs` (Import any deck presets). The three others are booleans.
+
+### E6.2 Effect
+
+- Oracle: Anki's deck-package import of the file with those options, each update value mapped to Anki's update condition of that meaning, into the open session collection, its media folder and its media database. Nothing closes.
+- Meguri: inspect, then apply (`package/apkg-import` I2, I14) with the five options, then close the session. When a merge has a preview to confirm (`ConfirmationRequired`, I8), the executor applies again at once with the token: the import runs as accepted, as schema changes do in scenarios (`notetype-ops.md` T9). A safety backup (I14.4) goes to the scenario's backups folder (`backup-ops.md` F1).
+- On both sides the import is one undoable step, "Import" (`undo-ops.md` V4 `import`, `package/apkg-import#I14.3`), and writes the five config keys of I5.
+- Notes and cards the import adds get no logical id, as the cards an edit adds (`note-ops.md` N3); `adopt` (`normalized-dump.md` N5) numbers them. Target notes keep theirs.
+- Files the import writes are in the media folder (`media_dir`, `media-ops.md` F9).
+
+### E6.3 Output
+
+`{import: <log>}`, the log of `package/apkg-import#I13`, every member present:
+
+```json
+{"found_notes": 2, "new": [{"note": 1894701600123, "fields": ["sun", "soleil"]}], "updated": [{"note": "#n1", "fields": ["moon", "lune"]}], "duplicate": [], "conflicting": [], "missing_notetype": [], "missing_deck": [], "first_field_match": [], "empty_first_field": []}
+```
+
+- `found_notes`: an integer. Each list holds `{note, fields}` entries in I13's order.
+- `note`: in `new`, `updated`, `duplicate` and `missing_deck`, the target note's logical id, or its real id as an integer when it has none (as `empty-cards-ops.md` Y1); in `conflicting` and `missing_notetype`, the package note's id as an integer. Meguri's `existing_id` (I13) is not observed.
+- `fields`: I13's reduced field texts; the oracle takes them as Anki's log gives them.
+- `first_field_match` and `empty_first_field` are always `[]` for a deck package.
+
+### E6.4 Rejections
+
+`{"import": {"error": <kind>}}`. After a rejection the collection, its media folder and its undo history are as they were.
+
+| Kind | Oracle | Meguri |
+|---|---|---|
+| `too_new` | as E2.3: an unknown `meta` version | `TooNew` |
+| `corrupt` | as E2.3, for Anki's deck-package import | `Corrupt`, `SchemaUnsupported`, `UnsupportedFile` |
+| `notetype_kind_conflict` | Anki's refusal to merge a standard and a cloze note type (I8) | `NotetypeKindConflict` |
+
+- The oracle tells them apart through the backend's own translations, as E2.3 does. Every other error on either side (`InsufficientSpace`, `DiskFull`, `Stale`, `SafetyBackupFailed`, `Io`, any other Anki error) is a run error.
+- Where Meguri differs from Anki (`package/apkg-import#I17`), the scenario that shows it carries the deviation I17 names.
+
+## E7. `export`, deck package form (draft)
+
+The deck package export of `package/apkg-export` (U122), latest format.
+
+- **Argument** `{format: apkg, name, limit, scheduling, presets, media}`, every key, no other key.
+  - `name`: E1's rule, ending in `.apkg`.
+  - `limit`: `collection`, `{deck: <name>}` (a deck by its stored human name; `unknown_ref` when none has it), `{notes: [#nN, ...]}` or `{cards: [#cN, ...]}` (non-empty). A reference to a note or card deleted since is passed by its real id, which `package/apkg-export#A2` ignores.
+  - `scheduling`, `presets`, `media`: booleans, A2's options Include scheduling information, Include deck presets and Include media. Support older Anki versions is off (E8 turns it on).
+- **Effect.** Writes the deck package (`package/apkg-export` A3 to A10) to the file `name` in the session directory, replacing a file of that name. The collection, the media folder and the undo history do not change.
+  - Oracle: Anki's deck-package export with that limit and those options, the option for older clients off.
+  - Meguri: the operation of A11 with the session directory as its output directory; since A11 publishes with `ExclusiveCreate`, the executor first removes a file of that name.
+- **Output** `{notes: <count>}`: the number of notes in the package.
+- **Rejections**: `invalid_ids` (A8 rule 1, an id more than a day ahead; Meguri `InvalidIds`) and `media_check_required` (A9.2 rule 5, a referenced file whose name Check Media would change; Meguri `MediaNeedsCheck`). The oracle tells them apart through the backend's own translations. A scenario gives a refused export a name that no earlier step wrote: after the refusal the session directory has no file of that name. Every other error is a run error.
+- **Not observable**: the package's bytes. Observe it with `package_listing` (E3), `package_media` (E10) and `package_db_dump` (E11), or import it (E6). In a live chain it crosses a handoff with the session directory (`dsl.md` D9.2).
+
+## E8. `export`, legacy deck package form (draft)
+
+"Support older Anki versions" for a deck package (`package/legacy-export`, U123).
+
+- **Argument** E7's, every key, plus `legacy: true`. The form `{format: apkg, name, legacy: true}` with no other key stays `model-ops.md` L6's whole-collection form; the two are told apart by their keys.
+- **Effect.** As E7, but the package is the legacy 2 layout (`package/legacy-export` L2 to L7: `meta` version 2, `collection.anki21` at schema 11, the placeholder, raw media entries and a JSON media map). Oracle: Anki's deck-package export with the option for older clients on. Meguri: `package/legacy-export#L7`.
+- **Output**, **rejections** and what is observable: as E7. Meguri's `LegacyConversion` and `VerificationFailed` (L11) are run errors.
+
+## E9. `export`, collection package options (draft)
+
+E1's form with the two options of `package/apkg-export#A14` (U124).
+
+- **Argument** `{format: colpkg, name, media?, legacy?}`, at least one of the two present: `media` (Include media) and `legacy` (Support older Anki versions) are booleans, false when missing. A step with either key is this form, never E1's (E1). A scenario writes the options only when one is true; for a package with both off it uses E1's form.
+- **Effect.** Writes the whole collection as a collection package with A14's writer for that combination, to `name` as E1 says:
+  - `media` true, `legacy` false: the latest format with every regular file of the media folder, referenced or not (`package/container#P15`, `package/file-export#E7`);
+  - `legacy` true: the legacy 2 layout of `package/legacy-export#L8`, with the media folder's files when `media` is true.
+  - Oracle: Anki's collection package export with those options. It closes and reopens the collection as E1 says; scenarios observe no undo state across it.
+  - Meguri: A14's writer on the live collection; nothing closes.
+- **Output**: none (`{}`).
+- **Rejections**: none. Every error on either side, Meguri's `LegacyConversion` and `VerificationFailed` (`package/legacy-export#L11`) included, is a run error; scenarios give the media folder only regular files whose names `package/container#P6` accepts.
+- The package's bytes are not observable: observe it with E3, E10 and E11, or import it with E2 in a segment the oracle runs (E2.2, E2.3; the live chains of `package/apkg-export#A17` and `package/legacy-export#L14`). A scenario that observes the collection after a legacy export observes only the package, or carries the deviation of `package/legacy-export#L13`.
+
+## E10. `package_media` (observation kind, draft)
+
+The media list of a package: what an importer finds in its media map and numbered entries.
+
+- **Request** `{package_media: {name: <file name>}}` or `{package_media: {fixture: <path>}}`, with E3's rules. At most one per observe step.
+- **Format.** Read from the `meta` entry as `model-ops.md` L7 reads it: version 3 is the latest format, version 1 or 2, or no `meta` entry, a legacy one.
+- **Value** `[{name, size, sha1, entry_size}, ...]`:
+  - latest format (`package/container#P5`): one item per media map record, in map order; `name`, `size` and `sha1` (lower-case hex) as the record holds them; `entry_size` the byte count of zip entry `n` after its zstd frame is decoded, `null` when the archive has no entry `n`;
+  - legacy format (`package/container#P17`): one item per map member, in ascending member number; `name` as the JSON stores it; `size` and `sha1` computed from entry `n`'s content after the zip method; `entry_size` equal to `size`; all three `null` when the archive has no entry `n`.
+  - A package without a `media` entry gives `[]`.
+- Anki writes media in an order of its own (`package/apkg-export#A16`), so scenarios that compare a package of each executor list this value under `compare.set` (`dsl.md` D5 allows it for an order a spec leaves to each executor).
+- Never changes the collection, the package or the session directory. An archive that does not read as zip and a map that does not decode are run errors; scenarios list only readable packages.
+
+## E11. `package_db_dump` (observation kind, draft)
+
+The rows of the collection inside a package, without opening it as a collection.
+
+- **Request** `{package_db_dump: {name: <file name>, tables?, raw?}}` or the same with `fixture: <path>` (E3's rules); `tables` and `raw` as `db_dump`'s (`observations.md` O8). At most one per observe step.
+- **What is read.** The package's collection entry: `collection.anki21b` decoded from zstd in the latest format (`package/container#P4`); in a legacy one the entry `model-ops.md` L7 names. The executor writes it to a scratch copy, reads it with plain SQLite (no open gate, no upgrade) and removes the copy.
+- **Value** `db_dump`'s value for that file (O8, `normalized-dump.md`; raw with `raw: true`, N4). A bare request reports every O8 table the file holds; a schema-11 file holds only `col`, `notes`, `cards`, `revlog` and `graves` (its other records are in `col`'s JSON columns, which `package_col` reads, `model-ops.md` L7). A listed table the file does not hold is a run error.
+- Anki's package collection also holds rows Meguri's never writes (`package/apkg-export#A16`: its new collection's stock field and template rows, and `curModel`): a scenario that compares those tables, or `config`, carries A16's deviation, or lists `tables` without them.
+- Never changes anything. A missing entry, an entry that does not decode, and a file SQLite cannot read are run errors.

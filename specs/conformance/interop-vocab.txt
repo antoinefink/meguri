@@ -291,3 +291,66 @@ pragma_integrity_check
 integrity_check
 # cloudkit-faults.md F3, F8: the macOS fcntl command the power-loss shim models.
 F_FULLFSYNC
+# package-ops.md E6-E11: the deck-package import options and log members,
+# export rejection kinds, capabilities and the two package observations.
+merge_notetypes
+update_notes
+update_notetypes
+with_scheduling
+with_deck_configs
+if_newer
+found_notes
+missing_notetype
+missing_deck
+first_field_match
+empty_first_field
+existing_id
+notetype_kind_conflict
+invalid_ids
+media_check_required
+export.apkg.legacy
+export.colpkg.media
+export.colpkg.legacy
+import.apkg
+package_media
+entry_size
+package_db_dump
+# media-ops.md F14: Check Media ops, output members and the case-variant marker.
+check_media
+delete_unused_media
+tag_missing_media
+missing_notes
+trash_count
+field_templates
+missing-media
+media-case-variants
+media_files.case_variants
+# dsl.md D7.2 and observations.md O4: draft ops and kinds of other areas.
+change_notetype_info
+change_notetype
+multiple_notetypes
+no_changes
+schema_changed
+empty_cards
+delete_empty_cards
+keep_notes
+kept_valid
+all_empty
+remove_notetype
+restore_notetype
+needs_stock_kind
+notetype_templates
+browser_front
+browser_back
+search_build
+search_join
+search_replace
+add_defaults
+notetype_last_deck
+review_card
+notetype_id
+tag_complete
+stats_presentation
+card_stats
+heatmap_report
+widget_snapshot

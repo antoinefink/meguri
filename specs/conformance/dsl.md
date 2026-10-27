@@ -51,7 +51,7 @@ The `compare` section (D5) is part of the value, so changing a comparison hint m
 |---|---|---|
 | `id` | yes | D1 |
 | `description` | no | one line for people |
-| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers and tools, never by executors; `generated` marks generator output, `clock-free` a scenario whose observations hold at any instant (`float-determinism.md` F6.3); D8.1 defines one explicit finer-capability tag for the preflight checker |
+| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers and tools, never by executors; `generated` marks generator output, `clock-free` a scenario whose observations hold at any instant (`float-determinism.md` F6.3); two tags add a capability need, which the loader derives: `needs:answer.filtered` (D8.1) and `media-case-variants` (draft, `media-ops.md` F14.4) |
 | `clock` | yes | D5 |
 | `compare` | no | D5 |
 | `setup` | no | D6 |
@@ -69,7 +69,7 @@ No other key is allowed.
 - Every instant an op records (note and card ids, review times, modification times) is the clock's current instant.
 - Randomness that is not seeded from collection data comes from a generator seeded with the first eight bytes of `scenario_sha256` read as a big-endian unsigned integer (Meguri's executor; the oracle has no such source to control). Each Meguri actor of an actor scenario has its own seed (`sync-ops.md` S2.5).
 - In an actor scenario, every actor and the sync server share the clock; the server may run at a fixed offset from it (`sync-ops.md` S3.2).
-- `compare.set`: a list of pointer patterns (`observations.md` O3). An array at a matching pointer is compared as a multiset. Use it only where the order is SQLite's unspecified row order.
+- `compare.set`: a list of pointer patterns (`observations.md` O3). An array at a matching pointer is compared as a multiset. Use it only where the order is unspecified: SQLite's row order, or an array whose order a spec leaves to each executor (the media list of a package, `package-ops.md` E10, `package/apkg-export#A16`).
 
 ## D6. Setup
 
@@ -121,7 +121,7 @@ A list of review-history rows `{card: #cN, id, ease, ivl, lastIvl, factor, time,
 
 ### D6.8 media_files
 
-A list of files and empty subdirectories created directly in the collection's media folder, bypassing the media store, as an outside program would: `{name, text}`, `{name, fill: {size, byte?}}` or `{name, dir: true}` (`media-ops.md` F2, F3).
+A list of files and empty subdirectories created directly in the collection's media folder, bypassing the media store, as an outside program would: `{name, text}`, `{name, fill: {size, byte?}}` or `{name, dir: true}` (`media-ops.md` F2, F3). Case variants are allowed only in scenarios tagged `media-case-variants` (draft, `media-ops.md` F14.4).
 
 ## D7. Steps
 
@@ -182,19 +182,22 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_scheduling_prefs` | `{rollover?, learn_ahead_minutes?, load_balancer?}`, at least one: the scheduling settings' save | none | stable (`deck-options-ops.md` E4) |
 | `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | stable (`model-ops.md` L2) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
-| `import` | collection package forms: exactly `{format: colpkg, fixture: <path under conformance/fixtures/>}` or `{format: colpkg, name: <file name>}` (`package-ops.md` E2); other forms `{format, fixture, ...options}` | collection package forms: none, rejections `too_new`, `corrupt`; other forms: counts defined by the package area | collection package forms stable (`package-ops.md` E2); others draft (package) |
-| `export` | `{format: apkg \| colpkg, name: <file name>, ...options}`; the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6); the collection package form is exactly `{format: colpkg, name}` (`package-ops.md` E1) | legacy form: `{notes: <count>}`; collection package form: none; other forms: defined by the package area | draft (package); the legacy form and the collection package form are stable (`model-ops.md` L6, `package-ops.md` E1) |
+| `import` | collection package forms: exactly `{format: colpkg, fixture: <path under conformance/fixtures/>}` or `{format: colpkg, name: <file name>}` (`package-ops.md` E2); deck package form: `{format: apkg, fixture \| name, merge_notetypes, update_notes: if_newer \| always \| never, update_notetypes: if_newer \| always \| never, with_scheduling, with_deck_configs}`, every option required (`package-ops.md` E6) | collection package forms: none, rejections `too_new`, `corrupt`; deck package form: the import log `{found_notes, new, updated, duplicate, conflicting, missing_notetype, missing_deck, first_field_match, empty_first_field}`, rejections `too_new`, `corrupt`, `notetype_kind_conflict` | collection package forms stable (`package-ops.md` E2); deck package form draft (`package-ops.md` E6) |
+| `export` | the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6); the collection package form is exactly `{format: colpkg, name}` (`package-ops.md` E1), and a step that also carries `media` or `legacy` (booleans, default false) is its options form (`package-ops.md` E9); the deck package form is `{format: apkg, name, limit: collection \| {deck} \| {notes} \| {cards}, scheduling, presets, media}` (`package-ops.md` E7), and with `legacy: true` added its legacy form (`package-ops.md` E8) | legacy form and deck package forms: `{notes: <count>}`, the deck package forms with rejections `invalid_ids`, `media_check_required`; collection package form: none | the legacy form and the collection package form are stable (`model-ops.md` L6, `package-ops.md` E1); the collection package options and the deck package forms are draft (`package-ops.md` E7 to E9) |
 | `add_backup_files` | `{names: [<file name>, ...]}` or `{series: {from, until, every}}`: empty files in the scenario's backups folder | none | stable (`backup-ops.md` F2) |
 | `force_backup` | `{}` or `{copy_as: <file name>}`: a forced backup into the backups folder, its retention included | `{name}` of the new backup | stable (`backup-ops.md` F3) |
 | `save_backup_settings` | `{daily, weekly, monthly, minimum_interval_mins}`: the backup limits written through the settings save | none | stable (`backup-ops.md` F4) |
 | `backup` | `{force: <boolean>}`: a forced backup, or a periodic one made only when the collection changed since the last backup and no entry of the backups folder is younger than the minimum interval; retention included | `{name}`: the new backup's file name, or `null` when none was made | stable (`backup-trigger-ops.md` H1) |
-| `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejection `corrupt` | stable (`collection-check.md` K10) |
+| `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejections `corrupt`, `failed` (K10) | stable (`collection-check.md` K10) |
 | `optimize` | `{}`: the automatic optimize (`VACUUM`, then `ANALYZE`) on the scenario's collection, at once | none | stable (`maintenance-ops.md` M1) |
 | `media_outside` | list of `media_files` entries (D6.8) and `{name, remove: true}`: change the media folder directly, bypassing the store | none | stable (`media-ops.md` F4) |
 | `add_media` | `{name, text}` or `{name, fill}`: add a file through the media store with this desired name | `{name}`: the stored name; rejections `invalid_name`, `ignored_name` (Meguri only) | stable (`media-ops.md` F5) |
 | `trash_media` | `{names: [...]}`: move these files to the media trash | none | stable (`media-ops.md` F6) |
 | `restore_media_trash` | `{}` | none | stable (`media-ops.md` F7) |
 | `empty_media_trash` | `{}` | none | stable (`media-ops.md` F8) |
+| `check_media` | `{}`: a Check Media run | `{unused, missing, missing_notes, renamed, dirs, oversize, extracted, trash_count, field_templates}` | draft (`media-ops.md` F14.1) |
+| `delete_unused_media` | `{}`: trash the `unused` list of the latest `check_media` step | `{count}` | draft (`media-ops.md` F14.2) |
+| `tag_missing_media` | `{}`: tag `missing-media` on the `missing_notes` of the latest `check_media` step | `{count}` | draft (`media-ops.md` F14.3) |
 | `media_reset` | `{}`: reset the media sync state as logging out does | none | stable (`media-sync-ops.md` V2) |
 | `media_sync` | `{}`: the current actor runs one media sync to its end | `{uploaded_files, uploaded_deletions, downloaded_files, downloaded_deletions}`; rejection `network` | stable (actor scenarios, `media-sync-ops.md` V3) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
@@ -212,6 +215,12 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | stable (`notetype-ops.md` T4) |
 | `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5) |
 | `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | stable (`notetype-ops.md` T6) |
+| `remove_notetype` | `{notetype}` | none | draft (`notetype-structure-ops.md` M1, M5) |
+| `restore_notetype` | `{notetype, kind?}`: Restore to Default, `kind` one of the six stock kinds | none; rejection `needs_stock_kind` | draft (`notetype-structure-ops.md` M2, M5) |
+| `change_notetype_info` | `{notes: [#nN, ...], notetype}`: the change screen opened on a selection | the info object of `change-notetype-ops.md` H1; rejections `not_found`, `multiple_notetypes` | draft (`change-notetype-ops.md` H1, H4) |
+| `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | draft (`change-notetype-ops.md` H2, H4) |
+| `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | draft (`empty-cards-ops.md` Y1, Y4) |
+| `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | draft (`empty-cards-ops.md` Y2, Y4) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
@@ -232,7 +241,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 
 ### D8.1 Explicit filtered-answer metadata
 
-The one exact tag `needs:answer.filtered` adds the finer op need `answer.filtered` when Meguri owns an `answer` step. This is checker metadata under D4; executors do not use it to change an answer’s behavior. `conformance/answer-ops#H6` defines its scope. No other `needs:` tag is interpreted as a capability through this convention.
+The one exact tag `needs:answer.filtered` adds the finer op need `answer.filtered` when Meguri owns an `answer` step. This is checker metadata under D4; executors do not use it to change an answer’s behavior. `conformance/answer-ops#H6` defines its scope. No other `needs:` tag is interpreted as a capability through this convention. The only other tag that adds a need is `media-case-variants` (draft): the loader adds the need `media_files.case_variants` to every scenario that carries it (`media-ops.md` F14.4).
 
 Apply the normal capability comparison before execution: a missing `answer.filtered` gives pending under D10. The tag never produces pass, changes expected observations, catches an execution error or permits a filtered answer. Meguri does not declare this capability while filtered study is excluded.
 
