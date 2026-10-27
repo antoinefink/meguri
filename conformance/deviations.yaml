@@ -341,6 +341,21 @@ deviations:
     scenarios: [preservation/notetype/structure-changes]
     pointer: /steps/9/db_exec/rows
     transform: {replace: [[1, 1, 1]]}
+  # specs/notetypes/structure-changes.md S4 and field-rename.md F3: a field
+  # rename or removal edits only the tags that name the field; Anki writes
+  # every tag of every text in canonical form, drops the alternate-delimiter
+  # directive and gives every empty browser front the first field.
+  - id: template-rewrite-keeps-text
+    requirement: R923
+    summary: After renaming Extra to Note, Spaced keeps its spaced tags and extra braces, Alt keeps its alternate delimiters (so {{x}} stays text), every browser text stays empty, and only the tags naming Extra are rewritten.
+    test: notetypes/structure/rewrite-format
+    scenarios: [notetypes/structure/rewrite-format]
+    pointer: /steps/4/notetype_templates/Styled
+    transform:
+      replace:
+        - {name: Spaced, front: "{{ Front }} {{{Back}}} {{text:Note}}", back: "{{# Front }}x{{/ Front }}{{Back}}", browser_front: "", browser_back: ""}
+        - {name: Alt, front: "{{=<% %>=}}<%Back%> {{x}} <%Note%>", back: "{{=<% %>=}}<%Front%>", browser_front: "", browser_back: ""}
+        - {name: Broken, front: "{{Note}}{{Front}}", back: "{{#Extra}}{{Back}}", browser_front: "", browser_back: ""}
   # specs/notetypes/structure-changes.md S8 and field-rename.md F3: card
   # requirements come from the fronts as rewritten; Anki computes them from
   # the fronts before its rewrite.
@@ -381,6 +396,15 @@ deviations:
         - [c, 1, Last, 3]
         - [c, 2, Last, 3]
         - [c, 3, Target, 3]
+  # specs/notetypes/restore-to-default.md D5: a restore that changes the
+  # template count sets col.scm; Anki does not when it only adds templates.
+  - id: restore-template-add-schema
+    requirement: R1477
+    summary: Restoring the Basic note type Plain as Basic (and reversed card) adds a template and marks the schema modified (scm > ls).
+    test: notetypes/structure/restore-forced-kind
+    scenarios: [notetypes/structure/restore-forced-kind]
+    pointer: /steps/7/db_exec/rows
+    transform: {replace: [[1]]}
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row
@@ -556,6 +580,37 @@ deviations:
         "Bar": {collapsed: 1, config: null, tag: "Bar", usn: -1}
         "Bar::c": {collapsed: 1, config: null, tag: "Bar::c", usn: -1}
         "Bar::x": {collapsed: 1, config: null, tag: "Bar::x", usn: -1}
+  # specs/notes/empty-cards.md E4, E5: Meguri's delete looks at the live rows
+  # again and keeps listed cards that became valid; Anki deletes every listed
+  # card that still exists. Pointers are cardgen/empty/recheck's steps 10 to 13.
+  - id: empty-cards-recheck
+    requirement: R952
+    summary: The delete reports one card deleted and two listed cards kept because they became valid; Anki deletes three and keeps none.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/10/delete_empty_cards
+    transform: {replace: {deleted: 1, kept_valid: 2}}
+  - id: empty-cards-recheck-cards
+    requirement: R952
+    summary: After the delete, the notes a and b still have their card 2.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/11/db_exec/rows
+    transform: {replace: [["a", 0], ["a", 1], ["b", 0], ["b", 1], ["c", 0]]}
+  - id: empty-cards-recheck-review-log
+    requirement: R952
+    summary: The review-log row of note a's card 2 still belongs to an existing card.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/12/db_exec/rows
+    transform: {replace: [[1894700000000, 3, 1]]}
+  - id: empty-cards-recheck-graves
+    requirement: R952
+    summary: Only the third note's card 2 gets a card grave from the delete, next to the deleted fourth note's two card graves and its note grave.
+    test: cardgen/empty/recheck
+    scenarios: [cardgen/empty/recheck]
+    pointer: /steps/13/db_exec/rows
+    transform: {replace: [[0, 3], [1, 1]]}
   # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
   # platform math library, as Anki does. On macOS the expected FSRS next-state
   # values come from the Apple oracle's overlay (conformance/goldens-apple/)

@@ -144,7 +144,8 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `set_clock` | date-time | none | stable |
 | `add_note` | `{notetype, deck?, fields, tags?}`: `notetype` a note type the collection holds, by its stored name (`notetype-ops.md` T1); `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing; the card gets the state `next_states` reports for the rating at the current instant, written as `specs/sched/answering.md` says; a held compatibility presentation advances under `session-ops.md` E2, with the chooser of `answer-ops.md` H2 | none | stable (`sched/answering`) |
-| `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
+| `open` | `{fixture: <path under conformance/fixtures/>}` or `{file: <session file name>}`: replace the collection with a copy of a fixture file, or of a file an earlier `schema11_copy` step wrote, and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is an `open` naming a fixture | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
+| `schema11_copy` | `{name: <session file name>}`: write a schema-11 copy of the collection to that file in the session directory; the collection does not change (`storage-ops.md` P4) | none; rejection `invalid_json` | stable (`storage-ops.md` P4) |
 | `observe` | list of observation requests (`observations.md` O2); the pure kinds `text`, `cloze`, `image_occlusion`, `type_answer`, `fsrs_next` (`float-determinism.md` F5) and `card_extractors` (`extractor-ops.md` E5) never touch the collection | `{<kind>: <value>, ...}` | stable |
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
@@ -215,12 +216,12 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | stable (`notetype-ops.md` T4) |
 | `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5), except the `field_options` options `tag` and `prevent_deletion`, draft (`notetype-ops.md` T5.1) |
 | `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | stable (`notetype-ops.md` T6) |
-| `remove_notetype` | `{notetype}` | none | draft: the oracle implements it; Meguri's executor and the typed model pending (`notetype-structure-ops.md` M1, M5) |
-| `restore_notetype` | `{notetype, kind?}`: Restore to Default, `kind` one of the six stock kinds | none; rejection `needs_stock_kind` | draft: the oracle implements it; Meguri's executor and the typed model pending (`notetype-structure-ops.md` M2, M5) |
-| `change_notetype_info` | `{notes: [#nN, ...], notetype}`: the change screen opened on a selection | the info object of `change-notetype-ops.md` H1; rejections `not_found`, `multiple_notetypes` | draft: the oracle implements it; Meguri's executor and the typed model pending (`change-notetype-ops.md` H1, H4) |
-| `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | draft: the oracle implements it; Meguri's executor and the typed model pending (`change-notetype-ops.md` H2, H4) |
-| `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | draft: the oracle implements it; Meguri's executor and the typed model pending (`empty-cards-ops.md` Y1, Y4) |
-| `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | draft: the oracle implements it; Meguri's executor and the typed model pending (`empty-cards-ops.md` Y2, Y4) |
+| `remove_notetype` | `{notetype}` | none | stable (`notetype-structure-ops.md` M1) |
+| `restore_notetype` | `{notetype, kind?}`: Restore to Default, `kind` one of the six stock kinds | none; rejection `needs_stock_kind` | stable (`notetype-structure-ops.md` M2) |
+| `change_notetype_info` | `{notes: [#nN, ...], notetype}`: the change screen opened on a selection | the info object of `change-notetype-ops.md` H1; rejections `not_found`, `multiple_notetypes` | stable (`change-notetype-ops.md` H1) |
+| `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | stable (`change-notetype-ops.md` H2) |
+| `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | stable (`empty-cards-ops.md` Y1) |
+| `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | stable (`empty-cards-ops.md` Y2) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 

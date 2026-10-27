@@ -145,7 +145,7 @@ Example: four cards with equal `mod` sorted by Card Modified are one equal-key r
 
 ## S11. Scenarios
 
-Observation: `search` with `order` (`specs/conformance/browser-ops.md` B1, B2). Each scenario needs its golden (B6). Each scenario sorts its whole collection in both modes and both directions, unless noted.
+Observation: `search` with `order` (`specs/conformance/browser-ops.md` B1, B2). Every scenario has its golden (B6). Each scenario sorts its whole collection in both modes and both directions, unless noted.
 
 | Scenario | Covers |
 |---|---|
@@ -166,6 +166,6 @@ Observation: `search` with `order` (`specs/conformance/browser-ops.md` B1, B2). 
 | `browser/sort/damaged` | S9: a card without a note dropped by note-column sorts only; a note without cards first ascending |
 | `browser/sort/subset` | S9: aggregates over all of a note's cards under a restricting search |
 
-These sixteen scenarios and their goldens are not on this branch yet: they need `order` on `search` requests, which neither the oracle driver nor Meguri's runner implements here (browser-ops B6). They come back with that observation, their goldens checked against the scenarios as ported (or re-recorded when a scenario changed). `browser/sort/damaged` breaks rows with `db_exec` as the active `card_excerpts` scenarios `browser/columns/question-deck/damaged` and `damaged-notetype` do (a missing deck, an ordinal with no template, a deleted note row: the row errors of `browser/columns` C3.1), and also deletes one note's cards; it shows only where such rows sort.
+The oracle driver implements `order`; Meguri's runner does not yet (browser-ops B6). `browser/sort/position` and `subset` name the card that `edit_note` adds with `adopt` (browser-ops B5). `browser/sort/damaged` breaks rows with `db_exec` as the active `card_excerpts` scenarios `browser/columns/question-deck/damaged` and `damaged-notetype` do (a missing deck, an ordinal with no template, a deleted note row: the row errors of `browser/columns` C3.1), and also deletes one note's cards; it shows only where such rows sort.
 
 Meguri-only tests (U84, `tests/sort_props.rs`): for every sortable column and mode, the reversed ascending result equals the descending result (S8); the final key makes every order total; no sort creates a schema object.
