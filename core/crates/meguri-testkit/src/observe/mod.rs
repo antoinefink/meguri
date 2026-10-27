@@ -50,10 +50,11 @@ fn exact(raw: &RawValue, max_integer: Option<i128>) -> Result<Value, serde_json:
             // D2 applies only to authored integer lexemes, including -0.
             // C3's shared conversion below keeps -0 and outside-i64/u64
             // integers as floats, and fractions/exponents as nearest doubles.
-            if let Some(max) = max_integer {
-                if !text.contains(['.', 'e', 'E']) && !text.parse::<i128>().is_ok_and(|n| (-max..=max).contains(&n)) {
-                    return Err(serde::de::Error::custom(format!("integer {text} is outside ±2^53")));
-                }
+            if let Some(max) = max_integer
+                && !text.contains(['.', 'e', 'E'])
+                && !text.parse::<i128>().is_ok_and(|n| (-max..=max).contains(&n))
+            {
+                return Err(serde::de::Error::custom(format!("integer {text} is outside ±2^53")));
             }
             let value: Value = serde_json::from_str(text)?;
             match &value {

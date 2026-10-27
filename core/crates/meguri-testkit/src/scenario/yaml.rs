@@ -213,7 +213,7 @@ fn is_core_float(text: &str) -> bool {
 }
 
 fn integer(n: i128) -> Result<Value, String> {
-    if n.abs() > MAX_SAFE {
+    if !(-MAX_SAFE..=MAX_SAFE).contains(&n) {
         return Err(format!("integer {n} is outside ±2^53"));
     }
     let n = i64::try_from(n).map_err(|_| format!("integer {n} is outside ±2^53"))?;

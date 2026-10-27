@@ -179,6 +179,18 @@ fn the_json_compatible_subset_is_enforced() {
     for text in rejected {
         assert!(scenario::parse_yaml(text).is_err(), "accepted {text:?}");
     }
+    // i128::MIN must return the range error without overflowing in abs().
+    for integer in [
+        "-170141183460469231731687303715884105728",
+        "170141183460469231731687303715884105727",
+        "-170141183460469231731687303715884105729",
+    ] {
+        let err = scenario::parse_yaml(&format!("a: {integer}\n")).unwrap_err();
+        assert!(
+            err.to_string().contains(&format!("integer {integer} is outside ±2^53")),
+            "{err}"
+        );
+    }
     // An anchor alone is allowed and changes nothing; quoted keys are strings.
     assert_eq!(
         scenario::parse_yaml("a: &x 1\n'1': y\n").unwrap(),
