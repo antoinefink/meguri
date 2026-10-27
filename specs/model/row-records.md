@@ -25,7 +25,7 @@ One row, `id` = 1.
 | `id` | i64 | always 1 |
 | `crt` | i64 | collection creation, epoch **seconds**; the start of day 0 for day numbers |
 | `mod` | i64 | last change to the collection, epoch **milliseconds** |
-| `scm` | i64 | last schema change, epoch milliseconds; a value greater than `ls` means the next sync must be one-way |
+| `scm` | i64 | last schema change, epoch milliseconds; a value greater than `ls` means the next manual Anki transfer must be one-way (KTD26, `notetypes/schema-changes#G1`) |
 | `ver` | i64 | schema version, 18 |
 | `dty` | i64 | unused, 0 |
 | `usn` | i32 | on a client, the server's update sequence number as of the last sync |

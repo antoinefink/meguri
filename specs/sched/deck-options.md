@@ -1,7 +1,7 @@
 # Deck options and scheduling preferences
 
 Spec: sched/deck-options
-Requirements: R636, R665, R686, R690, R730, R731, R732, R733, R734, R735, R736, R737, R738, R739, R740, R741, R742, R743, R744, R745, R746, R747, R748, R749, R750, R751, R752, R753, R760, R761
+Requirements: R636, R665, R686, R690, R730, R731, R732, R733, R734, R735, R736, R737, R738, R739, R740, R741, R742, R743, R744, R745, R746, R747, R748, R749, R750, R751, R752, R753, R760, R761, R1476, R2008, R2053 (preset removal side)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sched/options/
 
@@ -13,7 +13,7 @@ This file builds on:
 - `decks/deck-presets`: the default preset and built-in defaults (P2), the preset of a deck (P3), add, clone, rename, remove, assign and update (P4 to P10), and the preset menu's naming rule (P7);
 - `sched/step-remap`: the step translation the save applies;
 - `sched/memory-state`: the recompute (M4), which decks a save recomputes (M7.1), and the "N of M cards included" count (M5);
-- `notetypes/schema-changes`: the schema stamp and the confirmation gate (G1, G4, G5);
+- `notetypes/schema-changes`: the schema stamp, the no-confirmation rule and the stamp's write (G1, G4, G5);
 - `sched/config-keys`: the collection keys, their readers and defaults (G1, G2);
 - `sched/day-clock`: today, the rollover hour and when the day is computed afresh (D2, D6, D8, D13).
 
@@ -38,7 +38,7 @@ A read that writes nothing (apart from the day clock's own query, `sched/day-clo
 3. **Deck values** (`sched/presets#D1`), each optional: This-deck new and review limits (`new_limit`, `review_limit`); Today-only new and review limits (`new_limit_today`, `review_limit_today`), each given as its stored `limit` with `active` = its stored `today` equals today; the deck's own desired retention (`sched/presets#V7`).
 4. **Global options** (R735), each marked global: `newCardsIgnoreReviewLimit` and `applyAllParentLimits` (Daily Limits), `loadBalancerEnabled` (Advanced), read with `sched/config-keys#G1` (missing reads as false, false and true).
 5. **Defaults, ranges and choices** of every option of O3, for the restore-default controls (R734) and the editor's bounds.
-6. **`schema_modified`**: true when `scm` is greater than `ls` (`notetypes/schema-changes#G1`). Removing a preset then needs no confirmation (O6.5).
+6. **`schema_modified`**: true when `scm` is greater than `ls` (`notetypes/schema-changes#G1`): the next manual Anki transfer must be one-way. Informational since 2026-10-27: the screen asks and refuses nothing because of it (O6.5).
 7. **The ignore-date count** (R690): for the opening preset and its stored `ignore_revlogs_before_date`, the result of `sched/memory-state#M5`: `included`, `total`, and the warning flag (M5: `total` > 0 and 10 × `included` < `total`). It is absent when the stored date is empty or `1970-01-01`, as Anki shows no count for those. The screen asks M5 again for each date the user enters, for the preset being edited. For a preset the draft adds (O6.3), M5's card set is its `param_search` when that is not empty (a clone copies it), otherwise empty: 0 of 0, since no deck uses it yet.
 
 The screen holds no scheduling rule of its own (U232): ranges, defaults, warnings and the count all come from here and from O4.
@@ -195,7 +195,8 @@ Renames the selected preset in the draft, following `decks/deck-presets#P7` (no 
 
 - The default preset (id 1) cannot be removed; the menu disables the item, and a save that tries is refused (O7.1).
 - A staged preset is simply dropped. An existing preset is added to the draft's removals.
-- Removing an existing preset forces the next sync to be one-way. The screen asks the user to confirm first when the snapshot's `schema_modified` is false and the draft has no earlier removal of an existing preset (`notetypes/schema-changes#G4`); the confirmation travels with the save (O7.1).
+- Removing an existing preset is a schema change (`preset_removed`, `notetypes/schema-changes#G2`). The save sets `scm` (O7.2 step 1), so the next manual Anki transfer must be one-way (KTD26); CloudKit receives the removal in a coherent new generation (R2053, U114; record layout: `sync/cloudkit-records`, pending). Routine sync is not made one-way.
+- The screen asks no schema confirmation (`notetypes/schema-changes#G4`). Its only question is R733's: which decks the removal moves to the target preset (U232). The save takes a safety backup first (O7). Changed 2026-10-27: this replaces a confirmation that the screen asked when `schema_modified` was false and that travelled with the save.
 - After a removal the preset before it in O2's order becomes selected (the first preset when it was first).
 
 ### O6.6 Unsaved changes and defaults (R734)
@@ -205,7 +206,9 @@ Renames the selected preset in the draft, following `decks/deck-presets#P7` (no 
 
 ## O7. The save (R737)
 
-One op, named "Deck Options" (undo id `deck_options`, `conformance/undo-ops#V4`), source user. Input: the target deck; the target preset (an existing preset or one the draft staged); the draft's presets with their values and names; the staged presets; the removals; whether to save to all subdecks; the five deck values; the three global options; and whether the user confirmed a schema change.
+One op, named "Deck Options" (undo id `deck_options`, `conformance/undo-ops#V4`), source user. Input: the target deck; the target preset (an existing preset or one the draft staged); the draft's presets with their values and names; the staged presets; the removals; whether to save to all subdecks; the five deck values; and the three global options. Changed 2026-10-27: the input no longer says whether the user confirmed a schema change (`notetypes/schema-changes#G4`).
+
+A save whose removals contain an existing preset is a structural edit: it takes one safety backup after O7.1's checks pass and before its first write (`package/backup-triggers#T6.1`, T6.2). When the backup fails, the save is refused with `SafetyBackupFailed` and writes nothing.
 
 ### O7.1 Refusals
 
@@ -214,9 +217,10 @@ The save writes nothing and records no undo step when:
 - the target deck is filtered (`filtered_deck`) or missing (`not_found`), or a preset the draft edits, removes or selects no longer exists (`not_found`);
 - the removals contain the default preset (`default_preset`), or the target preset (invalid argument);
 - validation (O4) gives an error: the result carries the issues;
-- the removals contain an existing preset, `scm` ≤ `ls`, and the save is not confirmed: the result is `NeedsSchemaConfirmation` with the reason `preset_removed` (`notetypes/schema-changes#G4`).
+- Removed 2026-10-27: the `NeedsSchemaConfirmation` refusal of an unconfirmed removal (`notetypes/schema-changes#G4`).
+- after the checks above pass, the safety backup before a removal of an existing preset fails: `SafetyBackupFailed` (`package/backup-triggers#T6.2`).
 
-Validation runs before anything is written, then the gate; the effects below run in one transaction.
+Validation runs before anything is written; the effects below run in one transaction.
 
 ### O7.2 Effects, in order
 
@@ -296,6 +300,7 @@ The screen's labels, help texts and warning wording are Meguri's (R734, U232); t
 - **Step warning** on any step of 1 day or more (R743). Anki looks at the last step only.
 - **Step text** (O5.2): for a step of an exact multiple of 43,800 minutes that is not a multiple of 525,600, Anki shows a rounded number of days; Meguri shows exact hours.
 - **Load balancer** toggle on the deck options screen and in the settings (R665); Anki's desktop shows none.
+- **Preset removal** (O6.5): Anki's screen warns before the first schema change since a sync that the next sync must upload the whole collection; Meguri asks nothing and takes a safety backup before the save (`notetypes/schema-changes#G9`).
 
 None of these shows in a scenario's golden; scenarios avoid them (O13).
 
@@ -315,4 +320,4 @@ None of these shows in a scenario's golden; scenarios avoid them (O13).
 | `sched/options/globals` | O7.2 step 7 for the two limit keys | awaits the driver |
 | `sched/options/prefs-rollover` | O10 | awaits the driver (`conformance/deck-options-ops#E4`) |
 
-Meguri's own tests (no oracle): O2's snapshot on a collection with an out-of-range preset (V3 replacements shown), a missing preset (`preset_missing`), use counts and order; O4's every code and the "changed values only" rule; O5's two tables and round trips; O6's staging (add, clone with unsaved edits, rename, remove with and without confirmation, selection after removal, use counts); O7.1's refusals each writing nothing; O7's undo restoring presets, decks, cards and `scm`; O7.2 step 7 not adding missing keys; O10's ranges, its undo step and the day clock recomputing. Swift tests in CoreBridge cover the snapshot and validation API (U49 Verification).
+Meguri's own tests (no oracle): O2's snapshot on a collection with an out-of-range preset (V3 replacements shown), a missing preset (`preset_missing`), use counts and order; O4's every code and the "changed values only" rule; O5's two tables and round trips; O6's staging (add, clone with unsaved edits, rename, remove with `scm <= ls` committing with no confirmation input, selection after removal, use counts); the safety backup before a save that removes an existing preset, and none before one that only drops a staged preset; O7.1's refusals each writing nothing; O7's undo restoring presets, decks, cards and `scm`; O7.2 step 7 not adding missing keys; O10's ranges, its undo step and the day clock recomputing. Swift tests in CoreBridge cover the snapshot and validation API (U49 Verification).

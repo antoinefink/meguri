@@ -128,7 +128,7 @@ Meguri applies S4 everywhere. Where an Anki operation stamps an unchanged row an
 | `id` | 1 |
 | `crt` | the collection's day 0, epoch seconds (U40) |
 | `mod` | last change, epoch ms (S5) |
-| `scm` | last schema change, epoch ms: a schema change forces the next sync to be one-way (U29, U109) |
+| `scm` | last schema change, epoch ms: a schema change forces the next manual Anki transfer to be one-way (KTD26; `notetypes/schema-changes#G1`, U29, U109) |
 | `ver` | 18 |
 | `dty` | 0 |
 | `usn` | 0 when never synced. A sync's end sets it to the USN the server reported when that sync began, plus one: the server's own USN once the sync is done (R1531). Local changes never write it (R1456). |

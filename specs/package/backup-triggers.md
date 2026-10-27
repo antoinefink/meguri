@@ -1,7 +1,7 @@
 # Backup triggers, safety backups and restore
 
 Spec: package/backup-triggers
-Requirements: R1630, R1631, R1632, R1637 (core), R1638, R2008, R2010, R2020 (backup side), R1662 (backup side), R1539 (provider to U109); budgets R1848, R1854
+Requirements: R1630, R1631, R1632, R1637 (core), R1638, R2008, R1475 (backup side), R2010, R2020 (backup side), R1662 (backup side), R1539 (provider to U109); budgets R1848, R1854
 Anki: 26.09.3 for T2.1, T2.2 and T4.1 (when Anki makes a backup and which operations force one); every other section is Meguri design from the Product Contract and the plan (U127)
 Scenarios: conformance/scenarios/package/backup-triggers/
 
@@ -129,10 +129,11 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 | Delete Unused media | U130 | when it deletes at least one file | no |
 | deleting decks | U28 | when the deletion removes at least one card (U28 decides which cards a deletion removes; a filtered deck's deletion removes none) | no |
 | deleting a note type | U34 | always | no |
-| the first schema change since the last sync | U29, U121 | when the op is the one R1476 asked the user to confirm (`scm <= ls`), after the confirmation | no |
+| a structural edit (`notetypes/schema-changes#G2`) other than deleting a note type (row above): reasons `fields_changed`, `sort_field_changed`, `templates_changed`, `notetype_restored`, `notes_notetype_changed`, `preset_removed` or `notetypes_merged` (R1475, R2008) | U34, U35, U28, U49, U121 (classification U29) | whenever the op's plan classifies it so (`notetypes/schema-changes#G3`), whatever `scm` and `ls` hold; once per logical operation, before its first collection write; for an `.apkg` import that merges note types (U121), before the import's first collection write | no |
 | any op whose `engine/op-model#O9` undo class is "destructive, not undoable" | its unit | always (R2020) | — |
 
 - A conditional row is decided when the op is submitted, from the state its plan reads.
+- A structural edit has no confirmation step (`notetypes/schema-changes#G4`, R1476). When its unit shows a destructive-mapping preview, the user accepts that preview before the op is submitted: fields, templates or cards that the edit removes (U34, U35), Restore to Default's question (R914), the note type delete question (R918), the decks a preset removal reassigns (R733), or the merge preview of an `.apkg` import (U121). The backup follows the submit and precedes the op's first collection write (T6.2). Changed 2026-10-27: this row replaces one that took the backup only for the first schema change since the last sync, after the Anki confirmation that R1476 no longer has.
 - A collection backup holds no media: the backup before Delete Unused media protects the collection only; the files themselves go to the trash (R2018).
 
 ### T6.2 How it runs
@@ -203,7 +204,7 @@ The errors of `package/backups#B4`, `package/container#P13`, `engine/collection-
 | T2.3: the reference survives a reopen (deviation `backups-change-check-survives-reopen`) | `package/backup-triggers/reopen` |
 | T2 timing bounds and exact arithmetic; T3 deadline events, triggers, retry floor and exclusive-phase suppression | `core/crates/meguri-engine/tests/maintenance_scheduler.rs` (injected clock and entry times) |
 | `change_check_survives_reopen`: reopen and relaunch keep the reference | same file |
-| Safety classes: an op of each class takes its backup before its commit, conditional classes decided at submit (a deck with 3 cards: a backup; an empty deck: none), `SafetyBackupFailed` with injected disk full (the op does nothing, the collection hash unchanged), cancel during the backup | same file (fake ops); each op's unit adds its own ordering test (U28, U29, U34, U109, U121, U124, U128, U130, U131) |
+| Safety classes: an op of each class takes its backup before its commit, conditional classes decided at submit (a deck with 3 cards: a backup; an empty deck: none), `SafetyBackupFailed` with injected disk full (the op does nothing, the collection hash unchanged), cancel during the backup | same file (fake ops); each op's unit adds its own ordering test (U28, U29, U34, U35, U49, U109, U121, U124, U128, U130, U131) |
 | `back_up_now_writes_when_unchanged`; Back Up Now's result (name, size); refused in ExclusiveBusy and `Failed{Corrupt}` | `core/crates/meguri-package/tests/backup_service.rs` |
 | T7: a page-corrupted collection: the safety backup is a byte copy whose SHA-1 equals the source's, `corrupt-…` named, kept by retention, absent from the listing; disk full: `SafetyBackupFailed`, no main copy | `core/crates/meguri-package/tests/restore.rs` |
 | T8: a backup with a corrupted page refused, the collection hash unchanged (R1638); refused while a session is open; once in ExclusiveBusy an answer is refused and every answer committed before is in the pre-restore backup; cancel before the rename keeps lifecycle and generation; restore of a server copy | same file |

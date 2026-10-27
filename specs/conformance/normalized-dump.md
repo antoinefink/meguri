@@ -65,7 +65,7 @@ SELECT (SELECT count() FROM notes WHERE usn = -1), (SELECT count() FROM cards WH
 | 9 | config entries with `usn` -1 | keys written locally since the last sync. Config travels whole when `col.mod` is newer (`storage/config-table` C9), so this is not what selects them; it shows that a write happened |
 | 10 | graves | deletions not yet sent (`storage/graves` G5): a sync removes the graves it sends |
 | 11 | 1 when `col.mod` is after `col.ls` | the collection changed since its last sync: a normal sync has something to send |
-| 12 | 1 when `col.scm` is after `col.ls` | the schema changed since its last sync: the next sync is one-way (R1590) |
+| 12 | 1 when `col.scm` is after `col.ls` | the schema changed since its last sync: the next manual Anki transfer is one-way (KTD26, `notetypes/schema-changes#G1`; R1590) |
 
 A clean collection gives `[[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]`. The `fields` table has no `usn`; Anki leaves `templates.usn` at 0 (`model/schema11-json` S6), so column 7 counts only what another writer left. A collection that never synced (`ls` 0) is never clean by this query; the fixture has synced (N9.3).
 
