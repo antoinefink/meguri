@@ -1,0 +1,35 @@
+# A live chain (specs/conformance/dsl.md D9.2; specs/storage/schema11-downgrade.md
+# D1-D7; R1481). Meguri opens the schema-18 fixture, makes the raw edits of
+# storage/downgrade/contents (keep the three scenarios in step) and writes its
+# schema-11 copy. The oracle then reads Meguri's copy as a file, with the
+# add-on members of every record in the legacy JSON, and opens it, upgrading
+# it with Anki's own upgrade: the blobs carry the members again and the dump
+# equals the golden, which is Anki's own copy upgraded by Anki.
+id: storage/downgrade/oracle-opens
+description: A schema-11 copy written by Meguri reads and opens in Anki exactly as Anki's own copy does.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'2a0a25207061697220707265320b25207061697220706f7374fa0f277b227a7a5f6164646f6e223a7b2261223a5b747275652c2278222c322e355d2c2262223a317d7d' AS BLOB) WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'2a09252067617020707265320a252067617020706f7374' AS BLOB) WHERE name = 'Gap'"}
+  - db_exec: {sql: "UPDATE fields SET config = CAST(config || X'fa0f117b227a7a5f666c64223a226b656570227d' AS BLOB) WHERE name = 'Front' AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'fa0f227b227a7a5f746d706c223a5b312c7b2263223a5b6e756c6c5d2c2264223a307d5d7d' AS BLOB) WHERE name = 'Forward' AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"}
+  - db_exec: {sql: "UPDATE decks SET common = CAST(common || X'fa0f1a7b22785f6164646f6e223a5b312c7b2261223a747275657d5d7d' AS BLOB) WHERE name = 'Lang'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'48904e50904e5d6666a63f650000b0406d0000c07f750000c03f7dcdcccc3e8001c0b8028801959d029001009801c0b802b001904ec001009802904ead0252b87e3fc5020000003ffa0f1f7b227a7a5f707265736574223a7b2261223a5b322e355d2c2262223a317d7d' AS BLOB) WHERE id = 1"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'488f4e50005d14aea73f650000803f6d0000003f750000803f7d000000408001949d028801019001949d02980101b0018f4ec0018f4e98028f4ead023333333fc502ec51783ffa0f1a7b226c61707365223a7b227a7a5f6c61707365223a2278227d7d' AS BLOB) WHERE name = 'Slow'"}
+  - db_exec: {sql: "UPDATE tags SET collapsed = 0, config = X'0a0178' WHERE tag = 'vocab'"}
+  - schema11_copy: {name: legacy.anki2}
+  - handoff: oracle
+  - observe:
+      - file_col: {name: legacy.anki2, columns: [ver, conf, models, decks, dconf, tags]}
+      - file_objects: {name: legacy.anki2}
+  - observe:
+      - file_query: {name: legacy.anki2, sql: "SELECT * FROM pragma_journal_mode"}
+  - open: {file: legacy.anki2}
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM notetypes ORDER BY id"}
+  - db_exec: {sql: "SELECT ntid, ord, name, hex(config) FROM fields ORDER BY ntid, ord"}
+  - db_exec: {sql: "SELECT ntid, ord, name, mtime_secs, usn, hex(config) FROM templates ORDER BY ntid, ord"}
+  - db_exec: {sql: "SELECT id, mtime_secs, usn, hex(common), hex(kind) FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - observe: [schema_objects, db_dump]

@@ -1,0 +1,31 @@
+# specs/storage/schema11-downgrade.md D3.1, D8; specs/conformance/storage-ops.md
+# P4.2. A config value that holds a number beyond the 64-bit float range
+# (model/json-numbers N10), then one that is not JSON at all, refuses the
+# schema-11 copy: the step records invalid_json and nothing changes. With the
+# number back in range the copy succeeds, and conf carries the key. The
+# collection's config rows and col row at the end differ from those after the
+# insert only by the value the db_exec steps wrote: no copy, refused or not,
+# changes anything.
+id: storage/downgrade/config-invalid
+description: A config value Anki cannot read refuses the schema-11 copy and changes nothing; a readable one is carried.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('meguriWide', -1, 1894701600, CAST(? AS BLOB))"
+      params: ['{"zz": [1, 1e400]}']
+  - observe:
+      - db_dump: {tables: [col, config]}
+  - schema11_copy: {name: legacy.anki2}
+  - db_exec:
+      sql: "UPDATE config SET val = CAST(? AS BLOB) WHERE KEY = 'meguriWide'"
+      params: ['{"zz": [1, ']
+  - schema11_copy: {name: legacy.anki2}
+  - db_exec:
+      sql: "UPDATE config SET val = CAST(? AS BLOB) WHERE KEY = 'meguriWide'"
+      params: ['{"zz": [1, 1e300]}']
+  - schema11_copy: {name: legacy.anki2}
+  - observe:
+      - file_col: {name: legacy.anki2, columns: [ver, conf]}
+  - observe:
+      - db_dump: {tables: [col, config]}
