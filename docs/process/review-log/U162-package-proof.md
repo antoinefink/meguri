@@ -596,3 +596,15 @@ Independent attachment-filter review is clear. Separate review finds P2
 `M8-STALE-CURRENT-DIAGNOSTIC`: retired runtime receipts are recorded against
 the current update. Resolve this M8 contract gap before integration; do not
 attribute the masked R10 failure to it without evidence.
+
+## M8 stale native adapter contract
+
+Start `62dbc46d`; spec-writer session `s-20261026T041939Z-a8f043ce`.
+M8 now requires supported message validation before runtime age classification.
+A valid older emission is a no-op; malformed, unknown and future messages stay
+rejected. Current admission remains exact. Native confirmations retain their
+actual emission card, generation and side along with token and phase. Visible
+tokens remain independent presentation counters. No history ledger is needed.
+Standalone C66 and legacy iOS sender binding stay unchanged. Independent spec
+review is clear; privacy `20261027T002436Z-67151` passes. Production repair and
+focused checks remain required before closing the finding.
