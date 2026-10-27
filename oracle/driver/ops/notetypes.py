@@ -100,6 +100,9 @@ FIELD_OPTIONS = {
     "plain_text": ("plainText", "bool"),
     "collapsed": ("collapsed", "bool"),
     "exclude_from_search": ("excludeFromSearch", "bool"),
+    # notetype-ops.md T5.1 (draft): the Image Occlusion field config.
+    "tag": ("tag", "u32_or_null"),
+    "prevent_deletion": ("preventDeletion", "bool"),
 }
 TEMPLATE_VALUES = {
     "front": ("qfmt", "str"),
@@ -109,7 +112,12 @@ TEMPLATE_VALUES = {
     "browser_font_name": ("bfont", "str"),
     "browser_font_size": ("bsize", "uint"),
 }
-TYPE_NAMES = {"bool": "a boolean", "str": "a string", "uint": "a non-negative integer"}
+TYPE_NAMES = {
+    "bool": "a boolean",
+    "str": "a string",
+    "uint": "a non-negative integer",
+    "u32_or_null": "a non-negative integer below 2**32 or null",
+}
 
 
 def _is_uint(v: Any) -> bool:
@@ -117,7 +125,12 @@ def _is_uint(v: Any) -> bool:
 
 
 def _checked(value: Any, kind: str, what: str) -> Any:
-    ok = {"bool": isinstance(value, bool), "str": isinstance(value, str), "uint": _is_uint(value)}[kind]
+    ok = {
+        "bool": isinstance(value, bool),
+        "str": isinstance(value, str),
+        "uint": _is_uint(value),
+        "u32_or_null": value is None or (_is_uint(value) and value < 2**32),
+    }[kind]
     if not ok:
         raise invalid(f"{what} is {TYPE_NAMES[kind]}")
     return value

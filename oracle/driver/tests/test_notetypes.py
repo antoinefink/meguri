@@ -299,6 +299,10 @@ class Update(unittest.TestCase):
             [{"recolor": "x"}],
             [{"template": {"name": "X", "deck": "Nope"}}],
             [{"field_options": {"field": "A", "font_size": -1}}],
+            [{"field_options": {"field": "A", "tag": 2**32}}],
+            [{"field_options": {"field": "A", "tag": True}}],
+            [{"field_options": {"field": "A", "tag": 1.0}}],
+            [{"field_options": {"field": "A", "prevent_deletion": None}}],
             [{"template": {"name": "X", "front": None}}],
         ]
         with WorkerProcess("UTC") as w:
@@ -312,6 +316,29 @@ class Update(unittest.TestCase):
             self.assertEqual(resp["error"], {"kind": "unknown_ref", "ref": ref, "step": 0}, resp)
         for resp in bad:
             self.assertEqual((resp["error"]["kind"], resp["error"]["step"]), ("invalid_scenario", 0), resp)
+
+    def test_io_field_options_set_and_remove_the_tag_and_protection(self):
+        # notetype-ops.md T5.1 (draft): tag (u32 or null) and prevent_deletion.
+        def opts(field, **kw):
+            return {"field_options": {"field": field, **kw}}
+
+        steps = [
+            {"ensure_io_notetype": {}},
+            {"update_notetype": {"notetype": "Image Occlusion", "edits": [opts("Header", tag=None, prevent_deletion=False)]}},
+            {"observe": [{"notetype_structure": {"notetypes": ["Image Occlusion"]}}]},
+            {"update_notetype": {"notetype": "Trio", "edits": [opts("A", tag=2**32 - 1, prevent_deletion=True), opts("B", tag=0)]}},
+            {"observe": [{"notetype_structure": {"notetypes": ["Trio"]}}]},
+            {"update_notetype": {"notetype": "Trio", "edits": [opts("A", tag=None)]}},
+            {"observe": [{"notetype_structure": {"notetypes": ["Trio"]}}]},
+        ]
+        with WorkerProcess("UTC") as w:
+            out = run_ok(self, w, scenario("t/nt", "UTC", START, steps, setup=self.setup()))
+        io = out[2]["notetype_structure"]["Image Occlusion"]["fields"]
+        self.assertEqual([(f["tag"], f["prevent_deletion"]) for f in io[:3]], [(0, True), (1, True), (None, False)])
+        trio = out[4]["notetype_structure"]["Trio"]["fields"]
+        self.assertEqual([(f["tag"], f["prevent_deletion"]) for f in trio], [(2**32 - 1, True), (0, False), (None, False)])
+        trio = out[6]["notetype_structure"]["Trio"]["fields"]
+        self.assertEqual([(f["tag"], f["prevent_deletion"]) for f in trio], [(None, True), (0, False), (None, False)])
 
     def test_each_op_reads_the_rows_db_exec_wrote(self):
         steps = [
