@@ -1,0 +1,24 @@
+# C8.4 of specs/maintenance/check-database.md: ivl -5, 1.5 and 3,000,000,000
+# become 0, 2 and 2,147,483,647 (rounded, clamped to [0, 2^31 - 1]), each card
+# stamped, card_properties 3, scm unchanged. A second run finds nothing.
+id: maintenance/check-db/card-ivl
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET ivl = -5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'three')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, typeof(c.ivl), c.ivl, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

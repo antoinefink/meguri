@@ -1,0 +1,29 @@
+# C8.1 of specs/maintenance/check-database.md: new cards due 2,500,000 and
+# 1,500,000.5 fold to 1,000,000 + (due modulo 1,000,000), 1,500,000 both (the
+# modulo drops the fraction), stamped and counted in new_positions_too_high;
+# 1,999,999 already equals its folded value and a queue-4 new card keeps
+# 2,500,000. C8.2 then finds nothing (card_properties 0). A second run finds
+# nothing.
+id: maintenance/check-db/new-position-fold
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+    - {notetype: Single, deck: Inbox, fields: [four, cuatro]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1999999, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1500000.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'three')"}
+  - db_exec: {sql: "UPDATE cards SET queue = 4, due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'four')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.queue, typeof(c.due), c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

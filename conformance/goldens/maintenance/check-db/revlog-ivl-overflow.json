@@ -1,0 +1,30 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "error": "failed"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "36f9ac990ed1c82f5322023ff9975ce038e08d201ab9d3402efafb069209876d",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db/revlog-ivl-overflow",
+  "scenario_sha256": "93cc6204c9287ae5c6f61c875eff62e80e7ef37d1bd3dc507c667e9cb5e56b98",
+  "tz": "UTC"
+}

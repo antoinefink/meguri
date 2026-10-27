@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000, 1894701600000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "acb4f4120510b4b3fd19f0415a725c11b664aae3923edb1ac4cf02993d1f6ce5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db-notes/future-mtime",
+  "scenario_sha256": "386520eac03e74944705fbec69ab038ee8c3e0e85b46cf32435a8ca868f4eaf0",
+  "tz": "UTC"
+}

@@ -1,0 +1,575 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c47"],
+          "note": "#n38"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 15,
+          "cards_without_note": 1,
+          "cards_without_template": 5,
+          "decks_missing": 3,
+          "duplicate_card_ords": 3,
+          "field_counts": 1,
+          "future_ids": 0,
+          "new_positions_too_high": 4,
+          "notes_invalid_utf8": 2,
+          "notetypes_recovered": 1,
+          "revlog_properties": 4
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["db-check-1894964400000-1", 1894964400, -1],
+            ["db-check-1894964400000-2", 1894964400, -1],
+            ["db-check-1894964400000-2+", 1894964400, -1],
+            ["db-check-1894964400000-3", 1894964400, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["ahead", "Single", "ahead|x", "", 1894964400, 5],
+            ["badsfld", "Single", "badsfld|x", " plain ", 1894701600, 5],
+            ["duelearn", "Single", "duelearn|a", "", 1894701600, -1],
+            ["duenew", "Single", "duenew|a", "", 1894701600, -1],
+            ["duereview", "Single", "duereview|a", "", 1894701600, -1],
+            ["dupe", "Duo", "dupe|x", "", 1894701600, -1],
+            ["extra", "Duo", "extra|x", "", 1894701600, -1],
+            ["filt", "Single", "filt|a", "", 1894701600, -1],
+            ["folda", "Single", "folda|a", "", 1894701600, -1],
+            ["foldb", "Single", "foldb|a", "", 1894701600, -1],
+            ["foldc", "Single", "foldc|a", "", 1894701600, -1],
+            ["foldd", "Single", "foldd|a", "", 1894701600, -1],
+            ["f�o", "Single", "f�o|b", " a� ", 1894701600, 5],
+            ["gap", "Duo", "gap|x", "", 1894701600, -1],
+            ["ivla", "Single", "ivla|a", "", 1894701600, -1],
+            ["ivlb", "Single", "ivlb|a", "", 1894701600, -1],
+            ["ivlc", "Single", "ivlc|a", "", 1894701600, -1],
+            ["lost", "Single", "lost|a", "", 1894701600, -1],
+            ["modq", "Single", "modq|a", "", 1894701600, -1],
+            ["mono", "db-check-1894964400000-1", "mono|", " db-check ", 1894701600, 5],
+            ["nocard", "Single", "nocard|x", " a::b New ", 1894701600, 5],
+            ["oduea", "Single", "oduea|a", "", 1894701600, -1],
+            ["odueb", "Single", "odueb|a", "", 1894701600, -1],
+            ["orda", "Single", "orda|a", "", 1894701600, -1],
+            ["paira", "db-check-1894964400000-2", "paira|x", "", 1894701600, 5],
+            ["pairb", "db-check-1894964400000-2+", "pairb|x", "", 1894701600, 5],
+            ["parents", "Single", "parents|a", "", 1894701600, -1],
+            ["texta", "Single", "texta|a", "", 1894701600, -1],
+            ["textb", "Single", "textb|a", "", 1894701600, -1],
+            ["textc", "Single", "textc|a", "", 1894701600, -1],
+            ["textd", "Single", "textd|a", "", 1894701600, -1],
+            ["texte", "Single", "texte|a", "", 1894701600, -1],
+            ["textf", "Single", "textf|a", "", 1894701600, -1],
+            ["tria", "db-check-1894964400000-3", "tria|trib|tric", "", 1894701600, 5],
+            ["trja", "db-check-1894964400000-3", "trja|trjb|trjc", "", 1894701600, 5],
+            ["{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}", "Image Occlusion", "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}|<img src=\"pic.png\">|||", "", 1894701600, -1],
+            ["{{c1::red}} {{c2::green}} plain", "Gaps", "{{c1::red}} {{c2::green}} plain|", "", 1894701600, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["ahead", 0, 0, 0, "integer", 36, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["badsfld", 0, 0, 0, "integer", 35, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["duelearn", 0, 1, 1, "integer", 2147483647, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["duenew", 0, 0, 0, "integer", 3, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["duereview", 0, 2, 2, "integer", 3, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["dupe", 0, 0, 0, "integer", 30, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["dupe", 1, 0, 0, "integer", 30, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["extra", 0, 0, 0, "integer", 31, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["extra", 1, 0, 0, "integer", 31, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["filt", 0, 0, 0, "integer", 23, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["folda", 0, 0, 0, "integer", 1500000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["foldb", 0, 0, 0, "integer", 1999999, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["foldc", 0, 0, 0, "integer", 1500000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["foldd", 0, 0, 4, "integer", 2500000, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["f�o", 0, 0, 0, "integer", 34, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["gap", 0, 0, 0, "integer", 32, "integer", 0, 0, 0, "integer", 1894701600, -1, "Side"],
+            ["gap", 1, 0, 0, "integer", 32, "integer", 0, 0, 0, "integer", 1894964400, -1, "Side"],
+            ["ivla", 0, 0, 0, "integer", 11, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["ivlb", 0, 0, 0, "integer", 12, "integer", 2, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["ivlc", 0, 0, 0, "integer", 13, "integer", 2147483647, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["lost", 0, 0, 0, "integer", 22, "integer", 0, 0, 0, "integer", 1894701600, 5, "recovered4242+"],
+            ["modq", 0, 0, 0, "integer", 20, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["mono", 0, 0, 0, "integer", 29, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["nocard", 0, 0, 0, "integer", 101, "integer", 0, 0, 0, "integer", 1894964400, -1, "Second"],
+            ["oduea", 0, 2, 2, "integer", 5, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["odueb", 0, 0, 0, "integer", 10, "integer", 0, 0, 2, "integer", 1894964400, -1, "Inbox"],
+            ["orda", 0, 0, 0, "integer", 100, "integer", 0, 0, 0, "integer", 1894964400, -1, "Second"],
+            ["paira", 0, 0, 0, "integer", 27, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["pairb", 0, 0, 0, "integer", 28, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["parents", 0, 0, 0, "integer", 24, "integer", 0, 0, 0, "integer", 1894701600, -1, "A::B::C"],
+            ["texta", 0, 0, 0, "integer", 1000000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textb", 0, 0, 0, "integer", 1000012, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textc", 0, 2, 2, "integer", 3, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textd", 0, 0, 0, "integer", 99, "integer", 0, 0, 0, "integer", 1894964400, -1, "Second"],
+            ["texte", 0, 0, 0, "integer", 18, "integer", 12, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textf", 0, 0, 0, "integer", 19, "integer", 0, 0, 0, "integer", 12, 5, "Inbox"],
+            ["tria", 0, 0, 0, "integer", 25, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["tria", 1, 0, 0, "integer", 25, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["tria", 2, 0, 0, "integer", 25, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["trja", 0, 0, 0, "integer", 26, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["trja", 1, 0, 0, "integer", 26, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"],
+            ["trja", 2, 0, 0, "integer", 26, "integer", 0, 0, 0, "integer", 1894701600, -1, "Inbox"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0],
+            [1],
+            [2]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000],
+            [1894964400001],
+            [1894964400002],
+            [1894964400003]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Image Occlusion": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Occlusion",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 0
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Image",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 1
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Header",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 2
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back Extra",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 3
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Comments",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": 4
+              }
+            ],
+            "kind": "cloze",
+            "original_id": null,
+            "original_stock_kind": 6,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Image Occlusion",
+                "requirement": {
+                  "fields": [0, 1, 2],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000, "A", 1894964400, -1],
+            [1894964400001, "A::B", 1894964400, -1],
+            [1894701600001, "A::B::C", 1894701600, 5],
+            [1, "Default", 0, 0],
+            [1894701600006, "Inbox", 1894701600, -1],
+            [1894701600000, "recovered4242", 1894701600, -1],
+            [4242, "recovered4242+", 1894964400, -1],
+            [1894701600005, "Second", 1894701600, -1],
+            [1894701600004, "Side", 1894701600, -1],
+            [1894964400002, "X", 1894964400, -1],
+            [1894701600002, "X::Y", 1894701600, 5],
+            [1894701600003, "X::Z", 1894701600, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701500001, 7, 5, 2, 1, 4000, 1],
+            [1894701500002, 7, 5, 4, -3, 4000, 1],
+            [1894701500003, 7, 5, 4, 2, 0, 1],
+            [1894701500004, 7, 5, 4, 2, 2147483647, 1],
+            [1894701600000, 1894701600000, -1, -600, 0, 0, 0],
+            [1894701600001, 1894701600001, -1, -600, 0, 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["2500001", -1, 1894964400]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000, 1894964400000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "209c1b340c42c323e38f0cc625ff71638007f402c167fd4887bbc8b7208307c2",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db-notes/all-notes",
+  "scenario_sha256": "c49bf9b8dbaba38ecaa92d2dfcdc2ee43bc70c360a020d6afe568e448f518fdb",
+  "tz": "UTC"
+}

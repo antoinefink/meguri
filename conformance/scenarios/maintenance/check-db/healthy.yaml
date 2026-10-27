@@ -1,0 +1,27 @@
+# A collection with notes, reviews and decks and no damage
+# (specs/maintenance/check-database.md C11, C14): every count 0, scm
+# unchanged. Anki sets col.mod on every run; Meguri keeps it when nothing
+# changed (deviation check-db-no-change-keeps-mod). The undo history is empty
+# after the run. A second run finds nothing.
+id: maintenance/check-db/healthy
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox, "Inbox::Sub", Other]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: "Inbox::Sub", fields: [two, dos]}
+    - {notetype: Single, deck: Other, fields: [three, tres]}
+steps:
+  - answer: {card: "#c1", rating: good}
+  - advance: 1d
+  - answer: {card: "#c2", rating: easy}
+  - advance: 1h
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - observe: [undo_status]
+  - check_db: {}

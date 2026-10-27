@@ -1,0 +1,24 @@
+# N6.3 of specs/maintenance/check-database-notes.md: a cloze note whose c3
+# was removed from its text by db_exec keeps its card of ord 2 (a cloze note
+# type keeps every card); nothing is counted and scm stays. The note's sort
+# field and checksum are written again from the new text, without a stamp
+# (N6.6). A second run finds nothing.
+id: maintenance/check-db-notes/cloze-kept
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Gaps, deck: Inbox, fields: ["{{c1::red}} {{c2::green}} {{c3::blue}}", ""]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = '{{c1::red}} {{c2::green}} plain' || char(31), usn = 5"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT ord FROM cards ORDER BY ord"}
+  - db_exec: {sql: "SELECT sfld, csum, mod, usn FROM notes"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,27 @@
+# C9.1 of specs/maintenance/check-database.md: a note row deleted by db_exec
+# leaves its card without a note; Check Database deletes the card with no
+# grave (cards_without_note 1), keeps its review-log row and sets scm. A
+# second run finds nothing.
+id: maintenance/check-db/orphan-cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - answer: {card: "#c1", rating: good}
+  - db_exec: {sql: "UPDATE cards SET usn = 5 WHERE id = (SELECT min(id) FROM cards)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE sfld = 'one'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld FROM cards c JOIN notes n ON n.id = c.nid ORDER BY c.id"}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,24 @@
+# N6.6 of specs/maintenance/check-database-notes.md: deck 1 deleted by
+# db_exec while no card is in it, and a note whose only card was deleted, its
+# note type with no last deck. Anki finds no usable deck for the card it must
+# generate and its Check Database stops, changing nothing
+# (collection-check.md K10 failed); Meguri creates deck 1 as Default
+# (decks_missing 1) and generates the card there (deviation
+# check-db-default-deck-restored). No second run.
+id: maintenance/check-db-notes/default-deck-missing
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY LIKE '\\_nt\\_%\\_lastDeck' ESCAPE '\\'"}
+  - db_exec: {sql: "DELETE FROM decks WHERE id = 1"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('curDeck', 'activeDecks') ORDER BY KEY"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}

@@ -1,0 +1,29 @@
+# N4 and N6.4 of specs/maintenance/check-database-notes.md: a missing note
+# type whose notes have one field is recovered with Basic's two fields; its
+# notes are padded to two fields and tagged db-check (field_counts 2), their
+# mod and usn kept. No undo_status. A second run finds nothing.
+id: maintenance/check-db-notes/recover-one-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Mono
+      fields: [Only]
+      templates: [{name: One, front: "{{Only}}", back: "{{Only}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Mono, deck: Inbox, fields: [solo]}
+    - {notetype: Mono, deck: Inbox, fields: [uno], tags: [kept]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 5"}
+  - db_exec: {sql: "DELETE FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Mono')"}
+  - db_exec: {sql: "DELETE FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Mono')"}
+  - db_exec: {sql: "DELETE FROM notetypes WHERE name = 'Mono'"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}
+  - observe:
+      - notetype_structure: {notetypes: [db-check-1894705200000-1]}
+  - db_exec: {sql: "SELECT n.sfld, replace(n.flds, char(31), '|'), n.tags, n.mod, n.usn, (SELECT name FROM notetypes WHERE id = n.mid) FROM notes n ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT tag, usn, collapsed FROM tags ORDER BY tag"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -1,0 +1,199 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 1,
+          "revlog_properties": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["db-check-1894705200000-3", 1894705200, -1]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "db-check-1894705200000-3": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "3",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Card 1",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Card 2",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Card 3",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Card 1", 0, 0],
+            [1, "Card 2", 0, 0],
+            [2, "Card 3", 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a1", 1894701600, 5, "db-check-1894705200000-3"],
+            ["a2", 1894701600, 5, "db-check-1894705200000-3"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a1", 0, 1894701600, -1],
+            ["a1", 1, 1894701600, -1],
+            ["a1", 2, 1894701600, -1],
+            ["a2", 0, 1894701600, -1],
+            ["a2", 1, 1894701600, -1],
+            ["a2", 2, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000, 1894705200000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "acb4f4120510b4b3fd19f0415a725c11b664aae3923edb1ac4cf02993d1f6ce5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db-notes/recover-notetype",
+  "scenario_sha256": "cc5823258f44db7757c8e1a05f9856b7de95b1a5628ced3ee489ecd2f6bf5bb4",
+  "tz": "UTC"
+}

@@ -1,0 +1,21 @@
+# C9.2 of specs/maintenance/check-database.md: a card in deck 4242, which does
+# not exist, while a deck already holds the name recovered4242: the deck is
+# created with id 4242 under the unique name recovered4242+ (decks_missing 1,
+# local stamps), scm unchanged. A second run finds nothing.
+id: maintenance/check-db/missing-deck-name-taken
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [recovered4242, Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = 4242, usn = 5"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM decks WHERE name LIKE 'recovered%' ORDER BY name"}
+  - db_exec: {sql: "SELECT did, usn FROM cards"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

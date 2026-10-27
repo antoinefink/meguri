@@ -1,0 +1,19 @@
+# C8.5 of specs/maintenance/check-database.md: a card mod 1894701600.5 is
+# truncated to 1894701600 and not stamped (usn 5 stays): card_properties 1,
+# scm unchanged. A second run finds nothing.
+id: maintenance/check-db/card-mod
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1894701600.5, usn = 5"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT typeof(mod), mod, usn FROM cards"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

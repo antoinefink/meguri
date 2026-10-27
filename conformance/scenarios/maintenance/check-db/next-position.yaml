@@ -1,0 +1,29 @@
+# C10.3 of specs/maintenance/check-database.md: nextPos set to 99 with new
+# cards at positions 1 to 3 becomes 4 (the largest new due plus 1, written as
+# a config value with local stamps, not counted); with every card made a
+# review card by db_exec, a second run sets it to 0. A last run finds nothing.
+id: maintenance/check-db/next-position
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+steps:
+  - set_config: {key: nextPos, value: 99}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT due FROM cards ORDER BY due"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 1, due = 0, usn = 5"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

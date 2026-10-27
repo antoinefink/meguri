@@ -1,0 +1,308 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 15,
+          "cards_without_note": 1,
+          "cards_without_template": 2,
+          "decks_missing": 3,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 4,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 4
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["duelearn", 0, 1, 1, "integer", 2147483647, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["duenew", 0, 0, 0, "integer", 3, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["duereview", 0, 2, 2, "integer", 3, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["filt", 0, 0, 0, "integer", 23, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["folda", 0, 0, 0, "integer", 1500000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["foldb", 0, 0, 0, "integer", 1999999, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["foldc", 0, 0, 0, "integer", 1500000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["foldd", 0, 0, 4, "integer", 2500000, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["ivla", 0, 0, 0, "integer", 11, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["ivlb", 0, 0, 0, "integer", 12, "integer", 2, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["ivlc", 0, 0, 0, "integer", 13, "integer", 2147483647, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["lost", 0, 0, 0, "integer", 22, "integer", 0, 0, 0, "integer", 1894701600, 5, "recovered4242+"],
+            ["modq", 0, 0, 0, "integer", 20, "integer", 0, 0, 0, "integer", 1894701600, 5, "Inbox"],
+            ["oduea", 0, 2, 2, "integer", 5, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["odueb", 0, 0, 0, "integer", 10, "integer", 0, 0, 2, "integer", 1894964400, -1, "Inbox"],
+            ["orda", 0, 0, 0, "integer", 100, "integer", 0, 0, 0, "integer", 1894964400, -1, "A::B::C"],
+            ["parents", 0, 0, 0, "integer", 24, "integer", 0, 0, 0, "integer", 1894701600, -1, "A::B::C"],
+            ["texta", 0, 0, 0, "integer", 1000000, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textb", 0, 0, 0, "integer", 1000012, "integer", 0, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textc", 0, 2, 2, "integer", 3, "integer", 10, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textd", 0, 0, 0, "integer", 99, "integer", 0, 0, 0, "integer", 1894964400, -1, "A::B::C"],
+            ["texte", 0, 0, 0, "integer", 18, "integer", 12, 0, 0, "integer", 1894964400, -1, "Inbox"],
+            ["textf", 0, 0, 0, "integer", 19, "integer", 0, 0, 0, "integer", 12, 5, "Inbox"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000],
+            [1894964400001]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000, "A", 1894964400, -1],
+            [1894964400001, "A::B", 1894964400, -1],
+            [1894701600001, "A::B::C", 1894701600, 5],
+            [1, "Default", 0, 0],
+            [1894701600004, "Inbox", 1894701600, -1],
+            [1894701600000, "recovered4242", 1894701600, -1],
+            [4242, "recovered4242+", 1894964400, -1],
+            [1894964400002, "X", 1894964400, -1],
+            [1894701600002, "X::Y", 1894701600, 5],
+            [1894701600003, "X::Z", 1894701600, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701500001, 7, 5, 2, 1, 4000, 1],
+            [1894701500002, 7, 5, 4, -3, 4000, 1],
+            [1894701500003, 7, 5, 4, 2, 0, 1],
+            [1894701500004, 7, 5, 4, 2, 2147483647, 1],
+            [1894701600000, 1894701600000, -1, -600, 0, 0, 0],
+            [1894701600001, 1894701600001, -1, -600, 0, 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["2500001", -1, 1894964400]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894964400000, 1894964400000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db/all-records",
+  "scenario_sha256": "035bdb168036382324c38ca1d2360b41cbb0947e63bc88639ea04a684fb0d450",
+  "tz": "UTC"
+}

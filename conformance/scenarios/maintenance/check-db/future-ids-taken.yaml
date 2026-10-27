@@ -1,0 +1,23 @@
+# A valid note at now_ms and a note two days ahead
+# (specs/maintenance/check-database.md C10.4): Anki re-keys the future note to
+# now_ms, which is taken, and stops with a constraint error, changing nothing
+# (collection-check.md K10 failed); Meguri gives it now_ms + 1 (future_ids 1,
+# deviation check-db-future-ids-skip-used). No second run.
+id: maintenance/check-db/future-ids-taken
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - advance: 1h
+  - db_exec: {sql: "UPDATE cards SET nid = 1894705200000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE notes SET id = 1894705200000 WHERE sfld = 'one'"}
+  - db_exec: {sql: "UPDATE cards SET nid = 1894878000000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE notes SET id = 1894878000000, usn = 5 WHERE sfld = 'two'"}
+  - check_db: {}
