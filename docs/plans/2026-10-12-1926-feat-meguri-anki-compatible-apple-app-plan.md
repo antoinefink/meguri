@@ -317,9 +317,9 @@ flowchart TB
 - R166. Failures of automatic, background work (auto sync, periodic media sync, backups) never interrupt the user; they switch the relevant status glyph to "needs attention" and keep the details for the popover.
 - R167. Every error alert has a Copy Debug Info action that copies app version, OS, device model, collection size figures and the recent error log, never credentials or card content.
 - R168. Messages sent by the sync server are shown as sanitized rich text (links allowed, no scripts).
-- R169. If the collection cannot be opened (corrupt file, newer schema than supported, disk full), the blocking error offers Check Database, Restore from Backup and (when an account exists) Download from Server, in that order.
+- R169. If the collection cannot be opened (corrupt file, newer schema than supported, disk full), the blocking error offers Check Database, Restore from Backup and (when this device's iCloud conditions hold) Replace with the iCloud collection, in that order. No remedy downloads from an Anki server (`specs/sync/cloudkit-recovery.md` V19, `specs/maintenance/optimize-integrity.md` M7.1; corrected 2026-10-27).
 - R170. Long operations (check database, check media, empty cards, import, export, backup, restore, one-way sync, background FSRS optimization) report progress in a non-modal activity indicator, keep the rest of the UI usable, and offer Cancel whenever stopping is safe.
-- R171. Only one collection-wide exclusive operation (one-way sync, restore, check database, import) runs at a time; starting a second one explains which operation is running instead of queuing silently.
+- R171. Only one collection-wide exclusive operation (one-way sync, restore, check database, import, Replace local collection from iCloud (`CloudAdopt`; corrected 2026-10-27)) runs at a time; starting a second one explains which operation is running instead of queuing silently.
 - R172. Crash and hang diagnostics are collected only through the system's on-device mechanisms (MetricKit/OSLog) and are never sent anywhere without the user's action.
 
 **Undo and redo (shell-owned parts)**
@@ -1902,7 +1902,7 @@ flowchart TB
 **Heatmap settings and the synced `heatmap` key**
 - R1336. Meguri reads the synced collection config key `heatmap` (fields `colors`, `mode`, `limhist`, `limfcst`, `limdate`, `limcdel`, `limresched`, `limdecks`, `version`) and applies `mode` and every limit exactly as the add-on does.
 - R1337. When the key is absent, Meguri uses the add-on defaults (`year`, no limits, `limcdel` false, `limresched` true, no excluded decks) and does not create the key until the user changes a heatmap setting, so opening Meguri never marks the config as modified.
-- R1338. When Meguri writes the key, it rewrites only the changed fields, keeps `colors`, `version` and any unknown fields byte-for-byte, and leaves value types unchanged (numbers stay numbers, deck ids stay integers), so desktop Anki with the add-on keeps working.
+- R1338. When Meguri writes the key, it changes only the changed fields, keeps `colors`, `version` and any unknown fields with their values (the whole value is rewritten in compact form, so spacing and member order may change; `specs/storage/config-table.md` C6, corrected 2026-10-27), and leaves value types unchanged (numbers stay numbers, deck ids stay integers), so desktop Anki with the add-on keeps working.
 - R1339. Settings has a "Heatmap" group with Calendar mode (Year / 9 months) visible, and an Advanced disclosure with the add-on's other options under their add-on names: History limit (days, "No limit"), Forecast limit (days, "No limit"), Ignore data before (date), Exclude deleted cards from history, Exclude manual reschedules from history, and Exclude decks from main heatmap (a deck list with add/remove).
 - R1340. `limdecks` excludes the listed decks and their children from the Home heatmap, its streak stats and the widget only; deck pages ignore it.
 - R1341. `limcdel` = true removes deleted cards' reviews from the Home heatmap and streaks; deck-scoped heatmaps never include them anyway.
@@ -2300,7 +2300,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 - R1639. Check Database is available on every platform, makes a forced backup, runs in the background with stage progress (integrity, optimize, cards, notes, history), and ends with a list of fixes or "no problems found".
 - R1640. A failed SQLite integrity check stops with a "collection appears corrupt" message that points to backups, and changes nothing.
 - R1641. Check Database compacts and re-analyses the database.
-- R1642. Without forcing a one-way sync, it folds new-card due values ≥ 1,000,000, resets review due values over 100,000 to today, clamps due/odue/ivl to valid ranges, fixes odue on non-filtered review cards, makes mtimes integers, clamps template ordinals to 0–30,000, creates placeholder decks for missing deck ids, creates missing parent decks, repairs invalid UTF-8 in notes, rebuilds the tag list (keeping collapse states and parent tags), and resets the next new-card position.
+- R1642. Without forcing a one-way sync, it folds new-card due values to 1,000,000 plus the value modulo 1,000,000 (so only values of 2,000,000 or more change; `specs/conformance/collection-check.md` K5, corrected 2026-10-27), resets review due values over 100,000 to today, clamps due/odue/ivl to valid ranges, fixes odue on non-filtered review cards, makes mtimes integers, clamps template ordinals to 0–30,000, creates placeholder decks for missing deck ids, creates missing parent decks, repairs invalid UTF-8 in notes, rebuilds the tag list (keeping collapse states and parent tags), and resets the next new-card position.
 - R1643. It forces a one-way sync when it recomputes a wrong `lrt` from the revlog, deletes cards whose note is missing, clears `odid`/`odue` from cards in normal decks, removes duplicate card ordinals, removes cards whose template no longer exists (not for cloze), fixes a note's field count (tagging it `db-check`), recovers a missing notetype as `db-check-<ms>-<fieldcount>`, fixes invalid revlog values, or remaps ids more than a day in the future.
 - R1644. Check Database also restores Image Occlusion field tags, clamps future note mtimes, regenerates missing cards, and adds the Basic notetype if no notetype is left.
 
@@ -3413,7 +3413,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
 - KTD4. **Protobuf records.** Amended 2026-10-14 after U21's review: no prost, and no serde_json `preserve_order` or `float_roundtrip` (`docs/process/review-log/U21.md`, A2). Units that still name prost or those features follow this text.
   - Message structs and their wire codec are hand-written from the specs (`specs/model/protobuf-records.md`), without prost. The codec keeps unknown fields with their exact wire bytes at every message level and writes them by field number among the known fields (P4). A record whose decoded content did not change is written back as the bytes it was read with (P5) (R1463, R1486). prost's derived encoder cannot place unknown fields that way, and its decoder would need a second capture pass at every nesting level. Evidence: round-trip property tests with injected unknown fields of every wire type, the model goldens used as conversion pairs (`specs/model/schema11-json.md` S14), and the `proto_blobs` fuzz target.
   - Generating code from Anki's `.proto` files is forbidden.
-  - Legacy JSON is read from serde_json raw values with std's exact number parsers and written with ryu. Values without a declared type stay the exact text they were read with, so their member order and number spelling survive (`specs/model/json-numbers.md` N7). Numbers keep Anki's types: f32 for FSRS values, i64 for ids. serde_json's `preserve_order` and `float_roundtrip` are not enabled: raw text leaves nothing for `preserve_order` to order, std's exact parsers already give what `float_roundtrip` is for, and Cargo feature unification would turn either one on for every crate in the build, meguri-testkit's golden parsing included. A unit that edits a JSON object in place keeps its untouched members as raw text in stored order in the same way. This replaces rust-stack §5's serde_json feature advice.
+  - Legacy JSON is read from serde_json raw values with std's exact number parsers and written with ryu. Values without a declared type stay the exact text they were read with, so their member order and number spelling survive (`specs/model/json-numbers.md` N7). Numbers keep Anki's types: f32 for FSRS values, i64 for ids. serde_json's `preserve_order` and `float_roundtrip` are not enabled: raw text leaves nothing for `preserve_order` to order, std's exact parsers already give what `float_roundtrip` is for, and Cargo feature unification would turn either one on for every crate in the build, meguri-testkit's golden parsing included. A unit that edits a JSON object in place keeps its untouched members as raw text in stored order in the same way. Config-table values are the exception: a partial change keeps the other members' values and kinds but rewrites the whole value in compact form, members sorted by name (`specs/storage/config-table.md` C5, C6; corrected 2026-10-27). This replaces rust-stack §5's serde_json feature advice.
 - KTD5. **Op executor, change stream, undo and lifecycle live in the core (`meguri-engine`).**
   - Every write from UI, sync, local servers, optimizer, rollover or maintenance is an op on one serialized executor.
   - An op carries a `source` and returns its sequence number, a ChangeSet, undo metadata and the collection generation.
@@ -3526,10 +3526,10 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - It is written atomically and triggers a WidgetCenter reload only when its bytes change.
   - The widget never links the Rust core.
 - KTD17. **Exclusive phase.**
-  - It runs from confirming a one-way sync, restore or `.colpkg` import until `CollectionReplaced` or cancel.
+  - It runs from confirming a one-way sync, restore, `.colpkg` import or `CloudAdopt` (Replace local collection from iCloud, `specs/sync/cloudkit-recovery.md` V14 step 7; corrected 2026-10-27) until `CollectionReplaced` or cancel.
   - During it, Study, Add, Edit, bulk actions, deck options and note-type edits show "Waiting for <op>".
   - Open Add or Edit sheets close first: edits are saved, and Add drafts go through the discard prompt.
-  - While a review session is open (until its summary is dismissed, KTD6), a `.colpkg` import or a restore is refused before its confirmation completes, with the session-active reason, as a one-way sync is (R458). R325 lists every way a session ends and none is a collection replacement, so the review is never torn down underneath; the message tells the user to end the review first. An `.apkg` import keeps the review underneath (R52).
+  - While a review session is open (until its summary is dismissed, KTD6), a `.colpkg` import or a restore is refused before its confirmation completes, with the session-active reason, as a one-way sync is (R458); a `CloudAdopt` does not start while a session is open (`SessionActive`; V14.1, V20, V21), and one whose exclusive phase finds a session opened since it started waits at its `ready` step until `SessionEnded` (V14.2 step 7; corrected 2026-10-27). R325 lists every way a session ends and none is a collection replacement, so the review is never torn down underneath; the message tells the user to end the review first. An `.apkg` import keeps the review underneath (R52).
   - Local servers wait through U24's availability wait; then AnkiConnect replies "collection is not available" (U141) and Migaku follows U139's busy rule.
   - The core enforces the phase: only ops submitted by the exclusive job commit, and the job's safety backup and snapshot come after a drain (U24).
   - Afterwards every Swift cache resets by generation and the app lands on Home.
@@ -4059,7 +4059,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U101 | Card-based graphs: Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability, Added | `core/crates/meguri-stats/src/graphs/future_due.rs`<br>`core/crates/meguri-stats/tests/graphs_cards.rs`<br>`specs/stats/graphs-cards.md` | U45, U46, U47, U82, U82a, U98 |
 | U103 | Stats FFI surface and live-refresh events | `core/crates/meguri-ffi/src/stats.rs`<br>`core/crates/meguri-stats/src/events.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/StatsBridge.swift` | U6, U24, U92, U95, U96, U97, U98, U99, U100, U101 |
 | U104 | Stats conformance matrix and performance gates | `core/tools/meguri-cli/src/commands/stats_private.rs`<br>`core/crates/meguri-stats/benches/stats_bench.rs`<br>`core/crates/meguri-stats/tests/fuzz_aggregates.rs` | U4, U11, U12, U95, U96, U97, U98, U99, U100, U101, U103 |
-| U113 | CloudKit eligibility policy and manual-transfer isolation | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U38, U43, U106, U107, U109, U111 |
+| U113 | CloudKit eligibility policy and manual-transfer isolation | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md`, `specs/sync/cloudkit-records.md`, `specs/sync/cloudkit-recovery.md` (corrected 2026-10-27) | U24, U38, U43, U106, U107, U109, U111, U132 (corrected 2026-10-27) |
 | U114 | CloudKit bridge, Swift adapter and manual-transfer service | `core/crates/meguri-ffi/src/sync.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/Sync/`<br>`tools/scripts/sync-e2e-swift.sh` | U6, U12, U24, U105, U106, U107, U109, U110, U111, U113 |
 | U117 | Sync conformance suites (two-client and oracle) | `core/crates/meguri-testkit/src/sync/`<br>`core/tools/meguri-cli/src/commands/sync.rs`<br>`conformance/scenarios/sync/normal/` | U3, U4, U11, U13, U31, U38, U43, U107, U109, U111 |
 | U118 | Sync robustness, property tests and budgets | `core/crates/meguri-testkit/src/sync/`<br>`core/crates/meguri-sync/tests/holdback_property.rs`<br>`core/crates/meguri-sync/benches/sync_day.rs` | U11, U12, U13, U107, U109, U111, U113, U117, U250 |
@@ -4068,7 +4068,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U122 | `.apkg` export (latest format) and package writer | `core/crates/meguri-package/src/container/`<br>`core/crates/meguri-package/src/apkg/export/`<br>`core/crates/meguri-package/tests/apkg_export.rs` | U20, U22, U23, U28, U31, U60, U120, U124a |
 | U123 | Schema-11 writer and legacy package export | `core/crates/meguri-package/src/container/legacy.rs`<br>`core/crates/meguri-package/tests/legacy_export.rs`<br>`specs/package/legacy-export.md` | U21, U22, U23, U33, U122 |
 | U124a | Collection package container, collection-only `.colpkg` and verified collection replace | `core/crates/meguri-package/src/container/`<br>`core/crates/meguri-engine/src/lifecycle/replace.rs`<br>`core/crates/meguri-engine/src/maintenance/device_state.rs` | U3, U21, U22, U23, U24, U26, U32 |
-| U124 | `.colpkg` import and export | `core/crates/meguri-package/src/colpkg/`<br>`core/crates/meguri-package/tests/colpkg.rs`<br>`specs/package/colpkg.md` | U22, U24, U26, U31, U120, U122, U123, U124a |
+| U124 | `.colpkg` import and export | `core/crates/meguri-package/src/colpkg/`<br>`core/crates/meguri-package/tests/colpkg.rs`<br>specs: `specs/package/container.md` P15/P16, `specs/package/file-export.md` (corrected 2026-10-27) | U22, U24, U26, U31, U120, U122, U123, U124a |
 | U126 | Backup writer, listing and retention | `core/crates/meguri-package/src/backup/`<br>`core/crates/meguri-package/tests/`<br>`core/crates/meguri-package/benches/backup.rs` | U23, U24, U124a |
 | U127 | Backup triggers, safety backups and restore | `core/crates/meguri-engine/src/maintenance/`<br>`core/crates/meguri-package/src/backup/`<br>`core/crates/meguri-engine/tests/maintenance_scheduler.rs` | U24, U38, U124a, U126 |
 | U128 | Check Database: integrity, optimize and record repairs | `core/crates/meguri-engine/src/maintenance/check_db/`<br>`core/crates/meguri-storage/src/maintenance.rs`<br>`core/crates/meguri-engine/tests/check_db.rs` | U3, U4, U22, U23, U24, U25, U26, U27, U28, U40, U127, U132 |
@@ -4170,16 +4170,16 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U240 | Delivery milestones and milestone gate runner | `tools/scripts/gates/milestone_gate`<br>`tools/mg`<br>`tools/scripts/gates/tests/` | U1, U8, U19 |
 | U240r | Reviews-first milestone in the running manifest | `docs/process/milestones.yaml`<br>`tools/mg.d/milestone.sh` | U240 |
 | U241 | Performance budget catalog and regression gate | `tools/perf/budgets.yaml`<br>`tools/perf/baselines/<runner>/<suite>.json`<br>`tools/scripts/gates/perf_gate` | U8, U12, U240 |
-| U242 | Core benchmark suites and fixture profiles | `core/crates/meguri-testkit/profiles/`<br>`core/tools/meguri-cli/src/bench/`<br>`tools/mg` | U11, U12, U22, U24, U26, U41, U44, U47, U80, U84, U86, U98, U107, U109, U120, U124, U126, U128, U241 |
+| U242 | Core benchmark suites and fixture profiles | `core/crates/meguri-testkit/profiles/`<br>`core/tools/meguri-cli/src/bench/`<br>`tools/mg` | U11, U12, U22, U24, U26, U41, U44, U47, U80, U84, U86, U98, U107, U109, U113, U120, U124, U126, U128, U241 |
 | U243 | Review-loop frame budget suite | `app/Packages/MeguriKit/Sources/Features/Review/Diagnostics/`<br>`core/crates/meguri-testkit/profiles/review-corpus.toml`<br>`app/TestPlans/Performance.xctestplan` | U7, U11, U12, U15, U43, U44, U65, U66, U67, U175, U176, U178, U179, U180, U181, U182, U183, U184, U187, U241 |
 | U244 | App-wide UI performance suite | `app/TestPlans/Performance.xctestplan`<br>`app/MeguriUITests/Performance/` | U7, U11, U84, U86, U95, U98, U150, U151, U152, U190, U195, U200, U202, U205, U210, U211, U213, U214, U218, U219, U220, U221, U222, U225, U227, U228, U230, U231, U237, U241, U242 |
-| U245 | Resource and main-thread discipline suite | `app/Packages/MeguriKit/Sources/AppModel/Diagnostics/`<br>`tools/scripts/lint-bridge-usage`<br>`app/MeguriUITests/Performance/` | U6, U12, U24, U25, U43, U47, U67, U86, U100, U107, U120, U126, U128, U151, U165, U241 |
+| U245 | Resource and main-thread discipline suite | `app/Packages/MeguriKit/Sources/AppModel/Diagnostics/`<br>`tools/scripts/lint-bridge-usage`<br>`app/MeguriUITests/Performance/` | U6, U12, U24, U25, U43, U47, U67, U86, U100, U107, U113, U114, U120, U126, U128, U151, U165, U241 (corrected 2026-10-27) |
 | U246 | Conformance aggregate gate and requirement coverage report | `core/crates/meguri-testkit/src/coverage/`<br>`tools/mg`<br>`conformance/catalog/requirements-matrix.yaml` | U3, U4, U8, U14, U40, U41, U44, U45, U46, U47, U60, U61, U64, U80, U84, U95, U98, U105, U107, U109, U111, U120, U122, U124, U128, U135, U137, U141, U240 |
 | U247 | Nightly T2: differential fuzzing, query fuzzing, long simulations and Anki timing ratio | `core/crates/meguri-testkit/src/difffuzz/`<br>`core/tools/meguri-cli/src/fuzz_diff.rs`<br>`tools/scripts/nightly` | U2, U3, U4, U11, U18, U40, U41, U44, U45, U80, U91, U107, U120, U122, U241, U242, U246 |
 | U248 | CloudKit convergence soak and manual Anki transfer round trips | `conformance/scenarios/soak/`<br>`tools/mg`<br>`app/MeguriUITests/Sync/` | U3, U4, U13, U25, U43, U47, U107, U109, U111, U118, U151, U175, U210, U246 |
 | U249 | Private real-collection suite and anonymizer (T3) | `core/tools/meguri-cli/src/private_suite/`<br>`conformance/reports/private/<milestone>.json` | U3, U4, U11, U15, U18, U41, U44, U45, U46, U47, U60, U80, U84, U98, U107, U109, U111, U120, U122, U124, U137, U138, U242, U246 |
 | U250 | Core fault-injection and data-safety suite | `core/crates/meguri-testkit/src/fault/`<br>`core/tools/meguri-cli/src/fault.rs`<br>`core/crates/meguri-engine/tests/fault_injection.rs` | U3, U4, U13, U22, U23, U24, U25, U26, U31, U32, U38, U47, U107, U109, U111, U120, U122, U124, U124a, U126, U127, U128, U130, U131, U132, U246 |
-| U251 | App-level kill, disk-full and restore end-to-end suite | `tools/scripts/kill-app`<br>`tools/mg`<br>`app/MeguriUITests/Safety/` | U7, U8, U109, U124, U126, U128, U130, U151, U152, U153, U156, U160, U161, U162, U163, U163a, U175, U190, U210, U250 |
+| U251 | App-level kill, disk-full and restore end-to-end suite | `tools/scripts/kill-app`<br>`tools/mg`<br>`app/MeguriUITests/Safety/` | U7, U8, U109, U113, U114, U124, U126, U128, U130, U151, U152, U153, U156, U160, U161, U162, U163, U163a, U175, U190, U210, U250 (corrected 2026-10-27) |
 | U252 | Snapshot matrix and motion verification runs | `tools/scripts/snapshot-matrix`<br>`tools/scripts/baseline-guard`<br>`app/TestPlans/Snapshots.xctestplan` | U7, U9, U10, U67, U150, U152, U160, U165, U175, U190, U200, U205, U210, U225, U232, U240 |
 | U253 | Accessibility sweep and VoiceOver scripts | `app/TestPlans/Accessibility.xctestplan`<br>`tools/mg`<br>`app/MeguriUITests/Accessibility/` | U7, U9, U10, U150, U152, U160, U175, U190, U200, U205, U210, U225, U232, U252 |
 | U254 | Critic loop, variant picks and human checkpoints | `docs/design/screen-status.yaml`<br>`docs/design/critic-calibration/`<br>`tools/mg` | U8, U9, U10, U240, U252, U253 |
@@ -5303,7 +5303,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - `OpResult { seq, changes, undo, generation }`. The ChangeSet (value type in meguri-model, KTD2) is derived from the U23 journal: card ids with note ids (so Browse needs no card→note index) and a scheduling-relevant vs memory-state-only flag computed by column diff; note ids; notetype ids with `schemaChanged`; deck, deck-config, config-key, tag, revlog added/removed and media added/removed sets; and `source`.
 - In-core observers (the `ChangeObserver` port) run on the writer thread after commit and before the ChangeSet is published, receiving row payloads (revlog rows added/removed with removed rows from before-images, compact card before/after, config keys). Consumers: U26, U41, U95, U100. Observers never call Swift. Crates above the engine that run their own tasks (meguri-servers) may also subscribe to the published ChangeSet stream through the engine handle: an async receiver after publication, never on the writer thread. The change stream is the single ordered queue for every core→Swift event except Progress, HostEvents and U85 search results, which have their own channels (KTD5, KTD9): crates above engine publish their variants into it, and U6's dispatcher delivers it.
 - R1495 under KTD6: a normal sync holds the writer only for its SyncIncoming commit (U107 step 6); answers and edits made during its network phase commit immediately and upload on the next one. During a declared long write, answers go to U43's overlay and journal and other writes wait for the writer (Open Questions).
-- Lifecycle (C7): `NoCollection → Opening → Upgrading → Ready(gen)`, `ExclusiveBusy{op, phase, cancellable}`, `Failed(reason)` (incl. `Corrupt`, set by U132). From `Failed(Corrupt)` only restore and U132's recovery download may enter `ExclusiveBusy`. `Opening` runs the registered open-time steps (U43's pending-answer replay, U40's rollover check) before `Ready`. Handles and ops from an older generation are rejected with `StaleGeneration`.
+- Lifecycle (C7): `NoCollection → Opening → Upgrading → Ready(gen)`, `ExclusiveBusy{op, phase, cancellable}`, `Failed(reason)` (incl. `Corrupt`, set by U132). From `Failed(Corrupt)` only restore and `CloudAdopt` (the iCloud replace, `specs/sync/cloudkit-recovery.md` V19) may enter `ExclusiveBusy`; Check Database takes the long-operation slot there without it (`specs/maintenance/optimize-integrity.md` M7.2; corrected 2026-10-27). `Opening` runs the registered open-time steps (U43's pending-answer replay, U40's rollover check) before `Ready`. Handles and ops from an older generation are rejected with `StaleGeneration`.
 - Long-operation slot (R171 arbitration, separate from the lifecycle): one holder at a time among one-way sync, restore, `.colpkg` import, `.apkg` apply and Check Database; a second request gets `Busy{runningOp}`. Holding the slot leaves the lifecycle `Ready`, so answers and edits still commit and otherwise admissible unrelated jobs still run. Normal and media sync take no slot and may overlap each other, subject to independent protocol admission (`specs/engine/jobs.md` J3; `sync/anki-transfers` M2, `sync/normal-sync` N15, `sync/one-way` O4.6). Only the replacement ops (one-way sync, restore, `.colpkg` import) then enter `ExclusiveBusy` (KTD17). Local-server availability wait (`lifecycle/wait.rs`; R1706, R1797): the collection is available while the lifecycle is `Ready` and the slot is free. A waiter blocks otherwise, with a timeout chosen by the caller (5 s Migaku, U139; 30 s AnkiConnect, U141), and U24 publishes an availability event whenever both conditions hold again, a slot release included. U135 wraps this wait for both servers. `specs/engine/lifecycle.md` lists which job takes which tier.
 - Exclusive phase (owner of the KTD17 core rule): entering `ExclusiveBusy` first drains queued writes and flushes U43's in-memory answer overlay. While `ExclusiveBusy`, the executor commits only ops submitted by the exclusive job. Every other op, whatever its source, is refused with `CollectionUnavailable`, or parked until `Ready` and then re-validated against the new generation, getting `StaleGeneration` if it was planned on the old one. The exclusive job takes its safety backup (U127) and any `VACUUM INTO` snapshot only after the drain.
 - Generation change: U124a's verified-replace primitive performs every swap; this unit then bumps the generation, emits `CollectionReplaced(gen)`, clears undo (U25) and invalidates derived data (U26) through the `GenerationListener` port.
@@ -7576,7 +7576,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 
 **Requirements:** R1115 (key), R1134, R1135 (order storage), R1137, R1138, R1141 (keys and fallback), R1265, R1266, R1267 (synced-key part), R1038 (setting key), R1196/R1198 (remembered-input keys); supports R1112, R1157, R1171, R1218 (owned by Browser UI and Settings).
 
-**Dependencies:** U23 (config table), U21 (raw-text JSON that keeps member order, KTD4 as amended), U24 (op executor), U25 (undo entries for the saved-search ops).
+**Dependencies:** U23 (config table), U21 (exact number reading; config values are rewritten whole in compact form, `specs/storage/config-table.md` C6, not kept as raw text; corrected 2026-10-27), U24 (op executor), U25 (undo entries for the saved-search ops).
 
 **Files:**
 - `specs/browser/config-keys.md` (spec-writer)
@@ -8113,10 +8113,10 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
   - Labels, long dates and colours are formatted in Swift. The core returns dates and numbers.
 - History comes from U95 filtered by `limhist`/`limdate` (R1312). The forecast scans U95's card table: queue 2/3, home deck in scope, due day ≥ today, up to `limfcst` or the 73,000-day cap (R1310–R1311). Today's cell rule is R1305. Levels follow R1313–R1314 over the shown scope's daily average. Streaks follow R1327–R1330 over exactly the history the grid uses (R1331). `limdecks` and `limcdel` apply to Home only (R1340, R1341). Stats-screen code never reads this module (R1343).
 - Mapping a heatmap day to `prop:rated=-N` and `prop:due=N`: the spec must state which day offset N is when the civil heatmap day and the Anki day differ (DST edges). The browse result may differ from the tooltip count (R1323).
-- Config writer: an engine op through U23's config table path. It patches only the changed fields of the parsed JSON object, keeps `colors`, `version` and unknown fields byte-for-byte (untouched members kept as raw text in stored order, KTD4 as amended) and keeps value types (integers stay integers). It creates the key only on the first user change (R1337–R1338). The op marks config dirty for sync and invalidates U95 totals through the normal change stream.
+- Config writer: an engine op through U23's config table path. It patches only the changed fields of the parsed JSON object, keeps `colors`, `version` and unknown fields with their values and kinds, and writes the whole value per `specs/storage/config-table.md` C4/C6 (compact form; no write when the result equals the stored value; corrected 2026-10-27) and keeps value types (integers stay integers). It creates the key only on the first user change (R1337–R1338). The op marks config dirty for sync and invalidates U95 totals through the normal change stream.
 - Settings (U160) passes a typed patch: mode, limhist, limfcst, limdate, limcdel, limresched, limdecks. Per-device display toggles (R1342) are not handled here.
 
-**Execution note:** The spec writer comes first, with goldens from the add-on oracle op added in U95. The implementer then works test-first. The config writer's byte-preservation tests are Meguri-authored (no oracle).
+**Execution note:** The spec writer comes first, with goldens from the add-on oracle op added in U95. The implementer then works test-first. The config writer's value-preservation tests are Meguri-authored (no oracle; corrected 2026-10-27).
 
 **Patterns to follow:** U95 query API; KTD4/R1466 unknown-field preservation style used for other config keys (U23).
 
@@ -8133,7 +8133,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 - Months mode on 2026-10-12 starts 2026-06-01, and the current month is the fifth block. Year mode returns 2026-01-01…2026-12-31.
 - Navigation bounds: offset −1 from the first history period reports can-go-back false. The forward bound stops at the last forecast day's period.
 - An empty collection returns the no-history flag and no streak values.
-- Covers AE56. A key `{"colors":"flame","mode":"year",…,"version":"1.0.1"}` plus an unknown sub-key. Setting mode to months changes only `mode`. `colors`, `version`, the unknown key, member order and integer types are byte-identical. With no key present, opening, querying and closing writes nothing and the sync-pending state is unchanged.
+- Covers AE56. A key `{"colors":"flame","mode":"year",…,"version":"1.0.1"}` plus an unknown sub-key. Setting mode to months changes only `mode`. `colors`, `version` and the unknown key keep their values, and integers stay integers; the written bytes equal C5's compact form of the patched value, members sorted by name (`specs/storage/config-table.md` C5, C6; corrected 2026-10-27). With no key present, opening, querying and closing writes nothing and the sync-pending state is unchanged.
 - `limdecks` written with deck ids stays a JSON array of integers. A `limdate` round trip keeps its number type.
 
 **Verification:** All `conformance/scenarios/stats/heatmap/` and `conformance/scenarios/stats/streaks/` scenarios match the add-on goldens across the TZ matrix. The config round-trip tests pass. The query costs ≤ 5 ms at 150k cards and 1.2M rows in the U104 benchmark (R1290).
@@ -8875,26 +8875,29 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Requirements:** R88, R89, R123–R127, R1548–R1562, R2047–R2056, R2060–R2066.
 
-**Dependencies:** U106, U107, U109, U111, U24, U38, U43.
+**Dependencies:** U106, U107, U109, U111, U24, U38, U43, U132 (the remedy attach; corrected 2026-10-27).
 
 **Files:**
 - `specs/sync/policy.md`, `specs/sync/cloudkit-records.md`, `specs/sync/cloudkit-recovery.md`, `specs/sync/anki-transfers.md`
 - `core/crates/meguri-sync/src/policy/`, `core/crates/meguri-sync/tests/policy.rs`
 - `core/crates/meguri-host/src/wiring/sync.rs`
+- Engine pieces this unit adds to U24/U25's engine code, each built from its spec (corrected 2026-10-27): the `CloudIncoming` and `CloudRekey` op sources and the `cloud_incoming_apply` catalog entry (`specs/engine/op-model.md` O1, O1.1, O9); `begin_cloud_hold`, `mark_cloud_uploaded` and `cloud_held_run` (`specs/engine/undo.md` M8.1, M9.6–M9.8); the `CloudAdopt` replacement reason and its lifecycle admission (`specs/engine/collection-replace.md` R1/R6.6, `specs/engine/lifecycle.md` L4/L5, `specs/sync/cloudkit-recovery.md` V14); the cloud reader (`specs/engine/lifecycle.md` L11); the media-journal file-fact feed (`specs/media/media-journal.md` J6).
 
 **Approach:**
 - Specify the record, revision, conflict, tombstone, structural-generation and durable tracking contract first (R2066). Include durable conflict-copy listing, inspection, recovery and explicit-resolution operations for U161's per-object recovery flow. The contract includes every crash boundary across separate collection/tracking files, incoming apply/cursor persistence, account changes, whole-collection replacement and acknowledged deletions. Do not reinterpret existing Anki specs as CloudKit specs.
 - Core policy owns the eligible revision frontier, session hold-back and pause-after-import decision. Session events arrive directly from U43; Swift cannot supply fabricated session state. Outputs request cloud work, expose pending/held-back records and carry generation/revision guards.
-- App lifecycle and the automatic toggle request best-effort cloud work; CKSyncEngine manages Apple scheduling/backoff. No Rust policy pretends it can enforce a delivery interval or CloudKit retry timer. A single app flush deadline covers the foreground target only.
+- App lifecycle and the automatic toggle request best-effort cloud work; CKSyncEngine manages Apple scheduling/backoff. No Rust policy pretends it can enforce a delivery interval or CloudKit retry timer, and the app adds no retry timer and no quota pause: throttled and busy work waits on the engine's schedule, and quota-exceeded names go back at the next event trigger (`specs/sync/cloudkit-recovery.md` V10.3, `specs/sync/cloudkit-records.md` K12.4; corrected 2026-10-27). A single app flush deadline covers the foreground target only.
 - Core policy never emits an Anki transfer action on launch, timer, foreground/background, review completion, optimizer adoption, AnkiConnect sync or network recovery. Transfer starts require the explicit Settings operation identifier and confirmation.
 - Manual transfer policy persists operation stages, success receipts and retained deadline history, and checks endpoint/account identity, generation, review/exclusive state and recovery decisions. Custom URL servers impose no elapsed-time wait. Retries resume only the same explicitly started operation.
 - U47 attaches optimizer eligibility and a CloudKit reconciliation/revision gate when it lands. No Anki authentication or meta probe is required to optimize a CloudKit-connected collection.
+- **Attach to U132 (when this unit lands):** add Replace with the iCloud collection after restore in U132's remedy list, under V19's conditions only (R169, `specs/maintenance/optimize-integrity.md` M7.1 row 3). Add the `Failed(Corrupt) → ExclusiveBusy` admission for `CloudAdopt` with the active epoch as source (`specs/sync/cloudkit-recovery.md` V19, V14): its staging fetch only reads CloudKit, it installs the file only through U124a's verified-replace gate, and the lifecycle then becomes `Ready(gen+1)`. Add the iCloud legs of U132's corrupt-state tests below. U132 ships without these (U152's attach pattern; corrected 2026-10-27).
 
 **Test scenarios:**
 - Table/property tests exercise all lifecycle inputs and prove zero automatic Anki-transfer starts.
 - Every send callback respects the latest held-back answer even after newer edits, undo, crash and restart.
 - Restore/import pause survives restart; explicit publication choice starts a new generation and fences old queued records.
 - Acknowledgement of revision N cannot clear revision N+1; incoming replays are idempotent.
+- In `Failed(Corrupt)`, a routine cloud send is refused with a corrupt error and no network call. The remedy list is restore, then Replace with the iCloud collection only while every V19 condition holds; it is restore only when one fails (M7.1). Choosing the replace against the Rust-side CloudKit fake (`specs/sync/cloudkit-records.md` K22.2) → zero cloud sends and zero Anki server requests, a byte copy of the damaged file in the backups folder, the new collection passes the integrity check, `Ready(gen+1)` (moved from U132; corrected 2026-10-27).
 - Custom-server import → review → export works for the same endpoint/account before an hour elapses, including after relaunch/logout and with an older unexpired deadline retained unchanged. Both directions remain serialized; active, partial and uncertain operations retain their guards. The noncustom 60-minute success-only cooldown survives relaunch/logout where applicable; file transfers remain independent.
 
 **Verification:** Rust policy/recovery tests run in Docker through tools/mg; a reviewed CloudKit contract and transfer contract precede implementation.
@@ -8911,10 +8914,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `core/crates/meguri-ffi/src/sync.rs`
 - `app/Packages/MeguriCore/Sources/CoreBridge/Sync/CloudKitSyncAdapter.swift`, `CloudKitTrackingStore.swift`, `SyncModels.swift`, `AnkiTransferService.swift`
 - `app/Packages/MeguriCore/Tests/CoreBridgeTests/CloudKitSyncTests.swift`, `AnkiTransferServiceTests.swift`
+- Engine pieces this unit exposes over FFI and drives from the actor, all U113's (corrected 2026-10-27): incoming applies as `CloudIncoming` ops and `cloud_incoming_apply` jobs, `CloudRekey`, barriers that call `begin_cloud_hold`, `mark_cloud_uploaded` after each tracking commit, `CloudAdopt` for V14/V19, batch builds on the leased cloud reader, and the J6 media file-fact feed.
 
 **Approach:**
 - New short/off-main-thread core operations expose eligible snapshots/revisions, incoming apply, send acknowledgement, reconciliation, media staging and account/generation fencing. Long core work remains cancellable jobs; Apple network operations run in Swift, not a Rust worker waiting for a callback.
-- A Swift actor implements CKSyncEngineDelegate. Persist record system fields and engine serialization, inspect saved/failed/deleted outcomes, and acknowledge exactly the sent revision. Delegate handling durably applies fetched data before allowing cursor advancement. Never call sendChanges/fetchChanges recursively from event handling.
+- A Swift actor implements CKSyncEngineDelegate. Persist record system fields and engine serialization, inspect saved/failed/deleted outcomes, and acknowledge exactly the sent revision. Delegate handling durably applies fetched data before allowing cursor advancement. Never call sendChanges/fetchChanges recursively from event handling. The actor runs no retry timer and no quota pause of its own; CKSyncEngine owns backoff (`specs/sync/cloudkit-recovery.md` V10.3; corrected 2026-10-27).
 - Implement the reviewed R2051 recovery handshake; inject write failures/crashes at every commit/persistence boundary. Durable tracking is separate from disposable derived data and Anki server USNs.
 - Sync Now captures its boundary and awaits fetch/apply, eligible send and final fetch/apply with bounded conflict attempts. Success requires all selected outcomes and durable persistence; collection and media results differ. New edits remain pending without extending this request forever.
 - CKAsset files are staged with bounded resources, validated and atomically installed. Distinct zone scopes prioritize collection changes; encrypted payloads and opaque identifiers follow the initial schema contract.
@@ -9393,11 +9397,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Files:**
 - `core/crates/meguri-package/src/colpkg/{export.rs,import.rs,media_merge.rs}`
 - `core/crates/meguri-package/tests/colpkg.rs`
-- `specs/package/colpkg.md`
+- Specs (read, not written here): `specs/package/container.md` P15 (media output) and P16 (import with media), `specs/package/file-export.md` (export job, destination, E7 media) (corrected 2026-10-27)
 - `conformance/scenarios/package/colpkg/**`, `conformance/goldens/package/colpkg/**`
 
 **Approach:**
-- **Export (R1625):** builds on U124a's collection-only writer and snapshot path, which never closes the collection or blocks the writer. Include media streams the whole media folder as zstd entries through U122's media writer. Support older Anki versions downgrades the staging copy through U123. Output is atomic.
+- **Export (R1625):** builds on U124a's collection-only writer and snapshot path, which never closes the collection or blocks the writer. Include media streams the whole media folder as zstd entries through U122's media writer. Support older Anki versions downgrades the staging copy through U123. Output is atomic. Decided 2026-10-27: `specs/package/file-export.md` E1/E7 is an earlier partial delivery that always includes media and offers no options; this unit adds R1618/R1625's two options on top of it. Include media defaults to on; afterwards the remembered last choice applies (R1618, U160). When it is off, the export uses P11's collection-only writer; the E2–E6 job, destination and cancel rules apply to every combination (corrected 2026-10-27).
 - **Import pipeline**, a state machine the UI drives through U133:
   1. *Inspect:* classify (U120), then extract to staging and open through U124a's inspect (latest format) or U120's legacy reader. Run `integrity_check`, apply the R1479 refusals and R1478 upgrades to the copy, and return counts. A corrupt or unreadable package fails here, before any state change (R1628).
   2. *Confirm:* enter KTD17's exclusive phase, lifecycle `ExclusiveBusy{op: ColpkgImport}` (C7); U24 drains queued writes first.
@@ -9407,7 +9411,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   6. *Swap:* U124a's verified-replace primitive with `ReplaceReason::ColpkgImport`. This unit supplies the pre-swap mutation (`scm`/`mod`, R1626). Before the rename, it writes `cloudPublicationPending` and the new `scm` through U124a's device-state accessor.
 - **Disk preflight:** staging collection plus incoming media plus the backup estimate.
 
-**Execution note:** Spec writer first (colpkg import semantics), then implementer test-first. U124a supplies the container, inspect, replace primitive and sidecar.
+**Execution note:** The spec-writer pass is done: `specs/package/container.md` P15/P16 and `specs/package/file-export.md` (corrected 2026-10-27). The implementer works test-first. U124a supplies the container, inspect, replace primitive and sidecar.
 
 **Patterns to follow:** U124a container, inspect, replace primitive and sidecar; KTD3; U32 atomic-file helper; KTD17 exclusive-phase entry and exit; U120 staging and legacy reader.
 
@@ -9464,7 +9468,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - 400 days of hourly backups plus one server copy → retention keeps the server copy, and the listing shows it labelled as a server copy (R1540).
 - Week boundary: backups on Sunday and Monday fall into different weeks. Offset +09:00 vs −05:00 → names and day buckets follow the injected offset.
 - Property: retention is idempotent, never deletes today or yesterday, and never keeps more than `2 days + daily + weekly + monthly` buckets.
-- `backups` config absent → defaults 12/10/9/30. Config with an extra unknown key → the key survives a limits edit byte-for-byte.
+- `backups` config absent → defaults 12/10/9/30. Config with an extra unknown key → the key survives a limits edit with its value and kind (`specs/storage/config-table.md` C6; corrected 2026-10-27).
 - T1: a Meguri backup restored by the oracle → dump equals the source (R2009).
 - Backup of a 150k-card synthetic collection → at most 2 s of background work (R1848), peak RSS within R1852. The writer is never blocked.
 - Disk full during the backup write → no partial `backup-*.colpkg` left; error returned; previous backups untouched.
@@ -9568,7 +9572,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   4. Optimize: U132's vacuum-and-analyze primitive plus `REINDEX` (R1641), as U24 writer maintenance tasks outside the repair transaction.
   5. Run all repairs in one write op (source Maintenance, not undoable, clears undo per R725). Repairs are computed inside that write transaction against live rows, as Anki does, never on a snapshot (U24 write-phase rule).
 - **Report:** each repair category increments a counter. The counters equal the oracle's per-problem counters (R1924). Report text is Meguri's wording keyed by counter.
-- **Forced one-way sync:** `scm` is set if and only if a category listed in R1643 fired. This unit and U129 share the flag.
+- **Forced one-way sync:** `scm` is set if and only if a category listed in R1643 fired. This unit and U129 share the flag. Decided 2026-10-27: this rule stands, because the oracle sets `scm` only for those categories; `specs/conformance/collection-check.md` K5's "marks the schema changed after any repair" is broader than the oracle, and R1642-only repairs (for example card-property clamps and missing decks) leave `scm` equal (corrected 2026-10-27).
 - **Afterwards:** a broad ChangeSet; the derived store is marked stale (R1489).
 - **Concurrency:** lifecycle stays `Ready`, so review stays usable (R1494). Local servers wait through U24's availability wait (R1706, R1797). The vacuum task and the repair op declare their durations (U24 list), so answers that arrive meanwhile wait in U43's overlay and journal.
 - Corruption is injected in scenarios with the `db_exec` op on fixture copies (oracle-harness §2).
@@ -9581,7 +9585,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Each corruption class injected alone, and then all together, must give a repaired normalized dump and counters equal to the golden:
-  - new-card due ≥ 1,000,000;
+  - new-card due 2,500,000 (folded to 1,500,000) and new-card due 1,500,000 (left alone, not counted) (K5; corrected 2026-10-27);
   - review due 200,000;
   - negative and overflowing `ivl`;
   - `odue` set on a non-filtered review card;
@@ -9602,7 +9606,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - T1 (R1925): a collection opened, studied (200 answers) and closed by Meguri → oracle Check Database reports zero problems.
 - Bench: healthy 150k-card synthetic collection → at most 5 s total (R1847). An answer submitted during the run is committed and visible afterwards.
 - A card answered between the safety backup and the repair commit keeps its new scheduling unless a repair class applies to the new values.
-- From U132's `Failed(Corrupt)`, the remedy list reads Check Database, restore, download. Status after a Check Database run shows its time and result.
+- From U132's `Failed(Corrupt)`, the remedy list reads Check Database, restore, Replace with the iCloud collection (when V19's conditions hold; corrected 2026-10-27). Status after a Check Database run shows its time and result.
 
 **Verification:** every `conformance/scenarios/maintenance/check-db/` scenario matches its golden, and the T1 R1925 suite passes. The bench is within budget.
 
@@ -9763,8 +9767,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - **Unclean shutdown:** detected from U32's sidecar clean-shutdown flag and its set and clear points (R2011); this unit adds no second marker. U32 owns the `quick_check` primitive and the flag; this unit owns when checks run and the move to `Failed(Corrupt)`.
 - **Corruption (R2012):**
   - Lifecycle moves to `Failed(Corrupt)` (C7), and the engine refuses write ops with `CollectionCorrupt`.
-  - From `Failed(Corrupt)`, normal sync, one-way upload and media upload refuse to start; the lifecycle is checked before `meta`. The only sync allowed is the user-chosen recovery download (R169): U109's download direction, which may call `meta` and `download`, never uploads, and installs the file only through U124a's verified-replace gate, after which the lifecycle becomes `Ready(gen+1)`. U24 allows `Failed(Corrupt) → ExclusiveBusy` only for restore and this download; U127's safety backup in this state is a byte copy.
-  - The engine offers the remedies as an ordered list in R169's order. In M1R the list is: restore the most recent backup that passes an integrity check, then download. When U128 lands, it attaches Check Database at the head of the list (U152's attach pattern). No recovery is lost meanwhile: on a file that fails `quick_check`, Check Database stops at its integrity stage with the corrupt outcome (U128), so restore and download are the remedies that recover the collection.
+  - From `Failed(Corrupt)`, routine iCloud sending, Export to Anki and media upload refuse to start, and no Anki server request is made (`specs/maintenance/optimize-integrity.md` M7). U24 allows `Failed(Corrupt) → ExclusiveBusy` only for restore; U127's safety backup in this state is a byte copy. U113 attaches the user-chosen Replace with the iCloud collection (R169, `CloudAdopt`) and its admission when it lands (corrected 2026-10-27).
+  - The engine offers the remedies as an ordered list in R169's order (M7.1). This unit's list is: restore the most recent backup that passes an integrity check. U113 attaches Replace with the iCloud collection after it, and U128 attaches Check Database at the head of the list (U152's attach pattern; corrected 2026-10-27). No recovery is lost meanwhile: on a file that fails `quick_check`, Check Database stops at its integrity stage with the corrupt outcome (U128), so restore and the iCloud replace are the remedies that recover the collection (corrected 2026-10-27).
 - **Optimize (R1655):** vacuum and analyze, implemented here in `maintenance/optimize.rs` as U24 writer maintenance tasks (`VACUUM`, `ANALYZE`) with a declared delay. U128's optimize stage reuses this primitive and adds `REINDEX` (R1641). It is evaluated on the quick check's triggers and runs every 14 days when idle (no session, no long op), tracked in the U124a sidecar (`device_state.rs`). A session start or `suspend` cancels it through its CancelToken (it is a `SuspendParticipant`, U32), and it reruns at the next idle trigger. The pre-upload part of R1655 is U109's and never touches the live file.
 - **Status (R1657):** a record with the last backup (time, file), last Check Database (empty until U128 lands and records its runs in the U124a sidecar), last optimize, last quick-check result (all kept in U124a's `device_state.rs`), collection size, media size (from the U31 index) and trash size.
 
@@ -9774,8 +9778,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Unclean marker present at open → quick check scheduled immediately on the maintenance lane. The first interactive read is not delayed beyond R1857's rule (measured in test).
-- Corrupt page injected, then quick check → lifecycle `Failed(Corrupt)`. An answer op returns `CollectionCorrupt`, a sync start returns a corrupt error with no network call (mock transport records zero requests), and the status lists restore, then download.
-- From that state, a recovery download against U13 → zero upload requests, a byte copy of the damaged file in the backups folder, the new collection passes the integrity check, `Ready(gen+1)`. A restore of a good backup from that state completes the same way.
+- Corrupt page injected, then quick check → lifecycle `Failed(Corrupt)`. An answer op returns `CollectionCorrupt`, Export to Anki and a media upload are refused with a corrupt error and no network call (fakes record zero requests), and the status lists restore only (corrected 2026-10-27).
+- From that state, a restore of a good backup → zero Anki server requests, a byte copy of the damaged file in the backups folder, the restored collection passes the integrity check, `Ready(gen+1)` (corrected 2026-10-27).
 - Two idle triggers on the same day → one quick check. A trigger the next day → a second check. Neither arms a U127 deadline.
 - Optimize skipped at day 13, run at day 14 when idle, deferred while a session is active; a session start during the vacuum cancels it, and it reruns at the next idle trigger.
 - Status after a backup → the backup fields reflect it, last Check Database is empty, and sizes equal the folder sums.
@@ -9800,7 +9804,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - **Job contract (KTD9).** It is defined here, and U133 reuses it.
   - Every long call is a `start_*` export that returns a `JobHandle` at once; the outcome arrives as `JobFinished`.
   - Progress is a stage enum plus done/total, throttled by Rust to about 10 Hz. Results are value records.
-  - Errors are one typed set, defined whole here so U133 adds no variant: `Cancelled`, `InsufficientSpace{needed, available}`, `Corrupt`, `TooNew`, `SchemaUnsupported`, `UnsupportedFormat`, `InvalidIds`, `SafetyBackupFailed`, `Busy{runningOp}` (R171 message source), `CollectionUnavailable`, `CollectionCorrupt`.
+  - Errors are one typed set, defined whole here so U133 adds no variant: `Cancelled`, `InsufficientSpace{needed, available}`, `Corrupt`, `TooNew`, `SchemaUnsupported`, `UnsupportedFormat`, `InvalidIds`, `SafetyBackupFailed`, `Busy{runningOp}` (R171 message source), `CollectionUnavailable`, `CollectionCorrupt`, plus `SessionActive`, `InvalidArgument`, `DiskFull`, `Io` and `DestinationExists`, which `specs/package/backups.md` B4 and `specs/package/backup-triggers.md` T9 return and this set must carry (corrected 2026-10-27).
 - **Surface:**
   - Backups:
     - `start_create_backup` (Back Up Now, R1632): forced; returns the file name and size.
@@ -9825,7 +9829,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `start_create_backup` → the progress stream is monotonic and ends with a result naming `backup-YYYY-MM-DD-HH.MM.SS.colpkg` and its size. The listing returns that file first.
 - Restore of a fixture backup → success, with `CollectionReplaced(gen+1)` on the event stream, `cloudPublicationPending` in the result and a pre-restore backup in the listing.
 - Restore of a backup with a corrupted page → `Corrupt`; the generation is unchanged (R1638).
-- Restore while a review session is open → the session-active refusal.
+- Restore while a review session is open → `SessionActive` (corrected 2026-10-27).
 - Restore while a one-way sync holds the exclusive phase → `Busy{runningOp}` naming the one-way sync.
 - The restore token is cancelled before the rename → `Cancelled`; generation and lifecycle are unchanged.
 - `run_due_maintenance(Deadline)` after a change, with the interval elapsed → one backup and no further deadline. With no change since the last backup → no backup and no deadline.
@@ -9864,7 +9868,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - `PackageService` and the calls this unit adds to U133a's `MaintenanceService` start jobs, list and configure on the maintenance lane; cancels go to the control lane.
   - Progress reaches the UI as an `AsyncStream` with `.bufferingNewest(1)`, and results as Sendable values.
 - **File handoff (R1624):**
-  - Imports: Swift keeps the security-scoped URL open for the duration of the call, and the core reads the package in place, with no copy (R1599).
+  - Imports: Swift keeps the security-scoped URL open for the whole import. For a latest-format collection-file (`.colpkg`) import the core also takes an owned copy of the source, bound to its SHA-256 behind an opaque inspection handle; preview, confirmation and import read only that copy, so a source changed or lost after preview cannot reach the collection (`specs/package/container.md` P16.1). `.apkg` imports read the source in place under their own contract. R1599 limits reads to the package itself; it does not forbid the copy (corrected 2026-10-27).
   - Exports: the core writes into the app-private Exports folder. Swift moves the file to the save-panel URL or hands it to the share sheet, then deletes it.
 - **UI rules:** the per-device "remember last export options" store and all sheets, panels and menus are U160/U150. File-type declarations for "Open in Meguri" are U7/U150.
 - **Background execution:** user-started import and one-way operations on iOS are wrapped by U151 in `BGContinuedProcessingTask` with `NSProgress` fed from this progress stream (KTD15).
@@ -10658,7 +10662,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `DebugInfoBuilder` produces app version, OS, device model, collection size figures and the recent error ring buffer; it never includes credentials or card content (R167). Every alert gets "Copy Debug Info".
 - `ActivityRegistry` lists long operations from core progress callbacks (~10 Hz, KTD9) in a non-modal strip with Cancel when the op reports cancellable (R170).
 - `ExclusiveGate` derives from C7 `ExclusiveBusy{op}`: Study, Add, Edit, bulk actions, deck options and note-type edits read `gate.isBlocked` and show "Waiting for <op>"; read-only screens keep last data (KTD17). Starting a second exclusive op shows which one is running (R171; refusal enforced by core C7). Before entering the phase, the gate asks open Add/Edit sheets to close (edits saved; Add draft through U195's discard prompt). While a review session is open, it refuses `.colpkg` import and restore with the session-active reason (KTD17).
-- `BlockingErrorScreen` replaces the root for a `Failed` lifecycle and lists the remedies of U132's ordered list, read through U133a's maintenance status, in that order (R169). Each remedy is an AppNavigation intent shown once its destination is attached (U152's registry): Restore from Backup opens U163a's restore sheet, and Download from Server (only when an account exists) runs U161's recovery download; both are in M1R. Check Database, which U128 puts at the head of U132's list, is attached by U163. Copy Debug Info is always offered.
+- `BlockingErrorScreen` replaces the root for a `Failed` lifecycle and lists the remedies of U132's ordered list, read through U133a's maintenance status, in that order (R169). Each remedy is an AppNavigation intent shown once its destination is attached (U152's registry): Restore from Backup opens U163a's restore sheet, and Replace with the iCloud collection (only when `specs/sync/cloudkit-recovery.md` V19's conditions hold) opens V14's preview and confirmation with the active epoch as source, a destination U161 attaches; both are in M1R. No remedy downloads from an Anki server (corrected 2026-10-27). Check Database, which U128 puts at the head of U132's list, is attached by U163. Copy Debug Info is always offered.
 - `DiagnosticsCollector` subscribes to MetricKit and writes to OSLog only; nothing leaves the device without a user action (R172).
 
 **Patterns to follow:** KTD17; DesignSystem component gallery registration (U9); glass only on the floating toast/banner control layer (R1996).
@@ -10669,7 +10673,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Network-down error from automatic sync → no alert; sync glyph status `needsAttention`; details in the popover model.
 - 403 from manual sync → actionable alert "log in again" with Copy Debug Info.
 - Debug info for a fixture with a stored host key and card text "secret-front" → output contains neither.
-- Lifecycle `Failed(corrupt)` with test restore and download destinations registered → Restore from Backup, then Download from Server (U132's M1R list); without an account → Restore from Backup only. With a Check Database destination also registered and U132's list headed by Check Database → three actions in R169's order. A remedy with no attached destination is not shown, Copy Debug Info is always shown, and Study and Add stay disabled.
+- Lifecycle `Failed(corrupt)` with test restore and iCloud-replace destinations registered → Restore from Backup, then Replace with the iCloud collection (U132's M1R list); when V19's conditions do not hold (iCloud off, account not available, no binding and no complete `MGActive` read) → Restore from Backup only; offline → the entry stays with the offline reason (corrected 2026-10-27). With a Check Database destination also registered and U132's list headed by Check Database → three actions in R169's order. A remedy with no attached destination is not shown, Copy Debug Info is always shown, and Study and Add stay disabled.
 - `ExclusiveBusy(oneWayDownload)` → Study button, Add, deck options disabled with "Waiting for one-way sync"; Browse list still readable.
 - UI test with a test hook stalling a one-way download mid-transfer → tapping Study and ⌘N do nothing; after the stall releases → app lands on Home, generation incremented.
 - Second exclusive op requested during a restore → message names "Restore from Backup".
@@ -11005,6 +11009,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Show last manual transfer and active/resumable operation. Custom URL servers have no wait; do not present retained older deadlines as current eligibility restrictions. Other server paths show the persisted shared endpoint/account cooldown and next eligible time where applicable. Failed/cancelled operations can retry without consuming that cooldown. File export remains accessible even when CloudKit or server transfers cannot run.
 - Review Conflicts is reachable from iCloud needs attention and Account & Sync. List preserved edits with object identity and available version context; open a read-only comparison, then let the user restore selected content through a normal validated edit with a preview. Preserve the current version and saved copies until the user explicitly resolves them. Whole-collection replacement is not required to recover one edit. U113's reviewed recovery contract owns durable storage and semantics.
 - Recovery download/replace actions use the correct source (iCloud vs manually selected Anki server), preview/back up affected data and respect review/exclusive gates. Mac quit offers bounded flush progress and Quit Without Syncing.
+- **Attach to U153:** register Replace with the iCloud collection's destination in U152's registry: V14's preview and confirmation with the active epoch as source (`specs/sync/cloudkit-recovery.md` V14, V19), the same sheet as Account & Sync's Replace local collection from iCloud, so U153's `BlockingErrorScreen` shows the remedy (corrected 2026-10-27).
 
 **Test scenarios:**
 - Snapshots cover no account, local-only, connected, quota full, syncing collection, media pending, partial failure, paused and recovered states.
@@ -11121,7 +11126,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Patterns to follow:** U153 activities and alerts; U160 setting rows.
 
 **Test scenarios:**
-- `Failed(corrupt)` with an account, once this unit lands → the blocking screen shows Check Database, Restore from Backup and Download from Server in that order (R169); Check Database there stops at its integrity stage with the corrupt outcome and points to Restore (R1640).
+- `Failed(corrupt)` with V19's iCloud conditions met, once this unit lands → the blocking screen shows Check Database, Restore from Backup and Replace with the iCloud collection in that order (R169; corrected 2026-10-27); Check Database there stops at its integrity stage with the corrupt outcome and points to Restore (R1640).
 - Check Database on a fixture with fixable issues → report lists fixes; on a corrupt fixture → "collection appears corrupt" pointing to backups.
 - Check Media report → Delete Unused asks confirmation; Empty Trash shows size and asks confirmation.
 - Running Check Media while another exclusive op runs → message naming the running op.
@@ -11329,7 +11334,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Phase machine (`ReviewPhase`): loading → question(card) → answer(card) → transition → question(next) or congrats (U186) → ended. Accepting an answer flips to transition synchronously on the main actor before any async work. Answer inputs are honoured only in the answer phase of the presented card (R414). Every input source (buttons U178, tap zones U180, keys U181, auto advance U185) goes through this one gate.
 - Answer path, in order, all on the main actor within the 4 ms budget of R445:
   1. Take the input timestamp; answered-at is wall-clock at input (R361).
-  2. msTaken = active time since question presentation, capped at the card's preset maximum answer seconds (R359). The clock excludes iOS/iPadOS background time and Mac hidden/minimized time (window occlusion), not mere deactivation (R360). The core does not re-cap.
+  2. msTaken = active time since question presentation, capped at the card's preset maximum answer seconds (R359). The clock excludes iOS/iPadOS background time and Mac hidden/minimized time (window occlusion), not mere deactivation (R360). The core also caps the stored `time` at the preset's cap (`specs/sched/answering.md` A5, R678); both caps use the same preset value, so the stored value equals the capped msTaken (corrected 2026-10-27).
   3. Mark transition and ask U176 to present the predicted next card.
   4. Enqueue the core `answer` call as a session-owned task with a cancellation shield, so the commit happens even if the view's task is cancelled (R1817). Apply the returned head diff and counts.
 - Failure paths: `CommitFailed(cardId)`, or a stale outcome caught by the core's backstop check (R727/R728, Scheduling area), re-presents that card on its question side with an error banner (R362) or the core's "Card changed" notice. The session record drops that answer and prepared pages are discarded. Staleness known before input is handled by the gate in U178 (R356).
@@ -13568,9 +13573,9 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriSnapshotTests/Stats/DeckPageCountsSnapshotTests.swift`
 
 **Approach:**
-- `DeckPageCountsModel` (@Observable @MainActor, one per shown deck page) fetches one counts record per refresh on the query lane: New, Learning and To Review for the deck and its subdecks from U41's real queue build, plus a "+N" for each count where the tree count differs because of burying (R625, R767). Swift does no count math.
+- `DeckPageCountsModel` (@Observable @MainActor, one per shown deck page) fetches one counts record per refresh on the query lane: New, Learning and To Review for the deck and its subdecks from U41's real queue build, plus, for each count, the signed difference deck-list count minus queue count when it is not 0 (`specs/sched/counts.md` C5: positive when the queue build skips siblings (R631) or a subdeck limits more strictly, negative for Learn at the learn-ahead edge; cards already buried, manually or as siblings (queues -3 and -2), are in neither count, C3) (R625, R767; corrected 2026-10-27). Swift does no count math.
 - Refresh triggers come through U151's ChangeFanout: change sets touching cards, revlog, decks, deck configs and the config keys U152 lists (`rollover`, `collapseTime`, `newCardsIgnoreReviewLimit`, `applyAllParentLimits`); `RolledOver`; foreground; return from a review session; and `CollectionReplaced` (generation reset, no stale paint). U155's one-shot ready-instant timer also triggers a refresh, so this model arms no timer of its own. Fetches coalesce: one in flight, latest wins.
-- Rendering: the three counts in Anki's colours from the DesignSystem count tokens U152 uses (dimmed zero, 4.5:1 in all contrast modes). A count that differs shows a dimmed "+N". Its explanation appears on hover on the Mac, as a tap popover on iOS and iPadOS, and as a VoiceOver hint (R71, R1345).
+- Rendering: the three counts in Anki's colours from the DesignSystem count tokens U152 uses (dimmed zero, 4.5:1 in all contrast modes). A count that differs shows its dimmed signed difference ("+N" or "−N", corrected 2026-10-27). Its explanation appears on hover on the Mac, as a tap popover on iOS and iPadOS, and as a VoiceOver hint (R71, R1345).
 - `DeckPageStatsSection` is the only implementation of the deck page counts and badge. U155 hosts it, and the iPhone Overview reaches the same page. It exposes an activity slot and a Stats-action slot. Both stay empty and take no space until U228 fills them with the deck-scoped activity section (R1346) and the Stats action (R1347).
 
 **Execution note:** Implementer role. The counts and "+N" semantics are U41's (`specs/sched/counts.md`); this unit renders them unchanged.
@@ -13579,7 +13584,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Tree New 20 vs queue New 15 → "+5" dimmed beside New, with the explanation popover (moved from U228).
-- Deck with 3 buried cards → "+3" badge; tap shows the explanation (moved from U228).
+- Deck whose queue build skips 3 review siblings (R631) that the deck list counts → "+3" beside To Review; tap shows the explanation (moved from U228). 3 manually buried cards alone, or 3 cards already sibling-buried (queue -2) alone → no badge (C3) (corrected 2026-10-27).
+- Golden `sched/counts/deck-page-difference` → "+2", "−1" and "+3" (C5; corrected 2026-10-27).
 - Tree and queue counts equal → no badge.
 - Counts New 0 / Learning 3 / To Review 12 → zero dimmed; snapshot in light, dark and Increase Contrast.
 - Answer a card of this deck, then return to the deck page → one refresh, counts updated; no change events → no core calls (idle).
@@ -13766,7 +13772,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Dependencies:** U6, U9, U25, U28, U49, U150, U151, U152, U155, U175.
 
 **Files:**
-- `specs/deckconfig/options-ui.md`
+- `specs/sched/deck-options.md` (read, not written here; corrected 2026-10-27)
 - `app/Packages/MeguriKit/Sources/Features/DeckOptions/DeckOptionsScreen.swift`
 - `app/Packages/MeguriKit/Sources/Features/DeckOptions/DeckOptionsModel.swift`
 - `app/Packages/MeguriKit/Sources/Features/DeckOptions/DeckOptionsDraft.swift`
@@ -13782,7 +13788,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/MeguriUITests/DeckOptions/DeckOptionsFlowTests.swift`
 
 **Approach:**
-- Spec writer (KTD1) writes `specs/deckconfig/options-ui.md`: option labels and section membership in Anki's names, enum choice lists and display names, which review-sort orders show under FSRS-only, limit-tab default/clear semantics, and Anki's warning conditions; help texts are Meguri-written (R734).
+- The spec is `specs/sched/deck-options.md` (O3 options and sections, O4 warnings, O6 preset menu and limit tabs, O7 save, O11 strings; corrected 2026-10-27). It covers option labels and section membership in Anki's names, enum choice lists and display names, which review-sort orders show under FSRS-only, limit-tab default/clear semantics, and Anki's warning conditions; help texts are Meguri-written (R734).
 - Route `.deckOptions(deckId)` registered with U150: detail area on Mac/iPad, full-screen pushed view on iPhone (R730). Entry points are owned by U152 (deck ⋯ menu), U155 (the deck page's Deck Options button and the finished state's limit links), U175 (review ⋯ menu, current card's home deck) and U150 (Deck ▸ Deck Options… ⌥⌘O). U155's controls emit `.deckOptions(deckId)` intents and show only once this route is registered. This unit attaches the destination to them when it lands, following U152's attach pattern.
 - `DeckOptionsModel` loads one snapshot from U49 over U28's records (presets with use counts, the deck's preset id, deck-level limit/retention overrides, global options, defaults and valid ranges) on the interactive lane and keeps a pristine copy plus an editable value-type `DeckOptionsDraft`. All preset operations (add from defaults with name prompt, clone with name prompt, rename, remove, select, save-to-all-subdecks mode) change only the draft until Save (R731, R732). Default (id 1) shows no Remove; removing another preset confirms the affected deck reassignment (R733), without an Anki upload warning.
 - Save (button, ⌘↩, ⌘S) sends one save request to U49's save op (over U28's preset ops), which applies R737's ordered steps as one undoable "Deck Options" op and rebuilds the queue; the UI then dismisses or stays per platform and the undo title reflects "Deck Options" (R737, R719). Dismissing with unsaved changes asks Discard / Keep editing, including sidebar navigation away on Mac/iPad via a U150 leave-guard (R734).
@@ -13791,7 +13797,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `DeckOptionsLayout`: one-column `Form` on iPhone/narrow widths; two columns of grouped sections on wide Mac/iPad windows (R738). As a signature screen, about three layout variants are previewed for the user's pick (R1988).
 - While the collection is `ExclusiveBusy` the screen is disabled with "Waiting for <op>" (KTD17); on `CollectionReplaced` it closes. If a change-stream event touches the edited deck or its presets: no unsaved edits → reload silently; unsaved edits → non-modal banner offering Reload or Keep editing.
 
-**Execution note:** Spec writer produces `specs/deckconfig/options-ui.md` before U232–U234 implementation; implementer follows it and the Product Contract.
+**Execution note:** The spec is `specs/sched/deck-options.md` (corrected 2026-10-27); U232–U234's implementers follow it and the Product Contract.
 
 **Patterns to follow:** System `Form`, `Menu`, `Picker`, `.confirmationDialog`; KTD20 tokens; identifiers `deckOptions.preset.picker`, `deckOptions.preset.menu.add`, `deckOptions.save`, `deckOptions.option.<key>.restore`.
 
@@ -13831,7 +13837,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Approach:**
 - Essentials holds New cards/day, Maximum reviews/day, Desired retention and Don't play audio automatically (R736, R748).
-- `LimitTabsControl`: Preset / This deck / Today only tabs (segmented) per limit; opens on the most specific set tab; Today only stores limit plus today's day; clearing Today only keeps the stored value but moves its day into the past (R740, semantics per `specs/deckconfig/options-ui.md`; persisted by U28 in Anki's deck format, R765). Ranges 0–9999, defaults 20/200 (R739).
+- `LimitTabsControl`: Preset / This deck / Today only tabs (segmented) per limit; opens on the most specific set tab; Today only stores limit plus today's day; clearing Today only keeps the stored value but moves its day into the past (R740, semantics per `specs/sched/deck-options.md` O6 and O9, corrected 2026-10-27; persisted by U28 in Anki's deck format, R765). Ranges 0–9999, defaults 20/200 (R739).
 - `DesiredRetentionControl`: percentage display of 0.70–0.99 with Preset / This deck tabs; no workload estimate or simulator (R742, R752).
 - `DeckOptionsWarnings` (pure): reviews/day under 10 × new/day; retention below 80% or above 95% (warning) and below 70% or above 97% (strong); plus the warning rules used by U234 (steps ≥ 1 day, max answer seconds > 600, maximum interval < 180 / < 50). One function per option, unit-tested.
 - Advanced ▸ Daily Limits holds the two global toggles New cards ignore review limit and Limits start from top, each with the Global badge (R741, R735).
@@ -13891,7 +13897,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Ignore cards reviewed before cleared → stored as empty.
 - Snapshot of every Advanced section at iPhone width and Mac wide two-column layout, AX5.
 
-**Verification:** All option controls present in the order of `specs/deckconfig/options-ui.md`; tests pass; a save touching every option round-trips through U28 with only edited keys changed.
+**Verification:** All option controls present in the order of `specs/sched/deck-options.md` O3 (corrected 2026-10-27); tests pass; a save touching every option round-trips through U28 with only edited keys changed.
 
 ### U236. Stats PDF export
 
@@ -14098,6 +14104,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Dependencies:**
 - U11, U12, U241
 - U22, U24, U26, U41, U44, U47, U80, U84, U86, U98, U107, U109, U120, U124, U126, U128
+- U113 (the CloudKit engine pieces the sync benches drive; U107 and U109 are frozen references; corrected 2026-10-27)
 
 **Files:**
 - `core/crates/meguri-testkit/profiles/` (`realistic-10k`, `-100k`, `-150k`, `-500k`, `-1m`, `worst-500k-due`, `worst-tags-10k`, `worst-template-5mb`, `worst-media-30k`, `worst-decks-2000`, `worst-field-1mb`, `worst-inline-base64`)
@@ -14112,7 +14119,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Generated collections are cached by profile hash under a gitignored cache directory.
 - Wall-clock runs execute natively on the Mac (criterion or divan, chosen in U12). They report p50, p95, p99 and peak RSS to U241's JSON.
 - Instruction-count benches run in Docker on every core change and gate at +5%.
-- Sync benches run against the U13 local server on loopback. They report local work separately from transfer, because R1842 and R1843 budget local work.
+- Sync benches drive U113's core calls directly against a Rust-side CloudKit fake (`specs/sync/cloudkit-records.md` K22.2), with no Swift and no CKSyncEngine, and measure local work: the engine's incoming apply, batch builds on the cloud reader, acknowledgement and tracking commits, with no network and no Apple scheduling time, because R1842 and R1843 budget local work. Decided 2026-10-27: the U13 loopback legs (manual Anki transfers, U107/U109) are frozen with those units and run only if they are unfrozen (corrected 2026-10-27).
 - The 1M profile runs nightly as a "completes without error" smoke for every group (R1803).
 - R1855: a filesystem-call counter (testkit wrapper around the media directory) asserts that collection open and normal-sync preparation never list or hash the media folder.
 - Memory: peak RSS is sampled per group. The iPhone memory budgets are enforced in U245.
@@ -14125,8 +14132,8 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Profile `realistic-150k` generates: notes per notetype within 5% of the target histogram, revlog/card mean 8 ± 0.5, 9 presets, FSRS on (`profile_shape.rs`).
 - `worst-500k-due` has one deck with 500k cards due today, and the queue-head benchmark still completes within the 2× budget.
 - `open` on `realistic-150k`, warm: p95 ≤ 150 ms. Instrumentation shows no full table scan; the query plan check rejects any SCAN over cards, notes or revlog (R1823).
-- `sync-local` with 410 answers and 30 note edits staged against the local server: local work ≤ 1 s and end to end ≤ 3 s, excluding media (R1842).
-- `full-sync` upload and download of `realistic-150k`: local work ≤ 10 s, peak RSS bounded (streaming) (R1843).
+- `sync-local` with 410 answers and 30 note edits: building their outgoing batches and recording their acknowledgements, plus applying the same changes as incoming records on a second copy, takes ≤ 1 s of local work, excluding media (R1842; corrected 2026-10-27).
+- `full-sync` on `realistic-150k`: Replace iCloud collection's initial publication (`specs/sync/cloudkit-recovery.md` V15) and Replace local collection from iCloud's staging, validation and `CloudAdopt` replace (V14) each take ≤ 10 s of local work against the fake, with peak RSS bounded (streaming) (R1843; corrected 2026-10-27).
 - `import` of a 10k-note .apkg ≤ 3 s, and .colpkg import of `realistic-150k` ≤ 10 s, excluding media (R1846).
 - `check-db` on a healthy 150k collection ≤ 5 s (R1847). `backup` ≤ 2 s (R1848).
 - `memory-states` at 100k ≤ 3 s, and cancelled at 50%, leaves the collection byte-identical (R1849).
@@ -14274,7 +14281,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Requirements:** R1840, R1851, R1852, R1853, R1854, R1856, R1857, R1858, R1859, R1860, R1867; R1583 (simulator leg).
 
-**Dependencies:** U6, U12, U241, U24, U25, U43, U67, U100, U107, U120, U126, U128, U47, U151, U165; U86 wires in when it lands (Delivery Milestones).
+**Dependencies:** U6, U12, U241, U24, U25, U43, U67, U100, U107, U120, U126, U128, U47, U151, U165, U113 and U114 (the CloudKit apply, staging and sync legs; corrected 2026-10-27); U86 wires in when it lands (Delivery Milestones).
 
 **Files:**
 - `app/Meguri/TestHooks/MainThreadWatchdog.swift` (under `MEGURI_TEST_HOOKS`, registered through a MeguriKit seam; KTD18)
@@ -14294,10 +14301,10 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - **Per-row and per-frame calls (R1859).** CoreBridge exposes a debug call counter per signpost name. `CallBudgetTests`, plus a browser-scroll UI test, assert that the core is not called per visible row: at most one page fetch per page boundary while scrolling 10k rows.
 - **Progress throttle (R1858).** A synthetic core job emits 1,000 progress events per second. At most 11 UI updates arrive per second.
 - **Cancellation (R1860).**
-  - Core side: every long op (bulk ops, find and replace, import, export, Check DB, memory-state recompute, optimizer, full sync, media sync, backup) is cancelled at 10 random progress points. The test asserts that a normalized dump equals the pre-op dump, except for ops whose spec declares a commit point already passed.
+  - Core side: every long op (bulk ops, find and replace, import, export, Check DB, memory-state recompute, optimizer, CloudKit incoming apply (`cloud_incoming_apply`) and `CloudAdopt` staging, media staging, backup; the manual Anki full sync and media sync legs are frozen with U107/U109, corrected 2026-10-27) is cancelled at 10 random progress points. The test asserts that a normalized dump equals the pre-op dump, except for ops whose spec declares a commit point already passed.
   - The op list is taken from the engine's registry of cancellable ops, so a new op without a test fails.
 - **Memory (R1851–R1853, R1840).**
-  - XCTMemoryMetric peaks on iPhone simulators at 150k and 500k: normal use ≤ 150 MB; sync, import, export, backup, Check DB and optimize ≤ 300 MB at 500k.
+  - XCTMemoryMetric peaks on iPhone simulators at 150k and 500k: normal use ≤ 150 MB; CloudKit sync (incoming apply, batch build, adoption staging), import, export, backup, Check DB and optimize ≤ 300 MB at 500k (corrected 2026-10-27).
   - A 1,000-card session grows ≤ 5 MB, and web content memory returns to within 10 MB of the post-warm-up level after the session closes (KTD11 call-out on R1853).
   - The 500k stats memory test runs with all history selected.
   - The widget extension renders every family from a maximum-size snapshot within the system widget memory limit and never opens the collection (a file-access assertion).
@@ -14597,7 +14604,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Requirements:** R2003 (app part), R2007, R2010, R2012 (UI part), R2015 (user-visible refusal), R2018, R2020; AE86 end to end.
 
-**Dependencies:** U250, U8, U7, U151, U126, U109, U152, U153, U161, U163a, U175, U160. Wires in when landed (Delivery Milestones): U162 and U124 (`.colpkg` import), U163 and U128 (Check Database on the corrupt screen), U130 and U163 (media trash), U156 (deck delete), U190 and U210 (editor and Browser rows of the destructive-op table).
+**Dependencies:** U250, U8, U7, U151, U126, U109 (frozen reference), U113 and U114 (the CloudKit kill and `CloudAdopt` legs; corrected 2026-10-27), U152, U153, U161, U163a, U175, U160. Wires in when landed (Delivery Milestones): U162 and U124 (`.colpkg` import), U163 and U128 (Check Database on the corrupt screen), U130 and U163 (media trash), U156 (deck delete), U190 and U210 (editor and Browser rows of the destructive-op table).
 
 **Files:**
 - `app/MeguriUITests/Safety/KillDuringOperationTests.swift`
@@ -14629,7 +14636,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Covers AE86 (app paths). Kill while onboarding stages its initial iCloud collection: relaunch shows the previous valid generation, or onboarding when there was none, never partial content. Independently kill a full Anki download started through Settings Anki Transfers and assert the same local replacement safety against U13; these are separate backend results.
 - Background mid-session: the test-hook lock report shows no lock held, and the last answer is in the database (R2007).
 - Restore yesterday's backup: deck counts match the backup and iCloud publication remains paused with a Choose where to keep the restored collection action. Sync Now, restart and an Anki transfer cannot clear that choice (R2010).
-- An injected corruption flag on launch: the app shows Restore from Backup and, with an account, Download from Server (Check Database joins once U163 and U128 land), and the review entry points are disabled; restoring the newest good backup from there lands on Home with generation +1 (R2012).
+- An injected corruption flag on launch: the app shows Restore from Backup and, when V19's iCloud conditions hold, Replace with the iCloud collection, which runs `CloudAdopt` against the cloud fake and lands on Home with generation +1 (`specs/sync/cloudkit-recovery.md` V19; corrected 2026-10-27) (Check Database joins once U163 and U128 land), and the review entry points are disabled; restoring the newest good backup from there lands on Home with generation +1 (R2012).
 - Low disk space: a full download, and an import once U162 lands, show the insufficient-space message and leave the collection unchanged (R2015).
 - Delete unused media → trash → restore: the files return. Empty trash: a confirmation appears, and the files are gone only after it (R2018). Wires in with U130 and U163.
 - Delete a deck containing cards: undo is offered in a toast, and the backup listing shows a new backup (R2020, R2008). Wires in with U156.
