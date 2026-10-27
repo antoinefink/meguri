@@ -1421,7 +1421,7 @@ mod maintenance_tests {
             crate::replace::ReplaceReason::Restore,
             &AccountBinding::LocalOnly,
             &SeededRandom::new(4),
-            None,
+            (None, None),
             &|| false,
             || {},
         )

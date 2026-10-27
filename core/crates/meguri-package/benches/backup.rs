@@ -19,6 +19,82 @@ use std::{fs, process::ExitCode, sync::Arc, time::Duration};
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
 
+// Temporary generated-only Quit diagnosis. Remove with the two writer probes
+// after interpreting the unchanged complete-call measurements.
+mod temporary_quit_timing {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::{
+        sync::{
+            OnceLock,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static START: AtomicU64 = AtomicU64::new(0);
+    static STAGES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+    const HOOKS: [(&str, fn()); 6] = [
+        ("package.backup.before_snapshot_live", || record(0)),
+        ("package.backup.after_snapshot_live", || record(1)),
+        ("storage.atomic.after_write", || record(2)),
+        ("storage.atomic.after_sync", || record(3)),
+        ("storage.atomic.after_verify", || record(4)),
+        ("storage.backup.before_rename", || record(5)),
+    ];
+
+    fn now_ns() -> u64 {
+        u64::try_from(ORIGIN.get().unwrap().elapsed().as_nanos()).unwrap_or(u64::MAX)
+    }
+
+    fn record(stage: usize) {
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
+        // Later AtomicFile callbacks can belong to device-state metadata.
+        if (2..=4).contains(&stage) && STAGES[5].load(Ordering::Relaxed) != 0 {
+            return;
+        }
+        let elapsed = now_ns().saturating_sub(START.load(Ordering::Relaxed));
+        let _ = STAGES[stage].compare_exchange(0, elapsed.saturating_add(1), Ordering::Relaxed, Ordering::Relaxed);
+    }
+
+    pub fn arm() {
+        ORIGIN.get_or_init(Instant::now);
+        for stage in &STAGES {
+            stage.store(0, Ordering::Relaxed);
+        }
+        for (name, callback) in HOOKS {
+            faultpoint::arm(name, Fault::Callback(callback));
+        }
+    }
+
+    pub fn begin() {
+        START.store(now_ns(), Ordering::Relaxed);
+        ACTIVE.store(true, Ordering::Relaxed);
+    }
+
+    pub fn end() {
+        ACTIVE.store(false, Ordering::Relaxed);
+    }
+
+    pub fn disarm() {
+        for (name, _) in HOOKS {
+            faultpoint::disarm(name);
+        }
+    }
+
+    pub fn stages() -> [Option<Duration>; 6] {
+        std::array::from_fn(|index| {
+            STAGES[index]
+                .load(Ordering::Relaxed)
+                .checked_sub(1)
+                .map(Duration::from_nanos)
+        })
+    }
+}
+
 fn main() -> ExitCode {
     let mut criterion = Criterion::default().configure_from_args();
     let mut suite = Suite::wall_clock("backup");
@@ -83,13 +159,40 @@ fn main() -> ExitCode {
                         let modified = collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified;
                         assert_ne!(modified.0, previous.snapshot_mod);
                         let mut outcome = None;
-                        total += quit.run(1, |_| {
+                        temporary_quit_timing::arm();
+                        let elapsed = quit.run(1, |_| {
+                            temporary_quit_timing::begin();
                             outcome = Some(host.engine().run_due_maintenance(MaintenanceTrigger::Quit));
+                            temporary_quit_timing::end();
                         });
+                        total += elapsed;
+                        temporary_quit_timing::disarm();
+                        // Read publication before any existing outcome assertion
+                        // can panic. Emit generated facts only, never names/errors.
+                        let publication = state.last_backup();
+                        let published = publication.as_ref().ok().and_then(Option::as_ref);
+                        let expected = (modified.0, clock.now_ms());
+                        eprintln!(
+                            "temporary generated Quit diagnostic: elapsed={elapsed:?} stages_order=\
+                             [before_snapshot_live,after_snapshot_live,after_write,after_sync,after_verify,before_rename] \
+                             stages={:?} call_ok={} returned_deadline={:?} previous_mod_instant={:?} \
+                             published_mod_instant={:?} expected_mod_instant={expected:?} \
+                             publication_read_ok={} durable_name_changed={:?} \
+                             snapshot_record_matches={:?} published_file_exists={:?}",
+                            temporary_quit_timing::stages(),
+                            outcome.as_ref().is_some_and(Result::is_ok),
+                            outcome.as_ref().and_then(|result| result.as_ref().ok()),
+                            (previous.snapshot_mod, previous.instant),
+                            published.map(|record| (record.snapshot_mod, record.instant)),
+                            publication.is_ok(),
+                            published.map(|record| record.name != previous.name),
+                            published.map(|record| (record.snapshot_mod, record.instant) == expected),
+                            published.map(|record| backups.join(&record.name).exists()),
+                        );
                         // Quit may report writer failure through logging. Prove
                         // publication as well as a successful entry-point return.
                         assert_eq!(outcome.unwrap().unwrap(), None);
-                        let published = state.last_backup().unwrap().unwrap();
+                        let published = publication.unwrap().unwrap();
                         assert_ne!(published.name, previous.name);
                         assert_eq!(published.snapshot_mod, modified.0);
                         assert_eq!(published.instant, clock.now_ms());
