@@ -193,7 +193,7 @@ A clone is a new note type copied from an existing one:
 
 ## N10. Meguri never edits note types on its own (R1586, R1590)
 
-- Only an op that carries a requested change writes note type rows: a user action, a local API call, an import, a sync merge, Check Database's listed repairs (U129), or Empty Cards' and Change Note Type's own effects. Opening a collection, launching, timers, rendering, the integration servers and status checks never write a note type, template or CSS.
+- Only an op that carries a requested change writes note type rows: a user action, a local API call, an import, a sync merge, or Check Database's listed repairs (U129). Empty Cards and Change Note Type write notes, cards and graves but no note type row (`notes/empty-cards` E4, `notetypes/change-notetype` M9). Opening a collection, launching, timers, rendering, the integration servers and status checks never write a note type, template or CSS.
 - A save with no change writes nothing (N3.1), so re-sending the same definition (for example an integration that re-applies its note type on every connection) causes no sync traffic.
 - No Meguri op sets `col.scm` except those `notetypes/schema-changes` G2 lists (R1590).
 

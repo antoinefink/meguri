@@ -1,0 +1,106 @@
+# Empty Cards (generation side)
+
+Spec: notes/empty-cards
+Requirements: R952; supports R1015, R1473, R1652, R1653, R1654, R2008
+Anki: 26.09.3
+Scenarios: conformance/scenarios/cardgen/empty/
+
+Finding the cards whose template or cloze number no longer generates a card, and deleting them as one undoable step. The maintenance flow around it (the report screen data, paging, the safety backup before the delete) is U131's; the screen is U163's; the scenario ops are `specs/conformance/empty-cards-ops.md`. Which ordinals a note requires is `notes/card-generation` G2 to G4 (U27's evaluator).
+
+## E1. Empty cards
+
+A card is **empty** when its ordinal is not among the ordinals its note requires right now:
+
+- standard note type: the ordinals of the templates whose front requires a card for the note (`notes/card-generation` G2, G3);
+- cloze note type: min(n − 1, 499) for each cloze number n of the note's fields (G4).
+
+The note's existing cards play no part, and G6 (the card of ordinal 0 a note gets when it requires none) does not apply: a note that requires nothing has all its cards empty. Consequences:
+
+- A card whose template's front does not parse, or renders nothing for the note (a front of `{{^Deck}}{{Back}}{{/Deck}}`: `Deck` is never empty), is empty.
+- A card whose ordinal has no template (a standard note type with fewer templates than the ordinal, left by another program or an older client) is empty.
+- An image-occlusion note follows the cloze rule: the card of a mask that was removed is empty (R1015).
+- Cards of ordinal 499 are not empty while the note has a cloze number of 500 or more, whatever their count.
+
+## E2. The scan
+
+The scan looks at every note type and, for each, every note of that type that has at least one card. It writes nothing.
+
+Result: per note type that has at least one note with an empty card, the list of those notes; note types without one are left out. For each note:
+
+- the note id;
+- its empty cards, as (ordinal, card id), sorted by ordinal, then card id;
+- its number of cards (all of them, empty or not);
+- **all empty**: true when every card of the note is empty, so that deleting them would remove the note (R952 "marks notes that would lose all their cards").
+
+Order: note types by name in the note type list's order (the `unicase` collation of `storage/schema-18`: `alpha Cloze` before `Beta Optional` before `Deckless`), notes by ascending id. An empty result means there are no empty cards (Anki's "No empty cards.").
+
+Each empty card also carries what the report line shows for it (the wording and layout of the line are U131's and U163's):
+
+- standard note type: its template's name stripped by `text/strip-html` H4, or, when the note type has no template at that ordinal, the card number (ordinal + 1), which Anki shows as "Card <number>";
+- cloze note type: the cloze number, ordinal + 1 (Anki: "Cloze 1, 3").
+
+The note type's name in the report is stripped the same way. Anki's report line is "<empty count> of <card count> cards empty (<labels joined with ", ">)." under "Empty cards for <note type>:", with notes that are all empty shown in red.
+
+## E3. Running the scan
+
+- It runs as a job (`engine/jobs`) on a reader snapshot, off the writer, so reviews and edits go on meanwhile (U35's verification runs it on a 150,000-card collection).
+- It reports progress as notes examined out of the notes with cards of the snapshot, throttled as `engine/jobs` J5 says.
+- It can be cancelled at any time; a cancelled scan has no result.
+- Each note type's templates are parsed once per scan; nothing is rendered to HTML (G3 decides from the template structure alone).
+
+The scan's result is a plan for the delete (E4), which never trusts it blindly.
+
+## E4. The delete
+
+Input: the card ids the scan listed (all of them: the screen offers no per-card choice) and the "Keep notes with no valid cards" option (R952).
+
+Inside one write transaction, from the live rows (`engine/op-model` O7, re-derived):
+
+1. **Gone.** A listed card that no longer exists is skipped. A card listed twice counts once.
+2. **Still empty?** For each remaining listed card, its live note and that note's live note type decide E1 again. A card that is no longer empty (a field was filled, Add Reverse was set, a cloze number came back, the template changed) is **kept as valid** and counted.
+3. **Keep notes.** With the option on, each note whose live cards are all listed cards that step 2 found still empty keeps one of them: the one with the lowest ordinal, the lowest card id among equal ordinals. This is the card Anki keeps ("keeps each such note's first card"; the first of the scan's list, sorted as E2 says). With the option off, nothing is kept here.
+4. **Delete.** Every other listed card that step 2 found still empty is deleted with its card grave; each note left with no card is then deleted with its note grave (`notes/note-records` D2, the variant that removes the notes it leaves empty; `storage/graves` G3). Nothing is appended to the deleted-notes log (`notes/deleted-notes-log` L3). Review-log rows stay.
+5. `col.mod` becomes `now_ms` when anything was deleted (`storage/ids-usn-mtime` S5). A delete that deletes nothing changes nothing and takes no undo step.
+
+Result: the number of cards deleted and the number of listed cards kept as valid (step 2). Anki's screen then says "Deleted N cards."; U131's also says how many cards were kept because they became valid.
+
+The delete is one undo step, "Empty Cards": undo restores the cards and notes and removes the graves the delete added, redo deletes them again (`engine/undo`, `storage/graves` G6).
+
+It is not a schema change (`notetypes/schema-changes` G2): it leaves `col.scm` alone, so it never by itself makes the next manual Anki transfer one-way, and CloudKit sync is never one-way (R1654). Changed 2026-10-27: this paragraph said that the graves make the next normal sync remove the cards on the other side; in Meguri an Anki sync is a manual transfer only (KTD26). The deletions reach other devices two ways, both as incremental changes:
+
+- **CloudKit** (routine sync between Meguri devices): the deleted cards and notes are row deletions the change set carries like any other (`engine/change-stream` S1), which CloudKit sync sends to the other devices (`sync/cloudkit-records`). Nothing here depends on the graves.
+- **Manual Anki transfer** (KTD26): the card and note graves (R1473) are what the next incremental transfer sends, so the server and other Anki clients remove the cards too (`sync/normal-sync`).
+
+With no change between the scan and the delete, the result is Anki's: the same cards are deleted, the same card kept per note, the same notes removed.
+
+| Scan (Optional: Card 1 `{{Front}}`, Card 2 `{{#Add Reverse}}{{Back}}{{/Add Reverse}}`) | Keep notes on | Keep notes off |
+|---|---|---|
+| card 2 empty, card 1 valid | card 2 deleted | card 2 deleted |
+| the note's only card (card 2) empty | kept | deleted, then the note |
+| both cards empty | card 1 kept, card 2 deleted | both deleted, then the note |
+| cloze note, `{{c1::…}}` and `{{c2::…}}` removed from its text | the ordinal 0 card kept, ordinal 1 deleted | both deleted, then the note |
+| card 2 listed, then Add Reverse set again before the delete | card 2 kept as valid, counted | same |
+| card 2 listed, then its note deleted before the delete | skipped | skipped |
+
+## E5. Difference from Anki: the delete looks again
+
+Anki 26.09.3 deletes the cards its scan listed, as listed: a card that became valid between the scan and the delete is deleted with the rest, and "keep notes" keeps a card of every note the scan marked all empty. Meguri's delete re-evaluates each card against live rows (E4 steps 2 and 3) and keeps the cards that became valid (plan U35, the write-phase rule of U24). Scenario `cardgen/empty/recheck` shows it; its golden is transformed by the deviation entries `empty-cards-recheck`, `empty-cards-recheck-cards`, `empty-cards-recheck-review-log` and `empty-cards-recheck-graves` (R952), which `conformance/deviations.yaml` gets together with that golden (`empty-cards-ops` Y4).
+
+## E6. Running the delete
+
+- U131 calls it after U127's safety backup (R2008, U131; `package/backup-triggers#T6.1` row "Empty Cards deletion", taken when the list of cards is not empty); this spec's op does not take the backup itself.
+- On a long list the write phase can pass ~200 ms; it then declares a long write (`engine/op-model` O8) through an op catalog entry added with the implementation. A card whose note and note type are provably unchanged since the scan's snapshot (`engine/op-model` O7 `Untouched`) gives the same answer in step 2, so the implementation may skip its re-evaluation; the result is the same.
+
+## E7. Scenarios
+
+| Scenario | Covers | Golden |
+|---|---|---|
+| `cardgen/empty/scan` | E1 (optional reverse, both empty, a special-name front, a card without a template, cloze numbers), E2 (order, all-empty flag, card count), an empty scan | not yet in `conformance/`: awaits the ops (`empty-cards-ops` Y4) |
+| `cardgen/empty/keep-notes` | E4 with keep on: the card kept per note, graves, notes kept, review log kept, a scan after the delete | the same |
+| `cardgen/empty/delete-notes` | E4 with keep off: notes left without cards deleted with note graves | the same |
+| `cardgen/empty/recheck` | E4 steps 1 and 2, E5: a note whose Add Reverse is set again and one whose Back is filled keep their card 2 and its review log, a deleted note's cards are skipped; deviation `empty-cards-recheck` | the same |
+| `cardgen/empty/occlusion` | E1 for a cloze note and an image-occlusion note whose third mask was removed (R1015), E4 | the same |
+
+Decided 2026-10-27: the scenarios are specified here and in `empty-cards-ops` but are not in `conformance/` until both executors have the two ops; Y4 gives the order.
+
+The scan's progress and cancellation, the 150,000-card scan off the writer (U35's verification), undo and redo of the delete, and a delete whose list is entirely gone are tested in U35's Rust tests (`core/crates/meguri-engine/tests/empty_cards.rs`).

@@ -100,3 +100,27 @@ nextPos
 normalize_note_text
 revlog
 unicase
+# Change Note Type and Empty Cards (change-notetype.md, empty-cards.md and
+# their ops specs): op names, output members and rejection kinds.
+change_notetype_info
+change_notetype
+old_notetype
+new_notetype
+old_fields
+new_fields
+old_templates
+new_templates
+discarded_fields
+dropped_templates
+removed_cards
+field_content
+card_counts
+multiple_notetypes
+schema_changed
+no_changes
+empty_cards
+delete_empty_cards
+keep_notes
+kept_valid
+all_empty
+type_changes

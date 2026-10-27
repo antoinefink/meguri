@@ -121,7 +121,7 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 
 ## T9. Schema changes in scenarios
 
-- An op that is a schema change runs as accepted: the oracle never asks, and Meguri asks nothing (`notetypes/schema-changes#G4`). On Meguri the safety backups that structural edits take (`package/backup-triggers#T6.1`, its coalescing included) go into the scenario's backups folder (`backup-ops.md` F1); scenarios observe them only through the backup ops of `backup-ops.md`, and the note type and deck scenarios do not. Changed 2026-10-27: the executor no longer passes a confirmation.
+- An op that is a schema change runs as accepted: the oracle never asks, and Meguri asks nothing (`notetypes/schema-changes#G4`). On Meguri the safety backups that structural edits take (`package/backup-triggers#T6.1`, its coalescing included) go into the scenario's backups folder (`backup-ops.md` F1); scenarios observe them only through the backup ops of `backup-ops.md`, and the note type and deck scenarios do not. Changed 2026-10-27: the executor no longer passes a confirmation. The same holds for Change Note Type's `change_notetype` (`change-notetype-ops.md` H2).
 - Scenarios observe `col.scm`, `col.ls` and `col.mod` with `db_exec` (`record-ops.md` W1). They put the collection in the state right after a sync with `db_exec: {sql: "UPDATE col SET ls = scm"}` and then advance the clock before the first op, so that a change sets `scm` above `ls` (under a frozen clock a change in the same millisecond leaves `scm` equal to `ls`).
 
 ## T10. Status

@@ -80,7 +80,7 @@ Meguri writes its own template text. Each template must reference exactly the fi
 The template must work with Anki's image-occlusion runtime (so Meguri's Image Occlusion notes review on other clients) and with Meguri's own (U68). It holds, on the front:
 
 - the `Header` field, shown only when non-empty (`{{#Header}}…{{Header}}…{{/Header}}`);
-- an element hidden with `display: none` that holds `{{cloze:Occlusion}}` (the masks' data; card generation counts its cloze numbers);
+- an element hidden with `display: none` that holds `{{cloze:Occlusion}}` (the masks' data; card generation counts its cloze numbers, and Empty Cards finds the card of a removed mask by them, `notes/empty-cards` E1, R1015);
 - an element with id `image-occlusion-container` that holds `{{Image}}` and a `canvas` element with id `image-occlusion-canvas`;
 - a script that calls `anki.imageOcclusion.setup()`; when the call throws, the card shows a message of Meguri's own wording instead of failing silently.
 
