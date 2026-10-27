@@ -97,7 +97,7 @@ Registration tells a changed file by its modification time (Anki compares whole 
 
 ## F14. Check Media vocabulary (draft)
 
-The ops and the setup marker that the Check Media scenarios need (`maintenance/check-media` C21, C22). Draft: neither executor has them yet (`dsl.md` D7.2). The oracle maintainer implements them with C22's scenarios and fixes any detail then, here, in the schema and in the typed model together. They reuse F3 to F11.
+The ops and the setup marker that the Check Media scenarios need (`maintenance/check-media` C21, C22). Draft (`dsl.md` D7.2): the oracle driver implements them and C22's scenarios have goldens (2026-10-27); Meguri's executor and the typed model do not have them yet. They reuse F3 to F11.
 
 ### F14.1 Op `check_media`
 

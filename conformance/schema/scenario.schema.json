@@ -671,6 +671,28 @@
                 }
               }
             },
+            "package_media": {
+              "description": "package-ops.md E10: the media map of a package in the session directory (name) or of a fixture package (fixture), with each numbered entry's decoded size.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/any_package_name" },
+                "fixture": { "$ref": "#/$defs/package_fixture" }
+              },
+              "oneOf": [{ "required": ["name"] }, { "required": ["fixture"] }]
+            },
+            "package_db_dump": {
+              "description": "package-ops.md E11: db_dump's value (O8) of a package's collection entry, read with plain SQLite; tables and raw as db_dump's.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/any_package_name" },
+                "fixture": { "$ref": "#/$defs/package_fixture" },
+                "tables": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/dump_table" } },
+                "raw": { "type": "boolean" }
+              },
+              "oneOf": [{ "required": ["name"] }, { "required": ["fixture"] }]
+            },
             "package_listing": {
               "description": "package-ops.md E3: the layout of a package in the session directory (name) or of a fixture package (fixture).",
               "type": "object",
@@ -1008,6 +1030,23 @@
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._-]*\\.anki2$",
       "not": { "const": "collection.anki2" }
+    },
+    "export_limit": {
+      "description": "package-ops.md E7: collection, a deck by its stored name, or a non-empty list of note or card references.",
+      "anyOf": [
+        { "const": "collection" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "deck": { "type": "string", "minLength": 1 },
+            "notes": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^#n[1-9][0-9]*$" } },
+            "cards": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^#c[1-9][0-9]*$" } }
+          }
+        }
+      ]
     },
     "colpkg_name": {
       "description": "package-ops.md E1, E2.1: a collection package file in the session directory.",
@@ -1392,7 +1431,7 @@
           ]
         },
         "import": {
-          "description": "The collection package forms are exactly {format: colpkg, fixture} or {format: colpkg, name} (package-ops.md E2); other forms are draft (package).",
+          "description": "The collection package forms are exactly {format: colpkg, fixture} or {format: colpkg, name} (package-ops.md E2); the deck package form is {format: apkg, fixture | name, merge_notetypes, update_notes, update_notetypes, with_scheduling, with_deck_configs} (package-ops.md E6); other forms are draft (package).",
           "if": { "type": "object", "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
           "then": {
             "type": "object",
@@ -1405,10 +1444,30 @@
             },
             "oneOf": [{ "required": ["fixture"] }, { "required": ["name"] }]
           },
-          "else": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] }
+          "else": {
+            "if": { "type": "object", "required": ["format"], "properties": { "format": { "const": "apkg" } } },
+            "then": {
+              "description": "package-ops.md E6.1: the deck package form, exactly one of fixture and name, every option.",
+              "type": "object",
+              "required": ["format", "merge_notetypes", "update_notes", "update_notetypes", "with_scheduling", "with_deck_configs"],
+              "additionalProperties": false,
+              "properties": {
+                "format": { "const": "apkg" },
+                "fixture": { "allOf": [{ "$ref": "#/$defs/package_fixture" }, { "pattern": "\\.apkg$" }] },
+                "name": { "$ref": "#/$defs/package_name" },
+                "merge_notetypes": { "type": "boolean" },
+                "update_notes": { "enum": ["if_newer", "always", "never"] },
+                "update_notetypes": { "enum": ["if_newer", "always", "never"] },
+                "with_scheduling": { "type": "boolean" },
+                "with_deck_configs": { "type": "boolean" }
+              },
+              "oneOf": [{ "required": ["fixture"] }, { "required": ["name"] }]
+            },
+            "else": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] }
+          }
         },
         "export": {
-          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6) and the collection package form {format: colpkg, name} (package-ops.md E1).",
+          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (package-ops.md E7).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
@@ -1432,6 +1491,22 @@
                 "properties": {
                   "format": { "const": "colpkg" },
                   "name": { "$ref": "#/$defs/colpkg_name" }
+                }
+              }
+            },
+            {
+              "if": { "required": ["format"], "properties": { "format": { "const": "apkg" } }, "not": { "required": ["legacy"] } },
+              "then": {
+                "description": "package-ops.md E7: the deck package form, every key.",
+                "required": ["format", "name", "limit", "scheduling", "presets", "media"],
+                "additionalProperties": false,
+                "properties": {
+                  "format": { "const": "apkg" },
+                  "name": { "$ref": "#/$defs/package_name" },
+                  "limit": { "$ref": "#/$defs/export_limit" },
+                  "scheduling": { "type": "boolean" },
+                  "presets": { "type": "boolean" },
+                  "media": { "type": "boolean" }
                 }
               }
             }
@@ -1539,6 +1614,21 @@
         },
         "empty_media_trash": {
           "description": "Stable (media-ops.md F8): delete every media trash entry permanently.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "check_media": {
+          "description": "Draft (media-ops.md F14.1): a Check Media run to its end; its output is kept for the next delete_unused_media and tag_missing_media steps.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "delete_unused_media": {
+          "description": "Draft (media-ops.md F14.2): trash the unused list of the latest check_media step. Between that step and this one only observe, advance, set_clock and tag_missing_media may run (checked when the scenario loads).",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "tag_missing_media": {
+          "description": "Draft (media-ops.md F14.3): add the tag missing-media to the missing_notes of the latest check_media step, as one undoable update_tag step.",
           "type": "object",
           "maxProperties": 0
         },

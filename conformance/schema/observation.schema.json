@@ -11,6 +11,19 @@
     "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } }
   },
   "$defs": {
+    "import_log_list": {
+      "description": "package-ops.md E6.3: I13's entries; note a target note's logical id or a real id.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["note", "fields"],
+        "additionalProperties": false,
+        "properties": {
+          "note": { "anyOf": [{ "$ref": "#/$defs/note_key" }, { "type": "integer" }] },
+          "fields": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
     "card_key": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
     "render_av_entry": {
       "description": "render-ops.md Q5.2, specs/render/av-tags.md A6: a sound entry by its decoded name, or a TTS entry by its language.",
@@ -77,16 +90,59 @@
           }
         },
         "check_db": {
-          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt.",
+          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt or failed.",
           "anyOf": [
             { "$ref": "#/$defs/check_db_counts" },
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["corrupt"] } } }
+                { "properties": { "error": { "enum": ["corrupt", "failed"] } } }
               ]
             }
           ]
+        },
+        "check_media": {
+          "description": "specs/conformance/media-ops.md F14.1: the part of Check Media's report that Anki also gives.",
+          "type": "object",
+          "required": ["unused", "missing", "missing_notes", "renamed", "dirs", "oversize", "extracted", "trash_count", "field_templates"],
+          "additionalProperties": false,
+          "properties": {
+            "unused": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "missing": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "missing_notes": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/note_key" }, { "type": "integer" }] } },
+            "renamed": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+            "dirs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "oversize": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "extracted": { "type": "integer", "minimum": 0 },
+            "trash_count": { "type": "integer", "minimum": 0 },
+            "field_templates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["notetype", "template", "side"],
+                "additionalProperties": false,
+                "properties": {
+                  "notetype": { "type": "string" },
+                  "template": { "type": "string" },
+                  "side": { "enum": ["front", "back"] }
+                }
+              }
+            }
+          }
+        },
+        "delete_unused_media": {
+          "description": "specs/conformance/media-ops.md F14.2: the number of files trashed.",
+          "type": "object",
+          "required": ["count"],
+          "additionalProperties": false,
+          "properties": { "count": { "type": "integer", "minimum": 0 } }
+        },
+        "tag_missing_media": {
+          "description": "specs/conformance/media-ops.md F14.3: the number of notes written.",
+          "type": "object",
+          "required": ["count"],
+          "additionalProperties": false,
+          "properties": { "count": { "type": "integer", "minimum": 0 } }
         },
         "add_media": {
           "description": "specs/conformance/media-ops.md F5: the stored name, or a Meguri-only rejection.",
@@ -478,21 +534,67 @@
           }
         },
         "export": {
-          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the collection package form outputs nothing (package-ops.md E1); the other forms are draft (package).",
-          "type": "object",
-          "properties": { "notes": { "type": "integer", "minimum": 0 } }
-        },
-        "import": {
-          "description": "package-ops.md E2.3: the collection package forms output nothing, so this member holds only their rejection; the other forms are draft (package).",
+          "description": "dsl.md D7.2: the legacy package form and the deck package form output {notes} (model-ops.md L6, package-ops.md E7), the deck package form or its rejection; the collection package form outputs nothing (package-ops.md E1); the other forms are draft (package).",
           "anyOf": [
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["too_new", "corrupt"] } } }
+                { "properties": { "error": { "enum": ["invalid_ids", "media_check_required"] } } }
               ]
             },
-            { "type": "object", "not": { "required": ["error"] } }
+            {
+              "type": "object",
+              "not": { "required": ["error"] },
+              "properties": { "notes": { "type": "integer", "minimum": 0 } }
+            }
           ]
+        },
+        "import": {
+          "description": "package-ops.md E2.3, E6.3, E6.4: the collection package forms output nothing, so this member holds only their rejection; the deck package form outputs the import log or its rejection.",
+          "anyOf": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["too_new", "corrupt", "notetype_kind_conflict"] } } }
+              ]
+            },
+            {
+              "type": "object",
+              "required": ["found_notes", "new", "updated", "duplicate", "conflicting", "missing_notetype", "missing_deck", "first_field_match", "empty_first_field"],
+              "additionalProperties": false,
+              "properties": {
+                "found_notes": { "type": "integer", "minimum": 0 },
+                "new": { "$ref": "#/$defs/import_log_list" },
+                "updated": { "$ref": "#/$defs/import_log_list" },
+                "duplicate": { "$ref": "#/$defs/import_log_list" },
+                "conflicting": { "$ref": "#/$defs/import_log_list" },
+                "missing_notetype": { "$ref": "#/$defs/import_log_list" },
+                "missing_deck": { "$ref": "#/$defs/import_log_list" },
+                "first_field_match": { "$ref": "#/$defs/import_log_list" },
+                "empty_first_field": { "$ref": "#/$defs/import_log_list" }
+              }
+            },
+            { "type": "object", "maxProperties": 0 }
+          ]
+        },
+        "package_media": {
+          "description": "package-ops.md E10: the package's media map records in map order (latest) or ascending member number (legacy), sha1 lower-case hex, entry_size the numbered entry's decoded size.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "size", "sha1", "entry_size"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "size": { "type": ["integer", "null"], "minimum": 0 },
+              "sha1": { "anyOf": [{ "type": "string", "pattern": "^([0-9a-f]{2})*$" }, { "type": "null" }] },
+              "entry_size": { "type": ["integer", "null"], "minimum": 0 }
+            }
+          }
+        },
+        "package_db_dump": {
+          "description": "package-ops.md E11: db_dump's value (O8) of the package's collection entry.",
+          "$ref": "#/$defs/db_dump"
         },
         "package_listing": {
           "description": "package-ops.md E3: the archive's entries in order with their compression methods, the meta version (null without a meta entry, invalid when it does not decode), and the facts of each raw SQLite entry.",
