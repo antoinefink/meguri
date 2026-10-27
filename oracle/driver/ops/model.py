@@ -139,12 +139,12 @@ def merge_patch(target: Any, patch: Any) -> Any:
 class KindProbe:
     """Stands in for the RustBackend in one generated backend call: a backend
     error of `kind` raises `raises()`, any other error the exception pylib
-    would raise."""
+    would raise. For several kinds, pass a mapping kind -> factory as `kind`
+    and no `raises`."""
 
-    def __init__(self, backend, kind: int, raises) -> None:
+    def __init__(self, backend, kind, raises=None) -> None:
         self._rust = backend._backend
-        self._kind = kind
-        self._raises = raises
+        self._raises = dict(kind) if raises is None else {kind: raises}
 
     def _run_command(self, service: int, method: int, data: bytes) -> bytes:
         try:
@@ -153,8 +153,8 @@ class KindProbe:
             error_bytes = bytes(error.args[0])
         err = backend_pb2.BackendError()
         err.ParseFromString(error_bytes)
-        if err.kind == self._kind:
-            raise self._raises()
+        if err.kind in self._raises:
+            raise self._raises[err.kind]()
         raise backend_exception_to_pylib(err)
 
 

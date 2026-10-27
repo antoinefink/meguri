@@ -25,6 +25,7 @@ from . import (  # noqa: F401
     sched,
     sched_manual,
     schema11,
+    stats,
     storage,
     storage_open,
     sync_client,
