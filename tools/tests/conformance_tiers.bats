@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
 setup_file() {
   local t="$BATS_FILE_TMPDIR/template"
-  mkdir -p "$t/core" "$t/conformance"
+  mkdir -p "$t/core/crates/meguri-testkit" "$t/conformance"
   cp -R "$REPO_ROOT/tools" "$t/tools"
   cp -R "$REPO_ROOT/docker" "$t/docker"
   cp "$REPO_ROOT/.gitignore" "$t/"
@@ -108,7 +108,8 @@ mg() {
 
 native_scratch_stubs() {
   export STUB_CLI="$SB/core/stub-cli" STUB_TESTKIT="$SB/core/test binaries" CLI_EXIT=0 CLI_WAIT=no
-  mkdir -p "$STUB_TESTKIT"
+  mkdir -p "$STUB_TESTKIT" "$SB/conformance/scenarios"
+  printf '%s\n' 'package-relative scenarios resolved' >"$SB/conformance/scenarios/native-cwd-sentinel"
   cat >"$SB/stubs/cargo" <<'EOF'
 #!/bin/sh
 printf '%s\n' "${TMPDIR-unset}" >>"$CALLS.build-tmp"
@@ -158,6 +159,12 @@ printf '%s\n' "$name" >>"$CALLS.tests"
 printf '%s\n' "$TMPDIR" >>"$CALLS.test-tmp"
 printf '%s\n' "$PWD" >>"$CALLS.test-cwd"
 printf '%s\n' "$#" >>"$CALLS.test-argc"
+if [ "$name" = conformance ]; then
+  # The harness=false target discovers scenarios relative to the package root.
+  sentinel="$(cat ../../../conformance/scenarios/native-cwd-sentinel)" || exit 1
+  [ "$sentinel" = 'package-relative scenarios resolved' ] || exit 1
+  printf '%s\n' "$sentinel" >>"$CALLS.scenarios-resolved"
+fi
 if [ "${TESTKIT_WAIT:-no}" = yes ]; then
   echo "$$" >"$CALLS.ready"
   exec sleep 300
@@ -220,13 +227,15 @@ EOF
   [ "$(cat "$CALLS.tests")" = $'unit\nintegration\nconformance' ]
   [ "$(grep -cx 0 "$CALLS.test-argc")" -eq 3 ]
   [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.test-tmp")" -eq 3 ]
-  [ "$(grep -Fxc -- "$SB/core" "$CALLS.test-cwd")" -eq 3 ]
+  [ "$(grep -Fxc -- "$SB/core/crates/meguri-testkit" "$CALLS.test-cwd")" -eq 3 ]
+  [ "$(cat "$CALLS.scenarios-resolved")" = 'package-relative scenarios resolved' ]
   [ "$(grep -Fxc -- "$inherited" "$CALLS.build-tmp")" -eq 4 ]
   [ "$(grep -Fxc -- "$SB/core" "$CALLS.build-cwd")" -eq 4 ]
   grep -qx 'test -q -p meguri-testkit --tests --no-run --message-format=json' "$CALLS.build-args"
   [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
   [ "$(grep -cx check "$CALLS.scratch")" -eq 6 ]
   [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.child-tmp")" -eq 3 ]
+  [ "$(grep -Fxc -- "$SB/core" "$CALLS.child-cwd")" -eq 3 ]
   python3 - "$CALLS.owners" <<'PY'
 import re, sys
 rows = [line.rstrip("\n").split("\t") for line in open(sys.argv[1])]

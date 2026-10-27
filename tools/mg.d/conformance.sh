@@ -133,6 +133,7 @@ mg_conf__native_ready() {
 # Same lib + integration coverage as cargo test --tests (including harness=false;
 # no doctests). Build outside scratch, validate the entire artifact stream before
 # launching anything, then retain --no-fail-fast across the emitted binaries.
+# Match Cargo's package working directory for this package's test executables.
 mg_conf__testkit_native() {
   local executable rc=0
   mg_conf__native_owner || return 2
@@ -148,7 +149,7 @@ mg_conf__testkit_native() {
   fi
   while IFS= read -r -d '' executable; do
     mg_conf__native_ready || return 2
-    (cd "$MG_ROOT/core" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable") || rc=1
+    (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable") || rc=1
   done <"$MG_RUN_DIR/native-testkit-executables"
   return "$rc"
 }
