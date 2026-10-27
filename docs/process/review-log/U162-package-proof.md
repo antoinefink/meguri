@@ -636,3 +636,24 @@ R1 coverage; the final Bridge suite and native chain remain required below.
 Final `unit-sim/20261027T003757Z-76074` passes all 10 selected Bridge tests,
 zero failures and zero skips, in 5.614 seconds. The P2 finding is closed.
 The combined workflow, integration gate and unit acceptance stay open.
+
+## Native Mac R12 — six attachments, local reference mismatch
+
+Start `fb16689c`. `ui-test/20261027T003939Z-79208` passes its one actual
+Mac UI case, zero failures and skips, and collects all six exact xcresult
+files. The overall job remains error: the proof compares a native retained-R6
+reference with the independent replay's temporary reference. The two operations
+create separate directories. Their ID seeds do not determine those names.
+Independent review records P1 `RETENTION-R1-F1`.
+
+The actual saved native package separately passes the unchanged strict archive
+and compatible-client check `package-interop-check/20261027T004558Z-83277`
+against its frozen expected state. No database, stamp or media changes are made.
+This does not turn the failed combined run into a pass.
+
+The F11.2 clarification requires the actual backend's safe R6 reference and
+exact native continuity across all four phases. The replay retains its own
+reference. No production naming, content comparison, timing or filesystem
+safety requirement changes. Existing Rust R6 artifact/recovery checks remain
+required. Independent spec review is clear; privacy
+`20261027T004717Z-84387` passes. The proof repair and fresh combined run remain.

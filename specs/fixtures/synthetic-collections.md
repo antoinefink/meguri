@@ -468,6 +468,22 @@ Freeze three expected database states before launch: the prepared source, import
 
 Expected derivation may replay this one frozen case through the trusted existing Rust entry/review paths on a separate temporary copy in Docker. It uses only the declared inputs and actual seed consumers, including ordinary selection and recorded-time maintenance. It finishes before any native app launch and records its code/build identity and input digest. This checks native delivery, persistence and package fidelity; it is not independent proof of scheduler or import semantics. Existing backend, parity, durability and recovery tests remain required. Add no Python scheduler, generic replay framework or public MG job. Independent SQLite inspection/comparison stays in the pinned decoder Docker service; host Python 3.9 consumes neutral evidence only.
 
+Only `activation.retention` is an execution-local recovery reference, rather
+than an exact value shared with the independent replay. The backend exposes an
+optional string; this media-bearing case requires its actual committed import
+value. Apply the existing R6 form: an `r6-` prefix and a nonempty component other
+than `.` or `..`, with no slash, backslash or NUL. Keep the existing receipt
+size bound; add no guessed suffix format or separate filename length rule.
+Treat the reference as opaque metadata and never navigate it. Require the exact
+native value in the import, accepted, closed and reopened receipts, retaining
+their existing run, platform and activation/owner checks. Keep the replay's
+returned value as replay-local metadata; the two basenames need not match.
+Every other activation fact and all twelve tables, cells, storage classes,
+stamps, timing fields and media names/bytes remain subject to exact comparison.
+Do not mask them or make production temporary names deterministic. This native
+check proves delivery continuity only; existing Rust P16/R6 artifact and
+recovery tests still establish filesystem safety.
+
 **Development-only input owner.** Add only the missing fixture seam under `MEGURI_TEST_HOOKS` and the existing `.dev` guard. It loads and validates this run's frozen record before inspection/open can consume a seed. Reject malformed, changed, missing or wrong-run input; never fall back to host randomness for this case. Keep normal application defaults outside the requested hook. The owner supplies each declared seed to its actual consumer and records which value was used.
 
 When `ReviewCoordinator.rate` admits the native tap, compare the actual current card and button rating with the frozen record. Pass the declared elapsed value to the ordinary answer call with the existing fixed wall clock. Keep the real head, state token and Rust answer call. The hook must not choose a head, fake a commit or send an answer itself. Before dispatch, refuse a mismatch, an old owner or a second use of the input. Copy the values used before the call, then keep a separate receipt of its completion. Later app history, database rows or exports must not supply the input record or expected answer. Saving the hook receipt must not wait for file sync on the UI path.
