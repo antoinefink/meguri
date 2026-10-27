@@ -44,7 +44,7 @@ Terms: `now_s` and `now_ms` as in `storage/ids-usn-mtime`; "equal under unicase"
 
 ## N3. A local save
 
-A local save writes a note type the user, the local API (U141, U139) or a Meguri op changed. It runs N4 (normalization), N6 (card requirements) and, for a checked save, the template checks of `notetypes/validation` V3, then compares and writes as below. Saves of rows arriving by sync or import are U107's and U120's.
+A local save writes a note type the user, the local API (U141, U139) or a Meguri op changed. It runs N4 (normalization), N6 (card requirements) and, for a checked save, the template checks of `notetypes/validation` V3, then compares and writes as below. Saves of rows arriving by sync are U107's; a note type an `.apkg` import without a merge adds or updates is written as `package/apkg-import#I7` says (U120), and one that merges with Merge note types on as `package/notetype-merge#J4.5` says (U121).
 
 ### N3.1 A save that changes nothing writes nothing (R906, R1472)
 
@@ -96,7 +96,7 @@ Every local save, add and clone applies these steps in this order. A step that r
 
 Anki's Python layer has a rename of its own for note types added or saved through its legacy API (a hyphen and five characters of a checksum); Meguri follows the core rule of step 7 (R907).
 
-Saves of rows arriving by sync or import go through the same normalization in Anki; whether and how Meguri applies it there is U107's and U120's.
+Saves of rows arriving by sync or import go through the same normalization in Anki; whether and how Meguri applies it to sync is U107's, and an `.apkg` import without a merge applies steps 1 to 8 as an unchecked save (`package/apkg-import#I7`, U120); with a merge, the merged note type follows `package/notetype-merge#J4.5` (steps 1 to 5, 7 and 8 as an unchecked save, J4.4 standing in for step 6; U121).
 
 ## N5. Adding a note type
 

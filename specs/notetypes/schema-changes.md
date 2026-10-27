@@ -23,7 +23,7 @@ Each op that can change the schema declares a reason. The table is the whole lis
 | Reason | Op (owner) | Sets `scm` | Structural edit |
 |---|---|---|---|
 | `fields_changed` | a note type save whose fields are added, removed or reordered (U34) | yes | yes |
-| `sort_field_changed` | a note type save that makes another field the sort field (U34, R926) | yes | yes |
+| `sort_field_changed` | a note type save that makes another field the sort field (U34, R926); an `.apkg` update of a note type that changes its sort field (U120, `package/apkg-import#I7`) | yes | yes |
 | `templates_changed` | a note type save whose templates are added, removed or reordered (U34) | yes | yes |
 | `notetype_removed` | deleting a note type (U34, R918) | yes | yes |
 | `notetype_restored` | Restore to Default when it changes the field or template structure (U34, R914) | yes | yes |
@@ -105,6 +105,6 @@ R1889 references: `conformance/dsl#D13`; `conformance/deviations.yaml` header (l
 |---|---|---|---|
 | A schema change while `scm <= ls` (the first one since a sync) | the desktop warns that the next sync must upload the whole collection and that unsynced changes on other devices will be lost; the change runs only when the user accepts | the change commits without a question (G4); the next manual Anki transfer's preview shows the one-way consequence (R1476) | `core/crates/meguri-engine/tests/schema_gate.rs` `a_schema_op_commits_at_once_while_scm_is_at_ls` (U29: commits, sets `scm`, takes no confirmation input); for preset removal, `core/crates/meguri-engine/tests/deck_options.rs` `removing_a_preset_with_scm_at_ls_commits_without_confirmation` (U49, the deck options save) and `core/crates/meguri-engine/tests/deck_config.rs` `removal_commits_without_confirmation_and_undo_restores_schema_and_rows` (the preset operation, `decks/deck-presets#P13`) |
 | A user says no to that warning | nothing changes | not applicable: no op takes a confirmation input or returns `NeedsSchemaConfirmation` | `schema_gate.rs` `no_op_takes_a_schema_confirmation_input` (U29) |
-| A safety backup before a structural edit | none | one per structural edit (`package/backup-triggers#T6.1`, R2008) | `core/crates/meguri-engine/tests/maintenance_scheduler.rs` safety-class tests (`package/backup-triggers` T10), and each structural unit's ordering test (U28, U34, U35, U49, U121) |
+| A safety backup before a structural edit | none | one per structural edit (`package/backup-triggers#T6.1`, R2008) | `core/crates/meguri-engine/tests/maintenance_scheduler.rs` safety-class tests (`package/backup-triggers` T10), and each structural unit's ordering test (U28, U34, U35, U49, U120, U121); U120's is the T10 ordering test for an import that changes a sort field (`package/apkg-import` I18.3); U35's is `core/crates/meguri-engine/tests/change_notetype.rs` (no confirmation input, the safety backup's ordering and coalescing; `notetypes/change-notetype`) |
 
 This table authorizes no scenario transform. The oracle runs schema ops as accepted (`conformance/notetype-ops` T9, `conformance/deck-ops` K9), so no golden holds the question, and `conformance/deviations.yaml` has no entry for it: its entries are golden transforms (`conformance/dsl#D13`).

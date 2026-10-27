@@ -53,6 +53,8 @@ A read-only connection, opened with a `file:` URI:
 
    The collection uses the v2 or v3 scheduler only when that value parses as the JSON integer `2`. A missing key, `1`, any other number (`3`, `2.0`), a string or unparseable JSON mean the v1 scheduler: refuse with `V1Scheduler`. Anki reads the key the same way and treats the same values as v1, but opens such a file and upgrades its scheduler in place; Meguri refuses instead and tells the user to open the collection once in current Anki (deviation `storage-v1-scheduler-refused`, R1482). When `col.conf` at `ver` 11 is not a JSON object, refuse with `UpgradeFailed` (the upgrade could not read it either).
 
+   The one exception to the `V1Scheduler` refusal is the staging copy of an `.apkg` import's package collection: its inspect runs this gate without that refusal, and I3.2 then decides whether the copy's scheduler is converted (`package/apkg-import#I3` step 3, I3.2). That copy is read and never activated; every other refusal of this phase applies to it.
+
 ### C2.3 Phase 3: pre-upgrade copy
 
 Only when `ver` is 11, 14, 15, 16 or 17: `storage/schema-upgrade#U2` (R1480). Nothing is written to the original before the copy is complete, except C3's rollback of a hot journal, which restores the last committed state that the copy then holds.

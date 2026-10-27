@@ -120,7 +120,7 @@ Resolving a name to the file that holds it, for rendering (U67), Check Media (U1
 
 ## M6. Exact-name writes (R1587)
 
-The path for bytes whose name is fixed by someone else: bundled static files such as an integration's `_`-prefixed fonts (`ensure_static_media`, R1587, AE66), files ingested from an external folder under their own names (U143), CloudKit blob installs (`sync/cloudkit-records#K9.3`, U114), and, where U111's `specs/sync/media-sync.md` says so, media sync downloads of normalized names. No lowercasing and no hash name: the name stays as given.
+The path for bytes whose name is fixed by someone else: bundled static files such as an integration's `_`-prefixed fonts (`ensure_static_media`, R1587, AE66), files ingested from an external folder under their own names (U143), Check Media's inline-image extraction under its `paste-<sha1>` names (U130, `maintenance/check-media#C7`), CloudKit blob installs (`sync/cloudkit-records#K9.3`, U114), and, where U111's `specs/sync/media-sync.md` says so, media sync downloads of normalized names. No lowercasing and no hash name: the name stays as given.
 
 Input: name N and bytes B with content hash H.
 
@@ -205,6 +205,8 @@ The trash holds every media file Meguri removes. Emptying it is the only permane
 - If it resolves to nothing but the journal still records the name as live (the file vanished without a registration), the entry becomes a deletion, pending.
 - Otherwise the name is skipped. A missing name never stops the names after it.
 
+The exact-name form, `trash_exact(name)`, moves one entry by its exact listed name: the directory entry as the folder listed it, never put in NFC and never resolved to a case variant (M5 steps 1 and 3 do not apply). When a directory entry has exactly that name, it moves to the trash as a new entry recording that exact name, its content hash, size and the time, and the entry becomes a pending deletion only when the journal records that exact name as a live syncable file. When no directory entry has exactly that name, nothing moves, the journal does not change and the call reports the name as gone. The caller's re-check of the name runs in the same journal-serialized step as the move (`media/media-journal#J5`), so nothing changes the entry between the two. Its one caller is Check Media's fix (U130, `maintenance/check-media#C10` step 5). Decided 2026-10-27 (data safety first, from C10): resolving an old name by lookup could pick the kept file itself and trash referenced bytes; the exact-name move cannot.
+
 Every Meguri path that removes a media file goes through this (R2018, U130's enumeration): Check Media fixes and Delete Unused, server deletions in media sync (U111), incoming CloudKit media-name tombstones and content conflicts (`sync/cloudkit-records#K9.4`, K15.9; U114), AnkiConnect's `deleteMediaFile` (U143), replacements by M4 step 4 and M6 step 3, and M13's launch recovery.
 
 ### M10.2 Restoring
@@ -220,6 +222,8 @@ Restoring never overwrites a file (R1649). With two versions of `a.jpg` in the t
 
 - `empty()` deletes every trash entry permanently. The media folder and the journal do not change. (Check Media's Empty Trash uses identity forms of these two calls and deletes only the entries its preflight listed: `maintenance/check-media#C17`.)
 - `summary()` returns the number of entries and their total size in bytes (Check Media shows it before emptying, `maintenance/check-media#C17`).
+- `summary_with_ids()` returns what `summary()` returns, the count and the total size, together with the identities of the entries it counted (`media/media-journal#J3`), all read in one step, so the count and size are exactly those of the identities returned.
+- `empty_entries(identities)` deletes permanently only the listed entries, one at a time, and skips an identity the trash no longer holds; it returns the count and bytes it deleted. A cancel is honoured between entries, and the entries already deleted stay deleted. An entry trashed after the identities were read is never deleted by it. The media folder and the journal do not change. These two forms are what Check Media's Empty Trash uses (`maintenance/check-media#C17`); it never calls `empty()`.
 
 ## M11. What makes a file pending for the next media sync (R986)
 
@@ -290,7 +294,7 @@ Neutral scenarios under `conformance/scenarios/media/` use the vocabulary of `co
 - `register/ignored`, `register/size-limit`, `register/outside-changes`: M7 and M8.
 - `corpus/names-01`: 2,000 generated adds with case variants and collisions (`conformance/corpora/media/generate.py`), the naming differential.
 
-Meguri-only behavior has no golden and is tested in Meguri's own tests (U31's test files): M5 lookup, M6 (`ensure_static_media`), M9, M10.3 `summary`, M13 staging and its crash cases, the M7.3 change-check cost and the tombstone index, and the refusals.
+Meguri-only behavior has no golden and is tested in Meguri's own tests (U31's test files): M5 lookup, M6 (`ensure_static_media`), M9, M10.1 `trash_exact` (the exact name, never put in NFC or resolved to a case variant; `gone` changes nothing; a pending deletion only for that exact live syncable name), M10.3 `summary`, `summary_with_ids` (count and size exactly those of the identities returned) and `empty_entries` (an entry trashed after the identities were read survives, a missing identity is skipped, a cancel between entries keeps the entries already deleted), M13 staging and its crash cases, the M7.3 change-check cost and the tombstone index, and the refusals.
 
 ## M16. CloudKit media state (R1572, R2057, KTD25)
 

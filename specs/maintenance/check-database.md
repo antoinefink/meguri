@@ -206,7 +206,7 @@ The job's result on success:
 | `schema_changed` | whether C11 set `scm` |
 | `changed` | whether the op changed at least one row |
 | `missing_indexes` | C4's list, as names |
-| `device_records_repaired` | the `deviceState` keys C14 replaced because they were malformed |
+| `device_records_repaired` | the `deviceState` keys C14 replaced or removed because they were malformed |
 | `safety_backup` | the backup's file name (C5) |
 | `instant` | the repair instant, epoch milliseconds |
 
@@ -236,7 +236,7 @@ The job's result on success:
 - **Derived store** (R1489): every component is marked `Stale` and rebuilt (`storage/derived-store`), whether or not a row changed.
 - **Records** (`engine/collection-replace#R6.1`, U32's sidecar):
   - `lastCheckDatabase` = `{instant, result}` with `result` the `problems` object, after the commit; `{instant, result: {"error": "corrupt"}}` after a corrupt verdict (C4, C6). Any other error and a cancel record no `lastCheckDatabase`.
-  - Check Database is the repair path for malformed maintenance records (decided 2026-10-27, from `maintenance/optimize-integrity` M4.1). A malformed `lastQuickCheck`, `lastCheckDatabase` or `lastBackup` is replaced by the value this run writes to it (C4, this list, the safety backup's record). After the commit, a malformed `optimizeCadenceStart` is replaced by `now_ms`; a malformed `lastOptimize` is removed and `optimizeCadenceStart` set to `now_ms`, so the 14-day cadence starts again from the repair (M4.1). Each replaced or removed key is listed in `device_records_repaired`. The replacement goes through the sidecar's explicit replace of a malformed record, not its ordinary setter, which refuses to replace one (R6.1).
+  - Check Database is the repair path for malformed maintenance records (decided 2026-10-27, from `maintenance/optimize-integrity` M4.1). A malformed `lastQuickCheck`, `lastCheckDatabase` or `lastBackup` is replaced by the value this run writes to it (C4, this list, the safety backup's record). After the commit, a malformed `optimizeCadenceStart` is replaced by `now_ms`; a malformed `lastOptimize` is removed and `optimizeCadenceStart` set to `now_ms`, so the 14-day cadence starts again from the repair (M4.1). After the commit, a malformed `optimizerLog` (`sched/optimizer#O14`) is removed: the member is deleted from `deviceState` and nothing replaces it, which loses only the optimizer's run history on this device; the next run's end writes a new one. Each replaced or removed key is listed in `device_records_repaired`. The replacement goes through the sidecar's explicit replace of a malformed record, not its ordinary setter, which refuses to replace one (R6.1).
 - The status record (`maintenance/optimize-integrity` M10) shows `lastCheckDatabase`.
 - **Slot**: released before `JobFinished`; one `Available` event follows (`engine/lifecycle` L6).
 
@@ -314,7 +314,7 @@ Held for a driver change (the `check_db` op knows only the rejection `corrupt`; 
 - A row that cannot be decoded (a deck blob made invalid) gives `CheckFailed{cards}` and no change.
 - Cancel at each cancellable point gives `Cancelled` with no record and no change; a cancel during the repair op gives `past_cancel_point` and a complete report.
 - `Busy{running_op}` while restore holds the slot; `CollectionUnavailable` in `NoCollection` and `ExclusiveBusy`.
-- After a run: both undo histories empty with `ClearedByNonUndoableOp`; every derived component `Stale`; the status shows the run's time and result; malformed `lastOptimize` and `optimizeCadenceStart` repaired and listed.
+- After a run: both undo histories empty with `ClearedByNonUndoableOp`; every derived component `Stale`; the status shows the run's time and result; malformed `lastOptimize`, `optimizeCadenceStart` and `optimizerLog` repaired (`optimizerLog` removed, nothing written in its place, the other `deviceState` members kept) and listed in `device_records_repaired`.
 - An answer submitted during the repair op is committed after it and visible; a card answered after the backup and before the repair op keeps its new scheduling unless a repair applies to its new values.
 - T1 (R1925): a collection opened, studied (200 answers) and closed by Meguri gives the oracle's Check Database zero problems (`tools/mg oracle check`).
 - Bench (R1847): C16's budget.
