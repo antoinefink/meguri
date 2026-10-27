@@ -1,0 +1,79 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-10T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_text": "Studied 50 cards in 6.67 minutes today (8s/card)",
+        "today_stats": [
+          {
+            "answers": 50,
+            "correct": 50,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 50,
+            "time_ms": 400000
+          },
+          {
+            "answers": 50,
+            "correct": 50,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 50,
+            "time_ms": 400000
+          }
+        ]
+      },
+      {},
+      {
+        "studied_today_text": "Studied 50 cards in 6.67 minutes today (8s/card)",
+        "today_stats": [
+          {
+            "answers": 50,
+            "correct": 50,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 50,
+            "time_ms": 400000
+          },
+          {
+            "answers": 40,
+            "correct": 40,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 40,
+            "time_ms": 320000
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/today/ae53-deleted-card",
+  "scenario_sha256": "6572879361751289c5168f14072d44dab3a23863e1b50423077b86a5edddb981",
+  "tz": "Europe/Paris"
+}

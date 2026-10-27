@@ -1,0 +1,99 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-10T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "today_stats": [
+          {
+            "answers": 4,
+            "correct": 4,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 4,
+            "time_ms": 11000
+          },
+          {
+            "answers": 4,
+            "correct": 4,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 4,
+            "time_ms": 11000
+          },
+          {
+            "answers": 4,
+            "correct": 4,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 4,
+            "time_ms": 11000
+          },
+          {
+            "answers": 3,
+            "correct": 3,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 3,
+            "time_ms": 7000
+          },
+          {
+            "answers": 2,
+            "correct": 2,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 2,
+            "time_ms": 4000
+          },
+          {
+            "answers": 1,
+            "correct": 1,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 1,
+            "time_ms": 3000
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/today/search-scopes",
+  "scenario_sha256": "b7e73d75f4d9b9ca385377e4db30723a9e89b84e968f04f7bf606f7401ec15a0",
+  "tz": "Europe/Paris"
+}

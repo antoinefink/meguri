@@ -1,0 +1,28 @@
+# stats/studied-today T3.2 (R1282): the Deck scope of the Today section
+# covers the deck and its descendants, and a card's answers follow the card
+# to its current deck (2026-10-12, Europe/Paris, rollover 4). Moving #c4 from
+# Other to Lang after its answer moves that answer to Lang's scope.
+id: stats/today/deck-subtree
+clock: {tz: Europe/Paris, start: "2026-10-10T12:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang, "Lang::Verbs", Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [t1, x]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [t2, x]}
+    - {notetype: Pair, deck: Other, fields: [t3, x]}
+    - {notetype: Pair, deck: Other, fields: [t4, x]}
+steps:
+  - set_clock: "2026-10-12T20:00:00"
+  # From 09:00, one minute apart, 5,000 ms each: #c1 twice, #c2 three
+  # times, #c3 once, #c4 once; then one answer on card id 1000, which no
+  # card has.
+  - db_exec: {sql: "WITH c(k, id) AS (SELECT ROW_NUMBER() OVER (ORDER BY id) - 1, id FROM cards), r(i, k) AS (VALUES (0, 0), (1, 0), (2, 1), (3, 1), (4, 1), (5, 2), (6, 3)) INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1791788400000 + 60000 * r.i, c.id, -1, 3, 10, 5, 2500, 5000, 1 FROM r JOIN c ON c.k = r.k"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791788820000, 1000, -1, 3, 10, 5, 2500, 5000, 1)"}
+  - observe: [{today_stats: [{deck: Lang}, {deck: "Lang::Verbs"}, {deck: Other}, collection]}]
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Lang') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - observe: [{today_stats: [{deck: Lang}, {deck: "Lang::Verbs"}, {deck: Other}, collection]}]

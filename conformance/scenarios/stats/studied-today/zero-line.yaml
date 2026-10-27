@@ -1,0 +1,7 @@
+# stats/studied-today T2.4, T4.1 (R1298): with no review-log rows the Home
+# line still shows, as the zero line, and the Stats Today section has no
+# answers, so it shows its "no cards" state.
+id: stats/studied-today/zero-line
+clock: {tz: Europe/Paris, start: "2026-10-12T09:00:00"}
+steps:
+  - observe: [studied_today_text, studied_today_raw, {today_stats: [collection]}]

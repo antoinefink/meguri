@@ -1,0 +1,45 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-30T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 3,
+          "time_ms": 56000
+        },
+        "studied_today_text": "Studied 3 cards in 56 seconds today (18.67s/card)",
+        "today_stats": [
+          {
+            "answers": 4,
+            "correct": 4,
+            "filtered": 0,
+            "learn": 0,
+            "mature": 0,
+            "mature_correct": 0,
+            "relearn": 0,
+            "review": 4,
+            "time_ms": 60000
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/today/day-start-los-angeles-dst",
+  "scenario_sha256": "91ecd40cbd182831ebb8d224cf4e4c3bb22e8fc006dac01b6097344d3f552bec",
+  "tz": "America/Los_Angeles"
+}
