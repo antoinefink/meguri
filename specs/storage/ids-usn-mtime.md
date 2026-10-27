@@ -1,9 +1,10 @@
 # Ids, USN and modification times
 
 Spec: storage/ids-usn-mtime
-Requirements: R772, R776, R906, R1456, R1469, R1470, R1471, R1472, R1474
-Anki: 26.09.3
+Requirements: R772, R776, R906, R1456, R1469, R1470, R1471, R1472, R1474; supports R2052 (I5) and R2066 (the CloudKit rows of I4, I5 and S3)
+Anki: 26.09.3; I5 and the CloudKit rows of I4 and S3 are Meguri design
 Scenarios: conformance/scenarios/storage/ids/, conformance/scenarios/storage/noop/, conformance/scenarios/storage/stamps/
+Status: Under review (R2066) for I5 and the `CloudIncoming` and `CloudRekey` parts of I4 and S3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 How a row of `collection.anki2` gets its id when it is created, what a write does to its `usn` and modification time, when a write is skipped because it changes nothing, and how `col.mod` follows changes. Graves are in `graves.md`, the `config` table in `config-table.md`. "Now" is the U21 clock seam's current instant: `now_ms` in epoch milliseconds, `now_s` = `now_ms` divided by 1000, rounded down.
 
@@ -59,6 +60,22 @@ Anki has no cap, so its ids follow I2 even two days ahead. This difference is a 
 
 Rows that a sync, an import, an undo restore or a raw copy brings keep their given ids: no allocation, and no cap, applies to them. A review-log row whose given id already exists is not inserted, and the existing row stays as it is; that is Anki's rule for review-log rows from a sync, an import and an undo restore. The owning areas define the other tables' rules for given ids (U107 sync, U122 import). For undo (`engine/undo` A8): only a writer outside the undo history can take the id of a row an undo or redo puts back, and Meguri's check refuses that undo or redo before it writes (deviation `undo-revlog-taken-id-redo`).
 
+Rows that a `CloudIncoming` op writes (`sync/cloudkit-records#K13.2`) keep the ids their records carry; they are not allocated. When such an id is already used locally by another object, `sync/cloudkit-records#K14` decides: the same object is merged, a collision re-keys the local object first (I5). Added for CloudKit.
+
+## I5. Re-key allocation (Meguri, CloudKit)
+
+A `CloudRekey` op (`sync/cloudkit-records#K14.2`) moves a local row of an I1 table to a new id. The new id is not I2's candidate: it is the smallest integer greater than the old id that no row of the same table uses and that no entity of the binding's tracking holds for that kind, and it must be at most `now_ms + 86 400 000` (I3's cap). Unlike I2, this fills gaps above the old id. If no such id exists, the op fails, writes nothing, and status reports needs attention (K14.2).
+
+| Ids already in use (table or tracking) | Old id | `now_ms` | New id |
+|---|---|---|---|
+| T | T | T + 5 s | T + 1 |
+| T, T + 1, T + 3 | T | T + 5 s | T + 2 |
+| T, T + 1 held only by a tracking entity | T | T + 5 s | T + 2 |
+| T + 1 day + 5 s (the clock moved back) | T + 1 day + 5 s | T | none: every id above the old one is past the cap; the re-key fails |
+
+- The new id stays just above the old one, so a review's instant (`revlog.id`, I1), a note's or card's added date and the sort order move by at most a few milliseconds (K14.2).
+- The default deck and the default preset keep their fixed id 1 (I1); K14.1 decides whether a re-key applies to them, not this section.
+
 ## S1. Stamp columns
 
 | Table | Modification time | USN |
@@ -94,6 +111,12 @@ A row that a local action creates or changes gets `usn` -1 and, where S1 lists a
 | Raw write: staging copies (U33, U122, U123), the unbury at day rollover (U40), scenario `db_exec` | as written | as written | unchanged |
 | Day clock config writes: `rollover`, `localOffset`, `lastUnburied` (`sched/day-clock#D5`, `#D7`) | -1 | `now_s` | unchanged |
 | Schema upgrade on open (`storage/schema-upgrade`, not an operation) | as that spec gives: -1 only for the decks and cards it changes (U9.1) | as that spec gives | unchanged |
+| CloudKit incoming apply (`CloudIncoming`, `sync/cloudkit-records#K11.3`, `#K13.2`): a row that takes the incoming version | -1, so the next manual Anki transfer from this device sends it | the payload's (as received) | set to `now_ms` when the op changes something (S5) |
+| `CloudIncoming`: a row written with a merge result that differs from the local row (`sync/cloudkit-records#K15.1`) | -1 | `now_s` | set to `now_ms` (S5) |
+| `CloudIncoming`: the grave an incoming tombstone of a note, card or deck inserts, insert-or-ignore (`sync/cloudkit-records#K17.2`, `storage/graves#G2`) | -1 | none | as the op (S5) |
+| CloudKit re-key (`CloudRekey`, `sync/cloudkit-records#K14.2`): the moved row under its new id (I5), and every row whose reference to it the op rewrites, as a local change (S2) | -1 | `now_s` where S1 lists one; a rewritten `templates` or `fields` row stamps its note type's row instead (S1) | set to `now_ms` (S5) |
+
+The CloudKit rows (added for CloudKit; the others do not change): a `CloudIncoming` op leaves `col.usn` and `col.ls` alone, and sets `col.scm` only when it applies a structural generation that changes local structure (`notetypes/schema-changes#G1`, `cloudkit_structure_applied`). Template rows keep S1's rule and are written as data: an incoming template's `mtime_secs` is the payload's (`sync/cloudkit-records#K6`); its `usn`, which no payload carries, is 0 for a new template and the stored value for an existing one. A `CloudRekey` writes no grave for the old id: the server version is applied under that id next (K14.2). CloudKit tracking never writes a stamp column for its own bookkeeping (K11.3).
 
 Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key. That config write, like the day clock's writes of `rollover` and `localOffset`, stamps the row as a local change but leaves `col.mod` alone, as Anki does: Anki makes these writes outside any operation (`sched/day-clock#D5`).
 

@@ -4,12 +4,14 @@ Spec: storage/new-collection
 Requirements: R161, R913, R596, R1449, R2016
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/new-collection/
+Status: Under review (R2066) for the iCloud bullet of B1, with `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 What a collection that Meguri creates holds ("Start Empty", R161, and every other path that needs an empty collection), so that it equals, row for row, the collection Anki creates at the same instant in the same time zone, apart from the stock note types' template text and CSS (R908). The file format is `storage/schema-18`; the day-clock values are `sched/day-clock` D11; the stock note types `notetypes/stock-kinds` K2; the deck and preset records `decks/decks` D4 and `decks/deck-presets` P2. "The creation instant" `t` is the clock's current instant when the collection is created: `now_ms` and `now_s` below are taken at `t`.
 
 ## B1. When
 
 - The bootstrap runs only to create a collection where none exists: R161's "Start Empty", and the empty collection that a first sync then fills (R158). It never runs over an existing `collection.anki2`.
+- For iCloud (wording of 2026-10-27; the bootstrap itself does not change): "Start Empty" on a device that connects to an account with no iCloud collection makes this collection, which is then published as a new iCloud collection (`sync/cloudkit-recovery#V13.3`, first row). Connecting a device with no collection to an existing iCloud collection (R158, V13.3 second row) does not run the bootstrap and does not fill a bootstrapped collection: the device stages the iCloud collection as a new file (`sync/cloudkit-records#K18.4`) and activates it whole through `engine/collection-replace` (`CloudAdopt`). Its rows come only from the iCloud collection. The words "the empty collection that a first sync then fills" above do not apply to iCloud; they stay as written for manual Anki transfers (frozen; KTD26).
 - It creates the collection file only. The media folder and Meguri's own files next to the collection are their owners' (U31, U26).
 
 ## B2. The file

@@ -1,9 +1,10 @@
 # Backup triggers, safety backups and restore
 
 Spec: package/backup-triggers
-Requirements: R1630, R1631, R1632, R1637 (core), R1638, R2008, R1475 (backup side), R2010, R2020 (backup side), R1662 (backup side), R1539 (provider to U109); budgets R1848, R1854
+Requirements: R1630, R1631, R1632, R1637 (core), R1638, R2008, R1475 (backup side), R2010, R2020 (backup side), R1662 (backup side), R1539 (provider to U109), R2056 (local side of the iCloud replacements); budgets R1848, R1854
 Anki: 26.09.3 for T2.1, T2.2 and T4.1 (when Anki makes a backup and which operations force one); every other section is Meguri design from the Product Contract and the plan (U127)
 Scenarios: conformance/scenarios/package/backup-triggers/
+Status: Under review (R2066) for the two iCloud rows of T6.1 and the T6.1 bullet that explains them, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 When Meguri backs up: periodic backups (T2, T3), "Back Up Now" (T5), safety backups before destructive operations (T6), the byte copy of a damaged collection (T7), and restore (T8). Names, the writer, retention, the limits and the listing are `package/backups`; the package format is `package/container`; the swap is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/backup-trigger-ops.md` on top of `specs/conformance/backup-ops.md`.
 
@@ -120,8 +121,8 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 
 | Operation | Unit | Taken | Anki |
 |---|---|---|---|
-| one-way download (and the recovery download from `Failed{Corrupt}`) | U109 (U132) | always | yes (download) |
-| one-way upload | U109 | always | no |
+| one-way download from an Anki server, the recovery download from `Failed{Corrupt}` included (a manual Anki transfer, frozen with the Anki server work; KTD26) | U109 | always | yes (download) |
+| one-way upload to an Anki server (a manual Anki transfer, frozen; KTD26) | U109 | always | no |
 | restore | T8 | always | no |
 | `.colpkg` import | U124 | always | yes |
 | Check Database | U128 | always | yes |
@@ -131,23 +132,26 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 | deleting a note type | U34 | always | no |
 | a structural edit (`notetypes/schema-changes#G2`) other than deleting a note type (row above): reasons `fields_changed`, `sort_field_changed`, `templates_changed`, `notetype_restored`, `notes_notetype_changed`, `preset_removed` or `notetypes_merged` (R1475, R2008) | U34, U35, U28, U49, U121 (classification U29) | whenever the op's plan classifies it so (`notetypes/schema-changes#G3`), whatever `scm` and `ls` hold; once per logical operation, before its first collection write; for an `.apkg` import that merges note types (U121), before the import's first collection write | no |
 | any op whose `engine/op-model#O9` undo class is "destructive, not undoable" | its unit | always (R2020) | — |
+| Replace local collection from iCloud (`CloudAdopt`: the adoption of `sync/cloudkit-recovery#V14`, also at a first connection, V13.3, and from the damaged-collection screen, V19) | U113, U114 | always when a collection file exists: B4's backup, or T7's byte copy when the collection is damaged; none without a collection file (T6.2) | — |
+| Replace iCloud collection (`sync/cloudkit-recovery#V15`) | U113, U114 | never: the local collection does not change. The replaced iCloud collection stays recoverable as the previous epoch for 30 days (`sync/cloudkit-records#K18.5`, `sync/cloudkit-recovery#V14.1`) | — |
 
 - A conditional row is decided when the op is submitted, from the state its plan reads.
 - A structural edit has no confirmation step (`notetypes/schema-changes#G4`, R1476). When its unit shows a destructive-mapping preview, the user accepts that preview before the op is submitted: fields, templates or cards that the edit removes (U34, U35), Restore to Default's question (R914), the note type delete question (R918), the decks a preset removal reassigns (R733), or the merge preview of an `.apkg` import (U121). The backup follows the submit and precedes the op's first collection write (T6.2). Changed 2026-10-27: this row replaces one that took the backup only for the first schema change since the last sync, after the Anki confirmation that R1476 no longer has.
 - Coalescing (decided 2026-10-27): a structural edit whose `engine/op-model#O9` undo class is undoable takes no new safety backup when, in this opening, a safety backup ended less than 10 minutes before the op is submitted and every commit since that backup can still be undone. In every other case it takes one. Ops of the "destructive, not undoable" class always take their own (row above). This keeps one recoverable copy for a burst of note type edits without a full backup, and its wait, per edit.
 - An incoming CloudKit change that sets `scm` (`notetypes/schema-changes#G2` `cloudkit_structure_applied`) takes no safety backup on the receiving device; the device that made the edit took one (decided 2026-10-27).
 - A collection backup holds no media: the backup before Delete Unused media protects the collection only; the files themselves go to the trash (R2018).
+- The two iCloud rows (added 2026-10-27, R2056) keep a recoverable copy of each side being replaced. `CloudAdopt` takes its backup in the `Working` step of its exclusive phase, after one `package/container#P10` preflight for it (`sync/cloudkit-recovery#V14.2` step 7), the way T6.2 runs the backup of restore and `.colpkg` import in their phases. It is protected from retention until the adoption ends, and it holds no media, which the preview says (V14.2 step 1). A failure refuses the adoption with `SafetyBackupFailed` before the swap, and the local collection is unchanged (V14.3).
 
 ### T6.2 How it runs
 
 - The op's descriptor carries its safety class. Before the op's write phase is queued, the executor (U24) asks the engine's `BackupService` port for a forced backup and waits for it. `meguri-package` implements the port and `meguri-host` registers it when it opens a collection (U38), so the app, the local servers and headless runs all take the same backups.
-- An op of an exclusive phase (one-way sync, restore, `.colpkg` import) takes it during the phase's `Working` step, after the drain (`engine/lifecycle#L7` step 3). A plan-and-commit op (`engine/op-model#O6`) takes it after its planning and before its write phase; a replan after `Stale` takes no second one.
+- An op of an exclusive phase (one-way sync, a manual Anki transfer, frozen, KTD26; restore; `.colpkg` import; `CloudAdopt`, `sync/cloudkit-recovery#V14.2` step 7) takes it during the phase's `Working` step, after the drain (`engine/lifecycle#L7` step 3). `CloudAdopt` was added for CloudKit (R2066 review with the T6.1 iCloud rows); the others do not change. A plan-and-commit op (`engine/op-model#O6`) takes it after its planning and before its write phase; a replan after `Stale` takes no second one.
 - Other ops keep committing while it runs (answers never wait for it); it holds every commit made before its snapshot, and the guarded op commits only after it is published. In the op log, the backup's instant precedes the op's commit.
 - The backup's name is protected from retention (`package/backups#B5.1`) from its publication until the op ends (commit, failure or cancel).
 - It writes the record (T2.3, except a T7 copy); the scheduler re-evaluates (T3.3).
 - **Failure**: the op is refused with `SafetyBackupFailed{cause}` (cause: the B4 or T7 error), none of its writes runs and the collection is unchanged. It never proceeds without the backup.
 - **Cancel**: cancelling the op while its backup runs cancels the backup (B4) and the op ends `Cancelled`. A backup already published stays.
-- **Nothing to back up**: with no collection file at the collection path (a first download into an empty directory), the op proceeds without a safety backup.
+- **Nothing to back up**: with no collection file at the collection path (a first download into an empty directory, or a `CloudAdopt` at a first connection with no local collection, `sync/cloudkit-recovery#V13.3`), the op proceeds without a safety backup.
 
 ## T7. Safety backup of a damaged collection
 
@@ -211,5 +215,6 @@ The errors of `package/backups#B4`, `package/container#P13`, `engine/collection-
 | T7: a page-corrupted collection: the safety backup is a byte copy whose SHA-1 equals the source's, `corrupt-…` named, kept by retention, absent from the listing; disk full: `SafetyBackupFailed`, no main copy | `core/crates/meguri-package/tests/restore.rs` |
 | T8: a backup with a corrupted page refused, the collection hash unchanged (R1638); refused while a session is open; once in ExclusiveBusy an answer is refused and every answer committed before is in the pre-restore backup; cancel before the rename keeps lifecycle and generation; restore of a server copy | same file |
 | T8 end to end: restore removes five later reviews, emits CollectionReplaced and retains the pre-restore backup. R6 publication fencing survives restart and a manual Anki transfer. | same file, in Docker and in the iOS simulator through U133a |
+| T6.1 iCloud rows: a `CloudAdopt` of a staged collection takes a B4 backup in its `Working` step, before the swap, and the backup holds every answer committed before the phase; a damaged collection gets a T7 byte copy; no collection file, no backup; disk full gives `SafetyBackupFailed` and the local collection hash is unchanged. Replace iCloud collection writes no backup | U113 and U114's recovery tests, with fake staging (`sync/cloudkit-recovery#V23`) |
 
 Goldens: every `package/backup-triggers` scenario has one, recorded by the oracle with the op `backup` (`specs/conformance/backup-trigger-ops.md` H1), and their outcomes follow T2 and T4. Two goldens hold Anki's side of a deviation, and the deviation gives Meguri's: `forced-unchanged` (T4.2) and `reopen` (T2.3). The scenarios fail goldens-check and the T0 run until U127's adapter declares `backup` and the testkit's scenario model reads it (`backup-trigger-ops` H4), besides U126's `add_backup_files`, `force_backup` and `backup_files` (`backup-ops` F8).

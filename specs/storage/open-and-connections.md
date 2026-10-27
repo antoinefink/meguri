@@ -1,9 +1,10 @@
 # Opening a collection and its connections
 
 Spec: storage/open-and-connections
-Requirements: R1449, R1451, R1452, R1454, R1479, R1482, R2013, R2016; supports R1823, R1491 and R2006 (C9, with U24's writer and U32)
+Requirements: R1449, R1451, R1452, R1454, R1479, R1482, R2013, R2016; supports R1823, R1491 and R2006 (C9, with U24's writer and U32), R2051 (C9.2's covered seq) and R2066 (the `cloud` reader of C6)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/open/
+Status: Under review (R2066) for the `cloud` row and bullet of C6 and the covered seq of C9.2, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Do not implement them until approved. Every other section is in force and unchanged.
 
 How Meguri decides whether it may open a file, opens it without touching files it must refuse, and which SQLite connections it then keeps with which settings. The file layout is `storage/schema-18`; the upgrade of schemas 11 to 17 is `storage/schema-upgrade`. Close orchestration, suspension, the sidecar and the advisory lock that keeps a second Meguri process out (R2014) are U32's; this spec gives the storage primitives they use.
 
@@ -120,12 +121,14 @@ Read-only connections, each assigned to one role and never pooled or shared acro
 | interactive | review session, rendering, Card Info, editor open | on |
 | query | row pages, deck counts, heatmap | on |
 | search worker (one per worker; the search area sets the count) | searches; interruptible | on |
-| sync | normal and one-way sync snapshots, `VACUUM INTO` for a full upload | off |
+| sync | normal and one-way sync snapshots, `VACUUM INTO` for a full upload (manual Anki transfers, frozen; KTD26) | off |
+| cloud | CloudKit barrier snapshots and batch builds (`sync/policy#P7.1`), the reconcile scan (`sync/cloudkit-records#K11.4`); one user at a time, leased off the writer (`engine/lifecycle#L11`) | on |
 | maintenance | maintenance, backups (`VACUUM INTO`), stats cache builds, derived rebuilds | off |
 | server (two, macOS only, while the local servers run) | local servers' read handlers (R1790) | on |
 
 - Every reader: `busy_timeout` 250 ms, `cache_size` -40960, `temp_store` `MEMORY`, prepared-statement cache 128.
 - `query_only` makes SQLite refuse every write, temporary tables included. The sync and maintenance readers do without it because `VACUUM INTO` fails under it; on them `mode=ro` still refuses every write to the collection file (SQLite's read-only error). SQLite would allow TEMP tables there; Meguri creates none on any reader.
+- The `cloud` reader (added for CloudKit) never runs `VACUUM INTO`, so it keeps `query_only` on. It is separate from the sync reader, so a manual transfer's long snapshot never blocks a barrier, and from the maintenance reader, so a barrier never waits for a backup. It has every reader's settings (the bullet above) and is opened lazily like the others.
 - A reader is opened when its role is first used and kept until the collection closes; server readers open and close with the servers.
 - Long-lived snapshots (a sync, a backup, a derived rebuild) never use the interactive, query or server readers.
 
@@ -175,6 +178,9 @@ Without the flush, a returned commit becomes durable only at the next checkpoint
 - One sync covers every commit that returned before the sync started. A commit that returns during a sync is covered by the next one. Commits close together share one sync: U24's writer syncs 750 ms after the first commit that no sync covers yet, which leaves room for one write phase of about 200 ms (`engine/op-model` O6) and the sync itself inside the 1 s.
 - Ops waiting in the queue never delay a flush past its deadline. An op that can hold the writer for long (a declared long write or a maintenance task, `engine/op-model` O8) starts only after the flush that is pending, so the commits before it keep the 1 s bound.
 - A writer with no unsynced commit sets no timer and issues no sync (R1854).
+- **Covered seq** (added for CloudKit: `sync/cloudkit-records#K13.2`, `#K14.2`, `sync/policy#P7.1`; U24 and U32). The writer keeps the covered seq: the largest seq N (`engine/op-model` O4) such that every op with a seq up to N had committed when a sync started that has since completed successfully. A successful sync sets it to the last seq taken when that sync started; syncs run between ops, so every op with such a seq has already committed. While no commit is unsynced, it equals the last seq taken, so an op that wrote nothing, or a seq an event took, never waits. A failed sync never advances it.
+- **Waiting for a seq**: a call made off the writer thread takes a seq and a timeout, and returns once the covered seq reaches that seq, or reports a timeout. The writer never waits for it, and it never delays a flush or an op; any number of waits share the next sync. It starts no sync of its own: the 750 ms rule above already bounds the wait to about 1 s after the commit. A timeout is an outcome, not an error; the caller decides what follows (`sync/policy#P7.1`: the batch holds no record; `sync/cloudkit-records#K13.2`: the tracking update waits).
+- **Close and the covered seq** (decided 2026-10-27): the close's checkpoint (C10 step 2) covers every commit, so a close whose checkpoint succeeded sets the covered seq to the last seq taken, and open waits return covered. When it fails, the covered seq does not move and open waits fail with `CollectionUnavailable`. The next writer of that file then syncs its `-wal` once after it opens, before its first op, and that sync advances the covered seq. No replacement follows such a close, because R5 refuses a non-empty live `-wal` (`engine/collection-replace#R5` step 1). Work that a failed wait guarded is settled at the next open (`sync/cloudkit-records#K13.2`, `#K14.2`).
 - The first sync of the `-wal` after the writer opened it also syncs the directory that holds it, so that the file's directory entry survives a power loss.
 - The flush runs outside every op's write phase, so op timings (`engine/op-model` O10) do not include it. Its cost is one full sync, about 4 ms at p50 on the M3 Max (C9.4), about once every 750 ms while commits keep arriving. An op queued while the flush runs starts after it.
 - A failed sync is never silent and never counts as covering anything. The writer logs it and tries again, with a growing delay of at most 1 s between tries, until a sync succeeds. The commits it should have covered have already returned, so U32 reports a lasting failure as an I/O error; its design doc decides what the user sees.
