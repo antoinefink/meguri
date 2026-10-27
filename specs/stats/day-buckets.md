@@ -29,7 +29,7 @@ The two can disagree for a review logged near the rollover hour when the UTC off
 
 - Day 0 starts at `S = (N − 86,400) × 1,000` (epoch milliseconds).
 - A row is in the studied-today window when its `id` is strictly greater than `S`. A row stamped exactly `S` is not in it.
-- The window has no upper end. Rows dated after now, and after `N`, are in it (clock skew on another device, scenario `future-row`).
+- The window has no upper end. Rows dated after now, and after `N`, are in it (clock skew on another device, scenario `future-row`). Decided 2026-10-27: no upper end, as Anki. R1269's "to `next_day_at`" bounds day 0 for day indices (B3), not the studied-today window, which R1296 defines as every row since the start of day 0. Never cap the window at `N`.
 - When `N` changes (rollover, a change of `rollover`, an offset change; U40 says when), `S` changes with it and the window holds exactly the rows after the new `S` (B6).
 
 | `id` relative to `S` | In the window |
@@ -141,6 +141,7 @@ Meguri does not reproduce this. Every count stays on its B4.1 date, in every hea
 
 - Anki's day 0 moves whenever `N` moves. From then on, studied-today values cover exactly the rows of the new window, with no user action (R1274, scenario `rollover-while-open`: at 03:59:59 the 22:00 review is still studied today; at 04:00:00 it no longer is).
 - The heatmap's today `T` changes when `now − R` hours crosses a local midnight. On a day whose UTC offset changes, this can happen at another instant than the move of `N`, by up to the size of the change (B4.4).
+- `T` next changes at `at(T + 1)`: the first instant of local date `T + 1` in the zone (local midnight, or the first instant after a gap when midnight falls in one), plus `R` × 3,600 seconds of elapsed time. This is the first instant whose B4.2 date is after `T`, and the same instant as `stats/widget-snapshot` W4's `at(D)`. Example: Europe/Paris, `R` 4, `T` 2026-03-28: `at(2026-03-29)` is 2026-03-28 23:00Z + 4 h = 2026-03-29 03:00Z (05:00 CEST), while `N` moves at 02:00Z (04:00 CEST). No day-clock event marks `at(T + 1)` when it differs from the move of `N`, so the queries return it (`stats/counting-rules` N7) and hosts query again then (`stats/studied-today` T7).
 - `T` and the folding of later days into `T` (B4.3) are evaluated at each query. No value computed for an earlier `T` or `N` is served after either has changed.
 
 ## B7. Scenarios
@@ -150,7 +151,7 @@ All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log row
 | Scenario | Pins | `heatmap_totals.home` | `studied_today_raw` |
 |---|---|---|---|
 | `rollover-shift` (AE5) | 02:30 and 05:00 with rollover 4 | 10-11: 1, 10-12: 1 | 1 row, 6000 ms |
-| `ease-zero-row` (AE52) | a Set Due Date row with `limresched` true, then false, then true | 10-11: 1 / 10-11: 1, 10-12: 1 / 10-11: 1 | 0, 0 |
+| `ease-zero-row` (AE52) | a Set Due Date row with `limresched` true, then false, then true | 10-11: 1; then 10-11: 1, 10-12: 1; then 10-11: 1 | 0 rows, 0 ms (three times) |
 | `paris-spring-forward` (AE58) | B4.1, B4.4 | 03-28: 2, 03-29: 1 | 2 rows, 5000 ms |
 | `paris-fall-back` | B4.1 | 10-24: 1, 10-25: 2 | 1 row, 3000 ms |
 | `lord-howe-dst-start` | 30-minute change, B4.6, deviation | 10-03: 1, 10-04: 1 (oracle: 10-03: 2) | 2 rows, 3000 ms |
@@ -161,7 +162,7 @@ All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log row
 | `future-row` | B4.3, deviation | 10-12: 2 (oracle: 10-12: 1, 10-13: 1), then 10-12: 1, 10-13: 1 | 2 rows, 6000 ms; then 1 row, 5000 ms |
 | `travel-paris`, `travel-new-york` | B5 | 10-11: 1, 10-12: 3 / 10-11: 2, 10-12: 2 | 3 rows, 9000 ms / 2 rows, 7000 ms |
 | `other-creation-zone` | B1 (creation zone has no effect) | 10-11: 1, 10-12: 1 | 1 row, 2000 ms |
-| `rollover-while-open` | B6 | 10-12: 1 (three times), then 10-12: 1, 10-13: 1 | 1/5000, 1/5000, 0/0, 1/7000 |
+| `rollover-while-open` | B6 | 10-12: 1 (three times), then 10-12: 1, 10-13: 1 | 1 row, 5000 ms; then 1 row, 5000 ms; then 0 rows, 0 ms; then 1 row, 7000 ms |
 | `rollover-zero` | `R` = 0 | 10-11: 1, 10-12: 1 | 1 row, 2000 ms |
 
-(Dates are in 2026. `n rows, m ms` is `{cards: n, time_ms: m}`.)
+(Dates are in 2026. `n rows, m ms` is `{cards: n, time_ms: m}`. `then` separates the successive observations of one scenario, `(three times)` marks one value observed at three steps, and `/` separates the two scenarios of the `travel-*` row. Each column has one value per observation step.)

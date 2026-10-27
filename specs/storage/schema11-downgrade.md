@@ -5,31 +5,34 @@ Requirements: R1481, R2013; supports R1464, R1466
 Anki: 26.09.3
 Scenarios: none yet; `conformance/scenarios/storage/downgrade/` once the oracle driver has the op (D11)
 
-What Meguri writes when a collection must reach an Anki release older than schema 18: a separate file at schema 11, with the note types, decks, presets, config and tags back in the JSON columns of `col`, the old `graves` layout, the schema-18 tables and indexes removed, and the rollback-journal mode older releases need (R1481). Its only caller is the legacy package export (U123: `.apkg` and `.colpkg` with "Support older Anki versions", `package/legacy-export` L4, L7 and L8), which adds no conversion of its own. Manual Anki transfers (KTD26) send the collection at schema 18 (`sync/one-way#O6.2` keeps `col.ver`), so they need no downgrade.
+What Meguri writes when a collection must reach an Anki release older than schema 18: a separate file at schema 11, with the note types, decks, presets, config and tags back in the JSON columns of `col`, the old `graves` layout, the schema-18 tables and indexes removed, and the rollback-journal mode older releases need (R1481). Its only callers are the legacy package exports with "Support older Anki versions" (U123 for `.apkg`, from a closed staging file; U124 for `.colpkg`, from the open collection; `package/legacy-export` L4, L7 and L8), which add no conversion of their own. Manual Anki transfers (KTD26) send the collection at schema 18 (`sync/one-way#O6.2` keeps `col.ver`), so they need no downgrade.
 
 The copy must equal, value for value, what Anki 26.09.3's own downgrade to schema 11 makes of the same collection (goldens under `conformance/goldens/storage/downgrade/` once recorded, D11). The record → object conversion is the model area's (`model/schema11-json` S3 to S12, U21); this spec adds what the storage does around it. Meguri never downgrades the collection it has open, and never writes the source at all (R2013).
 
 ## D1. Entry point and guarantees
 
-- **Source**: either the open collection, or a closed schema-18 file that is not open as a live collection (U123's staging file, built with the storage-only builder of U23). Its `col.ver` must be 18 (else `SourceNotSchema18`, D8).
+- **Source**: either the open collection (U124's `.colpkg` export), or a closed schema-18 file that is not open as a live collection (U123's staging file, built with the storage-only builder of U23). Its `col.ver` must be 18 (else `SourceNotSchema18`, D8).
 - **Destination**: a file path. The call either leaves a complete schema-11 copy there (D3 to D5) or leaves the path as it was before the call. A file already at the path is replaced only by a complete, verified copy (D8).
+- A `-journal`, `-wal` or `-shm` file next to the destination path refuses the call with `Io` before anything is written, and again just before D8's rename. Decided 2026-10-27: SQLite would play a stale `-journal` of the replaced file back into the new copy at its next read-write open, and removing it is not safe while the file it belongs to may still need it. The callers write into fresh staging directories, where no such file exists.
 - **The source is never written.** The downgrade reads it only through a read-only connection (D2): no write lock, no transaction on the writer, no checkpoint. The writer keeps committing while the copy is made; its commits after the snapshot are not in the copy. With no operation running, the source file and its `-wal` keep their bytes and `PRAGMA data_version` does not move.
 - A destination that is the source file, or the source's `-wal`, `-shm` or `-journal`, compared after resolving symbolic links and relative parts, is refused before anything is written (`DestinationIsSource`). This guard keeps a caller's mistake from replacing the live collection with a schema-11 file.
 - Meguri never opens the copy as its collection. (Tests and scenarios open it on purpose to check the round trip, D7.)
 
 ## D2. Snapshot
 
-1. Take the snapshot with SQLite's `VACUUM INTO` into a new temporary file in the destination's directory, so that the final rename (D8) stays within one file system. It is the empty temporary file of `storage/durability-and-files#F4` (purpose `export`), which `VACUUM INTO` accepts as its target, so the launch cleanup removes a leftover (R1493).
+1. Take the snapshot with SQLite's `VACUUM INTO` in the destination's directory, so that the final rename (D8) stays within one file system. First create the temporary file of `storage/durability-and-files#F4` (purpose `export`). `VACUUM INTO` then writes to a name that does not exist yet: that temporary file's name with `-snapshot` appended, which is in the same `.meguri-tmp-export-*` namespace, so the launch cleanup removes a leftover of either (R1493). Right after `VACUUM INTO`, rename the snapshot over the F4 temporary file; D3 to D8 work on that file. Decided 2026-10-27: SQLite releases differ on whether `VACUUM INTO` accepts an existing empty file as its target (3.45.3 and the bundled 3.53.2 do, 3.54.0 refuses it with "output file already exists"), so the target never exists before the call. A target that exists anyway fails the call with `Io`.
    - From the open collection: on the maintenance reader (`storage/open-and-connections` C6); never on the writer, never on a `query_only` reader (where `VACUUM INTO` fails).
-   - From a closed file: on a read-only connection to it, initialized as every connection is (C5: `unicase` first).
+   - From a closed file: on a connection opened with the URI parameters `mode=ro&immutable=1`, initialized as every connection is (C5: `unicase` first). No other connection exists on a closed file, so it needs no lock, and SQLite then creates no file next to it, even when the file is in WAL mode (a plain `mode=ro` open of a WAL-mode file creates `-wal` and `-shm` and cannot remove them; probed with SQLite 3.53 and 3.45.3). An immutable open does not read a `-wal`, so a `-wal` or `-journal` next to the closed file, checked before the open, fails the call with `Io` and nothing is written: such a file was not closed cleanly (`package/apkg-export#A4` closes it with neither).
 2. The snapshot is one committed state of the source, including frames that are still in its `-wal`. It carries every table and index with their rows, SQLite's statistics tables and the source's foreign objects (D9), and none of the free pages, so deleted rows of the source never reach the copy. `VACUUM INTO` may renumber the rowids of a foreign table that has no `INTEGER PRIMARY KEY`; every collection table either has one or has no rowid.
 3. It needs about as much free space as the source file. The caller checks space before (`storage/durability-and-files#F5`, R2015); a disk that fills up during the call fails it with `InsufficientSpace` (D8).
 
-Everything after this step works on the temporary file through one read-write connection initialized as in C5 (`unicase` registered, since the tables D3.2 removes use it), with no other connection open on it.
+Everything after this step works on the temporary file through one read-write connection initialized as in C5 (`unicase` registered, since the tables D3.2 removes use it), with triggers turned off (D3), and with no other connection open on it.
 
 ## D3. Converting the copy
 
 The end state of the temporary file. How it is reached is free, as long as no step depends on the source and a failure leaves no destination (D8).
+
+Decided 2026-10-27: no trigger fires during the conversion. The conversion connection runs with SQLite's triggers turned off (`SQLITE_DBCONFIG_ENABLE_TRIGGER` set to 0 before its first statement), so a foreign trigger on `col` or on another kept table neither changes the copy nor makes it fail, whatever the order of the steps. (`DROP TABLE` fires no trigger in any case.) Anki writes `col` with triggers on, after replacing `graves` and before the drops, so a foreign trigger on `col` runs in its copy (D12).
 
 ### D3.1 The `col` row
 
@@ -46,15 +49,16 @@ The end state of the temporary file. How it is reached is free, as long as no st
 - Member order: ids in ascending numeric order, tags in the order of the `tags` table (its key order under `unicase`), config keys in ascending byte order (S12). Anki writes the members of each column in no set order; conformance compares parsed values (`specs/conformance/observations.md` O7).
 - The objects carry the rows' own `mod` and `usn` (`mtime_secs`, `usn`). The downgrade stamps nothing: no `usn`, modification time or `col.mod` changes.
 - `conf` member values: each `config` row's `val`, read as `storage/config-table` C3 reads JSON and written in its compact form (C5, the same as `storage/schema-upgrade#U9.2`): no whitespace, object members sorted by name at every depth, a repeated member name keeping its last value, numbers and strings spelled as C5 says. So the stored text `{"b": 1, "a": 2.50, "c": [1E2, -0]}` becomes `{"a":2.5,"b":1,"c":[100.0,-0.0]}`. Unknown keys and their values are all carried (R1466); only their spelling changes, as Anki's does.
-- A `config` row the downgrade cannot carry refuses the whole copy (`UnconvertibleConfig`, naming the key, D8): a `KEY` that is not TEXT holding valid UTF-8; a `val` that is not a BLOB; a `val` that is not exactly one JSON value per `model/json-numbers` N9, with nothing but JSON white space before or after it; a number in it beyond the 64-bit float range (N10); an array or object nested 128 levels deep or more, counting the outermost as level 1 (127 levels are carried). Anki's downgrade fails on each of these. The 128-level limit is one level stricter than the config table's typed reader (U23), which accepts 128 levels; the downgrade uses this one.
-- A note type, field, template, deck, preset or tag row that `model/row-records` R10 refuses (a blob that fails `model/protobuf-records` P9, a deck kind with neither member, a column of the wrong storage class) refuses the whole copy (`UnreadableRecord`, naming the table and the row's key, D8). Anki fails on these too. Rows of `notes`, `cards`, `revlog` and `graves` are never read as records; the downgrade copies them as SQLite values and never refuses because of their content.
+- A `config` row the downgrade cannot carry refuses the whole copy (`UnconvertibleConfig`, naming the key, D8): a `KEY` that is not TEXT holding valid UTF-8; a `val` that is not a BLOB; a `val` that is not exactly one JSON value per `model/json-numbers` N9, with nothing but JSON white space before or after it; a number in it beyond the 64-bit float range (N10); an array or object nested 128 levels deep or more, counting the outermost as level 1 (127 levels are carried). Anki's downgrade fails on each of these. This depth limit is the downgrade's own; D3.1 may read values with the config table's JSON parser (C3) only when it adds this depth check and N9 and N10.
+- The records read are those Anki's downgrade reads: every `notetypes` row, each with the `fields` and `templates` rows whose `ntid` is its id, in `ord` order (`model/row-records` R7); every `decks` row; every `deck_config` row; and the `tag`, `usn` and `collapsed` columns of every `tags` row. A `fields` or `templates` row whose `ntid` matches no note type is neither read nor refused, and is lost in the copy (D6). The `config` column of `tags` is never read.
+- A record read this way that `model/row-records` R10 refuses (a blob that fails `model/protobuf-records` P9, a deck kind with neither member, a column of the wrong storage class) refuses the whole copy (`UnreadableRecord`, naming the table and the row's key, D8). Anki fails on these too. Rows of `notes`, `cards`, `revlog` and `graves` are never read as records; the downgrade copies them as SQLite values and never refuses because of their content.
 
 ### D3.2 Removed objects
 
 These no longer exist in the copy:
 
 - the tables `config`, `deck_config`, `tags`, `fields`, `templates`, `notetypes` and `decks`, with every index and trigger defined on them (their unique name indexes included);
-- the indexes `idx_cards_odid` and `idx_notes_mid`. When the source lacks one of them (`storage/schema-18` S6.1 lets such a file open), there is nothing to remove and the copy goes on. (Anki's downgrade fails then; Meguri does not. No golden holds such a file.)
+- the indexes `idx_cards_odid` and `idx_notes_mid`. When the source lacks one of them (`storage/schema-18` S6.1 lets such a file open), there is nothing to remove and the copy goes on. (Anki's downgrade fails then; Meguri does not, D12 `downgrade-missing-index`. No golden holds such a file.)
 - the schema-18 `graves` table and its index `idx_graves_pending` (D3.3 replaces it).
 
 SQLite removes the statistics rows of a dropped table or index with it; `sqlite_stat1` and `sqlite_stat4` themselves stay (D4).
@@ -82,7 +86,7 @@ The copy is in rollback-journal mode: `PRAGMA journal_mode` reads `delete`, the 
 
 ## D4. The objects of the copy
 
-For a source that Anki or Meguri created (no foreign object), the copy's `sqlite_master`, normalized and sorted as `specs/conformance/storage-ops.md` P3 reports it, is exactly:
+For a complete source (every object of `storage/schema-18` S2, `sqlite_stat1` and `sqlite_stat4` present, no foreign object), the copy's `sqlite_master`, normalized and sorted as `specs/conformance/storage-ops.md` P3 reports it, is exactly:
 
 | Type | Name | Table | Normalized `sql` |
 |---|---|---|---|
@@ -101,15 +105,17 @@ For a source that Anki or Meguri created (no foreign object), the copy's `sqlite
 | table | `sqlite_stat1` | `sqlite_stat1` | `CREATE TABLE sqlite_stat1(tbl,idx,stat)` |
 | table | `sqlite_stat4` | `sqlite_stat4` | `CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)` |
 
-The schema-18 guard (`storage/schema-18` S6.2, R2016) is about the open collection; the copy is checked against this list instead (D8).
+A source that lacks one of these indexes or statistics tables gives a copy that lacks it too (D3.4); D8 check 3 derives the expected objects of any source from its snapshot. The schema-18 guard (`storage/schema-18` S6.2, R2016) is about the open collection; the copy is checked by D8 instead.
 
 ## D5. Preset values written
 
 Anki applies the read bounds of `sched/presets#V3` whenever it reads a preset, and its downgrade writes what that read gives: a bounded field (the "Read bounds" column of `sched/presets#V2`) whose value is outside its bounds, or NaN, is written as its built-in default. The stored preset is not changed. The schema-11 output of S10 then converts the checked record.
 
 - The bounds, defaults and float comparison are V3's: inclusive bounds, 32-bit floats compared with the 32-bit float nearest to each bound. A stored 1.31 is kept; 1.3 becomes 2.5.
-- No other field is checked: learning steps, FSRS parameter lists, Easy Days percentages and the enums go out as stored.
+- No other field is bounded: learning and relearning steps, FSRS parameter lists, Easy Days percentages, the Auto Advance times and the enums go out as stored, apart from the refusal below.
 - The downgrade uses the one preset read of V3 and keeps no bounds of its own.
+
+Non-finite values. Decided 2026-10-27: when an unbounded `f32` of a preset (`learn_steps`, `relearn_steps`, `fsrs_params_4`, `fsrs_params_5`, `fsrs_params_6`, `easy_days_percentages`, `seconds_to_show_question` or `seconds_to_show_answer`, any element of a list) is NaN, +∞ or −∞, the whole copy is refused with `UnreadableRecord` (table `deck_config`, the preset id, reason `non-finite value` with the field's name, D8). S10 would write such a value as `null` (`model/json-numbers`), which no reader takes back: the strict readers of the Auto Advance times, the FSRS parameter lists and the Easy Days list refuse the whole `dconf` column, so neither Anki's schema-11 upgrade nor Meguri's (`storage/schema-upgrade`) can open the copy, and a `null` in a step list makes that list read back as something else (Anki reads it as empty). Anki writes that file anyway; Meguri refuses rather than publish a copy that older releases cannot open or that silently changes the steps (D12 `downgrade-non-finite-preset`). The stored preset is not changed; `package/legacy-export` L11 reports the refusal as `LegacyConversion` with the table and the preset id, and the user corrects that option of the preset and exports again.
 
 Examples (scenario `storage/downgrade/contents`, D11): a preset storing new cards per day 10000, starting ease 1.3 and a NaN hard interval is written with `"perDay":20`, `"initialFactor":2500` and `"hardFactor":1.2`; one storing 9999, 1.31 and 0.5 is written with those values.
 
@@ -121,11 +127,13 @@ Schema 11 has no place for these; they are lost in the copy, as in Anki's:
 - the `collapsed` and `config` columns of `tags`;
 - the `usn` and `mtime_secs` of each config key (schema 11 keeps neither), and the stored spelling of config values (D3.1);
 - preset values outside D5's bounds;
-- what S4 to S10 output does not write: template `mtime_secs` and `usn`, `other` members under a reserved key or a key the object already writes (S3), and the spelling and member order of `other` values (Anki parses and rewrites them; Meguri keeps the stored text, `model/json-numbers` N7);
+- what S4 to S10 output does not write: template `mtime_secs` and `usn`, `other` members under a reserved key or a key the object already writes (S3), the whole of an `other` that is not a valid JSON object (S3 output rule 1: not JSON, not an object, or holding a number beyond the 64-bit float range), and the spelling and member order of `other` values (Anki parses and rewrites them; Meguri keeps the stored text, `model/json-numbers` N7);
+- `fields` and `templates` rows whose `ntid` matches no note type (D3.1);
 - a deck's desired-retention override beyond whole percent (S8: 0.875 is written as 87), and a preset's starting ease beyond thousandths (S10.1: 1.3105 is written as 1310);
-- `idx_cards_odid`, `idx_notes_mid`, `idx_graves_pending` and the primary key of `graves`.
+- `idx_cards_odid`, `idx_notes_mid`, `idx_graves_pending` and the primary key of `graves`;
+- the foreign indexes and triggers that D9 removes with the tables they are defined on.
 
-Everything else of the collection is in the copy: every note, card, review-log row and grave, every note type, deck and preset with its `other` members (R1464), every config key with its value (R1466), and every tag with its `usn`.
+Everything else of the collection is in the copy: every note, card, review-log row and grave, every note type, deck and preset with its `other` members (R1464; S3 output rule 1 excepted), every config key with its value (R1466), and every tag with its `usn`.
 
 ## D7. What upgrading the copy gives back
 
@@ -137,20 +145,24 @@ Opening the copy with the upgrade of `storage/schema-upgrade` (Meguri's or Anki'
 | `tags` | `collapsed` 1 and `config` NULL on every row (step 17); `usn` kept |
 | `templates` | `mtime_secs` 0 and `usn` 0 |
 | `notetypes`, `fields`, `templates`, `decks`, `deck_config` blobs | encoded again from the objects (`model/protobuf-records` P3): unknown fields gone, `other` rebuilt from the object's extra members (S3 input), preset values replaced per D5; the starting ease goes through S10.1 (×1000, truncated) and the upgrade's ×100 and ÷100 in 32-bit float arithmetic, so its last bits can move (1.31, 2.3 and 2.5 come back bit for bit; 1.311 comes back as the next float up) |
-| `sqlite_stat1`, `sqlite_stat4` | rebuilt by the upgrade's `ANALYZE` (never compared) |
+| `sqlite_stat1`, `sqlite_stat4` | created or rebuilt by the upgrade's `ANALYZE` (never compared) |
+| `fields`, `templates` | rows whose `ntid` matched no note type in the source are absent (D3.1, D6) |
+| `idx_cards_odid`, `idx_notes_mid` | present, as `storage/schema-upgrade#U5` creates them, also when the source lacked them; the `ix_*` indexes a source lacked stay absent |
+| foreign objects | the indexes and triggers that D9 removed are absent |
+| names | a note type, field, template or deck name that `storage/schema-upgrade` U6 steps 3 to 5 or U7 steps 2 to 4 would change comes back changed, a deck so renamed with the stamp of U7 step 3 |
 
-`col`, `notes`, `cards`, `revlog` and `graves` come back unchanged, row for row, and so do the row columns of note types, decks and presets (names, ids, `mtime_secs`, `usn`). An upgrade is not a change (`storage/schema-upgrade#U12`): nothing is stamped and `col.mod` keeps its value. Scenario `storage/downgrade/roundtrip` shows both dumps; `tests/downgrade.rs` asserts that the differences are exactly these.
+`col`, `notes`, `cards`, `revlog` and `graves` come back unchanged, row for row, and so do the row columns of note types, decks and presets (names, apart from the renames above, ids, `mtime_secs`, `usn`). An upgrade is not a change (`storage/schema-upgrade#U12`): nothing is stamped and `col.mod` keeps its value. Scenario `storage/downgrade/roundtrip` shows both dumps; `tests/downgrade.rs` asserts that the differences are exactly these.
 
 ## D8. Verification, failure and errors
 
-Before the copy reaches the destination, open the temporary file again with a read-only connection and check:
+Before the copy reaches the destination, open the temporary file again with a read-only connection initialized as in C5 (`unicase` registered first, since a kept foreign table or index may use it) and check:
 
-1. `PRAGMA integrity_check` returns the single row `ok`;
+1. `PRAGMA integrity_check` returns the single row `ok` (as `storage/durability-and-files#F5` `integrity_check(path)` checks it);
 2. `col` has one row, its `ver` is 11, and each of `conf`, `models`, `decks`, `dconf` and `tags` parses as a JSON object;
-3. its objects are those of D4 (D9 for foreign objects), compared by type, name and table, with `graves` holding D3.3's definition;
+3. its objects are the expected ones, compared by type, name and table, with `graves` holding D3.3's definition. The expected objects are those of the snapshot (read from the temporary file after D2, before the conversion), minus D3.2's removed objects and what goes with them (their indexes, triggers and `sqlite_autoindex_*` indexes), minus the schema-18 `graves` with its index, triggers and `sqlite_autoindex_*` index, plus D3.3's `graves`. So each `ix_*` index, each `sqlite_stat*` table and every other object SQLite makes itself (`sqlite_sequence`, the `sqlite_autoindex_*` indexes of a kept table) is expected exactly when the source has it, and nothing the source lacks is expected. For a complete source this is D4's list; foreign objects follow D9;
 4. `PRAGMA journal_mode` reads `delete`.
 
-These checks are the caller verification of the atomic file of `storage/durability-and-files#F4`, and its sequence applies unchanged: full sync of the file, these checks with every handle closed before the rename, rename over the destination, full directory sync.
+These checks are the caller verification of the atomic file of `storage/durability-and-files#F4`, and its sequence applies unchanged: full sync of the file, these checks with every handle closed before the rename, D1's check for a `-journal`, `-wal` or `-shm` next to the destination, rename over the destination, full directory sync.
 
 On any failure, cancellation (D10) or crash, no destination file appears and an existing one keeps its bytes; the temporary file is removed (after a crash, by the launch cleanup); the source is unchanged.
 
@@ -159,13 +171,13 @@ On any failure, cancellation (D10) or crash, no destination file appears and an 
 | `SourceNotSchema18` | the source's `col.ver` is not 18 | version found |
 | `DestinationIsSource` | D1 | |
 | `UnconvertibleConfig` | D3.1 | the key, and the reason: not text, not a BLOB, not JSON, out of range, too deep |
-| `UnreadableRecord` | D3.1 | table, row key, reason (`model/row-records` R10, `model/protobuf-records` P9) |
+| `UnreadableRecord` | D3.1, D5 | table, row key, reason (`model/row-records` R10, `model/protobuf-records` P9, or `non-finite value` with the field, D5) |
 | `InsufficientSpace` | the disk fills up (SQLite's full error, or no space on a write or rename) | |
 | `Cancelled` | D10 | |
 | `VerificationFailed` | a check of this section fails | which check |
-| `Io` | any other SQLite or file-system failure | |
+| `Io` | a `-wal` or `-journal` next to a closed source (D2), a `-journal`, `-wal` or `-shm` next to the destination (D1), or any other SQLite or file-system failure | the detail |
 
-U123 shows the user a failed export; the downgrade has no UI of its own.
+U123 (`.apkg`) and U124 (`.colpkg`, `package/legacy-export` L8) show the user a failed export; the downgrade has no UI of its own.
 
 ## D9. Foreign objects
 
@@ -173,10 +185,10 @@ Objects of the source that are not Anki's (`storage/schema-18` S6: an add-on's t
 
 - A foreign table stays, with its rows (D2 for rowids).
 - Foreign indexes and triggers defined on a table that D3.2 removes are removed with it, and so are those defined on the schema-18 `graves`: they go with the old table and are not created again. This is what Anki's downgrade does.
-- Views, and triggers on kept tables, keep their stored text. Those that read `graves` read the new table (D3.3 renames nothing). Those that read a removed table stay and fail when used, as in Anki's copy.
+- Views, and triggers on kept tables, keep their stored text; the triggers never fire during the conversion (D3). Those that read `graves` read the new table (D3.3 renames nothing). Those that read a removed table stay and fail when used, as in Anki's copy. One that does not resolve in the source (it names a table or column that does not exist) stays as stored, and the copy is made.
 - Every other foreign object stays unchanged.
 
-So the copy holds D4's objects plus the source's foreign objects minus those on removed tables and on `graves`. The only difference from Anki: Anki renames `graves` before replacing it, so its copy's views and triggers that read `graves` name a table that no longer exists. No fixture holds a foreign object, so no golden shows this; `tests/downgrade.rs` asserts Meguri's result.
+So the copy holds D4's objects plus the source's foreign objects minus those on removed tables and on `graves` (D8 check 3). Differences from Anki (D12): Anki renames `graves` before replacing it, so its copy's views and triggers that read `graves` name a table that no longer exists (`downgrade-graves-views`); and SQLite checks the whole schema when it renames a table, so a view or trigger that does not resolve makes Anki's rename, and so its downgrade, fail (`downgrade-broken-schema`; probed with SQLite 3.45.3: "error in view v: no such table: main.missing"). No fixture holds a foreign object, so no golden shows this; `tests/downgrade.rs` asserts Meguri's result.
 
 ## D10. Fault points and cancellation
 
@@ -197,10 +209,27 @@ The scenarios below are not in the suite yet: they wait for the oracle driver to
 `core/crates/meguri-storage/tests/downgrade.rs` (Meguri only) covers what no scenario shows:
 
 - the source file's SHA-256, its `-wal` size and `data_version` are unchanged after a copy made with no operation running; a copy taken while the writer commits holds the state of its start, and the writer's commits are never blocked;
-- the destination equal to the source (and to its `-wal`) is refused with nothing written; an existing destination is replaced only by a verified copy, and keeps its bytes after a failure;
-- a closed staging file as the source;
+- the destination equal to the source (and to its `-wal`) is refused with nothing written; an existing destination is replaced only by a verified copy, and keeps its bytes after a failure; a `-journal`, a `-wal` and a `-shm` next to the destination each give `Io` with nothing written and the existing file unchanged;
+- a closed staging file as the source, in rollback mode and in WAL mode: its directory holds the same names and the file the same bytes afterwards; with a `-wal` or a `-journal` next to it, `Io` and nothing written;
+- the snapshot target: `VACUUM INTO` writes to a name that did not exist, and a target that exists gives `Io`;
 - kill at both fault points: no destination, source intact, the temporary file removed by the launch cleanup; cancellation at each check;
 - `UnconvertibleConfig` for each reason (a TEXT value, a non-UTF-8 key, 128 nested levels refused and 127 carried), `UnreadableRecord` for a blob that fails P9 and for a deck kind with neither member;
-- a source missing `idx_cards_odid` or `idx_notes_mid`;
-- foreign objects (D9): a foreign table with rows, an index and a trigger on `notes` (kept), an index and a trigger on `graves` and on `decks` (removed), a view reading `graves` (reads the new table) and one reading `decks` (kept);
+- `UnreadableRecord` with reason `non-finite value` (D5) for NaN in `seconds_to_show_question`, in an element of `fsrs_params_6` and in an element of `learn_steps`, and for +∞ in `easy_days_percentages`; a NaN in a bounded field is written as its default, not refused;
+- a `fields` and a `templates` row whose `ntid` matches no note type, with a blob that fails P9: not refused, absent from the copy and from its upgrade; a `tags.config` value of any storage class: not refused;
+- a source missing `idx_cards_odid` or `idx_notes_mid`, one missing `ix_notes_csum`, and one without `sqlite_stat4` (and one without either statistics table): each copy passes D8 check 3 and lacks what the source lacked;
+- a foreign index declared `COLLATE unicase`: D8 check 1 passes;
+- foreign objects (D9): a foreign table with rows, one with `AUTOINCREMENT` (`sqlite_sequence`) and one with a `UNIQUE` column (`sqlite_autoindex_*`), an index and a trigger on `notes` (kept), an index and a trigger on `graves` and on `decks` (removed), a view reading `graves` (reads the new table) and one reading `decks` (kept), a view reading a table that does not exist (kept, the copy made), and an `AFTER UPDATE` trigger on `col` that reads `decks` and one that inserts into a foreign table (neither fires: the copy is made and the foreign table keeps its rows);
 - D7's differences, and nothing else, between a source and the upgrade of its copy, over the fixture and over a collection built by the U11 generator.
+
+## D12. Differences from Anki
+
+Decided 2026-10-27, data safety first. `tests/downgrade.rs` (D11) asserts each one. No golden shows any of them: no fixture or scenario holds such a source, and `conformance/deviations.yaml` holds golden transforms only (`specs/conformance/dsl.md` D13), so none has an entry there yet. A scenario that comes to show one adds its entry under the id below.
+
+| Id | Source | Anki 26.09.3 | Meguri |
+|---|---|---|---|
+| `downgrade-missing-index` | no `idx_cards_odid` or `idx_notes_mid` (D3.2) | the downgrade fails | the copy is made |
+| `downgrade-graves-views` | a view or trigger that reads `graves` (D9) | it names `graves_old`, which no longer exists | it reads the new `graves` |
+| `downgrade-broken-schema` | a view or trigger that does not resolve (D9) | the rename of `graves` fails, and so does the downgrade | the copy is made; the object stays as stored |
+| `downgrade-triggers-off` | a foreign trigger on `col` (D3) | it fires while `col` is written | it never fires |
+| `downgrade-non-finite-preset` | NaN or ±∞ in an unbounded `f32` of a preset (D5) | the copy holds `null`; no upgrade opens it, or a step list reads back empty | refused with `UnreadableRecord` |
+| `downgrade-snapshot` | any (D1, D2) | the live collection is closed, downgraded in place, packed and upgraded again when it reopens (`package/legacy-export` L13) | a snapshot is converted; the collection is never written (R2013) |

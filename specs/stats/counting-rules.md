@@ -1,7 +1,7 @@
 # Counting rules for review aggregates
 
 Spec: stats/counting-rules
-Requirements: R1275, R1276, R1277, R1278, R1279, R1281, R1286, R1287, R1288, R1292, R1295, R290, R291, R304, R1340, R1341, R1343
+Requirements: R1275, R1276, R1277, R1278, R1279, R1281, R1282, R1283, R1284, R1286, R1287, R1288, R1292, R1295, R1296, R290, R291, R304, R1340, R1341, R1343, R1447, R1453, R1818
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/heatmap-totals/, conformance/scenarios/stats/day-buckets/
 
@@ -62,7 +62,7 @@ A deck page's heatmap and streak stats for deck `D` count the rows N2 keeps whos
 
 - Deleted cards' rows never count here. `limcdel` and `limdecks` do not apply (R1340, R1341). `limresched` does.
 - Moving a card to another deck moves all its rows between deck scopes at once. Home does not change unless N3.3 applies (scenarios `deck-scope-move`, `limdecks-subtree`).
-- The add-on reads only `did`. Meguri's home-deck rule is the deviation of R1284. It shows only for cards in filtered decks. No U95 scenario has one: the unit that adds a filtered-deck scenario adds its deviation entry.
+- The add-on reads only `did`. Meguri's home-deck rule is the deviation of R1284. It shows only for cards in filtered decks: `conformance/deviations.yaml` entry `heatmap-deck-home-deck`, scenario `filtered-deck-card` (N9; both added with the oracle support, `specs/conformance/stats-ops.md` H4, as `stats/day-buckets` B4.3's entry is).
 
 ## N5. History windows
 
@@ -84,17 +84,23 @@ The line's text is `stats/studied-today` (U97). Its seconds are `time_ms / 1,000
 While a collection is open, the core holds these values. They are built once per open and never released, also on a memory warning (R1286, R1288, R1292):
 
 1. the Home count per heatmap day (N3), under the current `heatmap` settings;
-2. counts from which any deck scope (N4) can be summed when a query runs, and from which N3.3 can be applied, without reading the review log;
+2. counts from which any deck scope (N4) can be summed when a query runs, and from which N3.3 can be applied, without reading the review log. They must be addressable by current deck (`did`, for N3.3) as well as by home deck (N4), for example per (day, card, rated) or per (day, home deck, current deck, rated), where rated is `ease` ≥ 1 (N2). Decided 2026-10-27: this overrides the plan's U95 key list (day, home deck, rated, type), which cannot apply N3.3 to a card in a filtered deck. Scenario `filtered-deck-card` and a property-test case with a card in a filtered deck pin it;
 3. a card table: for each card id, whether it exists, its home deck, its current deck, its `type`, its queue, its `due` and its `odue` (used by the forecast, U96, which needs `type` and `odue` for cards in filtered decks, `stats/heatmap-addon` A3 items 1 and 3, and by scopes, U98);
 4. the studied-today count and time (N6) for the current window.
 
-A query for Home or a deck returns that scope's day → count map (N3 or N4, with `stats/day-buckets` B4.3 applied) and its earliest day, or no day when the map is empty. `heatmap_totals` observes the map (`specs/conformance/stats-ops.md` H1). How the heatmap and streaks use the earliest day is U96's.
+A query for Home or a deck returns that scope's day → count map (N3 or N4, with `stats/day-buckets` B4.3 applied) and its earliest day, or no day when the map is empty. It also returns `T` (`stats/day-buckets` B4.2) and `today_changes_at`, the instant `T` next changes (`stats/day-buckets` B6, epoch milliseconds), and every query built on it (`stats/heatmap-addon` A11) passes both on. `heatmap_totals` observes the map (`specs/conformance/stats-ops.md` H1). How the heatmap and streaks use the earliest day is U96's. A deck id that names no deck gives the error `unknown_deck`, as `stats/heatmap-addon` A11 does; its host handles it as A11's.
+
+Reads while the values are not ready. Decided 2026-10-27 (no wrong number is ever shown, and R1818 keeps Home interactive during a rebuild): a Home, deck or studied-today query whose resident values do not yet hold the state it reads (a rebuild at open after a key mismatch, after `CollectionReplaced`, an external change, a zone change or a change of `rollover` or `heatmap`, or a catch-up) does not wait and returns no values. Its result is `building`, with the progress of the aggregates' derived-store component (`storage/derived-store` D8) when there is one. It never returns zeros, old values or a partial map. The host asks again at that component's next `Ready` or `DerivedApplied` event (D8). Until then U228 hides the studied-today line and the summary streak line, and the heatmap shows no counts and no streak values; neither shows a placeholder number. The scenario adapters of `heatmap_totals` and `studied_today_raw` (`specs/conformance/stats-ops.md` H1, H2) wait until the values hold the step's state before they read, so `set_config rollover` followed by `observe` never races the rebuild. An adapter that still finds them not ready after 60 seconds fails the step.
 
 Contract:
 
 - **Equivalence.** Wherever a caller can read them, every value equals what N2 to N6 give for the collection's rows and settings at that moment, the current zone, `R`, `N` and now. This holds across answers and their undo and redo (undoing an answer removes its row; redoing restores it), incoming changes (CloudKit sync between Meguri devices; a manual Anki transfer, KTD26, or an import that replaces the whole collection), card deletion and moves, deck renames, reparenting and deletion (local or incoming), changes to the `heatmap` and `rollover` keys, zone changes, rollover, raw writes and changes made by another process (R1453). It also holds when such a change lands while the values are being rebuilt.
 - **Fresh after each operation.** A read that follows an operation's result includes that operation (R304).
-- **Never stale.** Values kept in Meguri's derived store are used at open only when they were computed from the same collection state, settings, zone and rollover hour. Otherwise they are rebuilt before anything shows them. A value computed for another state is never shown, not even briefly.
+- **Never stale.** Values kept in Meguri's derived store are used at open only when they were computed from the same collection state, settings, zone and rollover hour, and also:
+  - the studied-today values (item 4) only for the same `N` (the same Anki day); with another `N` they are recomputed with a range read of the new window, and the other values stay valid;
+  - the heatmap-day values (items 1 and 2) only for the same version of the bundled time zone database (`stats/day-buckets` B5) and, for a zone id that database does not know, the same fallback UTC offset. While the collection is open, a change of that fallback offset is a zone change.
+
+  Decided 2026-10-27: these inputs are part of U95's own validity key, next to the plan's collection mark, rollover, zone id and `heatmap` hash; they are not a component version bump (`storage/derived-store` D5.2), since they change without any change of the stored format. Otherwise the values are rebuilt before anything shows them. A value computed for another state is never shown, not even briefly.
 - Anki sees none of this. It is Meguri's design for R1286 to R1288 and R304, tested by property tests against a fresh computation and by the scenarios through `heatmap_totals` and `studied_today_raw`.
 
 ## N8. Read only
@@ -103,7 +109,7 @@ Building, keeping, storing and querying these values never writes `collection.an
 
 ## N9. Scenarios
 
-`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. Each scenario gets a golden recorded from the oracles when the scenarios land (`specs/conformance/stats-ops.md` H4); the goldens are then authoritative. Each equals this table, with no deviation. All rows are on 2026-10-12 in Europe/Paris, rollover 4.
+`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. Each scenario gets a golden recorded from the oracles when the scenarios land (`specs/conformance/stats-ops.md` H4); the goldens are then authoritative. Each equals this table, with no deviation except in `filtered-deck-card` (N4, `heatmap-deck-home-deck`). All rows are on 2026-10-12 in Europe/Paris, rollover 4.
 
 | Scenario | Pins | Values |
 |---|---|---|
@@ -116,4 +122,5 @@ Building, keeping, storing and querying these values never writes `collection.an
 | `limdecks-subtree` | N3.3, N4 | Home/Excl/Keep 5/2/2; with `limdecks` [Excl] 3/2/2; after moving the Keep card into `Excl::Sub` 2/3/1 |
 | `limdecks-deleted-card` | N3.3 | Home 2; with `limdecks` [Other] 1; with [1234] 1; with [] 2 |
 | `deck-scope-move` | N4 | Home/A/A::B/C 3/1/1/2, then 3/2/1/1 |
+| `filtered-deck-card` | N3.3, N4, N7 item 2, deviation | one rated row on a card whose home deck is `Lang` and which sits in filtered deck `Cram` (a `db_exec` deck row, `specs/conformance/deck-ops.md` K13), one on a card in `Lang`: Home/Lang/Cram 2/2/none (oracle: 2/1/1); with `limdecks` [Lang] Home 1; with [Cram] Home 1 |
 | `answers-and-deletes` | N7 through real answers and a deletion | Home/Lang none, 1/1, 2/2, 2/1; studied 0/0, 1/5000, 2/12000, 2/12000 |
