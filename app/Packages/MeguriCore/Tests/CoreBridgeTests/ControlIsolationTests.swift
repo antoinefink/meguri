@@ -5,14 +5,14 @@ import Synchronization
 import Testing
 @testable import CoreBridge
 
-private final class MaintenanceOccupancy: Sendable {
+final class MaintenanceOccupancy: Sendable {
     let release = DispatchSemaphore(value: 0)
     let entered: AsyncStream<Void>
     let signal: AsyncStream<Void>.Continuation
     let watchdogFired = Mutex(false)
     init() { (entered, signal) = AsyncStream.makeStream() }
 }
-private extension MaintenanceLane {
+extension MaintenanceLane {
     func occupy(_ gate: MaintenanceOccupancy) throws {
         try call("test.occupyMaintenance") {
             gate.signal.yield(())

@@ -141,3 +141,9 @@ pub fn test_bootstrap_collection(location: crate::collection::CollectionLocation
 pub fn collection_for_testing() -> Result<meguri_engine::Collection, CoreError> {
     runtime::host()?.collection().map_err(Into::into)
 }
+
+/// Rust integration fixtures share the exports' engine, slot and maintenance
+/// drain. Not a UniFFI export; never opens a second process engine.
+pub fn engine_for_testing() -> Result<meguri_engine::Engine, CoreError> {
+    runtime::engine().cloned()
+}
