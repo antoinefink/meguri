@@ -737,3 +737,20 @@ remain enabled. Independent review is clear. Privacy
 `20261027T013153Z-15572` and similarity `20261027T013151Z-15330` pass.
 Live mobile naming and export still require verification. No passing result is
 inferred from the source correction; original Mac evidence stays unchanged.
+
+## Folder-title witness and bounded failure state
+
+Start `947aa99d`. iPhone `ui-test/20261027T013255Z-16320` reaches the same
+naming check after successful media/review/reopen. The trace now reaches the
+exact RF2 title button's attribute checks, before editor lookup. That button
+identifies the folder during naming; the test does not click it. Requiring it
+to be actionable is an added condition absent from the original folder check.
+
+Filtered `cleanroom/20261027T013903Z-20559` keeps its unique scoped existence
+as the identity witness. Actual editor/New Folder/Save actionability, local
+ancestry, nonce, Return, child and destination checks remain enabled. A bounded
+512-byte diagnostic reports fixed stages, counts and evaluated Booleans only;
+it reuses existing queries and exports no values, labels or paths. Independent
+review is clear. Privacy `20261027T014202Z-22060` and similarity
+`20261027T014201Z-21823` pass. Live mobile completion remains pending; no
+historical failure or passing Mac binding is changed.

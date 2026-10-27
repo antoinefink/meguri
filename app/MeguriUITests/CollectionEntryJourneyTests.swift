@@ -682,6 +682,10 @@ import notify
 
     private func selectNativeExportChild(_ stem: String, create: Bool,
                                          _ app: XCUIApplication, _ bundle: String) throws {
+        enum NameAdmissionStage { case idle, context, roots, editors, editorExists, editorEnabled, editorHittable, ready }
+        var admission = (stage: NameAdmissionStage.idle, providers: 0, roots: 0,
+                         directBars: 0, genericBars: 0, actions: 0, editors: 0,
+                         enabled: false, hittable: false)
         func actionable(_ target: XCUIElement) -> Bool {
             target.exists && target.isEnabled && target.isHittable
         }
@@ -689,7 +693,8 @@ import notify
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
             guard XCTWaiter().wait(for: [ready], timeout: 10) == .completed else {
                 capturePicker(app)
-                XCTFail(message)
+                let diagnostic = "stage=\(admission.stage) providers=\(admission.providers) roots=\(admission.roots) directBars=\(admission.directBars) genericBars=\(admission.genericBars) actions=\(admission.actions) editors=\(admission.editors) enabled=\(admission.enabled) hittable=\(admission.hittable)"
+                XCTFail("\(message); \(diagnostic.prefix(512))")
                 throw NSError(domain: "CollectionEntryJourneyTests", code: 5)
             }
         }
@@ -816,30 +821,49 @@ import notify
                 }
             }
             func inlineNameTextView() -> XCUIElement? {
+                admission = (.context, 0, 0, 0, 0, 0, 0, false, false)
                 guard self.nativeExportFolderIsOpen("RF2 Import Tests", app),
                       !app.alerts.firstMatch.exists,
                       nameDialogs().isEmpty else { return nil }
-                let roots = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@",
+                let providers = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@",
                     "DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "))
-                    .allElementsBoundByIndex.filter { root in
+                    .allElementsBoundByIndex
+                admission.stage = .roots
+                admission.providers = providers.count
+                let roots = providers.filter { root in
                         guard root.exists else { return false }
                         let folderBars = root.navigationBars.matching(identifier: "RF2 Import Tests")
                             .allElementsBoundByIndex
                         let browserBars = root.navigationBars.matching(identifier: "FullDocumentManagerViewControllerNavigationBar")
                             .allElementsBoundByIndex
+                        admission.directBars += folderBars.count
+                        admission.genericBars += browserBars.count
                         guard folderBars.count <= 1, browserBars.count <= 1 else { return false }
                         let actions = browserBars.first?.buttons
                             .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu"))
                             .allElementsBoundByIndex ?? []
+                        admission.actions += actions.count
                         guard actions.count <= 1 else { return false }
                         return (folderBars.count == 1 && folderBars[0].exists)
                             || (browserBars.count == 1 && browserBars[0].exists
-                                && actions.count == 1 && actionable(actions[0]))
+                                && actions.count == 1 && actions[0].exists)
                     }
+                admission.roots = roots.count
                 guard roots.count == 1, let root = roots.first, root.exists else { return nil }
+                admission.stage = .editors
                 let textViews = root.descendants(matching: .textView).matching(identifier: "DOC.inlineRenameField")
                     .allElementsBoundByIndex
-                guard textViews.count == 1, let textView = textViews.first, actionable(textView) else { return nil }
+                admission.editors = textViews.count
+                guard textViews.count == 1, let textView = textViews.first else { return nil }
+                admission.stage = .editorExists
+                guard textView.exists else { return nil }
+                admission.stage = .editorEnabled
+                admission.enabled = textView.isEnabled
+                guard admission.enabled else { return nil }
+                admission.stage = .editorHittable
+                admission.hittable = textView.isHittable
+                guard admission.hittable else { return nil }
+                admission.stage = .ready
                 return textView
             }
             try waitForState("New Folder must offer one known name dialog or the unique inline Files name editor", {
