@@ -92,6 +92,43 @@ Retain these other prepared device fields and their consumers:
 
 Their accessor owns no CloudKit transport, record format, account discovery or network work.
 
+The following JSON lives only inside `deviceState`; these are Meguri-owned
+maintenance records, not collection or sync fields:
+
+| Key | Stored value |
+|---|---|
+| `lastBackup` | object with `snapshotMod`, `instant` (signed 64-bit epoch milliseconds) and `name` (the published backup filename string); keep the existing spelling and meaning |
+| `lastCheckDatabase` | object with `instant` (signed 64-bit epoch milliseconds) and `result` as defined below |
+| `lastOptimize` | signed 64-bit epoch milliseconds; keep the existing scalar representation |
+| `lastQuickCheck` | object with `instant` (signed 64-bit epoch milliseconds) and `passed` (JSON boolean) |
+
+`lastCheckDatabase.result` reuses the machine summary in
+`conformance/collection-check#K5`: either every documented problem kind with an
+unsigned 64-bit count and no `error` member, or `error: "corrupt"` with no problem
+count members. It stores no localized messages or raw error text. Unknown
+members remain allowed and preserved. This defines storage/accessors only;
+U128/U132 still own the operations and their scheduling and user presentation.
+
+A genuinely absent sidecar, `deviceState` or optional record reads as no record.
+A present null, wrong type, missing required member, invalid result variant or
+number outside its declared integer range is an error, never absence or a
+successful default. An unreadable document or invalid existing R6 state stays
+an error. Reads do not repair it, and a setter must not replace corrupt data
+with a new record. Maintenance accessors cannot initialize or reset R6 identity.
+
+Use the existing sidecar lock and durable read/modify/write seam, with no nested
+accessor calls. Merge only the supplied known fields. Preserve unknown members
+at document, `deviceState`, record and result levels, plus every unrelated
+record and the existing publication/intent state. A result-variant change may
+remove only the old variant's known fields. Propagate read, validation and
+publication failures rather than reporting a successful save.
+
+Focused accessor tests must distinguish absent from malformed/null/incomplete
+records, reject bad counts/times/booleans, roundtrip both result variants and
+preserve unknown members and R6 state through updates. Cover independent
+metadata writes sharing the lock and a failed durable publication. This
+preparation adds no check operation, cadence, UI or server work.
+
 ### R6.2 Before activation
 
 Restore, ColpkgImport and FullDownload used for manual Import use this handshake after validation/finalisation

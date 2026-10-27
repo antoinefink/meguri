@@ -82,6 +82,15 @@ Examples: `08 03` is the latest format; `08 04` and the empty entry are `TooNew`
 - Decoded content of zero bytes is a map with no entry. The collection-only writer writes the zstd encoding of zero bytes.
 - **No `media` entry.** Meguri reads it as a map with no entry and imports no media (R1598). Anki 26.9.3 refuses such a latest-format package: it substitutes the legacy format's empty JSON map, which is not a valid protobuf message. Deviation `package-latest-missing-media-map`; scenario `package/collection-package/missing-media-map`.
 
+The existing deviation requires the direct production-reader test
+`core/crates/meguri-package/tests/collection_package.rs::missing_media_map_reads_as_empty`.
+Use a valid synthetic latest-format collection package with the `media` entry
+omitted. Assert successful reading, an empty media map and the expected usable
+collection payload. Include a present malformed-map control that is refused as
+`Corrupt`; absence must not hide an invalid map. Keep the scenario, committed
+golden and deviation transform unchanged. A test pointer or transformed golden
+alone does not prove this direct reader behavior.
+
 ## P6. Safe media names (latest format)
 
 A name is safe when it is not empty and the media file name transform `text/media-filenames#F1` leaves it unchanged. That transform removes `/` and `\` and turns `.` and `..` into `._` and `.._`, so a safe name is always one plain path component. Anki's check has the same result: one plain component that its own transform leaves unchanged.
