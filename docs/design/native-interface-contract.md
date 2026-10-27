@@ -236,3 +236,13 @@ Decided 2026-10-27:
 ### N11.6 Session end (U157, U186)
 
 Decided 2026-10-27: Back to Decks after at least one answer restores the deck workspace and shows the session summary over it as a sheet (`home.sessionSummary`); with no answer it shows none (R91). The summary has no chart.
+
+### N11.7 Stats header and graph boxes (U225, U226)
+
+Decided 2026-10-27:
+
+- R1350's sticky header is the window's toolbar, which stays in place while the graphs scroll. No bar of its own, no custom background.
+- Regular width (Mac, iPad when the controls fit): in order, the scope picker (segmented: Deck, Collection, Search), the deck pop-up button (Deck scope) or the search field (Search scope), and the history picker (segmented). Compact width, or when they do not fit: the navigation title "Statistics" with the scope and history as its subtitle, and one toolbar menu holding the scope, the deck list and the history; the Search scope shows the navigation bar's search field.
+- The history labels are "Last 12 Months" and "All History", in title case as Apple's control labels are; `stats/graphs-common` G3 keeps Anki's lower-case wording as its source.
+- Each graph is a system group box: Anki's title and subtitle (R1358), the graph's controls, the chart and its table. No custom card background, corner radius, shadow or motion tokens; system animations, which Reduce Motion already shortens (R1368).
+- Replaces: U225's "sticky top bar" and `ChartCard` chrome with DesignSystem motion tokens, and U225's segmented scope control at compact width.
