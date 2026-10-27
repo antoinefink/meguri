@@ -3,7 +3,7 @@
 Spec: search/errors
 Requirements: R1075, R1778, R1085
 Anki: 26.09.3
-Scenarios: conformance/scenarios/search/errors/, conformance/scenarios/search/canonical/spec-examples.yaml
+Scenarios: conformance/scenarios/search/errors/, conformance/scenarios/search/canonical/spec-examples.yaml, conformance/scenarios/search/regex/
 
 The closed list of search error kinds, the details each carries, the order in which errors are found, the range each covers and the message Meguri shows. The grammar that raises them is `grammar.md`. The browser (U85) and the AnkiConnect server (U141, R1778) return the same message text.
 
@@ -61,12 +61,15 @@ Examples: `prop:ivl>x` → `invalid_positive_whole_number`, `x`, `ivl>x`. `rated
 
 ## E3. Run errors
 
-- **`invalid_regex`** (raised by U81's matchers; specified in `text-matching.md`). A pattern of `re:`, `<field>:re:`, `tag:re:` or `w:` that does not compile. Meguri compiles every pattern while it builds the plan, so the error comes before any result and whatever the collection holds. Anki compiles a pattern only when a row reaches its test, so on an empty collection, or when other terms rule out every row first, it returns results instead; U81 records that as a deviation. Note that an unquoted `re:(` is not a regex error: the `(` ends the term, so it is `unclosed_group`; the invalid regex is `"re:("` or `re:[`.
+- **`invalid_regex`** (raised by U81's matchers; specified in `text-matching.md`). A pattern of `re:`, `<field>:re:`, `tag:re:` or `w:` that does not compile. Meguri compiles every pattern while it builds the plan, so the error comes before any result and whatever the collection holds. Anki compiles a pattern only when a row reaches its test, so on an empty collection, or when other terms rule out every row first, it returns results instead (deviation `search-invalid-regex-unreached`, `text-matching.md` T12.3). Note that an unquoted `re:(` is not a regex error: the `(` ends the term, so it is `unclosed_group`; the invalid regex is `"re:("` or `re:[`.
 - **`search_failed`**. Anki raises a database error instead of a search error for these searches, and the oracle records that as `search_failed`. Meguri raises `search_failed` for the same searches, before it runs anything:
   - the search holds a negated operator word (`-and`, `-or`, any letter case; `grammar.md` G4);
-  - an id list of `did:`, `nid:` or `cid:` holds a digit other than ASCII `0`–`9` (G8 accepts any Unicode decimal digit).
+  - an id list of `did:`, `nid:` or `cid:` holds a digit other than ASCII `0`–`9` (G8 accepts any Unicode decimal digit);
+  - a text term's pattern is longer than 50,000 bytes, or a regular expression exceeds the compiled size limit (`text-matching.md` T3.3, T12.1);
+  - plain text, `nc:` or `sc:` when at least one note type exists and every note type excludes all its fields from searches without a field name (`text-matching.md` T7.2); `re:` or `w:` when some note type excludes all its fields; `sc:` when the collection has no cloze note type (`text-matching.md` T7.2, T7.3, T9.1);
+  - a `prop:` operand that is infinite or not a number (`properties.md` P14).
 - **Database limits.** When the database refuses the statement Meguri built for a valid search (too deeply nested, too many parameters), the search fails with `search_failed`. Anki already fails when about 1000 terms are joined by AND or OR in one sequence, because its statement nests one level per operator. Meguri's statement may reach that limit at a different size, so no scenario sits at the boundary.
-- Property operands that are infinite or not a number (`prop:s>inf`, `prop:cdn:k<nan`) also make Anki's statement fail. Whether Meguri fails them the same way is for `properties.md` (U82).
+- Property operands that are infinite or not a number (`prop:s>inf`, `prop:cdn:k<nan`) also make Anki's statement fail. Meguri raises `search_failed` for them while it builds the plan (`properties.md` P14), as for the other causes above.
 
 ## E4. Order
 
@@ -76,8 +79,14 @@ The text is read once, from left to right, one item at a time (`grammar.md` G2).
    - a term's form errors (G3: `empty_quote`, `unclosed_quote`, a backslash before a space or at the end), then its interpretation errors (G6–G8): `missing_key`; for a field search, the field name's `unknown_escape` before the value's; then the value's error. Within one value, the checks run in the order G8 lists them: `rated` days before the button, the `dupe` id before the missing comma, the `prop` property, then operator, then operand;
    - an operator word at the start of a sequence or right after another operator word: `misplaced_and` or `misplaced_or` at once.
 2. **The end of a sequence** (a `)`, or the end of the text): a trailing operator word is reported first (`misplaced_*`). Then, for a group: `empty_group` when its `)` is there and it is empty, `unclosed_group` when there is no `)` (so `(` alone is `unclosed_group`). For the whole search: `unopened_group` when a `)` ended it.
+3. **Plan errors** (every E3 cause but a database refusal) are checked only when the whole text reads without a parse error. They are checked in two passes over the terms, each in reading order, negated terms included; the first failing check is reported and nothing after it is examined:
+   1. **Statement checks**, which need only the term and the note types: a negated operator word; a non-ASCII digit in an id list; a `prop:` operand out of range (`properties.md` P14); `sc:` with no cloze note type (`text-matching.md` T9.1); no searchable field (T7.2); all fields excluded (T7.3). One term can fail more than one; they are checked in the order just listed.
+   2. **Pattern checks**, on each pattern and expression the term builds, in the order the term's section lists its patterns: the pattern size (T3.3), then the compilation of a regular expression (T12.1: a syntax error is `invalid_regex`, an expression over the size limit is `search_failed`).
+4. **A database refusal** comes last: Meguri runs the statement only when the plan raised nothing.
 
-Consequences, all pinned by `conformance/scenarios/search/errors/order.yaml`:
+Decided 2026-10-27: the two passes follow Anki's timing, where the statement checks fail while its statement is prepared and the pattern checks only when a row reaches the test, so `re:[ sc:x` on a collection without a cloze note type reports `search_failed (no cloze note type)` in both. Within each pass, reading order keeps the result independent of the collection's rows.
+
+Consequences of steps 1 and 2, all pinned by `conformance/scenarios/search/errors/order.yaml`:
 
 | Input | Error |
 |---|---|
@@ -107,7 +116,7 @@ Meguri's errors carry a range: a half-open interval of character offsets (Unicod
 | `unknown_escape` | the characters of `provided` where they stand in the text (a lone trailing backslash: that backslash) |
 | every other parse kind | the whole term: its key, colon and value, quotes included, without a negating `-` |
 | `invalid_regex` | the whole term holding the pattern |
-| `search_failed` | the negated operator word with its `-`, or the id-list term; the whole text for a database refusal |
+| `search_failed` | the negated operator word with its `-`; for every other cause but a database refusal, the whole term that failed, quotes included, without a negating `-`; the whole text for a database refusal |
 
 A range is never empty and always lies inside the text.
 
@@ -121,7 +130,7 @@ A range is never empty and always lies inside the text.
 Meguri's own wording, in plain English, naming the offending text (R1075). Implementers take these strings only from here.
 
 - A message is the text below for its kind, character for character, and nothing else: no shared prefix comes before it. The block lists one kind per line as `<kind>: <text>`; the text starts after the first `: `.
-- `{provided}` and `{context}` stand for the E2 texts, with each backtick (U+0060) in them replaced by an apostrophe (U+0027) so that the code spans stay intact. `{pattern}` and `{reason}` are defined in `text-matching.md` (U81).
+- `{provided}` and `{context}` stand for the E2 texts, with each backtick (U+0060) in them replaced by an apostrophe (U+0027) so that the code spans stay intact. `{pattern}`, `{reason}` and `{notetype}` are defined in `text-matching.md` T16; `{term}` is the failing term's text as it stands in the search, quotes included, without a negating `-`. The same backtick replacement applies to these four.
 - Backticks mark code spans: the browser may render them as code; AnkiConnect returns the string as it is.
 - `search_failed` has one text per cause of E3.
 
@@ -151,6 +160,12 @@ invalid_regex: `{pattern}` is not a valid regular expression: {reason}
 search_failed (negated operator word): A `-` cannot negate `and` or `or`. To leave out the word itself, quote it: `-"and"`.
 search_failed (id list): `{context}` takes ids written with the digits 0 to 9 only.
 search_failed (database refusal): This search is too large to run. Split it into smaller searches.
+search_failed (pattern too long): This search term is too long. Shorten it.
+search_failed (expression too large): The regular expression `{pattern}` is too large to search with. Make it shorter.
+search_failed (no searchable field): Every note type leaves all its fields out of searches without a field name. Search a named field instead, as in `front:text`.
+search_failed (no cloze note type): `sc:` searches cloze note types, and this collection has none.
+search_failed (all fields excluded): The note type `{notetype}` leaves all its fields out of searches without a field name, so `re:` and `w:` cannot run. Search a named field instead, as in `front:re:text`.
+search_failed (number out of range): `{term}` needs a finite number, and this one is out of range or not a number.
 ```
 
 For `search_failed (id list)`, `{context}` is the key as typed, then `:`.

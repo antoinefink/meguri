@@ -1,0 +1,49 @@
+# R1034, R1035; specs/search/text-matching.md T2, T5: plain text matches the
+# raw field HTML and the sort-field text (HTML stripped, entities decoded).
+# SortFirst sorts by Front, SortSecond by Back (patched before any note is
+# added, so every sort-field text is computed with the final index). The
+# sort-field column has integer affinity: `1.50` is stored as the number 1.5
+# and `1e3` as 1000.
+id: search/text/html-and-sort-field
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: SortFirst
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: SortSecond
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update: {notetype: SortSecond, patch: {sortf: 1}}
+  - add_note: {notetype: SortFirst, fields: ["hot<b>dog</b>", x]}
+  - add_note: {notetype: SortSecond, fields: ["hot<b>dog</b>", x]}
+  - add_note: {notetype: SortSecond, fields: [x, "hot<b>cat</b>"]}
+  - add_note: {notetype: SortFirst, fields: ["Tom &amp; Jerry", x]}
+  - add_note: {notetype: SortFirst, fields: [x, "a &lt; b"]}
+  - add_note: {notetype: SortFirst, fields: ["c &lt; d", x]}
+  - add_note: {notetype: SortFirst, fields: [x, "e & f"]}
+  - add_note: {notetype: SortFirst, fields: ["<b>1</b>.50", x]}
+  - add_note: {notetype: SortFirst, fields: ["<b>1</b>e3", x]}
+  - add_note: {notetype: SortFirst, fields: ["<img src=\"cat.jpg\">", x]}
+  - observe:
+      - search:
+          - {query: hotdog}
+          - {query: hotcat}
+          - {query: '&amp;'}
+          - {query: '&'}
+          - {query: 'tom & jerry'}
+          - {query: '<'}
+          - {query: '&lt;'}
+          - {query: 'a < b'}
+          - {query: 'c < d'}
+          - {query: 'e & f'}
+          - {query: '1.50'}
+          - {query: '1.5'}
+          - {query: '1e3'}
+          - {query: '1000'}
+          - {query: 'cat.jpg'}
+          - {query: 'img'}

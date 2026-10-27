@@ -1,0 +1,107 @@
+# R1070; specs/search/properties.md P6-P8, P14 and search/card-extractors.md X3,
+# X5. prop:s and prop:d
+# compare the stability and difficulty stored in cards.data (each read on its
+# own; d given on a 0-1 scale is mapped to the stored 1-10 scale), as 32-bit
+# values widened to 64 bits against the operand's decimal text read as a
+# 64-bit number (so a stored 2.3 is below 2.3). prop:r computes the
+# retrievability now from the memory state, decay (0.5 when missing) and the
+# time since the last review (lrt, else derived from due and ivl, on the
+# original due of a filtered card); new cards never match, cards without a
+# memory state are unknown. Infinite or NaN operands fail the search. Day 30
+# (2030-02-14 10:00 UTC), then one second before and at the next boundary.
+id: search/props/memory
+tags: [needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "review s 2.5, last review 10 days ago"]}
+    - {notetype: Memo, fields: [c2, "review s 2.3 d 3.7, no lrt, ivl 5"]}
+    - {notetype: Memo, fields: [c3, "review s 21, last review 1 day ago"]}
+    - {notetype: Memo, fields: [c4, "review s 100 decay 0.1542, 50 days ago"]}
+    - {notetype: Memo, fields: [c5, "review with s only"]}
+    - {notetype: Memo, fields: [c6, "review without memory state"]}
+    - {notetype: Memo, fields: [c7, "new card with a memory state"]}
+    - {notetype: Memo, fields: [c8, "new card"]}
+    - {notetype: Memo, fields: [c9, "relearning due in 10 min"]}
+    - {notetype: Memo, fields: [c10, "review s 5, no lrt, ivl 20"]}
+    - {notetype: Memo, fields: [c11, "filtered review s 5, home due 35, ivl 20"]}
+    - {notetype: Memo, fields: [c12, "review s 2.5, lrt in the future"]}
+    - {notetype: Memo, fields: [c13, "review s 0.1, no lrt, ivl 1"]}
+    - {notetype: Memo, fields: [c14, "review s beyond f32"]}
+    - {notetype: Memo, fields: [c15, "review with unreadable data"]}
+    - {notetype: Memo, fields: [c16, "review s 5 d 5 with a cd that is not a string"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 35, odue = 0, ivl = 10, data = ? WHERE id = 1894701600000", params: ['{"s":2.5,"d":5.5,"lrt":1896429600}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, odue = 0, ivl = 5, data = ? WHERE id = 1894701600001", params: ['{"s":2.3,"d":3.7}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600002", params: ['{"s":21.0,"d":1.0,"lrt":1897207200}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600003", params: ['{"s":100,"d":10,"decay":0.1542,"lrt":1892973600}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600004", params: ['{"s":5}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600005", params: ['{}']}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 1, odue = 0, ivl = 0, data = ? WHERE id = 1894701600006", params: ['{"s":3,"d":5}']}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 2, odue = 0, ivl = 0, data = ? WHERE id = 1894701600007", params: ['{}']}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1897294200, odue = 0, ivl = 0, data = ? WHERE id = 1894701600008", params: ['{"s":4,"d":6}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 35, odue = 0, ivl = 20, data = ? WHERE id = 1894701600009", params: ['{"s":5,"d":5}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -100000, odue = 35, ivl = 20, data = ? WHERE id = 1894701600010", params: ['{"s":5,"d":5}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600011", params: ['{"s":2.5,"d":5.5,"lrt":1897297200}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, odue = 0, ivl = 1, data = ? WHERE id = 1894701600012", params: ['{"s":0.1,"d":2}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600013", params: ['{"s":1e40,"d":1}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600014", params: ['garbage']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, odue = 0, ivl = 10, data = ? WHERE id = 1894701600015", params: ['{"s":5,"d":5,"cd":5}']}
+  - set_clock: "2030-02-14T10:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'prop:s>21'}
+          - {query: 'prop:s>=21'}
+          - {query: 'prop:s=2.5'}
+          - {query: 'prop:s=2.3'}
+          - {query: 'prop:s<2.3'}
+          - {query: 'prop:s>0.1'}
+          - {query: 'prop:s=0.1'}
+          - {query: 'prop:s>1'}
+          - {query: 'prop:s>1e30'}
+          - {query: '-prop:s>1'}
+          - {query: 'prop:d>0.3'}
+          - {query: 'prop:d=0.5'}
+          - {query: 'prop:d<0'}
+          - {query: 'prop:d>=0'}
+          - {query: 'prop:d>1'}
+          - {query: 'prop:d>=1'}
+          - {query: 'prop:d>1e37'}
+          - {query: 'prop:r<0.9'}
+          - {query: 'prop:r>0.99'}
+          - {query: 'prop:r>0.93'}
+          - {query: 'prop:r=1'}
+          - {query: 'prop:r>=1'}
+          - {query: '-prop:r<0.9'}
+          - {query: 'prop:r<0.5'}
+          - {query: 'prop:r>0.76'}
+          - {query: 'prop:r>-1'}
+          - {query: 'prop:s>inf'}
+          - {query: 'prop:s>nan'}
+          - {query: 'prop:d>1e38'}
+          - {query: 'prop:r<inf'}
+          - {query: 'prop:r<-inf'}
+          - {query: 'prop:s>=0 prop:r>2'}
+  - set_clock: "2030-02-15T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'prop:r>0.76'}
+          - {query: 'prop:r<0.5'}
+          - {query: 'prop:r<0.9'}
+          - {query: 'prop:r>0.99'}
+  - set_clock: "2030-02-15T04:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'prop:r>0.76'}
+          - {query: 'prop:r<0.5'}
+          - {query: 'prop:r<0.9'}
+          - {query: 'prop:r>0.99'}

@@ -1,0 +1,57 @@
+# R1043; specs/search/text-matching.md T9: sc: searches only notes of cloze
+# note types, in the field string and sort-field text with cloze markup
+# removed: each `{{c<digits or commas>::text::hint}}` becomes `text`, matched
+# shortest-first, not nesting-aware, and across field boundaries. A `-`
+# written directly before sc: negates only the note type condition (T9.3);
+# `-(sc:...)` negates the whole term. Notes mode, so ids name notes whatever
+# the cloze numbers.
+id: search/text/sc
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Gap, fields: ["{{c1::capital}} city", x]}
+    - {notetype: Single, fields: ["{{c1::capital}} city", x]}
+    - {notetype: Gap, fields: ["{{c1::one::hint}} two", x]}
+    - {notetype: Gap, fields: ["a {{c2::b {{c1::c}} d}} e", x]}
+    - {notetype: Gap, fields: ["{{c1::x", "y}} z"]}
+    - {notetype: Gap, fields: ["{{c١::arabic}} {{c1::one}}", x]}
+    - {notetype: Gap, fields: ["{{c1,2::both}} {{c3::}}end", x]}
+    - {notetype: Gap, fields: ["{{c1::a}}{{c2::b}}", x]}
+    - {notetype: Gap, fields: ["{{c1::multi\nline}}", x]}
+    - {notetype: Gap, fields: ["{{C1::upper}} {{c::none}} {{c1:single}}", x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'sc:capital', kind: notes}
+          - {query: 'sc:"capital city"', kind: notes}
+          - {query: 'capital city', kind: notes}
+          - {query: 'sc:"one two"', kind: notes}
+          - {query: 'sc:hint', kind: notes}
+          - {query: 'sc:"a b {{c1 d}} e"', kind: notes}
+          - {query: 'sc:"b {{c1 d"', kind: notes}
+          - {query: 'sc:"x_y z"', kind: notes}
+          - {query: 'sc:"arabic one"', kind: notes}
+          - {query: 'sc:"both end"', kind: notes}
+          - {query: 'sc:ab', kind: notes}
+          - {query: 'sc:multi_line', kind: notes}
+          - {query: 'sc:"{{C1::upper}}"', kind: notes}
+          - {query: 'sc:"{{c::none}}"', kind: notes}
+          - {query: 'sc:"{{c1:single}}"', kind: notes}
+          - {query: 'sc:"c1::"', kind: notes}
+          - {query: 'sc:', kind: notes}
+          - {query: '-sc:capital', kind: notes}
+          - {query: '-(sc:capital)', kind: notes}
+          - {query: '-sc:"capital city"', kind: notes}
+          - {query: '-sc:capital or one', kind: notes}
+          - {query: '-sc:capital -sc:city', kind: notes}

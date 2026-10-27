@@ -1,0 +1,67 @@
+# R1061; specs/search/names-and-ids.md N3.5, N5. nid:, cid: and did: take
+# comma-separated ids; did: matches the listed decks without subdecks, on the
+# card's deck or its home deck. mid: takes one note type id. Note, card and
+# note type ids come from the frozen clock (specs/storage/ids-usn-mtime.md I2):
+# the first two observations pin them. Decks P (400), P::C (401) and the
+# filtered deck F (402) are written with fixed ids; F holds one card from each.
+id: search/ids/lists
+tags: [needs-ids, needs-deck]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Solo
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Duo, fields: [one, x]}
+    - {notetype: Duo, fields: [two, x]}
+    - {notetype: Solo, fields: [three, x]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "SELECT id, name FROM notetypes WHERE name IN ('Duo', 'Solo') ORDER BY id"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 400, 'P', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 401, 'P' || char(31) || 'C', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (402, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec: {sql: "UPDATE cards SET did = 400 WHERE id = 1894701600000"}
+  - db_exec: {sql: "UPDATE cards SET did = 401 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET did = 402, odid = 400, odue = due, due = -100000 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET did = 402, odid = 401, odue = due, due = -100000 WHERE id = 1894701600003"}
+  - observe:
+      - search:
+          - {query: 'nid:1894701600000'}
+          - {query: 'nid:1894701600000', kind: notes}
+          - {query: 'nid:1894701600000,1894701600002', kind: notes}
+          - {query: 'nid:01894701600001', kind: notes}
+          - {query: 'NID:1894701600001', kind: notes}
+          - {query: 'nid:1', kind: notes}
+          - {query: 'nid:99999999999999999999', kind: notes}
+          - {query: '-nid:1894701600000', kind: notes}
+          - {query: 'cid:1894701600003'}
+          - {query: 'cid:1894701600000,1894701600004'}
+          - {query: 'cid:1894701600000,1894701600000'}
+          - {query: 'cid:1894701600001', kind: notes}
+          - {query: 'did:400'}
+          - {query: 'did:400,401'}
+          - {query: 'did:402'}
+          - {query: 'did:1'}
+          - {query: 'did:0400'}
+          - {query: 'did:401', kind: notes}
+          - {query: 'did:999'}
+          - {query: 'mid:1894701600006', kind: notes}
+          - {query: 'mid:1894701600007', kind: notes}
+          - {query: 'mid:+1894701600007', kind: notes}
+          - {query: 'mid:1', kind: notes}
+          - {query: 'mid:-5', kind: notes}
+          - {query: 'mid:1894701600006'}
+          - {query: 'nid:1894701600000, 1894701600001'}
+          - {query: 'NID:1,a'}
+          - {query: 'cid:1,,2'}
+          - {query: 'did:'}
+          - {query: 'mid:1,2'}

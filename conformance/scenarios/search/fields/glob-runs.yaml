@@ -1,0 +1,56 @@
+# R1047; specs/search/fields.md F5: when a field name pattern matches
+# neighbouring fields of a note type, those fields form one run, and a normal
+# or nc: field search tests the run as one span of the field string (the
+# Anki 26.09.3 behavior Meguri reproduces). A run at the start of the note
+# type therefore tests only its first field, a run at the end only its last,
+# and a run of every field the whole string. Values `*`, `_*` and `*_` never
+# form runs; regex mode tests each field.
+id: search/fields/glob-runs
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Head
+      fields: [A1, A2, B]
+      templates: [{name: Forward, front: "{{A1}}{{A2}}", back: "{{B}}"}]
+      css: ".card { margin: 0; }"
+    - name: Tail
+      fields: [X, Y1, Y2]
+      templates: [{name: Forward, front: "{{X}}{{Y1}}", back: "{{Y2}}"}]
+      css: ".card { margin: 0; }"
+    - name: Middle
+      fields: [P, Q1, Q2, R]
+      templates: [{name: Forward, front: "{{P}}{{Q1}}", back: "{{Q2}}{{R}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Head, fields: [x, dog, z]}
+    - {notetype: Head, fields: [dog, x, z]}
+    - {notetype: Head, fields: [x, y, dog]}
+    - {notetype: Head, fields: [dog, dog, z]}
+    - {notetype: Tail, fields: [x, dog, z]}
+    - {notetype: Tail, fields: [x, y, dog]}
+    - {notetype: Tail, fields: [dog, y, z]}
+    - {notetype: Middle, fields: [p, dog, x, r]}
+    - {notetype: Middle, fields: [p, x, dog, r]}
+    - {notetype: Middle, fields: [dog, x, y, r]}
+steps:
+  - observe:
+      - search:
+          - {query: 'a*:dog'}
+          - {query: 'a_:dog'}
+          - {query: 'a1:dog'}
+          - {query: 'a2:dog'}
+          - {query: 'y*:dog'}
+          - {query: 'q*:dog'}
+          - {query: 'a*:x'}
+          - {query: 'a*:*'}
+          - {query: 'a*:_*'}
+          - {query: 'a*:*dog*'}
+          - {query: 'a*:dog*'}
+          - {query: 'a*:dog_x'}
+          - {query: 'a*:re:dog'}
+          - {query: 'a*:nc:dog'}
+          - {query: 'y*:re:dog'}
+          - {query: '**:dog'}
+          - {query: '**:*dog*'}
+          - {query: '*:dog'}

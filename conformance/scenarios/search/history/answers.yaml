@@ -1,0 +1,109 @@
+# R1069, R1072, R1073; specs/search/history.md. rated:, resched: and
+# introduced: read the review log; the window of N days starts at the next
+# day boundary minus N days (rated: and resched: include an entry exactly at
+# that instant, introduced: does not). rated: and prop:rated count answers
+# (ease 1-4), resched: and prop:resched manual entries (ease 0); introduced:
+# looks at the first answer and ignores manual entries, also when negated.
+# prop:rated=N and prop:resched=N name day N relative to today (N <= 0), and
+# != means "an entry on another day". Entries are written with db_exec on the
+# day boundaries of UTC rollover 4: day 0 starts 2030-01-15 04:00, day 1
+# 2030-01-16 04:00 (B1), day 2 2030-01-17 04:00 (B2), day 3 2030-01-18 04:00
+# (B3). Observed on day 2, one second before B3 and at B3. Card ids come from
+# the frozen clock (1894701600000 + note number - 1).
+id: search/history/answers
+tags: [needs-history]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "first answer at the day-2 boundary"]}
+    - {notetype: Memo, fields: [c2, "answer 1 ms before the day-2 boundary"]}
+    - {notetype: Memo, fields: [c3, "manual entry on day 2"]}
+    - {notetype: Memo, fields: [c4, "Hard on day 1"]}
+    - {notetype: Memo, fields: [c5, "answered day 0 and day 2"]}
+    - {notetype: Memo, fields: [c6, "first answer (Again) on day 2"]}
+    - {notetype: Memo, fields: [c7, "manual day 0, first answer (Easy) day 2"]}
+    - {notetype: Memo, fields: [c8, "answer on day 2 (none)"]}
+    - {notetype: Memo, fields: [c9, "no entries"]}
+    - {notetype: Memo, fields: [c10, "answer and manual entry on day 3"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852800000, 1894701600000, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852799999, 1894701600001, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852805000, 1894701600002, 0, 0, 1, 0, 2500, 1000, 4)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894766401000, 1894701600003, 0, 2, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701601000, 1894701600004, 0, 3, 1, 0, 2500, 1000, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852801000, 1894701600004, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852802000, 1894701600005, 0, 1, 1, 0, 2500, 1000, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701602000, 1894701600006, 0, 0, 1, 0, 2500, 1000, 4)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852803000, 1894701600006, 0, 4, 1, 0, 2500, 1000, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894939201000, 1894701600009, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894939202000, 1894701600009, 0, 0, 1, 0, 2500, 1000, 4)"}
+  - set_clock: "2030-01-17T10:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'rated:0'}
+          - {query: 'rated:2'}
+          - {query: 'rated:3'}
+          - {query: 'rated:2:2'}
+          - {query: 'rated:2:3'}
+          - {query: 'rated:1:1'}
+          - {query: 'rated:1:4'}
+          - {query: 'rated:4294967295'}
+          - {query: 'resched:1'}
+          - {query: 'resched:0'}
+          - {query: 'resched:3'}
+          - {query: 'introduced:1'}
+          - {query: '-introduced:1'}
+          - {query: 'introduced:2'}
+          - {query: 'introduced:3'}
+          - {query: 'prop:rated=0'}
+          - {query: 'prop:rated=-1'}
+          - {query: 'prop:rated>=-1'}
+          - {query: 'prop:rated>-1'}
+          - {query: 'prop:rated<-1'}
+          - {query: 'prop:rated<=-1'}
+          - {query: 'prop:rated!=0'}
+          - {query: 'prop:rated=-2'}
+          - {query: 'prop:rated=0:1'}
+          - {query: 'prop:rated=-7:1'}
+          - {query: 'prop:rated=-0'}
+          - {query: 'prop:resched=0'}
+          - {query: 'prop:resched=-2'}
+          - {query: 'prop:resched>-1'}
+          - {query: 'prop:resched!=0'}
+          - {query: 'prop:rated=1'}
+          - {query: 'rated:1:5'}
+          - {query: 'prop:rated=-1:5'}
+          - {query: 'prop:resched=1'}
+          - {query: 'rated:-1'}
+          - {query: 'resched:-1'}
+          - {query: 'introduced:-1'}
+  - set_clock: "2030-01-18T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'resched:1'}
+          - {query: 'introduced:1'}
+          - {query: 'prop:rated=0'}
+          - {query: 'prop:rated=-1'}
+  - set_clock: "2030-01-18T04:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'rated:2'}
+          - {query: 'resched:1'}
+          - {query: 'resched:0'}
+          - {query: 'introduced:1'}
+          - {query: 'introduced:2'}
+          - {query: 'prop:rated=0'}
+          - {query: 'prop:rated=-1'}
+          - {query: 'prop:resched=-1'}

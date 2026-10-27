@@ -1,0 +1,45 @@
+# R1044, R1045; specs/search/fields.md F4: field:value matches when the whole
+# field equals the value as a wildcard pattern (no implicit wildcards). An
+# empty value matches an empty field, `_*` a non-empty one, `*` every note
+# whose note type has the field. Other is a note type without a Front field.
+id: search/fields/exact
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}{{Back}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Other
+      fields: [Side, Back]
+      templates: [{name: Forward, front: "{{Side}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, x]}
+    - {notetype: Single, fields: [hot dog, x]}
+    - {notetype: Single, fields: ["", x]}
+    - {notetype: Single, fields: [DOG, x]}
+    - {notetype: Single, fields: ["<b>dog</b>", x]}
+    - {notetype: Single, fields: [dig, dog]}
+    - {notetype: Other, fields: [dog, x]}
+    - {notetype: Single, fields: [" ", x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'front:dog'}
+          - {query: 'front:*dog*'}
+          - {query: 'front:*dog'}
+          - {query: 'front:d_g'}
+          - {query: 'front:'}
+          - {query: 'front:_*'}
+          - {query: 'front:*_'}
+          - {query: 'front:*'}
+          - {query: 'FRONT:dog'}
+          - {query: 'front:DOG'}
+          - {query: 'back:dog'}
+          - {query: 'side:dog'}
+          - {query: '"front:hot dog"'}
+          - {query: 'front:"hot dog"'}
+          - {query: '-front:dog'}
+          - {query: 'front:dog', kind: notes}

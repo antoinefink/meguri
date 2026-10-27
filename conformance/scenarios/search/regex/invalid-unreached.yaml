@@ -1,0 +1,23 @@
+# specs/search/text-matching.md T12.3: Anki compiles a pattern only when a
+# row reaches its test, so it returns results for these invalid patterns (the
+# golden): a collection with no note, and a field no note type has. Meguri
+# compiles every pattern while it builds the plan and reports invalid_regex
+# for each (deviation search-invalid-regex-unreached).
+id: search/regex/invalid-unreached
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - observe:
+      - search:
+          - {query: 're:['}
+          - {query: 'front:re:['}
+  - add_note: {notetype: Single, fields: [dog, x]}
+  - observe:
+      - search:
+          - {query: 'nosuchfield:re:['}

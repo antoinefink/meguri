@@ -1,0 +1,25 @@
+# R1036 with R1038; specs/search/case-folding.md C2: with
+# ignoreAccentsInSearch true, plain `привет` finds "Привет" only in Meguri's
+# Unicode mode (deviation search-unicode-ignore-accents; the golden is Anki's
+# empty result), while `uber` finds "ÜBER" in both modes.
+id: search/folding/ignore-accents
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {ignoreAccentsInSearch: true}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["Привет", x]}
+    - {notetype: Single, fields: ["ÜBER", x]}
+steps:
+  - observe:
+      - search:
+          - {query: "привет", kind: notes}
+  - observe:
+      - search:
+          - {query: "uber", kind: notes}
+          - {query: "w:привет", kind: notes}

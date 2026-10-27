@@ -1,0 +1,68 @@
+# R1055, R1057, R1268; specs/search/names-and-ids.md N3.4. deck:current
+# reads curDeck: the current deck's name and its subdecks, on the card's deck
+# or home deck. When curDeck names no deck, the name Default is searched (so a
+# deck now called "default" matches, not deck 1); when the key is missing,
+# deck 1. The decks are written with fixed ids by copying the default deck's
+# row; the filtered deck Cram (id 100) as specs/conformance/deck-ops.md K13.
+id: search/decks/current
+tags: [needs-deck]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [default, x]}
+    - {notetype: Memo, fields: [lang, x]}
+    - {notetype: Memo, fields: [lang-french, x]}
+    - {notetype: Memo, fields: [lang-french-verbs, x]}
+    - {notetype: Memo, fields: [filtered-from-lang-french, x]}
+    - {notetype: Memo, fields: [other, x]}
+steps:
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 300, 'Lang', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 301, 'Lang' || char(31) || 'French', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 302, 'Lang' || char(31) || 'French' || char(31) || 'Verbs', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 303, 'Other', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec: {sql: "UPDATE cards SET did = 300 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET did = 301 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET did = 302 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET did = 100, odid = 301, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET did = 303 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+          - {query: 'deck:current', kind: notes}
+  - set_config: {key: curDeck, value: 301}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+          - {query: 'deck:current -deck:current::*'}
+  - set_config: {key: curDeck, value: 300}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+  - set_config: {key: curDeck, value: 100}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+  - set_config: {key: curDeck, value: 999}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+  - db_exec: {sql: "UPDATE decks SET name = 'Main' WHERE id = 1"}
+  - db_exec: {sql: "UPDATE decks SET name = 'default' WHERE id = 303"}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+          - {query: 'deck:default'}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'curDeck'"}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+  - set_config: {key: curDeck, value: "301"}
+  - observe:
+      - search:
+          - {query: 'deck:current'}

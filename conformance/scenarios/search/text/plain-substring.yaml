@@ -1,0 +1,44 @@
+# R1033, R1034; specs/search/text-matching.md T3, T5: plain text is a
+# substring match on the raw field text and the sort-field text; `*` and `_`
+# are wildcards, `\*`, `\_` and `\\` literal, `%` always literal. One card per
+# note, so #cN is the card of #nN.
+id: search/text/plain-substring
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["<b>hot</b>dog", x]}
+    - {notetype: Single, fields: [dog house, x]}
+    - {notetype: Single, fields: [dosomethingg, x]}
+    - {notetype: Single, fields: [dig, x]}
+    - {notetype: Single, fields: [dg, x]}
+    - {notetype: Single, fields: ["a*b", x]}
+    - {notetype: Single, fields: ["a%b", x]}
+    - {notetype: Single, fields: [a_b, x]}
+    - {notetype: Single, fields: ['a\b', x]}
+    - {notetype: Single, fields: [DOG, x]}
+    - {notetype: Single, fields: [x, the dog]}
+steps:
+  - observe:
+      - search:
+          - {query: dog}
+          - {query: 'do*g'}
+          - {query: 'd_g'}
+          - {query: 'a\*b'}
+          - {query: 'a*b'}
+          - {query: 'a%b'}
+          - {query: 'a\_b'}
+          - {query: 'a_b'}
+          - {query: 'a\\b'}
+          - {query: '%'}
+          - {query: '\*'}
+          - {query: '\_'}
+          - {query: 'hot*dog'}
+          - {query: 'hot_dog'}
+          - {query: 'b>d'}
+          - {query: 'dog', kind: notes}

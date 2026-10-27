@@ -1,0 +1,26 @@
+# AE49 (R1036 reading); specs/search/case-folding.md C2: a field holding
+# "Über". The plain search `über` does not match in Anki (ASCII-only folding,
+# the golden) and matches in Meguri's Unicode mode (deviation
+# search-unicode-umlaut); nc:uber and w:über match in both modes.
+id: search/folding/umlaut
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["Über", x]}
+    - {notetype: Single, fields: [other, x]}
+steps:
+  - observe:
+      - search:
+          - {query: "über", kind: notes}
+  - observe:
+      - search:
+          - {query: "nc:uber", kind: notes}
+          - {query: "w:über", kind: notes}
+          - {query: "re:über", kind: notes}
+          - {query: "Über", kind: notes}

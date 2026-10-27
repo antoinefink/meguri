@@ -1,0 +1,41 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search": [
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          }
+        ]
+      },
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": []
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "58913630795064a0482f5010d1cefbcdb41507b061928762b263e5b56532fc9b",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/regex/invalid-unreached",
+  "scenario_sha256": "4784e3c20f86a5412c92a44d87ccb14dadc3cf7bd40087b1693aed5f2bab813f",
+  "tz": "UTC"
+}

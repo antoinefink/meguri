@@ -1,0 +1,59 @@
+# R1074; specs/search/names-and-ids.md N6. dupe:<note type id>,<text> finds
+# the notes of that note type whose first field, with HTML removed and media
+# file names kept, equals the text treated the same way: exactly, letter case
+# included; sound tags stay text. The note type ids come from the frozen clock
+# (specs/storage/ids-usn-mtime.md I2); the first observation pins them.
+id: search/dupe/first-field
+tags: [needs-dupe]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Word
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}{{Back}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Other
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}{{Back}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Word, fields: [Cat, x]}
+    - {notetype: Word, fields: [cat, x]}
+    - {notetype: Word, fields: ["<b>Cat</b>", x]}
+    - {notetype: Word, fields: ["Cat ", x]}
+    - {notetype: Word, fields: ["Cat[sound:x.mp3]", x]}
+    - {notetype: Word, fields: ["<img src=\"x.jpg\">Cat", x]}
+    - {notetype: Word, fields: [Dog, Cat]}
+    - {notetype: Other, fields: [Cat, x]}
+    - {notetype: Word, fields: ["Tom &amp; Jerry", x]}
+    - {notetype: Word, fields: ["Tom & Jerry", x]}
+    - {notetype: Word, fields: ["Café", x]}
+    - {notetype: Word, fields: ["", x]}
+    - {notetype: Word, fields: ['a\b', x]}
+steps:
+  - db_exec: {sql: "SELECT id, name FROM notetypes WHERE name IN ('Word', 'Other') ORDER BY id"}
+  - db_exec: {sql: "SELECT csum, flds FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'dupe:1894701600006,Cat', kind: notes}
+          - {query: 'dupe:1894701600006,<b>Cat</b>', kind: notes}
+          - {query: 'dupe:1894701600006,cat', kind: notes}
+          - {query: 'dupe:1894701600006,Cat[sound:x.mp3]', kind: notes}
+          - {query: '"dupe:1894701600006,<img src=\"x.jpg\">Cat"', kind: notes}
+          - {query: '"dupe:1894701600006,Cat "', kind: notes}
+          - {query: 'dupe:1894701600006,Dog', kind: notes}
+          - {query: 'dupe:1894701600007,Cat', kind: notes}
+          - {query: '"dupe:1894701600006,Tom & Jerry"', kind: notes}
+          - {query: '"dupe:1894701600006,Tom &amp; Jerry"', kind: notes}
+          - {query: "dupe:1894701600006,Café", kind: notes}
+          - {query: 'dupe:1894701600006,', kind: notes}
+          - {query: 'dupe:1894701600006,a\\b', kind: notes}
+          - {query: 'dupe:1894701600006,a\b', kind: notes}
+          - {query: 'dupe:123,Cat', kind: notes}
+          - {query: 'dupe:1894701600006,Cat'}
+          - {query: '-dupe:1894701600006,Cat', kind: notes}
+  - set_config: {key: normalize_note_text, value: false}
+  - observe:
+      - search:
+          - {query: "dupe:1894701600006,Café", kind: notes}
+          - {query: "dupe:1894701600006,Café", kind: notes}

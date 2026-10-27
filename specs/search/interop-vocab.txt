@@ -72,3 +72,29 @@ meguri_card_f32
 meguri_retrievability
 meguri_relative_retrievability
 meguri_original_position
+# U81 (text-matching, fields, case-folding): the field option and sort field
+# keys of note types, in schema-11 JSON and in the records, and Meguri's SQL
+# functions for text terms.
+excludeFromSearch
+exclude_from_search
+sortf
+sort_field_idx
+meguri_like
+meguri_transform
+meguri_regex
+meguri_regex_fields
+# U82 (names-and-ids, state-and-flags, properties, history): the tables and
+# columns the name, state, property and history terms read, the index dupe:
+# uses, and Meguri's SQL functions for tags and custom data.
+decks
+deck_config
+notetypes
+templates
+ntid
+revlog
+factor
+flags
+csum
+ix_notes_csum
+meguri_regex_tags
+meguri_custom_data

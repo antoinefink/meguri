@@ -1,0 +1,60 @@
+# R1058, R1268; specs/search/names-and-ids.md N3.6. preset: finds one preset
+# by its name compared with unicase (full case folding), the value taken as
+# written with its escapes, never as a pattern; it matches cards whose deck or
+# home deck uses that preset.
+id: search/decks/presets
+tags: [needs-deck]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: Fast}
+    - {name: "Slow Lane"}
+    - {name: 'Japanese "Core"'}
+    - {name: 'a\b'}
+    - {name: STRASSE}
+    - {name: "Fas*"}
+  decks:
+    - {name: Speed, preset: Fast}
+    - {name: "Speed::Sub", preset: Fast}
+    - {name: Lane, preset: "Slow Lane"}
+    - {name: Core, preset: 'Japanese "Core"'}
+    - {name: Back, preset: 'a\b'}
+    - {name: Street, preset: STRASSE}
+    - {name: Star, preset: "Fas*"}
+    - {name: Plain}
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, deck: Speed, fields: [speed, x]}
+    - {notetype: Memo, deck: "Speed::Sub", fields: [speed-sub, x]}
+    - {notetype: Memo, deck: Lane, fields: [lane, x]}
+    - {notetype: Memo, deck: Core, fields: [core, x]}
+    - {notetype: Memo, deck: Back, fields: [back, x]}
+    - {notetype: Memo, deck: Street, fields: [street, x]}
+    - {notetype: Memo, deck: Star, fields: [star, x]}
+    - {notetype: Memo, deck: Plain, fields: [plain, x]}
+    - {notetype: Memo, fields: [default, x]}
+    - {notetype: Memo, deck: Speed, fields: [speed-filtered, x]}
+steps:
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 100, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)"}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'preset:fast'}
+          - {query: 'preset:FAST'}
+          - {query: '-preset:fast'}
+          - {query: '"preset:slow lane"'}
+          - {query: '"preset:Japanese \"Core\""'}
+          - {query: 'preset:a\b'}
+          - {query: 'preset:straße'}
+          - {query: 'preset:Fas*'}
+          - {query: 'preset:F*'}
+          - {query: 'preset:default'}
+          - {query: 'preset:typo'}
+          - {query: 'preset:'}
+          - {query: 'preset:fast', kind: notes}
+          - {query: 'preset:fast deck:filtered'}

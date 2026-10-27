@@ -1,0 +1,63 @@
+# R1050, R1051, R1052, AE49 (tag part); specs/search/names-and-ids.md N2.2.
+# A tag term matches a whole tag or the start of one followed by `::`, never
+# a later level on its own; letter case is ignored; `*` and `_` match
+# characters other than white space, so they cross `::` but never the space
+# between two tags (nor U+00A0 inside one). none, * and a space are special
+# values.
+id: search/tags/hierarchy
+tags: [needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [one, x], tags: ["animal::mammal"]}
+    - {notetype: Memo, fields: [two, x], tags: [animals]}
+    - {notetype: Memo, fields: [three, x], tags: [Animal]}
+    - {notetype: Memo, fields: [four, x]}
+    - {notetype: Memo, fields: [five, x], tags: [x, ani]}
+    - {notetype: Memo, fields: [six, x], tags: ["parent::child", other]}
+    - {notetype: Memo, fields: [seven, x], tags: [parent]}
+    - {notetype: Memo, fields: [eight, x], tags: [none]}
+    - {notetype: Memo, fields: [nine, x], tags: ["x::ani"]}
+    - {notetype: Memo, fields: [ten, x], tags: ["deep::er::est"]}
+    - {notetype: Memo, fields: [eleven, x], tags: ["r\u00a0s"]}
+steps:
+  - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'tag:animal', kind: notes}
+          - {query: 'tag:ANIMAL', kind: notes}
+          - {query: 'Tag:Animal', kind: notes}
+          - {query: 'tag:animals', kind: notes}
+          - {query: 'tag:mammal', kind: notes}
+          - {query: 'tag:animal::mammal', kind: notes}
+          - {query: 'tag:animal::*', kind: notes}
+          - {query: 'tag:animal*', kind: notes}
+          - {query: 'tag:ani*', kind: notes}
+          - {query: 'tag:*ani', kind: notes}
+          - {query: 'tag:x*i', kind: notes}
+          - {query: 'tag:a_imal', kind: notes}
+          - {query: 'tag:*', kind: notes}
+          - {query: 'tag:_*', kind: notes}
+          - {query: 'tag:none', kind: notes}
+          - {query: 'tag:None', kind: notes}
+          - {query: '-tag:none', kind: notes}
+          - {query: 'tag:parent', kind: notes}
+          - {query: 'tag:parent::*', kind: notes}
+          - {query: 'tag:deep::*', kind: notes}
+          - {query: 'tag:deep::er', kind: notes}
+          - {query: 'tag:er', kind: notes}
+          - {query: 'tag:*er', kind: notes}
+          - {query: '"tag:a b"', kind: notes}
+          - {query: '"tag:animal "', kind: notes}
+          - {query: 'tag:', kind: notes}
+          - {query: 'tag:r', kind: notes}
+          - {query: 'tag:r*', kind: notes}
+          - {query: 'tag:r_s', kind: notes}
+          - {query: 'tag:re:^r', kind: notes}
+          - {query: 'tag:animal'}
+          - {query: '-tag:animal'}

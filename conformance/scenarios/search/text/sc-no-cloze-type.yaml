@@ -1,0 +1,27 @@
+# R1043; specs/search/text-matching.md T9.1: with no cloze note type in the
+# collection, sc: fails with search_failed, negated or not. The new
+# collection's two cloze note types (R1959: interop with them) are turned into
+# standard ones.
+id: search/text/sc-no-cloze-type
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'sc:dog', kind: notes}
+          - {query: '-sc:dog', kind: notes}
+  - legacy_update: {notetype: Cloze, patch: {type: 0}}
+  - legacy_update: {notetype: Image Occlusion, patch: {type: 0}}
+  - observe:
+      - search:
+          - {query: 'sc:dog', kind: notes}
+          - {query: '-sc:dog', kind: notes}
+          - {query: 'dog', kind: notes}

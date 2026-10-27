@@ -87,6 +87,55 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/search/case-folding.md C2, C5, C7: in Meguri's Unicode fold mode,
+  # plain, field, sc: and nc: searches fold case for every alphabet; Anki folds
+  # only ASCII there. Conformance runs are always in Unicode mode (C1), so
+  # these entries always apply; AsciiCompat is only for U91's live differential.
+  - id: search-unicode-umlaut
+    requirement: R1036
+    summary: The plain search über finds the field Über in Unicode mode (AE49); Anki finds nothing.
+    test: search/folding/umlaut
+    scenarios: [search/folding/umlaut]
+    pointer: /steps/0/search/0/ids
+    transform: {replace: ["#n1"]}
+  - id: search-unicode-differential
+    requirement: R1036
+    summary: "The differential folding table's searches whose results depend on the fold mode, with Meguri's Unicode-mode results (simple case folding, nc: included)."
+    test: search/folding/differential
+    scenarios: [search/folding/differential]
+    pointer: /steps/1/search
+    transform:
+      replace:
+        - {ids: ["#n1", "#n15"]}
+        - {ids: ["#n2", "#n3"]}
+        - {ids: ["#n5", "#n6", "#n7"]}
+        - {ids: ["#n8"]}
+        - {ids: ["#n9"]}
+        - {ids: ["#n13"]}
+        - {ids: ["#n4", "#n14"]}
+        - {ids: ["#n17"]}
+        - {ids: ["#n1"]}
+        - {ids: ["#n5", "#n6", "#n7"]}
+        - {ids: ["#n15"]}
+        - {ids: ["#n8"]}
+        - {ids: ["#n5", "#n6", "#n7"]}
+  - id: search-unicode-ignore-accents
+    requirement: R1036
+    summary: With ignoreAccentsInSearch on, the plain search привет finds Привет in Unicode mode; Anki finds nothing.
+    test: search/folding/ignore-accents
+    scenarios: [search/folding/ignore-accents]
+    pointer: /steps/0/search/0/ids
+    transform: {replace: ["#n1"]}
+  # specs/search/text-matching.md T12.2, T12.3: Meguri compiles every regular
+  # expression while it builds the plan; Anki compiles one only when a row
+  # reaches its test and returns results when none does.
+  - id: search-invalid-regex-unreached
+    requirement: R1075
+    summary: An invalid regular expression is invalid_regex even when no row would be tested (no notes, or a field no note type has); Anki returns no ids.
+    test: search/regex/invalid-unreached
+    scenarios: [search/regex/invalid-unreached]
+    pointer: /steps/*/search/*
+    transform: {replace: {error: invalid_regex}}
   # specs/decks/decks.md D6 step 4, D15.1 (R62): Meguri refuses to rename a
   # deck under one of its own descendants; Anki renames it there and creates
   # new empty decks for the names the subtree left.

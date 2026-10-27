@@ -1,0 +1,55 @@
+# R1048; specs/search/fields.md F6, F7: field:re: is an unanchored,
+# case-insensitive regular expression tested on that field alone; field:nc:
+# compares with the combining-free transform inside that field. Mode prefixes
+# are lower-case only. The all-fields names use a case-insensitive regular
+# expression for every mode: normal and nc: values become a whole-field
+# pattern (nc: is not applied), re: values are used as written.
+id: search/fields/modes
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [apple, x]}
+    - {notetype: Single, fields: [x, apple]}
+    - {notetype: Single, fields: ["über", x]}
+    - {notetype: Single, fields: ["Über", x]}
+    - {notetype: Single, fields: [uber, x]}
+    - {notetype: Single, fields: ["RE:x", x]}
+    - {notetype: Single, fields: ["re:x", x]}
+    - {notetype: Single, fields: ["line one\nline two", x]}
+    - {notetype: Single, fields: [banana, x]}
+    - {notetype: Single, fields: [empty back, ""]}
+steps:
+  - observe:
+      - search:
+          - {query: 'front:re:^a'}
+          - {query: 'front:re:a'}
+          - {query: 'front:re:ple$'}
+          - {query: 'front:re:^x$'}
+          - {query: 'back:re:^a'}
+          - {query: '"front:re:(?-i)^A"'}
+          - {query: 'front:re:'}
+          - {query: 'front:nc:uber'}
+          - {query: 'front:nc:Uber'}
+          - {query: 'front:uber'}
+          - {query: 'front:RE:x'}
+          - {query: 'front:re\:x'}
+          - {query: 'front:NC:uber'}
+          - {query: '*:re:^a'}
+          - {query: '*:re:^x$'}
+          - {query: '*:apple'}
+          - {query: '*:APP*'}
+          - {query: '*:über'}
+          - {query: '*:ÜBER'}
+          - {query: '*:nc:uber'}
+          - {query: '*:line*two'}
+          - {query: 'front:line*two'}
+          - {query: 'front:re:one.line'}
+          - {query: '*:'}
+          - {query: 'front:re:an{2}'}
+          - {query: 'front:re:a\"'}

@@ -1,0 +1,52 @@
+# R1064; specs/search/state-and-flags.md S6. flag:N compares the lowest three
+# bits of the card's flags with N; higher bits are ignored. Card ids come from
+# the frozen clock (1894701600000 + note number - 1).
+id: search/state/flags
+tags: [needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "flags 0"]}
+    - {notetype: Memo, fields: [c2, "flags 1"]}
+    - {notetype: Memo, fields: [c3, "flags 2"]}
+    - {notetype: Memo, fields: [c4, "flags 3"]}
+    - {notetype: Memo, fields: [c5, "flags 4"]}
+    - {notetype: Memo, fields: [c6, "flags 5"]}
+    - {notetype: Memo, fields: [c7, "flags 6"]}
+    - {notetype: Memo, fields: [c8, "flags 7"]}
+    - {notetype: Memo, fields: [c9, "flags 11"]}
+    - {notetype: Memo, fields: [c10, "flags 8"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET flags = 1 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET flags = 2 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET flags = 3 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE cards SET flags = 4 WHERE id = 1894701600004"}
+  - db_exec: {sql: "UPDATE cards SET flags = 5 WHERE id = 1894701600005"}
+  - db_exec: {sql: "UPDATE cards SET flags = 6 WHERE id = 1894701600006"}
+  - db_exec: {sql: "UPDATE cards SET flags = 7 WHERE id = 1894701600007"}
+  - db_exec: {sql: "UPDATE cards SET flags = 11 WHERE id = 1894701600008"}
+  - db_exec: {sql: "UPDATE cards SET flags = 8 WHERE id = 1894701600009"}
+  - observe:
+      - search:
+          - {query: 'flag:0'}
+          - {query: 'flag:1'}
+          - {query: 'flag:2'}
+          - {query: 'flag:3'}
+          - {query: 'flag:4'}
+          - {query: 'flag:5'}
+          - {query: 'flag:6'}
+          - {query: 'flag:7'}
+          - {query: 'flag:+3'}
+          - {query: 'flag:03'}
+          - {query: '-flag:0'}
+          - {query: 'flag:3', kind: notes}
+          - {query: 'flag:8'}
+          - {query: 'flag:-1'}
+          - {query: 'flag:'}
+          - {query: 'flag:red'}

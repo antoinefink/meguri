@@ -1,0 +1,65 @@
+# R1053; specs/search/names-and-ids.md N2.3-N2.5. tag:re: tests its
+# expression on each space-separated piece of the stored tag text, empty
+# pieces included, so an expression that matches the empty text matches every
+# note. tag:nc: compares combining-free forms. Letter case folds with simple
+# case folding in every mode; the value is converted to NFC first. Escaped
+# wildcards and regular-expression characters are literal in normal mode.
+id: search/tags/regex-and-nc
+tags: [needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [one, x], tags: ["animal::mammal"]}
+    - {notetype: Memo, fields: [two, x], tags: [animals]}
+    - {notetype: Memo, fields: [three, x], tags: [Animal]}
+    - {notetype: Memo, fields: [four, x]}
+    - {notetype: Memo, fields: [five, x], tags: ["x::ani"]}
+    - {notetype: Memo, fields: [six, x], tags: ["Übung"]}
+    - {notetype: Memo, fields: [seven, x], tags: ["c++", "a.b"]}
+    - {notetype: Memo, fields: [eight, x], tags: ["a*b"]}
+    - {notetype: Memo, fields: [nine, x], tags: [axb]}
+    - {notetype: Memo, fields: [ten, x], tags: ["STRASSE"]}
+    - {notetype: Memo, fields: [eleven, x], tags: ["ｆｕｌｌ"]}
+steps:
+  - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'tag:re:^ani', kind: notes}
+          - {query: 'tag:re:ani', kind: notes}
+          - {query: 'tag:re:mammal$', kind: notes}
+          - {query: 'tag:re:^animal$', kind: notes}
+          - {query: '"tag:re:(?-i)^Animal$"', kind: notes}
+          - {query: 'tag:re:', kind: notes}
+          - {query: 'tag:re:^$', kind: notes}
+          - {query: 'tag:re:x*', kind: notes}
+          - {query: 'tag:re:none', kind: notes}
+          - {query: 'tag:re:a.b', kind: notes}
+          - {query: 'tag:re:::', kind: notes}
+          - {query: 'tag:nc:ubung', kind: notes}
+          - {query: 'tag:nc:UBUNG', kind: notes}
+          - {query: 'tag:ubung', kind: notes}
+          - {query: 'tag:übung', kind: notes}
+          - {query: 'tag:ÜBUNG', kind: notes}
+          - {query: "tag:übung", kind: notes}
+          - {query: 'tag:nc:none', kind: notes}
+          - {query: 'tag:nc:*', kind: notes}
+          - {query: 'tag:nc:full', kind: notes}
+          - {query: 'tag:full', kind: notes}
+          - {query: 'tag:ＦＵＬＬ', kind: notes}
+          - {query: 'tag:straße', kind: notes}
+          - {query: 'tag:strasse', kind: notes}
+          - {query: 'tag:c++', kind: notes}
+          - {query: 'tag:a.b', kind: notes}
+          - {query: 'tag:a*b', kind: notes}
+          - {query: 'tag:a\*b', kind: notes}
+          - {query: 'tag:a_b', kind: notes}
+          - {query: 'tag:a\_b', kind: notes}
+  - observe:
+      - search:
+          - {query: 'tag:re:[', kind: notes}
+          - {query: '"tag:re:("', kind: notes}

@@ -1,0 +1,79 @@
+# R1036, R1917; specs/search/case-folding.md C5: the differential folding
+# table. Step 1 holds searches whose results are the same in both fold modes
+# (regular-expression terms fold with simple case folding in Anki too, and the
+# rest find nothing more under simple folding). Step 2 holds the searches that
+# Meguri's Unicode mode answers differently: the golden is Anki's
+# (AsciiCompat) result, and deviation search-unicode-differential gives
+# Meguri's. Normalization is off so that U+212A KELVIN SIGN stays stored as
+# typed. #n15 is a cloze note.
+id: search/folding/differential
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {normalize_note_text: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["Über", x]}
+    - {notetype: Single, fields: ["ẞ", x]}
+    - {notetype: Single, fields: ["ß", x]}
+    - {notetype: Single, fields: [STRASSE, x]}
+    - {notetype: Single, fields: ["Σ", x]}
+    - {notetype: Single, fields: ["ς", x]}
+    - {notetype: Single, fields: ["σ", x]}
+    - {notetype: Single, fields: ["ПРИВЕТ", x]}
+    - {notetype: Single, fields: ["ＡＢＣ", x]}
+    - {notetype: Single, fields: ["ハ", x]}
+    - {notetype: Single, fields: ["İ", x]}
+    - {notetype: Single, fields: ["ı", x]}
+    - {notetype: Single, fields: ["ǅ", x]}
+    - {notetype: Single, fields: ["ſ", x]}
+    - {notetype: Gap, fields: ["{{c1::Über}}", x]}
+    - {notetype: Single, fields: [abc, x]}
+    - {notetype: Single, fields: ["K", x]}
+steps:
+  - observe:
+      - search:
+          - {query: "ss", kind: notes}
+          - {query: "abc", kind: notes}
+          - {query: "ハ", kind: notes}
+          - {query: "は", kind: notes}
+          - {query: "i", kind: notes}
+          - {query: "I", kind: notes}
+          - {query: "w:über", kind: notes}
+          - {query: "re:σ", kind: notes}
+          - {query: "re:ß", kind: notes}
+          - {query: "re:ss", kind: notes}
+          - {query: "re:i", kind: notes}
+          - {query: "re:k", kind: notes}
+          - {query: "re:s", kind: notes}
+          - {query: "re:ａｂｃ", kind: notes}
+          - {query: "re:ǆ", kind: notes}
+          - {query: "*:über", kind: notes}
+          - {query: "*:σ", kind: notes}
+          - {query: "nc:uber", kind: notes}
+          - {query: "nc:ss", kind: notes}
+          - {query: "nc:i", kind: notes}
+  - observe:
+      - search:
+          - {query: "über", kind: notes}
+          - {query: "ß", kind: notes}
+          - {query: "ς", kind: notes}
+          - {query: "привет", kind: notes}
+          - {query: "ａｂｃ", kind: notes}
+          - {query: "ǆ", kind: notes}
+          - {query: "s", kind: notes}
+          - {query: "k", kind: notes}
+          - {query: "front:über", kind: notes}
+          - {query: "front:σ", kind: notes}
+          - {query: "sc:über", kind: notes}
+          - {query: "nc:привет", kind: notes}
+          - {query: "nc:σ", kind: notes}

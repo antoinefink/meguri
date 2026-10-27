@@ -1,0 +1,72 @@
+# R1039; specs/search/text-matching.md T7.3: when no note type of the
+# collection has a field that unqualified searches may read, plain text, nc:
+# and sc: fail with search_failed, negated or not. Every note type here, the
+# collection's own included, gets all its fields excluded; field searches
+# still work. Interop with the new collection's note types (R1959): the patch
+# names each of them.
+id: search/text/no-searchable-field
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Basic
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Basic (and reversed card)
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Basic (optional reversed card)
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Add Reverse, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Basic (type in the answer)
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Cloze
+      patch:
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back Extra, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Image Occlusion
+      patch:
+        flds:
+          - {name: Occlusion, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Image, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Header, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back Extra, ord: 3, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Comments, ord: 4, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Plain
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - add_note: {notetype: Plain, fields: [dog, x]}
+  - observe:
+      - search:
+          - {query: dog, kind: notes}
+          - {query: '-dog', kind: notes}
+          - {query: 'nc:dog', kind: notes}
+          - {query: 'sc:dog', kind: notes}
+          - {query: 'front:dog', kind: notes}
+          - {query: '*:dog', kind: notes}
+          - {query: 're:dog', kind: notes}

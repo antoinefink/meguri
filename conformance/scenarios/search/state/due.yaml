@@ -1,0 +1,87 @@
+# R1063; specs/search/state-and-flags.md S1, S3, S7. is:due takes review and
+# interday learning cards due today or earlier, and intraday learning and
+# preview cards due up to now + the learn-ahead limit (collapseTime, 1200 s
+# when missing or unreadable), always on the due column (a filtered card on its
+# filtered due). Observed one second before the day boundary (2030-01-16
+# 04:00:00 UTC, rollover 4), at it, then with other learn-ahead limits. After
+# the boundary, timing comes first in the observe step: the day query
+# unburies (specs/sched/day-clock.md D7), as Meguri's day clock does before a
+# search reads the day, so the buried review card is due from then on.
+id: search/state/due
+tags: [needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "review due today"]}
+    - {notetype: Memo, fields: [c2, "review due tomorrow"]}
+    - {notetype: Memo, fields: [c3, "review overdue"]}
+    - {notetype: Memo, fields: [c4, "learning due in 10 min"]}
+    - {notetype: Memo, fields: [c5, "learning due in 20 min"]}
+    - {notetype: Memo, fields: [c6, "learning due in 20 min 1 s"]}
+    - {notetype: Memo, fields: [c7, "learning overdue"]}
+    - {notetype: Memo, fields: [c8, "interday learning due today"]}
+    - {notetype: Memo, fields: [c9, "interday learning due tomorrow"]}
+    - {notetype: Memo, fields: [c10, "preview due in 10 min"]}
+    - {notetype: Memo, fields: [c11, "suspended review overdue"]}
+    - {notetype: Memo, fields: [c12, "buried review overdue"]}
+    - {notetype: Memo, fields: [c13, "new"]}
+    - {notetype: Memo, fields: [c14, "filtered review"]}
+    - {notetype: Memo, fields: [c15, "relearning due in 10 min"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, odue = 0 WHERE id = 1894701600000"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, odue = 0 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -5, odue = 0 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894766999, odue = 0 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894767599, odue = 0 WHERE id = 1894701600004"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894767600, odue = 0 WHERE id = 1894701600005"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894766299, odue = 0 WHERE id = 1894701600006"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 0, odue = 0 WHERE id = 1894701600007"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 1, odue = 0 WHERE id = 1894701600008"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 4, due = 1894766999, odue = 0 WHERE id = 1894701600009"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = -5, odue = 0 WHERE id = 1894701600010"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -2, due = -5, odue = 0 WHERE id = 1894701600011"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 1, odue = 0 WHERE id = 1894701600012"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -100000, odue = 50 WHERE id = 1894701600013"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1894766999, odue = 0 WHERE id = 1894701600014"}
+  - set_clock: "2030-01-16T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'is:due'}
+          - {query: '-is:due'}
+          - {query: 'is:due', kind: notes}
+  - set_clock: "2030-01-16T04:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'is:due'}
+  - set_config: {key: collapseTime, value: 0}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+  - set_config: {key: collapseTime, value: 1199}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+  - set_config: {key: collapseTime, value: "x"}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+  - set_config: {key: collapseTime, value: -1}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+  - set_config: {key: collapseTime, value: 60.0}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'collapseTime'"}
+  - observe:
+      - search:
+          - {query: 'is:due'}

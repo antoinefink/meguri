@@ -1,0 +1,29 @@
+# R1033, R1034; specs/search/text-matching.md T2, T5: plain text runs over
+# the whole field string, the fields joined by U+001F, so `*` and `_` also
+# match across a field boundary (`_` matches the separator itself). The text
+# never matches a separator literally.
+id: search/text/field-separator
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, cat]}
+    - {notetype: Single, fields: [cat, dog]}
+    - {notetype: Single, fields: [dog cat, x]}
+    - {notetype: Single, fields: [dog, ""]}
+steps:
+  - observe:
+      - search:
+          - {query: 'dog*cat'}
+          - {query: 'dog_cat'}
+          - {query: 'og_ca'}
+          - {query: 'cat*dog'}
+          - {query: '"dog cat"'}
+          - {query: 'dog_'}
+          - {query: 'dog__'}
+          - {query: 'g_'}

@@ -1,0 +1,86 @@
+# R1059, R1060; specs/search/names-and-ids.md N4. note: and card: names are
+# compared with unicase (full case folding) unless they hold a wildcard, then
+# matched as a whole by a case-insensitive pattern (simple case folding).
+# card:N selects the N-th template (the cloze number on a cloze note type),
+# card:0 is card:1; a cloze note type has one template row, so its template
+# name selects cloze 1 only.
+id: search/notetypes/names
+tags: [needs-notetype, needs-template]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Vocab
+      fields: [Front, Back]
+      templates:
+        - {name: Recognition, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Production, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Vocab Extra
+      fields: [Front, Back]
+      templates: [{name: Recognition, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: STRASSE
+      fields: [Front, Back]
+      templates: [{name: "Straße", front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: x_y
+      fields: [Front, Back]
+      templates: [{name: "t_1", front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: xzy
+      fields: [Front, Back]
+      templates: [{name: "tz1", front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Vocab, fields: [dog, chien]}
+    - {notetype: Vocab Extra, fields: [cat, chat]}
+    - {notetype: STRASSE, fields: [street, rue]}
+    - {notetype: x_y, fields: [xy, x]}
+    - {notetype: xzy, fields: [xzy, x]}
+    - {notetype: Gap, fields: ["{{c1::a}} {{c2::b}} {{c3::c}}", ""]}
+steps:
+  - db_exec: {sql: "SELECT c.ord, n.flds FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - observe:
+      - search:
+          - {query: 'note:vocab', kind: notes}
+          - {query: 'note:VOCAB', kind: notes}
+          - {query: 'Note:Vocab', kind: notes}
+          - {query: 'note:vocab*', kind: notes}
+          - {query: '"note:vocab extra"', kind: notes}
+          - {query: 'note:straße', kind: notes}
+          - {query: 'note:straß*', kind: notes}
+          - {query: 'note:stras*', kind: notes}
+          - {query: 'note:x_y', kind: notes}
+          - {query: 'note:x\_y', kind: notes}
+          - {query: 'note:*', kind: notes}
+          - {query: 'note:', kind: notes}
+          - {query: 'note:nosuch', kind: notes}
+          - {query: 'note:vocab'}
+          - {query: 'card:1'}
+          - {query: 'card:0'}
+          - {query: 'card:01'}
+          - {query: 'card:+1'}
+          - {query: 'card:2'}
+          - {query: 'card:3'}
+          - {query: 'card:4'}
+          - {query: 'card:65535'}
+          - {query: 'card:65536'}
+          - {query: 'card:recognition'}
+          - {query: 'card:PRODUCTION'}
+          - {query: 'card:recog*'}
+          - {query: 'card:cloze'}
+          - {query: 'card:straße'}
+          - {query: 'card:straß*'}
+          - {query: 'card:t_1'}
+          - {query: 'card:t\_1'}
+          - {query: 'card:*'}
+          - {query: 'card:'}
+          - {query: 'card:2', kind: notes}
+          - {query: 'card:production', kind: notes}
+          - {query: '-card:1', kind: notes}
+          - {query: 'note:vocab card:2'}

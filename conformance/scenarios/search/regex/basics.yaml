@@ -1,0 +1,45 @@
+# R1041; specs/search/text-matching.md T11: re: is a case-insensitive regular
+# expression (`regex` crate syntax; `(?-i)` turns case sensitivity back on)
+# over the whole field string, unanchored: `^` and `$` are the start and end
+# of the whole string, `.` also matches the U+001F separator. Only `\"` is
+# unescaped in the value. A `(` ends an unquoted term, so `(?-i)` needs the
+# quoted form.
+id: search/regex/basics
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [Dog, x]}
+    - {notetype: Single, fields: [hotdog, x]}
+    - {notetype: Single, fields: [x, dog]}
+    - {notetype: Single, fields: ["a\"b", x]}
+    - {notetype: Single, fields: [abc123, x]}
+    - {notetype: Single, fields: ["line one\nline two", x]}
+    - {notetype: Single, fields: ["<b>dog</b>", x]}
+steps:
+  - observe:
+      - search:
+          - {query: 're:dog'}
+          - {query: '"re:(?-i)Dog"'}
+          - {query: '"re:(?-i)dog"'}
+          - {query: 're:(?-i)Dog'}
+          - {query: 're:^dog'}
+          - {query: 're:dog$'}
+          - {query: 're:^x$'}
+          - {query: 're:g.x'}
+          - {query: '"re:\x1f"'}
+          - {query: 're:a\"b'}
+          - {query: 're:\d{3}'}
+          - {query: 're:one.line'}
+          - {query: '"re:(?s)one.line"'}
+          - {query: '"re:(?m)^line"'}
+          - {query: 're:^line'}
+          - {query: 're:<b>'}
+          - {query: 're:'}
+          - {query: '"re:dog|abc"'}
+          - {query: '-re:dog'}

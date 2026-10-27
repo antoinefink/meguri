@@ -1,0 +1,56 @@
+# R1072; specs/search/history.md H3, H4. added:N takes cards whose id (their
+# creation instant in ms) is after the next day boundary minus N days, edited:N
+# notes whose mod is after it: an instant exactly on the boundary is not
+# after it. N < 1 counts as 1. UTC, rollover 4: notes are added one second
+# before, at and one second after the boundary of 2030-01-16 04:00 (B1), and
+# two notes are edited at and one second after 2030-01-17 04:00 (B2).
+id: search/history/added-edited
+tags: [needs-history]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [n1, "added on day 0"]}
+steps:
+  - set_clock: "2030-01-16T03:59:59"
+  - add_note: {notetype: Memo, fields: [n2, "added 1 s before B1"]}
+  - set_clock: "2030-01-16T04:00:00"
+  - add_note: {notetype: Memo, fields: [n3, "added at B1"]}
+  - set_clock: "2030-01-16T04:00:01"
+  - add_note: {notetype: Memo, fields: [n4, "added 1 s after B1"]}
+  - observe: [ids]
+  - set_clock: "2030-01-17T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'added:1'}
+          - {query: 'added:0'}
+          - {query: 'added:+1'}
+          - {query: 'added:2'}
+          - {query: '-added:1'}
+          - {query: 'added:1', kind: notes}
+          - {query: 'edited:1', kind: notes}
+          - {query: 'edited:0', kind: notes}
+          - {query: 'edited:2', kind: notes}
+          - {query: 'edited:1'}
+          - {query: 'added:x'}
+          - {query: 'edited:-1'}
+          - {query: 'added:4294967296'}
+          - {query: 'added:4294967295'}
+  - set_clock: "2030-01-17T04:00:00"
+  - edit_note: {note: "#n1", fields: [n1, "edited at B2"]}
+  - set_clock: "2030-01-17T04:00:01"
+  - edit_note: {note: "#n2", fields: [n2, "edited 1 s after B2"]}
+  - db_exec: {sql: "SELECT mod FROM notes ORDER BY id"}
+  - observe:
+      - timing
+      - search:
+          - {query: 'added:1'}
+          - {query: 'added:2'}
+          - {query: 'added:3'}
+          - {query: 'edited:1', kind: notes}
+          - {query: 'edited:2', kind: notes}

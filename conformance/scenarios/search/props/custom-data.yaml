@@ -1,0 +1,88 @@
+# R1071; specs/search/properties.md P9, P12. Custom data is the JSON text
+# held in the cd member of cards.data. has-cd:key tests that its object has
+# the key (any value, null included); prop:cds compares the value as text
+# (a string's content, any other value as JSON text); prop:cdn compares that
+# text read as a number the way SQLite casts text to a real (the longest
+# numeric prefix, 0 when there is none). Keys of prop:cdn and prop:cds are
+# letters and digits only. Card ids come from the frozen clock
+# (1894701600000 + note number - 1).
+id: search/props/custom-data
+tags: [needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "k \"7\", v \"abc\""]}
+    - {notetype: Memo, fields: [c2, "k number 5"]}
+    - {notetype: Memo, fields: [c3, "k \"abc\""]}
+    - {notetype: Memo, fields: [c4, "k true"]}
+    - {notetype: Memo, fields: [c5, "k null"]}
+    - {notetype: Memo, fields: [c6, "no k"]}
+    - {notetype: Memo, fields: [c7, "no custom data"]}
+    - {notetype: Memo, fields: [c8, "k \"5x\""]}
+    - {notetype: Memo, fields: [c9, "k \"0.1\""]}
+    - {notetype: Memo, fields: [c10, "key K"]}
+    - {notetype: Memo, fields: [c11, "k number 1.5"]}
+    - {notetype: Memo, fields: [c12, "k empty string"]}
+    - {notetype: Memo, fields: [c13, "k \" 7\""]}
+    - {notetype: Memo, fields: [c14, "custom data not an object"]}
+    - {notetype: Memo, fields: [c15, "k twice"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600000", params: ['{"cd":"{\"k\":\"7\",\"v\":\"abc\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600001", params: ['{"cd":"{\"k\":5}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600002", params: ['{"cd":"{\"k\":\"abc\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600003", params: ['{"cd":"{\"k\":true}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600004", params: ['{"cd":"{\"k\":null}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600005", params: ['{"cd":"{\"other\":1}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600006", params: ['{}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600007", params: ['{"cd":"{\"k\":\"5x\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600008", params: ['{"cd":"{\"k\":\"0.1\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600009", params: ['{"cd":"{\"K\":1}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600010", params: ['{"cd":"{\"k\":1.5}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600011", params: ['{"cd":"{\"k\":\"\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600012", params: ['{"cd":"{\"k\":\" 7\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600013", params: ['{"cd":"[1,2]"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600014", params: ['{"cd":"{\"k\":\"1\",\"k\":\"9\"}"}']}
+  - observe:
+      - search:
+          - {query: 'prop:cdn:k>5'}
+          - {query: 'prop:cdn:k>=5'}
+          - {query: 'prop:cdn:k=0'}
+          - {query: 'prop:cdn:k=0.1'}
+          - {query: 'prop:cdn:k<1'}
+          - {query: 'prop:cdn:k!=5'}
+          - {query: '-prop:cdn:k>5'}
+          - {query: 'prop:cdn:k=7'}
+          - {query: 'prop:cdn:k=1.5'}
+          - {query: 'prop:cdn:k=9'}
+          - {query: 'prop:cds:k=7'}
+          - {query: 'prop:cds:k=5'}
+          - {query: 'prop:cds:k=true'}
+          - {query: 'prop:cds:k=null'}
+          - {query: 'prop:cds:k='}
+          - {query: 'prop:cds:k>a'}
+          - {query: 'prop:cds:k<5'}
+          - {query: 'prop:cds:v=abc'}
+          - {query: 'prop:cds:v=ABC'}
+          - {query: 'prop:cds:k=1.5'}
+          - {query: 'prop:cds:k=9'}
+          - {query: '"prop:cds:k= 7"'}
+          - {query: 'has-cd:k'}
+          - {query: 'has-cd:K'}
+          - {query: 'has-cd:v'}
+          - {query: 'has-cd:missing'}
+          - {query: '-has-cd:k'}
+          - {query: 'has-cd:'}
+          - {query: 'has-cd:a-b'}
+          - {query: 'HAS-CD:k'}
+          - {query: 'prop:cdn:K>0'}
+          - {query: 'prop:cdn:k>inf'}
+          - {query: 'prop:cdn:k-x>1'}
+          - {query: 'prop:cdn:k_1=1'}
+          - {query: 'prop:cdn:=1'}
+          - {query: 'prop:cdn:k>x'}

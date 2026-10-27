@@ -1,0 +1,149 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "ids": {
+          "#c1": 1894701600000,
+          "#c2": 1894766399000,
+          "#c3": 1894766400000,
+          "#c4": 1894766401000,
+          "#n1": 1894701600000,
+          "#n2": 1894766399000,
+          "#n3": 1894766400000,
+          "#n4": 1894766401000
+        }
+      },
+      {},
+      {
+        "search": [
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "edited:",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "4294967296"
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          }
+        ],
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894852799,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894852800],
+            [1894852801],
+            [1894766400],
+            [1894766401]
+          ]
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n4"]
+          }
+        ],
+        "timing": {
+          "days_elapsed": 2,
+          "next_day_at": 1894939200,
+          "now": 1894852801,
+          "utc_offset_secs": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "b43a514b84e998b50a96972e158c5b54f7be993b27bdfad07264ea19f658d536",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/history/added-edited",
+  "scenario_sha256": "85d5f4a5041e56358d5fcd3eda694077e4b281f99b62b96294bb46f230ca0c7a",
+  "tz": "UTC"
+}

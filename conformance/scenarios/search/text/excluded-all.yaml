@@ -1,0 +1,41 @@
+# R1039; specs/search/text-matching.md T7.3: a note type whose every field is
+# excluded never matches plain text, nc: or sc:, and while such a note type
+# exists every re: and w: search fails with search_failed (also with no note
+# of that type). Field searches are unaffected.
+id: search/text/excluded-all
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Hidden
+      fields: [Only]
+      templates: [{name: Forward, front: "{{Only}}", back: "x"}]
+      css: ".card { margin: 0; }"
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Hidden
+      patch:
+        flds:
+          - {name: Only, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - observe:
+      - search:
+          - {query: 're:secret', kind: notes}
+          - {query: 'w:secret', kind: notes}
+  - add_note: {notetype: Hidden, fields: [secret]}
+  - add_note: {notetype: Plain, fields: [secret, x]}
+  - observe:
+      - search:
+          - {query: secret, kind: notes}
+          - {query: 'nc:secret', kind: notes}
+          - {query: 'sc:secret', kind: notes}
+          - {query: 're:secret', kind: notes}
+          - {query: 'w:secret', kind: notes}
+          - {query: '-re:secret', kind: notes}
+          - {query: 'only:secret', kind: notes}
+          - {query: 'only:re:secret', kind: notes}
+          - {query: '*:secret', kind: notes}
+          - {query: '*:re:secret', kind: notes}

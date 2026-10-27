@@ -1,0 +1,45 @@
+# R1037; specs/search/text-matching.md T4: with normalize_note_text on, the
+# search text is NFC-normalized before matching; with it off, the text is used
+# as typed. Stored fields keep the form they were saved in: #n1 holds the
+# precomposed é (U+00E9), #n2 the decomposed form (both saved with normalization
+# off), #n3 the decomposed input saved with normalization on (so stored
+# precomposed). Field names are always NFC-normalized (fields.md F2).
+id: search/text/normalization
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {normalize_note_text: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["café", x]}
+    - {notetype: Single, fields: ["café", x]}
+steps:
+  - observe:
+      - search:
+          - {query: "café"}
+          - {query: "café"}
+          - {query: "front:café"}
+          - {query: "front:café"}
+          - {query: "re:café"}
+          - {query: "re:café"}
+          - {query: "w:café"}
+          - {query: "w:café"}
+          - {query: "nc:cafe"}
+          - {query: "cafe"}
+  - set_config: {key: normalize_note_text, value: true}
+  - add_note: {notetype: Single, fields: ["the café", x]}
+  - observe:
+      - search:
+          - {query: "café"}
+          - {query: "café"}
+          - {query: "front:café"}
+          - {query: "front:café"}
+          - {query: "front:*café"}
+          - {query: "re:café"}
+          - {query: "w:café"}
+          - {query: "nc:cafe"}
+          - {query: "cafe"}

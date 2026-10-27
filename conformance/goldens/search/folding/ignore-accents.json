@@ -1,0 +1,35 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search": [
+          {
+            "ids": []
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#n1"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "58913630795064a0482f5010d1cefbcdb41507b061928762b263e5b56532fc9b",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/folding/ignore-accents",
+  "scenario_sha256": "f509165962de638a562eacfd4f32c5e01b1dbafafdd601ec299c7afad7cc1d08",
+  "tz": "UTC"
+}

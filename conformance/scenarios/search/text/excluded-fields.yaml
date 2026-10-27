@@ -1,0 +1,86 @@
+# R1039; specs/search/text-matching.md T7: fields marked "exclude from
+# unqualified searches" are skipped by plain text, nc:, sc:, w: and re:, and
+# the sort-field text is skipped too when the sort field is excluded; field
+# searches still find them. Once any note type excludes a field, re: and w:
+# test each field of such a note type on its own, while note types without
+# excluded fields keep matching the whole field string. Plain is a note type
+# with no excluded field. The field options are set before any note is added.
+id: search/text/excluded-fields
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back, Notes]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: MemoSort
+      fields: [Front, Notes]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Notes}}"}]
+      css: ".card { margin: 0; }"
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Notes]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Memo
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Notes, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: MemoSort
+      patch:
+        sortf: 1
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Notes, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - legacy_update:
+      notetype: Gap
+      patch:
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: Notes, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, excludeFromSearch: true}
+  - add_note: {notetype: Memo, fields: [dog, x, secret]}
+  - add_note: {notetype: MemoSort, fields: [dog, secret]}
+  - add_note: {notetype: Plain, fields: [secret, x]}
+  - add_note: {notetype: Memo, fields: [x, dog, cat]}
+  - add_note: {notetype: Plain, fields: [dog, cat]}
+  - add_note: {notetype: Memo, fields: ["hot<b>dog</b>", x, y]}
+  - add_note: {notetype: MemoSort, fields: [a, "hot<b>dog</b>"]}
+  - add_note: {notetype: Gap, fields: ["{{c1::a}}", secret]}
+  - add_note: {notetype: Memo, fields: [x, y, dog]}
+  - observe:
+      - search:
+          - {query: secret, kind: notes}
+          - {query: 'notes:secret', kind: notes}
+          - {query: 're:secret', kind: notes}
+          - {query: 'w:secret', kind: notes}
+          - {query: 'nc:secret', kind: notes}
+          - {query: 'sc:secret', kind: notes}
+          - {query: '*:secret', kind: notes}
+          - {query: hotdog, kind: notes}
+          - {query: 'dog*cat', kind: notes}
+          - {query: 'dog_cat', kind: notes}
+          - {query: 'x*y', kind: notes}
+          - {query: 'y*dog', kind: notes}
+          - {query: 're:^dog', kind: notes}
+          - {query: 're:^x', kind: notes}
+          - {query: 're:dog.cat', kind: notes}
+          - {query: 're:x$', kind: notes}
+          - {query: 'w:dog', kind: notes}
+          - {query: dog, kind: notes}
+  - set_config: {key: ignoreAccentsInSearch, value: true}
+  - observe:
+      - search:
+          - {query: secret, kind: notes}
+          - {query: 'w:secret', kind: notes}
+          - {query: 'sc:secret', kind: notes}
+          - {query: hotdog, kind: notes}

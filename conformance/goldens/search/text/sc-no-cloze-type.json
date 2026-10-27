@@ -1,0 +1,43 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search": [
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#n1"]
+          }
+        ]
+      },
+      {},
+      {},
+      {
+        "search": [
+          {
+            "error": "search_failed"
+          },
+          {
+            "error": "search_failed"
+          },
+          {
+            "ids": ["#n1"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "58913630795064a0482f5010d1cefbcdb41507b061928762b263e5b56532fc9b",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/text/sc-no-cloze-type",
+  "scenario_sha256": "e703b439a1ab5a52794fd99611d0a07c33c9827ed016eb3dbc134084423c6065",
+  "tz": "UTC"
+}

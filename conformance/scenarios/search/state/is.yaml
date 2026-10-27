@@ -1,0 +1,69 @@
+# R1062; specs/search/state-and-flags.md S5. is: tests the card type (new,
+# learn, review) or the queue (suspended, buried kinds), over every type/queue
+# pair a card can hold; a relearning card is both learn and review. Card ids
+# come from the frozen clock (one card per note: 1894701600000 + note number
+# - 1); the second field names the state.
+id: search/state/is
+tags: [needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "new"]}
+    - {notetype: Memo, fields: [c2, "learning"]}
+    - {notetype: Memo, fields: [c3, "review"]}
+    - {notetype: Memo, fields: [c4, "relearning"]}
+    - {notetype: Memo, fields: [c5, "interday learning"]}
+    - {notetype: Memo, fields: [c6, "interday relearning"]}
+    - {notetype: Memo, fields: [c7, "suspended new"]}
+    - {notetype: Memo, fields: [c8, "suspended review"]}
+    - {notetype: Memo, fields: [c9, "sibling-buried review"]}
+    - {notetype: Memo, fields: [c10, "user-buried review"]}
+    - {notetype: Memo, fields: [c11, "sibling-buried new"]}
+    - {notetype: Memo, fields: [c12, "user-buried new"]}
+    - {notetype: Memo, fields: [c13, "suspended learning"]}
+    - {notetype: Memo, fields: [c14, "preview"]}
+    - {notetype: Memo, fields: [c15, "user-buried relearning"]}
+    - {notetype: Memo, fields: [c16, "unknown type 5, queue 7"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 1 WHERE id = 1894701600000"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894700000 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1894700000 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 0 WHERE id = 1894701600004"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 3, due = 0 WHERE id = 1894701600005"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = -1, due = 2 WHERE id = 1894701600006"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 0 WHERE id = 1894701600007"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -2, due = 0 WHERE id = 1894701600008"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -3, due = 0 WHERE id = 1894701600009"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = -2, due = 3 WHERE id = 1894701600010"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = -3, due = 4 WHERE id = 1894701600011"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = -1, due = 1894700000 WHERE id = 1894701600012"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 4, due = 1894700000 WHERE id = 1894701600013"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = -3, due = 0 WHERE id = 1894701600014"}
+  - db_exec: {sql: "UPDATE cards SET type = 5, queue = 7, due = 0 WHERE id = 1894701600015"}
+  - observe:
+      - search:
+          - {query: 'is:new'}
+          - {query: 'is:learn'}
+          - {query: 'is:review'}
+          - {query: 'is:suspended'}
+          - {query: 'is:buried'}
+          - {query: 'is:buried-manually'}
+          - {query: 'is:buried-sibling'}
+          - {query: '-is:new'}
+          - {query: 'is:learn is:review'}
+          - {query: 'is:learn -is:review'}
+          - {query: 'is:new is:suspended'}
+          - {query: 'IS:new'}
+          - {query: 'is:new', kind: notes}
+          - {query: 'is:NEW'}
+          - {query: 'is:Due'}
+          - {query: 'is:'}
+          - {query: 'is:buried_manually'}
+          - {query: 'is:learning'}

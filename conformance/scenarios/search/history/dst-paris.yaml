@@ -1,0 +1,64 @@
+# R1072, R1067, R1063; specs/search/history.md H2. On the 23-hour day of
+# 2030-03-30/31 in Europe/Paris (clocks jump from 02:00 +01:00 to 03:00
+# +02:00 on 2030-03-31, rollover 4), the one-day window still starts 86400 s
+# before the next day boundary (2030-03-31 04:00 +02:00 = 02:00 UTC), i.e. at
+# 2030-03-30 03:00 +01:00, one hour before that day's local rollover; entries,
+# cards and edits in that hour count as today. The collection is created
+# after the jump; two notes are added with the clock set back to 2030-03-30
+# (nothing is observed there). Card ids: notes 1-4 from 1901151000000 (setup),
+# note 5 1901068200000, note 6 1901065199000.
+id: search/history/dst-paris
+tags: [needs-history, needs-prop, needs-state]
+clock: {tz: Europe/Paris, start: "2030-03-31T03:30:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [n1, "answered 03:30 +01:00 on 03-30; learning due 03:00 +02:00 on 03-31"]}
+    - {notetype: Memo, fields: [n2, "answered 02:59:59 +01:00 on 03-30; review due today"]}
+    - {notetype: Memo, fields: [n3, "answered 03:00 +01:00 on 03-30"]}
+    - {notetype: Memo, fields: [n4, "answered 03:40 +02:00 on 03-31"]}
+steps:
+  - set_clock: "2030-03-30T03:30:00"
+  - add_note: {notetype: Memo, fields: [n5, "added 03:30 +01:00 on 03-30"]}
+  - set_clock: "2030-03-30T02:59:59"
+  - add_note: {notetype: Memo, fields: [n6, "added 02:59:59 +01:00 on 03-30"]}
+  - observe: [ids]
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901068200000, 1901151000000, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901066399000, 1901151000001, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901066400000, 1901151000002, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901151600000, 1901151000003, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1901068200 WHERE id = 1901151000000"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1901066400 WHERE id = 1901151000001"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1901066401 WHERE id = 1901151000002"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1901065199 WHERE id = 1901151000003"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1901149200 WHERE id = 1901151000000"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1 WHERE id = 1901151000001"}
+  - set_clock: "2030-03-31T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'prop:rated=0'}
+          - {query: 'prop:rated=-1'}
+          - {query: 'added:1'}
+          - {query: 'edited:1', kind: notes}
+          - {query: 'introduced:1'}
+          - {query: 'prop:due=0'}
+          - {query: 'prop:due=-1'}
+          - {query: 'is:due'}
+  - set_clock: "2030-03-31T04:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'rated:2'}
+          - {query: 'prop:rated=-1'}
+          - {query: 'added:1'}
+          - {query: 'added:2'}
+          - {query: 'edited:2', kind: notes}
+          - {query: 'prop:due=0'}
+          - {query: 'prop:due=-1'}

@@ -1,0 +1,75 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "search": [
+          {
+            "error": "search_failed"
+          },
+          {
+            "error": "search_failed"
+          }
+        ]
+      },
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "error": "search_failed"
+          },
+          {
+            "error": "search_failed"
+          },
+          {
+            "error": "search_failed"
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "58913630795064a0482f5010d1cefbcdb41507b061928762b263e5b56532fc9b",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/text/excluded-all",
+  "scenario_sha256": "c0a13434eb26c7d30572f755716456dbb7bb9d09d71c5d15f76a0e4d3ecb6e36",
+  "tz": "UTC"
+}

@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2", "#c10", "#c11"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c10", "#c11"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c4", "#c10", "#c11"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c6", "#c7", "#c8", "#c9"]
+          },
+          {
+            "ids": ["#c7"]
+          },
+          {
+            "ids": ["#c8"]
+          },
+          {
+            "ids": ["#c6", "#c7", "#c8", "#c9"]
+          },
+          {
+            "ids": ["#c9"]
+          },
+          {
+            "ids": ["#c7"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c8"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n10", "#n11"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "58913630795064a0482f5010d1cefbcdb41507b061928762b263e5b56532fc9b",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/text/plain-substring",
+  "scenario_sha256": "3666bc169cde8d012616ff8a25a49006b5ae67f350bfd9cc0d4d1034462c7ab4",
+  "tz": "UTC"
+}

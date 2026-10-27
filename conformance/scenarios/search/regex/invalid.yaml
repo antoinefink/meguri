@@ -1,0 +1,35 @@
+# specs/search/text-matching.md T12; specs/search/errors.md E3: a pattern
+# that does not parse (a syntax error, or groups nested 250 deep, while 249
+# are accepted) is invalid_regex; one that parses but compiles beyond the size
+# limit is search_failed. An unquoted `re:(` is a grammar error (the `(` opens
+# a group). Here notes exist, so Anki tests a row and reports the error;
+# search/regex/invalid-unreached covers the searches where it tests none.
+id: search/regex/invalid
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, x]}
+steps:
+  - observe:
+      - search:
+          - {query: '"re:("'}
+          - {query: 're:('}
+          - {query: 're:['}
+          - {query: 're:a{2,1}'}
+          - {query: 're:\p{Nope}'}
+          - {query: 're:*'}
+          - {query: 'front:re:['}
+          - {query: '-re:['}
+          - {query: 'dog re:['}
+          - {query: '"re:(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))"'}
+          - {query: '"re:((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))"'}
+          - {query: 're:a{1000}{1000}'}
+          - {query: 're:a{100}{100}'}
+          - {query: 'w:['}
+          - {query: 'w:\\'}

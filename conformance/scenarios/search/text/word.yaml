@@ -1,0 +1,44 @@
+# R1040; specs/search/text-matching.md T10: w: is a case-insensitive regular
+# expression `\b<text>\b` over the whole field string, the text's wildcards
+# turned into `.*` and `.`, everything else literal. Unicode word boundaries;
+# tags and punctuation are boundaries; `.` also crosses a field boundary.
+id: search/text/word
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [the dog., x]}
+    - {notetype: Single, fields: [hotdog, x]}
+    - {notetype: Single, fields: ["x<b>dog</b>", x]}
+    - {notetype: Single, fields: [dogs, x]}
+    - {notetype: Single, fields: [Dog_house, x]}
+    - {notetype: Single, fields: ["dog", cat]}
+    - {notetype: Single, fields: ["über", x]}
+    - {notetype: Single, fields: ["a.b", x]}
+    - {notetype: Single, fields: ["c+d", x]}
+    - {notetype: Single, fields: ["日本語", x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'w:dog'}
+          - {query: 'w:DOG'}
+          - {query: 'w:dog*'}
+          - {query: 'w:do_'}
+          - {query: 'w:*og'}
+          - {query: 'w:dog*cat'}
+          - {query: 'w:dog_cat'}
+          - {query: 'w:über'}
+          - {query: 'w:ber'}
+          - {query: 'w:a.b'}
+          - {query: 'w:a_b'}
+          - {query: 'w:c+d'}
+          - {query: 'w:日本'}
+          - {query: 'w:日本語'}
+          - {query: 'w:dog\_house'}
+          - {query: 'w:'}
+          - {query: 'w:x'}

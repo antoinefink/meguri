@@ -1,0 +1,53 @@
+# R1046, R1047, R1049; specs/search/fields.md F2, F3, F8: field names
+# resolve against every note type. A name without wildcards compares with the
+# unicase equality (ß equals SS); a name with `*` or `_` is a case-insensitive
+# pattern with simple folding (ß does not equal SS). The names `*`, `_*` and
+# `*_` select all fields. Names are NFC-normalized. A name no note type has
+# matches nothing. A space in a name needs the quoted form: the escaped space
+# is an unknown_escape error.
+id: search/fields/names
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Names
+      fields: [STRASSE, "Café", my field, a_b, "*", "Ünit"]
+      templates: [{name: Forward, front: "{{STRASSE}}", back: "x"}]
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Names, fields: [s1, c1, m1, u1, star1, "ü1"]}
+    - {notetype: Pair, fields: [x, star1]}
+    - {notetype: Pair, fields: [m1, x]}
+steps:
+  - observe:
+      - search:
+          - {query: "straße:s1"}
+          - {query: "straß*:s1"}
+          - {query: "strasse:s1"}
+          - {query: "stras*:s1"}
+          - {query: "café:c1"}
+          - {query: "CAFÉ:c1"}
+          - {query: '"my field:m1"'}
+          - {query: 'my\ field:m1'}
+          - {query: 'my*:m1'}
+          - {query: 'a_b:u1'}
+          - {query: 'a\_b:u1'}
+          - {query: 'axb:u1'}
+          - {query: 'a?b:u1'}
+          - {query: '\*:star1'}
+          - {query: '*:star1'}
+          - {query: '_*:star1'}
+          - {query: '*_:star1'}
+          - {query: '**:star1'}
+          - {query: '*:m1'}
+          - {query: "ünit:ü1"}
+          - {query: "ÜNIT:ü1"}
+          - {query: "ün*:ü1"}
+          - {query: "ÜN*:ü1"}
+          - {query: 'nosuchfield:x'}
+          - {query: 'nosuchfield:*'}
+          - {query: '-nosuchfield:x'}
