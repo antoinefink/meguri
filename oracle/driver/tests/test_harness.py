@@ -47,6 +47,25 @@ class JsonDiff(unittest.TestCase):
         self.assertEqual(diff({"a": [1, "x"]}, {"a": [1, "x"]}), [])
         json.dumps(diff({"k": 1}, {}), allow_nan=False)  # reports stay JSON
 
+    def test_compare_set_arrays_compare_as_multisets(self):
+        # dsl.md D5, observations.md O3: patterns with * segments.
+        diff, sets = harness.json_diff, harness._set_patterns({"compare": {"set": ["/steps/*/m", "/a~1b"]}})
+        self.assertEqual(diff({"steps": [{"m": [1, {"x": 2}]}]}, {"steps": [{"m": [{"x": 2}, 1]}]}, sets=sets), [])
+        self.assertEqual(diff({"a/b": [1, 1, 2]}, {"a/b": [2, 1, 1]}, sets=sets), [])
+        self.assertEqual(len(diff({"a/b": [1, 1, 2]}, {"a/b": [2, 2, 1]}, sets=sets)), 1)
+        self.assertEqual(len(diff({"steps": [{"n": [1, 2]}]}, {"steps": [{"n": [2, 1]}]}, sets=sets)), 2)
+        self.assertEqual(harness._set_patterns({}), [])
+
+    def test_overlay_recording_aligns_set_arrays_first(self):
+        # record-apple: a set array in another order gives no overlay entry;
+        # one that differs as a multiset keeps its order (escalated, F7.2).
+        sets = harness._set_patterns({"compare": {"set": ["/steps/*/m"]}})
+        linux = {"steps": [{"m": [1, 2], "n": [1, 2]}, {"m": [1, 2]}]}
+        apple = {"steps": [{"m": [2, 1], "n": [2, 1]}, {"m": [3, 1]}]}
+        aligned = harness.align_sets(linux, apple, sets)
+        self.assertEqual(aligned, {"steps": [{"m": [1, 2], "n": [2, 1]}, {"m": [3, 1]}]})
+        self.assertEqual(apple["steps"][0]["m"], [2, 1])  # the response is not changed
+
 
 class Harness(unittest.TestCase):
     def setUp(self):

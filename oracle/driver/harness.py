@@ -285,21 +285,60 @@ def _shown(value: Any) -> Any:
     return "<absent>" if value is _ABSENT else value
 
 
-def json_diff(expected: Any, actual: Any, path: list[str] | None = None, out: list | None = None) -> list[dict]:
-    """Exact structural differences as JSON pointers; types must match too."""
+def _set_patterns(scenario: Any) -> list[list[str]]:
+    """compare.set (dsl.md D5): pointer patterns as unescaped segments."""
+    compare = scenario.get("compare") if isinstance(scenario, dict) else None
+    patterns = compare.get("set", []) if isinstance(compare, dict) else []
+    return [[seg.replace("~1", "/").replace("~0", "~") for seg in p.split("/")[1:]] for p in patterns if isinstance(p, str)]
+
+
+def _set_match(pattern: list[str], path: list[str]) -> bool:
+    return len(pattern) == len(path) and all(p == "*" or p == str(k) for p, k in zip(pattern, path))
+
+
+def _canon(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+
+
+def json_diff(
+    expected: Any, actual: Any, path: list[str] | None = None, out: list | None = None,
+    sets: list[list[str]] | None = None,
+) -> list[dict]:
+    """Exact structural differences as JSON pointers; types must match too.
+    An array at a pointer matching one of `sets` (compare.set, observations.md
+    O3) compares as a multiset: one difference at its pointer when it differs."""
     path = path or []
     out = [] if out is None else out
-    if isinstance(expected, dict) and isinstance(actual, dict):
+    if isinstance(expected, list) and isinstance(actual, list) and sets and any(_set_match(p, path) for p in sets):
+        if sorted(map(_canon, expected)) != sorted(map(_canon, actual)):
+            out.append({"pointer": _ptr(path) or "/", "expected": expected, "actual": actual})
+    elif isinstance(expected, dict) and isinstance(actual, dict):
         for k in sorted(set(expected) | set(actual)):
-            json_diff(expected.get(k, _ABSENT), actual.get(k, _ABSENT), path + [k], out)
+            json_diff(expected.get(k, _ABSENT), actual.get(k, _ABSENT), path + [k], out, sets)
     elif isinstance(expected, list) and isinstance(actual, list):
         for i in range(max(len(expected), len(actual))):
             e = expected[i] if i < len(expected) else _ABSENT
             a = actual[i] if i < len(actual) else _ABSENT
-            json_diff(e, a, path + [str(i)], out)
+            json_diff(e, a, path + [str(i)], out, sets)
     elif type(expected) is not type(actual) or expected != actual:
         out.append({"pointer": _ptr(path) or "/", "expected": _shown(expected), "actual": _shown(actual)})
     return out
+
+
+def align_sets(expected: Any, actual: Any, sets: list[list[str]], path: list[str] | None = None) -> Any:
+    """`actual` with each compare.set array that equals its `expected`
+    counterpart as a multiset replaced by that counterpart, so a positional
+    diff (overlay recording) sees no order difference there. Arrays that
+    differ as multisets stay as they are."""
+    path = path or []
+    if isinstance(expected, list) and isinstance(actual, list) and any(_set_match(p, path) for p in sets):
+        return expected if sorted(map(_canon, expected)) == sorted(map(_canon, actual)) else actual
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        return {k: align_sets(expected[k], v, sets, path + [k]) if k in expected else v for k, v in actual.items()}
+    if isinstance(expected, list) and isinstance(actual, list):
+        return [align_sets(expected[i], v, sets, path + [str(i)]) if i < len(expected) else v
+                for i, v in enumerate(actual)]
+    return actual
 
 
 def _first_step(diffs: list[dict]) -> int | None:
@@ -368,7 +407,7 @@ def cmd_compare(args) -> int:
         if golden.get("scenario_sha256") != item.sha256:
             item.result = {"status": "stale_scenario", "golden": golden_path.as_posix()}
             continue
-        diffs = json_diff(golden.get("observations"), item.response["observations"])
+        diffs = json_diff(golden.get("observations"), item.response["observations"], sets=_set_patterns(item.scenario))
         stale_oracle = golden.get("oracle", {}).get("lock_sha256") != item.hello["lock_sha256"]
         status = "stale_oracle" if stale_oracle else ("fail" if diffs else "pass")
         item.result = {"status": status, "golden": golden_path.as_posix(), "diff_count": len(diffs)}
@@ -484,7 +523,9 @@ def cmd_record_apple(args) -> int:
         if item.error:
             item.result = _not_run(item)
             continue
-        linux_obs, apple_obs = item.golden["observations"], item.response["observations"]
+        linux_obs = item.golden["observations"]
+        sets = _set_patterns(item.scenario)
+        apple_obs = align_sets(linux_obs, item.response["observations"], sets) if sets else item.response["observations"]
         try:
             entries = ov.scalar_diff(linux_obs, apple_obs)
         except ov.Structural as exc:
@@ -563,7 +604,7 @@ def cmd_compare_apple(args) -> int:
                 item.result = {"status": "invalid_overlay", "error": {"detail": str(exc)}}
                 continue
             applied = len(item.overlay["entries"])
-        diffs = json_diff(expected, item.response["observations"])
+        diffs = json_diff(expected, item.response["observations"], sets=_set_patterns(item.scenario))
         item.result = {"status": "fail" if diffs else "pass", "overlay_applied": applied, "diff_count": len(diffs)}
         if diffs:
             item.result["first_step"] = _first_step(diffs)
