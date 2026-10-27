@@ -754,3 +754,34 @@ it reuses existing queries and exports no values, labels or paths. Independent
 review is clear. Privacy `20261027T014202Z-22060` and similarity
 `20261027T014201Z-21823` pass. Live mobile completion remains pending; no
 historical failure or passing Mac binding is changed.
+
+## Combined native workflow — all three platforms
+
+The complete F11.2 workflow now passes on all three platforms, with zero skips:
+
+| Platform | Native workflow receipt | Exact build | Strict package/client receipt |
+|---|---|---|---|
+| macOS | `ui-test/20261027T005741Z-91447` | `fa2bf6fc` | `package-interop-check/20261027T010030Z-94103` |
+| iPhone | `ui-test/20261027T014337Z-22914` | `94c95878` | `package-interop-check/20261027T014812Z-26371` |
+| iPad | `ui-test/20261027T014851Z-27810` | `94c95878` | `package-interop-check/20261027T015313Z-31124` |
+
+Each case uses the real picker and initial media import, actual PNG decode and
+native WAV completion, one accepted answer, normal close and no-reset relaunch,
+then native cancel/save/replacement with all media. Bound phase receipts and
+strict archive/client checks pass. No expected state, stamp, timing or media is
+edited after launch. All earlier failures remain retained. The later edits
+affect only the iOS test branch. Mac execution and production are unchanged;
+its original binding is preserved.
+
+The iPhone UI case passes in 221.567 seconds; iPad in 212.827 seconds.
+Full integration verification remains pending from base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. U124/U162 remain unaccepted;
+no other unit or milestone acceptance is claimed here. Native design, baseline,
+device and trial evidence are still required. The Anki server freeze remains.
+
+Files test rules are recorded in `app/MeguriUITests/AGENTS.md`. All actual
+control checks and time limits remain enabled. Completed source-copy cleanup
+preserves patches, manifests, logs and reports. More than 40 GB remains free.
+
+Independent checkpoint review is clear. Final documentation privacy
+`20261027T015830Z-34322` passes; failed wording scans remain retained.
