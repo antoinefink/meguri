@@ -108,3 +108,6 @@ integrity_check
 foreign_keys
 legacy_alter_table
 secure_delete
+# The schema-11 copy (schema11-downgrade.md, U33): the SQLite pragma whose
+# value shows the source unchanged.
+data_version

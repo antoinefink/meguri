@@ -971,7 +971,7 @@ h1586af627542,rust,supplementary,storage,in-scope,U95/U104: pinned per-deck stud
 h16db5ee73722,rust,supplementary,storage,in-scope,A review-log row whose id is taken gets the largest id plus one when the caller asks for a new id,storage/ids/revlog-same-instant,done
 h1dc4ce816f33,rust,supplementary,storage,in-scope,"U92/U104: pinned Card Info history lookup must return only the requested card's rows, even when other cards share nearby timestamps.",,deferred
 h209248bdfb33,rust,supplementary,storage,out-of-scope,"The pinned filtered-deck builder compares timestamp and day-number due values, but building/studying filtered decks is excluded by R706.",,done
-h26a287aeabf4,rust,supplementary,storage,in-scope,the downgrade to schema 11 on close; specified with the schema-11 writer (U33),,deferred
+h26a287aeabf4,rust,supplementary,storage,in-scope,"the downgrade to schema 11 leaves ver 11 in the copy; specified in storage/schema11-downgrade, scenarios wait for the driver op (U33)",,deferred
 h286ef51887e7,rust,supplementary,storage,in-scope,a refused file keeps its version and data; Meguri also keeps its bytes (Meguri test),storage/open/refuse-versions,done
 h294205b39ddd,rust,supplementary,storage,in-scope,new collections are created at schema 18; specified with the new-collection bootstrap (U28),,deferred
 h2dc788fb8e1b,rust,supplementary,storage,in-scope,U246: add a direct last-review lookup case proving newest qualifying rated history wins; existing missing-memory cases do not isolate every selection branch (R650).,,deferred

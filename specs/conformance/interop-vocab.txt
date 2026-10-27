@@ -270,3 +270,11 @@ uploaded_files
 uploaded_deletions
 downloaded_files
 downloaded_deletions
+# Schema-11 copies and session files (storage-ops.md P4-P8, U33).
+schema11_copy
+file_col
+file_objects
+file_query
+invalid_json
+pragma_journal_mode
+pragma_integrity_check
