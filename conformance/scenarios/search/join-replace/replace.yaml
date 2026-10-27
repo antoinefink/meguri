@@ -1,0 +1,91 @@
+# R1079; specs/search/join-and-replace.md J7, J8, J9, J11; items in the
+# neutral form of specs/conformance/search-ops.md S5. Every kind of J7's
+# table (a parsed-text item of one term stands in for the kinds without a
+# neutral item), replacements at depth and under negation, items that
+# replace nothing (negations, groups), the empty field, existing with
+# nothing of the kind, and parse errors. Nothing reads the
+# collection, so there is no setup.
+id: search/join-replace/replace
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_replace:
+          # plain text
+          - {existing: "a deck:X b", item: {literal: z}}
+          # field: every field term, whatever its name and mode
+          - {existing: "front:x back:y", item: {field_present: Notes}}
+          - {existing: "front:re:x back:nc:y deck:X", item: {field: {name: Back, text: q}}}
+          # tag, every mode
+          - {existing: "tag:a OR tag:re:b -tag:nc:c", item: {tag: t}}
+          - {existing: "tag:a", item: any_tag}
+          # deck, deck:* and deck:current included
+          - {existing: "deck:A or (deck:B -deck:C)", item: {deck: D}}
+          - {existing: "deck:* deck:current x", item: {deck: D}}
+          - {existing: "deck:A did:5", item: current_deck}
+          - {existing: "deck:A did:5", item: any_deck}
+          # deck ids: a parsed-text item of one term
+          - {existing: "did:5 deck:A mid:7", item: {text: "did:9"}}
+          # note type, template
+          - {existing: "note:A mid:7 card:2 card:Recall", item: {notetype: B}}
+          - {existing: "note:A mid:7 card:2 card:Recall", item: any_notetype}
+          - {existing: "note:A card:2 (card:Recall)", item: {template: 0}}
+          # note type id: a parsed-text item of one term
+          - {existing: "mid:7 note:A did:5", item: {text: "mid:9"}}
+          # state, every state
+          - {existing: "is:new added:3", item: {state: review}}
+          - {existing: "is:due -is:suspended is:buried-manually", item: {state: learn}}
+          # flag
+          - {existing: "flag:1 -flag:0", item: {flag: 3}}
+          - {existing: "flag:1", item: {flag: none}}
+          # answered: rated: and resched: together
+          - {existing: "resched:1 is:due", item: {answered: {days: 1, button: 1}}}
+          - {existing: "rated:2:3 resched:4", item: {rescheduled: 2}}
+          - {existing: "rated:2", item: {answered: {days: 9}}}
+          # added, edited, first review: three kinds
+          - {existing: "added:1 edited:2 introduced:3", item: {added: 7}}
+          - {existing: "added:1 edited:2 introduced:3", item: {edited: 7}}
+          - {existing: "added:1 edited:2 introduced:3", item: {introduced: 7}}
+          # ids: nid: and cid: are two kinds
+          - {existing: "nid:1 cid:2", item: {note_ids: [5, 3]}}
+          - {existing: "cid:2 nid:1 x", item: {text: "cid:9"}}
+          # duplicates
+          - {existing: "dupe:1,x a", item: {dupe: {notetype_id: 2, text: y}}}
+          # property: every prop: term, prop:rated and prop:resched included
+          - {existing: "rated:2 prop:ivl>10", item: {due_on: 0}}
+          - {existing: "prop:due=1 prop:rated=-1 prop:resched=-2 prop:cdn:k>1", item: {due_within: 3}}
+          # text terms, custom data and presets: a parsed-text item of one term
+          - {existing: "re:a nc:b sc:c w:d", item: {text: "re:z"}}
+          - {existing: "re:a nc:b sc:c w:d", item: {text: "w:z"}}
+          - {existing: "re:a nc:b sc:c w:d", item: {text: "nc:z"}}
+          - {existing: "re:a nc:b sc:c w:d", item: {text: "sc:z"}}
+          - {existing: "has-cd:a preset:b x", item: {text: "has-cd:z"}}
+          - {existing: "has-cd:a preset:b x", item: {text: "preset:z"}}
+          - {existing: "front:x has-cd:y", item: {text: 'has\-cd:x'}}
+          # whole collection
+          - {existing: "", item: whole_collection}
+          - {existing: "a deck:*", item: whole_collection}
+          # at depth and under negation
+          - {existing: "-(deck:A (x or -deck:B))", item: {deck: C}}
+          - {existing: "a (b (c -(tag:t)))", item: {tag: u}}
+          # negated and grouped items replace nothing
+          - {existing: "deck:Lang", item: {flag: any}}
+          - {existing: "tag:a", item: untagged}
+          - {existing: "deck:A", item: {negated: {deck: B}}}
+          - {existing: "deck:A note:N", item: {group: {joiner: and, items: [{notetype: M}, {template: 0}]}}}
+          - {existing: "deck:A x", item: {text: "deck:B y"}}
+          # a group of one item is that item
+          - {existing: "deck:A", item: {group: {joiner: or, items: [{deck: B}]}}}
+          - {existing: "deck:A", item: {negated: {negated: {deck: B}}}}
+          # the empty field: deck:* for any item but the whole collection
+          - {existing: "", item: {deck: X}}
+          - {existing: "", item: {tag: t}}
+          # existing with nothing of the kind: its canonical text
+          - {existing: "a  or   b", item: {deck: X}}
+          - {existing: "(a  b)", item: {deck: X}}
+          - {existing: "((a b))", item: {deck: X}}
+          - {existing: "is:due", item: {flag: 2}}
+          # parse errors of existing, and of a parsed-text item
+          - {existing: "(a", item: {deck: X}}
+          - {existing: '"a', item: {deck: X}}
+          - {existing: "rated:1:5", item: {deck: X}}
+          - {existing: "a", item: {text: "is:foo"}}

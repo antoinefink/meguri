@@ -1,0 +1,13 @@
+# AE43 (core part), R1079; specs/search/join-and-replace.md J6, J7, J9: given
+# the search deck:French is:due, replacing with the deck Spanish gives
+# deck:Spanish is:due, and joining the negated tag verbs with AND gives
+# (deck:French is:due) -tag:verbs. Items in the neutral form of
+# specs/conformance/search-ops.md S5. Nothing reads the collection.
+id: search/join-replace/ae43
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_replace:
+          - {existing: "deck:French is:due", item: {deck: Spanish}}
+      - search_join:
+          - {existing: "deck:French is:due", item: {tag: verbs}, joiner: and, negate: true}

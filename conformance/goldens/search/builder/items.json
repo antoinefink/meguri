@@ -1,0 +1,331 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_build": [
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:current"
+          },
+          {
+            "text": "deck:_*"
+          },
+          {
+            "text": "tag:_*"
+          },
+          {
+            "text": "-tag:_*"
+          },
+          {
+            "text": "note:_*"
+          },
+          {
+            "text": "-flag:0"
+          },
+          {
+            "text": "flag:0"
+          },
+          {
+            "text": "flag:1"
+          },
+          {
+            "text": "flag:2"
+          },
+          {
+            "text": "flag:3"
+          },
+          {
+            "text": "flag:4"
+          },
+          {
+            "text": "flag:5"
+          },
+          {
+            "text": "flag:6"
+          },
+          {
+            "text": "flag:7"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "is:learn"
+          },
+          {
+            "text": "is:review"
+          },
+          {
+            "text": "is:due"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "added:1"
+          },
+          {
+            "text": "added:4294967295"
+          },
+          {
+            "text": "edited:2"
+          },
+          {
+            "text": "introduced:30"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "rated:7:1"
+          },
+          {
+            "text": "rated:7:2"
+          },
+          {
+            "text": "rated:7:3"
+          },
+          {
+            "text": "rated:4294967295:4"
+          },
+          {
+            "text": "resched:0"
+          },
+          {
+            "text": "resched:3"
+          },
+          {
+            "text": "prop:due=0"
+          },
+          {
+            "text": "prop:due=-3"
+          },
+          {
+            "text": "prop:due=7"
+          },
+          {
+            "text": "prop:due=-2147483648"
+          },
+          {
+            "text": "prop:due=2147483647"
+          },
+          {
+            "text": "prop:due<=0"
+          },
+          {
+            "text": "prop:due<=-1"
+          },
+          {
+            "text": "prop:due<=30"
+          },
+          {
+            "text": "nid:5,3"
+          },
+          {
+            "text": "nid:1600000000000"
+          },
+          {
+            "text": "nid:0,9007199254740991,0"
+          },
+          {
+            "text": "\"dupe:1600000000000,a\\\\b \\\"c\\\"\""
+          },
+          {
+            "text": "\"dupe:1,x y\""
+          },
+          {
+            "text": "dupe:1,"
+          },
+          {
+            "text": "dupe:1,a*b_c:d"
+          },
+          {
+            "text": "dupe:0,-x"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:2"
+          },
+          {
+            "text": "card:65535"
+          },
+          {
+            "text": "\"and\""
+          },
+          {
+            "text": "\"OR\""
+          },
+          {
+            "text": "\"-x\""
+          },
+          {
+            "text": "3\\:30"
+          },
+          {
+            "text": "50%\\_off"
+          },
+          {
+            "text": "a\\\"b"
+          },
+          {
+            "text": "\"(x)\""
+          },
+          {
+            "text": "re\\:x"
+          },
+          {
+            "text": "\"x y\""
+          },
+          {
+            "text": "a\\\\b"
+          },
+          {
+            "text": "\\*"
+          },
+          {
+            "text": "ünï"
+          },
+          {
+            "text": "\"Front:a b\""
+          },
+          {
+            "text": "Front:"
+          },
+          {
+            "text": "Front:re\\:x"
+          },
+          {
+            "text": "Front:nc\\:x"
+          },
+          {
+            "text": "a\\*b:c\\_d"
+          },
+          {
+            "text": "\"Back Side:-x\""
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a OR b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "(a b)"
+          },
+          {
+            "text": "-(a)"
+          },
+          {
+            "text": "deck:x"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "deck:X"
+          },
+          {
+            "text": "is:new flag:1"
+          },
+          {
+            "text": "note:Memo card:1"
+          },
+          {
+            "text": "is:new OR is:learn OR is:review"
+          },
+          {
+            "text": "is:due -prop:due=0"
+          },
+          {
+            "text": "(flag:1 OR flag:2) is:due"
+          },
+          {
+            "text": "(flag:1 flag:2) OR is:due"
+          },
+          {
+            "text": "(a OR b) deck:X"
+          },
+          {
+            "text": "a (b c)"
+          },
+          {
+            "text": "deck:* OR tag:x"
+          },
+          {
+            "text": "-deck:X"
+          },
+          {
+            "text": "deck:X"
+          },
+          {
+            "text": "-deck:X"
+          },
+          {
+            "text": "flag:0"
+          },
+          {
+            "text": "tag:_*"
+          },
+          {
+            "text": "-(is:new flag:1)"
+          },
+          {
+            "text": "-deck:X"
+          },
+          {
+            "text": "-(a b)"
+          },
+          {
+            "text": "a"
+          },
+          {
+            "text": "-deck:*"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "context": "ease>x",
+            "error": "invalid_number",
+            "provided": "x"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/builder/items",
+  "scenario_sha256": "786f437789e447561833aeb5f7f7460efc3b90ac8164ef9b46eed64dcc0b9e74",
+  "tz": "UTC"
+}
