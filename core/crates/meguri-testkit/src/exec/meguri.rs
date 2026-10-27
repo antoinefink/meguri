@@ -80,7 +80,7 @@ pub struct Registry {
 impl Registry {
     /// Use a counted test witness on isolated fixture copies, never user data.
     /// This proves hook invocation, not production backup safety (host H6).
-    /// Scenarios requiring `force_backup` retain CoreHost's production provider.
+    /// Scenarios requiring `force_backup` or `backup` retain CoreHost's production provider.
     pub fn fixture_backup_witness(&mut self) {
         self.fixture_backup_witness = true;
     }
@@ -401,10 +401,12 @@ impl MeguriExecutor {
         Ok(session)
     }
 
-    /// Choose before setup can promote the writer. F3 needs actual publication;
+    /// Choose before setup can promote the writer. F3 and H1 need actual publication;
     /// other fixture scenarios keep the hook-only witness they requested.
     fn configure_storage(&self, session: &mut Session<'_>) {
-        if self.registry.fixture_backup_witness && !session.scenario.scenario.needs().ops.contains("force_backup") {
+        let needs = session.scenario.scenario.needs();
+        if self.registry.fixture_backup_witness && !needs.ops.contains("force_backup") && !needs.ops.contains("backup")
+        {
             session.storage.fixture_backup_witness();
         }
         if self.registry.record_changes {
