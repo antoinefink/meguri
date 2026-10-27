@@ -194,7 +194,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "{op}"
         );
     }
-    for op in ["add_backup_files", "force_backup", "save_backup_settings", "backup", "export", "import"] {
+    for op in [
+        "add_backup_files",
+        "force_backup",
+        "save_backup_settings",
+        "backup",
+        "export",
+        "import",
+    ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
@@ -206,15 +213,38 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     }
     // Form capabilities are supported parts, not standalone step vocabulary.
     for op in ["export.colpkg", "import.colpkg"] {
-        assert!(json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op), "{op}");
-        assert!(!json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op), "{op}");
+        assert!(
+            json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+        assert!(
+            !json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
     }
     for (kind, supported) in [
-        ("backup_files", true), ("backup_settings", true),
-        ("package_listing", true), ("package_col", false),
+        ("backup_files", true),
+        ("backup_settings", true),
+        ("package_listing", true),
+        ("package_col", false),
     ] {
-        assert!(json["language"]["observations"].as_array().unwrap().iter().any(|k| k == kind), "{kind}");
-        assert_eq!(json["supports"]["observations"].as_array().unwrap().iter().any(|k| k == kind), supported, "{kind}");
+        assert!(
+            json["language"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == kind),
+            "{kind}"
+        );
+        assert_eq!(
+            json["supports"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == kind),
+            supported,
+            "{kind}"
+        );
     }
     for op in [
         "actor",

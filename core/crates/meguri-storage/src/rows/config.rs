@@ -160,7 +160,9 @@ impl ConfigValue {
         ordered.extend(members);
         let mut out = String::from("{");
         for (index, (name, value)) in ordered.into_iter().enumerate() {
-            if index > 0 { out.push(','); }
+            if index > 0 {
+                out.push(',');
+            }
             write_string(name, &mut out);
             out.push(':');
             value.write(&mut out);

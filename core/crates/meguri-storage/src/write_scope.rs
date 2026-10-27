@@ -606,7 +606,12 @@ impl<'c> WriteScope<'c> {
             Some(row) => (row[1].clone(), row[2].clone()),
             None => (Cell::Integer(0), Cell::Integer(0)),
         };
-        let cells = vec![Cell::text(key), usn, mtime, Cell::Blob(value.compact_ordered(first).into_bytes())];
+        let cells = vec![
+            Cell::text(key),
+            usn,
+            mtime,
+            Cell::Blob(value.compact_ordered(first).into_bytes()),
+        ];
         self.put_cells(Table::Config, cells, false)
     }
 

@@ -1,6 +1,6 @@
 //! Production local backups: reuse the forced safety writer, add B5 retention.
-pub mod naming;
 pub mod listing;
+pub mod naming;
 pub mod retention;
 pub use meguri_engine::backup_limits::{self, BackupLimits};
 
@@ -125,48 +125,55 @@ impl ForcedBackupProvider {
                 }
             };
             let recorded: Result<BackupReceipt, EngineError> = (|| {
-            let size_bytes = fs::metadata(&destination)
-                .map_err(|e| {
-                    failure(
-                        io_cause(e),
-                        BackupPublication::Uncertain {
-                            name: name.clone(),
-                            instant,
-                        },
-                    )
-                })?
-                .len();
-            let receipt = BackupReceipt {
-                name: name.clone(),
-                size_bytes,
-                instant,
-                snapshot_modified: written.snapshot_modified,
-            };
-            // Cancellation after publication cannot discard either the file or
-            // its record. The importing worker may honour it after this returns.
-            record(directory, &receipt)
-                .map_err(|e| failure(engine_cause(e.into()), BackupPublication::Durable(receipt.clone())))?;
-            Ok(receipt)
+                let size_bytes = fs::metadata(&destination)
+                    .map_err(|e| {
+                        failure(
+                            io_cause(e),
+                            BackupPublication::Uncertain {
+                                name: name.clone(),
+                                instant,
+                            },
+                        )
+                    })?
+                    .len();
+                let receipt = BackupReceipt {
+                    name: name.clone(),
+                    size_bytes,
+                    instant,
+                    snapshot_modified: written.snapshot_modified,
+                };
+                // Cancellation after publication cannot discard either the file or
+                // its record. The importing worker may honour it after this returns.
+                record(directory, &receipt)
+                    .map_err(|e| failure(engine_cause(e.into()), BackupPublication::Durable(receipt.clone())))?;
+                Ok(receipt)
             })();
             // Publication is durable. Neither late cancellation nor metadata
             // failure may bypass retention or lose the primary error.
             let retained = match naming::today(EpochMillis(self.clock.now_ms()), self.clock.as_ref()) {
                 Ok(today) => retention::thin_pinned(
-                    retention_directory, today, limits,
+                    retention_directory,
+                    today,
+                    limits,
                     &std::collections::BTreeSet::from([name.clone()]),
                 ),
                 Err(error) => {
                     tracing::warn!(%error, "backup retention date unavailable");
                     retention::RetentionReport {
                         deleted_names: Vec::new(),
-                        failures: vec![retention::RetentionFailure { name: None, detail: error.to_string() }],
+                        failures: vec![retention::RetentionFailure {
+                            name: None,
+                            detail: error.to_string(),
+                        }],
                     }
                 }
             };
             let receipt = recorded?;
             // lease drops here, before the caller invokes verified replacement.
             return Ok(BackupWritten {
-                receipt, deleted_names: retained.deleted_names, retention_failures: retained.failures,
+                receipt,
+                deleted_names: retained.deleted_names,
+                retention_failures: retained.failures,
             });
         }
         unreachable!("each publication attempt returns or retries within its bound")

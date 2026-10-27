@@ -226,13 +226,19 @@ fn backups(session: &mut Session<'_>) -> Result<PathBuf, ExecError> {
 fn add_backup_files(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     use crate::scenario::AddBackupFilesArgs;
     use meguri_package::backup::naming::name_from_wall_seconds;
-    let Step::AddBackupFiles(args) = step else { return Err(invalid("expected add_backup_files")); };
+    let Step::AddBackupFiles(args) = step else {
+        return Err(invalid("expected add_backup_files"));
+    };
     // The scenario model validates components, bounds, duration and duplicates.
     let names = match args {
         AddBackupFilesArgs::Names(names) => names.clone(),
         AddBackupFilesArgs::Series(series) => {
-            let wall = |text: &str| format!("{text}Z").parse::<jiff::Timestamp>()
-                .map(|t| t.as_second()).map_err(invalid);
+            let wall = |text: &str| {
+                format!("{text}Z")
+                    .parse::<jiff::Timestamp>()
+                    .map(|t| t.as_second())
+                    .map_err(invalid)
+            };
             let mut second = wall(&series.from)?;
             let until = wall(&series.until)?;
             let every = series.every.seconds();
@@ -242,7 +248,9 @@ fn add_backup_files(session: &mut Session<'_>, step: &Step) -> Result<OpResult, 
             let mut names = Vec::new();
             loop {
                 names.push(name_from_wall_seconds(second).map_err(invalid)?);
-                let Some(next) = second.checked_add(every).filter(|n| *n <= until) else { break; };
+                let Some(next) = second.checked_add(every).filter(|n| *n <= until) else {
+                    break;
+                };
                 second = next;
             }
             names
@@ -251,34 +259,45 @@ fn add_backup_files(session: &mut Session<'_>, step: &Step) -> Result<OpResult, 
     let directory = backups(session)?;
     let mut seen = std::collections::BTreeSet::new();
     for name in &names {
-        if !seen.insert(name) { return Err(invalid("duplicate backup seed")); }
+        if !seen.insert(name) {
+            return Err(invalid("duplicate backup seed"));
+        }
         match directory.join(name).symlink_metadata() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Ok(_) => return Err(invalid("backup seed already exists")),
             Err(e) => return Err(error(e)),
         }
     }
     for name in names {
-        fs::OpenOptions::new().write(true).create_new(true).open(directory.join(name)).map_err(error)?;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(name))
+            .map_err(error)?;
     }
     Ok(OpResult::Done)
 }
 
 fn force_backup(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     use meguri_model::time::EpochMillis;
-    let Step::ForceBackup(args) = step else { return Err(invalid("expected force_backup")); };
+    let Step::ForceBackup(args) = step else {
+        return Err(invalid("expected force_backup"));
+    };
     let directory = backups(session)?;
-    let expected = meguri_package::backup::naming::name_at(
-        EpochMillis(session.clock.now_ms()), session.clock.as_ref(),
-    ).map_err(error)?;
+    let expected = meguri_package::backup::naming::name_at(EpochMillis(session.clock.now_ms()), session.clock.as_ref())
+        .map_err(error)?;
     match directory.join(expected).symlink_metadata() {
         Ok(_) => return Err(invalid("seed collides with force_backup (F7)")),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(error(e)),
     }
     let collection = session.engine_collection()?;
-    let receipt = session.storage.host()?.backup()
-        .before_colpkg_import(&collection, &meguri_engine::CancelToken::default()).map_err(error)?;
+    let receipt = session
+        .storage
+        .host()?
+        .backup()
+        .before_colpkg_import(&collection, &meguri_engine::CancelToken::default())
+        .map_err(error)?;
     if let Some(name) = &args.copy_as {
         // Copy the produced bytes, never synthesize an equivalent export.
         fs::copy(directory.join(&receipt.name), session.storage.dir()?.join(name)).map_err(error)?;
@@ -287,12 +306,20 @@ fn force_backup(session: &mut Session<'_>, step: &Step) -> Result<OpResult, Exec
 }
 
 fn save_backup_settings(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
-    let Step::SaveBackupSettings(args) = step else { return Err(invalid("expected save_backup_settings")); };
+    let Step::SaveBackupSettings(args) = step else {
+        return Err(invalid("expected save_backup_settings"));
+    };
     let collection = session.engine_collection()?;
-    meguri_engine::backup_limits::save(&collection, meguri_engine::backup_limits::BackupLimits {
-        daily: args.daily, weekly: args.weekly, monthly: args.monthly,
-        minimum_interval_mins: args.minimum_interval_mins,
-    }).map_err(error)?;
+    meguri_engine::backup_limits::save(
+        &collection,
+        meguri_engine::backup_limits::BackupLimits {
+            daily: args.daily,
+            weekly: args.weekly,
+            monthly: args.monthly,
+            minimum_interval_mins: args.minimum_interval_mins,
+        },
+    )
+    .map_err(error)?;
     Ok(OpResult::Done)
 }
 
@@ -302,10 +329,15 @@ fn backup_files(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Val
         let entry = entry.map_err(error)?;
         match fs::symlink_metadata(entry.path()) {
             Ok(metadata) if metadata.file_type().is_file() => {
-                names.push(entry.file_name().into_string().map_err(|_| error("non-UTF8 session name"))?);
+                names.push(
+                    entry
+                        .file_name()
+                        .into_string()
+                        .map_err(|_| error("non-UTF8 session name"))?,
+                );
             }
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(error(e)),
         }
     }
@@ -314,9 +346,14 @@ fn backup_files(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Val
 }
 
 fn backup_settings(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
-    let collection = session.storage.collection().ok_or_else(|| invalid("no collection open"))?;
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection open"))?;
     let reader = collection.reader()?;
     let limits = meguri_engine::backup_limits::read(&*reader).map_err(error)?;
-    Ok(json!({"daily": limits.daily, "weekly": limits.weekly, "monthly": limits.monthly,
-        "minimum_interval_mins": limits.minimum_interval_mins}))
+    Ok(
+        json!({"daily": limits.daily, "weekly": limits.weekly, "monthly": limits.monthly,
+        "minimum_interval_mins": limits.minimum_interval_mins}),
+    )
 }

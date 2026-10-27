@@ -92,6 +92,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 
 # Workspace tooling.
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
+proptest = "=1.12.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.154"
 tempfile = "3.27.0"

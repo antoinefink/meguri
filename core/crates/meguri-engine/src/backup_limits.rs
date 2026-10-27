@@ -1,6 +1,6 @@
 //! Synced backup limits (package/backups B6); scheduling belongs to U127.
-use meguri_storage::{ConfigValue, ReadRows, WriteScope};
 use crate::{Collection, EngineError, OpResult, OpSource, OpSpec};
+use meguri_storage::{ConfigValue, ReadRows, WriteScope};
 
 const FIELDS: [&str; 4] = ["daily", "weekly", "monthly", "minimum_interval_mins"];
 
@@ -13,7 +13,12 @@ pub struct BackupLimits {
 }
 impl Default for BackupLimits {
     fn default() -> Self {
-        Self { daily: 12, weekly: 10, monthly: 9, minimum_interval_mins: 30 }
+        Self {
+            daily: 12,
+            weekly: 10,
+            monthly: 9,
+            minimum_interval_mins: 30,
+        }
     }
 }
 impl BackupLimits {
@@ -27,7 +32,9 @@ impl BackupLimits {
                     for name in FIELDS {
                         let mut found = members.iter().filter(|(key, _)| key == name);
                         values.push(&found.next()?.1);
-                        if found.next().is_some() { return None; }
+                        if found.next().is_some() {
+                            return None;
+                        }
                     }
                     values
                 }
@@ -38,7 +45,10 @@ impl BackupLimits {
                 *out = u32::try_from(value.as_u64()?).ok()?;
             }
             Some(BackupLimits {
-                daily: numbers[0], weekly: numbers[1], monthly: numbers[2], minimum_interval_mins: numbers[3],
+                daily: numbers[0],
+                weekly: numbers[1],
+                monthly: numbers[2],
+                minimum_interval_mins: numbers[3],
             })
         }
         value.and_then(read).unwrap_or_default()
@@ -53,7 +63,10 @@ pub fn read(rows: &impl ReadRows) -> Result<BackupLimits, EngineError> {
 pub fn save_in(scope: &mut WriteScope<'_>, limits: BackupLimits) -> Result<bool, EngineError> {
     let mut value = scope.config_value("backups")?.unwrap_or(ConfigValue::Null);
     for (name, number) in FIELDS.into_iter().zip([
-        limits.daily, limits.weekly, limits.monthly, limits.minimum_interval_mins,
+        limits.daily,
+        limits.weekly,
+        limits.monthly,
+        limits.minimum_interval_mins,
     ]) {
         value = value.with_member(name, ConfigValue::from(u64::from(number)));
     }
@@ -62,7 +75,8 @@ pub fn save_in(scope: &mut WriteScope<'_>, limits: BackupLimits) -> Result<bool,
 
 /// Settings semantics: no undo entry; only a changed key clears history.
 pub fn save(collection: &Collection, limits: BackupLimits) -> Result<OpResult<bool>, EngineError> {
-    collection.run(OpSpec::named("save_backup_settings", OpSource::UserNonUndoable), move |ctx| {
-        save_in(ctx.scope(), limits)
-    })
+    collection.run(
+        OpSpec::named("save_backup_settings", OpSource::UserNonUndoable),
+        move |ctx| save_in(ctx.scope(), limits),
+    )
 }

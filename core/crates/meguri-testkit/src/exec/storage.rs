@@ -176,7 +176,12 @@ impl Storage {
             self.host_data = Some(tempfile::tempdir().map_err(core)?);
         }
         let data = self.host_data.as_ref().expect("host data was initialized").path();
-        let backups = self.dir.as_ref().expect("open session directory").path().join("backups");
+        let backups = self
+            .dir
+            .as_ref()
+            .expect("open session directory")
+            .path()
+            .join("backups");
         fs::create_dir_all(&backups).map_err(core)?;
         let directory = self
             .dir

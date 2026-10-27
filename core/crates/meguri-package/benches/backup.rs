@@ -1,13 +1,17 @@
 //! B8 / R1848 / R1852: production streamed backup plus retention, U12 harness.
 //! MG discovers this Cargo target; fixtures are prepared by the existing job.
-use std::{fs, process::ExitCode, sync::Arc, time::Duration};
 use criterion::Criterion;
 use meguri_engine::CancelToken;
 use meguri_model::clock::{StepClock, UtcOffset};
 use meguri_package::backup::naming;
-use meguri_testkit::bench::{fixtures, peak_alloc::PeakAlloc,
-    report::{self, Measurement, Suite}, timing::Percentile};
+use meguri_testkit::bench::{
+    fixtures,
+    peak_alloc::PeakAlloc,
+    report::{self, Measurement, Suite},
+    timing::Percentile,
+};
 use meguri_testkit::generate::DEFAULT_NOW_MS;
+use std::{fs, process::ExitCode, sync::Arc, time::Duration};
 
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
@@ -27,22 +31,27 @@ fn main() -> ExitCode {
         // The full hourly history is thinned once before measurement. Subsequent
         // samples advance one day, keeping a bounded, realistic retained set.
         let wall_now = DEFAULT_NOW_MS.div_euclid(1000);
-        for hour in 1..=400*24 {
-            let name = naming::name_from_wall_seconds(wall_now - hour*3600).unwrap();
+        for hour in 1..=400 * 24 {
+            let name = naming::name_from_wall_seconds(wall_now - hour * 3600).unwrap();
             fs::write(backups.join(name), []).unwrap();
         }
         let clock = Arc::new(StepClock::new(DEFAULT_NOW_MS, UtcOffset::UTC, "UTC"));
         let host = fixtures::open_engine_collection_with_backups(&copy.path, &backups, clock.clone()).unwrap();
         let collection = host.collection().unwrap();
         let provider = host.backup();
-        provider.before_colpkg_import(&collection, &CancelToken::default()).expect("warm streamed backup and retention");
+        provider
+            .before_colpkg_import(&collection, &CancelToken::default())
+            .expect("warm streamed backup and retention");
         let mut measurement = Measurement::start("package.backup", Some(size));
         group.bench_function(format!("streamed_with_retention/{size}"), |b| {
-            b.iter_custom(|iters| measurement.run(iters, |_| {
-                clock.step_ms(86_400_000);
-                provider.before_colpkg_import(&collection, &CancelToken::default())
-                    .expect("durable backup with retention")
-            }))
+            b.iter_custom(|iters| {
+                measurement.run(iters, |_| {
+                    clock.step_ms(86_400_000);
+                    provider
+                        .before_colpkg_import(&collection, &CancelToken::default())
+                        .expect("durable backup with retention")
+                })
+            })
         });
         suite.push(measurement.finish());
         host.close().unwrap();
@@ -50,17 +59,24 @@ fn main() -> ExitCode {
     group.finish();
     criterion.final_summary();
     if let Err(error) = suite.write(&report::results_dir(std::path::Path::new(env!("CARGO_TARGET_TMPDIR")))) {
-        eprintln!("backup benchmark report: {error}"); return ExitCode::FAILURE;
+        eprintln!("backup benchmark report: {error}");
+        return ExitCode::FAILURE;
     }
     let mut status = ExitCode::SUCCESS;
     for record in suite.records() {
         let maximum = record.percentile(Percentile::Max);
-        eprintln!("backup {}: max {maximum:?}, peak {} bytes", record.fixture.as_deref().unwrap_or("-"), record.memory_peak_bytes);
+        eprintln!(
+            "backup {}: max {maximum:?}, peak {} bytes",
+            record.fixture.as_deref().unwrap_or("-"),
+            record.memory_peak_bytes
+        );
         if record.fixture.as_deref() == Some("150k") && maximum > Duration::from_secs(2) {
-            eprintln!("backup exceeds the existing 150k <=2s contract"); status = ExitCode::FAILURE;
+            eprintln!("backup exceeds the existing 150k <=2s contract");
+            status = ExitCode::FAILURE;
         }
         if record.fixture.as_deref() == Some("500k") && record.memory_peak_bytes > 300 * 1024 * 1024 {
-            eprintln!("backup exceeds R1852's 300 MB footprint"); status = ExitCode::FAILURE;
+            eprintln!("backup exceeds R1852's 300 MB footprint");
+            status = ExitCode::FAILURE;
         }
     }
     status
