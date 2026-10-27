@@ -569,3 +569,30 @@ Final R2 review is clear. `swift-test/20261027T001420Z-58716` passes all
 41 tests, zero skips; similarity `20261027T001421Z-58962` passes. VM readiness
 `doctor/20261027T001401Z-57939` reports no failed checks; existing account and
 host-session warnings remain. The dedicated VM is available.
+
+## Native Mac R11 — UI success, attachment collection refused
+
+Start `ba99812c`. `ui-test/20261027T001521Z-60497` passes its one actual
+Mac UI test, zero failures and zero skips, in 136.628 seconds. It imports the
+package, decodes the image, finishes native audio, records one answer, closes,
+reopens and exports all media through the normal dialogs. The overall job is
+error: its first named attachment export returns an empty manifest. No combined
+proof or integration pass is claimed. The earlier R10 media failure remains
+retained; this successful UI run alone does not establish its cause.
+
+Filtered `cleanroom/20261027T001957Z-63953` fixes the filename filter.
+XCTest adds `_0_UUID` before each extension. The collector now uses one exact
+stem glob per owned name, preserving all six separate requests, method and
+manifest checks, UUID rules, failure refusal and exact file sets. No broad
+attachment export or app-container fallback is added. The R11 artifacts stay.
+
+Focused `selftest/20261027T002212Z-65284` passes all nine native-review tooling
+tests. They cover the transformed names, exact six-file collection and refusal
+cases. Privacy `20261027T002213Z-65672` and similarity
+`20261027T002212Z-65453` pass. Actual collection and package proof still require
+a fresh native run; unit and integration acceptance remain open.
+
+Independent attachment-filter review is clear. Separate review finds P2
+`M8-STALE-CURRENT-DIAGNOSTIC`: retired runtime receipts are recorded against
+the current update. Resolve this M8 contract gap before integration; do not
+attribute the masked R10 failure to it without evidence.

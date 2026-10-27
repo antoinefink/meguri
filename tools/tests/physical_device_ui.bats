@@ -2257,6 +2257,129 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "native review Mac capture filters transformed XCTest names and refuses foreign attachment proof" {
+  run python3 - "$SB/tools/scripts/native-media-review-capture.py" "$BATS_TEST_TMPDIR/review-attachments" <<'PY'
+import fnmatch
+import importlib.util
+import json
+import sys
+from copy import deepcopy
+from pathlib import Path
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('review_capture', sys.argv[1])
+capture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(capture)
+base = Path(sys.argv[2])
+filename = 'Meguri-Media-' + '2' * 32 + '.colpkg'
+names = [filename, 'native-review-app.json', 'native-review-import.json',
+         'native-review-accepted.json', 'native-review-closed.json', 'native-review-reopened.json']
+human_uuid = '00000000-0000-4000-8000-000000000008'
+file_uuid = '00000000-0000-4000-8000-000000000007'
+
+for case in ('success', 'attestation-only', 'iphone-attestation-only', 'wrong-method',
+             'wrong-name', 'wrong-index', 'invalid-human-uuid', 'invalid-file-uuid',
+             'extra-attachment', 'extra-record', 'extra-file', 'failure', 'missing-failure',
+             'empty-manifest', 'occupied-directory'):
+    run = base / case
+    output = run / 'native-review-export'
+    output.mkdir(parents=True)
+    attestation_only = case in ('attestation-only', 'iphone-attestation-only')
+    platform = 'iphone' if case == 'iphone-attestation-only' else 'mac'
+    bundle = run / (platform + '.xcresult')
+    bundle.mkdir()
+    binding = {'platform': platform, 'native_filename': filename, 'case': case}
+    (run / 'native-review-binding.json').write_text(json.dumps(binding))
+    payloads = {name: json.dumps(binding if name == 'native-review-app.json'
+                                else {'receipt': name}).encode() for name in names}
+    payloads[filename] = b'owned native package'
+    archive = []
+    for name in names:
+        path = Path(name)
+        entry = {'exportedFileName': file_uuid + path.suffix,
+                 'suggestedHumanReadableName': path.stem + '_0_' + human_uuid + path.suffix,
+                 'isAssociatedWithFailure': False}
+        archive.append((capture.METHOD, entry, payloads[name]))
+        # These share extensions or near-matching stems but belong to no owned filename.
+        for stem in ('prefix-' + path.stem, path.stem + '-other', 'unrelated'):
+            foreign = dict(entry, suggestedHumanReadableName=stem + '_0_' + human_uuid + path.suffix)
+            archive.append((capture.METHOD, foreign, b'foreign attachment'))
+        archive.append(('OtherTests/testOther()', entry, b'foreign method'))
+
+    calls = []
+    expected_names = ['native-review-app.json'] if attestation_only else names
+    if case == 'occupied-directory':
+        occupied = run / ('native-review-attachments-' + Path(filename).stem)
+        occupied.mkdir()
+        (occupied / 'preserved').write_bytes(b'failed capture evidence')
+
+    def export(args, **kwargs):
+        index = len(calls)
+        calls.append(args)
+        name = expected_names[index]
+        directory = run / ('native-review-attachments-' + Path(name).stem)
+        assert args[:10] == ['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(bundle),
+                            '--output-path', str(directory), '--test-id', capture.METHOD]
+        assert len(args) == 12 and args[10] == '--filter'
+        assert kwargs == {'check': True, 'stdout': capture.subprocess.DEVNULL,
+                          'stderr': capture.subprocess.DEVNULL}
+        assert not list(directory.iterdir())
+        # Model xcresulttool's filename glob against XCTest's transformed human name,
+        # never against the original filename or independent exported UUID filename.
+        selected = [(deepcopy(entry), data) for method, entry, data in archive
+                    if method == args[9] and fnmatch.fnmatchcase(entry['suggestedHumanReadableName'], args[11])]
+        manifest = [{'testIdentifier': args[9], 'attachments': [entry for entry, _ in selected]}] if selected else []
+        assert len(selected) == 1, (case, args[11], selected)
+        entry = manifest[0]['attachments'][0]
+        if case == 'wrong-method':
+            manifest[0]['testIdentifier'] = 'OtherTests/testOther()'
+        elif case == 'wrong-name':
+            entry['suggestedHumanReadableName'] = 'prefix-' + entry['suggestedHumanReadableName']
+        elif case == 'wrong-index':
+            entry['suggestedHumanReadableName'] = entry['suggestedHumanReadableName'].replace('_0_', '_1_')
+        elif case == 'invalid-human-uuid':
+            entry['suggestedHumanReadableName'] = entry['suggestedHumanReadableName'].replace(human_uuid, 'not-a-uuid')
+        elif case == 'invalid-file-uuid':
+            entry['exportedFileName'] = 'not-a-uuid' + Path(name).suffix
+        elif case == 'extra-attachment':
+            manifest[0]['attachments'].append(dict(entry))
+        elif case == 'extra-record':
+            manifest.append({'testIdentifier': 'OtherTests/testOther()', 'attachments': []})
+        elif case == 'failure':
+            entry['isAssociatedWithFailure'] = True
+        elif case == 'missing-failure':
+            del entry['isAssociatedWithFailure']
+        elif case == 'empty-manifest':
+            manifest = []
+        for attachment, data in selected:
+            (directory / attachment['exportedFileName']).write_bytes(data)
+        (directory / 'manifest.json').write_text(json.dumps(manifest))
+        if case == 'extra-file':
+            (directory / 'unrelated-screen.png').write_bytes(b'foreign screenshot')
+
+    try:
+        with patch.object(capture.subprocess, 'run', side_effect=export):
+            capture.mac_capture(run, bundle, attestation_only=attestation_only)
+    except (ValueError, OSError):
+        assert case not in ('success', 'attestation-only', 'iphone-attestation-only'), case
+        assert not list(output.iterdir()), case
+        assert len(calls) == (0 if case == 'occupied-directory' else 1), case
+        if case == 'occupied-directory':
+            assert (occupied / 'preserved').read_bytes() == b'failed capture evidence'
+    else:
+        assert case in ('success', 'attestation-only', 'iphone-attestation-only'), case
+        assert {path.name for path in output.iterdir()} == set(expected_names)
+        for name in expected_names:
+            assert (output / name).read_bytes() == payloads[name]
+        assert [args[11] for args in calls] == [Path(name).stem + '_0_*' + Path(name).suffix
+                                               for name in expected_names]
+        assert len(calls) == (1 if attestation_only else 6)
+        assert {path.name for path in run.glob('native-review-attachments-*')} == {
+            'native-review-attachments-' + Path(name).stem for name in expected_names}
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "native review frozen helper accepts retained Rust work but keeps expected inputs exact" {
   run python3 - "$SB" <<'PY'
 import importlib.util

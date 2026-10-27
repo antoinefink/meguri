@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import json
 import math
 import os
@@ -406,8 +407,11 @@ def mac_capture(run, bundle, attestation_only=False):
     for name in names:
         directory = run / ("native-review-attachments-" + Path(name).stem)
         directory.mkdir(mode=0o700)
+        # XCTest inserts _0_UUID before the extension; the filter is a glob
+        # over that human-readable name, independent of exportedFileName.
+        selector = glob.escape(Path(name).stem) + "_0_*" + glob.escape(Path(name).suffix)
         subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(bundle), "--output-path", str(directory),
-                        "--test-id", METHOD, "--filter", name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        "--test-id", METHOD, "--filter", selector], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with export.retained_directory(directory) as (fd, verify_directory):
             manifest = read(directory / "manifest.json")
             require(isinstance(manifest, list) and len(manifest) == 1 and manifest[0].get("testIdentifier") == METHOD, "attachment method")
