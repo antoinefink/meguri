@@ -14,6 +14,9 @@ update_notetype {notetype, edits, skip_checks?} -> {name}   (T5)
 ensure_io_notetype {} -> {name}   (T6)
     The adds and the update record {error: <T7 kind>} when the save refuses.
 notetype_structure (observation): every note type, or {notetypes: [name]}   (T8)
+remove_notetype {notetype}   (notetype-structure-ops.md M1)
+restore_notetype {notetype, kind?}, rejection needs_stock_kind   (M2)
+notetype_templates (observation): {notetypes: [name]}   (M3)
 
 browser_front and browser_back (dsl.md D6.4, T2) are the schema-11 bqfmt and
 bafmt, set on the new template before the add: a save stores them without
@@ -34,6 +37,14 @@ Refusals: an invalid-input error of the save is invalid_notetype; a card type
 error maps by its help page, and the template-error page, which parse errors
 and unknown fields share, by the message's detail compared with the backend's
 own translations (never literal text, which is localized, R1887).
+
+Removal and Restore to Default go through the model manager (the backend's
+note type removal and restore-to-stock), after a reopen. Without a kind, the
+restore first reads original_stock_kind through the protobuf getter and
+records needs_stock_kind itself when it is not 1 to 6: Anki's own refusal there
+is a generic invalid-input error. That check runs before the reopen, so a
+refusal leaves Anki's undo history alone. notetype_templates reads the stored template texts
+through the protobuf getter, which reads the file.
 """
 
 from __future__ import annotations
@@ -64,6 +75,9 @@ STOCK_KINDS = {
     "image_occlusion": STOCK.KIND_IMAGE_OCCLUSION,
 }
 IO_STOCK_KIND = notetypes_pb2.StockNotetype.OriginalStockKind.ORIGINAL_STOCK_KIND_IMAGE_OCCLUSION
+# original_stock_kind values Restore to Default uses without a given kind
+# (restore-to-default D2, stock-kinds K1).
+KNOWN_STOCK_KINDS = range(1, 7)
 IO_MIN_FIELDS = 4
 REQUIREMENT_KINDS = {0: "none", 1: "any", 2: "all"}
 REJECTS = ("invalid_notetype", "template_parse_error", "duplicate_front", "no_front_field", "unknown_field", "missing_cloze")
@@ -487,3 +501,53 @@ def notetype_structure(session, args):
             raise invalid("notetype_structure notetypes is a non-empty list of names")
         rows = [(notetype_id(session, name), name) for name in names]
     return {name: _structure(session, ntid) for ntid, name in rows}
+
+
+# --- removal, Restore to Default, notetype_templates ---------------------------
+
+
+@op("remove_notetype")
+def remove_notetype(session, args):
+    _mapping(args, {"notetype"}, {"notetype"}, "remove_notetype")
+    session.reopen()
+    session.col.models.remove(notetype_id(session, args["notetype"]))
+
+
+@op("restore_notetype", rejects=("needs_stock_kind",))
+def restore_notetype(session, args):
+    _mapping(args, {"notetype", "kind"}, {"notetype"}, "restore_notetype")
+    if "kind" in args and (not isinstance(args["kind"], str) or args["kind"] not in STOCK_KINDS):
+        raise invalid(f"restore_notetype kind is one of {', '.join(STOCK_KINDS)}")
+    ntid = notetype_id(session, args["notetype"])
+    if "kind" in args:
+        force_kind = STOCK_KINDS[args["kind"]]
+    else:
+        # Before the reopen, which empties Anki's undo and redo histories: a
+        # refusal changes nothing (dsl.md D7.3). The getter reads the file.
+        if session.col._backend.get_notetype(ntid).config.original_stock_kind not in KNOWN_STOCK_KINDS:
+            raise Rejected("needs_stock_kind")
+        force_kind = None
+    session.reopen()
+    session.col.models.restore_notetype_to_stock(ntid, force_kind)
+
+
+@observation("notetype_templates")
+def notetype_templates(session, args):
+    _mapping(args, {"notetypes"}, {"notetypes"}, "notetype_templates")
+    names = args["notetypes"]
+    if not isinstance(names, list) or not names or not all(isinstance(n, str) and n for n in names):
+        raise invalid("notetype_templates notetypes is a non-empty list of names")
+    value = {}
+    for name in names:
+        nt = session.col._backend.get_notetype(notetype_id(session, name))
+        value[name] = [
+            {
+                "name": t.name,
+                "front": t.config.q_format,
+                "back": t.config.a_format,
+                "browser_front": t.config.q_format_browser,
+                "browser_back": t.config.a_format_browser,
+            }
+            for t in nt.templates
+        ]
+    return value

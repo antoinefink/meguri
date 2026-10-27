@@ -24,3 +24,23 @@ nothing; stored values of other shapes, TEXT values and bytes that are not JSON
 read as the spec says; `1.0`, `-0.0` and `1e16` come back as floats and
 integers as integers; an earlier note edit stays the undo step after a write
 through each of the three setters.
+
+## Sorted searches and Browse rows (U84 held scenarios)
+
+Ported from the U84 oracle maintainer's driver work on `spec/U84` (session
+s-20261016T100754Z-fdaa69c8) to `observe/search.py` (`order`) and
+`observe/browser_rows.py` (`browser_rows`); meanings in
+`specs/conformance/browser-ops.md` B1 to B4. Read at tag 26.09.3: besides the
+files listed in `browser-columns-sorting.md` for B1 to B4, that work read
+`rslib/src/backend/error.rs` (row errors by backend error kind),
+`rslib/src/config/bool.rs` and `rslib/src/config/mod.rs` (Anki's own reading of
+`browserTableShowNotesMode`), `rslib/src/scheduler/mod.rs` (the first day
+computation writes `rollover`) and `pylib/anki/_backend.py` (the kinds pylib
+maps to classes). No code was copied. The row probe is `card_excerpts`'; its
+`missing` is B3's `deleted`.
+
+`edit_note` keeps giving the cards it adds no logical id (`note-ops.md` N3), so
+the three scenarios that name such a card run `adopt` after the edit instead of
+the `edit_note` numbering U84 had added. Re-recorded at the current pin, all 22
+goldens equal U84's apart from the `adopt` outputs and the field values that
+the privacy scan made `sort-field` and `question-answer` rename.

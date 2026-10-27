@@ -6,6 +6,6 @@ round-trip f32 decimals; no localized text (R1884, R1887).
 """
 
 from . import (  # noqa: F401
-    card_excerpts, card_extractors, cards, cloze, db_dump, decks, diag, fsrs_next, ids, image_occlusion, labels, notes, package_listing, queue, render, render_status, schema, sched, search, tags, template,
+    browser_rows, card_excerpts, card_extractors, cards, cloze, db_dump, decks, diag, fsrs_next, ids, image_occlusion, labels, notes, package_listing, queue, render, render_status, schema, sched, search, studied_today, tags, template,
     text, timing, type_answer,
 )

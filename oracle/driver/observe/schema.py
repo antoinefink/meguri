@@ -26,10 +26,18 @@ def normalize(sql: str | None) -> str | None:
     return _SPACE.sub(" ", _COMMENT.sub("", sql)).strip(" ")
 
 
+# The rows listing() takes; file_objects (ops/schema11.py) reads them from a session file.
+MASTER_QUERY = "select type, name, tbl_name, sql from sqlite_master"
+
+
+def listing(rows) -> list[dict]:
+    """sqlite_master rows (type, name, tbl_name, sql) -> the observation value."""
+    objects = [{"type": t, "name": n, "tbl_name": tb, "sql": normalize(sql)} for t, n, tb, sql in rows]
+    return sorted(objects, key=lambda o: (o["type"], o["name"]))
+
+
 @observation("schema_objects")
 def schema_objects(session, args):
     if args is not None:
         raise invalid("schema_objects takes no arguments")
-    rows = session.col.db.all("select type, name, tbl_name, sql from sqlite_master")
-    objects = [{"type": t, "name": n, "tbl_name": tb, "sql": normalize(sql)} for t, n, tb, sql in rows]
-    return sorted(objects, key=lambda o: (o["type"], o["name"]))
+    return listing(session.col.db.all(MASTER_QUERY))

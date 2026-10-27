@@ -1,10 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """search and canonical_search (specs/conformance/search-ops.md S1-S3).
 
-search [{query, kind?: cards | notes}] -> [{ids: [...]} | error, ...]: Anki's
-    card or note search with no order on the scenario's collection. ids are the
-    logical refs (#cN or #nN) by number, then the real ids no logical id names,
-    ascending.
+search [{query, kind?: cards | notes, order?: {column, reverse?}}] ->
+    [{ids: [...]} | error, ...]: Anki's card or note search on the scenario's
+    collection. Without order: no order, and ids are the logical refs (#cN or
+    #nN) by number, then the real ids no logical id names, ascending. With
+    order (browser-ops.md B1, B2): the backend's search with the built-in sort
+    for that column key and direction; ids in that order, unnamed rows as real
+    ids at their place, and each equal-key run listed as an unordered result
+    is (refs by number, then real ids ascending) within the positions it
+    holds. A run is found from Anki alone: the search is also sorted the other
+    way, and two consecutive rows belong to one run when they keep their
+    relative order there (Anki reverses every key but leaves equal-key rows in
+    one order for both directions).
 canonical_search [text, ...] -> [{text} | parse error, ...]: the backend's
     search-string builder given the text as one search (what the browser puts
     back in its search field). It reads and changes nothing in the collection.
@@ -20,6 +28,15 @@ a regex parse error is invalid_regex, and a database error while a search runs
 is search_failed. Anything else, a message that matches no kind or more than
 one included, is anki_error: never a guess. No message text leaves the driver
 (R1887).
+
+A sorted search follows B1's error order: a parse error, then unsortable, then
+the run errors. Anki refuses a column it cannot sort (an unknown key included)
+with an invalid-input error, raised after the query is parsed and its SQL
+written, so a bad regex can come first. An invalid-input error is therefore
+unsortable exactly when the empty search sorted by the same column in the same
+mode is refused too; otherwise it is read as for an unsorted search. pylib's
+find_cards and find_notes quietly drop a sort the column does not support, so
+sorted searches call the backend search with the built-in sort order.
 """
 
 from __future__ import annotations
@@ -28,6 +45,7 @@ import re
 from typing import Any, Callable
 
 import anki.errors
+from anki import search_pb2
 
 from ..errors import DriverError, invalid
 from ..registry import observation
@@ -161,17 +179,67 @@ def _search_error(reasons: Reasons, exc: anki.errors.SearchError) -> dict:
     return out
 
 
-def _requests(args: Any) -> list[tuple[str, str]]:
+def _order(value: Any) -> tuple[str, bool]:
+    if (
+        not isinstance(value, dict)
+        or set(value) - {"column", "reverse"}
+        or not isinstance(value.get("column"), str)
+        or not isinstance(value.get("reverse", False), bool)
+    ):
+        raise invalid("a search request's order is {column: <text>, reverse?: <boolean>}")
+    return value["column"], value.get("reverse", False)
+
+
+def _requests(args: Any) -> list[tuple[str, str, "tuple[str, bool] | None"]]:
     if not isinstance(args, list) or not args:
-        raise invalid("search takes a non-empty list of {query, kind?}")
+        raise invalid("search takes a non-empty list of {query, kind?, order?}")
     out = []
     for req in args:
-        if not isinstance(req, dict) or not isinstance(req.get("query"), str) or set(req) - {"query", "kind"}:
-            raise invalid("a search request is {query: <text>, kind?: cards | notes}")
+        if not isinstance(req, dict) or not isinstance(req.get("query"), str) or set(req) - {"query", "kind", "order"}:
+            raise invalid("a search request is {query: <text>, kind?: cards | notes, order?: {column, reverse?}}")
         kind = req.get("kind", "cards")
         if kind not in ("cards", "notes"):
             raise invalid("a search request's kind is cards or notes")
-        out.append((req["query"], kind))
+        out.append((req["query"], kind, _order(req["order"]) if "order" in req else None))
+    return out
+
+
+def _sorted(col, kind: str, query: str, column: str, reverse: bool) -> list[int]:
+    """The backend's card or note search with its built-in sort."""
+    order = search_pb2.SortOrder(builtin=search_pb2.SortOrder.Builtin(column=column, reverse=reverse))
+    run = col._backend.search_cards if kind == "cards" else col._backend.search_notes
+    return list(run(search=query, order=order))
+
+
+def _unsortable(col, kind: str, column: str, reverse: bool) -> bool:
+    """True when Anki refuses to sort the empty search by column in this mode."""
+    try:
+        _sorted(col, kind, "", column, reverse)
+    except anki.errors.InvalidInput:
+        return True
+    return False
+
+
+def _logical(rows: list[int], prefix: str, index: dict[int, int]) -> list:
+    """rows as an unordered result lists them: refs by number, then real ids."""
+    named = sorted(index[i] for i in rows if i in index)
+    return [f"{prefix}{n}" for n in named] + sorted(i for i in rows if i not in index)
+
+
+def _runs(found: list[int], other: list[int], prefix: str, index: dict[int, int]) -> list:
+    """found (one direction) with each equal-key run in logical order; other is
+    the same search sorted the other way (B2)."""
+    where = {rid: i for i, rid in enumerate(other)}
+    if len(where) != len(other) or len(other) != len(found) or set(where) != set(found):
+        raise DriverError("internal_error", detail="the search sorted the other way returned other rows")
+    out: list = []
+    run: list[int] = []
+    for rid in found:
+        if run and where[run[-1]] > where[rid]:
+            out.extend(_logical(run, prefix, index))
+            run = []
+        run.append(rid)
+    out.extend(_logical(run, prefix, index))
     return out
 
 
@@ -185,14 +253,20 @@ def search(session, args):
         "notes": ("#n", {nid: n for n, nid in enumerate(session.notes, 1)}),
     }
     out = []
-    for query, kind in requests:
-        find = col.find_cards if kind == "cards" else col.find_notes
+    for query, kind, order in requests:
         try:
-            found = list(find(query, order=False))
+            if order is None:
+                find = col.find_cards if kind == "cards" else col.find_notes
+                found = list(find(query, order=False))
+            else:
+                found = _sorted(col, kind, query, *order)
         except anki.errors.SearchError as exc:
             out.append(_search_error(reasons, exc))
             continue
         except anki.errors.InvalidInput as exc:
+            if order is not None and _unsortable(col, kind, *order):
+                out.append(_error("unsortable"))
+                continue
             if not str(exc).startswith(REGEX_PREFIX):
                 raise
             out.append(_error("invalid_regex"))
@@ -201,9 +275,12 @@ def search(session, args):
             out.append(_error("search_failed"))
             continue
         prefix, index = numbers[kind]
-        named = sorted(index[i] for i in found if i in index)
-        unnamed = sorted(i for i in found if i not in index)
-        out.append({"ids": [f"{prefix}{n}" for n in named] + unnamed})
+        if order is None:
+            out.append({"ids": _logical(found, prefix, index)})
+        else:
+            column, reverse = order
+            other = _sorted(col, kind, query, column, not reverse)
+            out.append({"ids": _runs(found, other, prefix, index)})
     return out
 
 

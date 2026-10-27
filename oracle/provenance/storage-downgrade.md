@@ -25,9 +25,10 @@ Driver hints for the oracle maintainer (U33 role work):
 - `file_col`, `file_objects`, `file_query`: copy the session file to scratch and read it with Python's sqlite3 (with a `unicase` collation registered), as `package_col` reads a package entry; never through Anki. `file_col` parses JSON columns as `package_col` does; `file_objects` reuses `observe/schema.py`'s normalization; `file_query` writes values as `db_exec` does.
 
 Port (spec writer, 2026-10-27): the spec, storage-ops P1's `file` form and
-P4 to P8 were ported from `spec/U33` without the driver op. The driver that
-branch added for these hints is not on this branch, so the scenarios, goldens
-and `dsl.md`/`observations.md` rows wait for it. Rechecked at 26.09.3 for the
+P4 to P8 were ported from `spec/U33` without the driver op. The driver for
+these hints now lands with the scenarios under
+`conformance/scenarios/storage/downgrade/`, their goldens and the
+`dsl.md`/`observations.md` rows (oracle maintainer, below). Rechecked at 26.09.3 for the
 port: `rslib/src/storage/upgrades/mod.rs` (`downgrade_to_schema_11`: one
 transaction, the order of the steps), `schema18_downgrade.sql` and
 `schema11_downgrade.sql` (the `graves` rename, the dropped tables and
@@ -39,3 +40,19 @@ in `specs/sched/presets.md` V2, which D5 now cites instead of its own table),
 is server-side only: the server sends schema 11 to clients older than sync
 version 11. Meguri is a client at version 11 and uploads schema 18
 (`sync/one-way` O6.2), so no transfer calls the downgrade.
+
+Driver (oracle maintainer, U33; ported to `oracle/held-scenario-ops`,
+2026-10-27): `ops/schema11.py` (the op and the three observations) and the
+`open {file}` form in `ops/storage_open.py` follow the hints above. The port
+parses `file_col`'s JSON columns in `ops/schema11.py` itself (`ops/package.py`
+is not on this branch), with the same number rules.
+Read at 26.09.3 for them: `pylib/anki/collection.py` (`close`,
+`close_for_full_sync`, `export_collection_package`), the wheel's
+`_backend_generated.py` (`export_collection_package`), `rslib/src/backend/import_export.rs`,
+`rslib/src/import_export/package/colpkg/export.rs` and `meta.rs` (the export
+closes with the downgrade and propagates its error; legacy meta version 2,
+`collection.anki21` deflated), `rslib/src/storage/sqlite.rs` (`close`),
+`rslib/src/storage/upgrades/mod.rs`, `rslib/src/storage/config/mod.rs`
+(`get_all_config`) and `rslib/src/error/mod.rs` (a serde_json failure is the
+JSON error kind). Session file names are lower case only (storage-ops P8.1),
+so no name reaches `collection.anki2` on a case-insensitive volume.
