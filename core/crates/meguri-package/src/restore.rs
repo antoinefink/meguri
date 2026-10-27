@@ -39,31 +39,40 @@ pub enum RestoreError {
     },
 }
 impl From<EngineError> for RestoreError {
-    fn from(e: EngineError) -> Self {
-        Self::Engine(e)
+    fn from(cause: EngineError) -> Self {
+        RestoreError::Engine(cause)
     }
 }
 impl From<StorageError> for RestoreError {
-    fn from(e: StorageError) -> Self {
-        EngineError::from(e).into()
+    fn from(cause: StorageError) -> Self {
+        Self::Engine(EngineError::Storage(cause))
     }
 }
 impl From<std::io::Error> for RestoreError {
-    fn from(e: std::io::Error) -> Self {
-        StorageError::from(e).into()
+    fn from(cause: std::io::Error) -> Self {
+        Self::from(StorageError::from(cause))
     }
 }
 impl From<CollectionPackageInspectError> for RestoreError {
-    fn from(e: CollectionPackageInspectError) -> Self {
-        Self::Package(e)
+    fn from(cause: CollectionPackageInspectError) -> Self {
+        RestoreError::Package(cause)
     }
 }
 impl std::fmt::Display for RestoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        f.write_fmt(format_args!("{self:?}"))
     }
 }
-impl std::error::Error for RestoreError {}
+impl std::error::Error for RestoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Engine(cause) | Self::AfterActivation { error: cause, .. } => Some(cause),
+            Self::Package(cause) => Some(cause),
+            Self::Replacement { error, .. } => Some(error),
+            Self::AfterSafety { error, .. } => Some(error.as_ref()),
+        }
+    }
+}
 impl RestoreError {
     pub fn candidate_active(&self) -> bool {
         match self {
@@ -78,10 +87,9 @@ impl RestoreError {
     }
 }
 fn invalid(message: &str) -> RestoreError {
-    EngineError::InvalidArgument {
+    RestoreError::Engine(EngineError::InvalidArgument {
         message: message.into(),
-    }
-    .into()
+    })
 }
 fn file_size(path: &Path) -> Result<Option<u64>, RestoreError> {
     match path.symlink_metadata() {

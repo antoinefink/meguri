@@ -319,10 +319,10 @@ pub(super) fn retire(live: &Path) -> Result<(), StorageError> {
     Ok(())
 }
 pub(super) fn verify_retired(live: &Path, intent: &Intent) -> Result<(), StorageError> {
-    if let Some(wal) = &intent.wal {
-        if wal.disposition != WalDisposition::Retired || !wal.locations(live, intent)? {
-            return Err(failure("the retained old WAL no longer matches the saved swap state"));
-        }
+    if let Some(wal) = &intent.wal
+        && (wal.disposition != WalDisposition::Retired || !wal.locations(live, intent)?)
+    {
+        return Err(failure("the retained old WAL no longer matches the saved swap state"));
     }
     Ok(())
 }

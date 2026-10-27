@@ -91,7 +91,7 @@ impl Policy {
         let engine = Engine::new(EngineConfig::default()).unwrap();
         let mut options = open_config(&clock)
             .ports(Ports::new().backup_service(writer.clone()))
-            .backups_directory(backups.path());
+            .backups_directory(backups.path().to_owned());
         options.backup_entry_times = entries.clone();
         let c = engine.open_raw(&path, options).unwrap();
         meguri_engine::backup_limits::save(
@@ -263,7 +263,7 @@ fn reference_survives_reopen_and_relaunch_even_when_the_backup_was_retained_away
     p.engine.close().unwrap();
     let mut options = open_config(&p.clock)
         .ports(Ports::new().backup_service(p.writer.clone()))
-        .backups_directory(p.backups.path());
+        .backups_directory(p.backups.path().to_owned());
     options.backup_entry_times = p.entries.clone();
     p.engine.open_raw(&p.path, options.clone()).unwrap();
     p.run(Trigger::Opened);
