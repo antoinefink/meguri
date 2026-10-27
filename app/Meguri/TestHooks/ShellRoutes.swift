@@ -1,5 +1,5 @@
 #if MEGURI_TEST_HOOKS
-import AppModel
+@_spi(MeguriTestHooks) import AppModel
 import DesignSystem
 import SwiftUI
 #if os(macOS)
@@ -397,6 +397,7 @@ extension TestHooks {
         private var navigation: AppNavigation?
         private let nativeClose = NativeReviewCloseRequest()
         private weak var nativeInput: NativeReviewInput?
+        private weak var nativeCollection: ReviewCollection?
         #if os(macOS)
         private let nativePhase = NativeReviewPhaseRequest()
         #endif
@@ -409,6 +410,7 @@ extension TestHooks {
             self.navigation = navigation
             nativeClose.bind(collection: nativeCollection)
             nativeInput = nativeCollection?.configuration.nativeReviewInput
+            self.nativeCollection = nativeCollection
             #if os(macOS)
             nativePhase.bind(input: nativeClose.enabled ? nativeInput : nil)
             #endif
@@ -477,10 +479,14 @@ extension TestHooks {
                     let status = await nativeInput.evidenceStatus()
                     let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.nativeReviewStatus"
                     #if os(macOS)
+                    let diagnostic: String
+                    if status == "imported", let nativeCollection {
+                        diagnostic = nativeInput.readinessDiagnostic(collection: nativeCollection)
+                    } else { diagnostic = nativeInput.safeFailureDiagnostic }
                     let value = ["status": status, "directory": nativeInput.receiptURL.deletingLastPathComponent().path,
                         "owner": (try? nativeInput.phaseTransportOwner()) ?? "",
-                        "diagnostic": nativeInput.safeFailureDiagnostic]
-                    guard nativeInput.safeFailureDiagnostic.utf8.count <= 900,
+                        "diagnostic": diagnostic]
+                    guard diagnostic.utf8.count <= 900,
                           let data = try? JSONSerialization.data(withJSONObject: value), data.count <= 4096,
                           let object = String(data: data, encoding: .utf8) else { return }
                     DistributedNotificationCenter.default().postNotificationName(Notification.Name(name),

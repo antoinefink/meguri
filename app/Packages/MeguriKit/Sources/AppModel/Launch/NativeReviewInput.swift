@@ -1,5 +1,5 @@
 import CoreBridge
-import CardRendering
+@_spi(MeguriTestHooks) import CardRendering
 import WebKit
 import Foundation
 import Darwin
@@ -661,6 +661,30 @@ import Darwin
     private var mediaReady: Bool {
         guard let image = receipt?.image, let audio = receipt?.audio else { return false }
         return image.binding == audio.binding && audio.success && audio.duration == 2 && audio.samples >= 2
+    }
+    /// Read only on an imported/not-ready development status request. No raw
+    /// evidence values, identifiers or errors enter this bounded snapshot.
+    @_spi(MeguriTestHooks) public func readinessDiagnostic(collection: ReviewCollection) -> String {
+        guard collection.configuration.nativeReviewInput === self,
+              (try? requireCurrent()) != nil, receipt?.phase == "activated", !mediaReady,
+              safeFailureDiagnostic.isEmpty else { return safeFailureDiagnostic }
+        let audio = receipt?.audio
+        let playback = collection.review?.pair?.nativeReviewAudioReadiness
+        let duration = audio?.duration, position = audio?.lastPosition
+        // Presence/finite flags distinguish missing facts from a real zero.
+        // Milliseconds are clamped to ten minutes before integer conversion.
+        func milliseconds(_ seconds: Double?) -> Int {
+            guard let seconds, seconds.isFinite else { return 0 }
+            return Int(min(max(seconds, 0), 600) * 1_000)
+        }
+        return "readiness: imagePresent=\(receipt?.image != nil) audioPresent=\(audio != nil) " +
+            "audioSuccess=\(audio?.success == true) samples=\(min(audio?.samples ?? 0, 9_999)) " +
+            "durationFinite=\(duration?.isFinite == true) durationMS=\(milliseconds(duration)) " +
+            "positionFinite=\(position?.isFinite == true) positionMS=\(milliseconds(position)) " +
+            "naturalCompletionPresent=\(audio?.completedAt != nil) " +
+            "audioControllerPresent=\(playback != nil) audioEntryPresent=\(playback?.entryPresent == true) " +
+            "audioPaused=\(playback?.paused == true) reviewPresent=\(collection.review != nil) " +
+            "reviewIsActive=\(collection.reviewIsActive)"
     }
     public func evidenceStatus() async -> String {
         do {
