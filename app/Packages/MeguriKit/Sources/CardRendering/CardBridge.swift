@@ -63,11 +63,24 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard world == CardRuntime.interactionWorldName else { reject(.world); return }
         guard let dictionary = body as? [String: Any] else { reject(.body); return }
         guard dictionary.count <= 16 else { reject(.bodySize); return }
-        guard let card = Self.integer(dictionary["card"]), card == update.card else { reject(.card); return }
+        guard let card = Self.integer(dictionary["card"]) else { reject(.card); return }
+        // Validate the whole supported message before classifying its age. A
+        // delayed producer retains its identity, even after this page is reused.
+        func isCurrent(_ generation: Int64, side: String) -> Bool {
+            if UInt64(generation) < update.generation { return false }
+            guard UInt64(generation) == update.generation else { reject(.futureGeneration); return false }
+            guard card == update.card else { reject(.card); return false }
+            guard side == update.sideName else { reject(.side); return false }
+            return true
+        }
         if name == CardRuntime.confirmationHandlerName {
             guard let token = Self.integer(dictionary["token"]), token >= 0 else { reject(.confirmationToken); return }
             guard let phase = dictionary["phase"] as? String,
-                  Set(dictionary.keys) == ["card", "token", "phase"] else { reject(.confirmationShape); return }
+                  Set(dictionary.keys) == ["card", "generation", "side", "token", "phase"] else { reject(.confirmationShape); return }
+            guard phase == "settled" || phase == "visible" else { reject(.confirmationValue); return }
+            guard let generation = Self.integer(dictionary["generation"]), generation >= 0 else { reject(.generation); return }
+            guard let side = dictionary["side"] as? String, side == "question" || side == "answer" else { reject(.side); return }
+            guard isCurrent(generation, side: side) else { return }
             guard (phase == "settled" && UInt64(token) == update.generation || phase == "visible" && UInt64(token) == page.visibleToken && page.acceptsVisibleConfirmation())
             else { reject(.confirmationValue); return }
             page.confirm(dictionary)
@@ -75,10 +88,7 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard name == CardRuntime.signalHandlerName else { reject(.signalChannel); return }
         guard let generation = Self.integer(dictionary["generation"]), generation >= 0 else { reject(.generation); return }
-        guard UInt64(generation) == update.generation else {
-            reject(UInt64(generation) < update.generation ? .olderGeneration : .futureGeneration); return
-        }
-        guard dictionary["side"] as? String == update.sideName else { reject(.side); return }
+        guard let side = dictionary["side"] as? String, side == "question" || side == "answer" else { reject(.side); return }
         guard let signal = dictionary["signal"] as? String else { reject(.signalType); return }
         let base: Set<String> = ["signal", "card", "generation", "side"]
         func keys(_ extra: Set<String>) -> Bool { Set(dictionary.keys).isSubset(of: base.union(extra)) }
@@ -90,23 +100,20 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch signal {
         case "settled", "shown":
             guard keys([]) else { reject(.signalFields); return }
-            page.signal(signal, body: dictionary)
         case "visible":
             guard keys(["token"]) else { reject(.signalFields); return }
-            guard let token = Self.integer(dictionary["token"]), token >= 0, UInt64(token) == page.visibleToken else { reject(.signalValue); return }
-            page.signal(signal, body: dictionary)
+            guard let token = Self.integer(dictionary["token"]), token >= 0 else { reject(.signalValue); return }
         case "updateFailed":
             guard keys(["error"]) else { reject(.signalFields); return }
             guard string("error", max: 8_000) != nil else { reject(.signalValue); return }
-            page.signal(signal, body: dictionary)
         case "command":
             guard keys(["command", "reveal"]) else { reject(.signalFields); return }
-            if Self.bool(dictionary["reveal"]) == true, update.side == .question, dictionary["command"] == nil { page.admit(.reveal) }
-            else if page.platform == .mac, let command = string("command", max: 128), dictionary["reveal"] == nil {
-                if command == "ans", update.side == .question { page.admit(.reveal) }
-                else if let action = Self.command(command, payload: payload) { page.admit(action) }
-                else { reject(.signalValue) }
-            } else { reject(.signalValue) }
+            if dictionary["reveal"] != nil {
+                guard Self.bool(dictionary["reveal"]) == true, dictionary["command"] == nil else { reject(.signalValue); return }
+            } else {
+                guard let command = string("command", max: 128), command == "ans" || Self.playCommand(command) != nil
+                else { reject(.signalValue); return }
+            }
         case "error":
             guard keys(["kind", "message", "line", "column", "source", "phase", "index"]) else { reject(.signalFields); return }
             guard let kind = string("kind", max: 16), ["exception", "rejection", "hook"].contains(kind),
@@ -116,21 +123,12 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
                   ["line", "column"].allSatisfy({ dictionary[$0] == nil || dictionary[$0] is NSNull || (Self.integer(dictionary[$0]) ?? -1) >= 0 }),
                   (phase == "script" ? (Self.integer(dictionary["index"]) ?? 0) > 0 : dictionary["index"] == nil || dictionary["index"] is NSNull)
             else { reject(.signalValue); return }
-            page.diagnostics.captureTemplateError(update: update, payload: payload, kind: kind, phase: phase,
-                                                  message: dictionary["message"] as? String ?? "",
-                                                  line: Self.integer(dictionary["line"]).map(Int.init),
-                                                  column: Self.integer(dictionary["column"]).map(Int.init),
-                                                  index: Self.integer(dictionary["index"]).map(Int.init))
-            let location = page.diagnostics.scriptLocation(message: dictionary["message"] as? String ?? "", line: Self.integer(dictionary["line"]).map(Int.init),
-                                                           column: Self.integer(dictionary["column"]).map(Int.init), source: dictionary["source"] as? String)
-            page.diagnostics.record("script.\(kind).\(phase)", update: update, index: Self.integer(dictionary["index"]).map(Int.init), script: location)
         case "mediaError":
             guard keys(["tag", "url", "family"]) else { reject(.signalFields); return }
             guard let tag = string("tag", max: 16),
                   ["img", "audio", "video", "source", "link", "object", "embed", "script", "font"].contains(tag),
-                  let url = string("url", max: 4096), dictionary["family"] == nil || string("family", max: 512) != nil
+                  string("url", max: 4096) != nil, dictionary["family"] == nil || string("family", max: 512) != nil
             else { reject(.signalValue); return }
-            page.diagnostics.record("mediaError.\(tag)", update: update, name: url)
         case "selection", "composition", "focus", "typedText", "listeners", "mediaPlayback":
             let fields: Set<String>
             let valid: Bool
@@ -152,8 +150,37 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
             default: valid = boolean("tap") && boolean("key")
             }
             guard valid else { reject(.signalValue); return }
+        default: reject(.unknownSignal); return
+        }
+        guard isCurrent(generation, side: side) else { return }
+        switch signal {
+        case "settled", "shown", "updateFailed":
+            page.signal(signal, body: dictionary)
+        case "visible":
+            guard let token = Self.integer(dictionary["token"]), UInt64(token) == page.visibleToken else { reject(.signalValue); return }
+            page.signal(signal, body: dictionary)
+        case "command":
+            if Self.bool(dictionary["reveal"]) == true, update.side == .question { page.admit(.reveal) }
+            else if page.platform == .mac, let command = dictionary["command"] as? String {
+                if command == "ans", update.side == .question { page.admit(.reveal) }
+                else if let action = Self.command(command, payload: payload) { page.admit(action) }
+                else { reject(.signalValue) }
+            } else { reject(.signalValue) }
+        case "error":
+            let kind = dictionary["kind"] as? String ?? ""
+            let phase = dictionary["phase"] as? String ?? ""
+            page.diagnostics.captureTemplateError(update: update, payload: payload, kind: kind, phase: phase,
+                                                  message: dictionary["message"] as? String ?? "",
+                                                  line: Self.integer(dictionary["line"]).map(Int.init),
+                                                  column: Self.integer(dictionary["column"]).map(Int.init),
+                                                  index: Self.integer(dictionary["index"]).map(Int.init))
+            let location = page.diagnostics.scriptLocation(message: dictionary["message"] as? String ?? "", line: Self.integer(dictionary["line"]).map(Int.init),
+                                                           column: Self.integer(dictionary["column"]).map(Int.init), source: dictionary["source"] as? String)
+            page.diagnostics.record("script.\(kind).\(phase)", update: update, index: Self.integer(dictionary["index"]).map(Int.init), script: location)
+        case "mediaError":
+            page.diagnostics.record("mediaError.\(dictionary["tag"] as? String ?? "")", update: update, name: dictionary["url"] as? String ?? "")
+        default:
             if page.presented { page.signal(signal, body: dictionary) }
-        default: reject(.unknownSignal)
         }
     }
 
@@ -168,6 +195,11 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         return Int64(exactly: value.doubleValue)
     }
     static func command(_ text: String, payload: CardPayload) -> CardBridgeAction? {
+        guard let action = playCommand(text), case let .play(side, index) = action,
+              index < payload.audio(on: side).count else { return nil }
+        return action
+    }
+    private static func playCommand(_ text: String) -> CardBridgeAction? {
         let parts = text.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 3, parts[0] == "play", parts[1] == "q" || parts[1] == "a", !parts[2].isEmpty,
               parts[2].utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { return nil }
@@ -179,6 +211,6 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
             index = next
         }
         let side: CardRenderSide = parts[1] == "q" ? .question : .answer
-        return index < payload.audio(on: side).count ? .play(side, index) : nil
+        return .play(side, index)
     }
 }

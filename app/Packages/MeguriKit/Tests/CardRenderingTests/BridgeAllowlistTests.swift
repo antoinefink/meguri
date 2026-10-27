@@ -171,12 +171,16 @@ extension WebKitSuites {
             let world = CardRuntime.interactionWorldName
             let signal = CardRuntime.signalHandlerName
             let confirmation = CardRuntime.confirmationHandlerName
-            let samples: [(String, String?, Any, CardBridge.RejectionReason)] = [
+            func paint(_ changes: [String: Any] = [:]) -> [String: Any] {
+                let base: [String: Any] = ["card": 7, "generation": 2, "side": "question", "token": 2, "phase": "settled"]
+                return base.merging(changes, uniquingKeysWith: { _, value in value })
+            }
+            var samples: [(String, String?, Any, CardBridge.RejectionReason)] = [
                 (signal, WKContentWorld.page.name, "malformed", .world),
                 (signal, world, "malformed", .body),
                 (signal, world, body(["card": 7.5, "generation": 1]), .card),
                 (signal, world, body(["generation": true]), .generation),
-                (signal, world, body(["generation": 1, "side": "answer"]), .olderGeneration),
+                (signal, world, body(["generation": 1, "side": "unknown"]), .side),
                 (signal, world, body(["generation": 3]), .futureGeneration),
                 (signal, world, body(["side": "answer"]), .side),
                 (signal, world, body(["signal": true]), .signalType),
@@ -187,12 +191,77 @@ extension WebKitSuites {
                                       "line": 98765, "column": 87654, "extra": true]), .signalFields),
                 (signal, world, body(["signal": "focus", "editable": "true", "typeans": true]), .signalValue),
                 (signal, world, body(["signal": "typedText", "text": String(repeating: "x", count: 65_537)]), .signalValue),
-                (confirmation, world, ["card": 7, "token": true, "phase": "settled"] as [String: Any], .confirmationToken),
-                (confirmation, world, ["card": 7, "token": 2, "phase": "settled", "extra": true] as [String: Any], .confirmationShape),
-                (confirmation, world, ["card": 7, "token": 1, "phase": "settled"] as [String: Any], .confirmationValue),
+                (confirmation, world, paint(["token": true]), .confirmationToken),
+                (confirmation, world, paint(["extra": true]), .confirmationShape),
+                (confirmation, world, paint(["token": 1]), .confirmationValue),
+                (signal, world, body(["card": 8]), .card),
+                (signal, world, body(["signal": "visible", "token": 2]), .signalValue),
+                (confirmation, world, paint(["card": 8]), .card),
+                (confirmation, world, paint(["side": "answer"]), .side),
+                (confirmation, world, paint(["generation": 3]), .futureGeneration),
+                (confirmation, world, paint(["phase": "visible"]), .confirmationValue),
+                // Old malformed input is still rejected before age admission.
+                (signal, WKContentWorld.page.name, body(["generation": 1]), .world),
+                (confirmation, WKContentWorld.page.name, paint(["generation": 1]), .world),
+                (confirmation, world, "malformed", .body),
+                (signal, world, body(["generation": -1]), .generation),
+                (signal, world, body(["generation": 9_007_199_254_740_992 as Int64]), .generation),
+                (signal, world, body(["generation": 1, "side": "answer"]).merging(
+                    Dictionary(uniqueKeysWithValues: (0..<13).map { ("extra\($0)", true as Any) }),
+                    uniquingKeysWith: { _, value in value }), .bodySize),
+                (signal, world, body(["generation": 1, "side": true]), .side),
+                (signal, world, body(["generation": 1, "signal": "nativeOpen"]), .unknownSignal),
+                (signal, world, body(["generation": 1, "signal": true]), .signalType),
+                (signal, world, body(["generation": 1, "extra": true]), .signalFields),
+                (signal, world, body(["generation": 1, "signal": "visible", "token": -1]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "visible", "token": true]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "visible"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "shown", "extra": true]), .signalFields),
+                (signal, world, body(["generation": 1, "signal": "updateFailed", "error": false]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "updateFailed", "error": String(repeating: "x", count: 8_001)]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "command"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "command", "reveal": false]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "command", "reveal": true, "command": "ans"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "command", "command": String(repeating: "x", count: 129)]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "error", "kind": "exception", "phase": "script", "message": "error"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "error", "kind": "exception", "phase": "later", "message": "error", "line": true]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "mediaError", "tag": "unknown", "url": "synthetic"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "mediaError", "tag": "img", "url": String(repeating: "x", count: 4_097)]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "selection", "selected": 1]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "focus", "editable": true]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "composition", "active": "true"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "typedText", "text": String(repeating: "x", count: 65_537)]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "listeners", "tap": true, "key": 0]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "mediaPlayback", "playing": NSNull()]), .signalValue),
+                (confirmation, world, paint(["generation": 1, "token": true]), .confirmationToken),
+                (confirmation, world, paint(["generation": 1, "token": -1]), .confirmationToken),
+                (confirmation, world, paint(["generation": 1, "token": 1.5]), .confirmationToken),
+                (confirmation, world, paint(["generation": 1, "token": Double.infinity]), .confirmationToken),
+                (confirmation, world, paint(["generation": 1, "token": 9_007_199_254_740_992 as Int64]), .confirmationToken),
+                (confirmation, world, paint(["generation": 1, "extra": true]), .confirmationShape),
+                (confirmation, world, ["card": 7, "token": 1, "phase": "settled"] as [String: Any], .confirmationShape),
+                (confirmation, world, paint(["generation": 1, "phase": "unknown"]), .confirmationValue),
+                (confirmation, world, paint(["generation": 1, "phase": true]), .confirmationShape),
+                (confirmation, world, paint(["card": true, "generation": 1]), .card),
+                (confirmation, world, paint(["generation": true]), .generation),
+                (confirmation, world, paint(["generation": -1]), .generation),
+                (confirmation, world, paint(["generation": 1.5]), .generation),
+                (confirmation, world, paint(["generation": 1, "side": "unknown"]), .side),
+                (confirmation, world, paint(["generation": 1, "side": true]), .side),
                 // Confirmation shape cannot enter through the signal channel.
                 (signal, world, ["card": 7, "token": 2, "phase": "settled"] as [String: Any], .generation),
             ]
+            let malformedCommands = [
+                "play:q:-1", "play:q:1.5", "play:x:0", "play:question:0",
+                "play:q:٢", "play:q:１", "play:q:one", "play:q:",
+                "play:q:999999999999999999999999999", "play:q:+0", "play:q: 0",
+                "play:q:0:extra", "PLAY:q:0", "", "nativeOpen", "ease3",
+            ]
+            for generation in [1, 2] {
+                for command in malformedCommands {
+                    samples.append((signal, world, body(["generation": generation, "signal": "command", "command": command]), .signalValue))
+                }
+            }
             for (name, world, value, reason) in samples {
                 let before = pair.diagnostics.entries.first { $0.kind == "bridgeRejected" && $0.update == update && $0.bridgeRejectionReason == reason }?.repeats ?? 0
                 configuration.bridge.receive(name: name, world: world, body: value, page: page)
@@ -207,9 +276,91 @@ extension WebKitSuites {
             let rejections = pair.diagnostics.entries
             configuration.bridge.receive(name: signal, world: world, body: base, page: page)
             configuration.bridge.receive(name: confirmation, world: world,
-                                         body: ["card": 7, "token": 2, "phase": "settled"], page: page)
+                                         body: paint(), page: page)
             #expect(page.settled && signals == ["settled"] && confirmations == 1 && actions.isEmpty)
             #expect(pair.diagnostics.entries == rejections)
+        }
+
+        @Test(arguments: [false, true], [UInt64(2), UInt64(80)])
+        func delayedWellFormedMessagesLeaveCurrentUpdateUntouched(sameCard: Bool, visibleToken: UInt64) async throws {
+            let fixture = MediaFixture()
+            let configuration = CardWebConfiguration(store: .nonPersistent())
+            let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved(), platform: .mac)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let page = pair.current
+            let old = CardUpdate(card: sameCard ? 7 : 6, generation: 39, side: .answer)
+            page.begin(CardPayload(cardID: old.card, question: "old", answer: "old",
+                                   questionAudio: [.sound(name: "one.mp3"), .sound(name: "two.mp3"), .sound(name: "three.mp3")]), update: old)
+            page.visibleToken = visibleToken
+            page.webView.setIdle(false)
+            try await page.present(token: visibleToken)
+            let current = CardUpdate(card: 7, generation: 40, side: .question)
+            page.begin(CardPayload(cardID: 7, question: "new", answer: "new", questionAudio: [.sound(name: "one.mp3")]), update: current)
+            page.visibleToken = visibleToken
+            var actions: [CardBridgeAction] = []
+            var signals: [String] = []
+            var confirmations: [String] = []
+            page.onAction = { _, action in actions.append(action) }
+            page.onSignal = { _, signal, _ in signals.append(signal) }
+            page.onConfirmation = { _, body in confirmations.append(body["phase"] as? String ?? "") }
+            let world = CardRuntime.interactionWorldName
+            func send(_ update: CardUpdate, _ signal: String, _ fields: [String: Any] = [:]) {
+                let base: [String: Any] = ["card": update.card, "generation": update.generation, "side": update.sideName, "signal": signal]
+                configuration.bridge.receive(name: CardRuntime.signalHandlerName, world: world,
+                                             body: base.merging(fields, uniquingKeysWith: { _, value in value }), page: page)
+            }
+            func paint(_ update: CardUpdate, _ phase: String, _ token: UInt64) {
+                configuration.bridge.receive(name: CardRuntime.confirmationHandlerName, world: world,
+                                             body: ["card": update.card, "generation": update.generation, "side": update.sideName,
+                                                    "phase": phase, "token": token], page: page)
+            }
+            let before = pair.diagnostics.entries
+            let oldSignals: [(String, [String: Any])] = [
+                ("settled", [:]), ("shown", [:]), ("visible", ["token": visibleToken]),
+                ("updateFailed", ["error": "old failure"]),
+                ("command", ["command": "ans"]), ("command", ["reveal": true]),
+                // Valid for the old payload; outside the new AV list. Age must
+                // be classified before consulting the new payload's bounds.
+                ("command", ["command": "play:q:0002"]),
+                ("error", ["kind": "exception", "phase": "script", "index": 1, "message": "TypeError: old"]),
+                ("mediaError", ["tag": "img", "url": "old.png"]),
+                ("selection", ["selected": true]), ("focus", ["editable": true, "typeans": true]),
+                ("composition", ["active": true]), ("typedText", ["text": "old text"]),
+                ("listeners", ["tap": true, "key": true]), ("mediaPlayback", ["playing": true]),
+            ]
+            for (signal, fields) in oldSignals { send(old, signal, fields) }
+            paint(old, "settled", old.generation)
+            for token in [UInt64(0), UInt64(2), UInt64(80)] { paint(old, "visible", token) }
+            #expect(pair.diagnostics.entries == before && pair.diagnostics.templateErrors.isEmpty)
+            #expect(actions.isEmpty && signals.isEmpty && confirmations.isEmpty)
+            #expect(page.update == current && !page.settled && page.typedValue == nil && !page.acceptsVisibleConfirmation())
+            #expect(page.visibleToken == visibleToken && page.presented)
+
+            // Current payload bounds and exact identity/token still reject.
+            send(current, "command", ["command": "play:q:1"])
+            send(current, "visible", ["token": visibleToken + 1])
+            paint(current, "visible", visibleToken) // no matching visible receipt yet
+            #expect(actions.isEmpty && signals.isEmpty && confirmations.isEmpty && !page.acceptsVisibleConfirmation())
+            let rejections = pair.diagnostics.entries
+            #expect(rejections.filter { $0.kind == "bridgeRejected" }.reduce(0) { $0 + $1.repeats } == 3)
+            send(current, "settled")
+            paint(current, "settled", current.generation)
+            send(current, "command", ["command": "ans"])
+            send(current, "command", ["command": "play:q:0000"])
+            send(current, "typedText", ["text": "current text"])
+            send(current, "visible", ["token": visibleToken])
+            paint(current, "visible", visibleToken + 1)
+            #expect(confirmations == ["settled"] && page.acceptsVisibleConfirmation())
+            #expect(pair.diagnostics.entries.filter { $0.kind == "bridgeRejected" }.reduce(0) { $0 + $1.repeats } == 4)
+            let finalRejections = pair.diagnostics.entries
+            paint(current, "visible", visibleToken)
+            #expect(page.settled && page.acceptsVisibleConfirmation() && page.update == current)
+            #expect(actions == [.reveal, .play(.question, 0)])
+            #expect(signals == ["settled", "typedText", "visible"] && confirmations == ["settled", "visible"])
+            #expect(page.typedValue?.text == "current text")
+            #expect(pair.diagnostics.entries == finalRejections)
         }
 
         @Test func exactIOSLegacyProtocols() async throws {
@@ -255,6 +406,21 @@ extension WebKitSuites {
             }
             configuration.bridge.receive(name: "meguri", world: WKContentWorld.page.name, body: "play:a:000", page: page)
             #expect(actions.last == .play(.answer, 0) && actions.count == 7)
+            // Tokenless adapters bind the actual sending page's native payload,
+            // even while the other page has a different card, side and AV list.
+            let other = pair.idle
+            other.begin(CardPayload(cardID: 99, question: "other question", answer: "other answer"),
+                        update: CardUpdate(card: 99, generation: 3, side: .question))
+            var otherActions: [CardBridgeAction] = []
+            other.onAction = { _, action in otherActions.append(action) }
+            other.visibleToken = 2
+            try await other.present(token: 2)
+            configuration.bridge.receive(name: "cb", world: WKContentWorld.page.name,
+                                         body: "{\"scheme\":\"ankitap\",\"msg\":\"topRight\"}", page: other)
+            configuration.bridge.receive(name: "meguri", world: WKContentWorld.page.name, body: "play:a:0", page: other)
+            #expect(otherActions == [.reveal])
+            #expect(actions == [.again, .again, .again, .good, .good, .good, .play(.answer, 0)])
+            #expect(pair.diagnostics.entries.last?.bridgeRejectionReason == .legacyValue)
         }
     }
 }

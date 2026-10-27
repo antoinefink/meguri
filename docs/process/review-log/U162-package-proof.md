@@ -608,3 +608,31 @@ tokens remain independent presentation counters. No history ledger is needed.
 Standalone C66 and legacy iOS sender binding stay unchanged. Independent spec
 review is clear; privacy `20261027T002436Z-67151` passes. Production repair and
 focused checks remain required before closing the finding.
+
+## M8 native adapter repair
+
+Start `171dc542`; filtered R1 `cleanroom/20261027T002530Z-67844`.
+Supported runtime messages are validated before age classification. Older valid
+emissions have no effect or diagnostic; future and malformed input still fail.
+Native confirmations carry their emitting identity, and current paint still
+requires its exact independent token. No media proof guard changes.
+
+`unit-sim/20261027T003243Z-71302` passes 84 tests, with zero failures and one
+existing hardware skip. It runs the full Pair, SideUpdate and Bridge suites,
+including delayed actual producer messages, same-card reuse, independent
+presentation tokens, standalone C66 and legacy sender controls. The 1000-card
+case passes in 42.820 seconds. Similarity passes. Privacy finds only two new
+comment blocks; its failure remains retained.
+
+Independent R1 finds P2 `M8-COMMAND-VALUES-BEFORE-AGE`: old command strings
+must pass grammar and overflow checks before age classification, while current
+payload list bounds remain after age. R2 `cleanroom/20261027T003608Z-74906`
+separates those checks, adds 32 malformed-old/current cases, preserves the
+valid old index outside the new payload's range, and removes both comments.
+Independent R2 is clear. Privacy `20261027T003758Z-76599` and similarity
+`20261027T003758Z-76515` pass. Unchanged runtime producer and Pair tests keep
+R1 coverage; the final Bridge suite and native chain remain required below.
+
+Final `unit-sim/20261027T003757Z-76074` passes all 10 selected Bridge tests,
+zero failures and zero skips, in 5.614 seconds. The P2 finding is closed.
+The combined workflow, integration gate and unit acceptance stay open.

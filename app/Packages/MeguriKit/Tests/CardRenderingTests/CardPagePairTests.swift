@@ -88,7 +88,7 @@ extension WebKitSuites {
             #expect(try await page.webView.callAsyncJavaScript("""
                 return JSON.stringify(paintMessages) === JSON.stringify([
                   {signal:'visible', token:token, side:'answer', card:card, generation:generation},
-                  {token:token, card:card, phase:'visible'}
+                  {token:token, card:card, generation:generation, side:'answer', phase:'visible'}
                 ]);
                 """, arguments: ["token": token.sequence, "card": answer.card, "generation": answer.generation], contentWorld: CardPage.world) as? Bool == true)
             try await CardBehaviorFixture.until("native accepted answer paint identity") { page.acceptsVisibleConfirmation() }
@@ -257,10 +257,120 @@ extension WebKitSuites {
             var state: [String] = []
             pair.onInteraction = { signal, _ in state.append(signal) }
             // A real observer post emitted by card1 is delivered only after
-            // that same page presents card3; native must reject its old id.
+            // that same page presents card3; native must silently ignore it.
+            let diagnostics = pair.diagnostics.entries
             try await nativePage.run("flushDelayed();", world: CardPage.world)
             try await Task.sleep(for: .milliseconds(40))
             #expect(!state.contains("typedText"))
+            #expect(pair.diagnostics.entries == diagnostics)
+        }
+
+        @Test(arguments: [false, true])
+        func queuedRuntimeMessagesKeepActualEmissionIdentityAcrossPageReuse(sameCard: Bool) async throws {
+            let fixture = MediaFixture()
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let page = pair.idle
+            // Retain the actual posts from both producers, not reconstructed
+            // messages or identities read from the page after it is reused.
+            try await page.run("""
+                window.holdOldEmission = true;
+                window.queuedEmission = [];
+                window.emissionHandlers = ['meguriCard', 'meguriVisible'].map(function (name) {
+                  const handler = webkit.messageHandlers[name];
+                  const post = handler.postMessage;
+                  handler.postMessage = function (message) {
+                    if (holdOldEmission && typeof message.card === 'number') {
+                      queuedEmission.push({name:name, message:message});
+                      // Native prepare/shown readiness must still complete;
+                      // retain those actual receipts for delayed redelivery too.
+                      if (message.signal !== 'settled' && message.signal !== 'shown') return;
+                    }
+                    return post.call(handler, message);
+                  };
+                  return {name:name, handler:handler, post:post};
+                });
+                window.flushEmission = function () {
+                  return Promise.all(queuedEmission.map(function (entry) {
+                    const target = emissionHandlers.find(h => h.name === entry.name);
+                    return target.post.call(target.handler, entry.message);
+                  }));
+                };
+                """, world: CardPage.world)
+            let first = try await pair.prepare(CardPayload(cardID: 11, question: "<input id=typeans>", answer: "answer"))
+            let firstToken = try pair.present(first)
+            try await page.waitForShown(first)
+            try await CardBehaviorFixture.until("held actual settled and visible confirmations") {
+                try await page.webView.callAsyncJavaScript("""
+                    return queuedEmission.some(e => e.message.phase === 'settled') &&
+                           queuedEmission.some(e => e.message.phase === 'visible') &&
+                           queuedEmission.some(e => e.message.signal === 'visible');
+                    """, contentWorld: CardPage.world) as? Bool == true
+            }
+            try await page.run("""
+                const input = document.getElementById('typeans');
+                input.value = 'old typed text';
+                input.dispatchEvent(new Event('input', {bubbles:true}));
+                """)
+            #expect(try await page.webView.callAsyncJavaScript("""
+                const messages = queuedEmission.map(e => e.message);
+                const paints = messages.filter(m => m.phase);
+                return paints.length === 2 && paints.every(m =>
+                  Object.keys(m).sort().join(',') === 'card,generation,phase,side,token' &&
+                  m.card === card && m.generation === generation && m.side === 'question') &&
+                  paints.some(m => m.phase === 'settled' && m.token === generation) &&
+                  paints.some(m => m.phase === 'visible' && m.token === token) &&
+                  messages.some(m => m.signal === 'typedText' && m.card === card &&
+                    m.generation === generation && m.side === 'question' && m.text === 'old typed text');
+                """, arguments: ["card": first.card, "generation": first.generation, "token": firstToken.sequence],
+                contentWorld: CardPage.world) as? Bool == true)
+            try await page.run("holdOldEmission = false;", world: CardPage.world)
+            let second = try await pair.prepare(CardPayload(cardID: 12, question: "second", answer: "answer"))
+            _ = try pair.present(second)
+            try await pair.current.waitForShown(second)
+            let preparing = Task {
+                try await pair.prepare(CardPayload(cardID: sameCard ? 11 : 13, question: """
+                    <p>fresh</p><script>
+                    onUpdateHook.push(function () {
+                      return new Promise(function (resolve) { window.releaseFreshUpdate = resolve; });
+                    });
+                    </script>
+                    """, answer: "answer"))
+            }
+            defer { preparing.cancel() }
+            try await CardBehaviorFixture.until("superseding runtime update holds readiness") {
+                try await page.webView.callAsyncJavaScript("return typeof releaseFreshUpdate === 'function';", contentWorld: .page) as? Bool == true
+            }
+            let freshIdentity = try #require(page.update)
+            #expect(pair.idle === page && freshIdentity.generation > first.generation && !page.settled)
+            #expect(freshIdentity.card == (sameCard ? first.card : 13))
+            var signals: [String] = []
+            var actions: [CardBridgeAction] = []
+            var confirmations = 0
+            let signalHandler = page.onSignal
+            let actionHandler = page.onAction
+            let confirmationHandler = page.onConfirmation
+            page.onSignal = { _, signal, _ in signals.append(signal) }
+            page.onAction = { _, action in actions.append(action) }
+            page.onConfirmation = { _, _ in confirmations += 1 }
+            let diagnostics = pair.diagnostics.entries
+            try await page.run("await flushEmission();", world: CardPage.world)
+            #expect(pair.diagnostics.entries == diagnostics && pair.diagnostics.templateErrors.isEmpty)
+            #expect(signals.isEmpty && actions.isEmpty && confirmations == 0)
+            #expect(page.update == freshIdentity && !page.settled && page.typedValue == nil)
+            #expect(page.visibleToken == nil && !page.acceptsVisibleConfirmation())
+            page.onSignal = signalHandler
+            page.onAction = actionHandler
+            page.onConfirmation = confirmationHandler
+            try await page.run("releaseFreshUpdate();")
+            let fresh = try await preparing.value
+            #expect(fresh == freshIdentity && page.settled)
+            _ = try pair.present(fresh)
+            try await page.waitForShown(fresh)
+            try await CardBehaviorFixture.until("current runtime still confirms paint") { page.acceptsVisibleConfirmation() }
+            #expect(pair.current === page && page.update == fresh && pair.diagnostics.entries == diagnostics)
         }
 
         @Test func lifecycleResumeDoesNotRestartHTMLPlaybackHeldInBackground() async throws {

@@ -94,7 +94,7 @@
       case "settled":
         // U12's confirmation contract: the prepare generation as the token.
         if (isNumber(signal.card) && isNumber(signal.generation)) {
-          post(CONFIRMATIONS, { token: signal.generation, card: signal.card, phase: "settled" });
+          post(CONFIRMATIONS, { token: signal.generation, card: signal.card, generation: signal.generation, side: signal.side, phase: "settled" });
         }
         break;
       default:
@@ -119,7 +119,7 @@
         }
         post(SIGNALS, visible);
         if (isNumber(ready.card) && isNumber(ready.token)) {
-          post(CONFIRMATIONS, { token: ready.token, card: ready.card, phase: "visible" });
+          post(CONFIRMATIONS, { token: ready.token, card: ready.card, generation: ready.generation, side: ready.side, phase: "visible" });
         }
       });
     });

@@ -67,6 +67,20 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func standalonePresentationKeepsSignalsWithoutNativeIdentity() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showQuestion("<p>standalone C66</p>")
+                let settled = try await harness.signal("settled", from: page)
+                #expect(settled.card == nil && settled.generation == nil && settled.side == "question")
+                try await page.present(token: 90)
+                let shown = try await harness.signal("shown", from: page)
+                let visible = try await harness.signal("visible", from: page)
+                #expect(shown.card == nil && shown.generation == nil && shown.side == "question")
+                #expect(visible.card == nil && visible.generation == nil && visible.side == "question" && visible["token"] as? Int == 90)
+                #expect(harness.signals.messages(to: CardRuntime.confirmationHandlerName).isEmpty)
+            }
+        }
+
         @Test func targetedAnswerWaitsWhileQuestionShownHooksDrain() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 try await page.announce(card: 9, generation: 1)
