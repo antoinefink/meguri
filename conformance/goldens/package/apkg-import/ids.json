@@ -1,0 +1,79 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["one", "a"],
+              "note": 1894701600999
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1, "one"],
+            [1894701600001, 0, "two"],
+            [1894701600999, 0, "one"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000],
+            [1894701600001, 1894701600001],
+            [1894701600999, 1894701600999]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/ids",
+  "scenario_sha256": "66fa03ead4e6c43835effc0980dcfffb577002b62ac05f0e55bf4ed0e4455abb",
+  "tz": "UTC"
+}

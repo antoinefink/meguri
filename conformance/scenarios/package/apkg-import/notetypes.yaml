@@ -1,0 +1,63 @@
+# Note types without a merge (specs/package/apkg-import.md I7, I9, I11.1;
+# package-ops.md E6). The package's Pair has a third field Extra and its Duo
+# a second front {{Back}}; both edits are undone in the target after the
+# export, so the target's Pair has a different schema and its Duo the same
+# schema with an older mtime and the front {{#Rev}}{{Back}}{{/Rev}}. Then the
+# target loses p2 and Duo note d0's second card, and gains d1 (Rev empty, so
+# one card). The import (if newer):
+# - Pair: a copy Pair+ added under a new id, curModel set to it; p1
+#   conflicting (its target note is under Pair), p2 new under the copy.
+#   Pair+ is read by its stored name in db_exec rows only.
+# - Duo: updated; its fronts changed, so d0 and d1 gain their second card
+#   (at the position of the note's new card; nextPos stays 5), and the
+#   package's card for d0's second ordinal is skipped; d0 is a duplicate.
+# A second import of the same package reuses Pair+ (same original id and
+# schema): no third note type, p2 now a duplicate.
+id: package/apkg-import/notetypes
+description: A different schema adds a copy that a later import reuses; a newer same-schema update with changed fronts adds cards.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Duo
+      fields: [Front, Back, Rev]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{#Rev}}{{Back}}{{/Rev}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [p1, a]}
+    - {notetype: Pair, deck: Lang, fields: [p2, b]}
+    - {notetype: Duo, deck: Lang, fields: [d0, c, ""]}
+steps:
+  - observe: [timing]
+  # A raw write first: the undo history then holds only this scenario's steps.
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}]}
+  - update_notetype: {notetype: Duo, edits: [{template: {name: Reverse, front: "{{Back}}"}}]}
+  - export: {format: apkg, name: types.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  # Undo the front change; a field change empties Anki's undo history, so
+  # Extra is removed again by an edit.
+  - undo: {}
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Extra}]}
+  - advance: 1m
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "DELETE FROM cards WHERE ord = 1"}
+  - add_note: {notetype: Duo, deck: Lang, fields: [d1, e, ""]}
+  - db_exec: {sql: "SELECT id, name, mtime_secs FROM notetypes WHERE name IN ('Pair', 'Duo') ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: types.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Pair%' OR name = 'Duo' ORDER BY id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) = (SELECT CAST(id AS TEXT) FROM notetypes WHERE name = 'Pair+') FROM config WHERE KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due, c.type, c.did = (SELECT id FROM decks WHERE name = 'Lang') FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair, Duo]}
+  - advance: 1m
+  - import: {format: apkg, name: types.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name LIKE 'Pair%' ORDER BY id"}

@@ -1,0 +1,42 @@
+# Undoing an import (specs/package/apkg-import.md I14.3, I5; undo-ops.md V4;
+# package-ops.md E6.2). After the export n2 is deleted and n1 edited; the
+# import (Always) brings n2 back and updates n1. The undo status names the
+# import; undo gives back the pre-import rows, the option keys included, and
+# redo the import's.
+id: package/apkg-import/undo
+description: An import is one undoable step that undo and redo reverse and repeat.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  # A raw write first: the undo history then holds only this scenario's steps.
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - export: {format: apkg, name: two.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "UPDATE notes SET flds = 'one' || char(31) || 'edited', mod = 1894701500"}
+  - advance: 1m
+  - observe:
+      - db_dump: {tables: [notes, cards, graves, decks, config]}
+  - import: {format: apkg, name: two.apkg, merge_notetypes: false, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe: [undo_status]
+  - observe:
+      - db_dump: {tables: [notes, cards, graves, decks, config]}
+  - advance: 1m
+  - undo: {}
+  - observe: [undo_status]
+  - observe:
+      - db_dump: {tables: [notes, cards, graves, decks, config]}
+  - advance: 1m
+  - redo: {}
+  - observe:
+      - db_dump: {tables: [notes, cards, graves, decks, config]}

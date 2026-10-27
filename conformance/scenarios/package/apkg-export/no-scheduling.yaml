@@ -1,0 +1,81 @@
+# A deck package without scheduling (specs/package/apkg-export.md A3, A4, A6,
+# A7; package-ops.md E7, E11; R1621). The source holds a card of every type
+# and queue (A6's example table among them: review with and without `pos`,
+# new, suspended, learning with `left` 1002, new in a filtered deck), user
+# and sibling buried cards, a relearning card with memory state and flags, a
+# day-learning card, a card in the default deck, nextPos 7, the tags marked,
+# Leech, leech::x and MARKED, note flags and data, deck limits, today's
+# counters, collapse states and a filtered deck. The whole collection goes
+# out without scheduling and presets: cards become new at their positions or
+# from 7 on, flags 0, s, d and pos dropped; marked and leech tags go; every
+# deck's common is emptied, limits dropped, presets 1; Cram becomes a normal
+# deck; the source's deck 1 stays out and the new collection's default deck
+# takes its place. The package's config table (Anki's curModel) and note type
+# rows are not compared (A16).
+id: package/apkg-export/no-scheduling
+description: A deck package without scheduling holds A6's rewritten cards, notes and decks.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5, fsrs_params: [0.4, 1.2, 3.1, 15.6, 7.2, 0.5, 1.4, 0.005, 1.5, 0.12, 1.0, 1.9, 0.11, 0.3, 2.3, 0.23, 2.9, 0.5, 0.67, 0.1, 0.2]}
+  decks: [Lang, {name: "Lang::Verbs", preset: Slow}, Other]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a], tags: [marked, Leech, "leech::x", marked2, MARKED]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+    - {notetype: Pair, deck: Lang, fields: [three, c]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [four, d]}
+    - {notetype: Pair, deck: Lang, fields: [five, e]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [six, f]}
+    - {notetype: Pair, deck: Lang, fields: [seven, g]}
+    - {notetype: Pair, deck: Lang, fields: [eight, h]}
+    - {notetype: Pair, deck: "Lang::Verbs", fields: [nine, i]}
+    - {notetype: Pair, deck: Other, fields: [ten, j]}
+    - {notetype: Pair, fields: [eleven, k]}
+    - {notetype: Pair, deck: Lang, fields: [twelve, l]}
+steps:
+  - observe: [timing]
+  # Deck limits on Lang; Lang and the default deck expanded (new decks are
+  # collapsed); today's counters on Lang from one answer (c12, with a
+  # review-log row).
+  - save_deck_options: {deck: Lang, limits: {new: 5, review: 50, new_today: 3, review_today: 30}}
+  - set_deck_collapsed: {decks: [Lang, Default], scope: study, collapsed: false}
+  - answer: {card: "#c12", rating: good}
+  # Card states by row number (ascending id), every card stamped alike.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6, reps = v.column7, lapses = v.column8, left = v.column9, flags = v.column10, data = v.column11, mod = 1894701000, usn = 0
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, 5, 10, 2500, 3, 0, 0, 0, '{}'),
+          (2, 0, 0, 3, 0, 0, 0, 0, 0, 0, '{}'),
+          (3, 2, -1, 7, 4, 2300, 2, 1, 0, 0, '{}'),
+          (4, 2, 2, 9, 20, 2500, 5, 0, 0, 1, '{"pos":2}'),
+          (5, 0, 0, -100000, 0, 0, 0, 0, 0, 0, '{}'),
+          (6, 1, 1, 1894702200, 0, 2500, 1, 0, 1002, 0, '{"pos":4}'),
+          (7, 0, -3, 6, 0, 0, 0, 0, 0, 0, '{}'),
+          (8, 3, 1, 1894702200, 3, 2100, 6, 2, 1, 3, '{"s":3.5,"d":5.0,"dr":0.9,"lrt":1894600000}'),
+          (9, 1, 3, 0, 0, 2500, 2, 0, 2, 0, '{}'),
+          (10, 2, -2, 4, 8, 2500, 4, 0, 0, 0, '{}'),
+          (11, 0, 0, 10, 0, 0, 0, 0, 0, 0, '{}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # A filtered deck Cram (fixed id 900) holds c5, its home deck Lang.
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+  # Note columns no importer reads, and tags with odd spacing.
+  - db_exec: {sql: "UPDATE notes SET flags = 1, data = 'x' WHERE sfld = 'two'"}
+  - db_exec: {sql: "UPDATE notes SET tags = '  b a  a ' WHERE sfld = 'three'"}
+  - set_config: {key: nextPos, value: 7}
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: plain.apkg, limit: collection, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: plain.apkg, tables: [col, notes, cards, revlog, graves, decks, deck_config, tags]}

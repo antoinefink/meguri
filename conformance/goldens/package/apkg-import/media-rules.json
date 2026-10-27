@@ -1,0 +1,121 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "package_media": [
+          {
+            "entry_size": 15,
+            "name": "b&c.png",
+            "sha1": "26e6789b1d0983f75066bdb91b3656bb5de6cb52",
+            "size": 15
+          },
+          {
+            "entry_size": 13,
+            "name": "d.png",
+            "sha1": "19e4a5eb36cab3e77085216cb4128e5df039e7bc",
+            "size": 13
+          },
+          {
+            "entry_size": 8,
+            "name": "_font.woff",
+            "sha1": "e5b7f1003e202d403f0ad69b442ac0ffebd365d1",
+            "size": 8
+          },
+          {
+            "entry_size": 12,
+            "name": "a.png",
+            "sha1": "7ad47221d20e764864dce8364953d833e2f9a5f1",
+            "size": 12
+          },
+          {
+            "entry_size": 17,
+            "name": "_new.css",
+            "sha1": "6937ba43c33c334008ff0f5735db4baa641e35ad",
+            "size": 17
+          }
+        ]
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": [" d.png ", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": [" a.png   b&c.png ", "a"],
+              "note": "#n1"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["<img src=\"a.png\"> <img src=\"b&amp;c.png\">\u001fa"],
+            ["<img src=\"d.png\">\u001fb"]
+          ]
+        }
+      },
+      {
+        "media_dir": {
+          "_font.woff": {
+            "sha1": "23a680b732dfd936a8a4a66e082e5bcd4c171c94",
+            "size": 8
+          },
+          "_new.css": {
+            "sha1": "6937ba43c33c334008ff0f5735db4baa641e35ad",
+            "size": 17
+          },
+          "a.png": {
+            "sha1": "7ad47221d20e764864dce8364953d833e2f9a5f1",
+            "size": 12
+          },
+          "b&c.png": {
+            "sha1": "26e6789b1d0983f75066bdb91b3656bb5de6cb52",
+            "size": 15
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d856a0309ee163f8223d1c3449cdef0ee667547e832ee5b237c2a43f961fd39e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/media-rules",
+  "scenario_sha256": "b80cda5de5debf9c11d67254a28d0a2432ae5d1a7a78f3910a609fed24e8c1bb",
+  "tz": "UTC"
+}

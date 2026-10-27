@@ -1,0 +1,31 @@
+# AE67 (specs/package/apkg-import.md I9 example, I12.2, I12.3; package-ops.md
+# E6, E7). The package's n1 references cat.jpg and was exported with it; then
+# the target's n1 gets an older mod and another back, and the target's
+# cat.jpg other bytes. Importing with Update notes if newer updates n1 (its
+# mod the package's), writes the package's cat.jpg under its hash name and
+# rewrites the updated note's reference to it; the target's cat.jpg stays.
+id: package/apkg-import/ae67
+description: An updated note's media reference is rewritten to the hash name of the package's differing file.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"cat.jpg\">", a]}
+  media_files:
+    - {name: cat.jpg, text: "first picture"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: cat.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894701500, flds = '<img src=\"cat.jpg\">' || char(31) || 'changed'"}
+  - advance: 1m
+  - media_outside: [{name: cat.jpg, text: "second picture"}]
+  - advance: 1m
+  - import: {format: apkg, name: cat.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, mod, usn, flds FROM notes ORDER BY id"}
+  - observe: [media_dir]

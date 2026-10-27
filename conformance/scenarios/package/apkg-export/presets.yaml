@@ -1,0 +1,35 @@
+# Deck presets in a deck package (specs/package/apkg-export.md A7;
+# package-ops.md E7, E11). Lang uses Slow (FSRS parameters set), Other uses
+# Fast and Plain the default preset. Presets off: every deck on preset 1 and
+# only the new collection's default preset. On with scheduling: Slow and Fast
+# as stored, FSRS parameters kept, and the source's preset 1. On without
+# scheduling: the same presets with their FSRS parameter lists emptied.
+id: package/apkg-export/presets
+description: Presets off, on with scheduling and on without scheduling.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  presets:
+    - {name: Slow, new_per_day: 5, fsrs_params: [0.4, 1.2, 3.1, 15.6, 7.2, 0.5, 1.4, 0.005, 1.5, 0.12, 1.0, 1.9, 0.11, 0.3, 2.3, 0.23, 2.9, 0.5, 0.67, 0.1, 0.2]}
+    - {name: Fast, new_per_day: 50}
+  decks: [{name: Lang, preset: Slow}, {name: Other, preset: Fast}, Plain]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Other, fields: [two, b]}
+    - {notetype: Pair, deck: Plain, fields: [three, c]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: off.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - export: {format: apkg, name: on.apkg, limit: collection, scheduling: true, presets: true, media: false}
+  - export: {format: apkg, name: plain.apkg, limit: collection, scheduling: false, presets: true, media: false}
+  - observe:
+      - package_db_dump: {name: off.apkg, tables: [decks, deck_config]}
+  - observe:
+      - package_db_dump: {name: on.apkg, tables: [decks, deck_config]}
+  - observe:
+      - package_db_dump: {name: plain.apkg, tables: [decks, deck_config]}

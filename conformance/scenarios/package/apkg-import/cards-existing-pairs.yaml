@@ -1,0 +1,29 @@
+# Cards of matched notes (specs/package/apkg-import.md I11.1, R1608;
+# package-ops.md E6). n1 has c1 and c2. After the export the target's c2 is
+# deleted with db_exec and c1 gets other scheduling. The package's n1 is a
+# duplicate (Never): its c1 is skipped, since the target has that note and
+# ordinal (c1's row unchanged), and its c2 is added back.
+id: package/apkg-import/cards-existing-pairs
+description: Existing note and ordinal pairs are skipped; a duplicate note gains its missing card.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Both
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Both, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: both.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "DELETE FROM cards WHERE ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 9, ivl = 5, factor = 2500, reps = 2, mod = 1894701000, usn = 3 WHERE ord = 0"}
+  - advance: 1m
+  - import: {format: apkg, name: both.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards]}

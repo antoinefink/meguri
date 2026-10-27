@@ -1,0 +1,55 @@
+# Cards and review log with scheduling (specs/package/apkg-import.md I11.1,
+# I11.2, I11.3, R1609; package-ops.md E6). The source holds a review card
+# with memory state (due day 10), a suspended review card (due 5), a learning
+# card due at an epoch second, a review card held by the filtered deck Cram
+# (fixed id 900; due 8, odue 12) and an answered card with its review-log
+# row. After the export every note is deleted and the target's crt is moved
+# seven days earlier, so the target's today is seven days after the
+# package's: day-based dues shift by +7 (queues 2 and 3, a review card's
+# odue), learning cards due at an epoch second keep theirs, card data and the
+# review log come in, and Cram maps to the target's Cram.
+id: package/apkg-import/scheduling-on
+description: An import with scheduling shifts day-based dues by the day difference and adds the review log.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+    - {notetype: Pair, deck: Lang, fields: [three, c]}
+    - {notetype: Pair, deck: Lang, fields: [four, d]}
+    - {notetype: Pair, deck: Lang, fields: [five, e]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c5", rating: good}
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6, reps = v.column7, left = v.column8, data = v.column9
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 2, 2, 10, 10, 2500, 3, 0, '{"s":3.5,"d":5.0,"lrt":1894600000}'),
+          (2, 2, -1, 5, 4, 2300, 2, 0, '{}'),
+          (3, 1, 1, 1894702200, 0, 2500, 1, 2, '{}'),
+          (4, 2, 2, 12, 6, 2500, 2, 0, '{}')
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due, due = 8 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: sched.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}
+  - db_exec: {sql: "UPDATE col SET crt = crt - 7 * 86400"}
+  - reopen: {}
+  - advance: 1m
+  - observe: [timing]
+  - import: {format: apkg, name: sched.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks]}

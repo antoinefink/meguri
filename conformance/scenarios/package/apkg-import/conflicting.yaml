@@ -1,0 +1,32 @@
+# A GUID match under another note type (specs/package/apkg-import.md I9 step
+# 5, R1603; package-ops.md E6). After the export, the target's n1 is moved to
+# the note type Other (same fields) with db_exec. Without a merge the
+# package's n1 is conflicting, logged with the package note's id, and the
+# target's note keeps its exact row; the package's n2 is a duplicate.
+id: package/apkg-import/conflicting
+description: Without a merge, a GUID match under another note type is logged conflicting and changes nothing.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Other
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "UPDATE notes SET mid = (SELECT id FROM notetypes WHERE name = 'Other'), mod = 1894701500 WHERE sfld = 'one'"}
+  - observe:
+      - db_dump: {tables: [notes, cards]}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: false, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards]}

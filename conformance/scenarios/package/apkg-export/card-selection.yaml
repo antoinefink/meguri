@@ -1,0 +1,30 @@
+# A card limit selects the whole note (specs/package/apkg-export.md A2, A3;
+# package-ops.md E7, E11). Note n1 has two cards, c1 in A::B and c2 in C;
+# n2 sits in C. Exporting c1 takes n1 with both cards, the decks A::B and C
+# and the ancestor A, and nothing of n2.
+id: package/apkg-export/card-selection
+description: One card of a two-card note exports both cards, both decks and their ancestors.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: ["A::B", C]
+  notetypes:
+    - name: Both
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Both, deck: "A::B", fields: [one, a]}
+    - {notetype: Pair, deck: C, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'C') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - advance: 1m
+  - export: {format: apkg, name: card.apkg, limit: {cards: ["#c1"]}, scheduling: true, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: card.apkg, tables: [notes, cards, decks]}

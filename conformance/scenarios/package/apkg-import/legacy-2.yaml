@@ -1,0 +1,35 @@
+# Both formats import alike (specs/package/apkg-import.md I3, P17;
+# package/container.md P17; model-ops.md L6; package-ops.md E6). The same
+# collection is exported in the latest format and with the whole-collection
+# legacy form (meta 2, schema-11 collection.anki21). After every note is
+# deleted, the latest package is imported, the dump taken, the import undone,
+# and the legacy package imported: both dumps hold the same rows.
+id: package/apkg-import/legacy-2
+description: A legacy 2 package imports to the same rows as the latest format.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang, "Lang::Sub"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a], tags: [kept]}
+    - {notetype: Pair, deck: "Lang::Sub", fields: [two, b]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - answer: {card: "#c1", rating: good}
+  - advance: 1m
+  - export: {format: apkg, name: latest.apkg, limit: collection, scheduling: true, presets: true, media: false}
+  - export: {format: apkg, name: legacy.apkg, legacy: true}
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - advance: 1m
+  - import: {format: apkg, name: latest.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks, deck_config, tags]}
+  - undo: {}
+  - import: {format: apkg, name: legacy.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks, deck_config, tags]}

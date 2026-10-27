@@ -1,0 +1,28 @@
+# The layout of a deck package (specs/package/apkg-export.md A10;
+# package/container.md P7, P11; package-ops.md E3, E7). A deck with a subdeck
+# and one media file, exported with scheduling, presets and media: entries
+# meta, collection.anki21b, collection.anki2, the numbered media entry and
+# media, all stored; meta_version 3; the placeholder is the only raw SQLite
+# entry (schema 11, rollback journal, one note and one card) and Anki opens
+# it.
+id: package/apkg-export/listing
+description: A deck package's entries, methods, meta version and placeholder.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: ["A::B"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: A, fields: ["one <img src=\"pic.png\">", a]}
+    - {notetype: Pair, deck: "A::B", fields: [two, b]}
+  media_files:
+    - {name: pic.png, text: "picture"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: deck.apkg, limit: {deck: A}, scheduling: true, presets: true, media: true}
+  - observe:
+      - package_listing: {name: deck.apkg}

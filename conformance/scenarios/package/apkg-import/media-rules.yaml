@@ -1,0 +1,49 @@
+# Media on import (specs/package/apkg-import.md I12; package-ops.md E6). The
+# package holds a.png and b&c.png (n1's references, the second written with
+# an entity), d.png (n2's), and the note type's static _font.woff and
+# _new.css. After the export n1 is deleted; the target's _font.woff gets
+# other bytes, b&c.png and _new.css are removed, d.png too. Importing (Never):
+# n1 is new, so a.png (identical bytes) is reused without a write and b&c.png
+# is written, its reference kept; _new.css, static and unreferenced by any
+# note, is written; the target's _font.woff is kept; n2 is a duplicate, so
+# d.png is not copied.
+id: package/apkg-import/media-rules
+description: Identical files reused, static files written unless present, unused entries not copied.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+# Anki writes media in an order of its own (package-ops.md E10).
+compare:
+  set: [/steps/3/package_media]
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: "@font-face { font-family: f; src: url(_font.woff); }\n@import \"_new.css\";"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"a.png\"> <img src=\"b&amp;c.png\">", a]}
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"d.png\">", b]}
+  media_files:
+    - {name: a.png, text: "same picture"}
+    - {name: "b&c.png", text: "another picture"}
+    - {name: d.png, text: "third picture"}
+    - {name: _font.woff, text: "font one"}
+    - {name: _new.css, text: ".n { margin: 0; }"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: media.apkg, limit: collection, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_media: {name: media.apkg}
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - media_outside:
+      - {name: _font.woff, text: "font two"}
+      - {name: "b&c.png", remove: true}
+      - {name: _new.css, remove: true}
+      - {name: d.png, remove: true}
+  - advance: 1m
+  - import: {format: apkg, name: media.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  - observe: [media_dir]
