@@ -12,6 +12,8 @@ The states, items, results and choices are those of `sync/policy` (P12, P14, P15
 ## T1. Keys, arguments and plurals
 
 - Every string is an entry of the Sync String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
+- Decided 2026-10-27: the Sync String Catalog is the one file `app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings`, the table `Sync` of the AppModel target's resource bundle (U151 adds it; U161 adds the keys its views show). U161's views in the Features target read it through AppModel's bundle, which AppModel exposes publicly; no other target holds a copy of any key here.
+- "Followed by" (T8, T11.2, T13.7) means a separate line directly under the entry, never one string made by joining the two. A kinds or reasons breakdown (T11.3) is one line of its own: the T11.3 count entries joined with the T1 list format.
 - `%lld` is an integer argument, `%@` a text argument; with two arguments they are numbered (`%1$lld`, `%2$@`). A plural entry has the catalog's plural variations on its integer argument: English uses **one** for exactly 1 and **other** for every other value, 0 included; other languages follow their CLDR rules. The tables write a plural entry as `one` / `other`.
 - A **Mac:** value is the catalog's Mac device variation of the entry; iPhone and iPad use the main value.
 - Text arguments are formatted by the system, never by hand:
@@ -63,7 +65,7 @@ One title and one detail per state, from `SyncStatus.state` and its reason field
 | `upToDate{asOf}` | `sync.status.upToDate.title`: Up to Date | `sync.status.upToDate.detail`: `Last synced %@.` with `asOf` (T1 instant). No detail when no instant is recorded |
 
 - The accessibility value is the title without its "…". The `needsAttention` count counts attention items, not their entities.
-- The states `iCloudUnavailable`, `paused` (every reason) and `offline` add, in the popover only, `sync.status.keptLocally`: "Your changes are saved on this device." (R2046). So does `needsAttention`, unless one of its items is `collectionCorrupt`, `localStorageFull` or `trackingError`: then the collection may not be saving, and the line would not be true.
+- The states `iCloudUnavailable`, `paused` (every reason), `offline` and `needsAttention` add, in the popover only, `sync.status.keptLocally`: "Your changes are saved on this device." (R2046), unless an attention item `collectionCorrupt`, `localStorageFull` or `trackingError` is present, whatever the P14.2 state: then the collection may not be saving, and the line would not be true. Decided 2026-10-27: the exception does not depend on the state, because P14.2 rows 2 and 3 come before row 4, so these items can be present in `iCloudUnavailable` and `paused{decisionRequired}`.
 - Decided 2026-10-27: `paused{automaticOff}` has its own title, because Sync Now still works then (`sync/policy#P12.1`) and "Paused" would say otherwise. It is the `paused` state for the symbol and the tests.
 - Decided 2026-10-27: no state text says "synced" about the changes of other devices. `upToDate` names this device's last confirmed sync (R107, R2050); it is "Last synced", also when `asOf` is a quiet point (`sync/policy#P14.3`).
 - Decided 2026-10-27: `iCloudUnavailable` offers no button. Apple gives no public way to open the account pane, so the guidance is the text (R102); Meguri never asks for an Apple password (R117).
@@ -112,14 +114,15 @@ While Sync Now is unavailable, the command and the button are disabled, and the 
 | `collectionUnavailable` | `sync.now.unavailable.collectionUnavailable` | Sync Now is available once the collection is ready. |
 | `reviewActive`, automatic sync running (below) | `sync.now.unavailable.reviewActive` | iCloud keeps syncing automatically while you review. Sync Now is available when you finish reviewing. |
 | `reviewActive`, otherwise | `sync.now.unavailable.reviewActive.manual` | Sync Now is available when you finish reviewing. |
-| `notConnected` | `sync.now.unavailable.notConnected` | Connect to iCloud in Account & Sync to sync this collection. |
+| `notConnected` | `sync.now.unavailable.notConnected` | This collection doesn’t sync with iCloud. You can turn on syncing in Account & Sync. |
 | `paused` | `sync.now.unavailable.paused` | iCloud sync is paused. Resume it in Account & Sync to sync now. |
 | `iCloudUnavailable`, account `noAccount` | `sync.now.unavailable.iCloudUnavailable` | Sign in to iCloud in Settings to sync. **Mac:** Sign in to iCloud in System Settings to sync. |
 | `iCloudUnavailable`, other account statuses | the T3 detail of the status's `unavailableReason` | |
 | `decisionRequired` | `sync.now.unavailable.decisionRequired` | Choose where to keep this collection before you sync. |
 | `recoveryRequired` | `sync.now.unavailable.recoveryRequired` | iCloud sync needs your attention. Open iCloud Sync to see what to do. |
 
-- "Automatic sync running" (decided 2026-10-27): auto is on and the T3 state is `upToDate`, `changesPending`, `syncingCollection`, `syncingMedia` or `offline`. Row 2 of P12.1 matches before every other reason, so during review a device that is not connected, paused or unavailable would otherwise be told that iCloud keeps syncing; it gets the `.manual` text instead. R89's sentence is true whenever it is shown.
+- "Automatic sync running" (decided 2026-10-27): auto is on and the T3 state is `upToDate`, `changesPending`, `syncingCollection`, `syncingMedia` or `offline`, or it is `needsAttention` and every item is one that stops no sync: `conflicts`, `conflictsUnreadable`, `refused`, `referenceWaiting`, `oversize`, `unreadable`, `unsyncable`, `claimStuck`, `generationIncomplete`, `assetUnavailable`, `applyFailed`, `rekeyFailed`, `mediaZoneMissing`, `mediaChanged`, `mediaMissing`, `exchangeIncomplete` or `unsupportedSchema`. Row 2 of P12.1 matches before every other reason, so during review a device that is not connected, paused, unavailable, isolated or stopped would otherwise be told that iCloud keeps syncing; it gets the `.manual` text instead. R89's sentence is true whenever it is shown.
+- Decided 2026-10-27: `notConnected` names no control, because Account & Sync's enable control is Connect to iCloud… or, for a `stopped` binding that V9.2 offers to resume, Resume Syncing (T14).
 - Decided 2026-10-27: with `decisionRequired` Sync Now is disabled like every other reason: the popover button, the menu command and `Y` (P12.1 row 6 makes it `unavailable`). Choosing Sync Now never opens the T10 sheet. The popover shows the decision's action, `sync.decision.action`, beside the disabled Sync Now, and only that action opens the sheet (`sync/cloudkit-recovery#V11`).
 - AnkiConnect's `sync` (U146) shows nothing; it returns its typed error.
 
@@ -145,7 +148,7 @@ Results, shown in the popover when the exchange ends and kept as `sync.details.l
 | `incomplete` | `sync.result.incomplete`: Some Changes Did Not Sync | `sync.result.outstanding`: `%lld change is still waiting to sync.` / `%lld changes are still waiting to sync.`; `sync.result.blocked`: `%lld change can’t sync. See the details below.` / `%lld changes can’t sync. See the details below.` |
 | `waiting{class}` | `sync.result.waiting`: Sync Couldn’t Finish Yet | the T8 line of `class`; for class none, `sync.result.notReady`: Meguri is still getting ready to sync. Try again in a moment. |
 | `failed{class}` | `sync.result.failed`: Sync Failed | the T8 line of `class` |
-| `cancelled` | `sync.result.cancelled`: Sync Stopped | `sync.status.keptLocally` (T3), under T3's condition |
+| `cancelled` | `sync.result.cancelled`: Sync Stopped | `sync.status.keptLocally` (T3), unless an attention item `collectionCorrupt`, `localStorageFull` or `trackingError` is present, whatever the state |
 
 Media line of `succeeded` (R2050: a collection result never says media is done when it is not):
 
@@ -167,8 +170,8 @@ One short line per class, used by `sync.details.error`, the `waiting` and `faile
 | `noAccount` | `sync.error.noAccount` | iCloud isn’t available. |
 | `accountChanged` | `sync.error.accountChanged` | The iCloud account on this device changed. |
 | `offline` | `sync.error.offline` | You’re offline. |
-| `throttled{retryAfter}` | `sync.error.throttled.retry` | `iCloud is busy. Try again in about %@.` (T1 duration of `retryAfter`) |
-| `throttled`, no retry-after | `sync.error.throttled` | iCloud is busy. Try again later. |
+| `throttled{retryAfter}`, while the retry instant is in the future | `sync.error.throttled.retry` | `iCloud is busy. Try again in about %@.` (T1 duration of the time left until the retry instant, below) |
+| `throttled`, no retry-after, or its retry instant has passed | `sync.error.throttled` | iCloud is busy. Try again later. |
 | `quotaFull` | `sync.error.quotaFull` | Your iCloud storage is full. |
 | `localStorageFull`, no space | `sync.error.localStorageFull` | This device is out of storage space. |
 | `localStorageFull`, other failure (`trackingError`) | `sync.error.trackingError` | Meguri couldn’t save its sync information on this device. |
@@ -177,6 +180,7 @@ One short line per class, used by `sync.details.error`, the `waiting` and `faile
 | none, `cloudError` (P15 last two rows) | `sync.error.cloudError` | iCloud sync isn’t working right now. |
 
 - In the `iCloudUnavailable` state, `sync.error.noAccount` is followed by the T3 detail of `unavailableReason`.
+- Decided 2026-10-27: the retry instant is the instant the throttled error was reported (the end of the exchange or engine operation that got it) plus `retryAfter`; `sync/policy#P14.4`'s `error` must carry it as that instant, not as the interval. The argument is the time left until it, rounded up as T1 says and refreshed at least once a minute while the line is shown. Once the time left is 0 or less, the line is `sync.error.throttled`. The same rule applies to a kept `waiting{throttled}` result (T7).
 - Throttling is quiet (R1555): it shows only in the popover, never in the button's state.
 
 ## T9. Attention items (R1561, R2054, R2059; `sync/policy#P14.4`, `sync/cloudkit-recovery#V11`)
@@ -188,20 +192,22 @@ Each item is one popover row: its text, then its actions as buttons (T9.2). Item
 | Item | Key | English |
 |---|---|---|
 | `isolated`, `signed_out` with an account available again | `sync.attention.signedOut` | This collection stopped syncing when you signed out of iCloud. |
-| `isolated`, `account_changed` | `sync.attention.accountChanged` | You’re signed in to a different iCloud account. This collection was not sent to it. |
+| `isolated`, `account_changed`, while the account's identity is not the binding's | `sync.attention.accountChanged` | You’re signed in to a different iCloud account. This collection was not sent to it. |
+| `isolated`, `account_changed`, while the account's identity, read in this process, is the binding's again (V9.2) | `sync.attention.accountChangedBack` | This collection stopped syncing when the iCloud account on this device changed. |
 | `isolated`, `epoch_switched` | `sync.attention.replacedElsewhere` | The iCloud collection was replaced from another device. |
 | `isolated`, `zone_missing`, `active_missing` | `sync.attention.missing` | This collection is missing from iCloud. Your collection and its unsent changes are still on this device. |
 | `isolated`, `zone_deleted_by_user` | `sync.attention.deleted` | Meguri’s iCloud data was deleted. Your collection and its unsent changes are still on this device. |
 | `isolated`, `encrypted_data_reset` | `sync.attention.encryptionReset` | The iCloud copy can no longer be read because your iCloud encrypted data was reset. Your collection is still on this device. |
 | `isolated`, `file_mismatch` | `sync.attention.fileMismatch` | The collection file on this device isn’t the one that was syncing. |
 | `isolated`, any other reason | `sync.attention.isolated` | This collection stopped syncing with iCloud. |
+| `rootUnreadable` | `sync.attention.rootUnreadable` | Meguri can’t read which collection is current in iCloud. Your collection and its unsent changes are still on this device. |
 | `chooseCollection` | `sync.attention.chooseCollection` | Choose how this collection syncs with iCloud. |
 | `conflicts` | `sync.attention.conflicts` | `%lld edit was kept as a copy because it conflicted with a change from another device.` / `%lld edits were kept as copies because they conflicted with changes from other devices.` |
 | `conflictsUnreadable` | `sync.attention.conflictsUnreadable` | Some saved conflict copies couldn’t be read. |
 | `refused` | `sync.attention.refused` | `%lld item can’t sync because its copy in iCloud is not valid.` / `%lld items can’t sync because their copies in iCloud are not valid.` |
 | `referenceWaiting` | `sync.attention.referenceWaiting` | `%lld change from iCloud is waiting for a related change that has not arrived.` / `%lld changes from iCloud are waiting for related changes that have not arrived.` |
 | `oversize` | `sync.attention.oversize` | `%lld item is too large to sync.` / `%lld items are too large to sync.` |
-| `unreadable` | `sync.attention.unreadable` | `%lld item can’t be read, so it doesn’t sync. Check Database can repair it.` / `%lld items can’t be read, so they don’t sync. Check Database can repair them.` |
+| `unreadable` | `sync.attention.unreadable` | `%lld item can’t be read, so it doesn’t sync.` / `%lld items can’t be read, so they don’t sync.` |
 | `unsyncable` | `sync.attention.unsyncable` | `%lld media file is empty or too large to sync.` / `%lld media files are empty or too large to sync.` |
 | `claimStuck` | `sync.attention.claimStuck` | `%lld note type change can’t sync.` / `%lld note type changes can’t sync.` |
 | `generationIncomplete`, one row per generation | `sync.attention.generationIncomplete` | `Changes to the note type “%@” from another device are incomplete.` (the note type's name) |
@@ -218,7 +224,7 @@ Each item is one popover row: its text, then its actions as buttons (T9.2). Item
 | `recoveryOpWaiting`, `publish` | `sync.attention.publishWaiting` | Uploading this collection to iCloud did not finish. |
 | `recoveryOpWaiting`, `publish` whose new binding an account event isolated (V15.3) | `sync.attention.publishAccount` | Uploading this collection to iCloud stopped because the iCloud account changed. |
 | `recoveryOpWaiting`, `publish` with its switch conflict set (V15.2 step 5) | `sync.attention.publishConflict` | The iCloud collection was replaced from another device while this device was uploading. |
-| `quotaFull` while a `publish` op is at step `bound`, `zones` or `sent`, that is during V15.2 step 3 (V15.3); it replaces `sync.attention.quotaFull` | `sync.attention.publishQuota` | iCloud needs room for both collections while the previous one is kept for 30 days. |
+| `quotaFull` while a `publish` op is at step `bound`, `zones` or `sent`, that is during V15.2 step 3 (V15.3); it replaces the whole `quotaFull` row: its text, and its actions, which are V15.3's Cancel Replacement… and storage guidance, with no Try Again | `sync.attention.publishQuota` | iCloud needs room for both collections while the previous one is kept for 30 days. |
 | `recoveryOpWaiting`, `abandon_generation` (V18) | `sync.attention.abandonWaiting` | Meguri is finishing abandoning a note type change. |
 | `exchangeIncomplete` | `sync.attention.exchangeIncomplete` | Some changes from your last Sync Now did not sync. |
 | `quotaFull` | `sync.attention.quotaFull` | Your iCloud storage is full. Changes stay on this device until there’s room. |
@@ -230,23 +236,26 @@ Each item is one popover row: its text, then its actions as buttons (T9.2). Item
 - Decided 2026-10-27: `zone_missing` and `active_missing` share one text: both mean the device's iCloud collection is gone, and the choices are the same (V11). `republished` and any reason added later use `sync.attention.isolated`.
 - Decided 2026-10-27: `crtMismatch` says "creation dates": `col.crt` is the collection's creation day, and the user knows no other name for it.
 - A `signed_out` binding while the account is `noAccount` is not an attention row: the state is `iCloudUnavailable{noAccount}` (T3).
+- Decided 2026-10-27: an `account_changed` binding keeps its reason when the user signs back in to its account (V2.2, V9.1), so its row has two texts: `accountChanged` while another identity is signed in, and `accountChangedBack` once the identity read in this process is the binding's, which is when V9.2 can offer Resume.
+- Decided 2026-10-27: `rootUnreadable` (`sync/policy#P14.4`, `sync/cloudkit-recovery#V10.2` row 3, V11) has its own row; it is not an `isolated` reason. Its actions are V11's: Replace iCloud Collection… (V15 after confirmation; the core makes its switch conditional on the change tag of the version that could not be read) and Keep on This Device Only… (V16). This closes the `sync/policy#P24` open item for it.
+- Decided 2026-10-27: `unreadable` promises no repair. Check Database repairs some unreadable rows (notes covered by `maintenance/check-database-notes` N6.1) and ends `CheckFailed` with nothing changed on others, such as an undecodable deck or note type (`maintenance/check-database` C13). It stays offered, since it is the first remedy of `maintenance/optimize-integrity#M7.1` and changes nothing when it fails; its own result text (U163) then points to the other remedies.
 - Decided 2026-10-27: an `adopt` op never waits for Resume (V14.3: a restart deletes a staging op, rolls a `ready` op back or finishes it). Its only waiting rows are `adoptAfterReview` (V14.2 step 7) and `adoptUnproven` (V14.3 last row); both offer Cancel only.
 
 ### T9.2 Actions
 
 | Key | English | Runs | Offered on |
 |---|---|---|---|
-| `sync.action.resume` | Resume Syncing | `resume_binding` (V9.2) after T12's Continue confirmation | `signedOut`, `accountChanged`, `isolated` and `localOnly` (a `stopped` binding), only while V9.2 offers it |
-| `sync.action.connect` | Connect to iCloud… | the V13 flow (T12) | `localOnly` when Resume is not offered; `signedOut` and `accountChanged` when Resume is not offered; `fileMismatch`, `isolated`, `chooseCollection` |
+| `sync.action.resume` | Resume Syncing | `resume_binding` (V9.2) after T12's Continue confirmation | `signedOut`, `accountChangedBack`, `isolated` and `localOnly` (a `stopped` binding), only while V9.2 offers it |
+| `sync.action.connect` | Connect to iCloud… | the V13 flow (T12) | `localOnly` when Resume is not offered; `signedOut` and `accountChangedBack` when Resume is not offered; `accountChanged`, `fileMismatch`, `isolated`, `chooseCollection` |
 | `sync.action.useICloud` | Use iCloud Collection… | the V14 preview (T13.1) | `replacedElsewhere`, `crtMismatch`; `missing`, `deleted`, `encryptionReset` when V10.1 offers V14 |
-| `sync.action.replaceICloud` | Replace iCloud Collection… | the V15 preview (T13.2) | `replacedElsewhere`, `missing`, `deleted`, `encryptionReset`, `crtMismatch`, `mediaMissingInICloud` |
-| `sync.action.keepLocal` | Keep on This Device Only… | T14's `sync.keepLocal` alert, then `keep_local_only` (V16) | `replacedElsewhere`, `missing`, `deleted`, `encryptionReset`, `publishConflict` |
+| `sync.action.replaceICloud` | Replace iCloud Collection… | the V15 preview (T13.2) | `replacedElsewhere`, `missing`, `deleted`, `encryptionReset`, `rootUnreadable` (its switch conditional, V10.2 row 3), `crtMismatch`, `mediaMissingInICloud` |
+| `sync.action.keepLocal` | Keep on This Device Only… | T14's `sync.keepLocal` alert, then `keep_local_only` (V16) | `replacedElsewhere`, `missing`, `deleted`, `encryptionReset`, `rootUnreadable`, `publishConflict` |
 | `sync.action.reviewConflicts` | Review Conflicts… | V17's list (T13.4) | `conflicts` |
 | `sync.action.showDetails` | Show Details… | the item's T11 list | `refused`, `referenceWaiting`, `oversize`, `unreadable`, `unsyncable`, `claimStuck`, `generationIncomplete` when Abandon is not offered, `applyFailed`, `rekeyFailed`, `mediaMissing` |
 | `sync.action.copyDebugInfo` | Copy Debug Info | U153's diagnostics copy | the rows V11 gives it: `conflictsUnreadable`, `refused`, `referenceWaiting`, `oversize`, `unreadable`, `unsyncable`, `claimStuck`, `generationIncomplete`, `applyFailed`, `rekeyFailed`, `mediaMissing`, `adoptUnproven` (its R6 journal), `cloudError` |
 | `sync.action.checkDatabase` | Check Database… | Check Database (U163, once U128 lands) | `unreadable` |
 | `sync.action.abandon` | Abandon Change… | T13.3 | `generationIncomplete` while V18 offers it |
-| `sync.action.tryAgain` | Try Again | `SyncNowRequested{command}` (`sync/policy#P12.1`: hands parked names back, or probes tracking first) | `quotaFull`, `localStorageFull`, `trackingError`, `cloudError` |
+| `sync.action.tryAgain` | Try Again | `SyncNowRequested{command}` (`sync/policy#P12.1`: hands parked names back, or probes tracking first) | `quotaFull` (not while `publishQuota` replaces it), `localStorageFull`, `trackingError`, `cloudError` |
 | `sync.action.syncNow` | Sync Now | `SyncNowRequested{command}` | `exchangeIncomplete` |
 | `sync.action.resumeOp` | Resume | `resume_recovery_op` (V26.2) | `publishWaiting`, `publishAccount`, as V15.3 offers it |
 | `sync.action.cancelOp` | Cancel Replacement… | `cancel_recovery_op` after T13.5's confirmation | `adoptAfterReview`, `adoptUnproven`, `publishWaiting`, `publishAccount`, `publishConflict`, `publishQuota`, as V14.3 and V15.3 allow it |
@@ -255,6 +264,7 @@ Each item is one popover row: its text, then its actions as buttons (T9.2). Item
 
 - Storage guidance (`quotaFull`, `publishQuota`): the row adds `sync.attention.storageGuidance`: "Manage your iCloud storage in Settings." **Mac:** "Manage your iCloud storage in System Settings." Text only, as T3 says for account guidance.
 - Actions that V20 refuses during a review session (Connect, Use iCloud Collection, Abandon) stay enabled; the session error is T13.6's `SessionActive` text. Sync Now follows T6.
+- Decided 2026-10-27: `sync.action.tryAgain` and `sync.action.syncNow` send the Sync Now request, so they are enabled and disabled exactly as Sync Now is (T6, `sync/policy#P12.1`), with T6's reason as the Mac help tag and, on iPhone and iPad, as the line under the disabled button. A disabled Try Again sends nothing, so it probes no tracking; a tracking stop still clears at P15.2's other triggers, and Try Again works once Sync Now is available again.
 - `collectionCorrupt` has no action: the damaged-collection screen (`shell.damagedCollection`, `docs/design/screens.md`) holds the remedies (V19).
 - Decided 2026-10-27: `localOnly` is a state, not a T9 row. Its action is shown under the T3 detail in the popover and is Account & Sync's enable control (T14). It is `sync.action.resume` while the newest binding is `stopped` and V9.2 offers Resume, and `sync.action.connect` otherwise; never both. For such a binding Connect would also end at T12's Continue sheet (V13.3 last row); Resume Syncing opens it directly.
 
@@ -308,7 +318,7 @@ The sheet opened by `paused{decisionRequired}`'s action, `sync.decision.action`.
 | `sync.preview.isolatedUnsent` | `%lld unsent change from an earlier iCloud connection` / `%lld unsent changes from an earlier iCloud connection` |
 | `sync.preview.otherDevicesUnknown` | Changes that other devices have not sent yet are not counted. |
 | `sync.preview.sentAfterReplacement` | `%lld change sent after the iCloud collection was replaced may only be in the replaced collection.` / `%lld changes sent after the iCloud collection was replaced may only be in the replaced collection.`, followed by its kinds |
-| `sync.preview.sentAfterReplacement.adopt` | `After this replacement, it’s only in this device’s backup and, for 30 days, in the previous iCloud collection.` / `After this replacement, they’re only in this device’s backup and, for 30 days, in the previous iCloud collection.` |
+| `sync.preview.sentAfterReplacement.adopt` | `After this replacement, it’s only in this device’s backup, and possibly in the replaced iCloud collection for a limited time.` / `After this replacement, they’re only in this device’s backup, and possibly in the replaced iCloud collection for a limited time.` |
 | `sync.preview.sentAfterReplacement.publish` | `It’s included when this collection replaces the iCloud collection.` / `They’re included when this collection replaces the iCloud collection.` |
 | `sync.preview.otherDevicesSentUnknown` | What other devices sent to the replaced collection isn’t known. |
 | `sync.preview.notApplied` | `%lld change received from other devices has not been applied, and the new iCloud collection won’t include it.` / `%lld changes received from other devices have not been applied, and the new iCloud collection won’t include them.`, followed by its reasons (T11.3) |
@@ -316,6 +326,7 @@ The sheet opened by `paused{decisionRequired}`'s action, `sync.decision.action`.
 | `sync.preview.conflictsKept` | `%lld saved conflict copy is kept.` / `%lld saved conflict copies are kept.` |
 
 - `sync.preview.sentAfterReplacement.adopt` and `.publish` are plural entries on the same count as `sync.preview.sentAfterReplacement`, and show no number.
+- Decided 2026-10-27: `.adopt` names no duration. Each device deletes the replaced zone 30 days after the later of the switch and its own first-seen instant (`sync/cloudkit-records#K18.5`), so from this device the zone may already be gone or near its end, and after a second switch it is not the previous collection V14.1 offers.
 
 ### T11.3 Kinds and reasons
 
@@ -510,20 +521,22 @@ Shown in one line in the sheet or row that made the call. The call's state is as
 | `Cancelled` | `sync.recovery.error.cancelled` | Cancelled. |
 | `StagingRefused{gate}`, `StagingCorrupt` (V14.2 step 5, `engine/collection-replace#R9`) | `sync.recovery.error.stagingInvalid` | The downloaded iCloud collection couldn’t be used. This collection is unchanged. |
 | `SafetyBackupFailed` (V14.2 step 7, `package/backup-triggers#T9`) | `sync.recovery.error.backupFailed` | Couldn’t back up this collection, so nothing was replaced. It is unchanged. |
-| `LiveWalNotEmpty`, `StagingNotFinalised`, `Io` of an `adopt` (V14.3, `engine/collection-replace#R9`) | `sync.recovery.error.replaceFailed` | Couldn’t replace this collection. It is unchanged. |
+| `LiveWalNotEmpty`, `StagingNotFinalised` of an `adopt` (V14.3, `engine/collection-replace#R9`) | `sync.recovery.error.replaceFailed` | Couldn’t replace this collection. It is unchanged. |
+| `Io` of an `adopt` (`engine/collection-replace#R9`) | `sync.recovery.error.replaceIncomplete` | Meguri couldn’t finish replacing this collection. |
 | any other passed-through error (V21 last line) | `sync.recovery.error.other` | Meguri couldn’t finish this. Try again. |
 
 - `Cancelled` says nothing about what changed: a `publish` op may have sent its switch (T13.5). `EpochChanged` reopens the preview with new preview reads.
-- The rows `stagingInvalid`, `backupFailed` and `replaceFailed` say the collection is unchanged because V14.2 step 5 and V14.3 make it so: each ends the op before the R5 rename, and V14.3's first `ready` row restores the binding before. Each is shown with `sync.recovery.tryAgain` (V14.3). `InsufficientSpace` of an adoption gets its own row above, also with Try Again.
+- The rows `stagingInvalid`, `backupFailed` and `replaceFailed` say the collection is unchanged because V14.2 step 5 and V14.3 make it so: each of their errors comes only before the R5 rename (`engine/collection-replace` R3, R4 and R5 step 1; V14.2 steps 5 and 7), and V14.3's first `ready` row restores the binding before. Each is shown with `sync.recovery.tryAgain` (V14.3). `InsufficientSpace` of an adoption gets its own row above, also with Try Again.
+- Decided 2026-10-27: `Io` claims nothing. R9's `Io` is any file-system failure, also R5 step 5's directory sync after the rename and the steps after it, where the new file already stands (`engine/collection-replace#R6.3`, `#R8`); the error alone does not say which. It is shown with `sync.recovery.tryAgain`, which starts from a new preview (T13.1), so the counts the user confirms are read after the failure. `sync/cloudkit-recovery#V14.3` should state the outcome of an `Io` at or after the rename.
 - The calls of V26.2 show every row with `sync.recovery.tryAgain` except `NotOffered`, `ConflictNotFound`, `RecoveryInvalid` and `Cancelled`, where trying again cannot help.
 
 ### T13.7 An adoption that did not finish (V14.2, V14.3)
 
 | Key | English | Use |
 |---|---|---|
-| `sync.attention.adoptWaiting` | Replacing this collection with the iCloud collection was not finished. | followed by `sync.cancelOp.adopt.message` (T13.5), with `sync.recovery.tryAgain`: in the V14 sheets (screen contracts `sync.replaceLocal` and `sync.connect`, cases d and an adoption chosen in e) after `StagingRefused`, `StagingCorrupt`, `SafetyBackupFailed`, `LiveWalNotEmpty`, `StagingNotFinalised` or `Io` |
+| `sync.attention.adoptWaiting` | Replacing this collection with the iCloud collection was not finished. | followed by `sync.cancelOp.adopt.message` (T13.5), with `sync.recovery.tryAgain`: in the V14 sheets (screen contracts `sync.replaceLocal` and `sync.connect`, cases d and an adoption chosen in e) after `StagingRefused`, `StagingCorrupt`, `SafetyBackupFailed`, `LiveWalNotEmpty` or `StagingNotFinalised`. After an `Io` the sheet shows `sync.recovery.error.replaceIncomplete` (T13.6) instead, since the collection may already be replaced |
 
-- Decided 2026-10-27: the key keeps the name the screen contracts give it, but it is not a T9 row: an `adopt` op never waits after these errors (T9.1, V14.3). Where a screen contract names this line, it stands in place of the error's T13.6 row (`stagingInvalid`, `backupFailed`, `replaceFailed`); both say that this device's collection is unchanged, which V14.2 step 5 and V14.3 make true. With no collection on this device (V13.3 case b) the line is `sync.error.cloudError` instead, since there is no collection to keep.
+- Decided 2026-10-27: the key keeps the name the screen contracts give it, but it is not a T9 row: an `adopt` op never waits after these errors (T9.1, V14.3). Where a screen contract names this line, it stands in place of the error's T13.6 row (`stagingInvalid`, `backupFailed`, `replaceFailed`), never in place of `replaceIncomplete`; both say that this device's collection is unchanged, which V14.2 step 5 and V14.3 make true. With no collection on this device (V13.3 case b) the line is `sync.error.cloudError` instead, since there is no collection to keep.
 
 ### T13.8 Where the Review Conflicts keys appear (V17)
 
@@ -577,7 +590,9 @@ Decided 2026-10-27, so that the screen contract `sync.reviewConflicts` and T13.4
 
 ## T16. Tests
 
-The oracle has no CloudKit, so the text is checked by Meguri's Swift tests: `SyncStatusModelTests` (U151, in `app/Packages/MeguriKit/Tests/AppModelTests/`: each P14.2 state and reason gives the T3 keys; T4's and T5's lines appear exactly under their conditions; the T6 reason and its `.manual` variant for each combination of P12.1 row 2 with auto and state; `decisionRequired` leaves Sync Now disabled; the media free-space pause shows `sync.media.noSpace` and keeps the state and `sync.status.keptLocally`), a `SyncButtonStateTests` suite in U161's `app/Packages/MeguriKit/Tests/SyncUITests/` (U161: the button's label and value, the help tag, T7's result lines for each P12.6 result and media value, AE91's incomplete result showing no completion text, every T9 item with its actions and their conditions) and U161's snapshots of T10 to T15. Every key must exist in the catalog with exactly this English value and its plural and Mac variations (U167's string lint). No catalog entry of routine sync may contain "AnkiWeb", "record", "zone" or "CloudKit" (a lint over the Sync String Catalog).
+The oracle has no CloudKit, so the text is checked by Meguri's Swift tests: `SyncStatusModelTests` (U151, in `app/Packages/MeguriKit/Tests/AppModelTests/`: each P14.2 state and reason gives the T3 keys; T4's and T5's lines appear exactly under their conditions; the T6 reason and its `.manual` variant for each combination of P12.1 row 2 with auto, state and attention items; `decisionRequired` leaves Sync Now disabled; the media free-space pause shows `sync.media.noSpace` and keeps the state and `sync.status.keptLocally`; `iCloudUnavailable` and `paused{decisionRequired}` with `collectionCorrupt`, `localStorageFull` or `trackingError` show no `sync.status.keptLocally`; a throttled error 70 s before its retry instant shows "about 2 minutes", and after the instant `sync.error.throttled`), a `SyncButtonStateTests` suite in U161's `app/Packages/MeguriKit/Tests/SyncUITests/` (U161: the button's label and value, the help tag, T7's result lines for each P12.6 result and media value, `cancelled` with and without the three items, AE91's incomplete result showing no completion text, every T9 item with its actions and their conditions, `rootUnreadable` and both `account_changed` texts included; Try Again disabled with Sync Now) and U161's snapshots of T10 to T15. U161's Files list in its plan unit section, not its table row, gives these paths.
+
+Decided 2026-10-27: `SyncStringCatalogTests` (in `app/Packages/MeguriKit/Tests/AppModelTests/`; U151 adds it with its keys, and U161 adds the rows of the keys it adds) loads `Sync.xcstrings` (T1) and checks every key of this file against an expected table taken from this file: the key exists, its English value is exactly this one, and its plural and Mac variations are those given. The same test fails when any entry of the catalog contains "AnkiWeb", "record", "zone" or "CloudKit". U167's `lint-strings` checks this catalog as every other: developer comments, plural variants and no concatenation.
 
 ## T17. Changes from the draft wording
 

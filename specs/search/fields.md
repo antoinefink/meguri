@@ -28,7 +28,7 @@ The name is resolved when the plan is built, against every note type of the coll
 3. Else, if the name has wildcards (`text-matching.md` T13.2), it matches the field names that the regular expression `^(?i)` + T13.1(name) + `$` matches: Unicode simple case folding (`case-folding.md` C3), `*` any run, `_` one character.
 4. Else, remove each escaping backslash (`\\` gives `\`, `\*` gives `*`, `\_` gives `_`) and compare with each field name by the unicase equality of `text/unicode-primitives#U2` (full case folding).
 
-The result is, for each note type, the positions (0-based field order) of its matching fields, ascending. Note types with no matching field take no part.
+The result is, for each note type, the positions (0-based field order) of its matching fields, ascending. Note types with no matching field take no part. The step 3 expression is compiled when the plan is built and can pass the compiled size limit (`text-matching.md` T12.1: `search_failed (expression too large)`, never a panic). The resolution must hold for the collection state the statement reads (`text-matching.md` T15).
 
 | Name | Field | Matches? | Why |
 |---|---|---|---|

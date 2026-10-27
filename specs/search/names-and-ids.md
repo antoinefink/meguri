@@ -5,7 +5,7 @@ Requirements: R1050, R1051, R1052, R1053, R1054, R1055, R1056, R1057, R1058, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/tags/, conformance/scenarios/search/decks/, conformance/scenarios/search/notetypes/, conformance/scenarios/search/ids/, conformance/scenarios/search/dupe/
 
-What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios pin the examples.
+What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios each section names pin its examples, except those of N3.3, whose scenario is still to be written (N8).
 
 ## N1. Shared rules
 
@@ -103,7 +103,7 @@ A card matches when its `did` is a matching deck, or when its `odid` is not 0 an
 - letter case folds with simple case folding: `deck:ÜBER` matches `über`, `deck:straße` does not match `STRASSE`;
 - `deck:**` matches the cards of every existing deck, which differs from `deck:*` only for cards whose deck row is missing.
 
-Scenario: `search/decks/names`.
+The scenario `search/decks/names` is to pin these examples; it is not yet written, so no golden holds them today (`search/decks/current` pins only `deck:current` and `deck:default`).
 
 ### N3.4 `deck:current` (R1055, R1057)
 
@@ -123,7 +123,7 @@ So `deck:current` takes the current deck's subdecks and, through `odid`, the car
 
 - The value is G8's (kind R: escapes kept exactly as written). It is not converted to NFC and never treated as a pattern: `preset:Fas*` looks for a preset named `Fas*`.
 - The preset is the row of `deck_config`, taken in ascending `id` order, whose `name` first equals the value under unicase equality: `preset:fast` and `preset:FAST` find `Fast`, `preset:straße` finds `STRASSE`. When none does, no card matches.
-- The decks using it are the normal decks whose preset id is that row's id (filtered decks have none).
+- The decks using it are the normal decks whose stored preset id, the `config_id` of the normal-deck kind (`decks/deck-presets`), equals that row's id (filtered decks have none). The comparison is literal, with no fallback: a deck whose `config_id` names no existing preset uses the default preset for scheduling but matches no `preset:` search, `preset:Default` included.
 - A card matches when its `did` or its `odid` is one of those decks.
 - Because the value keeps its escapes, a backslash is part of the name: `preset:a\b` finds the preset `a\b`, and `"preset:Japanese \"Core\""` looks for the name `Japanese \"Core\"` with its backslashes, so it does not find a preset named `Japanese "Core"`. A preset whose name contains `"` cannot be found by `preset:`. Code that builds a `preset:` search for a name (U88, U46, U47) must keep this in mind; the oracle confirms it (`search/decks/presets`).
 
@@ -162,19 +162,19 @@ Scenario: `search/notetypes/names`.
 The term behind the editor's "Show duplicates". G8 gives a note type id and a text (kind D).
 
 1. The text is converted to NFC when `normalize_note_text` is on (it is a context value, `query-model.md` Q8), then stripped keeping media file names (`text/strip-html#H5`). Call the result C.
-2. K is the checksum of C (`text/checksum-and-sort-field#C4`).
+2. K is the first 4 bytes, read as a big-endian unsigned 32-bit integer, of the SHA-1 digest of the UTF-8 bytes of C as it is: only steps 2 and 3 of `text/checksum-and-sort-field#C4`, with no second H5, no NFC and no control-character removal. H5 is not idempotent (H4 decodes entities, and a second pass removes the tags they produced), so a first field `&lt;b&gt;Cat` has the stored checksum of `<b>Cat`, and `dupe:<id>,&lt;b&gt;Cat` gives C = `<b>Cat` and finds it; hashing H5 of C (`Cat`) would miss it.
 3. A note matches when its `mid` equals the id, its `csum` column equals K, and its stored first field (the text of `notes.flds` before the first U+001F), stripped by H5 without any NFC step, equals C exactly.
 
 So letter case, spaces and sound tags count: `dupe:<id>,Cat` finds `Cat` and `<b>Cat</b>`, not `cat` or `Cat ` (trailing space); `dupe:<id>,Cat[sound:x.mp3]` finds only a first field holding that sound tag; `"dupe:<id>,<img src=\"x.jpg\">Cat"` finds `<img src="x.jpg">Cat` (both strip to ` x.jpg Cat`); `"dupe:<id>,Tom & Jerry"` finds `Tom & Jerry` and `Tom &amp; Jerry`. An empty text finds notes whose first field strips to nothing. Other note types, and text in other fields, never match. The note itself is not excluded (the editor excludes the note being edited when it shows the result, U27, U191). `csum` is read as stored: a note whose stored checksum does not fit its field is not found. Scenario: `search/dupe/first-field`.
 
-Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`), then compares the stripped first fields; the checksum and strip helpers are the ones the note save path uses (U20, U27).
+Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`), then compares the stripped first fields. It reuses the note save path's H5 strip and the save path's hash of an already stripped text (C4 steps 2–3, U20, U27), never a helper that takes a raw first field and strips or normalizes it again.
 
 ## N7. Plan
 
 - **Resolved at build.** Note type, template, deck, preset and `dupe:` candidates may be resolved to id sets when the plan is built (N1). `deck:current` reads the current deck id; `dupe:` reads `normalize_note_text` (`query-model.md` Q8). Name terms resolved to id sets are not slow.
-- **Slow.** Tag terms test an expression per note (`meguri_regex` of `text-matching.md` T14 for normal and `nc:` mode, the tags function below for `tag:re:`); they are slow terms (`query-model.md` Q9).
-- **Errors.** `invalid_regex` for `tag:re:` (N2.3); `search_failed` for a non-ASCII digit in an id list (`errors.md` E3).
-- **SQL function** (Meguri design, registered with the others of `text-matching.md` T14): `meguri_regex_tags(pattern, tags)` is 1 when the compiled expression matches at least one piece of `tags` split at U+0020 (N2.3), else 0; NULL `tags` gives NULL. `tag:nc:` passes `meguri_transform(tags, 1)` as the text.
+- **Slow.** Tag terms test an expression per note; they are slow terms (`query-model.md` Q9). Normal mode calls `meguri_regex(pattern, tags)` and `tag:nc:` calls `meguri_regex(pattern, meguri_transform(tags, 1))` (`text-matching.md` T14), both on the whole column; only `tag:re:` calls the tags function below.
+- **Errors.** `invalid_regex` for `tag:re:` (N2.3); `search_failed (expression too large)` for any expression of this file over the compiled size limit, the glob and escaped ones included (`text-matching.md` T12.1, T16); `search_failed` for a non-ASCII digit in an id list (`errors.md` E3).
+- **SQL function** (Meguri design, registered with the others of `text-matching.md` T14): `meguri_regex_tags(pattern, tags)` is 1 when the compiled expression matches at least one piece of `tags` split at U+0020 (N2.3), else 0; NULL `tags` gives NULL. Only `tag:re:` uses it.
 
 ## N8. Scenarios
 
@@ -182,7 +182,7 @@ Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`),
 |---|---|
 | `search/tags/hierarchy` | N2.1, N2.2 (AE49 tag part) |
 | `search/tags/regex-and-nc` | N2.3, N2.4, N2.5 |
-| `search/decks/names` | N3.2, N3.3, N3.7 |
+| `search/decks/names` (not yet written) | N3.2, N3.3, N3.7 |
 | `search/decks/current` | N3.4 |
 | `search/decks/presets` | N3.6 |
 | `search/ids/lists` | N3.5, N5 |

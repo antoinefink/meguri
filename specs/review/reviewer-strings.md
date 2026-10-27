@@ -2,7 +2,7 @@
 
 Spec: review/reviewer-strings
 Requirements: R86, R363, R370, R382, R383, R387, R429, R430, R432, R433, R434, R435, R436, R437, R439, R456, R581, R635
-Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog); none for S10 and the keys
+Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists); none for S10 and the keys
 Scenarios: conformance/scenarios/review/ (none recorded yet, S12)
 
 The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices and the unbury choices. U175, U182, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state and U157's summary reuse S8 and S9 for the same facts.
@@ -10,7 +10,7 @@ The text the review screen shows besides the card: toasts, the timebox prompt, A
 ## S1. Keys, arguments and plurals
 
 - Every string is an entry of the Review String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
-- `%lld` is an integer argument, `%@` a text argument; with two arguments they are numbered (`%1$lld`, `%2$lld`). A plural entry has the catalog's plural variations on its integer argument: English uses **one** for exactly 1 and **other** for every other value, 0 included; other languages follow their CLDR rules. An entry with two integer arguments pluralizes each one separately.
+- `%lld` is an integer argument, `%@` a text argument; with two arguments they are numbered (`%1$lld`, `%2$lld`). A plural entry has the catalog's plural variations on its integer argument: English uses **one** for exactly 1 and **other** for every other value, 0 included; other languages follow their CLDR rules. An entry with two integer arguments pluralizes each one separately. Every translation includes the integer argument in every plural form; the only exception is the English **one** form of `review.congrats.learnRemaining` (S8), because English uses **one** only for 1. A language whose **one** form also covers other numbers (Russian 21, French 0) shows the number.
 - Text is shown as given, with the trailing period where it has one. Decided 2026-10-27: apostrophes are typographic (’), the platform's typography; Anki writes ASCII `'`. Every other difference from Anki's English is listed in S11.
 
 ## S2. Toasts (R581)
@@ -25,10 +25,11 @@ No toast follows an answer, except the leech toast.
 
 | Key | English | Shown when |
 |---|---|---|
-| `review.toast.leech` | Card was a leech. | the accepted answer made the card a leech (`sched/leeches`) and the card is not suspended after it (leech action Tag Only) |
-| `review.toast.leechSuspended` | Card was a leech. It has been suspended. | the same, and the card is suspended after the answer (leech action Suspend Card) |
+| `review.toast.leech` | Card was a leech. | C9's `Accepted` result (`sched/review-session#C9`) has `leech` set and `suspended` not set (leech action Tag Only) |
+| `review.toast.leechSuspended` | Card was a leech. It has been suspended. | `Accepted` has both `leech` and `suspended` set (leech action Suspend Card) |
 
-- "Suspended after the answer" is read from the accepted outcome (the card's `queue` is -1 after it), not from the preset.
+- `suspended` is the outcome's flag (`sched/leeches#L5`: the answer set `queue` −1 through the leech action), never read from the preset. The suffix is Meguri's behaviour from R363 on that outcome; Anki 26.09.3 desktop does not show it (S11).
+- The catalog holds these two keys only, each translated as one whole sentence. `sched/leeches#L5`'s ids `leech-notice` and `leech-notice-suspended` are not catalog keys and nothing joins strings at run time: L5's two texts joined with a space are the English of `review.toast.leechSuspended`, and this table is the one source of the text.
 - Not shown again when the answer is redone (S2).
 - When the answer also reaches the timebox (S7), the toast shows together with the sheet.
 
@@ -40,13 +41,15 @@ No toast follows an answer, except the leech toast.
 | `review.toast.cardSuspended` | Card suspended. | | Suspend Card |
 | `review.toast.noteSuspended` | Note suspended. | | Suspend Note |
 | `review.toast.noteDeleted` | Note deleted. | | Delete Note, with the action below |
-| `review.toast.undo` | Undo | | the action button of `review.toast.noteDeleted`; it runs the undo of that step (U179) |
+| `review.toast.undo` | Undo | | the action button of `review.toast.noteDeleted`; it undoes that Delete Note only (rule below, U179) |
 | `review.toast.dueDateSet` | `Set due date of %lld card.` / `Set due date of %lld cards.` | cards given to the op | Set Due Date… (U183) |
 | `review.toast.cardsReset` | `Reset %lld card.` / `Reset %lld cards.` | cards given to the op | Forget… (U183) |
 
 - The bury count is the op's count of cards it wrote (`sched/manual-ops#M2`, M9): Bury Note on a note with 3 cards of which one is suspended says "2 cards buried."; Bury Card on the current card says "1 card buried.".
 - The suspend toasts carry no count: "Note suspended." also for a note whose other cards were already suspended.
 - The delete toast carries no count, whatever the number of cards removed with the note (R387; Anki says "3 cards deleted." for a note with 3 cards). VoiceOver announces it with its Undo action.
+- Decided 2026-10-27: the toast's Undo is offered only while that Delete Note is the session's newest undo step. When the newest step changes while the toast is shown (any step is recorded, such as an answer, an Auto Advance action, a bury, Flag or Mark, or an undo or redo runs, including the back button's), the toast closes at once. A tap on Undo first reads `peek(Session)` (`engine/undo`): it runs one `undo(Session)` (U179) only when the top step is `delete_note` and no step was recorded or undone since the toast appeared; otherwise it does nothing and the toast closes. The toast never runs an undo of another step.
+- Decided 2026-10-27: while VoiceOver runs, this toast does not hide after 2 seconds (S2): it stays until its Undo is used or the newest undo step changes (above), so its action can be reached. The back button (`Undo Delete Note`, S5) is the other way. Toasts without an action keep S2's timing.
 - Flag and Mark Note show no toast; the flag and ★ indicators change in place (R380, R381) and their accessibility values change. (Anki's reviewer shows none either.)
 
 ## S5. Undo and redo (R370)
@@ -72,15 +75,16 @@ No toast follows an answer, except the leech toast.
 | `review.toast.autoAdvanceOff` | Auto Advance disabled | the user turns it off |
 | `review.toast.questionTimeElapsed` | Question time elapsed | the question countdown ends and the question action is Show Reminder |
 | `review.toast.answerTimeElapsed` | Answer time elapsed | the answer countdown ends and the answer action is Show Reminder |
-| `review.autoAdvance.unavailable` | Auto Advance needs a number of seconds to show the question or the answer in this deck’s options. | explanation of the disabled toggle, both seconds 0 (R433; Meguri's wording) |
+| `review.autoAdvance.unavailable` | Auto Advance needs a number of seconds to show the question or the answer in the deck options of this card. | explanation of the disabled toggle, and ⇧A's toast while it is disabled (rule below; R433; Meguri's wording) |
 
+- Decided 2026-10-27: the current card's preset decides, as for every other Auto Advance value (R432). A time (`secondsToShowQuestion`, `secondsToShowAnswer`) is set when it is a finite number above 0. A stored 0, negative or NaN time (`sched/presets` keeps them as stored) is not set, and that countdown does not run. While Auto Advance is off and neither time of the current card's preset is set, the ⋯ item is disabled with `review.autoAdvance.unavailable` as its explanation, and ⇧A shows that text as a toast and changes nothing. While Auto Advance is on, the item stays enabled so that it can be turned off; a card whose preset sets neither time runs no countdown and shows no toast, and the next card with a set time counts down again. Anki never disables the toggle (S11).
 - Not shown: when Auto Advance turns itself off because the app left the foreground or the Mac app deactivated (R433); the ⋯ item's checked state shows it. A reminder shows once per countdown.
 
 ## S7. Timebox (R86, R429, R430)
 
 | Key | English | Arguments |
 |---|---|---|
-| `review.timebox.message` | `%1$lld card studied in %2$lld minute.`, each argument with its own plural: `card` / `cards`, `minute.` / `minutes.` | cards, minutes |
+| `review.timebox.message` | each argument with its own plural, cards one / other × minutes one / other: `%1$lld card studied in %2$lld minute.` / `%1$lld card studied in %2$lld minutes.` / `%1$lld cards studied in %2$lld minute.` / `%1$lld cards studied in %2$lld minutes.` | cards, minutes |
 | `review.timebox.continue` | Continue | |
 | `review.timebox.finish` | Finish | |
 
@@ -89,29 +93,35 @@ No toast follows an answer, except the leech toast.
 - minutes: `timeLim` / 60 rounded to the nearest whole number, an exact half to the even neighbour (90 → 2, 150 → 2, 600 → 10, 20 → 0). It is the limit, not the measured time.
 - Examples: 1 answer, `timeLim` 600 → "1 card studied in 10 minutes."; 25 answers, `timeLim` 60 → "25 cards studied in 1 minute.".
 - Continue restarts the timebox from 0 with a card count of 0; Finish ends the session into the summary (R430).
-- Decided 2026-10-27: when the crossing answer leaves nothing to present (finished or waiting), no sheet appears; the congratulations content or the summary follows as usual, and the timebox ends with the session.
+- Decided 2026-10-27: when the crossing answer leaves nothing to present (head `Finished` or `WaitingUntil`), no sheet appears; the congratulations content or the summary follows as usual, and the timebox restarts from 0 with a card count of 0 at that answer, as Continue does.
+- Decided 2026-10-27: time while no card is presented (the congratulations content, the summary) is not timebox time. The timebox's clock stops there and goes on from its value when a card is presented again (Continue, R437; unbury, R435; an undo from congratulations or the summary). A resume from the summary after Finish starts from 0 with a card count of 0.
+- Decided 2026-10-27: an undo while the sheet is shown closes the sheet and leaves the elapsed time and the card count unchanged (the count rule above), so the next accepted answer shows the sheet again. Esc on the Mac and swiping the sheet down count as Continue.
+- Example: `timeLim` 600; the answer at 610 s leaves only a learning card due in 10 minutes, so no sheet appears and the timebox restarts; 10 minutes on the congratulations content add nothing; after Continue the timebox goes on from 0 s and 0 cards.
 
 ## S8. Congratulations (R434, R436, R437, R439)
 
-Shown in place of a card when the head is empty (`Finished` or `WaitingUntil`), and passed to the summary (R439). The facts come from `sched/counts#C7` (`DeckStudyState`) for the session's deck at the instant shown. Paragraphs appear in this order:
+Shown in place of a card when the applied head's `terminalState` (`sched/review-session#C17.1`) is `Finished` or `WaitingUntil`, and passed to the summary (R439). The head alone decides the phase, the ready-in paragraph, its instant and Continue. The other facts come from `sched/counts#C7` (`DeckStudyState`) for the session's deck, read once the session's accepted answers have committed (C11), so that they include those answers. Paragraphs appear in this order:
 
 | Key | English | Shown when |
 |---|---|---|
 | `review.congrats.title` | Congratulations! You have finished this deck for now. | always |
-| `review.congrats.nextLearn.minutes`, `.hours` | `The next learning card will be ready in %lld minute.` / `… minutes.`; `… %lld hour.` / `… hours.` | `next_learning_ready_at` is present and after now |
+| `review.congrats.nextLearn.minutes` | `The next learning card will be ready in %lld minute.` / `The next learning card will be ready in %lld minutes.` | the head is `WaitingUntil{instant}`, the instant is after now, and the amount's unit is minutes |
+| `review.congrats.nextLearn.hours` | `The next learning card will be ready in %lld hour.` / `The next learning card will be ready in %lld hours.` | the same, and the unit is hours |
 | `review.congrats.learnRemaining` | one: `There is one remaining learning card due later today.` other: `There are %lld learning cards due later today.` | exactly when the line above is shown, in the same paragraph after a space; the count of `learning_later_today` |
 | `review.congrats.reviewLimit` | Today’s review limit has been reached, but there are still cards waiting to be reviewed. For optimum memory, consider increasing the daily limit in the options. | `review_limit_reached` |
 | `review.congrats.newLimit` | There are more new cards available, but the daily limit has been reached. You can increase the limit in the options, but please keep in mind that the more new cards you introduce, the higher your short-term review workload will become. | `new_limit_reached` |
 | `review.congrats.buried` | `One or more cards were buried, and will be shown tomorrow. You can %@ if you wish to see them immediately.` | `sibling_buried` + `user_buried` > 0 |
 | `review.congrats.unburyLink` | unbury them | the `%@` of the line above, shown as a link that starts S9; also the paragraph's accessibility action |
-| `review.congrats.continue` | Continue | R437's button, once `next_learning_ready_at` is at or before now |
+| `review.congrats.continue` | Continue | R437's button: the head is `WaitingUntil` and its instant is at or before now, or the applied head is `Active` (below) |
 | (deck description) | the deck's own text, rendered as U155 does | the description is not empty after rendering |
 
-- The ready-in amount: s = max(60, `next_learning_ready_at` − now) in seconds, as Anki clamps it. Below 3,600 the unit is minutes, below 86,400 hours; at 86,400 or more neither line shows. The amount is s divided by the unit's seconds, rounded to the nearest whole number with halves up. Examples: 600 → "10 minutes"; 90 → "2 minutes"; 3,599 → "60 minutes"; 5,400 → "2 hours". With a 1,200 s learn-ahead, a card due in 25 minutes is "ready in 5 minutes".
-- The amount is recomputed at least once a minute while shown, by a system-driven schedule, never an app timer (R437, R1854). When `next_learning_ready_at` reaches now, the ready-in paragraph goes (both its sentences) and Continue appears; review never resumes on its own.
-- Decided 2026-10-27: Meguri reads C7's native members (`next_learning_ready_at`, `learning_later_today`, `review_limit_reached`, `new_limit_reached`). Anki's page reads the compatibility members (`secs_until_next_learn`, `learning_remaining`, `review_remaining`, `new_remaining`). Those use C7's full named subtree, filtered descendants included, and coarser meanings (every queue-1 card, any due review card, any new card) where the native members use the studied subtree and "excluded by a daily limit", so Meguri's notices can differ from Anki's beyond C7's boundary and imported rows (S11).
+- The ready-in amount: s = max(60, floor((instant − now) / 1,000)) whole seconds, where instant is the head's `WaitingUntil` instant and both values are in milliseconds; the clamp is Anki's. Below 3,600 the unit is minutes, below 86,400 hours; at 86,400 or more neither line shows. The amount is s divided by the unit's seconds, rounded to the nearest whole number with halves up. Examples: 600 s → "10 minutes"; 90,000 ms → 90 → "2 minutes"; 89,999 ms → 89 → "1 minute"; 3,599 s → "60 minutes"; 5,400 s → "2 hours". With a 1,200 s learn-ahead, a card due in 25 minutes is "ready in 5 minutes".
+- The sentence is the catalog string, redrawn by a system-driven schedule (a timeline with an entry at each instant the shown amount changes and one at the ready instant), never an app timer (R437, R1854). A timer-interval countdown view (`Text(timerInterval:)`, a clock such as 4:59) is not used; this overrides U186's approach. When the instant is reached, the ready-in paragraph goes (both its sentences) and Continue appears.
+- Decided 2026-10-27: the screen follows the applied head (C17.1). `WaitingUntil` shows the ready-in paragraph and later Continue; `Finished` shows neither, whatever C7 reports. Until C7 has been read after the commit, the ready-in sentence shows alone and the C7 paragraphs follow when it is read. When the head turns `Active` while this content is shown (at readiness, or with cards another change made available), the content stays, Continue appears, and the head's item 0 is presented only when Continue is tapped; review never resumes on its own (R437). Continue tapped before the refreshed head is `Active` refetches the head and presents its item 0, or keeps this content while the head is still empty. The one exception is the screen's own unbury (S9): its result head is presented at once when it is `Active` (R435).
+- Decided 2026-10-27: Meguri reads C7's native members (`learning_later_today`, `review_limit_reached`, `new_limit_reached`); the ready instant is the head's, never C7's `next_learning_ready_at`. Anki's page reads the compatibility members (`secs_until_next_learn`, `learning_remaining`, `review_remaining`, `new_remaining`). Those use C7's full named subtree, filtered descendants included, and coarser meanings (every queue-1 card, any due review card, any new card) where the native members use the studied subtree and "excluded by a daily limit", so Meguri's notices can differ from Anki's beyond C7's boundary and imported rows (S11).
 - There is no custom-study paragraph or link (R436). The limit paragraphs carry no link here (R78's Deck Options links are the deck page's, U155).
-- The content is computed again on rollover and on any change while shown (R438).
+- The content is computed again on rollover, on any change while shown (R438) and when the session's own pending answers commit.
+- The English **one** form of `review.congrats.learnRemaining` intentionally has no `%lld` (S1).
 
 ## S9. Unbury choices (R435)
 
@@ -129,9 +139,10 @@ Shown in place of a card when the head is empty (`Finished` or `WaitingUntil`), 
 
 | Key | English | Shown when |
 |---|---|---|
-| `review.toast.changedElsewhere` | This card was changed elsewhere | the session reports `CurrentCardChanged{removed}` (`sched/review-session#C13`) for a change the review screen did not make |
+| `review.toast.changedElsewhere` | This card was changed elsewhere | the screen applies `CurrentCardChanged{removed}` (`sched/review-session#C13`) |
 
-- Not shown for the review screen's own ops (bury, suspend, flag, mark, Delete Note, set due date, forget, an edit in the edit panel; `sched/review-session#C13`, with C13.1 for Mark and Delete Note), for `{eligible}` or `{memoryOnly}`, or when the card leaves through a rollover. This wording is Meguri's (no Anki text).
+- Decided 2026-10-27: the screen keys the toast on the event alone and guesses nothing from in-flight ops. It relies on this core contract: an op submitted with the session id (every op of C13's list: bury, suspend, flag, forget, set due date, an edit in the edit panel, and C13.1's Mark and Delete Note) emits no `CurrentCardChanged` for its own commit and reports the change only in its result's head diff, as C13.1 states for Mark and Delete Note; a rollover that drops the current card (C14, R600) reports it through the rebuilt head (`QueueHeadChanged`, or the `Accepted` result with `rolledOver`), never as `CurrentCardChanged{removed}`. `sched/review-session#C13` and C14 do not say so for every op yet; this section is the contract until they do.
+- So it is not shown for the review screen's own ops, for `{eligible}` or `{memoryOnly}`, or when the card leaves through a rollover. This wording is Meguri's (no Anki text).
 
 ## S11. Differences from Anki
 
@@ -143,7 +154,23 @@ Shown in place of a card when the head is empty (`Finished` or `WaitingUntil`), 
 - The unbury choices are in sentence case (R435, R635); Anki writes them in title case (S9).
 - Decided 2026-10-27: the new-card limit notice uses "keep in mind", a small rewording of Anki's sentence (S8).
 - The congratulations facts are C7's native members (S8): studied subtree and daily-limit meanings, where Anki's compatibility members use the full named subtree and "some due review / new / queue-1 card exists", so the notices can differ beyond C7's boundary and imported rows. There is no custom-study line (R436).
+- Anki 26.09.3 desktop reads the card from before the answer when it shows the leech notice, so without add-ons it never adds "It has been suspended."; Meguri adds it when the outcome leaves the card suspended (R363, S3). Anki also shows the leech notice only after its modal timebox dialog closes; Meguri shows the toast together with the sheet (S3).
+- Anki never disables the Auto Advance toggle: with both times 0 it still says "Auto Advance enabled". Meguri disables it from the current card's preset with an explanation (R433, S6).
+- Anki's timebox measures wall-clock time since it started; Meguri's counts active time only, without background time (R431) or time with no card presented, and restarts at a crossing that shows no sheet (S7).
+- Anki's congratulations page clamps the ready-in amount to at least 60 seconds, so once the card is ready it still says "ready in 1 minute" until the page refreshes, and the page has no Continue button. Meguri removes the paragraph at the ready instant and shows Continue (R437, S8).
 
 ## S12. Tests and scenarios
 
-The oracle runs the collection library, not Anki's UI, so the text itself is checked by Meguri's tests: `ReviewToastsTests` (every key of S3 to S6 and S10 with its trigger and its absence), `TimeboxControllerTests` (S7 examples and the half-to-even rule), `CongratsModelTests` (S8 examples, each paragraph's condition, the 86,400 cut-off, the Continue switch) and the S9 chooser cases. Every key must exist in the catalog with exactly this English value (U167's string lint). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.
+The oracle runs the collection library, not Anki's UI, so the text itself is checked by Meguri's tests, each in a file its unit already lists:
+
+| Test file (unit) | Covers |
+|---|---|
+| `AnswerPathTests` (U175) | S3: both leech keys from `Accepted.leech` and `Accepted.suspended`, none after a redo, the toast together with the timebox sheet |
+| `CardActionPerformerTests` (U182) | S4's keys, counts and absences; the delete toast closing when another step is recorded or undone before Undo, a late Undo tap doing nothing, and the toast staying while VoiceOver runs |
+| `ReviewUndoControllerTests` (U179) | S5's labels and announcements, with no toast |
+| `AutoAdvanceControllerTests` (U185) | S6: the toasts, the toggle disabled from the current card's preset (0, negative and NaN times), ⇧A while disabled, a 0/0 card while Auto Advance is on |
+| `TimeboxControllerTests` (U185) | S7: the examples, the four message forms, the half-to-even rule, the restart at a crossing with no sheet, no timebox time while no card is presented, undo while the sheet is shown, Esc as Continue |
+| `CongratsModelTests` (U186) | S8: the examples (89,999 ms included), each paragraph's condition, the 86,400 cut-off, the Continue switch from the head, `Finished` with no ready-in line or Continue, and C17.1's two regressions (Easy on the last learning card inside learn-ahead; Again with a 60-minute step) while a committed C7 query disagrees; S9's chooser cases |
+| `ExternalChangeHandlerTests` (U187) | S10: the toast for each applied `{removed}`, none for `{eligible}`, `{memoryOnly}` or a rollover's rebuilt head |
+
+Every key must exist in the catalog with exactly this English value (U167's string lint). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.

@@ -32,6 +32,7 @@ Let D be the card's `odue` when it is not 0, otherwise its `due` (so a card in a
 | 1 (learning) or 4 (preview) | Q compared with N holds, where Q = (D − next-day-at) ÷ 86400 in 64-bit integers, the quotient truncated toward zero |
 | any other | never |
 
+- Overflow of Q (only for a stored `due` or `odue` near the ends of the signed 64-bit range, from another client or a damaged row): when D − next-day-at falls outside that range, the value is SQLite's: the difference is computed as a 64-bit real and divided by 86400 without truncation, so Q lies beyond ±10^14 and compares below (or above) every 32-bit operand. A learning card with `due` −9223372036854775000 is found by `prop:due<0` and not by `prop:due>=0`. Meguri writes the expression into the statement and lets SQLite compute it, or computes the same result; it never wraps or panics. Decided 2026-10-27 (Anki compatibility; no data is written).
 - New, suspended and buried cards never match, whatever their due.
 - Truncation toward zero puts every learning due less than one day either side of next-day-at at 0: one second before the boundary of day 10, a learning card due 10 minutes later and one due 18 hours earlier are both `prop:due=0`; a learning card due 86400 or 86401 seconds before next-day-at is −1.
 - The wrap is Anki's: with today 11, `prop:due<2147483647` compares review cards with −2147483638 and finds none of them, while learning cards are compared with 2147483647 and all match. Scenarios pin it (`search/props/scheduling`).
@@ -88,7 +89,7 @@ Examples at day 30 (`search/props/memory`): `s` 2.5 with `lrt` 10 days ago gives
 
 ## P9. Custom data: `cdn:`, `cds:`, `has-cd:` (R1071)
 
-The custom data value C(key) of a card is P12's. Keys of `cdn:` and `cds:` are ASCII letters and digits only (G8.1: `prop:cdn:k-x>1` and `prop:cdn:k_1=1` are `invalid_operator` with `cdn:k`); the key of `has-cd:` is any text (kind U). Keys are case-sensitive.
+The custom data value C(key) of a card is P12's. Keys of `cdn:` and `cds:` are ASCII letters and digits only (G8.1: `prop:cdn:k-x>1` and `prop:cdn:k_1=1` are `invalid_operator` with `cdn:k`); the key of `has-cd:` is any text (kind U), used as read: the pairs `\\`, `\*` and `\_` that kind U keeps stay two characters, so `has-cd:my\_key` looks for the key `my\_key` and does not find `{"my_key":1}`, which `has-cd:my_key` finds (no wildcards: `_` and `*` are plain characters here). Keys are case-sensitive.
 
 - **`has-cd:key`**: the card matches when C(key) exists (any value, JSON `null` and the empty string included). It is never unknown, so `-has-cd:key` finds every card without the key.
 - **`prop:cds:key<op>text`**: C(key) compared with the operand text (G8.1, kept as written, possibly empty) as text: SQLite's binary collation, which orders by the UTF-8 bytes. Unknown when the key is missing. `prop:cds:k=true` finds the JSON value `true`, `prop:cds:k=null` the JSON value `null`, `prop:cds:k=` the empty string, `"prop:cds:k= 7"` the string ` 7`.

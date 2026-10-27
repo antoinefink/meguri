@@ -76,14 +76,14 @@ This replaces `notetypes/records#N4` step 6 for a merge.
 ### J4.5 Writing the merged note type
 
 - It is written over T's rows (`notetypes/records#N3.2`: `fields` and `templates` rows by `ord`), as a save whose origins are T's positions: a field or template of T has its position in T as origin, the others none (the terms of `notetypes/structure-changes#S1.1`).
-- It is normalized by `notetypes/records#N4` steps 1 to 5, 7 and 8 as an unchecked save (`notetypes/validation#V1`: no template check), J4.4 standing in for step 6.
+- It is normalized by `notetypes/records#N4` steps 1 to 5, 7 and 8 as an unchecked save (`notetypes/validation#V1`: no template check), J4.4 standing in for step 6. A refusal there (`notetypes/validation#V2`) ends the import with `Corrupt{detail}` and nothing written, as `package/apkg-import#I7` decides ("A refused record").
 - When a field with an origin has a name other than T's field at that origin (a rename, J4.3), template references are rewritten in every template of the merged note type by `notetypes/field-rename#F3` with `notetypes/structure-changes#S4.3`'s append rule (deviation `template-rewrite-keeps-text`, `notetypes/structure-changes#S14`). No field is removed, so S4.2 never applies.
 - The `notetypes` row gets `mtime_secs` = `now_s` and `usn` -1 every time stage 1 or stage 2 writes the note type, also when no value differs from T's (Anki 26.9.3 stamps every merged note type).
 - `curModel` is not touched (J8 can change it).
 
 ## J5. Stage 1: merging by id
 
-**Inputs.** Those `package/apkg-import#I8` lists under "Called with". Beyond the note types and the GUID pairs, the merge reads from the same plan snapshot: the ids of every note of T, of each copy and of each E (J5 steps 3 and 5, J6); the target notes' `flds` and `mod` (J5 step 3, J10, J11); the package notes' `mod` (J10); and the Update notes option (I5, for J10). It reads nothing else and nothing live.
+**Inputs.** Those `package/apkg-import#I8` lists under "Called with". Beyond the note types (every target note type with its id and name, for J8's `curModel`), the package notes' ids, GUIDs, `mid`s and `mod`s, and the target notes of shared GUIDs, the merge reads from the same plan snapshot: the ids of every note of T, of each copy, of each E and of each I (J5 steps 3 and 5, J6); the target notes' `flds` and `mod` (J5 step 3, J10, J11); the cards of those notes (`id`, `nid`, `ord`, `did`, `odid`), for the plan halves of G9, M9 step 3 and M9.1; the decks and the config D3 and D4 read, the `_nt_<id>_` keys included (J5 step 5, J8); the target's `nextPos` (plan only, drawn live in the write phase, J12); and the Update notes option (I5, for J10). It reads nothing else and nothing live.
 
 For each incoming note type whose id the target holds, in ascending id, with T, its merging copies and the plan's state as the earlier note types of this stage left it:
 
@@ -98,7 +98,7 @@ Steps 3 to 5 run in this order, so G9 visits only T's own notes and the moved no
 
 ## J6. Stage 2: notes whose note type differs
 
-After stage 1, the merge takes every package note in ascending id, leaving out those `package/apkg-import#I9` step 1 skips and, for a GUID two package notes hold, all but the first. When a target note holds its GUID and that target note's `mid` (as stage 1 left it) differs from the package note's `mid`, the target note joins the pair (E, I): E the target note's note type, I the package note's note type as the target holds it after stage 1 or I7's add. The pairs run in ascending (I, E), each against the state the earlier ones left. Decided 2026-10-27: Anki runs them in an unspecified order (J14). For each pair:
+After stage 1, the merge takes every package note in ascending id, leaving out those `package/apkg-import#I9` step 1 skips and, for a GUID two package notes hold, all but the first that I9 step 1 does not skip (with merge on, none is `conflicting`, so that one is I9's first counted note). When a target note holds its GUID and that target note's `mid` (as stage 1 left it) differs from the package note's `mid`, the target note joins the pair (E, I): E the target note's note type, I the package note's note type as the target holds it after stage 1 or I7's add. The pairs run in ascending (I, E), each against the state the earlier ones left. Decided 2026-10-27: Anki runs them in an unspecified order (J14). For each pair:
 
 1. **Kinds**: E and I must be of one kind, otherwise `NotetypeKindConflict{incoming: I, target: E}` (J2).
 2. **I's record** gains E's fields and templates that it lacks: J4.1 with I as the starting list and E as the only merging record (templates not merged when I is cloze). I governs, whatever Update note types says, and keeps its sort field index.
@@ -114,7 +114,8 @@ For each incoming note type id, the merge returns (`package/apkg-import#I8`):
 
 - **Target note type**: the incoming note type's own id (T, or the note type I7's add created). A merge never sends incoming notes to another id.
 - **Field map**: for each position of that note type's final field list (after both stages), the position in the incoming note type of the incoming field matched there in stage 1 (J3), or none. Fields stage 1 appended from the incoming note type are filled from their own positions; fields that only T or a copy has, and fields stage 2 appended, are none. For an added note type that stage 2 did not grow, the identity.
-- **Template map**: each incoming template ordinal → the position of the template it matched in the final template list. For a cloze note type, the identity on every ordinal: card ordinals are cloze numbers.
+- **Template map**: each incoming template ordinal → the position of the template it matched in the final template list. For a cloze note type, the identity on every ordinal: card ordinals are cloze numbers. A standard card's `ord` at or past the incoming note type's template count has no entry; `package/apkg-import#I11.1` says what happens to it.
+- **An added note type that stage 2 grew** (it was the I of a pair, J6): its field map is the identity on the incoming note type's own positions and none for the positions stage 2 appended; its template map is the identity on the incoming ordinals. Stage 2 only appends to I, so I's own fields and templates keep their positions.
 
 Example: T `Front` (f1), `Back` (f2) with templates `Card 1` (t1), `Card 2` (t2); incoming `Front` (f1), `Extra` (f3), `Back` (f2) with templates `Card 2` (t2), `Card 3` (t3): merged fields `Front`, `Back`, `Extra`, field map 0, 2, 1; merged templates `Card 1`, `Card 2`, `Card 3`, template map 0 → 1, 1 → 2. An incoming card of ordinal 0 becomes ordinal 1, and I11's "pair exists" test runs on ordinal 1 (I8).
 
@@ -131,7 +132,7 @@ After I9 has written the notes, each copy merged in stage 1 and each E of stage 
 - **Confirmed preview.** Decided 2026-10-27 (data safety): an import whose merge preview (J10) was not empty and was confirmed takes the safety backup like a structural edit, also when the merge has no structural effect (no reason, no `scm`): after the confirmation and before the first write, with the structural-edit coalescing (`package/backup-triggers#T6.1`, T6.2; `package/apkg-import#I14.4`). The confirmed preview drops content that only the undo step keeps, and an undo step lasts only as long as the undo history. An import with an empty preview and no effect takes none.
 - **What this overrides.** Decided 2026-10-27: a merge's plan carries `notetypes_merged` and no other reason, whatever its effects (as `package/apkg-import#I8` says). This overrides, for a merge, `notetypes/schema-changes#G3`'s "carries all of them": a merge that changes a sort index or grows a field list carries `notetypes_merged`, not also `sort_field_changed` or `fields_changed`. One reason is enough for `scm` and for the backup (G3), so nothing is lost. I7's `sort_field_changed` for an update without a merge is unchanged.
 - No Anki full-upload warning is shown (R1476). With `scm > ls` the next manual Anki transfer is one-way and its preview says so (`notetypes/schema-changes#G1`); routine CloudKit sync stays incremental (R2053).
-- **Structure report** (`engine/change-stream#S2.5`, `sync/cloudkit-records#K19.1`; this spec edits neither): reasons 8 `apkg_apply` and, when the merge has an effect, 9 `notetypes_merged`; `layouts` for each note type J5 or J6 wrote whose rows or sort field changed, with entry i of `field_map` the stored `ord` merged field i comes from or -1 (likewise `template_map`); `removed`, J8's ids; `type_changes`, one entry per (copy, T) and per (E, I) pair with J5 step 5's maps. Decided 2026-10-27: 9 is reported exactly when the plan carries the reason, as `package/apkg-import#I14.4` says.
+- **Structure report** (`engine/change-stream#S2.5`, `sync/cloudkit-records#K19.1`; this spec edits neither): reasons 8 `apkg_apply` and, when the merge has an effect, 9 `notetypes_merged`; `layouts` for each note type J5 or J6 wrote that existed before the import and whose rows or sort field changed (an I that I7 added has none, J12), with entry i of `field_map` the stored `ord` merged field i comes from or -1 (likewise `template_map`); `removed`, J8's ids; `type_changes`, one entry per (copy, T) and per (E, I) pair with J5 step 5's maps. Decided 2026-10-27: 9 is reported exactly when the plan carries the reason, as `package/apkg-import#I14.4` says.
 
 ## J10. Preview of destructive mappings (R1605)
 
@@ -157,9 +158,10 @@ A note I9 updates gets the incoming `mod`; one it does not keeps the `mod` the m
 ## J12. Write phase, undo and progress
 
 - **Plan.** The merge runs in the plan (`package/apkg-import#I14.1` step 3), against the snapshot, cancellable there, with the plan half of every G9 run. A replan (I14.2) runs it again and compares the preview's digest (I8).
-- **Write phase** (I14.1 step 8, one transaction): stage 1 per note type (J5 steps 3 to 6), stage 2 per pair (J6 steps 3 to 5), then I9's notes, then J8's removals, then the rest of step 8. `scm` is set once (J9) and `col.mod` once (I14.1).
+- **Write phase** (I14.1 step 8, one transaction): I7's adds of the note types the target lacks, then stage 1 per note type (J5 steps 3 to 6), stage 2 per pair (J6 steps 3 to 5), then I9's notes, then J8's removals, then the rest of step 8. `scm` is set once (J9) and `col.mod` once (I14.1).
+- **An added I.** A note type I7 added that stage 2 then rewrites (J6 step 5) ends with `mtime_secs` `now_s` and `usn` -1 (J4.5), not the package's `mtime_secs`. It did not exist before the op, so it gets no `layouts` entry (`engine/change-stream#S2.5`); the notes moved into it are in `type_changes`.
 - **Re-derived** in the write phase as I14.2 says for I7's regeneration: G9's and M9 step 3's new cards and the `nextPos` values they draw, from live rows; card renumbering by M9.1 reads live cards. The `TableUntouched` preconditions on `notes`, `notetypes`, `fields` and `templates` cover the rest: an edit there replans. The rows the merge writes count toward I14.2's long-write threshold.
-- **Undo** is the import's one step "Import" (I14.3): it restores T's and every I's rows with their stamps, every rewritten or moved note (`mid`, `flds`, `sfld`, `csum`, `mod`, `usn`), every renumbered card, the removed note types with their `_nt_<id>_` keys, `curModel` and `col.scm` (`notetypes/schema-changes#G5`), and deletes the cards G9 and M9 step 3 added, without graves. Redo applies the after-images. Anki 26.9.3's merge is part of its one undo step "Import" too.
+- **Undo** is the import's one step "Import" (I14.3): it restores T's and every I's rows with their stamps, every rewritten or moved note (`mid`, `flds`, `sfld`, `csum`, `mod`, `usn`), every renumbered card, the removed note types with their `_nt_<id>_` keys, `curModel`, `nextPos` when G9 or M9 step 3 drew from it, and `col.scm` (`notetypes/schema-changes#G5`), and deletes the cards G9 and M9 step 3 added, without graves. Redo applies the after-images. Anki 26.9.3's merge is part of its one undo step "Import" too.
 
 ## J13. Errors
 
@@ -167,6 +169,7 @@ A note I9 updates gets the incoming `mod`; one it does not keeps the `mod` the m
 |---|---|
 | `NotetypeKindConflict{incoming, target}` | J2, in stage 1 or stage 2; the whole import ends with nothing written |
 | `ConfirmationRequired{preview, token}` | J10 with I8's token rules |
+| `Corrupt{detail}` | J4.5: N4 or V2 refuses a merged record (a name that is empty after normalization, from a crafted package); the whole import ends with nothing written (`package/apkg-import#I7`, I16) |
 
 The merge has no other error: a merge cannot miss a field or a template. Every other error of the import is `package/apkg-import#I16`'s. For scenarios, the kind conflict is recorded as `notetype_kind_conflict` (I16).
 
@@ -183,6 +186,7 @@ Decided 2026-10-27, in the order of `package/apkg-import#I17`: data safety first
 | Ids or names that repeat inside one note type | one field or template can be matched twice | one to one (J3); no scenario |
 | A copy of the other kind | merged into T: its notes change kind and lose cards past the template count | left alone (J1, J2); no scenario |
 | A copy whose id is an incoming note type's id | treated as a copy and again as an incoming note type | not a copy (J1); no scenario |
+| A standard card whose `ord` has no template-map entry (damaged package) and names a position the merged template list has | keeps its ordinal and shows that template | skipped with its review log (`package/apkg-import#I11.1`, `apkg-merge-unmapped-ordinal`); no scenario |
 | Destructive mappings | imported without a question | J10's preview and I8's confirmation; no golden: scenarios run the import as accepted (J15) |
 
 Anki behaviors Meguri keeps, which a reader might take for differences: `Always` governs also with equal `mtime_secs` (J4.2); every merged note type is stamped (J4.5); the sort index is kept as a number (J4.4); fields the incoming lacks are emptied in updated notes (J7, previewed by J10); `IfNewer` after a layout change updates no note of T (J11).
@@ -221,5 +225,7 @@ Each golden whose Meguri result differs (J14) gets its `conformance/deviations.y
 - J2: a kind conflict in stage 1 and in stage 2 writes nothing; a copy of the other kind is left alone.
 - J3 one-to-one matching with a repeated id; J1's copy that is an incoming note type's id.
 - J6 with two pairs on one I, and with one E split over two I's; J6 step 3 leaves I's own notes' values in place when E's layout differs.
+- J7 for an added note type that stage 2 grew: package note type 5001, which the target lacks, and note `g1`, which the target holds under 3001 with an extra field: 5001 is added, gains 3001's extra field, and its incoming notes keep their values at their own positions (field map the identity, then none; template map the identity); the added 5001 has no `layouts` entry (J12).
+- I11.1's unmapped ordinal: a card of `ord` 3 for an incoming standard note type with two templates, kept at 3 when the merged list has three templates and skipped when it has four.
 - J9: `scm` set exactly for the effects listed; the storage guard (`notetypes/schema-changes#G6`) passes. The structure report cases (reasons 8 and 9 exactly when J9 says, layouts, removed, type changes) go in `core/crates/meguri-engine/tests/op_catalog.rs` (`engine/change-stream#S2.5`, whose list holds them); `apkg_merge.rs` also checks the reasons the plan carries.
 - J12: undo and redo of a merge with removals restore `curModel` and the `_nt_` keys; the failpoint kill during the write phase leaves all or none of the merge (I18.3).

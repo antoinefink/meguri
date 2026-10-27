@@ -7,7 +7,7 @@ Scenarios: conformance/scenarios/maintenance/check-db/
 
 Check Database checks the collection file, compacts it, then repairs rows that other programs, old clients or raw writes left inconsistent, and reports what it repaired. The oracle's view of it (the problem kinds, their counts and the `check_db` scenario op) is `conformance/collection-check` K3 step 7, K5 and K10; this spec does not repeat K5's table but gives, for each kind, the rule, the stamps and the order Meguri must reproduce. The notes stage (note types, notes, tags and card generation) is `maintenance/check-database-notes` (U129). The integrity verdict and the optimize statements are `maintenance/optimize-integrity` M6 and M3.
 
-Terms: "now" is the repair instant (C7): `now_ms` in epoch milliseconds, `now_s` = `now_ms` divided by 1,000, rounded down; "today" is the day clock's `days_elapsed` at that instant (`sched/day-clock`). "Local stamps" are `usn` -1 and the modification time `now_s` (`storage/ids-usn-mtime#S2`). "Round" is SQLite's `round()`: to the nearest integer, halves away from zero. "Clamp to [a, b]" replaces a value below a by a and above b by b.
+Terms: "now" is the repair instant (C7): `now_ms` in epoch milliseconds, `now_s` = `now_ms` divided by 1,000, rounded down; "today" is the day clock's `days_elapsed` at that instant (`sched/day-clock`). "Local stamps" are `usn` -1 and the modification time `now_s` (`storage/ids-usn-mtime#S2`). "Round" is SQLite's `round()`: to the nearest integer, halves away from zero. "Clamp to [a, b]" replaces a value below a by a and above b by b. "Modulo" is SQLite's `%`: each operand is first truncated toward zero to an integer, so the result is always an integer (1,500,000.5 modulo 1,000,000 is 500,000; 2,000,000.5 modulo 1,000,000 is 0).
 
 Text and blob values follow SQLite's conversion rules, which the repairs must reproduce (they appear only after raw writes, since an integer column converts a numeric text on store):
 
@@ -100,7 +100,7 @@ Example (one new card with `ivl` 1.5, `due` 2,000,000, `odue` 1.5): C8.1 folds `
 
 ### C8.1 New-card positions
 
-The summary's C8.1 row. A `due` from 1,000,000 to 1,999,999 already equals its folded value, so it is neither changed nor counted (K5). 2,500,000 becomes 1,500,000; 2,000,000 becomes 1,000,000. Cards in queue 4 keep their `due`.
+The summary's C8.1 row. A `due` from 1,000,000 to 1,999,999 already equals its folded value, so it is neither changed nor counted (K5). 2,500,000 becomes 1,500,000; 2,000,000 becomes 1,000,000. A fractional `due` loses its fraction through the modulo (Terms): 1,500,000.5 becomes 1,500,000 and 2,000,000.5 becomes 1,000,000, each counted here, and C8.2 then finds nothing on them. Cards in queue 4 keep their `due`.
 
 ### C8.2 Due
 
@@ -148,9 +148,9 @@ Count: one per deck created, in `decks_missing`. Scenario `maintenance/check-db/
 
 ### C9.3 Filtered fields outside a filtered deck (R1643)
 
-Every card with `odid` above 0 whose `did` names a normal deck gets `odid` 0 and `odue` 0. Its other columns stay, `mod` and `usn` included. Each such card is counted in `card_properties`. A card whose `did` names a filtered deck is left alone, whatever its `odid` names.
+Every card with `odid` above 0 whose `did` names a normal deck gets `odid` 0 and `odue` 0. Its other columns stay, `mod`, `usn` and `data` included (`data` byte for byte). Each such card is counted in `card_properties`. A card whose `did` names a filtered deck is left alone, whatever its `odid` names.
 
-Meguri reads only the cards' `id`, `did`, `odid` and `odue` here. Anki reads every column of each card it changes and stops the run, changing nothing, when one is out of its stored range (for example a negative `reps`); Meguri goes on and leaves those columns. Deviation `check-db-lrt-reads-needed-columns` (C8.7, C17).
+Meguri reads only the cards' `id`, `did`, `odid` and `odue` here. Anki reads every column of each card it changes and stops the run, changing nothing, when one is out of its stored range (for example a negative `reps`); Meguri goes on and leaves those columns. Anki also writes the card's `data` back in its own canonical form: keys it does not know are dropped, a value that is not a JSON object becomes `{}`, `s` without `d` is dropped, and `s`, `d`, `dr` and `decay` are rounded to 4, 3, 2 and 3 decimal places. Decided 2026-10-27, data safety: Meguri keeps `data` as stored, since this repair is about `odid` and `odue` only. Both are deviation `check-db-lrt-reads-needed-columns` (C8.7, C17).
 
 ## C10. History stage
 
@@ -178,6 +178,8 @@ Going through every deck name in ascending `unicase` order of the stored name (c
 
 So the count is one per parent created for a deck, not one per deck created: `A::B::C` alone creates `A::B` and `A` and counts 1; `X::Y` and `X::Z` without `X` create `X` and count 1. Ancestors created for the parent are not added to the set; a later deck whose parent is such an ancestor finds that it exists, creates nothing and still counts 1 (`A::B::C` and `A::D` alone count 2 and create `A::B` and `A`).
 
+D3's two refusals do not apply here. When the parent's nearest existing ancestor is a filtered deck (D3's `filtered_parent`), or the parent has 12 or more components and its 11 nearest ancestors are missing (D3's `too_deep`), the parent and its missing ancestors are still created as above, as normal decks, and counted. Examples: a filtered deck `F` and a deck `F::x::y` create the normal deck `F::x` and count 1; a deck `1::2::…::13` alone creates its twelve ancestors and counts 1. Anki creates the parent through its ordinary deck add, which refuses in both cases, so its whole Check Database stops with an error, changing nothing, and every later run stops the same way. Decided 2026-10-27, data safety: the subdecks already exist under that name, so creating their parent only completes the hierarchy, removes nothing and lets the check finish. Deviation `check-db-parents-past-deck-limits` (C17).
+
 ### C10.3 Next new-card position (R1642)
 
 The config key `nextPos` becomes the largest `due` of the cards with `type` 0 (any queue) plus 1, or 0 when there is no such card or that value is negative. It is written as a config value (`storage/config-table`, local stamps) only when it differs from the stored one. Not counted.
@@ -189,10 +191,11 @@ The config key `nextPos` becomes the largest `due` of the cards with `type` 0 (a
 - When the count is above 0, the tables are re-keyed in this order: `notes` (and every card's `nid` that named an old note id), then `cards` (and every review-log row's `cid` that named an old card id), then `revlog`. In each table the rows above the cutoff, in ascending order of their old id, take the new ids `now_ms`, `now_ms` + 1, `now_ms` + 2, ... No stamp changes; graves are not touched.
 - Example (scenario `maintenance/check-db/future-ids`, `now_ms` T): a note at T + 2 days and one at T + 1 day; only the first is counted, and it takes T, whatever larger valid ids exist.
 - When a new id is already used by a row of that table, Anki stops with a constraint error and changes nothing. Meguri skips every id already used in the table, so the k-th row takes the k-th unused id from `now_ms` up. Deviation `check-db-future-ids-skip-used` (C17).
+- C8.7 runs before this step, so a card's `lrt` set from a review-log row that is re-keyed here still names the row's old id. The next run's C8.7 then corrects it and counts it in `card_last_review_time` (Anki does the same).
 
 ## C11. The schema stamp and `col.mod`
 
-- `scm` (R1643, `notetypes/schema-changes#G2` reason `check_database_repair`): set to `now_ms` when at least one of these is above 0: C8.7's count, C9.1's count, the number of cards C9.3 changed, C10.1's count, C10.4's count, or one of the notes stage's `duplicate_card_ords`, `cards_without_template`, `field_counts` and `notetypes_recovered` (`maintenance/check-database-notes` N8). Every other repair leaves `scm` as it was (`conformance/collection-check` K5's last paragraph). The op then reports reason 10 in its structure report (`engine/change-stream#S2.5`, under review with R2066).
+- `scm` (R1643, `notetypes/schema-changes#G2` reason `check_database_repair`): set to `now_ms` when at least one of these is above 0: C8.7's count, C9.1's count, the number of cards C9.3 changed, C10.1's count, C10.4's count, or one of the notes stage's `duplicate_card_ords`, `cards_without_template`, `field_counts` and `notetypes_recovered` (`maintenance/check-database-notes` N8). Every other repair leaves `scm` as it was (`conformance/collection-check` K5's last paragraph). The op then reports reason 10 in its structure report (`engine/change-stream#S2.5`, approved 2026-10-27 with R2066).
 - `col.mod`: set to `now_ms` when the op changed at least one row (`storage/ids-usn-mtime#S5`). A run that changes nothing leaves it (R1472). Anki sets `col.mod` on every run. Deviation `check-db-no-change-keeps-mod` (C17). Decided 2026-10-27: R1472 is the requirement that decides this; the plan's test "`col.mod` matches the oracle on a healthy collection" is read as "matches up to this deviation".
 
 ## C12. The report
@@ -224,14 +227,14 @@ The job's result on success:
 | `CheckFailed{stage, cause}` | C4's check gave no verdict; C6 failed without a corrupt verdict; or a repair failed | unchanged (a C6 statement that completed changed no row) |
 | `Cancelled` | C15 | unchanged |
 
-- A repair fails when a row it must read cannot be decoded (`model/row-records`' typed error, naming the table, column and key: an unreadable deck or note type record, a note whose `guid` or other text is not valid UTF-8 beyond `flds`, `tags` and `sfld`, which `maintenance/check-database-notes` N6.1 repairs) or a statement fails (`SQLITE_FULL`, `SQLITE_IOERR`). The `check_database` op rolls back as a whole, so nothing of it is committed, and the job ends with `CheckFailed{stage, cause}`, `stage` being `cards`, `notes` or `history`. Anki also stops at such a row and changes nothing. No later run gets past such a row; the remedies are restore and the iCloud replace (`maintenance/optimize-integrity` M7.1). The safety backup stays.
+- A repair fails when a row it must read cannot be decoded (`model/row-records`' typed error, naming the table, column and key: an unreadable deck or note type record, a note whose `guid` or other text is not valid UTF-8 beyond `flds`, `tags` and `sfld`, which `maintenance/check-database-notes` N6.1 repairs, or a note whose `guid`, `flds` or `tags` is stored as a blob, N6.1) or a statement fails (`SQLITE_FULL`, `SQLITE_IOERR`). The `check_database` op rolls back as a whole, so nothing of it is committed, and the job ends with `CheckFailed{stage, cause}`, `stage` being `cards`, `notes` or `history`. Anki also stops at such a row and changes nothing. No later run gets past such a row; the remedies are restore and the iCloud replace (`maintenance/optimize-integrity` M7.1). The safety backup stays.
 - A process killed during the repair op leaves the last committed file: the transaction is not in it.
 - U133a maps these to its FFI error set.
 
 ## C14. After the commit
 
 - **Undo** (R725): both histories are emptied with `ClearedByNonUndoableOp` (`engine/undo`), also when the op changed nothing, as Anki does and as the `check_db` scenario op does (`engine/undo` M6). A run that ends before the repair op leaves them.
-  - One exception in Anki: when the notes stage recovers a note type (`maintenance/check-database-notes` N4), Anki adds it through an undoable add, so its undo history holds one "Add Note Type" step after the run. Decided 2026-10-27: Meguri empties both histories in that case too (data safety: undoing that step would remove the note type the moved notes now use). The scenarios that recover a note type do not observe `undo_status`, so no golden shows this; it is listed in C17's last paragraph.
+  - Two exceptions in Anki, both from undoable adds nested in the run: when the notes stage recovers a note type (`maintenance/check-database-notes` N4), its undo history holds one "Add Note Type" step after the run; and each parent C10.2 creates adds one "Add Deck" step (the parent's missing ancestors are in the same step), after the note type's. Decided 2026-10-27: Meguri empties both histories in these cases too (data safety: undoing such a step would remove the note type the moved notes now use, or a parent its subdecks rely on). The scenarios that recover a note type or create a missing parent do not observe `undo_status`, so no golden shows this; it is listed in C17's last paragraph.
 - **Change set**: the op's change set covers every row it changed (`engine/change-stream`), published after the commit.
 - **Derived store** (R1489): every component is marked `Stale` and rebuilt (`storage/derived-store`), whether or not a row changed.
 - **Records** (`engine/collection-replace#R6.1`, U32's sidecar):
@@ -243,6 +246,7 @@ The job's result on success:
 ## C15. Progress and cancellation
 
 - Progress phases (`engine/jobs` J5), R1639's stages: `integrity` (also during the safety backup), `optimize`, `cards`, `notes` (completed: notes done; total: all notes), `history`. The last three run inside the repair op's write phase: when the writer takes the op, the sink reports `cards` in place of `engine/op-model` O5's `Committing`, then `notes` and `history`, and none of the three offers Cancel (they stand for `Committing` in J5's sense).
+- Every progress report of this job carries `cancellable` beside its phase: true in `integrity` and `optimize` (also while the repair op waits for the writer), false from `cards` on. Decided 2026-10-27: U133a's progress record exposes this flag, and U133a and U153 decide whether to offer Cancel from it alone, never from the phase names.
 - Cancel before the writer takes the repair op: during the check (the reader is interrupted: no verdict, C4), during the backup (T6.2), during a maintenance task (the writer is interrupted while that task runs: `SQLITE_INTERRUPT`, nothing changed, M8.4), or while the repair op waits for the writer (O5). The job ends `Cancelled`; the backup stays; no `lastCheckDatabase` is recorded. A cancel after C4's sound verdict keeps C4's `lastQuickCheck` and its state change (`Failed{Corrupt}` to `Ready`).
 - Once the writer takes the repair op, a cancel is ignored and the result reports `past_cancel_point` (O5).
 - `suspend` (U32) cancels the job as a cancel does. A repair op already running finishes; if the process is killed meanwhile, its transaction is not committed.
@@ -260,10 +264,11 @@ Each is a deviation entry in `conformance/deviations.yaml`, added with the scena
 | Id | Anki 26.09.3 | Meguri |
 |---|---|---|
 | `check-db-no-change-keeps-mod` | sets `col.mod` on every run | only when a row changed (C11, R1472) |
-| `check-db-lrt-reads-needed-columns` | stops with an error, changing nothing, when a card or review-log row has a column outside its range (C8.7, C9.3) | goes on; C10.1 repairs `ivl`, `lastIvl` and `time`; other out-of-range columns stay |
+| `check-db-lrt-reads-needed-columns` | stops with an error, changing nothing, when a card or review-log row has a column outside its range (C8.7, C9.3); rewrites the `data` of each card C9.3 changes in canonical form | goes on; C10.1 repairs `ivl`, `lastIvl` and `time`; other out-of-range columns stay; C9.3 keeps `data` as stored |
 | `check-db-future-ids-skip-used` | stops with a constraint error when a new id is taken (C10.4) | skips used ids |
+| `check-db-parents-past-deck-limits` | stops with an error when a missing parent's nearest existing ancestor is filtered or the parent is too deep (C10.2) | creates the parent and its missing ancestors as normal decks and counts it |
 
-Not deviations, since no scenario can show them: the order of backup and integrity check (C3); the lifecycle, progress, cancel, records and report (C2, C12 to C15). Not a deviation entry, since no scenario observes it: the undo step Anki keeps after a note type recovery (C14); a scenario that recovers a note type must not observe `undo_status`. The notes stage's differences are `maintenance/check-database-notes` N9.
+Not deviations, since no scenario can show them: the order of backup and integrity check (C3); the lifecycle, progress, cancel, records and report (C2, C12 to C15). Not a deviation entry, since no scenario observes it: the undo steps Anki keeps after a note type recovery or a missing parent's creation (C14); a scenario that recovers a note type or creates a missing parent (C10.2) must not observe `undo_status`. The notes stage's differences are `maintenance/check-database-notes` N9.
 
 ## C18. Scenarios and tests
 
@@ -287,23 +292,28 @@ Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advanc
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|
 | `card-due` | a new card `due` 2.5, a review card (queue 2) `due` 200,000, a learning card `due` 3,000,000,000: C8.2's values and stamps, `card_properties` 3, `scm` unchanged |
-| `new-position-fold` | new cards `due` 2,500,000 and 1,999,999, a queue-4 new card `due` 2,500,000: C8.1 (1,500,000; unchanged; unchanged), count 1 |
+| `new-position-fold` | new cards `due` 2,500,000, 1,999,999 and 1,500,000.5, a queue-4 new card `due` 2,500,000: C8.1 (1,500,000; unchanged; 1,500,000, the fraction dropped by the modulo; unchanged), `new_positions_too_high` 2, `card_properties` 0 |
 | `card-odue` | a review card with `odue` 10 and `odid` 0, a card with `odue` 1.5: C8.3, count 2 |
 | `card-ivl` | `ivl` -5, 1.5 and 3,000,000,000: C8.4, count 3 |
-| `card-text-values` | by `db_exec`: a new card `due` `'abc'`, a new card `due` the blob `x'3132'`, a review card (queue 2) `due` `'abc'`, a card `ord` `'abc'`, a card `ivl` `'12abc'`, a card `mod` `'12abc'`: 1,000,000 and 1,000,012 (`new_positions_too_high` 2), today, 30,000, 12 and 12 (`card_properties` 4; the Terms' conversion rules); the `ord` 30,000 card is then removed by the notes stage (`cards_without_template` 1, `scm` set) |
+| `card-text-values` | by `db_exec`: a new card `due` `'abc'`, a new card `due` the blob `x'3132'`, a review card (queue 2) `due` `'abc'`, a card `ord` `'abc'`, a card `ivl` `'12abc'`, a card `mod` `'12abc'`: 1,000,000 and 1,000,012 (`new_positions_too_high` 2), today, 30,000, 12 and 12 (`card_properties` 4; the Terms' conversion rules); the `ord` 30,000 card, the only card of its note, is then removed by the notes stage (`cards_without_template` 1, `scm` set) and N6.6 generates that note's `ord` 0 card again (new id, local stamps, observed) |
 | `card-mod` | `mod` 1894701600.5: C8.5, truncated, no stamp |
-| `card-ord` | a standard card `ord` 40,000: C8.6 to 30,000, then removed by the notes stage (`card_properties` 1, `cards_without_template` 1, `scm` set) |
+| `card-ord` | the only card of a one-template standard note, set to `ord` 40,000: C8.6 to 30,000, then removed by the notes stage (`card_properties` 1, `cards_without_template` 1, `scm` set); N6.6 then generates the note's `ord` 0 card again (new id, local stamps, deck and position observed) |
 | `orphan-cards` | a note row deleted by `db_exec`: its card deleted, no grave (`SELECT count(*) FROM graves`), review log kept, `scm` set |
 | `missing-deck-name-taken` | a deck named `recovered4242` exists, a card in deck 4242: deck `recovered4242+` with id 4242 |
-| `missing-parents` | decks renamed by `db_exec` to `A::B::C`, `X::Y`, `X::Z` (U+001F between components): `A::B`, `A` and `X` created, ids and names observed, `decks_missing` 2, `scm` unchanged |
-| `filtered-fields` | a card in a normal deck with `odid` 1 and `odue` 7: both 0, no stamp, `card_properties` 1, `scm` set |
+| `missing-parents` | decks renamed by `db_exec` to `A::B::C`, `X::Y`, `X::Z` (U+001F between components): `A::B`, `A` and `X` created, ids and names observed, `decks_missing` 2, `scm` unchanged; no `undo_status` (C14) |
+| `filtered-fields` | a card in a normal deck with `odid` 1, `odue` 7 and canonical `data` (C9.3): both 0, no stamp, `card_properties` 1, `scm` set |
 | `revlog-values` | review-log rows with `ivl` 1.5, `lastIvl` -2.5, `time` -5 and 3,000,000,000: C10.1's values, `usn` kept, `revlog_properties` count, `scm` set |
 | `next-position` | `nextPos` set to 99 by `set_config`, new cards at positions 1 to 3: `nextPos` 4; then every card made a review card by `db_exec` (`type` 2, `queue` 2, `due` 0) and a second `check_db`: `nextPos` 0 |
-| `future-ids-cards` | a card and a review-log row with ids two days ahead: re-keyed to `now_ms`, the row's `cid` follows its card, `future_ids` 2 |
+| `future-ids-cards` | a new card (type 0, so C8.7 does not read its row) and a review-log row of it, both with ids two days ahead: re-keyed to `now_ms`, the row's `cid` follows its card, `future_ids` 2 |
 | `healthy` | a collection with notes, reviews and decks, no damage: all counts 0, `scm` unchanged, `col.mod` (deviation `check-db-no-change-keeps-mod`), `undo_status` empty after the run |
-| `all-records` | every damage above in one collection: one report, counts equal to the sum |
+| `all-records` | every damage above except `future-ids-cards`, in one collection: one report, counts equal to the sum; no `undo_status` (C14). `future-ids-cards` stays out because N6.6 gives the cards it generates (`card-ord`, `card-text-values`) ids from `now_ms` up, which C10.4 would then need for the future card, and Anki stops on a taken id (C10.4) |
 
-Held for a driver change (the `check_db` op knows only the rejection `corrupt`; these need a rejection for Anki's other failures, for example `{"error": "failed"}` in `conformance/collection-check` K10 and `dsl.md` D7.2): `revlog-ivl-overflow` (a review-log `ivl` of 3,000,000,000: Anki fails, Meguri repairs, deviation `check-db-lrt-reads-needed-columns`) and `future-ids-taken` (a valid note at `now_ms` and a note two days ahead: Anki fails, Meguri gives `now_ms` + 1, deviation `check-db-future-ids-skip-used`).
+Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl.md` D7.2) on Anki's side, each with its deviation; they end with no second `check_db`:
+
+- `revlog-ivl-overflow`: a review-log `ivl` of 3,000,000,000. Anki `failed`; Meguri repairs it (`revlog_properties` 1). Deviation `check-db-lrt-reads-needed-columns`.
+- `future-ids-taken`: a valid note at `now_ms` and a note two days ahead. Anki `failed`; Meguri gives `now_ms` + 1 (`future_ids` 1). Deviation `check-db-future-ids-skip-used`.
+- `parents-under-filtered`: a filtered deck `F` and a normal deck renamed by `db_exec` to `F::x::y`. Anki `failed`; Meguri creates the normal deck `F::x` (`decks_missing` 1). Deviation `check-db-parents-past-deck-limits`; no `undo_status`.
+- `parents-too-deep`: a deck renamed by `db_exec` to `1::2::…::13`, none of its ancestors existing. Anki `failed`; Meguri creates its twelve ancestors (`decks_missing` 1). Deviation `check-db-parents-past-deck-limits`; no `undo_status`.
 
 ### C18.3 Meguri tests (`core/crates/meguri-engine/tests/check_db.rs`)
 

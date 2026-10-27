@@ -5,7 +5,7 @@ Requirements: R1033, R1034, R1035, R1037, R1038, R1039, R1040, R1041, R1042, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/text/, conformance/scenarios/search/regex/
 
-What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios pin the examples. Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
+What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios each section names pin its examples, except the examples of T6 and T8.3, whose scenarios are still to be written (T17). Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
 
 ## T1. Terms
 
@@ -50,7 +50,7 @@ A pattern matches a text when it matches the whole text; T5 and T7 add the `%` t
 
 - `%` matches any run of zero or more characters.
 - `_` matches exactly one character (one Unicode scalar value).
-- `\` followed by a character matches that character. A `\` at the very end of a pattern makes the pattern match nothing.
+- `\` followed by a character matches that character, compared like any other pattern character in the fold mode (`case-folding.md` C2, C3): `\D` matches `d` too, as SQLite's `LIKE` does. A `\` at the very end of a pattern makes the pattern match nothing.
 - Any other pattern character matches one text character equal to it in the fold mode (`case-folding.md` C2, C3, C6).
 - "Character" includes U+001F, line breaks and every other code point, so `%` and `_` cross field boundaries in the field string (T5.2).
 
@@ -58,7 +58,7 @@ These are SQLite's `LIKE` rules with `ESCAPE '\'`. In AsciiCompat mode SQLite's 
 
 ### T3.3 Size limit
 
-A pattern longer than 50,000 bytes in UTF-8 fails the search with `search_failed` (`errors.md` E3). The length is that of the whole pattern as tested: the `%` around plain text, and the U+001F and `%` that a run adds (T7.2, `fields.md` F4). So 49,998 `a` pass as plain text (50,000 bytes) and 49,999 fail, and `front:` with 49,999 `a` fails for a `Front` that is the first of two fields (50,001 bytes) (`search/text/pattern-limit`). Anki fails only when a row reaches the test; Meguri checks every pattern of the plan when it builds the plan, as for regular expressions (T12.2, T12.3).
+A pattern longer than 50,000 bytes in UTF-8 fails the search with `search_failed` (`errors.md` E3). The length is that of the whole pattern as tested: the `%` around plain text, and the U+001F and `%` that a run adds (T7.2, `fields.md` F4). So 49,998 `a` pass as plain text (50,000 bytes) and 49,999 fail, and `front:` with 49,999 `a` fails for a `Front` that is the first of two fields (50,001 bytes) (`search/text/pattern-limit`). Anki fails only when a row reaches the test; Meguri checks every pattern of the plan when it builds the plan, as for regular expressions (T12.2, T12.3), the run patterns of note types without notes included.
 
 ## T4. Normalizing the search text (R1037)
 
@@ -102,7 +102,7 @@ When ignore accents is on:
 - Not affected: `nc:` (always combining-free), `re:`, field searches in every mode, all-fields searches (`fields.md` F7).
 - The fold mode still applies after the transform (`case-folding.md` C2).
 
-Examples with the key on (`search/text/ignore-accents`): `uber`, `über`, `w:uber` and `w:ÜBER` find `über`, `ÜBER`, `uber` and the cloze note `{{c1::über}} all`; `sc:uber` finds the cloze `{{c1::über}}`; `front:uber`, `re:uber` and `*:uber` find only `uber`; `strasse` finds nothing next to `Straße` and `strase` finds it (T8.2).
+Examples with the key on, which the scenario `search/text/ignore-accents` is to pin; it is not yet written, so only `uber` finding `ÜBER` is pinned today (`search/folding/ignore-accents`): `uber`, `über`, `w:uber` and `w:ÜBER` find `über`, `ÜBER`, `uber` and the cloze note `{{c1::über}} all`; `sc:uber` finds the cloze `{{c1::über}}`; `front:uber`, `re:uber` and `*:uber` find only `uber`; `strasse` finds nothing next to `Straße` and `strase` finds it (T8.2).
 
 ## T7. Excluded fields (R1039)
 
@@ -170,7 +170,7 @@ Every other character is kept. NFKD folds compatibility forms: fullwidth `ｄｏ
 
 ### T8.3 Match
 
-The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `ıstanbul` (`search/text/nc`).
+The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `ıstanbul`. The scenario `search/text/nc` is to pin this and the table below; it is not yet written, so no golden holds these examples today (`nc:uber` is pinned by `search/folding/umlaut`, the transform through other terms by `search/tags/regex-and-nc` and `search/fields/modes`).
 
 | Search | Stored | Matches? |
 |---|---|---|
@@ -269,7 +269,7 @@ Scenario: `search/regex/basics`. An empty `re:` matches every note.
 
 ### T12.1 Kinds
 
-Every regular expression a query builds is compiled as T11.1 says: `re:`, field `re:` (`fields.md` F5), the all-fields expressions (F7), `w:` (T10.1) and `tag:re:` (`names-and-ids.md` N2.3).
+Every regular expression a query builds is compiled as T11.1 says, at plan time (T12.2): `re:`, field `re:` (`fields.md` F5), the all-fields expressions (F7), `w:` (T10.1), `tag:re:` (`names-and-ids.md` N2.3), and also the expressions built by glob conversion or escaping: field-name patterns (`fields.md` F2 step 3), normal and `nc:` tag values (N2.2 step 4, N2.4), deck names and `deck:current` (N3.3, N3.4), and note type and template names with wildcards (N4.1, N4.2). The second group can never have a syntax error, since every metacharacter is escaped, but a long run of wildcards can pass the size limit (each `_` of a deck name becomes a Unicode `.`, each `*` of a tag value a Unicode `\S*`): `deck:` followed by 30,000 `_` is `search_failed (expression too large)`, never a panic or an empty result. Its range is the whole term.
 
 - A syntax error, nesting beyond the limit included, is `invalid_regex` (`errors.md` E1). `"re:("`, `re:[`, `re:a{2,1}`, `re:\p{Nope}` and `re:*` are syntax errors. With the `(?i)` prefix, 249 nested groups are accepted and 250 are an error.
 - An expression that parses but whose compiled form exceeds the size limit (`re:a{1000}{1000}`) is `search_failed`.
@@ -284,7 +284,7 @@ Meguri compiles every expression of the query while it builds the plan, before a
 
 ### T12.3 Deviation from Anki
 
-Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference; no scenario shows it.
+Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference, a second deviation, `search-pattern-limit-unreached`: on a collection without notes, `front:` followed by 49,999 `a` (a `Front` that is the first of two fields) returns no ids in Anki and `search_failed (pattern too long)` in Meguri; so does a T7.2 run pattern over the limit that only a note type without notes has. Decided 2026-10-27: Meguri keeps the build-time check (one rule for every pattern, no error that depends on which rows exist). Its `conformance/deviations.yaml` entry and that scenario are still to be added; `search-invalid-regex-unreached` covers regular expressions only.
 
 ## T13. Glob conversion to a regular expression
 
@@ -327,7 +327,7 @@ Not Anki behavior: the functions through which Meguri's plan runs the per-row wo
 
 ## T15. The plan
 
-- Field-name resolution (`fields.md` F2), exclusions (T7), cloze note types (T9.1) and the run patterns are computed from the note types when the plan is built.
+- Field-name resolution (`fields.md` F2), exclusions (T7), cloze note types (T9.1) and the run patterns are computed from the note types when the plan is built. As `names-and-ids.md` N1 says for names, the result must equal evaluating these rules on the collection state the statement reads, so the plan builds and runs on one read transaction, or is built again when the note types changed between the two (a cache keyed only on context values, `query-model.md` Q8, does not suffice).
 - The plan records the context values each term read (T1) and marks as slow every term that calls a T14 function per row (`query-model.md` Q9). In Unicode mode every term of this spec does. In AsciiCompat mode plain text and normal field terms may run on SQLite's `LIKE` and are then not slow.
 - Errors raised while building the plan: `invalid_regex` and `search_failed` from T3.3, T7.2, T7.3, T9.1 and T12.1. Their messages are in `errors.md` E7; T16 defines the texts they insert.
 
@@ -335,9 +335,9 @@ Not Anki behavior: the functions through which Meguri's plan runs the per-row wo
 
 The messages are `errors.md` E7's, which holds every search message; this section defines the texts they insert. The backtick rule of E7 applies to each.
 
-- `{pattern}` (`invalid_regex`, `search_failed (expression too large)`): the term's value as the user wrote the expression, after the grammar's reading, without the `(?i)`, anchors and boundaries Meguri adds: `re:` and field `re:` (also `*:re:`): kind Q; `w:`: the `w:` value; `tag:re:`: kind Q of the text after `re:`, after NFC (`names-and-ids.md` N2.3); the normal and nc modes of the all-fields names (`fields.md` F7): the value as read, before the glob conversion of T13.1.
+- `{pattern}` (`invalid_regex`, `search_failed (expression too large)`): the term's value as the user wrote the expression, after the grammar's reading, without the `(?i)`, anchors and boundaries Meguri adds: `re:` and field `re:` (also `*:re:`): kind Q; `w:`: the `w:` value; `tag:re:`: kind Q of the text after `re:`, after NFC (`names-and-ids.md` N2.3); the normal and nc modes of the all-fields names (`fields.md` F7): the value as read, before the glob conversion of T13.1; the glob and escaped expressions of T12.1's second group (`search_failed (expression too large)` only): the text that was converted, as read and after NFC, before the conversion: the field name for a field-name pattern, the tag value for `tag:` and `tag:nc:`, the deck value for `deck:` (the stored name of the current deck for `deck:current`), the note type or template value for `note:` and `card:`.
 - `{reason}` (`invalid_regex`): from the `regex` crate's syntax error text, the part after `error: ` on its last line that starts with `error: `, for example `unclosed group`, `unclosed character class`, `repetition operator missing expression`.
-- `{notetype}` (`search_failed (all fields excluded)`): the name of the first note type, in name order, that excludes all its fields.
+- `{notetype}` (`search_failed (all fields excluded)`): the name of the first note type that excludes all its fields, in ascending order of `notetypes.name` under the `unicase` comparison (`text/unicode-primitives#U2`), then of id. Decided 2026-10-27 (Meguri's wording; Anki names none): with `b` and `B2`, or `Z` and `a`, excluding every field, the message names `b`, or `a`.
 
 The `search_failed` causes of this spec and their E7 lines (Anki shows only a database error for them):
 
@@ -359,11 +359,11 @@ The range of each is the whole term that failed (`errors.md` E5).
 | `search/text/html-and-sort-field` | T2, T5 |
 | `search/text/field-separator` | T3.2, T5 |
 | `search/text/normalization` | T4 |
-| `search/text/ignore-accents` | T6 |
+| `search/text/ignore-accents` (not yet written; `search/folding/ignore-accents` pins `uber` only) | T6 |
 | `search/text/excluded-fields` | T7.2, T7.3 |
 | `search/text/excluded-all` | T7.2, T7.3 |
 | `search/text/no-searchable-field` | T7.2 |
-| `search/text/nc` | T8 |
+| `search/text/nc` (not yet written) | T8 |
 | `search/text/sc`, `sc-no-cloze-type` | T9 |
 | `search/text/word` | T10 |
 | `search/text/pattern-limit` | T3.3 |
