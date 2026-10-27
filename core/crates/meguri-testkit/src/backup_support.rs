@@ -1,6 +1,7 @@
 //! Local backup/recovery composition for package integration tests. Opens no
 //! endpoint, server, transport or acceptance harness.
 use meguri_model::{clock::Clock, rng::SeededRandom};
+pub use meguri_package::restore::RestoreError;
 use meguri_storage::space::SpaceProvider;
 use std::{path::Path, sync::Arc};
 pub fn open_restore_host(

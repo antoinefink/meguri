@@ -228,6 +228,7 @@ impl ReaderRole {
 #[derive(Debug)]
 pub struct Reader {
     pub(crate) conn: Connection,
+    _recovery_copy: Option<tempfile::TempDir>,
     role: ReaderRole,
     /// The epoch of the derived store attached as `derived`
     /// (`storage/derived-store` D9).
@@ -243,6 +244,7 @@ pub struct Reader {
 pub struct ReaderFactory {
     path: PathBuf,
     initializers: Initializers,
+    recovery: bool,
 }
 
 impl ReaderFactory {
@@ -250,20 +252,34 @@ impl ReaderFactory {
         ReaderFactory {
             path: path.to_path_buf(),
             initializers: initializers.clone(),
+            recovery: false,
         }
     }
 
-    /// Diagnostics for a recorded-corrupt owner: no writer or successful probe
-    /// is required. Readers use mode=ro and include a live WAL; SQLite may
-    /// refuse hot-journal recovery. Such refusal never releases ownership.
     pub fn recovery(path: &Path, initializers: &Initializers) -> Self {
-        Self::new(path, initializers)
+        Self {
+            recovery: true,
+            ..Self::new(path, initializers)
+        }
     }
 
     /// Opens a reader of `role` (C6). The caller closes it before the
     /// collection closes.
     pub fn open(&self, role: ReaderRole) -> Result<Reader, StorageError> {
-        Reader::open(&self.path, role, &self.initializers)
+        if self.recovery {
+            let copy = recovery_copy(&self.path)?;
+            let path = copy.path().join("collection.anki2");
+            let mut reader = Reader::open_with_query(
+                &path,
+                role,
+                &self.initializers,
+                crate::schema::version::probe_query(&path),
+            )?;
+            reader._recovery_copy = Some(copy);
+            Ok(reader)
+        } else {
+            Reader::open(&self.path, role, &self.initializers)
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -275,11 +291,21 @@ impl Reader {
     /// Opens a reader of `role` on a collection the writer has already set
     /// to WAL mode.
     pub(crate) fn open(path: &Path, role: ReaderRole, initializers: &Initializers) -> Result<Reader, StorageError> {
-        let conn = Connection::open_with_flags(file_uri(path, Some("mode=ro")), READ_ONLY)?;
+        Self::open_with_query(path, role, initializers, "mode=ro")
+    }
+
+    fn open_with_query(
+        path: &Path,
+        role: ReaderRole,
+        initializers: &Initializers,
+        query: &str,
+    ) -> Result<Reader, StorageError> {
+        let conn = Connection::open_with_flags(file_uri(path, Some(query)), READ_ONLY)?;
         conn_init::full(&conn, initializers).map_err(|detail| StorageError::ConnectionInit { detail })?;
         pragmas::reader(&conn, role.query_only())?;
         Ok(Reader {
             conn,
+            _recovery_copy: None,
             role,
             derived: None,
         })
@@ -288,6 +314,60 @@ impl Reader {
     pub fn role(&self) -> ReaderRole {
         self.role
     }
+}
+
+#[derive(PartialEq, Eq)]
+struct RecoveryStamp {
+    native: (u64, u64),
+    bytes: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+fn recovery_stamp(path: &Path) -> Result<Option<RecoveryStamp>, StorageError> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_file() {
+        return Err(StorageError::Io {
+            detail: "recovery evidence is not a regular file".into(),
+        });
+    }
+    Ok(Some(RecoveryStamp {
+        native: (metadata.dev(), metadata.ino()),
+        bytes: metadata.len(),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    }))
+}
+
+fn recovery_copy(path: &Path) -> Result<tempfile::TempDir, StorageError> {
+    let suffixes = ["", "-wal", "-journal"];
+    let before = suffixes
+        .map(|suffix| recovery_stamp(&sibling(path, suffix)))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    if before[0].is_none() {
+        return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
+    }
+    let copy = tempfile::tempdir()?;
+    let destination = copy.path().join("collection.anki2");
+    for (suffix, stamp) in suffixes.iter().zip(&before) {
+        if stamp.is_some() {
+            std::fs::copy(sibling(path, suffix), sibling(&destination, suffix))?;
+        }
+    }
+    for (suffix, stamp) in suffixes.iter().zip(&before) {
+        if recovery_stamp(&sibling(path, suffix))? != *stamp {
+            return Err(StorageError::Io {
+                detail: "recovery evidence changed during diagnostic capture".into(),
+            });
+        }
+    }
+    Ok(copy)
 }
 
 #[cfg(test)]

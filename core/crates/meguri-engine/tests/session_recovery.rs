@@ -21,7 +21,10 @@ use session_support::{Harness, NOW};
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -1037,22 +1040,36 @@ fn fail_marker_after_archive_rename() {
 }
 type ForeignJournal = (PathBuf, Vec<u8>, (u64, u64));
 static FOREIGN_JOURNAL: Mutex<Option<ForeignJournal>> = Mutex::new(None);
+static FOREIGN_ROLLBACK_REFUSALS: AtomicUsize = AtomicUsize::new(0);
+fn observe_foreign_rollback_refusal() {
+    let foreign = FOREIGN_JOURNAL.lock().unwrap();
+    let (path, bytes, identity) = foreign.as_ref().unwrap();
+    assert_eq!(fs::read(path).unwrap(), *bytes);
+    assert_eq!(native(path), *identity);
+    FOREIGN_ROLLBACK_REFUSALS.fetch_add(1, Ordering::SeqCst);
+}
 fn substitute_retired_marker() {
     use meguri_model::faultpoint::{self, Fault};
     let mut foreign = FOREIGN_JOURNAL.lock().unwrap();
     let (path, bytes, identity) = foreign.as_mut().unwrap();
     *bytes = fs::read(&*path).unwrap();
     assert!(String::from_utf8_lossy(bytes).contains("Retired"));
+    let retired_identity = native(path);
     let replacement = path.with_file_name("foreign-journal.jsonl");
     fs::write(&replacement, &*bytes).unwrap();
     fs::rename(&replacement, &*path).unwrap();
     *identity = native(path);
+    assert_ne!(*identity, retired_identity);
     // The exact marker bytes on a foreign inode are still an unknown binding.
     // Stop before activation so R6 proves old, then require rollback to refuse
     // that foreign inode without destroying either it or the archived answers.
     faultpoint::arm(
         "replace.media.after_final_database_verification",
         Fault::IoError(std::io::ErrorKind::Other),
+    );
+    faultpoint::arm(
+        "session.journal.recovery.rollback_refused",
+        Fault::Callback(observe_foreign_rollback_refusal),
     );
 }
 fn recovery_archives(collection: &Path) -> Vec<PathBuf> {
@@ -1180,6 +1197,7 @@ fn recovery_restore_failure(failure: RecoveryFailure) {
                 "storage.atomic.after_rename"
             }
             RecoveryFailure::ForeignBinding => {
+                FOREIGN_ROLLBACK_REFUSALS.store(0, Ordering::SeqCst);
                 *FOREIGN_JOURNAL.lock().unwrap() = Some((journal_path(&captured.path), Vec::new(), (0, 0)));
                 "replace.after_live_wal_removed"
             }
@@ -1196,6 +1214,7 @@ fn recovery_restore_failure(failure: RecoveryFailure) {
         let refused = host.restore_backup(&backup.name, &Default::default(), &ProgressSink::new());
         faultpoint::disarm(point);
         faultpoint::disarm("replace.media.after_final_database_verification");
+        faultpoint::disarm("session.journal.recovery.rollback_refused");
         let foreign = if failure == RecoveryFailure::ForeignBinding {
             Some(FOREIGN_JOURNAL.lock().unwrap().take().unwrap())
         } else {
@@ -1204,7 +1223,19 @@ fn recovery_restore_failure(failure: RecoveryFailure) {
         let expected_journal = foreign.as_ref().map_or(&old, |(_, bytes, _)| bytes);
         let refusal = refused.unwrap_err();
         if foreign.is_some() {
-            assert!(refusal.to_string().contains("binding changed"), "{refusal}");
+            assert_eq!(FOREIGN_ROLLBACK_REFUSALS.load(Ordering::SeqCst), 1);
+            assert!(
+                matches!(
+                    &refusal,
+                    meguri_testkit::backup_support::RestoreError::Replacement {
+                        error: meguri_engine::replace::ReplaceError::Staging(
+                            meguri_engine::replace::StagingError::Io(meguri_storage::StorageError::Io { detail })
+                        ),
+                        safety_backup: Some(_),
+                    } if detail.contains("replace.media.after_final_database_verification")
+                ),
+                "{refusal}"
+            );
         } else {
             assert!(refusal.to_string().contains(point), "{refusal}");
         }

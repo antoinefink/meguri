@@ -350,7 +350,11 @@ impl RecoveryJournal {
         if self.original.matches(&self.path)? {
             return self.original.sync(&self.path);
         }
-        self.marker.require(&self.path)?;
+        if let Err(error) = self.marker.require(&self.path) {
+            meguri_model::faultpoint!("session.journal.recovery.rollback_refused")
+                .map_err(meguri_storage::StorageError::from)?;
+            return Err(error.into());
+        }
         let mut rollback = AtomicFile::new(&self.path, Purpose::Sidecar)?;
         rollback.file_mut().write_all(&self.original.bytes).map_err(error)?;
         let restored = RecoveryBinding {

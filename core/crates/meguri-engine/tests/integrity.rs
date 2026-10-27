@@ -685,6 +685,48 @@ fn recovery_bytes(path: &std::path::Path) -> Vec<Option<Vec<u8>>> {
         })
         .into()
 }
+type DiagnosticEvidence = (Option<Vec<u8>>, Option<(u64, u64)>);
+fn diagnostic_evidence(path: &std::path::Path) -> Vec<DiagnosticEvidence> {
+    use std::os::unix::fs::MetadataExt;
+    ["", "-wal", "-journal", "-shm"]
+        .map(|suffix| {
+            let path = sibling(path, suffix);
+            match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => (
+                    Some(std::fs::read(path).unwrap()),
+                    Some((metadata.dev(), metadata.ino())),
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, None),
+                Err(error) => panic!("reading diagnostic evidence: {error}"),
+            }
+        })
+        .into()
+}
+fn assert_diagnostic_evidence(path: &std::path::Path, expected: &[DiagnosticEvidence], phase: &str, case: &str) {
+    use sha2::{Digest, Sha256};
+    let digest = |bytes: &Option<Vec<u8>>| {
+        bytes.as_ref().map(|bytes| {
+            let hash = Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            (bytes.len(), hash)
+        })
+    };
+    for ((actual, expected), suffix) in diagnostic_evidence(path)
+        .iter()
+        .zip(expected)
+        .zip(["", "-wal", "-journal", "-shm"])
+    {
+        assert!(
+            actual.0 == expected.0,
+            "{phase}: {case} {suffix:?}: actual size/hash {:?}, expected {:?}",
+            digest(&actual.0),
+            digest(&expected.0),
+        );
+        assert_eq!(actual.1, expected.1, "{phase}: {case} {suffix:?}: native identity");
+    }
+}
 fn record_corrupt(path: &std::path::Path) {
     DeviceState::for_collection(path)
         .set_last_quick_check(&LastQuickCheck {
@@ -738,7 +780,7 @@ fn recorded_corruption_preserves_upgrade_mode_hot_journal_and_live_wal() {
             db.close().unwrap();
         }
         record_corrupt(&path);
-        let original = recovery_bytes(&path);
+        let original = diagnostic_evidence(&path);
         let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
         let engine = Engine::new(EngineConfig::default()).unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
@@ -755,7 +797,7 @@ fn recorded_corruption_preserves_upgrade_mode_hot_journal_and_live_wal() {
             }
         ));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(recovery_bytes(&path), original, "open: {case}");
+        assert_diagnostic_evidence(&path, &original, "open", case);
         {
             let reader = c.reader(ReaderRole::Maintenance);
             if case == "hot" {
@@ -770,16 +812,16 @@ fn recorded_corruption_preserves_upgrade_mode_hot_journal_and_live_wal() {
             }
         }
         assert!(engine.maintenance_status().is_ok());
-        assert_eq!(recovery_bytes(&path), original, "read/status: {case}");
+        assert_diagnostic_evidence(&path, &original, "read/status", case);
         // The advisory lock is held even if no SQLite probe succeeded.
         let other = Engine::new(EngineConfig::default()).unwrap();
         assert!(other.open_raw(&path, common::open_config(&clock)).is_err());
         engine.close().unwrap();
-        assert_eq!(recovery_bytes(&path), original, "close: {case}");
+        assert_diagnostic_evidence(&path, &original, "close", case);
         let reopened = other.open_raw(&path, common::open_config(&clock)).unwrap();
         drop(reopened);
         drop(other);
-        assert_eq!(recovery_bytes(&path), original, "drop: {case}");
+        assert_diagnostic_evidence(&path, &original, "drop", case);
         drop(dir);
     }
 }
