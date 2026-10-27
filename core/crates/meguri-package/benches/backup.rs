@@ -25,8 +25,8 @@ fn main() -> ExitCode {
     for size in sizes.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let fixture = fixtures::profile_collection(size).expect("prepared generated fixture");
         let copy = fixture.working_copy().expect("isolated working copy");
-        let directory = copy.path.parent().unwrap();
-        let backups = directory.join("backups");
+        let backup_directory = tempfile::tempdir().expect("isolated backup directory");
+        let backups = backup_directory.path().join("backups");
         fs::create_dir(&backups).unwrap();
         // The full hourly history is thinned once before measurement. Subsequent
         // samples advance one day, keeping a bounded, realistic retained set.
