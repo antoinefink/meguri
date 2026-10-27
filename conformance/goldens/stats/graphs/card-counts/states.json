@@ -1,0 +1,77 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "buried": 2,
+                "learn": 1,
+                "mature": 1,
+                "newCards": 1,
+                "relearn": 1,
+                "suspended": 1,
+                "young": 1
+              },
+              "including_inactive": {
+                "learn": 2,
+                "mature": 2,
+                "newCards": 2,
+                "relearn": 1,
+                "young": 1
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/card-counts/states",
+  "scenario_sha256": "67b7365fcea38ca8d43b4d9d8f21b62c87942501630216d4d0237879781a2fbd",
+  "tz": "Europe/Paris"
+}

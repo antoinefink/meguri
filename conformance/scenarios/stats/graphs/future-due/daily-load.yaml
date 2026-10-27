@@ -1,0 +1,18 @@
+# stats/graphs-cards C13 (C3.4): five review cards due tomorrow with ivl 0 to
+# 4: daily_load 3 (f32 sum 3.0833333); no have_backlog member.
+id: stats/graphs/future-due/daily-load
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+steps:
+  - {"db_exec": {"sql": "WITH c(k, id) AS (SELECT ROW_NUMBER() OVER (ORDER BY id) - 1, id FROM cards) UPDATE cards SET type = 2, queue = 2, due = 1, ivl = (SELECT k FROM c WHERE c.id = cards.id)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}]}]}

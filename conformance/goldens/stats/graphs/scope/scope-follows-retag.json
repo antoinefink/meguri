@@ -1,0 +1,81 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 1
+              },
+              "including_inactive": {
+                "newCards": 1
+              }
+            },
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 1
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          }
+        ]
+      },
+      {
+        "remove_note_tags": {
+          "count": 1
+        }
+      },
+      {
+        "add_note_tags": {
+          "count": 1
+        }
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 1
+              },
+              "including_inactive": {
+                "newCards": 1
+              }
+            },
+            "reviews": {
+              "count": {
+                "0": {
+                  "young": 1
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/scope-follows-retag",
+  "scenario_sha256": "ff0b026f4bacbe38ec19662cd9b2edbd28480cd1a965fb7087644860c55313e3",
+  "tz": "Europe/Paris"
+}

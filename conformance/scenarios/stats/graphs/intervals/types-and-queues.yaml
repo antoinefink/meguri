@@ -1,0 +1,28 @@
+# stats/graphs-cards C13 (C5): review cards with ivl 0, 1, 21 and 36,500, a
+# suspended review card with ivl 21, a relearning card with ivl 1, a new card
+# and a learning card with ivl 5. Expected {0: 1, 1: 2, 21: 2, 36500: 1}.
+id: stats/graphs/intervals/types-and-queues
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 0, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 1, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 21, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 36500, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 21, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 1, due = 1791857400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, ivl = 5, due = 1791857400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["intervals"]}]}]}

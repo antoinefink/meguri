@@ -1,0 +1,63 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "mature": 1
+              },
+              "including_inactive": {
+                "mature": 1
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "mature": 1
+              },
+              "including_inactive": {
+                "mature": 1
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "mature": 1
+              },
+              "including_inactive": {
+                "mature": 1
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/card-counts/filtered-deck",
+  "scenario_sha256": "51d983bb7855900eab0952c23b375bf1db244ae0e33a1b4f76c49b5230d4a9e9",
+  "tz": "Europe/Paris"
+}

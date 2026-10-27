@@ -1,0 +1,30 @@
+# stats/graphs-cards C13 (C4.1): one card each: new, learning, relearning,
+# young (ivl 20), mature (ivl 21), suspended mature, buried-by-scheduler new,
+# buried-by-user learning. Expected excluding_inactive {newCards 1, learn 1,
+# relearn 1, young 1, mature 1, suspended 1, buried 2}, including_inactive
+# {newCards 2, learn 2, relearn 1, young 1, mature 2}.
+id: stats/graphs/card-counts/states
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791857400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 3, due = 1791857400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 21, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 30, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = -3, due = 1791857400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}

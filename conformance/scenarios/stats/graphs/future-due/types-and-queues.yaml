@@ -1,0 +1,24 @@
+# stats/graphs-cards C13 (C3.1, C3.3): a suspended review card, a suspended
+# and a buried new card (none counted), a buried review card due today + 4
+# (key 4), a buried review card due today (not counted, in daily_load).
+# Both buried review cards have ivl 1, so daily_load is 2.
+id: stats/graphs/future-due/types-and-queues
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 5, due = 2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -2, ivl = 1, due = 4 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -3, ivl = 1, due = 0 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}]}]}

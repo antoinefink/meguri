@@ -1,0 +1,17 @@
+# stats/graphs-common G15 (G3): card graphs read every scope card whatever the
+# history. Cards created 400 and 10 days ago (ids set with db_exec). Expected
+# added and card_counts equal for year and all.
+id: stats/graphs/scope/card-graphs-ignore-history
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1757239200000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1790935200000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["added", "card_counts"]}, {"scope": "collection", "history": "all", "parts": ["added", "card_counts"]}]}]}

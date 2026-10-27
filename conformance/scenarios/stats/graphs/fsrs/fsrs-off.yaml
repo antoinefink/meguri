@@ -1,0 +1,20 @@
+# stats/graphs-cards C13 (C6.3): the memory-state graphs whatever the fsrs
+# key. Two review cards with s 5, d 5 and an lrt 10 days back, observed with
+# fsrs true and then false. Expected stability, difficulty and retrievability
+# equal; context has fsrs only the first time.
+id: stats/graphs/fsrs/fsrs-off
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4, "fsrs": true}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 3, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1790935200}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 3, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1790935200}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["stability", "difficulty", "retrievability", "context"]}]}]}
+  - {"set_config": {"key": "fsrs", "value": false}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["stability", "difficulty", "retrievability", "context"]}]}]}

@@ -1,0 +1,301 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "hours": {
+              "one_month": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ],
+              "one_year": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ],
+              "three_months": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ]
+            }
+          },
+          {
+            "hours": {
+              "all_time": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ],
+              "one_month": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ],
+              "one_year": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ],
+              "three_months": [
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/hourly/kathmandu-edges",
+  "scenario_sha256": "0a866343c85919f1c8c3cc53a45e8027e14dbc27d8e4c452a1f696738885e140",
+  "tz": "Asia/Kathmandu"
+}

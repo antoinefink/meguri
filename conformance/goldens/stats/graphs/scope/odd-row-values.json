@@ -1,0 +1,351 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "buttons": {
+              "one_month": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              },
+              "one_year": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              },
+              "three_months": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              }
+            },
+            "hours": {
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "0": {
+                  "learn": 3,
+                  "mature": 4,
+                  "young": 1
+                }
+              },
+              "time": {
+                "0": {
+                  "learn": 3000,
+                  "mature": 1000,
+                  "young": 1000
+                }
+              }
+            },
+            "true_retention": {
+              "month": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "today": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "week": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "year": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "all_time": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              },
+              "one_month": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              },
+              "one_year": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              },
+              "three_months": {
+                "learning": [0, 0, 3, 0],
+                "mature": [0, 0, 4, 0],
+                "young": [0, 0, 1, 0]
+              }
+            },
+            "hours": {
+              "all_time": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 8,
+                  "total": 8
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "0": {
+                  "learn": 3,
+                  "mature": 4,
+                  "young": 1
+                }
+              },
+              "time": {
+                "0": {
+                  "learn": 3000,
+                  "mature": 1000,
+                  "young": 1000
+                }
+              }
+            },
+            "true_retention": {
+              "all_time": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "month": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "today": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "week": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "year": {
+                "mature_passed": 8,
+                "young_passed": 1
+              },
+              "yesterday": {}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/odd-row-values",
+  "scenario_sha256": "506751a590a960063417e61c6458408c71b844391a3d3b328f23bf6fa9c87426",
+  "tz": "Europe/Paris"
+}

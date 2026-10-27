@@ -1,0 +1,17 @@
+# stats/graphs-cards C13 (C4.1, G2.1): a review card in filtered deck F (a
+# deck-ops.md K13 row) from home H is counted by its type in Deck F, Deck H
+# and Collection.
+id: stats/graphs/card-counts/filtered-deck
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["H"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "H", "fields": ["n1", "x"]}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 30, did = 900, odid = (SELECT id FROM decks WHERE name = 'H'), due = -100000, odue = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"reopen": {}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "H"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "F"}, "history": "year", "parts": ["card_counts"]}]}]}

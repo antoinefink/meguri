@@ -1,0 +1,16 @@
+# stats/graphs-common G15 (G2.1): deck: wildcards never apply to a Deck
+# scope. Decks a_b, a_b::c and axb with one card each. Expected Deck a_b 2
+# cards, Deck axb 1 (card_counts and added).
+id: stats/graphs/scope/subdeck-wildcards
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["a_b", "a_b::c", "axb"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "a_b", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "a_b::c", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "axb", "fields": ["n3", "x"]}
+steps:
+  - {"observe": [{"stats": [{"scope": {"deck": "a_b"}, "history": "year", "parts": ["card_counts", "added"]}, {"scope": {"deck": "axb"}, "history": "year", "parts": ["card_counts", "added"]}]}]}
