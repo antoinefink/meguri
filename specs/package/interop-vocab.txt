@@ -120,3 +120,6 @@ original_id
 sort_field_idx
 learn_steps
 relearn_steps
+# Note type merging (notetype-merge.md, U121): the note type config field
+# the merge does not read.
+original_stock_kind

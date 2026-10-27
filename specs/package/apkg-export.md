@@ -5,7 +5,7 @@ Requirements: R1617 (core limits), R1618 (core options; remembering them is U160
 Anki: 26.09.3
 Scenarios: conformance/scenarios/package/apkg-export/ (none recorded yet; A17 lists them)
 
-How Meguri writes a deck package (`.apkg`, U122): which rows go in for a deck, a note or card selection, or the whole collection; how scheduling is removed when it is not included; which media files go in; the latest-format container; and Meguri's export operation (input, output, progress, cancellation, errors, temporary files, atomic output). A14 states the two collection package options of U124 (R1625). The container, its limits and the writer reused here are `package/container` (P1–P11, P15). The job, owned artifact, native destination and cancel rules are `package/file-export` E2–E5. The legacy format ("Support older Anki versions") is U123's: the schema-11 copy is `storage/schema11-downgrade`, the legacy container `package/legacy-export` (U123, not yet written); A13 only says where it plugs in. Importing a deck package is U120's (`package/apkg-import`).
+How Meguri writes a deck package (`.apkg`, U122): which rows go in for a deck, a note or card selection, or the whole collection; how scheduling is removed when it is not included; which media files go in; the latest-format container; and Meguri's export operation (input, output, progress, cancellation, errors, temporary files, atomic output). A14 states the two collection package options of U124 (R1625). The container, its limits and the writer reused here are `package/container` (P1–P11, P15). The job, owned artifact, native destination and cancel rules are `package/file-export` E2–E5. The legacy format ("Support older Anki versions") is U123's: the schema-11 copy is `storage/schema11-downgrade`, the legacy container `package/legacy-export` (U123); A13 only says where it plugs in. Importing a deck package is U120's (`package/apkg-import`).
 
 ## A1. Scope and entry points
 
@@ -295,10 +295,10 @@ Every error leaves no artifact, no staging directory and no temporary file, and 
 
 The option does not change A2 to A9: the same selection, scrub and media list. It changes the container and the collection schema only:
 
-- `.apkg`: the A4 file is converted by `storage/schema11-downgrade` (its closed-file source, D1) and packed in the legacy layout Anki 26.9.3 writes for this option (`meta` version 2, `collection.anki21` at schema 11, the placeholder, raw media and a JSON map; `specs/conformance/model-ops.md` L6), per `package/legacy-export` (U123).
-- `.colpkg`: the whole collection, downgraded by `storage/schema11-downgrade` from the open collection (D1), in the same legacy layout, with or without media (A14).
+- `.apkg`: the A4 file is converted by `storage/schema11-downgrade` (its closed-file source, D1) and packed in the legacy layout Anki 26.9.3 writes for this option (`meta` version 2, `collection.anki21` at schema 11, the placeholder, raw media and a JSON map; `specs/conformance/model-ops.md` L6), per `package/legacy-export` (U123; steps `package/legacy-export#L7`).
+- `.colpkg`: the whole collection, downgraded by `storage/schema11-downgrade` from the open collection (D1), in the same legacy layout, with or without media (A14; steps `package/legacy-export#L8`).
 
-This spec says nothing more about that format; U123 owns it.
+This spec says nothing more about that format: `package/legacy-export` L2 to L6 (container, media map, limits), L9 to L11 (preflight, verification, errors) and L13 (differences) own it.
 
 ## A14. Collection package options (U124, R1625)
 
@@ -308,7 +308,7 @@ The whole-collection `.colpkg` export of `package/file-export` has two options, 
 |---|---|---|
 | on (default) | off (default) | `package/container#P15` with the media inventory of `package/file-export#E7` (every regular media file, referenced or not) |
 | off | off | `package/container#P11`, the collection-only writer (as backups use) |
-| on or off | on | U123's legacy writer (A13) |
+| on or off | on | U123's legacy writer (A13, `package/legacy-export#L8`) |
 
 - The job, owned artifact, destination, cancel and restart rules of `package/file-export` E2 to E6 apply to every combination. Only the writer and its preflight differ.
 - A `.colpkg` export has no limit and no scheduling or preset option: it is the whole collection as it is, scheduling, presets and the default deck included. A6 never applies to it.
