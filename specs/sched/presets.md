@@ -75,7 +75,7 @@ Some Anki versions let the deck options screen store 0 or NaN. So every read of 
 
 - A bounded field whose value is below its lower bound or above its upper bound, or is NaN, reads as its built-in default. Bounds are inclusive. Float fields compare as `f32` with the `f32` nearest to the written bound (1.31 is 1.30999994…, 0.99 is 0.99000001…, 0.7 is 0.69999999…): a stored value equal to that `f32` is in range, the next `f32` beyond it is not. +∞ and -∞ are out of range.
 - Fields without bounds are used as stored: an empty step list, a negative or NaN Auto Advance time, any parameter list.
-- "Every read for use" means scheduling, queue building, counts, the deck options screen, the optimizer, and the schema-11 output that sync and legacy export send to other clients (`model/schema11-json#S13`). Only the schema upgrade reads presets without bounds (`storage/schema-upgrade`).
+- "Every read for use" means scheduling, queue building, counts, the deck options screen, the optimizer, and the schema-11 output that sync and legacy export send to other clients (`model/schema11-json#S10`, `#S12`). Only the schema upgrade reads presets without bounds (`storage/schema-upgrade`).
 - A read never writes. The stored blob keeps its out-of-range values until the preset is written (V8).
 - Only `f32` fields can hold NaN. The integer fields (`new_per_day`, `maximum_review_interval` and the others typed `uint32` in `model/protobuf-records#P6.6`) cannot, and JSON has no NaN. A legacy JSON preset whose `maxIvl` is not a `u32` (`1.5`, `-1`, `"x"`) makes its whole `rev` part invalid, so the part reads as its defaults, `maxIvl` 36500 included (`model/schema11-json#S10.2`), before V3 applies. A stored `new_per_day` of 0 is in range and reads as 0.
 

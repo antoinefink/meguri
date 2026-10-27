@@ -171,11 +171,12 @@ C18 owns execution of this mapping. It is separate from scenario activation and 
 
 Result: `Started{sessionId, generation, head, counts, validUntil, timeLim}` or `Refused{PresetUnsupported{presetIds} | FsrsPolicyPending}`.
 
-1. **Admission.** On the writer, atomically check and reserve the collection-owned admission state shared with `enableFsrs` (`sched/fsrs-policy#S3`). No session is exposed before this succeeds. Refusals, in order, write nothing, fire no hook and reserve nothing:
+0. **Submission.** On submission, before the start is queued for the writer: request cancellation of a running optimizer commit op without waiting (`sched/optimizer#O10`). It fires for every submitted start, also one that admission then refuses. It marks nothing and cancels no training; step 2 does that.
+1. **Admission.** On the writer, atomically check and reserve the collection-owned admission state shared with `enableFsrs` (`sched/fsrs-policy#S3`). No session is exposed before this succeeds. Refusals, in order, write nothing, fire no step-2 hook (the step 0 request has already been made) and reserve nothing:
    - policy status is not `ok`: `FsrsPolicyPending`;
    - any card in the selected deck tree has an unsupported home preset under the shared U45 check: `PresetUnsupported` with distinct preset ids ascending. Inspect all represented homes, including suspended, buried, future and otherwise ungathered cards, not only queue entries;
    - balancing is on and any preset of the collection has an Easy Days list of length other than 0 or 7: `PresetUnsupported` with those ids ascending (`sched/load-balancer#W2`). This check is collection-wide, distinct from the home-preset check.
-2. **Optimizer.** Fire the session-start hook, which requests cancellation of training without waiting (U47, KTD8).
+2. **Optimizer.** Fire the session-start hook, which requests cancellation of training without waiting and marks a job in `AwaitingGate` (`sched/optimizer#O10`; U47, KTD8).
 3. **Selection.** Delegate to `decks/decks#D11`: the existing select-deck op writes only `curDeck`, skip-undo (`engine/undo#M2`), and writes nothing when that value is unchanged. Preserve `activeDecks` here. Complete the reserved start consistently with that write. A failed start releases its reservation and exposes no active session. D11 leaves R41's additional `activeDecks` behavior to U152/U175; those owners must close it for both deck-page opening and review start before final app acceptance, through the shared selection contract with write-on-change and skip-undo preserved.
 4. **Build.** Use current U41 queue and U44 cache contracts at the start instant. Build failure releases admission without a partially exposed session.
 5. **Current card.** Use `resumeCardId` when presented, otherwise head item 0 (C4).
