@@ -116,7 +116,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 
 ## O6. Numbers
 
-- Integers are written as integers.
+- Integers are written as integers. Golden and Apple-overlay observation values retain their exact signed or unsigned 64-bit integer through conversion and schema checks (`storage-ops.md` P5). The ±2^53 bound of `dsl.md` D2 applies only to authored scenario inputs.
+- Conversion and schema checks preserve number kind and reject repeated member names, malformed JSON and non-finite numbers.
 - A value the engine keeps as 32-bit float (memory states, ease factors, desired retention) is written as the shortest decimal that parses back to the same f32, chosen as Ryu does (fewest digits, then nearest, ties to even), as a JSON number with a fraction or exponent: 11.262237, never the widened 11.262236595153809; 1.0, never 1.
 - A 64-bit float is written as its shortest round-trip decimal.
 
