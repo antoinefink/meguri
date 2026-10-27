@@ -84,3 +84,8 @@ cannot run stay queued and must pass before final acceptance.
 Use `Unit:` only when the unit is complete. Keep a record of unfinished
 requirements. Complete every active unit and retain every active milestone gate.
 Frozen server requirements do not block delivery.
+
+
+## Next feature priority — 2026-10-27
+
+Antoine requests iCloud sync after the current backup, integrity and recovery work is verified. Prioritize U113 and U114 and their dependencies before the remaining editing, search and statistics features. Cover collections, saved reviews and media across devices under the approved CloudKit contract. Before using a rule listed in `sync/policy#P24`, add its `conformance/cloudkit-acceptance#Q11` test and resolve the listed item through the spec-writer workflow. `sched/optimizer` O12 and O13 still need independent review before U47 uses them. Anki-server work stays frozen.
