@@ -1,0 +1,60 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_pending": {
+          "Cat.jpg": "f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd",
+          "cat.jpg": "a13a42fff8ad4460d9b0acd026f68e8e69657833"
+        }
+      },
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {
+            "Cat.jpg": "cat-f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd.jpg"
+          },
+          "trash_count": 0,
+          "unused": []
+        }
+      },
+      {
+        "media_dir": {
+          "cat-f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd.jpg": {
+            "sha1": "f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd",
+            "size": 9
+          },
+          "cat.jpg": {
+            "sha1": "a13a42fff8ad4460d9b0acd026f68e8e69657833",
+            "size": 9
+          }
+        },
+        "media_trash": []
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["<img src=\"cat-f4e13214f584b05bf4b18d6fbfd0dce6a9265dcd.jpg\">|<img src=\"cat.jpg\">", 1894705200, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/case/other-content",
+  "scenario_sha256": "1962bf3e0063ec36d4059a2ea55b7b2869894fb08607f03edabb1260c5baeb6b",
+  "tz": "UTC"
+}

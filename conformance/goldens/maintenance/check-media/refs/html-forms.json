@@ -1,0 +1,76 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["m5.png"]
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 3415723276,
+              "data": "",
+              "flags": 0,
+              "flds": "<audio src=\"m1.mp3\"></audio><source src=m2.mp3>\u001f<object data='m3.svg'></object><img alt=\"x>y\" src=\"m4.png\">[sound:a &amp; b.mp3]",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": " m1.mp3  m2.mp3 ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "media_dir": {
+          "a & b.mp3": {
+            "sha1": "4db2c1df4610cd6c0da6b9197b066bfb4e9b9d00",
+            "size": 4
+          },
+          "m1.mp3": {
+            "sha1": "fe05bcdcdc4928012781a5f1a2a77cbb5398e106",
+            "size": 3
+          },
+          "m2.mp3": {
+            "sha1": "ad782ecdac770fc6eb9a62e44f90873fb97fb26b",
+            "size": 3
+          },
+          "m3.svg": {
+            "sha1": "b802f384302cb24fbab0a44997e820bf2e8507bb",
+            "size": 5
+          },
+          "m4.png": {
+            "sha1": "9f8f7eec5dea5ac43738721939c120318cbff1df",
+            "size": 4
+          },
+          "m5.png": {
+            "sha1": "bec9703f7a456cd2b4ab5fb3220ae016e3e394e3",
+            "size": 3
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/refs/html-forms",
+  "scenario_sha256": "7f3d1c65272a8c0f249800faac0511141fd10b18bfb7b91f09ab5d2382e1e963",
+  "tz": "UTC"
+}

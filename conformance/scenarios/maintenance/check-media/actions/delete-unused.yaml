@@ -1,0 +1,20 @@
+# C14 of specs/maintenance/check-media.md: after a registration (seed), Check
+# Media lists b.jpg unused and Delete Unused moves it to the trash, a pending
+# deletion for media sync.
+id: maintenance/check-media/actions/delete-unused
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a.jpg\">", ""]}
+  media_files:
+    - {name: a.jpg, text: "first image"}
+    - {name: b.jpg, text: "second image"}
+steps:
+  - observe: [media_pending]
+  - check_media: {}
+  - delete_unused_media: {}
+  - observe: [media_dir, media_trash, media_pending]

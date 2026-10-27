@@ -1,0 +1,19 @@
+# C4 of specs/maintenance/check-media.md: a referenced file with a 130-byte
+# name is renamed to a name cut to at most 119 bytes
+# (text/media-filenames F1 step 6), its reference rewritten, so it is neither
+# unused nor missing.
+id: maintenance/check-media/rename/long-name
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdef.jpg\">", ""]}
+  media_files:
+    - {name: "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdef.jpg", text: "long image"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

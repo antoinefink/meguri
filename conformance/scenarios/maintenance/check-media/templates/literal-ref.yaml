@@ -1,0 +1,17 @@
+# C9 of specs/maintenance/check-media.md: a template naming logo.png
+# literally protects that file from being unused in Meguri; Anki does not read
+# templates here and reports it unused (deviation
+# check-media-template-references).
+id: maintenance/check-media/templates/literal-ref
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Tmpl
+      fields: [Front, Back]
+      templates: [{name: One, front: "<img src=\"logo.png\">{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Tmpl, fields: [word, meaning]}
+  media_files:
+    - {name: logo.png, text: "a logo"}
+steps:
+  - check_media: {}

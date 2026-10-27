@@ -1,0 +1,23 @@
+# C5 of specs/maintenance/check-media.md on a case-sensitive volume
+# (media-ops.md F14.4): Cat.jpg and cat.jpg with different bytes, referenced
+# by both spellings. Meguri keeps both and changes nothing; Anki renames one
+# (deviation check-media-case-variant-kept).
+id: maintenance/check-media/case/other-content
+tags: [media-case-variants]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"Cat.jpg\">", "<img src=\"cat.jpg\">"]}
+  media_files:
+    - {name: Cat.jpg, text: "upper cat"}
+    - {name: cat.jpg, text: "lower cat"}
+steps:
+  - observe: [media_pending]
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod, usn FROM notes"}

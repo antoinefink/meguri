@@ -1,0 +1,23 @@
+# C16 of specs/maintenance/check-media.md: after actions/delete-unused, a
+# different b.jpg is placed from outside; Restore Deleted keeps the present
+# b.jpg's bytes and adds the trashed bytes under another name.
+id: maintenance/check-media/actions/restore-conflict
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"a.jpg\">", ""]}
+  media_files:
+    - {name: a.jpg, text: "first image"}
+    - {name: b.jpg, text: "second image"}
+steps:
+  - observe: [media_pending]
+  - check_media: {}
+  - delete_unused_media: {}
+  - advance: 1m
+  - media_outside: [{name: b.jpg, text: "another image"}]
+  - restore_media_trash: {}
+  - observe: [media_dir, media_trash]

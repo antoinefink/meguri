@@ -1,0 +1,18 @@
+# C6 step 5 of specs/maintenance/check-media.md: the file x&[y].jpg, referenced
+# with an entity as x&amp;[y].jpg, is renamed to x&y.jpg and the reference is
+# written back with the entity: x&amp;y.jpg.
+id: maintenance/check-media/rename/entities
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"x&amp;[y].jpg\">", ""]}
+  media_files:
+    - {name: "x&[y].jpg", text: "entity image"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

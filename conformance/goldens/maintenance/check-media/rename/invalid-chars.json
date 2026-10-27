@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {
+            "Bar?.PNG": "bar.png",
+            "con.jpg": "con_.jpg",
+            "foo[.jpg": "foo.jpg"
+          },
+          "trash_count": 0,
+          "unused": []
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 861030276,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"foo.jpg\">\u001f<img src=\"bar.png\"> <img src=\"con_.jpg\">",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894705200,
+              "sfld": " foo.jpg ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "media_dir": {
+          "bar.png": {
+            "sha1": "92bb25b31ad56da2feacb845756de9b33ea6fabe",
+            "size": 14
+          },
+          "con_.jpg": {
+            "sha1": "06a0004d0c22198dd4849d398ebfc6f3366a5e5f",
+            "size": 14
+          },
+          "foo.jpg": {
+            "sha1": "c35f990b976f468104111fd94cdcccb22fb5d3b9",
+            "size": 13
+          }
+        },
+        "media_trash": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/rename/invalid-chars",
+  "scenario_sha256": "e0eff1ef48aedcf5fed23dc42e263f8bcc72bd16de39a785d586904d9a064d9d",
+  "tz": "UTC"
+}

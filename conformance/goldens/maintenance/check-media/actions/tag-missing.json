@@ -1,0 +1,111 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["c.png"],
+          "missing_notes": ["#n1"],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["b.jpg"]
+        }
+      },
+      {},
+      {
+        "tag_missing_media": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 386565315,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"a.jpg\"> [sound:snd.mp3]\u001f<img src=\"c.png\"> <img src=\"https://example.org/r.png\">",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": " a.jpg  [sound:snd.mp3]",
+              "tags": " kept missing-media ",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 1196959972,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"a.jpg\">\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": " a.jpg ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "update_tag"
+        }
+      },
+      {},
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 386565315,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"a.jpg\"> [sound:snd.mp3]\u001f<img src=\"c.png\"> <img src=\"https://example.org/r.png\">",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": " a.jpg  [sound:snd.mp3]",
+              "tags": " kept ",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 1196959972,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"a.jpg\">\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": " a.jpg ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/actions/tag-missing",
+  "scenario_sha256": "1474d8fdca6e6bda536fd4bdacf56440d9a05b1d1d6f5dbaac312c104414396f",
+  "tz": "UTC"
+}

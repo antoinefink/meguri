@@ -1,0 +1,21 @@
+# C4 to C7 of specs/maintenance/check-media.md: after rename/invalid-chars'
+# run, a second run finds nothing to rename or rewrite. col.mod is not
+# observed (Anki moves it on every run, deviation check-media-no-change-no-mod).
+id: maintenance/check-media/rerun/no-change
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"foo[.jpg\">", "<img src=\"Bar?.PNG\"> <img src=\"con.jpg\">"]}
+  media_files:
+    - {name: "foo[.jpg", text: "bracket image"}
+    - {name: "Bar?.PNG", text: "question image"}
+    - {name: con.jpg, text: "reserved image"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

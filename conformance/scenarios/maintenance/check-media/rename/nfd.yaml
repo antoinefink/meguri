@@ -1,0 +1,21 @@
+# C2 step 2 and C6 of specs/maintenance/check-media.md: the NFD-named file
+# cafe U+0301 .jpg is renamed in place to its NFC name, one field naming the
+# NFC spelling stays, one naming the NFD spelling (written by db_exec, since
+# the add stores fields in NFC) is rewritten to NFC. T5 renames in place, so
+# the trash stays empty.
+id: maintenance/check-media/rename/nfd
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"café.jpg\">", "<img src=\"café.jpg\">"]}
+  media_files:
+    - {name: "café.jpg", text: "accent image"}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = '<img src=\"caf' || char(233) || '.jpg\">' || char(31) || '<img src=\"cafe' || char(769) || '.jpg\">'"}
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash, {db_dump: {tables: [notes]}}]

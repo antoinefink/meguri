@@ -1,0 +1,23 @@
+# C7 of specs/maintenance/check-media.md: inline base64 images are written as
+# paste-<sha1>.<ext> and the fields rewritten (extracted counts each
+# reference: a valid PNG payload, the same payload twice in one field, and an
+# upper-case JPEG prefix); an invalid payload and an svg+xml payload are not
+# extracted and stay plain references. Anki also reports the just-extracted
+# images missing; Meguri does not (deviation
+# check-media-extracted-not-missing).
+id: maintenance/check-media/inline/extract
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"data:image/png;base64,cGl4ZWwtb25l\">", ""]}
+    - {notetype: Media, fields: ["<img src=\"data:image/png;base64,cGl4ZWwtb25l\"><img src=\"data:image/png;base64,cGl4ZWwtb25l\">", ""]}
+    - {notetype: Media, fields: ["<img src=\"DATA:IMAGE/JPEG;BASE64,cGl4ZWwtdHdv\">", ""]}
+    - {notetype: Media, fields: ["<img src=\"data:image/png;base64,not*base64\">", "<img src=\"data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=\">"]}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, {db_dump: {tables: [notes]}}]

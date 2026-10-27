@@ -1,0 +1,29 @@
+# C8 of specs/maintenance/check-media.md: LaTeX names from [latex], [$] and
+# [$$] fields (one with <br>, which becomes a line feed), from LaTeX inside a
+# cloze, and with the note type's latexsvg true (.svg); the files for $ab$
+# (png) and z (svg) exist and are used, the other three names are missing.
+id: maintenance/check-media/latex/names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Formula
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Vector
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}]
+  notes:
+    - {notetype: Formula, fields: ["[latex]x<br>y[/latex]", "[$]a<b>b</b>[/$]"]}
+    - {notetype: Formula, fields: ["[$$]e=mc^2[/$$]", ""]}
+    - {notetype: Vector, fields: ["[latex]z[/latex]", ""]}
+    - {notetype: Gaps, fields: ["{{c1::[$]p[/$]}} and {{c2::q}}", ""]}
+  media_files:
+    - {name: latex-ef870ce9fefe09b80a97b05a7b9198414c1b35f7.png, text: "formula ab"}
+    - {name: latex-395df8f7c51f007019cb30201c49e884b46b92fa.svg, text: "formula z"}
+steps:
+  - legacy_update: {notetype: Vector, patch: {latexsvg: true}}
+  - check_media: {}

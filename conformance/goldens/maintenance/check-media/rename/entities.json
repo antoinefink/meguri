@@ -1,0 +1,59 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {
+            "x&[y].jpg": "x&y.jpg"
+          },
+          "trash_count": 0,
+          "unused": []
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 2599129360,
+              "data": "",
+              "flags": 0,
+              "flds": "<img src=\"x&amp;y.jpg\">\u001f",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894705200,
+              "sfld": " x&y.jpg ",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "media_dir": {
+          "x&y.jpg": {
+            "sha1": "752812ebe220719e1f600a170930cd9ce83af4bf",
+            "size": 12
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/rename/entities",
+  "scenario_sha256": "d3a52366d0b1c605a96e447404f8d4435f2b01e5bfd7554b605dc8933cdde48a",
+  "tz": "UTC"
+}
