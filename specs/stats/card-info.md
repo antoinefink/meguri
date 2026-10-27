@@ -429,7 +429,7 @@ No text contains U+2068 or U+2069. Anki wraps each number in that pair of invisi
 - **Meguri.** The raw values of the core's snapshot (C3, C6.1) under the same names.
 - **Comparison.** Exact, except `memory_state` (top level and per entry) and `fsrs_retrievability`, within a relative 1e-5 under `conformance/observations#O7`'s rule (the row C13.2 adds there).
 - **Errors.** A card stats failure is a run error (`anki_error` in the oracle; the matching typed error in Meguri, C11).
-- **No text.** The pylib backend returns no display text (R1887). If U226's headless graphs-page image lands, a later `card_info_text` kind may record the card-info page's texts; until then C4 to C7 are tested from this spec.
+- **No text.** Anki's Python-side stats backend returns no display text (R1887). If U226's headless graphs-page image lands, a later `card_info_text` kind may record the card-info page's texts; until then C4 to C7 are tested from this spec.
 
 ### C13.2 Where it is defined
 
