@@ -67,7 +67,7 @@ Applies a list of edits to a note type and saves the result once, as one undoabl
 - **Effect.** The draft is saved through the note type save that Anki's note type editors use: `notetypes/records` N3 and N4, the checks unless `skip_checks`, and every effect on notes, cards and `col.scm` that the save has (`notetypes/schema-changes` G2; U34 for notes and cards). A field or template kept from the stored note type keeps its identity (its id, options and, for a template, its row's `mtime_secs` and `usn`) wherever the edits move it; the save matches them by identity, never by name.
 - **Output** `{update_notetype: {name: <stored name after the save>}}`.
 - **Rejections** T7.
-- **Meguri's executor** maps an update to Meguri's ops: an update whose edits are only `rename`, `css`, `field_options`, `rename_template` and `template` without `front` or `back` is a plain save (U29); any other is U34's draft apply. Schema changes run confirmed (T9). Until U34 lands, scenarios that need its edits are `pending` (T10.1).
+- **Meguri's executor** maps an update to Meguri's ops: an update whose edits are only `rename`, `css`, `field_options`, `rename_template` and `template` without `front` or `back` is a plain save (U29); any other is U34's draft apply. Schema changes run as accepted (T9). Until U34 lands, scenarios that need its edits are `pending` (T10.1).
 
 ## T6. `ensure_io_notetype` (op)
 
@@ -121,7 +121,7 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 
 ## T9. Schema changes in scenarios
 
-- An op that is a schema change runs as if the user accepted the warning: the oracle never asks, and Meguri's executor submits it with `schema_confirmed` true (`notetypes/schema-changes` G4). The gate's refusal is tested outside scenarios.
+- An op that is a schema change runs as accepted: the oracle never asks, and Meguri asks nothing (`notetypes/schema-changes#G4`). On Meguri the safety backups that structural edits take (`package/backup-triggers#T6.1`, its coalescing included) go into the scenario's backups folder (`backup-ops.md` F1); scenarios observe them only through the backup ops of `backup-ops.md`, and the note type and deck scenarios do not. Changed 2026-10-27: the executor no longer passes a confirmation.
 - Scenarios observe `col.scm`, `col.ls` and `col.mod` with `db_exec` (`record-ops.md` W1). They put the collection in the state right after a sync with `db_exec: {sql: "UPDATE col SET ls = scm"}` and then advance the clock before the first op, so that a change sets `scm` above `ls` (under a frozen clock a change in the same millisecond leaves `scm` equal to `ls`).
 
 ## T10. Status

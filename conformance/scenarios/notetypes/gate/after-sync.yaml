@@ -3,8 +3,8 @@
 # the note type pending for the next normal sync); adding a
 # field sets scm, so the schema counts as modified until the next sync; a
 # template reorder before that sync sets scm again. Schema changes in
-# scenarios run confirmed (specs/conformance/notetype-ops.md T9); Meguri's
-# confirmation request itself is tested in meguri-engine's schema_gate tests.
+# scenarios run as accepted; Meguri asks nothing (specs/conformance/
+# notetype-ops.md T9, specs/notetypes/schema-changes.md G4).
 id: notetypes/gate/after-sync
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:

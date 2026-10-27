@@ -64,7 +64,8 @@ Anki's deck options screen, which Meguri's preset menu (U232) follows:
 
 - Input: the preset to remove and the **fallback** preset: the preset that the screen is saving for its deck (R733: decks that used the removed preset get the preset being saved). The fallback must exist and differ from the removed preset (`InvalidArgument` otherwise).
 - The default preset (id 1) cannot be removed: refused with `default_preset`, nothing written.
-- It is a schema change with reason `preset_removed` (`notetypes/schema-changes` G2): when `scm <= ls` and the call is not confirmed, it ends with `NeedsSchemaConfirmation` and writes nothing (G4); when it commits it sets `scm` to `now_ms` (G5).
+- It is a schema change with reason `preset_removed` (`notetypes/schema-changes` G2). It commits without asking, whatever `scm` and `ls` hold (G4), and sets `scm` to `now_ms` (G5). Changed 2026-10-27: the confirmation gate and its `NeedsSchemaConfirmation` refusal are gone.
+- It is a structural edit, so the operation that runs it takes a safety backup before its first collection write, unless T6.1's coalescing applies (`package/backup-triggers#T6.1`, T6.2). Decided 2026-10-27: the backup belongs to the operation that runs the removal. Run inside the deck options save, that is the save's one backup (P11; `sched/deck-options` O7); run on its own, the removal's. A refused removal (`default_preset`, `InvalidArgument`) is refused while its plan is made and takes none.
 - Effects, in one transaction:
   1. every normal deck whose `config_id` is the removed preset's id, or names no preset that exists after the removal, gets the fallback's id and is stamped (the deck write path of `decks/decks` D13 applies);
   2. the preset's row is deleted, without a grave;
@@ -105,6 +106,6 @@ Anki's screen saves everything in one "Deck Options" operation. Observed with th
 |---|---|
 | `decks/presets/add-clone-rename` | P4, P5, P6: ids, stamps, the stored config (defaults with FSRS-6 parameters; a clone's bytes equal its source's) |
 | `decks/presets/assign` | P9: one deck, a subtree, filtered descendants untouched, no write when unchanged, `filtered_deck` |
-| `decks/presets/remove` | P8 after a sync (`scm <= ls`), confirmed: decks of the removed preset and a deck with a missing preset move to the fallback, `scm` set past `ls`, no grave; `default_preset` |
+| `decks/presets/remove` | P8 after a sync (`scm <= ls`), run as accepted (Meguri asks nothing, `notetypes/schema-changes#G4`): decks of the removed preset and a deck with a missing preset move to the fallback, `scm` set past `ls`, no grave; `default_preset` |
 
-Meguri's own behavior is tested in `core/crates/meguri-engine/tests/deck_config.rs`: `NeedsSchemaConfirmation` with nothing written, then the confirmed call (R1476); P7's helper; P10's field-level update keeping unknown fields and the older FSRS lists (R1486); the fallback of P3.
+Meguri's own behavior is tested in `core/crates/meguri-engine/tests/deck_config.rs`: with `scm <= ls` a removal commits at once, sets `scm` and takes no confirmation input (R1476); its safety backup is published before its first write, and a refused removal takes none (T6.1); P7's helper; P10's field-level update keeping unknown fields and the older FSRS lists (R1486); the fallback of P3.

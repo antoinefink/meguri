@@ -3,8 +3,9 @@
 # that used it, and a deck whose preset id names no preset, to the fallback,
 # stamped; decks of other presets stay; the row goes without a grave; scm is
 # set to now, past ls. "ls = scm" stands for a sync (specs/conformance/
-# deck-ops.md K13); the removal runs confirmed (K9). Deck D gets a preset id
-# that names no preset (config_id 999999) with db_exec.
+# deck-ops.md K13); the removal runs as accepted, Meguri asks nothing (K9).
+# Deck D gets a preset id that names no preset (config_id 999999) with
+# db_exec.
 id: decks/presets/remove
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:

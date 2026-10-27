@@ -69,7 +69,7 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 ## K9. `remove_preset`
 
 - **Argument** `{preset, fallback}`: the preset to remove and the fallback preset (`decks/deck-presets#P8`); they differ (`invalid_scenario` otherwise).
-- **Effect** `decks/deck-presets#P8`, confirmed: the oracle never asks, and Meguri's executor passes `schema_confirmed` (as `notetype-ops.md` T9 does for note types). It sets `scm`; scenarios read it with `db_exec`.
+- **Effect** `decks/deck-presets#P8`, run as accepted: the oracle never asks, and Meguri asks nothing (`notetypes/schema-changes#G4`, as `notetype-ops.md` T9 says for note types). It sets `scm`; scenarios read it with `db_exec`. On Meguri the removal's safety backup, when T6.1 takes one, goes into the scenario's backups folder (`backup-ops.md` F1, `package/backup-triggers#T6.1`); deck scenarios do not observe it. Changed 2026-10-27: the executor no longer passes a confirmation.
 - **Output** none (`{}`).
 - **Rejection** `default_preset` when `preset` is the default preset (id 1); nothing changes.
 - The op writes nothing else: no config key, no deck limit.
