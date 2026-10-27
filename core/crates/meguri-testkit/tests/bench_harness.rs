@@ -4,6 +4,7 @@
 //! result JSON (`tools/perf/perf-result.schema.json`).
 
 use std::hint::black_box;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -36,8 +37,9 @@ fn process_memory() -> MutexGuard<'static, ()> {
 
 /// A criterion short enough for a test: a tenth of a second of warm-up,
 /// half a second of measurement.
-fn quick_criterion() -> Criterion {
+fn quick_criterion(output: &Path) -> Criterion {
     Criterion::default()
+        .output_directory(output)
         .sample_size(10)
         .warm_up_time(Duration::from_millis(100))
         .measurement_time(Duration::from_millis(500))
@@ -85,7 +87,8 @@ fn one_slow_sample_in_a_hundred_is_the_p99() {
 #[test]
 fn a_criterion_bench_with_one_20_ms_stall_in_100_operations_reports_it_at_p99() {
     let _process = process_memory();
-    let mut criterion = quick_criterion();
+    let criterion_output = tempfile::tempdir().unwrap();
+    let mut criterion = quick_criterion(criterion_output.path());
     let mut samples = OpSamples::new();
     let mut op = 0u64;
     criterion.bench_function("stall", |b| {
@@ -178,7 +181,8 @@ fn an_open_bench_on_the_10k_collection_reports_percentiles_and_peak_memory() {
     assert_eq!(again.manifest, collection.manifest);
 
     let copy = collection.working_copy().unwrap();
-    let mut criterion = quick_criterion();
+    let criterion_output = tempfile::tempdir().unwrap();
+    let mut criterion = quick_criterion(criterion_output.path());
     let mut measurement = Measurement::start("collection.open", Some("10k"));
     criterion.bench_function("open/10k", |b| {
         b.iter_custom(|iters| measurement.run(iters, |_| fixtures::open(&copy.path).unwrap()))

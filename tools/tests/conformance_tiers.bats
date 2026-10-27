@@ -501,7 +501,8 @@ PY
 
 @test "gate pairs T1-only replay with fresh dual-lane T0 coverage" {
   run python3 - "$REPO_ROOT/tools/gate/tiers.yaml" <<'PY'
-import sys, yaml
+import re, sys, yaml
+from pathlib import Path
 runs = {r['id']: r for r in yaml.safe_load(open(sys.argv[1]))['runs']}
 t0, t1 = runs['conformance'], runs['live-oracle']
 assert set(t0['triggers']) <= set(runs['core-test']['triggers']), 'core-test must cover every conformance trigger'
@@ -509,21 +510,71 @@ assert t0['args'] == ['--lane', 'all']
 assert t1['args'][:3] == ['--live-only', '--lane', 'native']
 assert all(any(path.startswith(trigger) for trigger in t0['triggers']) for path in t1['triggers'])
 assert 'sync-server' not in t1['needs']
-# The positive selectors cover every active scenario, and no frozen one.
-from pathlib import Path
-root = Path(sys.argv[1]).resolve().parents[2] / 'conformance/scenarios'
-filters = t1['args'][3:]
-assert filters and '*' not in filters
-for path in root.rglob('*.yaml'):
-    if path.name == 'area.yaml':
-        continue
-    name = path.relative_to(root).with_suffix('').as_posix()
+# D9.1 uses top-level area metadata and character globs, including across '/'.
+def is_active(name, areas):
+    area = name.split('/')[0]
+    return any(re.fullmatch(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c)
+                                   for c in area + '/' + pattern), name, re.DOTALL)
+               for pattern in areas.get(area, []))
+
+def scenario_id(path):
+    if path.name in ('area.yaml', 'area.yml') or path.name.startswith('.'):
+        return None
+    return path.with_suffix('').as_posix() if path.suffix in ('.yaml', '.yml', '.json') else None
+
+def check_selection(name, active, selected):
     frozen = (name.startswith(('sync/conflicts/', 'sync/holdback/', 'sync/media/',
                                'sync/meta/', 'sync/normal/', 'sync/transport/', 'sync/wire/',
                                'smoke/sync/', 'preservation/sync/'))
               or name == 'sched/compat/keys-survive-sync')
+    if frozen:
+        assert not selected, f'{name}: frozen scenario selected (active={active})'
+    elif active:
+        assert selected, f'{name}: active nonfrozen scenario lacks a T1 selector'
+
+# Synthetic cases stay in memory; no real area or scenario is activated.
+for filename, areas, expected in [
+    ('example/nested/deep/case.yaml', {'example': ['nested/*']}, True),
+    ('example/nested/case.yml', {'example': ['nested/cas?']}, True),
+    ('example/nested/case.json', {'example': ['nested/cas?']}, True),
+    ('example/nested/cases.yaml', {'example': ['nested/cas?']}, False),
+    ('example/nested/case.yaml', {'example': ['case']}, False),
+    ('missing/nested/case.yaml', {'example': ['*']}, False),
+]:
+    name = scenario_id(Path(filename))
+    assert name == filename.rsplit('.', 1)[0], f'{filename}: supported scenario suffix ignored'
+    assert is_active(name, areas) == expected, f'{filename}: activation mismatch for {areas}'
+for filename in ('example/area.yaml', 'example/area.yml', 'example/case.txt'):
+    assert scenario_id(Path(filename)) is None, f'{filename}: metadata or unsupported suffix included'
+for active in (False, True):
+    check_selection('sync/normal/example', active, False)
+    try:
+        check_selection('sync/normal/example', active, True)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f'frozen selection allowed with active={active}')
+
+# The positive selectors cover every active scenario, and no frozen one.
+root = Path(sys.argv[1]).resolve().parents[2] / 'conformance/scenarios'
+filters = t1['args'][3:]
+assert filters and '*' not in filters
+areas = {}
+for directory in root.iterdir():
+    if not directory.is_dir():
+        continue
+    metadata = [directory / name for name in ('area.yaml', 'area.yml') if (directory / name).is_file()]
+    assert len(metadata) <= 1, f'{directory}: duplicate area metadata'
+    if metadata:
+        areas[directory.name] = yaml.safe_load(metadata[0].read_text()).get('active', [])
+for path in root.rglob('*'):
+    if not path.is_file() or path.is_symlink():
+        continue
+    name = scenario_id(path.relative_to(root))
+    if name is None:
+        continue
     selected = any(name == f or name.startswith(f + '/') for f in filters)
-    assert selected != frozen, name
+    check_selection(name, is_active(name, areas), selected)
 assert runs['conformance-route-transport']['disabled']
 PY
   [ "$status" -eq 0 ]

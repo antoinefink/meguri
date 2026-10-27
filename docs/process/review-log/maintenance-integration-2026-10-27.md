@@ -174,3 +174,92 @@ uses the file's existing fully qualified duration convention. The scoped final
 review is clear. `core-test/20261027T221606Z-53831` passed all 21 lifecycle
 tests with zero skips. `private/20261027T221616Z-54249` passed. These are scoped
 integration repairs and do not add another whole-unit review round or acceptance.
+
+## Broad verification and focused harness closure, October 27–28
+
+`gate/20261027T221731Z-55732` used clean `524845cc` and the original batch
+base. It preserved one unchanged tracked source throughout execution. Completed
+results include:
+
+- `core-test/20261027T221841Z-83505`: 3,492 passed, zero failures, ten skips.
+- `native-durability/20261027T224209Z-92680`: 25 passed.
+- `conformance/20261027T224303Z-93817`: both lanes passed; 914 scenarios,
+  638 product passes, zero active failures. Pending, skipped and reference
+  outcomes remain in its report; they are not product passes.
+- `goldens-check/20261027T225539Z-10870`: 914 checked, zero changed goldens.
+- Harvest report, host/image/privacy selftests, design documents, manifest
+  validation and UI lint passed. The design letter-suffix fix remains verified.
+- Swift core, the optimized five-millisecond bridge check and Swift UI package
+  suites passed. Debug iOS/macOS builds passed. Xcode configuration checks
+  completed Mac Debug/Profile/Release and iPhone/iPad Debug build checks; the
+  VM Mac unit stage passed 625 tests with four recorded skips.
+
+The broad selftest (`selftest/20261027T225604Z-11753`) passed 729 and failed
+four. Three are the retained frozen actor/fault-proxy wrappers. The active
+failure was a test-domain error: the positive T1 selector assertion also
+required inactive cases without an area manifest, including the new stats
+cases. Independent source review established the actual D9.1 activation rules.
+The filtered fixer changes only that assertion's domain: supported scenario
+suffixes, top-level area metadata, the runner's character globs, selection of
+every active nonfrozen case, and unconditional exclusion of every frozen case.
+Selectors, activation metadata, argv and trigger requirements stay unchanged.
+In-memory cases prove the domain and frozen exclusions.
+
+Native conformance also exposed Criterion's implicit relative output directory
+in two existing benchmark-harness tests. Exactly sixteen generated files were
+archived after their conformance producer finished, with a hash manifest at
+`build/unit-intake/maintenance-gate-fixes/criterion-output-archive.json`. No
+source was removed. The fix gives each test an explicit temporary output root
+whose owner outlives Criterion. All measurement settings and assertions stay.
+The initial filtered author attempt refused the untracked output before any
+author ran; the later export from `cleanroom/20261027T233039Z-86389` was
+independently source-reviewed and clear. Its source view names the real master
+base `524845cc`; its synthetic filtered Git base is not a master commit.
+
+The Xcode Mac app-hosted stage reported 86 passes, two failing tests and two
+skips. One failure is the synthetic manual-transfer credential test, with
+missing-entitlement error -34018 in the ad-hoc lane; it remains frozen-scope
+and signed-lane evidence, with no credential-store inspection or server work.
+The other is ScreenSnapshots: 66 pixel mismatches across home.deckList (4),
+settings.sync (14), settings.importExport (18) and onboarding.collectionImport
+(30). Gallery known issues are separate. The WebKit failed-roundtrip test
+actually passed; no WebKit repair was justified.
+
+After capturing these failures the orchestrator stopped the remaining broad
+run for focused diagnosis. Its terminal gate and Xcode results are cancelled
+and incomplete, never pass. Remaining configuration/runtime checks, other T0
+checks and T1 are unrun; all acceptance boundaries remain open.
+
+Focused post-gate verification of the two harness repairs:
+
+- `core-test/20261027T234557Z-97977`: all five benchmark-harness tests passed.
+- `selftest/20261027T234647Z-98486`: all eleven conformance-tooling checks passed.
+- `core-lint/20261027T234648Z-98709`: pass.
+
+## Visual triage and priority
+
+`snapshots/20261027T234856Z-174` compared one synthetic home.deckList typical
+Mac cell without recording. It retains the known signature mismatch and frozen
+credential-lane failure. The integrator inspected its actual and diff PNGs: the
+old baseline has the custom icon/chevron rows, while the current frame uses a
+native hierarchical List. This reflects the requested native redesign, not a
+reason to restore the old custom rows. No baseline or tolerance was changed.
+The current count colours and wording still need N11.5's trailing secondary
+counts and To Review wording. U152 and its related UI work have no completion
+trailers and remain unfinished; this capture is not design or release approval.
+Keep all 66 failures for the owning UI units and final native design evidence.
+
+The backup/integrity source has focused and broad core/bridge evidence above.
+The unfinished UI acceptance, signed/frozen lane limitations and U127's open
+performance escalation stay explicit. Follow Antoine's next priority with an
+independent, store-only U113 dependency slice, without advertising a provider,
+writing collection data or accepting any unit. Preserve the original batch
+base for every pending change. Later integration and milestone acceptance still
+require their complete active evidence; these receipts do not waive it.
+
+Closure checks for the harness-only delta and this evidence log:
+`private/20261027T235715Z-8097`,
+`static-checks/20261027T235716Z-8257` and
+`similarity/20261027T235716Z-8256` passed. The similarity job's own summary
+retains its scanned/skipped inputs; this is source-code verification, not the
+open R1881 search-data check. Independent factual review of the log was clear.
