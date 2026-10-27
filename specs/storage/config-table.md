@@ -90,7 +90,7 @@ Some settings are members inside one key's object (U96's heatmap settings, U84 a
 
 ## C7. Keys Meguri does not use
 
-Meguri never writes, re-encodes, reorders or removes a key it does not use (R323, R1466). Examples are `heatmap`, `onigiri_sidebar_collapsed`, `_nt_<id>_lastDeck` for a note type Meguri never adds to, `cardStateCustomizer`, easy-days and filtered-deck keys, and keys of clients and add-ons Meguri does not know. Such a key keeps its bytes, `usn` and `mtime_secs` through every local operation. The only exceptions are Anki's own: removing a note type or deck removes its key family (C10), and a sync can replace the whole table (C9).
+Meguri never writes, re-encodes, reorders or removes a key it does not use (R323, R1466). Examples are `onigiri_sidebar_collapsed`, `_nt_<id>_lastDeck` for a note type Meguri never adds to, `cardStateCustomizer`, easy-days and filtered-deck keys, and keys of clients and add-ons Meguri does not know. Such a key keeps its bytes, `usn` and `mtime_secs` through every local operation. The only exceptions are Anki's own: removing a note type or deck removes its key family (C10), and a sync can replace the whole table (C9). The add-on key `heatmap` is not in this list: Meguri reads it and writes it by C6's rule, but only when the user changes a heatmap setting (`stats/heatmap-config#K2`); until then it keeps its bytes, `usn` and `mtime_secs` like a key Meguri does not use.
 
 ## C8. Meguri's keys and device-only state
 

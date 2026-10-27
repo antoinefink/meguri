@@ -4133,7 +4133,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U195 | Add flow | `app/Packages/MeguriKit/Sources/Features/Editor/Add/AddScreen.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/AddEntryPoints.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/AddScreenModelTests.swift` | U27, U28, U29, U37, U80, U150, U151, U152, U175, U190, U191, U192, U193, U210 |
 | U196 | Edit flows: review edit panel, Browse editor, external changes | `app/Packages/MeguriKit/Sources/Features/Editor/Edit/`<br>`app/Packages/MeguriKit/Tests/EditorTests/ExternalChangePolicyTests.swift`<br>`app/MeguriUITests/Editor/EditFlowUITests.swift` | U24, U25, U27, U151, U175, U184, U190, U192, U193, U210 |
 | U197 | Paste and drag-and-drop pipeline | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/paste-filter.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Paste/PasteboardReader.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/PasteProcessorTests.swift` | U2, U3, U4, U190, U194 |
-| U200 | Note Types screen and card template editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`<br>`app/Packages/MeguriKit/Sources/Features/NoteTypes/Templates/CardTemplateEditor.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/SchemaChangeGate.swift` | U9, U28, U29, U34, U37, U60, U150, U151, U190 |
+| U200 | Note Types screen and card template editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`<br>`app/Packages/MeguriKit/Sources/Features/NoteTypes/Templates/CardTemplateEditor.swift` (corrected 2026-10-27: no schema-change gate file) | U9, U28, U29, U34, U37, U60, U150, U151, U190 |
 | U201 | Field editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Fields/FieldsEditor.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/FieldNameValidatorTests.swift`<br>`app/MeguriUITests/NoteTypes/FieldsEditorUITests.swift` | U9, U29, U34, U37, U200 |
 | U202 | Template preview | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Preview/TemplatePreviewView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/TemplatePreviewModelTests.swift`<br>`app/MeguriUITests/NoteTypes/TemplatePreviewUITests.swift` | U37, U60, U61, U64, U66, U67, U190, U200 |
 | U203 | Change Note Type | `app/Packages/MeguriKit/Sources/Features/NoteTypes/ChangeNotetype/ChangeNotetypeView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/ChangeNotetypeModelTests.swift`<br>`app/MeguriUITests/NoteTypes/ChangeNotetypeUITests.swift` | U29, U35, U37, U151, U200, U210 |
@@ -12465,8 +12465,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`, `NoteTypesModel.swift`, `AddNotetypeSheet.swift`
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/Templates/CardTemplateEditor.swift`, `CardTemplateEditorModel.swift`, `NotetypeDraft.swift`, `TemplateCodeEditor.swift` (TextKit 2 representable: NSTextView / UITextView), `TemplateSyntaxHighlighter.swift`, `TemplateOptionsMenu.swift`, `DeckOverrideSheet.swift`, `BrowserAppearanceSheet.swift`, `CopyInfoFormatter.swift`
-- `app/Packages/MeguriKit/Sources/AppModel/SchemaChangeGate.swift`
-- `app/Packages/MeguriKit/Tests/NoteTypesTests/CardTemplateEditorModelTests.swift`, `TemplateSyntaxHighlighterTests.swift`, `CopyInfoFormatterTests.swift`, `SchemaChangeGateTests.swift`
+- `app/Packages/MeguriKit/Tests/NoteTypesTests/CardTemplateEditorModelTests.swift` (structural save included), `TemplateSyntaxHighlighterTests.swift`, `CopyInfoFormatterTests.swift` (corrected 2026-10-27: the schema-change gate and its tests are gone, `specs/notetypes/schema-changes.md` G4)
 - `app/MeguriUITests/NoteTypes/NoteTypesUITests.swift`, `app/MeguriUITests/NoteTypes/TemplateEditorUITests.swift`
 - `app/MeguriSnapshotTests/NoteTypes/NoteTypesSnapshotTests.swift`
 
@@ -12479,6 +12478,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - Rename (R917). Delete with the R918 rules and messages.
   - Row actions: Fields (U201), Cards, Restore to Default (R919). Restore confirms with default No, then asks for a kind when the original kind is unknown (R914 rules owned by U34).
 - **Structural change validation** (shared with U201, U203 and import merging) asks U29 to validate mappings and coherent-generation publication. Preview destructive mappings; do not show an Anki full-upload warning in ordinary editing. Anki scm bookkeeping remains intact for a future explicit transfer (R951).
+- **Structural save** (shared with U201 and U203; corrected 2026-10-27). Meguri asks no schema-change confirmation and shows no confirmation dialog for it (`specs/notetypes/schema-changes.md` G4). The previews and questions the units already require stay and come first: Add Card Type's note count, Remove Card Type's removal preview (R933), the delete question (R918), Restore to Default's question (R914), U201's field-delete question (R922) and U203's loss summary (R947, `specs/notetypes/change-notetype.md` M6). Accepting them and pressing Save is the whole consent. The save then shows the op's normal progress while it plans, takes its safety backup when T6.1 requires one (coalescing included, so some saves take none) and writes (`specs/package/backup-triggers.md` T6.1, T6.2; the op takes it, not the UI). When the op is refused with `SafetyBackupFailed`, an error alert (R167) says the safety backup could not be made, with its cause, and that nothing was changed; the collection is unchanged, the editor stays open with the draft and its edits, and Save can be tried again. For the note type delete (R918) and Restore to Default (R914), which run from the Note Types list, the list stays as it was and the action can be tried again. There is no gate type or file: each model maps the op's refusals itself.
 - **Template editor (R929).**
   - `NotetypeDraft` is the editable copy. Front, Back and Styling are switched with ⌘1/⌘2/⌘3.
   - `TemplateCodeEditor` is native TextKit 2: monospaced, with quote, dash and text substitutions and autocorrect off. Tab inserts 4 spaces. ⌘F finds (NSTextFinder / UIFindInteraction).
@@ -12492,7 +12492,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - Restore to Default.
   - Copy Info: Markdown code blocks for front, back and styling.
 - **Insert Field and Flip (R936).** Flip requires `<hr id=answer>`; without it, show the error.
-- **Save (⌘↩ or ⌘S, R937, R276).** The gate runs when the draft is structural, then the whole draft goes to U34's draft-apply op (one transaction, one undo entry); a draft with only CSS or option changes goes through U29's update. On validation errors (R942, R943) the editor stays open with the errors listed. Leaving with changes asks "Discard changes?".
+- **Save (⌘↩ or ⌘S, R937, R276).** The whole draft goes to U34's draft-apply op (one transaction, one undo entry); a structural draft follows the structural save rule above, with no confirmation (corrected 2026-10-27). A draft with only CSS or option changes goes through U29's update. On validation errors (R942, R943) the editor stays open with the errors listed. Leaving with changes asks "Discard changes?".
 - **Layout.** Code and preview (U202) side by side on Mac and iPad regular. On iPhone and compact, a segmented Code / Preview switch.
 
 **Patterns to follow:** KTD10 stores; DesignSystem list, menu and sheet components; R1964 accessibility ids (`notetypes.row.<id>`, `templates.editor.front`…).
@@ -12500,7 +12500,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Test scenarios:**
 - The list shows names within one frame. Counts appear after the background load (a slow-query test hook shows a placeholder first).
 - Add › "Add: Cloze", name "Grammar" → created and selected. "Clone: Basic" defaults to "Basic copy".
-- Delete with one note type left → refused. Delete a used type → "Delete this note type and all its cards?" then the schema gate. An unused type → "Delete this unused note type?".
+- Delete with one note type left → refused. Delete a used type → "Delete this note type and all its cards?", then progress and no further question (corrected 2026-10-27). An unused type → "Delete this unused note type?".
 - Type `{{Bogus}}` in Front → an "unknown field" error appears live. ⌘↩ keeps the editor open with the error listed.
 - Two templates with identical fronts → save refused. Adding `{{Card}}` to both → save succeeds.
 - A Cloze type whose back lacks `{{cloze:Text}}` → save refused (R943).
@@ -12508,11 +12508,12 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Deck Override is absent for Cloze. Entering a new deck name creates the deck and sets the override.
 - Flip on a back without `<hr id=answer>` → error. With it → the front and back swap per R936.
 - ⌥2 selects card type 2. ⌘3 focuses Styling. Copy Info yields three fenced blocks.
-- Covers AE39 (template part). After a field add confirmed the warning, reordering templates before the next sync shows no second warning.
+- Covers AE39 (template part). Adding a template and then reordering templates, before and after a sync, shows no confirmation dialog and no Anki full-upload warning; each save shows progress and commits (corrected 2026-10-27).
+- Structural save with an injected safety backup failure (a template added to a type with notes) → an error alert names the backup failure and says nothing was changed; the stored note type and its cards are unchanged, the editor stays open with the draft, and a second Save after the failure clears commits (corrected 2026-10-27).
 - F6 on the iPad simulator: open from the Browse sidebar, edit Back and Styling, save → the stored notetype templates and CSS equal the edits, and the mtime changed once.
 - During review, E then Cards… → the template editor opens as a sheet; save and close → back in the Edit panel, the session is still active (no end reason recorded) and the card re-renders on close.
 
-**Verification:** Note-type UI tests pass on iPhone, iPad and Mac. Model, highlighter and gate tests are green. The snapshot matrix and accessibility audit pass.
+**Verification:** Note-type UI tests pass on iPhone, iPad and Mac. Model (structural save included) and highlighter tests are green (corrected 2026-10-27). The snapshot matrix and accessibility audit pass.
 
 ### U201. Field editor
 
@@ -12533,11 +12534,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - **Names.** `FieldNameValidator` mirrors R921 and explains invalid input inline. U29 stays authoritative on save.
 - **Delete.** Refused for the last field and for protected fields. Otherwise it asks with the U29 note count (R922).
 - **Options form (R925).** Editor font picker and size, RTL, HTML editor by default, collapse by default, exclude from unqualified searches, description. The sort-field radio is single-select (R926).
-- **Save.** Edits go into a draft. Save runs the `SchemaChangeGate` when the draft has a structural change (add, delete, reorder, sort field), then sends the whole draft, renames included, to U34's draft-apply op: one transaction and one undo step that rewrites template references for renames (R923) and needs no gate for a rename alone (AE39, R950). A draft with only option-form edits (R925) goes through U29's update. Note rewrites run as a job started on the maintenance lane, with throttled progress (R927, KTD9). Leaving with changes asks "Discard changes?" (R928).
+- **Save.** Edits go into a draft. Save sends the whole draft, renames included, to U34's draft-apply op: one transaction and one undo step that rewrites template references for renames (R923). A structural draft (add, delete, reorder, sort field) follows U200's structural save rule: no confirmation, progress, and on `SafetyBackupFailed` an error alert with nothing changed and the draft kept; a rename alone is not structural and takes no backup (AE39, R950; corrected 2026-10-27). A draft with only option-form edits (R925) goes through U29's update. Note rewrites run as a job started on the maintenance lane, with throttled progress (R927, KTD9). Leaving with changes asks "Discard changes?" (R928).
 - Sticky is not offered here; it lives in Add (U195).
 - **Presentation.** Opened from an editor or a Browse sidebar item, it uses U200's in-window sheet rule and returns to the originating editor on close.
 
-**Patterns to follow:** U200 draft and gate pattern; DesignSystem form components.
+**Patterns to follow:** U200 draft and structural save pattern (corrected 2026-10-27); DesignSystem form components.
 
 **Test scenarios:**
 - Rename to `"#a:b"` → inline explanation, save disabled. `Front ` → trimmed. `front` beside `Front` → rejected as not unique.
@@ -12606,9 +12607,9 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - Fields: per new field, a picker of old fields or "(Nothing)"; an old field may feed several new fields.
   - Templates: per new template, an old template or "(Nothing)", each old template used at most once (the picker disables used ones). This section is hidden when either side is Cloze, with the R946 note shown instead.
 - **Loss summary (R947).** Lists fields whose content will be discarded and cards that will be removed, with counts from U35's change-info query.
-- **Save (R948).** `SchemaChangeGate`, then U35's change op with the schema stamp. A changed stamp is refused with an explanation and the view stays open. The op runs on the maintenance lane with progress. It is undoable, and a toast says "N notes updated.".
+- **Save (R948).** U35's change op with the schema stamp, with no confirmation dialog: the loss summary (R947, `specs/notetypes/change-notetype.md` M6) is the change's preview, and Save accepts it (corrected 2026-10-27, `specs/notetypes/schema-changes.md` G4). A changed stamp is refused with an explanation and the view stays open. The op runs on the maintenance lane with progress and takes its safety backup itself when `specs/package/backup-triggers.md` T6.1 requires one, coalescing included (`specs/notetypes/change-notetype.md` M8 check 5). When it is refused with `SafetyBackupFailed`, an error alert (R167) says the safety backup could not be made and nothing was changed; the view stays open with its mappings. It is undoable, and a toast says "N notes updated.".
 
-**Patterns to follow:** U200 gate and sheet patterns.
+**Patterns to follow:** U200 structural save and sheet patterns (corrected 2026-10-27).
 
 **Test scenarios:**
 - Basic(Front, Back) → Vocab(Back, Front, Extra) → defaults Back←Back, Front←Front, Extra←(Nothing).
@@ -12616,6 +12617,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Basic → Cloze → the template section is hidden and the note is shown.
 - Unmapped Back with content in 7 notes → the summary lists Back. An unmapped template 2 → lists its card count.
 - A sync changes the schema while the view is open → save refused with a message, nothing written.
+- Save shows no confirmation dialog. Save with an injected safety backup failure → an error alert says the backup failed and nothing was changed; the notes and cards are unchanged and the view stays open with its mappings (corrected 2026-10-27).
 - Save on 50 notes → toast "50 notes updated.". ⌘Z restores the original type and cards.
 
 **Verification:** UI and model tests pass on iPad and Mac. Snapshots pass.

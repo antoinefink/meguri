@@ -15,7 +15,8 @@ Which cards a note has: which templates (standard note types) or cloze ordinals 
 | an update that changes the note (`notes/note-records` U3) | G7 | D3 |
 | Check Database, for each note (U128) | G7 | D3 |
 | an import that adds or updates notes (U120, U121) | as the importer's spec says | its spec |
-| a note type change that adds a template or changes a front (U34), Change Note Type (U35) | G9 | D4 |
+| a note type change that adds a template or changes a front (U34) | G9 | D4 |
+| Change Note Type, for every selected note, also one with no card (U35, `notetypes/change-notetype` M9 step 3) | G7 over the note's cards after M9's card changes, G6 for a note with no card | D3, whose item 3 is the new note type's last deck |
 
 Nothing else creates cards: incoming sync, undo and redo, scheduling operations and an update that changes nothing (`notes/note-records` U2) never do.
 
