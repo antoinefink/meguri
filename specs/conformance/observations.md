@@ -13,7 +13,7 @@ What each observation kind records, how values are written, and how the runner c
 - An op step's output is `{}`, `{<op>: <op output>}` (`dsl.md` D7.2) or a rejection `{<op>: {"error": <kind>}}` (`dsl.md` D7.3). An observe step's output is `{<kind>: <value>, ...}` with one member per requested kind. A `handoff` step's output is `{}`.
 - Values are plain JSON keyed by logical ids (`#nN`, `#cN`). A real id appears only in the `ids` kind, or where a value is a real id by definition (revlog row ids are review instants, fuzz-table card ids are inputs, a `db_dump` holds the stored rows, `decks` reports each deck's id and preset id).
 - In an actor scenario (`sync-ops.md`), an observe step runs on the current actor's collection (S2.3).
-- No localized text is ever an observation (R1887): errors and results are kinds, counts and enums. Driver-authored English (`detail` of a protocol error) is never compared.
+- No localized text is ever an observation (R1887): errors and results are kinds, counts and enums. Driver-authored English (`detail` of a protocol error) is never compared. The one exception is the English studied-today line, which R1448 requires to match Anki's text (`studied_today_text`, `studied_today_format`; `stats-ops.md` H5).
 
 ## O2. Requesting observations
 
@@ -55,11 +55,17 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `image_occlusion` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: Anki's raw reading of an Occlusion field and its image-occlusion field roles (`image-occlusion-ops.md` J1); never reads or changes the scenario's collection |
 | `fields_check` | `{cases: [{notetype, fields} \| {note: #nN, fields?}, ...]}`, at most one request per step | `[{state, duplicates?}, ...]`, one per case: the field check of `specs/notes/field-check.md` on unsaved drafts, `duplicates` (logical note ids) only with the state `duplicate` (`note-ops.md` N4); never changes the collection |
-| `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
+| `search` | list of `{query, kind?: cards \| notes, order?: {column, reverse?}}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}`; with `order` (draft, `browser-ops.md` B1, B2, B6), the sorted ids with equal-key runs in logical-id order, or also `{error: "unsortable"}` |
+| `browser_rows` | `{columns: [<column key>, ...], rows: [<reference>, ...]}` | draft (browser, `browser-ops.md` B3, B4, B6): one entry per reference, `{tint, cells: {<column key>: <cell>}}` or `{error: deleted \| damaged}`, cards or notes as `browserTableShowNotesMode` says; at most one request per step |
 | `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
 | `card_extractors` | `{inputs: [{id, data, due, ivl, today, now}, ...]}`, at most once per observe step | `{rows: [{id, s, d, dr, r, rr, pos}, ...]}`: the card-data SQL functions of `specs/search/card-extractors.md` on given SQL values, one row per input (`extractor-ops.md` E1–E3); never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables?: [...], raw?: bool}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8), or raw (`normalized-dump.md` N4) |
-| `stats` | arguments defined by the stats area | draft (stats) |
+| `stats` | arguments defined by the stats area | draft (stats): the Stats screen's graph data |
+| `heatmap_totals` | none, or `{decks: [<name>, ...]}` | draft (stats): `{home: {<YYYY-MM-DD>: <count>}, decks?: {<name>: {...}}}`, the heatmap's review count per day for Home and the listed decks (`stats-ops.md` H1; oracle: the add-on image, H4) |
+| `studied_today_raw` | none | draft (stats): `{cards, time_ms}`, the count and time the Home studied-today line is built from (`stats-ops.md` H2) |
+| `studied_today_text` | none | draft (stats): the Home studied-today line, an English string (`stats-ops.md` H5) |
+| `studied_today_format` | `{inputs: [[<cards>, <time_ms>], ...]}` | draft (stats): `[<line>, ...]`, the Home line for each pair, without review-log rows (`stats-ops.md` H6) |
+| `today_stats` | `[collection \| {deck: <name>} \| {search: <text>}, ...]` | draft (stats): `[{answers, time_ms, correct, learn, review, relearn, filtered, mature, mature_correct}, ...]`, the Stats Today section's values per scope (`stats-ops.md` H7) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
 | `ignored_before_count` | `{preset, dates: [<string>, ...]}`, at most once per observe step | `[{included, total} \| {error: "invalid_date"}, ...]`, one per date: the count behind "N of M cards included" for that date text (`deck-options-ops.md` E2, `sched/memory-state` M5); never changes the collection |
 | `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |

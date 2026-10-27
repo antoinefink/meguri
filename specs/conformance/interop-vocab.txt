@@ -80,6 +80,14 @@ lrt
 nextPos
 localOffset
 db-check
+# Stats observations (stats-ops.md H1, H2, H5-H7).
+heatmap_totals
+studied_today_raw
+time_ms
+studied_today_text
+studied_today_format
+today_stats
+mature_correct
 # Undo ops and observation (undo-ops.md, U25); undoable is the config API's
 # argument name.
 undo_status
