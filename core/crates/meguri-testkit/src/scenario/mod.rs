@@ -3,6 +3,7 @@
 
 mod card_extractors;
 mod image_occlusion;
+mod intake;
 mod model;
 mod package;
 mod type_answer;

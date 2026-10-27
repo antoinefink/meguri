@@ -190,6 +190,9 @@ fn context(session: &Session<'_>) -> Result<(SearchContext, ContextReads), ExecE
 /// S1: one output per request.
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
+    if requests.iter().any(|request| request.order.is_some()) {
+        return Err(ExecError::new("unsupported_observation", "sorted search is pending"));
+    }
     let (mut context, unknown) = context(session)?;
     let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());

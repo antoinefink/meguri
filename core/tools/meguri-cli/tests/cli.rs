@@ -184,7 +184,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     );
     // dsl.md D7.2/D8: the current step vocabulary excludes observe and adds
     // the declared answer.filtered part, including parsing-only operations.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 77);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 87);
     for (op, supported) in [("media_reset", true), ("media_sync", false)] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

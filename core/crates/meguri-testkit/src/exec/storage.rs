@@ -420,13 +420,16 @@ fn open(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::Open(spec) = step else {
         return Err(ExecError::new("internal_error", "open adapter called for another op"));
     };
+    let crate::scenario::OpenSpec::Fixture(fixture_path) = spec else {
+        return Err(ExecError::new("unsupported_op", "open from a session file is pending"));
+    };
     let fixture = fixtures_dir(session.scenario)
-        .map(|dir| dir.join(spec.fixture.as_str()))
+        .map(|dir| dir.join(fixture_path.as_str()))
         .filter(|path| path.is_file())
         .ok_or_else(|| {
             invalid(format!(
                 "no fixture file conformance/fixtures/{}",
-                spec.fixture.as_str()
+                fixture_path.as_str()
             ))
         })?;
     session.storage.close()?;

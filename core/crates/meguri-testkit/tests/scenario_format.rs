@@ -246,7 +246,7 @@ steps:
   - update_preset: {name: Default, new_per_day: 5}
   - build_filtered: {name: F, search: "deck:A"}
   - import: {fixture: package/x.apkg}
-  - export: {format: apkg, name: out.apkg}
+  - export: {format: apkg, name: out.apkg, limit: collection, scheduling: true, presets: true, media: false}
   - check_db: {}
   - db_exec: {sql: "update cards set due = 1"}
   - reopen: {}
@@ -326,7 +326,10 @@ fn schema_draft_requirements() -> Vec<(String, Vec<String>, Vec<String>)> {
     let mut out = Vec::new();
     for (op, def) in schema["$defs"]["step"]["properties"].as_object().unwrap() {
         // A fixed form may leave the other forms draft (`import.colpkg`).
-        let def = def.get("else").unwrap_or(def);
+        let mut def = def;
+        while let Some(fallback) = def.get("else") {
+            def = fallback;
+        }
         let parts: Vec<&Value> = match def.get("allOf") {
             Some(all) => all.as_array().unwrap().iter().collect(),
             None if def.get("$ref") == Some(&json!("#/$defs/draft_args")) => vec![def],
@@ -360,7 +363,9 @@ fn valid_draft_args(op: &str) -> Value {
         "update_preset" => json!({"name": "Default"}),
         "build_filtered" => json!({"name": "F", "search": "deck:A"}),
         "import" => json!({"fixture": "package/x.apkg"}),
-        "export" => json!({"format": "apkg", "name": "out.apkg"}),
+        "export" => {
+            json!({"format": "apkg", "name": "out.apkg", "limit": "collection", "scheduling": true, "presets": true, "media": false})
+        }
         other => panic!("no valid example for draft op {other}: add one with the schema change"),
     }
 }
@@ -839,7 +844,7 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     assert!(parsed.needs().observations.contains("blob_decode"));
     // model-ops.md L6 and L7; other export forms stay draft and open.
-    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: apkg, name: out.apkg, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: apkg, name: out.apkg, limit: collection, scheduling: false, presets: true, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     let needs = parsed.needs();
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
@@ -2045,7 +2050,9 @@ fn open_scenarios_are_checked_when_they_load() {
     )
     .unwrap();
     assert!(ok.opens_fixtures());
-    assert!(matches!(&ok.steps[1], Step::Open(spec) if spec.fixture.as_str() == "a/b-c_d.e.anki2"));
+    assert!(
+        matches!(&ok.steps[1], Step::Open(scenario::OpenSpec::Fixture(path)) if path.as_str() == "a/b-c_d.e.anki2")
+    );
     let needs = ok.needs();
     assert!(needs.ops.contains("open") && needs.observations.contains("schema_objects"));
 
@@ -2790,9 +2797,9 @@ fn package_forms_enforce_sources_names_and_capability_parts() {
         "steps": [open, import]});
     setup["setup"] = json!({});
     assert!(scenario::Scenario::from_value(&setup).is_err());
-    // Other forms keep their draft keys and argument rules.
+    // Unspecified import forms keep draft rules; E7 export has an exact shape.
     assert!(model_accepts(json!({"import": {"fixture": "draft.apkg", "future": true}})).is_ok());
-    assert!(model_accepts(json!({"export": {"format": "apkg", "name": "draft.apkg", "future": true}})).is_ok());
+    assert!(model_accepts(json!({"export": {"format": "apkg", "name": "draft.apkg", "future": true}})).is_err());
 }
 
 #[test]
@@ -2928,5 +2935,601 @@ fn optimize_is_a_typed_empty_mapping_operation() {
         let mut invalid = value.clone();
         invalid["steps"] = json!([{"optimize": args}]);
         assert!(scenario::Scenario::from_value(&invalid).is_err());
+    }
+}
+
+// Prepared held vocabulary: recognition only, with no area activation.
+fn held_steps(steps: Value) -> Result<scenario::Scenario, scenario::FormatError> {
+    scenario::Scenario::from_value(&json!({
+        "id": "area/intake", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": steps,
+    }))
+}
+
+fn held_import() -> Value {
+    json!({"format": "apkg", "name": "Export-1.apkg", "merge_notetypes": false,
+        "update_notes": "if_newer", "update_notetypes": "always",
+        "with_scheduling": true, "with_deck_configs": false})
+}
+
+fn held_export() -> Value {
+    json!({"format": "apkg", "name": "Export-1.apkg", "limit": "collection",
+        "scheduling": true, "presets": false, "media": true})
+}
+
+#[test]
+fn held_step_vocabulary_is_strict_and_remains_unregistered() {
+    let examples = [
+        ("remove_notetype", json!({"notetype": "Pair"})),
+        ("restore_notetype", json!({"notetype": "Pair", "kind": "basic"})),
+        ("change_notetype_info", json!({"notes": ["#n1"], "notetype": "Pair"})),
+        (
+            "change_notetype",
+            json!({"fields": [0, null, 0], "templates": [1, null, 0]}),
+        ),
+        ("empty_cards", json!({})),
+        ("delete_empty_cards", json!({"keep_notes": false})),
+        ("schema11_copy", json!({"name": "copy-1.anki2"})),
+        ("check_media", json!({})),
+        ("delete_unused_media", json!({})),
+        ("tag_missing_media", json!({})),
+    ];
+    let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
+    assert_eq!(Step::NAMES.len(), 87);
+    assert_eq!(Step::NAMES.iter().collect::<std::collections::BTreeSet<_>>().len(), 87);
+    for (op, args) in examples {
+        let prefix = match op {
+            "change_notetype" => json!({"change_notetype_info": {"notes": ["#n1"], "notetype": "Pair"}}),
+            "delete_empty_cards" => json!({"empty_cards": {}}),
+            "delete_unused_media" | "tag_missing_media" => json!({"check_media": {}}),
+            _ => json!({"advance": "1s"}),
+        };
+        let parsed = held_steps(json!([prefix, {op: args.clone()}])).unwrap();
+        assert_eq!(parsed.steps[1].name(), op);
+        assert!(parsed.needs().ops.contains(op));
+        assert!(!capabilities.ops.contains(op), "{op} is recognition only");
+        assert!(held_steps(json!([prefix, {op: null}])).is_err(), "{op} null");
+        assert!(held_steps(json!([prefix, {op: []}])).is_err(), "{op} list");
+        let mut extra = args.clone();
+        extra["unknown"] = json!(true);
+        assert!(held_steps(json!([prefix, {op: extra}])).is_err(), "{op} unknown key");
+    }
+    for kind in [
+        "basic",
+        "basic_and_reversed",
+        "basic_optional_reversed",
+        "basic_typing",
+        "cloze",
+        "image_occlusion",
+    ] {
+        assert!(model_accepts(json!({"restore_notetype": {"notetype": "Pair", "kind": kind}})).is_ok());
+    }
+    assert!(model_accepts(json!({"restore_notetype": {"notetype": "Pair"}})).is_ok());
+    for step in [
+        json!({"remove_notetype": {"notetype": ""}}),
+        json!({"remove_notetype": {}}),
+        json!({"restore_notetype": {"notetype": "Pair", "kind": "unknown"}}),
+        json!({"restore_notetype": {"notetype": "Pair", "kind": null}}),
+        json!({"change_notetype_info": {"notes": [], "notetype": "Pair"}}),
+        json!({"change_notetype_info": {"notes": ["#c1"], "notetype": "Pair"}}),
+        json!({"change_notetype_info": {"notes": ["#n1"], "notetype": ""}}),
+        json!({"delete_empty_cards": {}}),
+        json!({"delete_empty_cards": {"keep_notes": 0}}),
+    ] {
+        assert!(model_accepts(step.clone()).is_err(), "{step}");
+    }
+    let info = json!({"change_notetype_info": {"notes": ["#n1"], "notetype": "Pair"}});
+    assert!(held_steps(json!([info, {"change_notetype": {}}])).is_ok());
+    for map in [
+        json!({"fields": null}),
+        json!({"fields": [-1]}),
+        json!({"fields": [1.0]}),
+        json!({"templates": [1, 1]}),
+        json!({"templates": [true]}),
+        json!({"fields": {"0": 1}}),
+    ] {
+        assert!(
+            held_steps(json!([info, {"change_notetype": map.clone()}])).is_err(),
+            "{map}"
+        );
+    }
+}
+
+#[test]
+fn held_collection_scans_and_selections_have_segment_and_actor_chronology() {
+    let info = json!({"change_notetype_info": {"notes": ["#n1"], "notetype": "Pair"}});
+    for (scan, action) in [
+        (info, json!({"change_notetype": {}})),
+        (
+            json!({"empty_cards": {}}),
+            json!({"delete_empty_cards": {"keep_notes": true}}),
+        ),
+    ] {
+        assert!(held_steps(json!([action])).is_err());
+        assert!(held_steps(json!([scan, action, action])).is_ok());
+        for side in ["meguri", "oracle"] {
+            assert!(held_steps(json!([scan, {"handoff": side}, action])).is_err());
+        }
+        let actors = json!({"id": "area/actors", "actors": ["client_a", "meguri"],
+            "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+            "steps": [scan, {"actor": "meguri"}, action]});
+        assert!(scenario::Scenario::from_value(&actors).is_err());
+        let mut back = actors;
+        back["steps"] = json!([scan, {"actor": "meguri"}, {"actor": "client_a"}, action]);
+        assert!(scenario::Scenario::from_value(&back).is_ok());
+    }
+}
+
+#[test]
+fn held_check_media_actions_never_reuse_an_invalidated_catalog() {
+    let scan = json!({"check_media": {}});
+    let tag = json!({"tag_missing_media": {}});
+    let delete = json!({"delete_unused_media": {}});
+    for action in [&tag, &delete] {
+        assert!(held_steps(json!([action])).is_err());
+        assert!(
+            held_steps(json!([scan, {"observe": ["media_dir"]}, {"advance": "1s"},
+            {"set_clock": "2030-01-16T00:00:00"}, tag, tag, action]))
+            .is_ok()
+        );
+        for invalidating in [
+            json!({"media_outside": [{"name": "x", "text": "x"}]}),
+            json!({"db_exec": {"sql": "SELECT 1"}}),
+            json!({"reopen": {}}),
+            json!({"undo": {}}),
+            json!({"delete_unused_media": {}}),
+            json!({"set_config": {"key": "x", "value": 1}}),
+            json!({"import": held_import()}),
+        ] {
+            assert!(
+                held_steps(json!([scan, invalidating, action])).is_err(),
+                "{invalidating}"
+            );
+            assert!(
+                held_steps(json!([scan, invalidating, scan, action])).is_ok(),
+                "reset after {invalidating}"
+            );
+        }
+        for side in ["meguri", "oracle"] {
+            assert!(held_steps(json!([scan, {"handoff": side}, action])).is_err());
+            assert!(held_steps(json!([scan, {"handoff": side}, scan, action])).is_ok());
+        }
+        let mut actors = json!({"id": "area/media-actors", "actors": ["client_a", "meguri"],
+            "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+            "steps": [scan, {"actor": "meguri"}, action]});
+        assert!(scenario::Scenario::from_value(&actors).is_err());
+        actors["steps"] = json!([scan, {"actor": "meguri"}, scan, action]);
+        assert!(scenario::Scenario::from_value(&actors).is_ok());
+    }
+}
+
+#[test]
+fn held_session_files_require_a_fixture_first_and_safe_single_names() {
+    let fixture = json!({"open": {"fixture": "storage/schema-11.anki2"}});
+    let file = json!({"open": {"file": "copy.anki2"}});
+    assert!(held_steps(json!([file])).is_err());
+    assert!(
+        scenario::Scenario::from_value(&json!({"id": "area/open", "setup": {},
+        "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [fixture]}))
+        .is_err()
+    );
+    // Absence of a produced file is a runtime unknown_ref, not a load error.
+    assert!(held_steps(json!([fixture, file])).is_ok());
+    assert!(
+        held_steps(json!([fixture, {"schema11_copy": {"name": "copy.anki2"}},
+        {"handoff": "oracle"}, file]))
+        .is_ok()
+    );
+    for name in [
+        "collection.anki2",
+        "Collection.anki2",
+        "../copy.anki2",
+        "a/copy.anki2",
+        "_copy.anki2",
+        ".anki2",
+        "copy.apkg",
+        "",
+        "a\\copy.anki2",
+    ] {
+        assert!(
+            model_accepts(json!({"schema11_copy": {"name": name}})).is_err(),
+            "{name}"
+        );
+        assert!(
+            held_steps(json!([fixture, {"open": {"file": name}}])).is_err(),
+            "{name}"
+        );
+    }
+    for args in [
+        json!({}),
+        json!({"file": null}),
+        json!({"fixture": "a.anki2", "file": "copy.anki2"}),
+        json!({"file": "copy.anki2", "unknown": true}),
+    ] {
+        assert!(held_steps(json!([fixture, {"open": args}])).is_err());
+    }
+}
+
+#[test]
+fn held_observation_shapes_and_pure_formatting_are_recognized() {
+    use scenario::{NEW_COLLECTION, ObservationKind as K};
+    let requests = [
+        json!({"browser_rows": {"columns": ["noteFld", "cardDue"], "rows": ["#c1", "#c2"]}}),
+        json!({"notetype_templates": {"notetypes": ["Pair"]}}),
+        json!("studied_today_raw"),
+        json!("studied_today_text"),
+        json!({"studied_today_format": {"inputs": [[0, -9007199254740991_i64], [4294967295_u64, 9007199254740991_i64]]}}),
+        json!({"today_stats": ["collection", {"deck": "Default"}, {"search": ""}, {"search": "  "}]}),
+        json!({"file_col": {"name": "copy.anki2", "columns": ["crt", "mod", "scm", "ver", "dty", "usn", "ls", "conf", "models", "decks", "dconf", "tags"]}}),
+        json!({"file_objects": {"name": "copy.anki2"}}),
+        json!({"file_query": {"name": "copy.anki2", "sql": "SELECT 1"}}),
+        json!({"package_media": {"name": "Export-1.apkg"}}),
+        json!({"package_db_dump": {"fixture": "package/standard.colpkg", "tables": ["notes", "cards"], "raw": true}}),
+    ];
+    let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
+    assert_eq!(K::ALL.len(), 57);
+    for request in &requests {
+        let parsed = held_steps(json!([{"observe": [request]}])).unwrap();
+        let Step::Observe(observe) = &parsed.steps[0] else {
+            unreachable!()
+        };
+        let kind = observe[0].kind;
+        assert_eq!(K::from_name(kind.name()), Some(kind));
+        assert!(!capabilities.observations.contains(kind.name()));
+        assert_eq!(
+            parsed.needs().setup.contains(NEW_COLLECTION),
+            kind != K::StudiedTodayFormat
+        );
+        assert!(
+            held_steps(json!([{"observe": [request, request]}])).is_err()
+                || matches!(kind, K::StudiedTodayRaw | K::StudiedTodayText)
+        );
+        if let Some(map) = request.as_object() {
+            let (name, args) = map.iter().next().unwrap();
+            if let Some(args) = args.as_object() {
+                let mut extra = args.clone();
+                extra.insert("unknown".to_owned(), json!(true));
+                assert!(model_accepts(json!({"observe": [{name: extra}]})).is_err(), "{name}");
+                for key in args.keys().filter(|k| !matches!(k.as_str(), "raw" | "tables")) {
+                    let mut missing = args.clone();
+                    missing.remove(key);
+                    assert!(
+                        model_accepts(json!({"observe": [{name: missing}]})).is_err(),
+                        "{name}.{key}"
+                    );
+                }
+            }
+        }
+    }
+    // The pure exception applies to H6 only, even though all three names concern today.
+    let pure = held_steps(json!([{"advance": "1s"}, {"observe": [requests[4]]}])).unwrap();
+    assert!(!pure.starts_from_new_collection());
+    assert!(
+        held_steps(json!([{"observe": ["studied_today_raw"]}]))
+            .unwrap()
+            .starts_from_new_collection()
+    );
+}
+
+#[test]
+fn held_observations_reject_bad_members_bounds_refs_and_browse_modes() {
+    for request in [
+        json!({"browser_rows": {"columns": [], "rows": ["#c1"]}}),
+        json!({"browser_rows": {"columns": ["deck", "deck"], "rows": ["#c1"]}}),
+        json!({"browser_rows": {"columns": ["unknown"], "rows": ["#c1"]}}),
+        json!({"browser_rows": {"columns": ["deck"], "rows": []}}),
+        json!({"browser_rows": {"columns": ["deck"], "rows": ["#c1", "#c1"]}}),
+        json!({"browser_rows": {"columns": ["deck"], "rows": ["#n1", "#c1"]}}),
+        json!({"browser_rows": {"columns": ["deck"], "rows": ["#c0"]}}),
+        json!({"notetype_templates": {"notetypes": [""]}}),
+        json!({"notetype_templates": {"notetypes": []}}),
+        json!({"studied_today_raw": {}}),
+        json!({"studied_today_text": {}}),
+        json!("studied_today_raw()"),
+        json!("studied_today_text()"),
+        json!({"studied_today_format": {"inputs": []}}),
+        json!({"studied_today_format": {"inputs": [[0]]}}),
+        json!({"studied_today_format": {"inputs": [[0, 1, 2]]}}),
+        json!({"studied_today_format": {"inputs": [[-1, 0]]}}),
+        json!({"studied_today_format": {"inputs": [[4294967296_u64, 0]]}}),
+        json!({"studied_today_format": {"inputs": [[1.0, 0]]}}),
+        json!({"studied_today_format": {"inputs": [[1, 0.0]]}}),
+        json!({"studied_today_format": {"inputs": [[1, 9007199254740992_i64]]}}),
+        json!({"today_stats": []}),
+        json!({"today_stats": ["deck"]}),
+        json!({"today_stats": [{"deck": ""}]}),
+        json!({"today_stats": [{"search": null}]}),
+        json!({"today_stats": [{"search": "", "deck": "Default"}]}),
+        json!({"file_col": {"name": "copy.anki2", "columns": ["ver", "ver"]}}),
+        json!({"file_col": {"name": "copy.anki2", "columns": ["unknown"]}}),
+        json!({"file_objects": {"name": "collection.anki2"}}),
+        json!({"file_query": {"name": "copy.anki2", "sql": ""}}),
+        json!({"package_media": {"fixture": "../x.apkg"}}),
+        json!({"package_media": {"name": "x.apkg", "fixture": "package/x.apkg"}}),
+        json!({"package_media": {"name": "x.apkg", "tables": ["notes"]}}),
+        json!({"package_db_dump": {"name": "x.apkg", "tables": []}}),
+        json!({"package_db_dump": {"name": "x.apkg", "tables": ["notes", "notes"]}}),
+        json!({"package_db_dump": {"name": "x.apkg", "tables": ["unknown"]}}),
+        json!({"package_db_dump": {"name": "x.apkg", "raw": null}}),
+        json!({"package_db_dump": {"name": "x.apkg", "raw": 1}}),
+    ] {
+        assert!(
+            model_accepts(json!({"observe": [request.clone()]})).is_err(),
+            "{request}"
+        );
+    }
+    let note_rows = json!({"observe": [{"browser_rows": {"columns": ["deck"], "rows": ["#n1"]}}]});
+    assert!(held_steps(json!([note_rows])).is_err());
+    assert!(
+        held_steps(json!([{"set_config": {"key": "browserTableShowNotesMode", "value": true}}, note_rows])).is_ok()
+    );
+    let card_rows = json!({"observe": [{"browser_rows": {"columns": ["deck"], "rows": ["#c1"]}}]});
+    assert!(
+        held_steps(json!([{"set_config": {"key": "browserTableShowNotesMode", "value": true}}, card_rows])).is_err()
+    );
+}
+
+#[test]
+fn held_browser_rows_follow_browser_config_mode_switches() {
+    for (notes, row, wrong) in [(true, "#n1", "#c1"), (false, "#c1", "#n1")] {
+        let before = json!({"browser_config_set": {"key": "browserTableShowNotesMode", "value": !notes}});
+        let switch = json!({"browser_config_set": {"key": "browserTableShowNotesMode", "value": notes}});
+        let rows = |row| json!({"observe": [{"browser_rows": {"columns": ["deck"], "rows": [row]}}]});
+        assert!(held_steps(json!([before, rows(wrong), switch, rows(row)])).is_ok());
+        let error = held_steps(json!([before, switch, rows(wrong)])).unwrap_err();
+        assert!(error.to_string().contains("references disagree with Browse mode"));
+        // An unrelated browser write keeps the known mode; raw SQL makes it unknown.
+        let unrelated = json!({"browser_config_set": {"key": "previewBothSides", "value": !notes}});
+        assert!(held_steps(json!([switch, unrelated, rows(wrong)])).is_err());
+        assert!(held_steps(json!([switch, {"db_exec": {"sql": "SELECT 1"}}, rows(wrong)])).is_ok());
+    }
+    // The mode accepts only true or false; each other JSON type is rejected.
+    for invalid_mode in [json!(null), json!(0), json!(1), json!("false"), json!([]), json!({})] {
+        assert!(
+            held_steps(json!([{"browser_config_set": {"key": "browserTableShowNotesMode", "value": invalid_mode}}])).is_err()
+        );
+    }
+}
+
+#[test]
+fn held_browser_config_mode_writes_belong_to_the_current_actor() {
+    for (writer, other) in [("client_a", "meguri"), ("meguri", "client_a")] {
+        for (notes, row, wrong) in [(true, "#n1", "#c1"), (false, "#c1", "#n1")] {
+            let switch = json!({"browser_config_set": {"key": "browserTableShowNotesMode", "value": notes}});
+            let rows = |row| json!({"observe": [{"browser_rows": {"columns": ["deck"], "rows": [row]}}]});
+            let mut value = json!({"id": "area/browser-mode-actors", "actors": ["client_a", "meguri"],
+                "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+                "steps": []});
+            let prefix = json!([
+                {"set_config": {"key": "browserTableShowNotesMode", "value": !notes}},
+                {"actor": "meguri"},
+                {"set_config": {"key": "browserTableShowNotesMode", "value": !notes}},
+                {"actor": writer}, switch
+            ]);
+            for (tail, accepted) in [
+                (json!([rows(row)]), true),
+                (json!([rows(wrong)]), false),
+                (
+                    json!([{"actor": other}, rows(wrong), {"actor": writer}, rows(row)]),
+                    true,
+                ),
+                (json!([{"actor": other}, rows(row)]), false),
+            ] {
+                let mut steps = prefix.as_array().unwrap().clone();
+                steps.extend(tail.as_array().unwrap().iter().cloned());
+                value["steps"] = json!(steps);
+                assert_eq!(
+                    scenario::Scenario::from_value(&value).is_ok(),
+                    accepted,
+                    "writer={writer}, notes={notes}, tail={tail}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn held_search_orders_are_optional_strict_and_preserved() {
+    for order in [
+        json!({"column": "cardMod"}),
+        json!({"column": "unknown", "reverse": true}),
+        json!({"column": "", "reverse": false}),
+    ] {
+        let request = json!({"query": "", "kind": "notes", "order": order});
+        let parsed = scenario::SearchRequest::from_list(&[request]).unwrap();
+        assert_eq!(
+            parsed[0].order.as_ref().unwrap().column,
+            order["column"].as_str().unwrap()
+        );
+        assert_eq!(
+            parsed[0].order.as_ref().unwrap().reverse,
+            order.get("reverse").and_then(Value::as_bool)
+        );
+    }
+    assert!(
+        scenario::SearchRequest::from_list(&[json!({"query": ""})]).unwrap()[0]
+            .order
+            .is_none()
+    );
+    for order in [
+        json!(null),
+        json!([]),
+        json!({}),
+        json!({"column": 1}),
+        json!({"column": "deck", "reverse": null}),
+        json!({"column": "deck", "reverse": 1}),
+        json!({"column": "deck", "unknown": false}),
+    ] {
+        assert!(model_accepts(json!({"observe": [{"search": [{"query": "", "order": order}]}]})).is_err());
+    }
+}
+
+#[test]
+fn held_apkg_sources_options_limits_and_finer_needs_are_exact() {
+    let import = held_import();
+    let export = held_export();
+    let parsed = held_steps(json!([{"import": import}, {"export": export}])).unwrap();
+    assert!(parsed.needs().ops.contains("import.apkg"));
+    assert!(parsed.needs().ops.contains("export.apkg"));
+    let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
+    assert!(!capabilities.ops.contains("import.apkg"));
+    assert!(!capabilities.ops.contains("export.apkg"));
+    for (op, args) in [("import", &import), ("export", &export)] {
+        for key in args.as_object().unwrap().keys() {
+            let mut missing = args.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            // The format-free import form intentionally retains its draft contract.
+            if op == "import" && key == "format" {
+                continue;
+            }
+            assert!(model_accepts(json!({op: missing})).is_err(), "{op}.{key}");
+        }
+        let mut extra = args.clone();
+        extra["unknown"] = json!(true);
+        assert!(model_accepts(json!({op: extra})).is_err());
+    }
+    for policy in ["if_newer", "always", "never"] {
+        let mut args = import.clone();
+        args["update_notes"] = json!(policy);
+        args["update_notetypes"] = json!(policy);
+        assert!(model_accepts(json!({"import": args})).is_ok());
+    }
+    for key in [
+        "merge_notetypes",
+        "with_scheduling",
+        "with_deck_configs",
+        "update_notes",
+        "update_notetypes",
+    ] {
+        for value in [json!(null), json!(1), json!("unknown")] {
+            let mut args = import.clone();
+            args[key] = value;
+            assert!(model_accepts(json!({"import": args})).is_err(), "{key}");
+        }
+    }
+    let mut fixture_import = import.clone();
+    fixture_import.as_object_mut().unwrap().remove("name");
+    fixture_import["fixture"] = json!("package/apkg/x.apkg");
+    assert!(model_accepts(json!({"import": fixture_import})).is_ok());
+    for source in ["../x.apkg", "x.colpkg", "_x.apkg", "a/x.apkg"] {
+        let mut args = import.clone();
+        args["name"] = json!(source);
+        assert!(model_accepts(json!({"import": args})).is_err());
+    }
+    let mut both = import.clone();
+    both["fixture"] = json!("package/x.apkg");
+    assert!(model_accepts(json!({"import": both})).is_err());
+    for limit in [
+        json!("collection"),
+        json!({"deck": "Default"}),
+        json!({"notes": ["#n1"]}),
+        json!({"cards": ["#c1"]}),
+    ] {
+        let mut args = export.clone();
+        args["limit"] = limit;
+        assert!(model_accepts(json!({"export": args})).is_ok());
+    }
+    for limit in [
+        json!("unknown"),
+        json!({"deck": ""}),
+        json!({"notes": []}),
+        json!({"notes": ["#c1"]}),
+        json!({"cards": ["#n1"]}),
+        json!({"deck": "Default", "cards": ["#c1"]}),
+    ] {
+        let mut args = export.clone();
+        args["limit"] = limit;
+        assert!(model_accepts(json!({"export": args})).is_err());
+    }
+    for flag in ["scheduling", "presets", "media"] {
+        let mut args = export.clone();
+        args[flag] = json!(1);
+        assert!(model_accepts(json!({"export": args})).is_err());
+    }
+    // Session ownership: only the side/actor actually importing needs the finer form.
+    let chain = held_steps(json!([{"handoff": "oracle"}, {"import": import}])).unwrap();
+    assert!(!chain.needs_on(scenario::Side::Meguri).ops.contains("import.apkg"));
+    assert!(chain.needs_on(scenario::Side::Oracle).ops.contains("import.apkg"));
+    let actors = scenario::Scenario::from_value(&json!({"id": "area/actors", "actors": ["client_a", "meguri"],
+        "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": [{"import": import}, {"actor": "meguri"}, {"export": export}]}))
+    .unwrap();
+    assert!(!actors.needs_of_meguri_actors().ops.contains("import.apkg"));
+    assert!(actors.needs_of_meguri_actors().ops.contains("export.apkg"));
+}
+
+#[test]
+fn held_media_case_variants_are_opt_in_but_nfc_duplicates_never_are() {
+    for outside in [false, true] {
+        let files = json!([{"name": "A.jpg", "text": "A"}, {"name": "a.jpg", "text": "a"}]);
+        let mut value =
+            json!({"id": "area/media", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": []});
+        if outside {
+            value["steps"] = json!([{"media_outside": files}]);
+        } else {
+            value["setup"] = json!({"media_files": files});
+        }
+        assert!(scenario::Scenario::from_value(&value).is_err());
+        value["tags"] = json!(["media-case-variants"]);
+        let parsed = scenario::Scenario::from_value(&value).unwrap();
+        assert!(parsed.needs().setup.contains("media_files.case_variants"));
+        assert!(
+            parsed
+                .needs_on(scenario::Side::Oracle)
+                .setup
+                .contains("media_files.case_variants")
+        );
+        assert!(
+            !meguri_testkit::exec::MeguriExecutor::default()
+                .capabilities()
+                .setup
+                .contains("media_files.case_variants")
+        );
+        let equal = json!([{"name": "é.jpg", "text": "x"}, {"name": "e\u{301}.jpg", "text": "y"}]);
+        if outside {
+            value["steps"] = json!([{"media_outside": equal}]);
+        } else {
+            value["setup"] = json!({"media_files": equal});
+        }
+        assert!(scenario::Scenario::from_value(&value).is_err());
+    }
+}
+
+#[test]
+fn held_raw_requests_and_numeric_observation_values_retain_their_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("intake.json");
+    let value = json!({"id": "area/intake", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+        "steps": [{"import": held_import()}, {"export": held_export()},
+            {"observe": [{"studied_today_format": {"inputs": [[4294967295_u64, -9007199254740991_i64]]}},
+                {"search": [{"query": "", "order": {"column": "cardMod", "reverse": false}}]}]}]});
+    fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+    let loaded = scenario::load(&path).unwrap();
+    assert_eq!(loaded.value, value); // CLI to-json emits this raw value.
+    assert_eq!(scenario::jcs(&loaded.value).unwrap(), scenario::jcs(&value).unwrap());
+    for (index, raw) in [(0, held_import()), (1, held_export())] {
+        assert_eq!(
+            loaded.scenario.steps[index].draft_args().unwrap().0,
+            *raw.as_object().unwrap()
+        );
+    }
+    let exact = meguri_testkit::observe::parse_json(
+        r#"{"conf":{"u":18446744073709551615,"i":1,"f":1.0},"mod":9223372036854775807}"#,
+    )
+    .unwrap();
+    assert_eq!(exact["conf"]["u"].as_u64(), Some(u64::MAX));
+    assert_eq!(exact["mod"].as_i64(), Some(i64::MAX));
+    assert!(exact["conf"]["i"].as_number().unwrap().is_u64());
+    assert!(exact["conf"]["f"].as_number().unwrap().is_f64());
+    assert_eq!(
+        serde_json::to_string(&exact).unwrap(),
+        r#"{"conf":{"f":1.0,"i":1,"u":18446744073709551615},"mod":9223372036854775807}"#
+    );
+    for text in [
+        r#"{"open":{"fixture":"a.anki2","fixture":"b.anki2"}}"#,
+        r#"{"import":{"format":"apkg","format":"colpkg"}}"#,
+        r#"{"observe":[{"file_col":{"name":"a.anki2","name":"b.anki2"}}]}"#,
+    ] {
+        assert!(scenario::parse_json(text).is_err());
     }
 }

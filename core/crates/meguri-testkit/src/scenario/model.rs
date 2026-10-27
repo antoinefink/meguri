@@ -845,33 +845,61 @@ pub struct TemplateEdit {
     pub deck: Option<Option<String>>,
 }
 
-/// `open: {fixture}` (storage-ops.md P1.1).
+/// Exactly one fixture or session file (storage-ops P1, P8.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenSpec {
-    /// A path relative to `conformance/fixtures/`, ending in `.anki2`.
-    pub fixture: FixturePath,
+pub enum OpenSpec {
+    Fixture(FixturePath),
+    File(String),
 }
 
 impl<'de> Deserialize<'de> for OpenSpec {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<OpenSpec, D::Error> {
         let map = mapping(deserializer, "open")?;
-        let mut fixture = None;
-        for (key, value) in map {
-            match (key.as_str(), value) {
-                ("fixture", Value::String(path)) => fixture = Some(path.parse().map_err(de::Error::custom)?),
-                ("fixture", other) => {
-                    return Err(de::Error::custom(format!("open.fixture is a path, found {other}")));
-                }
-                (other, _) => {
-                    return Err(de::Error::custom(format!(
-                        "open: unknown key {other:?}, expected fixture"
-                    )));
-                }
-            }
+        if map.len() != 1 {
+            return Err(de::Error::custom("open takes exactly one of fixture or file"));
         }
-        let fixture = fixture.ok_or_else(|| de::Error::custom("open needs a fixture"))?;
-        Ok(OpenSpec { fixture })
+        match map.into_iter().next().expect("one member") {
+            (key, Value::String(path)) if key == "fixture" => {
+                Ok(Self::Fixture(path.parse().map_err(de::Error::custom)?))
+            }
+            (key, Value::String(name)) if key == "file" && super::intake::session_name(&name) => Ok(Self::File(name)),
+            _ => Err(de::Error::custom(
+                "open needs a valid fixture path or session file name",
+            )),
+        }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredNotetypeArgs {
+    pub notetype: String,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreNotetypeArgs {
+    pub notetype: String,
+    #[serde(default, deserialize_with = "present")]
+    pub kind: Option<StockKind>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeNotetypeInfoArgs {
+    pub notes: Vec<NoteRef>,
+    pub notetype: String,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeNotetypeArgs {
+    #[serde(default, deserialize_with = "present")]
+    pub fields: Option<Vec<Option<u64>>>,
+    #[serde(default, deserialize_with = "present")]
+    pub templates: Option<Vec<Option<u64>>>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteEmptyCardsArgs {
+    pub keep_notes: bool,
 }
 
 /// A fixture file below `conformance/fixtures/` (scenario.schema.json
@@ -914,6 +942,27 @@ impl FromStr for FixturePath {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
+    #[serde(deserialize_with = "op_mapping")]
+    RemoveNotetype(StoredNotetypeArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    RestoreNotetype(RestoreNotetypeArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    ChangeNotetypeInfo(ChangeNotetypeInfoArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    ChangeNotetype(ChangeNotetypeArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    EmptyCards(NoArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    DeleteEmptyCards(DeleteEmptyCardsArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    Schema11Copy(NameArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    CheckMedia(NoArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    DeleteUnusedMedia(NoArgs),
+    #[serde(deserialize_with = "op_mapping")]
+    TagMissingMedia(NoArgs),
+
     #[serde(deserialize_with = "mapping_list")]
     MediaOutside(Vec<MediaFileSpec>),
     #[serde(deserialize_with = "op_mapping")]
@@ -1086,7 +1135,17 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 77] = [
+    pub const NAMES: [&'static str; 87] = [
+        "remove_notetype",
+        "restore_notetype",
+        "change_notetype_info",
+        "change_notetype",
+        "empty_cards",
+        "delete_empty_cards",
+        "schema11_copy",
+        "check_media",
+        "delete_unused_media",
+        "tag_missing_media",
         "advance",
         "set_clock",
         "add_note",
@@ -1172,6 +1231,16 @@ impl Step {
     /// The op name as written in scenarios.
     pub fn name(&self) -> &'static str {
         match self {
+            Step::RemoveNotetype(_) => "remove_notetype",
+            Step::RestoreNotetype(_) => "restore_notetype",
+            Step::ChangeNotetypeInfo(_) => "change_notetype_info",
+            Step::ChangeNotetype(_) => "change_notetype",
+            Step::EmptyCards(_) => "empty_cards",
+            Step::DeleteEmptyCards(_) => "delete_empty_cards",
+            Step::Schema11Copy(_) => "schema11_copy",
+            Step::CheckMedia(_) => "check_media",
+            Step::DeleteUnusedMedia(_) => "delete_unused_media",
+            Step::TagMissingMedia(_) => "tag_missing_media",
             Step::MediaOutside(_) => "media_outside",
             Step::AddMedia(_) => "add_media",
             Step::TrashMedia(_) => "trash_media",
@@ -1984,6 +2053,18 @@ pub const DUMP_TABLES: [&str; 12] = [
 /// Observation kinds (observations.md O4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationKind {
+    BrowserRows,
+    NotetypeTemplates,
+    StudiedTodayRaw,
+    StudiedTodayText,
+    StudiedTodayFormat,
+    TodayStats,
+    FileCol,
+    FileObjects,
+    FileQuery,
+    PackageMedia,
+    PackageDbDump,
+
     TypeAnswer,
     ReviewHtml,
     MediaDir,
@@ -2070,7 +2151,18 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 46] = [
+    pub const ALL: [ObservationKind; 57] = [
+        ObservationKind::BrowserRows,
+        ObservationKind::NotetypeTemplates,
+        ObservationKind::StudiedTodayRaw,
+        ObservationKind::StudiedTodayText,
+        ObservationKind::StudiedTodayFormat,
+        ObservationKind::TodayStats,
+        ObservationKind::FileCol,
+        ObservationKind::FileObjects,
+        ObservationKind::FileQuery,
+        ObservationKind::PackageMedia,
+        ObservationKind::PackageDbDump,
         ObservationKind::TypeAnswer,
         ObservationKind::ReviewHtml,
         ObservationKind::MediaDir,
@@ -2121,6 +2213,17 @@ impl ObservationKind {
 
     pub fn name(self) -> &'static str {
         match self {
+            ObservationKind::BrowserRows => "browser_rows",
+            ObservationKind::NotetypeTemplates => "notetype_templates",
+            ObservationKind::StudiedTodayRaw => "studied_today_raw",
+            ObservationKind::StudiedTodayText => "studied_today_text",
+            ObservationKind::StudiedTodayFormat => "studied_today_format",
+            ObservationKind::TodayStats => "today_stats",
+            ObservationKind::FileCol => "file_col",
+            ObservationKind::FileObjects => "file_objects",
+            ObservationKind::FileQuery => "file_query",
+            ObservationKind::PackageMedia => "package_media",
+            ObservationKind::PackageDbDump => "package_db_dump",
             ObservationKind::TypeAnswer => "type_answer",
             ObservationKind::ReviewHtml => "review_html",
             ObservationKind::MediaDir => "media_dir",
@@ -2176,6 +2279,17 @@ impl ObservationKind {
 
     pub(super) fn shape(self) -> ArgShape {
         match self {
+            ObservationKind::BrowserRows => ArgShape::Mapping,
+            ObservationKind::NotetypeTemplates => ArgShape::Mapping,
+            ObservationKind::StudiedTodayRaw => ArgShape::None,
+            ObservationKind::StudiedTodayText => ArgShape::None,
+            ObservationKind::StudiedTodayFormat => ArgShape::Mapping,
+            ObservationKind::TodayStats => ArgShape::List,
+            ObservationKind::FileCol => ArgShape::Mapping,
+            ObservationKind::FileObjects => ArgShape::Mapping,
+            ObservationKind::FileQuery => ArgShape::Mapping,
+            ObservationKind::PackageMedia => ArgShape::Mapping,
+            ObservationKind::PackageDbDump => ArgShape::Mapping,
             ObservationKind::Ids => ArgShape::AnyRefs,
             ObservationKind::CardExcerpts => ArgShape::CardRefs,
             ObservationKind::MediaDir
@@ -2244,7 +2358,7 @@ pub struct ObservationRequest {
 
 impl ObservationRequest {
     /// D8: the kinds that never read a collection, `type_answer`, `text`, `cloze`,
-    /// `fsrs_next`, `canonical_search` and `card_extractors`, and `template` when every case is
+    /// `fsrs_next`, `studied_today_format`, `canonical_search` and `card_extractors`, and `template` when every case is
     /// a new-note case.
     pub fn reads_no_collection(&self) -> bool {
         match self.kind {
@@ -2254,7 +2368,8 @@ impl ObservationRequest {
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::CanonicalSearch
-            | ObservationKind::CardExtractors => true,
+            | ObservationKind::CardExtractors
+            | ObservationKind::StudiedTodayFormat => true,
             ObservationKind::Template => match &self.args {
                 ObservationArgs::Mapping(map) => TemplateRequest::from_mapping(map)
                     .is_ok_and(|request| request.cases.iter().all(|c| matches!(c, TemplateCase::NewNote(_)))),
@@ -2278,6 +2393,15 @@ impl ObservationRequest {
         if kind == ObservationKind::CardExcerpts {
             return Err(FormatError::new(
                 "card_excerpts needs a mapping with a non-empty card list",
+            ));
+        }
+        if matches!(
+            kind,
+            ObservationKind::StudiedTodayRaw | ObservationKind::StudiedTodayText
+        ) && inner.is_some()
+        {
+            return Err(FormatError::new(
+                "studied_today_raw and studied_today_text use the plain no-argument form",
             ));
         }
         let args = match inner {
@@ -2365,17 +2489,26 @@ pub enum SearchKind {
     Notes,
 }
 
-/// One request of a `search` observation: `{query, kind?}`, `kind` cards when
+/// One request of a `search` observation: `{query, kind?, order?}`, `kind` cards when
 /// missing (search-ops.md S1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequest {
     pub query: String,
     pub kind: SearchKind,
+    pub order: Option<SearchOrder>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchOrder {
+    pub column: String,
+    #[serde(default, deserialize_with = "present")]
+    pub reverse: Option<bool>,
 }
 
 impl SearchRequest {
     /// Reads a `search` list with scenario.schema.json's rules: at least one
-    /// request, each exactly `query` (a string) and an optional `kind`.
+    /// request, each `query` (a string), optional `kind` and optional `order`.
     pub fn from_list(items: &[Value]) -> Result<Vec<SearchRequest>, FormatError> {
         let bad = |why: String| FormatError::new(format!("observation search: {why}"));
         if items.is_empty() {
@@ -2387,9 +2520,12 @@ impl SearchRequest {
             .map(|(k, item)| {
                 let map = item
                     .as_object()
-                    .ok_or_else(|| bad(format!("request {k} is a {{query, kind?}} mapping")))?;
-                if let Some(key) = map.keys().find(|key| !matches!(key.as_str(), "query" | "kind")) {
-                    return Err(bad(format!("request {k} takes {{query, kind?}}, not {key:?}")));
+                    .ok_or_else(|| bad(format!("request {k} is a {{query, kind?, order?}} mapping")))?;
+                if let Some(key) = map
+                    .keys()
+                    .find(|key| !matches!(key.as_str(), "query" | "kind" | "order"))
+                {
+                    return Err(bad(format!("request {k} takes {{query, kind?, order?}}, not {key:?}")));
                 }
                 let query = map
                     .get("query")
@@ -2406,6 +2542,15 @@ impl SearchRequest {
                 Ok(SearchRequest {
                     query: query.to_owned(),
                     kind,
+                    order: map
+                        .get("order")
+                        .map(|v| {
+                            if !v.is_object() {
+                                return Err(bad("order is a mapping".to_owned()));
+                            }
+                            SearchOrder::deserialize(v).map_err(|e| bad(e.to_string()))
+                        })
+                        .transpose()?,
                 })
             })
             .collect()
@@ -3232,6 +3377,9 @@ impl Scenario {
     /// the schema requires beyond the types (scenario.schema.json).
     pub fn from_value(value: &Value) -> Result<Scenario, FormatError> {
         let scenario = Scenario::deserialize(value).map_err(|e| FormatError::new(e.to_string()))?;
+        if scenario.opens_fixtures() && value.get("setup").is_some() {
+            return Err(FormatError::new("a scenario with open has no setup (storage-ops P1.3)"));
+        }
         super::validate::scenario(&scenario)?;
         super::package::scenario(&scenario, value)?;
         Ok(scenario)
@@ -3245,6 +3393,7 @@ impl Scenario {
             needs.setup.insert(NEW_COLLECTION.to_owned());
         }
         needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
+        self.add_media_variant_need(&mut needs);
         add_step_needs(&mut needs, &self.steps);
         self.add_filtered_answer_need(&mut needs, &self.steps);
         needs
@@ -3310,6 +3459,7 @@ impl Scenario {
         if !self.actors().iter().any(ActorName::is_meguri) {
             return needs;
         }
+        self.add_media_variant_need(&mut needs);
         needs.ops.insert("actor".to_owned());
         needs.setup.insert(NEW_COLLECTION.to_owned());
         if self.actors()[0].is_meguri() {
@@ -3382,10 +3532,17 @@ impl Scenario {
             add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
             self.add_filtered_answer_need(&mut needs, &self.steps[segment.steps.clone()]);
         }
+        self.add_media_variant_need(&mut needs);
         if self.has_handoffs() {
             needs.ops.insert("handoff".to_owned());
         }
         needs
+    }
+
+    fn add_media_variant_need(&self, needs: &mut Needs) {
+        if self.tags.iter().any(|tag| tag == "media-case-variants") {
+            needs.setup.insert("media_files.case_variants".to_owned());
+        }
     }
 
     // The one declared D8 part gates answer legs only, on the owning side.
@@ -3447,8 +3604,12 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                 needs.ops.insert(step.name().to_owned());
                 if args.0.get("format").and_then(Value::as_str) == Some("colpkg") {
                     needs.ops.insert(format!("{}.colpkg", step.name()));
-                } else if matches!(step, Step::Export(_)) && args.0.get("legacy") == Some(&Value::Bool(true)) {
-                    needs.ops.insert("export.apkg_legacy".to_owned());
+                } else if args.0.get("format").and_then(Value::as_str) == Some("apkg") {
+                    if matches!(step, Step::Export(_)) && args.0.get("legacy") == Some(&Value::Bool(true)) {
+                        needs.ops.insert("export.apkg_legacy".to_owned());
+                    } else {
+                        needs.ops.insert(format!("{}.apkg", step.name()));
+                    }
                 }
             }
             other => {

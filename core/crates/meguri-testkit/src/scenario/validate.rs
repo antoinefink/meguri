@@ -81,12 +81,14 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
     for notetype in s.setup.notetypes.iter().flatten() {
         notetype_spec(notetype)?;
     }
+    let case_variants = s.tags.iter().any(|tag| tag == "media-case-variants");
     if let Some(files) = &s.setup.media_files {
-        media_files(files, false)?;
+        media_files(files, false, case_variants)?;
     }
     actors(s)?;
     opens(s)?;
     review_sessions(s)?;
+    super::intake::chronology(s)?;
     let mut side: Option<Side> = None;
     for (index, step) in s.steps.iter().enumerate() {
         let at = |e: FormatError| FormatError::new(format!("step {index} ({}): {e}", step.name()));
@@ -110,6 +112,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
             }
         }
         notetype_op(step).map_err(at)?;
+        super::intake::step(step).map_err(at)?;
         record_op(step).map_err(at)?;
         deck_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
@@ -120,7 +123,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
                 if files.is_empty() {
                     return Err(at(empty("media_outside")));
                 }
-                media_files(files, true).map_err(at)?;
+                media_files(files, true, case_variants).map_err(at)?;
             }
             Step::AddMedia(file) => media_file(file, true, false).map_err(at)?,
             Step::TrashMedia(args) if args.names.is_empty() || args.names.iter().any(|n| !media_component(n)) => {
@@ -177,15 +180,18 @@ fn media_file(file: &super::MediaFileSpec, add: bool, remove: bool) -> Result<()
     }
     Ok(())
 }
-fn media_files(files: &[super::MediaFileSpec], remove: bool) -> Result<(), FormatError> {
+fn media_files(files: &[super::MediaFileSpec], remove: bool, case_variants: bool) -> Result<(), FormatError> {
     let mut names = Vec::<String>::new();
     for file in files {
         media_file(file, false, remove)?;
         let name = meguri_text::normalize::nfc(&file.name).into_owned();
-        if names
-            .iter()
-            .any(|other| meguri_text::fold::compare_folded(other, &name).is_eq())
-        {
+        if names.iter().any(|other| {
+            if case_variants {
+                other == &name
+            } else {
+                meguri_text::fold::compare_folded(other, &name).is_eq()
+            }
+        }) {
             return Err(FormatError::new(
                 "media names must be distinct after NFC and unicase comparison",
             ));
@@ -260,7 +266,7 @@ fn opens(s: &Scenario) -> Result<(), FormatError> {
             "a scenario with an open step has no setup (storage-ops.md P1.3)",
         ));
     }
-    if !matches!(s.steps.first(), Some(Step::Open(_))) {
+    if !matches!(s.steps.first(), Some(Step::Open(super::OpenSpec::Fixture(_)))) {
         return Err(FormatError::new(
             "a scenario with an open step starts with open (storage-ops.md P1.3)",
         ));
@@ -311,6 +317,11 @@ fn draft(op: &str, args: &DraftArgs) -> Result<(), FormatError> {
             }
             _ => {}
         }
+    }
+    if args.0.get("format").and_then(Value::as_str) == Some("apkg")
+        && (op == "import" || (op == "export" && !args.0.contains_key("legacy")))
+    {
+        return super::intake::apkg(op, &args.0);
     }
     let Some((_, spec)) = DRAFT_ARGS.iter().find(|(name, _)| *name == op) else {
         return Ok(());
@@ -633,6 +644,7 @@ pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result
         ObservationKind::ReviewHtml => super::ReviewHtmlCase::from_list(items).map(drop),
         ObservationKind::Search => SearchRequest::from_list(items).map(drop),
         ObservationKind::CanonicalSearch => canonical_search_texts(items).map(drop),
+        ObservationKind::TodayStats => super::intake::today_stats(items),
         other => Err(FormatError::new(format!(
             "observation {} does not take a list",
             other.name()
@@ -654,6 +666,15 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
         ObservationKind::CardExcerpts,
         ObservationKind::IgnoredBeforeCount,
         ObservationKind::PackageListing,
+        ObservationKind::BrowserRows,
+        ObservationKind::NotetypeTemplates,
+        ObservationKind::StudiedTodayFormat,
+        ObservationKind::TodayStats,
+        ObservationKind::FileCol,
+        ObservationKind::FileObjects,
+        ObservationKind::FileQuery,
+        ObservationKind::PackageMedia,
+        ObservationKind::PackageDbDump,
     ] {
         if requests.iter().filter(|r| r.kind == kind).count() > 1 {
             return Err(FormatError::new(format!(
@@ -667,6 +688,9 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
 
 /// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
+    if super::intake::observation(kind, map)? {
+        return Ok(());
+    }
     let name = kind.name();
     let bad = |why: &str| Err(FormatError::new(format!("observation {name}: {why}")));
     let uint = |v: &Value| v.is_u64();
