@@ -30,6 +30,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["ops"],
         serde_json::json!([
             "actor",
+            "add_backup_files",
             "add_deck",
             "add_media",
             "add_note",
@@ -55,9 +56,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "enable_fsrs",
             "enable_v3",
             "ensure_io_notetype",
+            "export",
+            "export.colpkg",
+            "force_backup",
             "forget",
             "grade_now",
             "handoff",
+            "import",
+            "import.colpkg",
             "legacy_update",
             "media_outside",
             "media_reset",
@@ -74,6 +80,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "reparent_tags",
             "restore_media_trash",
             "review_session",
+            "save_backup_settings",
             "save_deck_options",
             "set_clock",
             "set_config",
@@ -129,6 +136,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["observations"],
         serde_json::json!([
             "answer_labels",
+            "backup_files",
+            "backup_settings",
             "blob_decode",
             "browser_config",
             "canonical_search",
@@ -154,6 +163,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "media_trash",
             "next_states",
             "notetype_structure",
+            "package_listing",
             "queue",
             "render",
             "render_status",
@@ -184,15 +194,27 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "{op}"
         );
     }
-    for op in ["add_backup_files", "force_backup", "save_backup_settings", "backup"] {
+    for op in ["add_backup_files", "force_backup", "save_backup_settings", "backup", "export", "import"] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
         );
         assert!(
-            !json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op) == (op != "backup"),
             "{op}"
         );
+    }
+    // Form capabilities are supported parts, not standalone step vocabulary.
+    for op in ["export.colpkg", "import.colpkg"] {
+        assert!(json["supports"]["ops"].as_array().unwrap().iter().any(|o| o == op), "{op}");
+        assert!(!json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op), "{op}");
+    }
+    for (kind, supported) in [
+        ("backup_files", true), ("backup_settings", true),
+        ("package_listing", true), ("package_col", false),
+    ] {
+        assert!(json["language"]["observations"].as_array().unwrap().iter().any(|k| k == kind), "{kind}");
+        assert_eq!(json["supports"]["observations"].as_array().unwrap().iter().any(|k| k == kind), supported, "{kind}");
     }
     for op in [
         "actor",

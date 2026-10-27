@@ -1,4 +1,3 @@
-# Collection-only foundation: conformance/package-ops E1-E5.
-# Backup operations and triggers remain pending.
+# Collection packages and U126 local backups; U127 triggers stay inactive.
 area: package
-active: ["collection-package/*"]
+active: ["collection-package/*", "backups/*"]

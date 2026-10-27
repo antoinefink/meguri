@@ -129,7 +129,7 @@ fn identity(m: &Metadata) -> (u64, u64) {
     (m.dev(), m.ino())
 }
 
-fn open_at(parent: &File, name: &OsStr, directory: bool) -> std::io::Result<File> {
+pub(crate) fn open_at(parent: &File, name: &OsStr, directory: bool) -> std::io::Result<File> {
     let name = CString::new(name.as_bytes()).map_err(|_| std::io::Error::other("invalid component"))?;
     let flags = libc::O_RDONLY
         | libc::O_CLOEXEC
@@ -145,18 +145,18 @@ fn open_at(parent: &File, name: &OsStr, directory: bool) -> std::io::Result<File
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct EntryMetadata {
+pub(crate) struct EntryMetadata {
     stamp: Stamp,
     kind: libc::mode_t,
 }
 impl EntryMetadata {
-    fn is_dir(self) -> bool {
+    pub(crate) fn is_dir(self) -> bool {
         self.kind == libc::S_IFDIR
     }
-    fn is_file(self) -> bool {
+    pub(crate) fn is_file(self) -> bool {
         self.kind == libc::S_IFREG
     }
-    fn identity(self) -> (u64, u64) {
+    pub(crate) fn identity(self) -> (u64, u64) {
         (self.stamp.dev, self.stamp.ino)
     }
 }
@@ -164,7 +164,7 @@ impl EntryMetadata {
 fn link_count(count: impl Into<u64>) -> u64 {
     count.into()
 }
-fn stat_at(parent: &File, name: &OsStr) -> std::io::Result<EntryMetadata> {
+pub(crate) fn stat_at(parent: &File, name: &OsStr) -> std::io::Result<EntryMetadata> {
     let name = CString::new(name.as_bytes()).map_err(|_| std::io::Error::other("invalid component"))?;
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: parent is live, name is terminated, fstatat initializes stat on success.
@@ -373,7 +373,7 @@ impl ProtectedInventory {
 }
 
 // readdir needs a separate open description, not dup (which shares its offset).
-fn visit(root: &File, mut f: impl FnMut(OsString) -> Result<()>) -> Result<()> {
+pub(crate) fn visit(root: &File, mut f: impl FnMut(OsString) -> Result<()>) -> Result<()> {
     let scan = open_at(root, OsStr::new("."), true)?;
     let fd = scan.into_raw_fd();
     // SAFETY: fd is a fresh directory descriptor; DIR owns it on success.

@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+tracing.workspace = true
 libc.workspace = true
 meguri-engine.workspace = true
 meguri-model.workspace = true
@@ -20,6 +21,13 @@ zip.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]
+meguri-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 tempfile.workspace = true
 meguri-model = { workspace = true, features = ["test-hooks"] }
+
+[[bench]]
+name = "backup"
+harness = false

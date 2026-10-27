@@ -589,13 +589,24 @@ impl<'c> WriteScope<'c> {
     /// otherwise the value is stored in compact form (C5) as a BLOB,
     /// stamped per the mode.
     pub fn set_config(&mut self, key: &str, value: &ConfigValue) -> Result<Written, StorageError> {
+        self.set_config_ordered(key, value, &[])
+    }
+
+    /// C4 comparison and stamping, with selected root object members first.
+    /// Nested values and remaining members use C5 (backups B6.2).
+    pub fn set_config_ordered(
+        &mut self,
+        key: &str,
+        value: &ConfigValue,
+        first: &[&str],
+    ) -> Result<Written, StorageError> {
         let stored = rows::select_image(self.conn, Table::Config, &RowKey::text(key))?;
         let (usn, mtime) = match &stored {
             Some(row) if same_value(&row[3], value) => return Ok(Written::Unchanged),
             Some(row) => (row[1].clone(), row[2].clone()),
             None => (Cell::Integer(0), Cell::Integer(0)),
         };
-        let cells = vec![Cell::text(key), usn, mtime, Cell::Blob(value.compact().into_bytes())];
+        let cells = vec![Cell::text(key), usn, mtime, Cell::Blob(value.compact_ordered(first).into_bytes())];
         self.put_cells(Table::Config, cells, false)
     }
 

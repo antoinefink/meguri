@@ -1,5 +1,16 @@
-//! Forced safety backups only. RF2 retains every publication; U126/U127's
-//! periodic scheduler, T7 damaged-file copies and retention remain unaccepted.
+//! Production local backups: reuse the forced safety writer, add B5 retention.
+pub mod naming;
+pub mod listing;
+pub mod retention;
+pub use meguri_engine::backup_limits::{self, BackupLimits};
+
+/// Additive Rust result for U127, without changing safety or FFI receipts.
+#[derive(Debug)]
+pub struct BackupWritten {
+    pub receipt: BackupReceipt,
+    pub deleted_names: Vec<String>,
+    pub retention_failures: Vec<retention::RetentionFailure>,
+}
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -48,7 +59,7 @@ impl ForcedBackupProvider {
         }
     }
 
-    fn force(&self, collection: &Collection, cancel: &CancelToken) -> Result<BackupReceipt, EngineError> {
+    pub fn force(&self, collection: &Collection, cancel: &CancelToken) -> Result<BackupWritten, EngineError> {
         let _lane = self.lane.lock().unwrap_or_else(PoisonError::into_inner);
         let fail = |cause| failure(cause, BackupPublication::Unpublished);
         cancel.check().map_err(|e| fail(engine_cause(e)))?;
@@ -62,6 +73,7 @@ impl ForcedBackupProvider {
                 current: self.engine.generation(),
             })));
         }
+        let limits = backup_limits::read(&*lease).map_err(|e| fail(engine_cause(e)))?;
         let configured = self.collection.canonicalize().map_err(|e| fail(io_cause(e)))?;
         let actual = collection.path().canonicalize().map_err(|e| fail(io_cause(e)))?;
         let (source, _) = lease.live_snapshot_source().map_err(|e| fail(engine_cause(e.into())))?;
@@ -97,6 +109,9 @@ impl ForcedBackupProvider {
             crate::writer::preflight_publication(size, &destination, &context).map_err(|e| fail(e.into()))?;
             cancel.check().map_err(|e| fail(engine_cause(e)))?;
             create_backup_directory(&self.backups).map_err(|e| fail(engine_cause(e.into())))?;
+            // Pin before publication and its metadata callbacks. A pin failure
+            // skips retention, never a recoverable backup; do not reopen later.
+            let retention_directory = retention::PinnedDirectory::open(&self.backups);
             let written = match crate::write_collection_package_from_live(&lease, &destination, &context) {
                 Ok(written) => written,
                 Err(WriteError::DestinationExists) if attempt < 2 => continue,
@@ -109,6 +124,7 @@ impl ForcedBackupProvider {
                     return Err(failure(error.into(), publication));
                 }
             };
+            let recorded: Result<BackupReceipt, EngineError> = (|| {
             let size_bytes = fs::metadata(&destination)
                 .map_err(|e| {
                     failure(
@@ -121,7 +137,7 @@ impl ForcedBackupProvider {
                 })?
                 .len();
             let receipt = BackupReceipt {
-                name,
+                name: name.clone(),
                 size_bytes,
                 instant,
                 snapshot_modified: written.snapshot_modified,
@@ -130,8 +146,28 @@ impl ForcedBackupProvider {
             // its record. The importing worker may honour it after this returns.
             record(directory, &receipt)
                 .map_err(|e| failure(engine_cause(e.into()), BackupPublication::Durable(receipt.clone())))?;
+            Ok(receipt)
+            })();
+            // Publication is durable. Neither late cancellation nor metadata
+            // failure may bypass retention or lose the primary error.
+            let retained = match naming::today(EpochMillis(self.clock.now_ms()), self.clock.as_ref()) {
+                Ok(today) => retention::thin_pinned(
+                    retention_directory, today, limits,
+                    &std::collections::BTreeSet::from([name.clone()]),
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "backup retention date unavailable");
+                    retention::RetentionReport {
+                        deleted_names: Vec::new(),
+                        failures: vec![retention::RetentionFailure { name: None, detail: error.to_string() }],
+                    }
+                }
+            };
+            let receipt = recorded?;
             // lease drops here, before the caller invokes verified replacement.
-            return Ok(receipt);
+            return Ok(BackupWritten {
+                receipt, deleted_names: retained.deleted_names, retention_failures: retained.failures,
+            });
         }
         unreachable!("each publication attempt returns or retries within its bound")
     }
@@ -146,7 +182,7 @@ impl BackupService for ForcedBackupProvider {
         use meguri_engine::ports::TransferBackup;
         if let Some(collection) = collection {
             match self.force(collection, cancel) {
-                Ok(receipt) => return Ok(TransferBackup::Collection(receipt)),
+                Ok(written) => return Ok(TransferBackup::Collection(written.receipt)),
                 Err(EngineError::SafetyBackupFailed(ref error)) if corrupt_snapshot(&error.cause) => {}
                 Err(error) => return Err(error),
             }
@@ -253,7 +289,7 @@ impl BackupService for ForcedBackupProvider {
         collection: &Collection,
         cancel: &CancelToken,
     ) -> Result<BackupReceipt, EngineError> {
-        self.force(collection, cancel)
+        self.force(collection, cancel).map(|written| written.receipt)
     }
 }
 

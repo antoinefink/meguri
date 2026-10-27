@@ -1,5 +1,5 @@
 //! Latest-format package publication: collection-only P11 and opt-in file-export P15.
-mod backup;
+pub mod backup;
 mod export_capture;
 mod file_export;
 pub use export_capture::ExportSourceValidation;

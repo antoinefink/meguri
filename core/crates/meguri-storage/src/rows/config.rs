@@ -145,6 +145,30 @@ impl ConfigValue {
         out
     }
 
+    /// C5 with a requested root-member prefix; all nested objects stay sorted.
+    pub fn compact_ordered(&self, first: &[&str]) -> String {
+        if !matches!(self, Self::Object(_)) {
+            return self.compact();
+        }
+        let mut members = self.members();
+        let mut ordered = Vec::new();
+        for name in first {
+            if let Some(index) = members.iter().position(|(key, _)| key == name) {
+                ordered.push(members.remove(index));
+            }
+        }
+        ordered.extend(members);
+        let mut out = String::from("{");
+        for (index, (name, value)) in ordered.into_iter().enumerate() {
+            if index > 0 { out.push(','); }
+            write_string(name, &mut out);
+            out.push(':');
+            value.write(&mut out);
+        }
+        out.push('}');
+        out
+    }
+
     fn write(&self, out: &mut String) {
         match self {
             ConfigValue::Null => out.push_str("null"),

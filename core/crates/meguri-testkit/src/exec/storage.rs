@@ -176,7 +176,7 @@ impl Storage {
             self.host_data = Some(tempfile::tempdir().map_err(core)?);
         }
         let data = self.host_data.as_ref().expect("host data was initialized").path();
-        let backups = data.join("backups");
+        let backups = self.dir.as_ref().expect("open session directory").path().join("backups");
         fs::create_dir_all(&backups).map_err(core)?;
         let directory = self
             .dir
@@ -271,9 +271,9 @@ impl Storage {
     }
     #[cfg(test)]
     pub(super) fn backup_directory_for_testing(&self) -> PathBuf {
-        self.host_data
+        self.dir
             .as_ref()
-            .expect("host data was initialized")
+            .expect("session directory was initialized")
             .path()
             .join("backups")
     }

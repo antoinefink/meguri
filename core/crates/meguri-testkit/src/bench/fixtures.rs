@@ -144,3 +144,21 @@ pub fn open_engine_collection(
         std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
     ))
 }
+
+/// Explicit local backup location for package tests and benchmarks; retain the
+/// production host, provider and device metadata rather than a bench writer.
+pub fn open_engine_collection_with_backups(
+    path: &Path,
+    backups: &Path,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+) -> Result<meguri_host::CoreHost, meguri_engine::EngineError> {
+    let directory = path.parent().expect("isolated collection directory");
+    meguri_host::CoreHost::open(meguri_host::HostConfig::new(
+        directory.into(),
+        backups.into(),
+        directory.join("snapshot"),
+        clock,
+        std::sync::Arc::new(SeededRandom::new(SEED)),
+        std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
+    ))
+}
