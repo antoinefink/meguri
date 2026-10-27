@@ -1,0 +1,49 @@
+# The Empty Cards scan (specs/notes/empty-cards.md E1, E2). A note's card is
+# empty when its ordinal is not one the note requires now: card 2 once Add
+# Reverse is cleared, both cards once Front is cleared too, a card whose
+# ordinal has no template (moved to ordinal 5 by a raw write), the cards of
+# cloze numbers removed from the text, and the one card of a note whose front
+# can never render ("Deck" is never empty). Note types come by name in unicase
+# order (alpha Cloze, Beta Optional, Deckless; byte order would put Beta
+# first), notes by id; a note type without empty cards is left out.
+id: cardgen/empty/scan
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Beta Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+    - name: alpha Cloze
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+    - name: Deckless
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{^Deck}}{{Back}}{{/Deck}}", back: "{{Front}}"}
+    - name: Plain
+      fields: [Front]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: ""}
+  notes:
+    - {notetype: Beta Optional, fields: [a, A, y]}
+    - {notetype: Beta Optional, fields: ["", B, y]}
+    - {notetype: Beta Optional, fields: [c, C, y]}
+    - {notetype: Beta Optional, fields: [d, D, ""]}
+    - {notetype: Beta Optional, fields: [g, G, y]}
+    - {notetype: alpha Cloze, fields: ["{{c1::x}} {{c2::y}} {{c3::z}}", ""]}
+    - {notetype: Deckless, fields: [f, b]}
+    - {notetype: Plain, fields: [t]}
+steps:
+  - empty_cards: {}
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n3", fields: {Front: "", Add Reverse: ""}}
+  - edit_note: {note: "#n6", fields: {Text: "{{c2::y}}"}}
+  - db_exec: {sql: "UPDATE cards SET ord = 5 WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'g')"}
+  - empty_cards: {}
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n5", "#n6", "#n7"]}
+  - empty_cards: {}

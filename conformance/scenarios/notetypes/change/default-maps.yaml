@@ -1,0 +1,59 @@
+# The Change Note Type screen's opening data (specs/notetypes/change-notetype.md
+# M2 to M7): default field maps by exact name, then unused old fields in order
+# (Vocab; Cased to Flip, where "front" is not "Front"); default template maps,
+# absent when either side is cloze; the loss preview of the defaults; field
+# content and card counts; the selection's refusals (mixed note types, a
+# deleted first or later note); and a save refused when nothing would change.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/default-maps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Pair Reverse
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+    - name: Vocab
+      fields: [Back, Notes, Front, More]
+      templates:
+        - {name: Recognition, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Production, front: "{{Back}}", back: "{{Front}}"}
+    - name: Cased
+      fields: [Back, front, Extra]
+      templates:
+        - {name: Card 1, front: "{{front}}", back: "{{Back}}"}
+    - name: Flip
+      fields: [Extra, Front]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Extra}}"}
+    - name: Cloze Text
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+  notes:
+    - {notetype: Pair, fields: [one, ""]}
+    - {notetype: Pair, fields: [two, deux]}
+    - {notetype: Pair Reverse, fields: [tri, trio, x]}
+    - {notetype: Cased, fields: [b, f, e]}
+    - {notetype: Cloze Text, fields: ["{{c1::a}} {{c3::b}}", ""]}
+steps:
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - change_notetype_info: {notes: ["#n3"], notetype: Vocab}
+  - change_notetype_info: {notes: ["#n3"], notetype: Pair}
+  - change_notetype_info: {notes: ["#n4"], notetype: Flip}
+  - change_notetype_info: {notes: ["#n5"], notetype: Pair Reverse}
+  - change_notetype_info: {notes: ["#n1"], notetype: Cloze Text}
+  - change_notetype_info: {notes: ["#n1", "#n3"], notetype: Pair}
+  - change_notetype_info: {notes: ["#n3"], notetype: Pair Reverse}
+  - change_notetype: {}
+  - delete_notes: {notes: ["#n2"]}
+  - change_notetype_info: {notes: ["#n2", "#n1"], notetype: Pair Reverse}
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}

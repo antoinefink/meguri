@@ -1,0 +1,37 @@
+# U35 test 5 with "Keep notes with no valid cards" off (specs/notes/empty-cards.md
+# E4). Every listed card is deleted with its card grave, and each note left
+# with no card is deleted with its note grave: only the first note, whose card
+# 1 is valid, remains. A scan afterwards finds nothing.
+id: cardgen/empty/delete-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+    - name: Cloze Text
+      kind: cloze
+      fields: [Text, Back Extra]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Back Extra}}"}
+  decks: [Words]
+  notes:
+    - {notetype: Optional, deck: Words, fields: [a, A, y]}
+    - {notetype: Optional, deck: Words, fields: ["", B, y]}
+    - {notetype: Optional, deck: Words, fields: [c, C, y]}
+    - {notetype: Cloze Text, deck: Words, fields: ["{{c1::x}} {{c2::y}}", ""]}
+steps:
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n3", fields: {Front: "", Add Reverse: ""}}
+  - edit_note: {note: "#n4", fields: {Text: "no cloze left"}}
+  - advance: 1h
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: false}
+  - observe: [card]
+  - db_exec: {sql: "SELECT type, usn, count(*) FROM graves GROUP BY type, usn ORDER BY type"}
+  - db_exec: {sql: "SELECT sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - empty_cards: {}

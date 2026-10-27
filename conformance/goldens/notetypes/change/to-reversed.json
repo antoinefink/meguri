@@ -1,0 +1,141 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 2]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [2, 1],
+          "fields": [0, 1, null],
+          "new_fields": ["Front", "Back", "Extra"],
+          "new_notetype": "Pair Reverse",
+          "new_templates": ["Card 1", "Card 2"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Card 1"],
+          "removed_cards": 0,
+          "schema": 1894701600000,
+          "templates": [0, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 2
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "German",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "French",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {},
+            "did": "German",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Hund", 0, "German", 0, 0, 1, 1894701600, -1],
+            ["Hund", 1, "German", 0, 0, 1, 1894705200, -1],
+            ["chat", 0, "French", 0, 0, 2, 1894701600, -1],
+            ["Katze", 0, "German", 0, 0, 3, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Hund", "Pair Reverse", "Hund|dog|", 243334449, 1894705200, -1, ""],
+            ["chat", "Pair Reverse", "chat||", 2127422280, 1894705200, -1, ""],
+            ["Katze", "Pair", "Katze|cat", 2352814564, 1894701600, -1, ""]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000, 1894705200000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/to-reversed",
+  "scenario_sha256": "befbaf39652cfcdc67d4e820e3c869c8c1e0c13c1b659d8998f96db4162488fb",
+  "tz": "UTC"
+}

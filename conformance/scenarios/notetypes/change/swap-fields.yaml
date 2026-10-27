@@ -1,0 +1,26 @@
+# U35 test 2 (specs/notetypes/change-notetype.md M9): Pair Reverse notes
+# changed to their own note type with Front and Back swapped. flds, sfld and
+# csum follow the new order and the notes are stamped; the template map is the
+# identity, so no card is touched (mod and usn stay) and none is created.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/swap-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair Reverse
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair Reverse, fields: [lomo, Lomu, item]}
+    - {notetype: Pair Reverse, fields: [pear, Birne, ""]}
+steps:
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - change_notetype: {fields: [1, 0, 2]}
+  - observe: [card]
+  - db_exec: {sql: "SELECT n.sfld, t.name, replace(n.flds, char(31), '|'), n.csum, n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT scm, mod FROM col"}

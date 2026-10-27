@@ -1,0 +1,45 @@
+# Where the cards a change creates go (specs/notetypes/change-notetype.md M9
+# step 3; notes/deck-placement-and-position.md D3, P2). Three's last deck is
+# Last (a note of Three was added there). A Two note whose cards are split
+# between Left and Right gets its third card in Last, at its first card's
+# position. A Two note whose cards were both reviewed gets its third card in
+# their shared deck Left, at the next counter value. A Two note with empty
+# fields (its only card was created because a note always gets one) loses that
+# card when every template is dropped and gets a new card of ordinal 0, which
+# no sibling places, so it goes to Last (notes/card-generation.md G6).
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/placement
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Two
+      fields: [A, B]
+      templates:
+        - {name: T1, front: "{{A}}", back: "{{B}}"}
+        - {name: T2, front: "{{B}}", back: "{{A}}"}
+    - name: Three
+      fields: [A, B, C]
+      templates:
+        - {name: T1, front: "{{A}}", back: "{{B}}"}
+        - {name: T2, front: "{{B}}", back: "{{A}}"}
+        - {name: T3, front: "{{A}}{{B}}", back: "{{C}}"}
+  decks: [Left, Right, Last]
+  notes:
+    - {notetype: Three, deck: Last, fields: [x, y, z]}
+    - {notetype: Two, deck: Left, fields: [a, b]}
+    - {notetype: Two, deck: Left, fields: [c, d]}
+    - {notetype: Two, deck: Left, fields: ["", ""]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Right') WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 3, reps = 2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'c')"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n2", "#n3"], notetype: Three}
+  - change_notetype: {}
+  - change_notetype_info: {notes: ["#n4"], notetype: Three}
+  - change_notetype: {templates: [null, null, null]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT type, count(*) FROM graves GROUP BY type ORDER BY type"}
