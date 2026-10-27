@@ -1,0 +1,98 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Front", 0],
+            ["Hint", 1],
+            ["Source", 2],
+            ["Back", 3]
+          ]
+        }
+      },
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": ["one", "a", "source", "hint"],
+              "note": "#n1"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Front", 0],
+            ["Back", 1],
+            ["Source", 2],
+            ["Hint", 3]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["one\u001fa\u001fsource\u001fhint", "one"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f56dfee581132fb4520f3c81c0e71d532e710ff1542696ad5e809b2dfb75e465",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/notetype-merge/two-new-fields",
+  "scenario_sha256": "ca270b16c2af6eb099673189c90798bdf34d5dc001637c73130b7ca42bbcdb0a",
+  "tz": "UTC"
+}
