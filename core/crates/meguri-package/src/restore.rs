@@ -31,7 +31,7 @@ pub enum RestoreError {
     },
     AfterActivation {
         error: EngineError,
-        restored: RestoredBackup,
+        restored: Box<RestoredBackup>,
     },
     AfterSafety {
         error: Box<RestoreError>,
@@ -242,7 +242,7 @@ pub fn restore_backup(
     })()
     .map_err(|error| RestoreError::AfterActivation {
         error,
-        restored: restored.clone(),
+        restored: Box::new(restored.clone()),
     })?;
     Ok(restored)
 }
