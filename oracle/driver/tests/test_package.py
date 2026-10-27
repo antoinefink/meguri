@@ -252,7 +252,8 @@ class Export(Packages):
     def test_malformed_collection_package_forms_are_invalid_before_any_collection(self):
         bad = [
             {"format": "colpkg"}, {"format": "colpkg", "name": "x.colpkg", "with_media": False},
-            {"format": "colpkg", "name": "x.colpkg", "legacy": True},
+            {"format": "colpkg", "name": "x.colpkg", "legacy": 1}, {"format": "colpkg", "media": True},
+            {"format": "colpkg", "name": "x.apkg", "media": True},
         ] + [{"format": "colpkg", "name": name} for name in (
             "", "x", "x.apkg", "x.COLPKG", ".x.colpkg", "-x.colpkg", "a/x.colpkg", "x.colpkg\n", 1, None)]
         for args in bad:
@@ -264,7 +265,13 @@ class Export(Packages):
                 self.assertEqual(self.ok([OPEN, {"export": {"format": "colpkg", "name": name}}]), [{}, {}])
 
     def test_other_export_forms_stay_unsupported(self):
-        for args in ({"format": "apkg", "name": "x.apkg"}, {"format": "apkg", "name": "x.apkg", "with_media": True}):
+        # E8, the legacy deck form, and E9, the collection package options,
+        # are drafts (E7's form is test_apkg.py).
+        e8 = {"format": "apkg", "name": "x.apkg", "limit": "collection", "scheduling": True, "presets": True,
+              "media": False, "legacy": True}
+        e9 = [{"format": "colpkg", "name": "x.colpkg", **opts}
+              for opts in ({"media": True}, {"legacy": True}, {"media": True, "legacy": False})]
+        for args in (e8, *e9, {"format": "csv", "name": "x.csv"}):
             err = self.error([{"advance": "1m"}, {"export": args}])
             with self.subTest(args=args):
                 self.assertEqual(err, {"kind": "unsupported_op", "op": "export", "step": 1})
@@ -358,8 +365,11 @@ class Import(Packages):
             err = self.error([OPEN, {"import": args}])
             with self.subTest(args=args):
                 self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 1), err)
-        # The package area's other forms are drafts (dsl.md D7.2).
+        # The deck package form is E6 (test_apkg.py): checked before any
+        # collection; formats the package area does not have are unsupported.
         err = self.error([OPEN, {"import": {"format": "apkg", "fixture": "package/x.apkg"}}])
+        self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 1), err)
+        err = self.error([OPEN, {"import": {"format": "csv", "fixture": "package/x.csv"}}])
         self.assertEqual(err, {"kind": "unsupported_op", "op": "import", "step": 1})
 
     def test_scenario_rules(self):

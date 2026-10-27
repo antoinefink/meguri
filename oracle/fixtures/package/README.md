@@ -4,7 +4,9 @@
 `specs/conformance/package-ops.md` E4: Anki 26.9.3's forced backup of
 `storage/schema-18.anki2` at 2030-01-14T12:00:00Z (`make.py backup`, clock
 frozen by `run.sh`), rewritten with the placeholder, and the variants built
-from it and the storage fixtures (`make.py build`). Run it on the host from a
+from it and the storage fixtures (`make.py build`), then the deck-package
+refusal fixtures `apkg/*.apkg` from `storage/schema-11.anki2` (`apkg.py`, run
+as `make.py apkg`). Run it on the host from a
 full checkout after the storage fixtures exist; it needs only the oracle image.
 
 - The maker writes every archive itself: stored entries dated 1980-01-01 in
@@ -20,4 +22,5 @@ full checkout after the storage fixtures exist; it needs only the oracle image.
   `stock-check` must pass on all of them before anything is copied.
 - Same image, same storage fixtures: the same bytes (checked twice). Remaking
   the storage fixtures or bumping the pin changes them: remake, then
-  re-record `package/collection-package` with `tools/mg oracle record`.
+  re-record `package/collection-package` and `package/apkg-import` with
+  `tools/mg oracle record`.

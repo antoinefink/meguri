@@ -7,7 +7,8 @@
 #   oracle/fixtures/package/make.sh [--tag <meguri-oracle image tag>]
 #
 # Without --tag it builds the oracle image with `tools/mg oracle build`. The
-# packages are written only when every check passes: Anki's backup has E4's
+# packages (the collection packages and apkg.py's deck packages) are written
+# only when every check passes: Anki's backup has E4's
 # layout, the damaged page is what E4 says, and no SQLite file in any package
 # (raw, or in one of the maker's own frames) nor the collection Anki imports
 # from the backup fixture holds stock note type text (the storage maker's
@@ -46,6 +47,7 @@ current() {
 
 current "$here" backup /storage/schema-18.anki2 /out/anki-backup.colpkg
 current "$here" build /storage /out/anki-backup.colpkg /out/package
+current "$here" apkg /storage /out/package/apkg
 current "$here" sqlite-files /out/package /out/sqlite
 files=()
 for f in "$work"/sqlite/*.anki2; do files+=("/out/sqlite/$(basename "$f")"); done
@@ -56,4 +58,7 @@ for sub in backup variants; do
   rm -f "$dest/$sub"/*.colpkg
   cp "$work/package/$sub"/*.colpkg "$dest/$sub/"
 done
-echo "make.sh: wrote $(find "$dest" -name '*.colpkg' | wc -l | tr -d ' ') packages to conformance/fixtures/package" >&2
+mkdir -p "$dest/apkg"
+rm -f "$dest/apkg"/*.apkg
+cp "$work/package/apkg"/*.apkg "$dest/apkg/"
+echo "make.sh: wrote $(find "$dest" -name '*.colpkg' -o -name '*.apkg' | wc -l | tr -d ' ') packages to conformance/fixtures/package" >&2

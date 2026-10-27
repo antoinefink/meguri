@@ -37,8 +37,10 @@ class DriverError(Exception):
 class Rejected(Exception):
     """Anki refused an op as part of its behavior (dsl.md D7.3): the step
     records {op: {"error": kind}} and the run goes on. Raise it only when the
-    op changed nothing (Anki rolls a refused backend op back), and only with a
-    kind the op declared (`registry.op(name, rejects=...)`)."""
+    op changed nothing (Anki rolls a refused backend op back; D7.3's one
+    exception is the undo history a refused deck-package import empties,
+    package-ops.md E6.4), and only with a kind the op declared
+    (`registry.op(name, rejects=...)`)."""
 
     def __init__(self, kind: str) -> None:
         super().__init__(kind)

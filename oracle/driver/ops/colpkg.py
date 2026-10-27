@@ -8,12 +8,13 @@ export, collection package form {format: colpkg, name} (ops/package.py
     it afterwards, as the desktop does (also after a failure). Session.hand_off
     copies the session directory, so the package crosses a handoff.
 import, {format: colpkg, fixture} or {format: colpkg, name} -> none;
-    rejections too_new, corrupt. The driver closes the collection, runs
-    Anki's collection package import into the session's collection.anki2 with
+    rejections too_new, corrupt (the deck package form, with the rejection
+    notetype_kind_conflict too, is ops/apkg.py). The driver closes the
+    collection, runs Anki's collection package import into the session's
+    collection.anki2 with
     the session's media folder and media database, and opens collection.anki2
     again with the same backend (the desktop's restore), after a refusal too.
-    Other import forms are the package area's drafts: unsupported_op before
-    any collection exists.
+    Other formats: unsupported_op before any collection exists.
 
 The import's refusals are read from the backend error (pylib raises import
 and protobuf errors as the same plain BackendError, so a probe reads the kind):
@@ -61,11 +62,17 @@ def colpkg_name(value: Any, what: str) -> str:
 
 
 def import_source(args: Any) -> tuple[str, str]:
-    """('fixture', path) or ('name', file name) of a collection package import;
-    unsupported_op for the other (draft) forms."""
+    """('fixture', path) or ('name', file name) of a collection package import,
+    ('apkg', '') for a valid deck package import (ops/apkg.py); unsupported_op
+    for any other format."""
     if not isinstance(args, dict):
         raise invalid("import takes {format, ...}")
     if args.get("format") != "colpkg":
+        if args.get("format") == "apkg":
+            from . import apkg
+
+            apkg.import_form(args)
+            return "apkg", ""
         raise DriverError("unsupported_op", op="import")
     if set(args) not in IMPORT_FORMS:
         raise invalid("the collection package import is exactly {format: colpkg, fixture} or {format: colpkg, name}")
@@ -94,11 +101,12 @@ def check_import_steps(scenario: dict) -> None:
         ((name, args),) = step.items()
         if name == "import":
             try:
-                import_source(args)
+                kind, _ = import_source(args)
             except DriverError as exc:
                 exc.fields.setdefault("step", index)
                 raise
-            imports.append(index)
+            if kind != "apkg":
+                imports.append(index)
     if not imports:
         return
     if scenario.get("setup") or "open" not in steps[0]:
@@ -151,9 +159,13 @@ def _refusal(tr, error: backend_pb2.BackendError) -> str | None:
     return "corrupt" if error.kind in _CORRUPT_KINDS else None
 
 
-@op("import", rejects=("too_new", "corrupt"))
+@op("import", rejects=("too_new", "corrupt", "notetype_kind_conflict"))
 def import_package(session, args):
     kind, value = import_source(args)
+    if kind == "apkg":
+        from . import apkg
+
+        return apkg.import_package(session, args)
     if kind == "fixture":
         package = fixture_path(value, (".colpkg",), "import fixture")
     else:

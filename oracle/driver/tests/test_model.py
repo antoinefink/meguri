@@ -438,8 +438,13 @@ class ExportLegacy(unittest.TestCase):
     def test_other_export_forms_stay_unsupported(self):
         # The package area's draft forms (dsl.md D7.2): unsupported before any
         # collection, as when the driver had no export at all.
-        # The collection package form is package-ops.md E1 (test_package.py).
-        drafts = [{"format": "apkg", "name": "x.apkg"}, {"format": "apkg", "name": "x.apkg", "with_media": True}]
+        # The collection package form is package-ops.md E1 (test_package.py),
+        # the deck package form E7 (test_apkg.py); E8 is a draft.
+        drafts = [
+            {"format": "apkg", "name": "x.apkg", "limit": "collection", "scheduling": True, "presets": True,
+             "media": False, "legacy": True},
+            {"format": "csv", "name": "x.csv"},
+        ]
         with WorkerProcess("UTC") as w:
             for args in drafts:
                 resp = run(w, [{"observe": ["ids"]}, {"export": args}])

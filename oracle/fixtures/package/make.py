@@ -10,6 +10,9 @@ at 2030-01-14T12:00:00Z (run.sh). Driven by make.sh; see README.md.
   python3 make.py build STORAGE BACKUP OUT
       write OUT/backup/standard.colpkg and OUT/variants/*.colpkg (E4) from the
       storage fixtures in STORAGE and Anki's backup
+  python3 make.py apkg STORAGE OUT
+      write the deck-package refusal fixtures OUT/*.apkg (apkg.py, E4) from
+      STORAGE/schema-11.anki2
   python3 make.py sqlite-files PACKAGES OUT
       for the stock check: every SQLite file the packages under PACKAGES hold,
       raw or in one of this maker's raw-block frames, and the collection Anki
@@ -252,7 +255,7 @@ def sqlite_files(packages: str, out: str) -> None:
             path = os.path.join(folder, file)
             if not zipfile.is_zipfile(path):
                 continue
-            stem = os.path.relpath(path, packages)[: -len(".colpkg")].replace("/", "_")
+            stem = os.path.splitext(os.path.relpath(path, packages))[0].replace("/", "_")
             for index, (name, data) in enumerate(entries_of(path)):
                 content = data if data.startswith(SQLITE_HEADER) else raw_frame_content(data)
                 if content is not None and content.startswith(SQLITE_HEADER):
@@ -284,6 +287,10 @@ def main(argv) -> int:
         backup(*args)
     elif cmd == "build" and len(args) == 3:
         build(*args)
+    elif cmd == "apkg" and len(args) == 2:
+        import apkg  # this directory's apkg.py (standard library only)
+
+        apkg.make(*args)
     elif cmd == "sqlite-files" and len(args) == 2:
         sqlite_files(*args)
     else:
