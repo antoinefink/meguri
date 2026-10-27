@@ -5,6 +5,7 @@ from . import (  # noqa: F401
     backups,
     browser,
     change_notetype,
+    check_media,
     clock,
     collection,
     colpkg,

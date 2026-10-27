@@ -3,8 +3,12 @@
 Database on the current collection; optimize (specs/conformance/
 maintenance-ops.md M1): the desktop's automatic optimize on it.
 
-check_db: {}   -> {<kind>: count} for every K5 kind, or the rejection corrupt
-    when the integrity check finds the file corrupt (nothing changed).
+check_db: {}   -> {<kind>: count} for every K5 kind, or a rejection (K10,
+    nothing changed): corrupt when the integrity check finds the file corrupt,
+    failed when Check Database stops with any other backend error (its repairs
+    run in one transaction, which the error rolls back; the driver then
+    reopens, since the rollback leaves Anki's deck and note type caches as
+    the repairs left them).
 optimize: {}   -> nothing. The collection's own optimize call: vacuum, then
     analyze, each through the raw query API with no begin or commit request.
     Anki then marks its proxy modified (a commit request would stamp col.mod;
@@ -116,11 +120,22 @@ def check_database(col) -> dict[str, int] | None:
     return None if problems is None else problem_counts(col.tr, problems)
 
 
-@op("check_db", rejects=("corrupt",))
+@op("check_db", rejects=("corrupt", "failed"))
 def check_db(session, args):
     if args != {}:
         raise invalid("check_db takes {}")
-    counts = check_database(session.col)
+    try:
+        counts = check_database(session.col)
+    except anki.errors.BackendError as exc:
+        # K10 failed: Anki raised before committing anything (a value out of
+        # its stored range, a taken id, a refused deck add, a row it cannot
+        # read). Its rollback empties the undo history and study queues but
+        # not the deck and note type caches, which may still hold rows the
+        # rollback removed (repaired note types, added parent decks): reopen
+        # so that later steps read the file. The reopen loses nothing the
+        # rollback kept. Nothing is logged; the message never leaves (R1887).
+        session.reopen()
+        raise Rejected("failed") from exc
     if counts is None:
         raise Rejected("corrupt")
     return counts

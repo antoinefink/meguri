@@ -20,7 +20,10 @@ frozen clock never reaches, and registration tells changes by those times.
 
 Names are checked as F3 says; variants (equal after NFC under Anki's own
 `unicase` collation, asked through the collection's database) are
-invalid_scenario. Driver choices on top of F3/F4/F6, so that no golden holds
+invalid_scenario, except in a scenario tagged media-case-variants (F14.4),
+where only names equal after NFC are, and where the media folder must be
+case-sensitive (a probe file; elsewhere media_files is unsupported_setup and
+media_outside unsupported_op). Driver choices on top of F3/F4/F6, so that no golden holds
 what a scenario must not ask: an outside file over a subdirectory or a
 subdirectory over a file is invalid_scenario, and trash_media names distinct
 regular files present under exactly that name (Anki stops at a missing name and
@@ -43,6 +46,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+import tempfile
 import time
 import unicodedata
 from typing import Any
@@ -51,7 +55,7 @@ from anki.errors import NetworkError
 from anki.media import media_paths_from_col_path
 from anki.sync import SyncAuth
 
-from ..errors import invalid
+from ..errors import DriverError, invalid
 from ..registry import observation, op, setup_section
 
 MAX_FILL = 209_715_200  # F2
@@ -150,6 +154,42 @@ def _variants(col, a: str, b: str) -> bool:
     return bool(col.db.scalar("select ? = ? collate unicase", unicodedata.normalize("NFC", a), unicodedata.normalize("NFC", b)))
 
 
+CASE_VARIANTS_TAG = "media-case-variants"
+
+
+def _case_variants(session) -> bool:
+    return CASE_VARIANTS_TAG in (session.scenario.get("tags") or [])
+
+
+def _case_sensitive(folder: str) -> bool:
+    """Whether the folder tells names apart by case: a probe file created in
+    it and looked up under its swapped case. _apply stamps the folder after
+    any probe, so the probe leaves no trace a registration could see."""
+    fd, path = tempfile.mkstemp(prefix=".Case-Probe-", dir=folder)
+    os.close(fd)
+    try:
+        head, tail = os.path.split(path)
+        return not os.path.lexists(os.path.join(head, tail.swapcase()))
+    finally:
+        os.remove(path)
+
+
+def _require_case_sensitive(session, error: DriverError) -> None:
+    """F14.4: a scenario tagged media-case-variants runs only where the media
+    folder is case-sensitive (Linux); elsewhere case variants would collapse
+    into one file, so the step fails as one the driver cannot run."""
+    if _case_variants(session) and not _case_sensitive(_folder(session)):
+        raise error
+
+
+def _clash(session, a: str, b: str) -> bool:
+    """F3/F4's refusal: variants, or in a scenario tagged media-case-variants
+    (F14.4) only names equal after NFC (bytes)."""
+    if _case_variants(session):
+        return unicodedata.normalize("NFC", a) == unicodedata.normalize("NFC", b)
+    return _variants(session.col, a, b)
+
+
 def _folder(session) -> str:
     return session.col.media.dir()
 
@@ -171,7 +211,7 @@ def _apply(session, entries: list[tuple[str, str, Contents | None]]) -> None:
                 os.remove(path)
             written.pop(path, None)
             continue
-        clash = next((other for other in present if other != name and _variants(session.col, other, name)), None)
+        clash = next((other for other in present if other != name and _clash(session, other, name)), None)
         if clash is not None:
             raise invalid(f"{name!r} is a case or normalization variant of {clash!r} in the media folder")
         if name in present and os.path.isdir(path) != (kind == "dir"):
@@ -193,10 +233,13 @@ def media_files(session, entries):
     if not isinstance(entries, list):
         raise invalid("setup.media_files is a list of entries")
     parsed = [_entry(e, removable=False) for e in entries]
+    _require_case_sensitive(session, DriverError(
+        "unsupported_setup", sections=["media_files"],
+        detail="media-case-variants needs a case-sensitive media folder (media-ops.md F14.4)"))
     names = [name for _, name, _ in parsed]
     for i, a in enumerate(names):
         for b in names[i + 1:]:
-            if a == b or _variants(session.col, a, b):
+            if a == b or _clash(session, a, b):
                 raise invalid(f"setup.media_files names {a!r} and {b!r} are equal after NFC under unicase")
     _apply(session, parsed)
 
@@ -205,7 +248,11 @@ def media_files(session, entries):
 def media_outside(session, args):
     if not isinstance(args, list) or not args:
         raise invalid("media_outside takes a non-empty list of entries")
-    _apply(session, [_entry(e, removable=True) for e in args])
+    parsed = [_entry(e, removable=True) for e in args]
+    _require_case_sensitive(session, DriverError(
+        "unsupported_op", op="media_outside",
+        detail="media-case-variants needs a case-sensitive media folder (media-ops.md F14.4)"))
+    _apply(session, parsed)
 
 
 @op("add_media")
