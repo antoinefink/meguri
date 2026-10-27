@@ -1001,8 +1001,8 @@ flowchart TB
 - R691. Meguri never shows FSRS parameters and has no manual Optimize button; it re-optimizes each preset automatically in the background (deviation: Anki optimizes only on demand).
 - R692. Optimization runs when today minus the synced `lastFsrsOptimize` day is at least 30, processes every preset in turn, and then sets `lastFsrsOptimize` to today, so devices sharing a collection do not repeat the work after syncing.
 - R693. A preset with fewer than 64 training items after filtering is skipped and keeps its current parameters.
-- R694. Training follows Anki: search `preset:"<name>" -is:suspended` unless the preset's stored `weightSearch` overrides it, short-term enabled, 8 epochs, the count of relearning steps under one day passed to the optimizer, items built from whole days relative to `next_day_at`.
-- R695. New parameters are adopted only if they have lower log loss than the current ones (defaults when empty) on the same items, with Anki's extra relearning-steps check when there is more than one relearning step; otherwise the preset is left untouched (no write, no sync traffic).
+- R694. Training follows Anki: the preset's own cards (by preset id, not suspended) unless its stored `weightSearch` overrides it (`specs/sched/optimizer.md` O2; corrected 2026-10-27), short-term enabled, 8 epochs, the count of relearning steps under one day passed to the optimizer, items built from whole days relative to `next_day_at`.
+- R695. New parameters are adopted when they have lower log loss than the current ones (defaults when empty) on the same items, or, with more than one relearning step, when Anki's extra relearning-steps check on the current ones does not find a stability below 1.0, even if the log loss is not lower (`specs/sched/optimizer.md` O5 step 4; corrected 2026-10-27); otherwise the preset is left untouched (no write, no sync traffic).
 - R696. Adopted parameters are written only to `fsrsParams6`, leaving `fsrsParams5` and `fsrsWeights` untouched, and must be accepted by Anki desktop's own validation.
 - R697. After adoption Meguri refreshes memory states for that preset's cards (R686) and never reschedules: no due date or interval changes and no Rescheduled revlog rows.
 - R698. Optimization never blocks the UI: on Mac it runs at background priority while Meguri is open; on iPhone/iPad it runs as a background processing task when the system allows (preferring charging and idle), or at low priority in the app; it is abortable, and an interrupted run writes nothing.
@@ -2759,7 +2759,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 - R1902. Stability, difficulty and retrievability recomputed from history for every card of the user's collection match the oracle within relative 1e-5, and every outlier is explained.
 - R1903. The review-history filtering that feeds FSRS (manual reschedules, filtered-deck reviews, entries before a forget or reset, SM-2-era history) matches the oracle.
 - R1904. Parameter optimization on the same history is compared with the oracle on evaluation metrics (log loss and RMSE within a documented tolerance), not on raw parameter values.
-- R1905. Meguri's automatic re-optimization adopts new parameters only if they fit the history better than the current ones, and a test proves that worse parameters are never adopted.
+- R1905. Meguri's automatic re-optimization adopts new parameters only under the adoption rule of `specs/sched/optimizer.md` O5, and a test proves that parameters that rule rejects are never adopted (corrected 2026-10-27).
 - R1906. A revlog-replay suite replays each card's rating history through both schedulers with today's presets (load balancer off, plus a smaller run with it on) and reports agreement per preset.
 
 **Rendering conformance**
@@ -3044,7 +3044,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 - AE40. **Covers R776, R823.** Given a Migaku note opened in the Edit panel, when the user closes the panel without typing, then the note's modification time and sync marker are unchanged; and when the user edits only the Translation field, the Sentence field is saved byte-identical.
 - AE41. **Covers R1024, R1076.** Given the user types `dog cat or  fish` and presses Return, when the search commits, then it matches notes containing (dog AND cat) OR fish, and the field shows `dog cat OR fish`, identical to Anki's canonical text.
 - AE42. **Covers R1107, R1108.** Given results for `deck:Japanese` are showing, when the user types ` tag:"wk-lev`, then results stay those of `deck:Japanese` with no error; when the user then presses Return with the quote still open, then an inline "unclosed quote" error underlines `"wk-lev` and the dimmed old results remain.
-- AE43. **Covers R1079, R1168, R1169.** Given the search `deck:French is:due`, when the user ⌘⇧-clicks the deck "Spanish" (or long-presses it on iPhone and picks Replace same kind), then the search becomes `deck:Spanish is:due`; when the user instead ⌥⌘-clicks the tag "verbs", then it becomes `deck:French is:due -tag:verbs`.
+- AE43. **Covers R1079, R1168, R1169.** Given the search `deck:French is:due`, when the user ⌘⇧-clicks the deck "Spanish" (or long-presses it on iPhone and picks Replace same kind), then the search becomes `deck:Spanish is:due`; when the user instead ⌥⌘-clicks the tag "verbs", then it becomes `(deck:French is:due) -tag:verbs` (`specs/search/join-and-replace.md` J6, J9; corrected 2026-10-27).
 - AE44. **Covers R1147, R1149.** Given a card flagged red whose note is marked and which is suspended, when shown in cards mode, then the row is red-tinted with flag, marked and suspended glyphs; in notes mode the same note's row is marked-tinted.
 - AE45. **Covers R1193, R1155.** Given the search `-is:suspended` with 3 selected cards where the current card is not suspended, when the user presses ⌘J, then all 3 become suspended, their rows stay visible with suspended tint and "(…)" due text, and one ⌘Z restores all 3.
 - AE46. **Covers R1252, R1251.** Given a review card with no stored last-review time and no memory state, when Card Info opens, then Retrievability is computed from its latest review entry and a computed memory state is shown, and the card row (data, mtime, usn) is byte-identical afterwards.
@@ -3057,7 +3057,7 @@ R1498–R1502 and R1504–R1546 describe the retained Anki protocol used only in
 - AE53. **Covers R1281, R1282, R1296.** Given 50 reviews today of which 10 were on a card the user then deleted, when Home and the Stats screen are viewed, then Home says "Studied 50 cards…", Stats Today in Collection scope says 50, and Stats Today in Deck scope for that card's former deck counts only the 40 reviews of surviving cards.
 - AE54. **Covers R1305, R1310, R1322.** Given 12 cards are due today and the user has not reviewed yet, when they tap today's cell on iPhone, then the callout reads "**12** cards **due** on …" and "Show in Browser" opens `prop:due=0`; after one review, the same cell reads "**1** card **reviewed** on …" and opens `prop:rated=0`.
 - AE55. **Covers R1313, R1327.** Given a daily average of 410 reviews, when a day with 300 reviews and a day with 1,700 reviews are drawn, then they get level 4 (≤ 0.75 × 410 = 307.5) and level 10 (> 4 × 410 = 1,640); given a daily average of 8, the scale uses a = 20, so a day with 8 reviews gets level 3 (≤ 10).
-- AE56. **Covers R1337, R1338.** Given a synced collection whose config has `heatmap` = `{"colors":"flame","mode":"year",…,"version":"1.0.1"}`, when the user switches Calendar mode to 9 months in Meguri and syncs, then the key becomes the same object with only `mode` = `"months"`, `colors` still `"flame"`, and desktop Anki's add-on shows the continuous timeline in flame colours; given a collection with no `heatmap` key, opening Meguri creates no key and no config change to sync.
+- AE56. **Covers R1337, R1338.** Given a synced collection whose config has `heatmap` = `{"colors":"flame","mode":"year",…,"version":"1.0.1"}`, when the user switches Calendar mode to 9 months in Meguri and the collection reaches desktop Anki through a manual Anki transfer (KTD26; corrected 2026-10-27), then the key becomes the same object with only `mode` = `"months"`, `colors` still `"flame"`, and desktop Anki's add-on shows the continuous timeline in flame colours; given a collection with no `heatmap` key, opening Meguri creates no key and no config change to sync.
 - AE57. **Covers R1374, R1375, R1378.** Given 30 overdue review cards, 5 buried cards due today and 3 buried cards due tomorrow, when Future Due shows with Backlog off, then no negative days appear, today excludes the 5 buried cards, tomorrow includes the 3 buried cards, and Daily load includes all 38 cards; with Backlog on, the 30 overdue cards appear on negative days.
 - AE58. **Covers R1269, R1271, R1384.** Given Europe/Paris, rollover 4, and a review at 03:30 CEST on the morning after the clocks went forward (spring-forward Sunday), when both views are compared, then the Stats Calendar and the Home heatmap may place that review on different dates, each matching its oracle (Anki for the Calendar, the add-on for the heatmap), and the test suite asserts both.
 - AE59. **Covers R1367, R1406.** Given history set to "last 12 months", when the Retention table shows, then it has no All time row and the Reviews range picker has no "all"; when the user switches to "all history", then the All time row appears and Reviews, Hourly Breakdown and Answer Buttons switch to "all".
@@ -3499,7 +3499,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - The collection, media, media DB and derived store sit in the app's private Application Support. Backups go to `Documents/Backups` on iOS and iPadOS, where the Files app shows them (R1629), and to the private container on the Mac, with a Show Backups action.
   - The App Group holds only `widget-snapshot.json`.
   - CloudKit pending work, record system fields/change tags, cursors, engine serialization, account binding and generation recovery metadata live in durable app-private tracking storage (KTD25); this is not a disposable derived cache.
-  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, the generation-bound cloud publication decision (U124a/U114 durable tracking, separate from legacy Anki recovery), optimizer run diagnostics (U47 derived-store table) and UI state.
+  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, the generation-bound cloud publication decision (U124a/U114 durable tracking, separate from legacy Anki recovery), optimizer run diagnostics (U47, `deviceState.optimizerLog` in U32's sidecar, `specs/sched/optimizer.md` O14; corrected 2026-10-27) and UI state.
   - `lastFsrsOptimize` is a synced collection config key, written only by the U47 commit op and read by U113's optimizer gate.
 - KTD13. **Local servers in Rust (`meguri-servers`, axum on tokio), started and stopped by the Mac app over FFI.**
   - Body limits as R1678 sets them (256 MB for AnkiConnect, 128 MB for Migaku).
@@ -3917,11 +3917,11 @@ Deferred product decisions for Antoine. The plan follows each default until he a
 - Heatmap streak toggle default. Decided 2026-10-27: all on, per R1342 and U229; R148, which had set "Show streak stats even when the heatmap is hidden" off, now matches (corrected 2026-10-27).
 - Zero studied-today line. R44 says "No cards studied today"; R1298 says Anki's "Studied 0 cards in 0 seconds today (0s/card)". Default: R1298, the Anki text (U228).
 - Remote media destinations. AnkiConnect `url` sources and Migaku remote media let any allowed caller make Meguri fetch loopback or LAN hosts (U135). Refuse private, loopback and link-local destinations for requests that carry an Origin, including after redirects? That would break workflows such as Yomitan's local audio server on localhost. Default: no destination restriction, as AnkiConnect behaves.
-- R1960 and the oracle. Does "no Anki web assets in tests" cover the AGPL oracle quarantine? U190 reads it as yes (observed editor goldens, settled), while U226 records stats goldens by running the graphs page in a quarantined oracle image. Default: the oracle quarantine may run the graphs page for stats goldens; the editor keeps its observed goldens.
+- R1960 and the oracle. Does "no Anki web assets in tests" cover the AGPL oracle quarantine? U190 reads it as yes (observed editor goldens, settled), while U226 records stats goldens by running the graphs page in a quarantined oracle image. Decided 2026-10-27 (`specs/stats/graphs-common.md` G12.2): the oracle quarantine may run the graphs page for stats goldens, which hold observed values only; the editor keeps its observed goldens (corrected 2026-10-27).
 - Real collection on a device. AE81's device run needs the real collection on the iPhone, but `local-data/` must never leave the Mac. Default: the device gets it through Meguri's own full download from Antoine's sync account (U256); a pushed copy needs his explicit approval.
 - Non-answer writes during a declared long write (R1495, R1845, R1812, R1813). Only answers have U43's overlay and journal; editor saves, ⋯-menu actions and `startSession`'s `curDeck` write queue behind a large SyncIncoming merge, a large `.apkg` apply, Check Database vacuum and repairs, or a large bulk op (U24's list) for up to its declared length. Extend the deferred-commit mechanism to these writes, or accept the wait? Default: they wait, the UI shows its "Waiting for <op>" state, and the R1812/R1813 gates are measured outside declared long writes.
 - Id allocation where the requirements disagree. R772 (largest note id plus one) and R1469 (next free value) give different ids when an existing id lies above now, and when the oracle's rule would pass now + 1 day it conflicts with R1470's cap. Default: U23 follows the oracle per table, R1470's cap wins over oracle parity, and that case is recorded in `deviations.yaml` with a Meguri-authored golden.
-- Optimization without a sync account. R691 and R692 promise automatic re-optimization, but R699 starts a run only right after a successful incremental sync, and its gate needs a `meta` probe, so a collection used with no sync account never optimizes. Default: no optimization without an account, and the scheduler diagnostics view says that it needs sync (U47, U113).
+- Optimization without a sync account. R691 and R692 promise automatic re-optimization, but R699 starts a run only right after a successful incremental sync, and its gate needs a `meta` probe, so a collection used with no sync account never optimizes. Decided 2026-10-27: obsolete. R699 now lets a local-only collection optimize under the local revision and session guards (`specs/sched/optimizer.md` O12, mode local-only), and the scheduler diagnostics view does not say that it needs sync (U47, U113; corrected 2026-10-27).
 - Redo on the Mac during M1R. ⇧⌘Z and Edit ▸ Redo arrive with U159 (M1), and U182's ⋯ Redo item is iPhone-only (R374), so an M1R Mac build can undo (back button, U) but not redo. Default: no Mac redo until U159; re-answer the card instead. The alternative is to show U182's Redo item on the Mac until U159 binds ⇧⌘Z (U179, U182).
 - Scheduler diagnostics location. R701 puts the view under Settings → Advanced, a page R109's page list does not have. Default: a "Scheduler diagnostics" row on the Maintenance page opens it (U47, U163).
 - Learning cards beyond learn-ahead. R622 shows a waiting state that presents the card automatically when it becomes due; R437 shows congratulations with a live countdown and a Continue button, and review never resumes on its own. Default: R437; U186 owns `WaitingUntil` and shows Continue at the card's ready instant (U43, U176).
@@ -6601,13 +6601,13 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - `core/crates/meguri-sched/src/optimizer/health.rs`
 - `core/crates/meguri-sched/src/optimizer/pool.rs`
 - `core/crates/meguri-engine/src/jobs/optimizer.rs`
-- `core/crates/meguri-storage/src/derived/optimizer_log.rs`
+- `core/crates/meguri-storage/src/derived/optimizer_log.rs` (reads and writes `deviceState.optimizerLog` in U32's sidecar `meguri-sidecar.json`, not a U26 derived-store table; `specs/sched/optimizer.md` O14, corrected 2026-10-27)
 - `core/crates/meguri-ffi/src/optimizer.rs`
 - `core/crates/meguri-engine/tests/optimizer.rs`
 - `core/tools/meguri-cli/src/bench/optimizer.rs`
 - `specs/sched/optimizer.md`
 - `conformance/scenarios/sched/optimizer/`
-- `core/crates/meguri-sync/src/policy/optimizer.rs`; `core/crates/meguri-sync/src/policy/events.rs`, `core/crates/meguri-host/src/wiring/sync.rs` and `core/crates/meguri-ffi/src/sync.rs` (optimizer inputs and events); `core/crates/meguri-sync/tests/policy.rs` (optimizer cases); `specs/sync/policy.md` (optimizer section)
+- `core/crates/meguri-sync/src/cloud/policy/optimizer.rs` with its inputs and events in the same `cloud/policy/` module; `core/crates/meguri-host/src/wiring/sync.rs` and `core/crates/meguri-ffi/src/sync.rs` (optimizer inputs and events); `core/crates/meguri-sync/tests/cloud_policy.rs` (optimizer cases); `specs/sched/optimizer.md` O12 and O13 (the optimizer section, cited by `sync/policy#P18`). `meguri-sync/src/policy/` holds the frozen manual-transfer policy (`specs/sched/optimizer.md` O18; corrected 2026-10-27)
 - `app/Packages/MeguriKit/Sources/AppModel/OptimizerCoordinator.swift`
 - `app/Packages/MeguriKit/Sources/Features/Settings/SchedulerDiagnosticsView.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/OptimizerCoordinatorTests.swift`
@@ -6629,9 +6629,9 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
   1. Training ends in `AwaitingGate{jobId, adoptedPresets}` and writes nothing.
   2. OptimizerCoordinator requests U114 CloudKit fetch/reconciliation when connected and then asks the core to validate the captured input revision and generation. A failed/cancelled exchange abandons adoption. Local-only operation skips the exchange and retains the same local revision/session checks. No Anki endpoint, credential or meta request participates.
   3. `optimizer_commit` abandons without writing if its captured input revision/account/collection generation changed, or a session is active or started after training. Every run reaches this step, even with no adopted preset; the op then writes only `lastFsrsOptimize` (R692). Otherwise it runs one op with source `Optimizer`: `fsrsParams6` only for adopted presets (R696), memory states refreshed for their cards through U46 without rescheduling (R697), and `lastFsrsOptimize` set to today (R692).
-  4. The commit emits U113's `syncRequested(optimizerAdopted)` input, so SyncCoordinator runs sync 2 under the normal policy. If sync 2 fails, the write stays and uploads with the next normal sync.
-- Diagnostics (R701) are stored per preset in a U26 derived-store table: last run date, review count used, adopted or not, health result. This data is device-local and rebuildable as empty (KTD12). An FFI read serves the app-side leg's `SchedulerDiagnosticsView`.
-- Policy branch (attached to U113 when this unit lands; attach pattern as in U152): add the optimizer inputs, actions, sync-2 exemption, `optimizerDue` flag and refusal reasons listed in U113's Approach to `meguri-sync/src/policy/`. Feed this job's `AwaitingGate` and commit events through `meguri-host/src/wiring/sync.rs`, and add the two Swift-originated inputs to U114's policy-event export. U47's spec writer adds the optimizer section to `specs/sync/policy.md`.
+  4. The commit ends the job `Done`. At `OptimizerJob{Ended{Done}}` the policy emits `UpdatePending{full}` and `RequestSend{collection}` in mode connected, auto, and nothing in mode connected, manual, where the result waits for the next Sync Now (`specs/sched/optimizer.md` O12 rule 6; corrected 2026-10-27). If the send fails, the result stays pending and leaves with the next normal send.
+- Diagnostics (R701) are stored as `deviceState.optimizerLog` in U32's sidecar, not in a U26 derived-store table (`specs/sched/optimizer.md` O14; corrected 2026-10-27): the last run, and per preset its day, outcome, item and review counts and health result. This data is device-local; losing it loses only this history (KTD12). An FFI read serves the app-side leg's `SchedulerDiagnosticsView`.
+- Policy branch (attached to U113 when this unit lands; attach pattern as in U152): add the optimizer inputs, actions, state, `OptimizerDueChanged` flag and refusal reasons of `specs/sched/optimizer.md` O12 to `meguri-sync/src/cloud/policy/` (O18; corrected 2026-10-27). Feed this job's `AwaitingGate` and commit events through `meguri-host/src/wiring/sync.rs`, and add the two Swift-originated inputs to U114's policy-event export. The optimizer section is `specs/sched/optimizer.md` O12 and O13, cited by `sync/policy#P18` (corrected 2026-10-27).
 - App-side leg (attached from U51 when this unit lands; attach pattern as in U152; Default execution with no spec-writer pass, since this is Meguri-defined behavior). `OptimizerCoordinator` (MainActor, owned by U151's CollectionStore) executes U113's optimizer actions, which U114's `SyncPolicyDriver` hands to it, and nothing else starts the optimizer (KTD5). On the optimizer action it starts the core job (a KTD9 job). On `optimizerGate` it runs commit-gate step 2: the U114 CloudKit reconciliation barrier and core revision check, then `optimizer_commit`, or `optimizer_abandon` when the barrier/guard fails. On macOS it starts the job in the same turn as the action and holds a `ProcessInfo` background activity for the job's lifetime against App Nap; it does not use `NSBackgroundActivityScheduler`, whose deferral would break R699's right-after-sync rule. On iOS and iPadOS it attaches the optimizer's processing task through U154's registry slot, as the background entry point above states (KTD15): it submits the request when the app backgrounds while U113's status reports `optimizerDue`; on launch the handler sends U113 `processingTaskLaunched(optimizer)`, SyncCoordinator and this coordinator execute the returned actions, and task expiration cancels the job's CancelToken. The core enforces the session rule (U43), so no lock is needed. `SchedulerDiagnosticsView` is read-only: per preset, last run, review count, adopted and health, with Optimize now (sends U113's `optimizeNowRequested` and shows U113's refusal reason) and no parameter values (R691, R701). It has previews for the empty, typical, overflow, error and loading states (R1970). This leg registers it as the destination of the scheduler-diagnostics intent that U163's Maintenance page row emits.
 
 **Execution note:** Spec writer first: training data selection and the adoption rule. The implementer validates against oracle-computed params for fixed revlog fixtures with a declared tolerance. A T1 live check confirms that Anki accepts the written params. Stop condition: if the `realistic-500k` peak exceeds 300 MB without changing the item set, stop and report the R1852 conflict to Antoine (Open Questions); never trim items, because that breaks FSRS parity (R1902).
@@ -6649,12 +6649,12 @@ Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and 
 - `optimizer_abandon` on an `AwaitingGate` job → `Abandoned(gateFailed)`, nothing written; the next optimizer start runs.
 - A 34-parameter preset plus a normal preset whose new params win → the normal preset is adopted; the unsupported preset's bytes and its cards' `data` are unchanged; the job ends `Done`.
 - No preset adopted (every preset below 64 items or not better) → the commit still runs: `lastFsrsOptimize` = today, no preset bytes change.
-- A successful commit emits `syncRequested(optimizerAdopted)` and the job ends `Done` without running any sync itself.
+- A successful commit ends the job `Done` without running any sync itself; the send that follows is the policy's (O12 rule 6; corrected 2026-10-27).
 - Health check enabled with 350 items: a result is recorded; with 250 items, none.
 - T1 live: the oracle opens the collection after adoption and constructs FSRS from every preset's params without error (R696).
 - Two Meguri clients both past 30 days (CloudKit fake plus signed lane): concurrent optimizer results converge under the reviewed conflict policy; U13 proves only independent Anki transfer compatibility.
 - Bench, with `fsrsHealthCheck` on and a preset above 300 items, so the timing covers training, evaluation and the health check: 1M revlog entries ≤ 30 s (R1850), and `realistic-500k` (about 4M revlog rows) peak footprint ≤ 300 MB (R1852), measured through `meguri-cli bench optimizer`; the item builder's reported bytes are recorded per preset.
-- Policy branch (from U113): session ended → sync action, then an optimizer start action after success; if a new session starts first → no optimizer action; optimizer awaiting its gate → `optimizerGate`; `syncRequested(optimizerAdopted)` → a normal sync action under the usual gates except auto sync off.
+- Policy branch (from U113): session ended → `RequestFetch{root, collection}`, then `StartOptimizer` at the drain once the applies have settled (`specs/sched/optimizer.md` O12 rules 2 and 3); if a new session starts first → no optimizer action; optimizer awaiting its gate → `RequestFetch{root, collection}`, then `OptimizerGate` (rule 5); `Ended{Done}` in mode connected, auto → `UpdatePending{full}` then `RequestSend{collection}` in one list, and nothing with Sync automatically off (rule 6) (corrected 2026-10-27).
 - Policy branch (from U113): optimizeNowRequested bypasses the cadence. A connected collection requires the CloudKit exchange/revision gate; a local-only collection uses local revision/session checks without an Anki login. The automatic processing task retains the 30-day condition.
 - Policy branch (from U113): after a run that adopted nothing, the next successful sync emits no optimizer action.
 - U113's property test, with the optimizer inputs added to its generator, still finds no two concurrent sync actions and no one-way start during a session.
@@ -7726,10 +7726,10 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
   4. `reverse(handle)` reverses the held list in memory and keeps index-based selection mapped (R1142). `resort(handle, sort)` re-sorts the held id set without re-running the predicate (R1083).
   5. `map_selection(from_handle, ranges|ids, to_handle)` covers re-search preservation (R1154) and the Cards/Notes toggle mapping (R1116: cards → their notes; notes → all their cards; current note → its first card). Handles keep the card-level match set, so when no op committed since the handle's change seq the toggle derives the other mode from it (the result a re-run gives, R1080) without running the predicate; otherwise it re-runs the search. `index_of(handle, id)` supports reviewer entry (R1113).
   6. `resolve_selection(handle, ranges, target)` → card ids or note ids. Notes mode expands to all cards of the selected notes (R1117). U86/U87 use it so 150k-id selections never cross the FFI.
-  7. `invalidated_rows(handle, change_set)` → indexes to refetch: card changes are mapped to their note rows in notes mode. It also returns `removed` indexes for deleted notes/cards, which the handle prunes (R1156). Membership is never re-evaluated (R1155).
+  7. `invalidated_rows(handle, revision, change_sets)` → indexes to refetch: card changes are mapped to their note rows in notes mode. It also returns `removed` indexes for deleted notes/cards, which the handle prunes (R1156), and applies to handles still in progress, on their final prefix (`specs/browser/result-sets.md` H10; corrected 2026-10-27). Membership is never re-evaluated (R1155).
   8. `search_ids(text, mode, order=IdAscending, context)` is a blocking one-shot used by AnkiConnect (R1776–R1778). It resolves `deck:current` from `curDeck` in the engine-built context, as Browse does (U82), and returns the same error text.
 - **Streaming plan.** Cheap terms and the sort run in SQL, through a sorted-list cache hook that U90 fills (absent until then). The SQL candidate predicate replaces each slow leaf (U80 marks them) with TRUE under an even number of NOTs and FALSE under an odd number, so the candidates are a superset; the full predicate is then evaluated on each candidate in final sort order, chunk by chunk, on the worker's own rayon pool. `specs/search/query-model.md` states this rule, and U90's cheap-predicate key is this relaxed predicate. The first page is emitted as soon as the first page of matches in prefix order is confirmed. Order and membership equal the non-streamed result.
-- **Handles** hold ordered ids (8 bytes each), the request seq, the change-stream seq and the generation. The registry keeps a small LRU (current plus previous per session) to respect R1851. A handle from an older generation returns `StaleGeneration` (KTD17).
+- **Handles** hold ordered ids (16 bytes per row in cards mode, id plus note id; 8 bytes per note plus match data in notes mode), the request seq, the change-stream seq and the generation. Per session the registry keeps the in-flight handle plus the two newest complete handles to respect R1851 (`specs/browser/result-sets.md` H6; corrected 2026-10-27). A handle from an older generation returns `StaleGeneration` (KTD17).
 - **Contexts** are built by the engine from config, the day clock (U40) and now. Swift never builds a `SearchContext`.
 
 **Patterns to follow:** KTD9 (blocking exports, explicit CancelToken, sync callbacks, paged results), R1859 (no per-row calls); rust-stack "never hold a statement open across FFI calls" (page by id list, short read transactions).
@@ -7874,9 +7874,9 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 **Patterns to follow:** U80 parse and canonicalisation; change-stream-driven in-memory indexes as in U85.
 
 **Test scenarios:**
-- Covers AE43. `deck:French is:due` with `replace_same_kind(deck "Spanish")` → `deck:Spanish is:due`; with `join(tag "verbs", And, negate)` → `deck:French is:due -tag:verbs`.
+- Covers AE43. `deck:French is:due` with `replace_same_kind(deck "Spanish")` → `deck:Spanish is:due`; with `join(tag "verbs", And, negate)` → `(deck:French is:due) -tag:verbs` (`specs/search/join-and-replace.md` J9; corrected 2026-10-27).
 - `join` of `a or b` with `c` (And) → canonical text and bracket placement match the golden.
-- Builder deck `a_b*` → `"deck:a\_b\*"` (exact form per the golden), and it matches only that deck.
+- Builder deck `a_b*` → `deck:a\_b\*`, unquoted (`specs/search/join-and-replace.md` J9; corrected 2026-10-27), and it matches only that deck.
 - Builder tag `x y` → a search that matches nothing, per R1051 (spec states it).
 - Covers AE42 (core part). `deck:Japanese tag:"wk-lev` with the cursor at the end → Incomplete; at commit, parse → UnclosedQuote whose range covers `"wk-lev`.
 - `spans("-deck:a (b or tag:c)")` → negated deck token, group open, plain b, OR operator, tag token, group close, with UTF-16 offsets correct for emoji in deck names.
@@ -8017,7 +8017,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 - Stability 45 days → time span plus "(45 days)"; Difficulty stored 5.5 → 50 %.
 - Total time 0 → Average Time and Total Time absent. Custom Data renders as `k=v` pairs.
 - A mixed history: an SM-2-era revlog row shows "250%" and an FSRS row shows "D:xx%", matching the spec's detection rule.
-- History with Manual, Rescheduled and Filtered (cram) entries → type classification matches the golden; the curve skips them and starts after the last reset. With a 10-day history only First Week is offered, and it is the default.
+- History with Manual, Rescheduled and Filtered (cram) entries → type classification matches the golden; the curve skips them and starts after the last reset. The rows of `specs/stats/card-info.md` C7.3's table give its offered ranges and default: a first and only answer 10 days ago with interval 1 day offers First Week and First Month, First Month the default (corrected 2026-10-27).
 - A preset with 19 parameters → decay 0.5; empty parameters → 0.1542.
 - Every raw value equals the oracle's card stats, and every row string equals the spec goldens, for the fixture cards at three frozen clocks and for 50 generated cards across the TZ matrix (R1261, R1448).
 - The debug JSON contains the card row, all revlog rows, deck, preset, rollover and the `stats` rows, and parses back to equal values.
@@ -8044,7 +8044,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 - `core/crates/meguri-host/src/wiring/stats.rs` (registers the stats observers with U38)
 
 **Approach:**
-1. Day mapping. The Anki day index and `next_day_at` come from U40's day clock and are never recomputed in this crate (R1272). The heatmap day (R1270) is the civil date of (instant − rollover hours) in the device zone, using the zone offset at the instant the add-on oracle uses (the review instant or the shifted one), which the spec writer states in `specs/stats/day-buckets.md` from the oracle's actual computation. The core receives the IANA zone id plus current offset through the meguri-model clock (U21) and resolves historical offsets with `jiff` and a bundled tz database (no system tz lookup, so Docker and device agree). Rows dated after now map to today (R1280). If the zone id is unknown, fall back to the current fixed offset and log it.
+1. Day mapping. The Anki day index and `next_day_at` come from U40's day clock and are never recomputed in this crate (R1272). The heatmap day (R1270) is the civil date of (instant − rollover hours) in the device zone, using the zone offset at the shifted instant, not at the review instant (`specs/stats/day-buckets.md` B4.1; corrected 2026-10-27). The core receives the IANA zone id plus current offset through the meguri-model clock (U21) and resolves historical offsets with `jiff` and a bundled tz database (no system tz lookup, so Docker and device agree). Rows dated after now map to today (R1280). If the zone id is unknown, fall back to the current fixed offset and log it.
 2. Resident tier, built once per open and never released while the collection is open:
    - Home per-day totals under the current heatmap rules (`limresched`, `limcdel`, `limdecks` with children, R1336–R1341).
    - Counts per (heatmap day, home deck, rated/unrated, type), so the size is O(days × decks) rather than one entry per revlog row (R1851). Deck-scoped heatmaps sum the matching decks at query time (R1287); Home totals apply `limdecks` incrementally, and step 3 rebuilds them when the decks a `limdecks` entry covers change. A card move or delete re-attributes that card's rows through the `revlog.cid` index.
@@ -8186,14 +8186,14 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 **Dependencies:** U95, U80, U82 (deck, state and property leaves for search scopes), U23, U24, U26, U40, U3, U4.
 
 **Files:**
-- `specs/stats/graphs-common.md` (scopes, history window, bin edges, range definitions, quantile method, day-label bounds), `specs/stats/browse-queries.md`
+- `specs/stats/graphs-common.md` (scopes, history window, row reading, aggregates, request contract, caches; bin edges, ranges, quantiles and day labels are `specs/stats/graph-presentation.md`'s, G12.1; corrected 2026-10-27), `specs/stats/browse-queries.md`
 - `conformance/scenarios/stats/graphs/scope/*.yaml`, `conformance/scenarios/stats/browse-queries/*.yaml`, goldens under `conformance/goldens/stats/graphs/`
 - `oracle/driver/ops/stats.py` (oracle-maintainer: raw graph data for a search and history window; binned output and bar queries come from U226's graphs-page driver)
 - `core/crates/meguri-stats/src/graphs/mod.rs`, `src/graphs/cache.rs`, `src/graphs/column_files.rs`, `src/graphs/scope.rs`, `src/graphs/request.rs`, `src/graphs/aggregates.rs`, `src/graphs/queries.rs`
 - `core/crates/meguri-stats/tests/graphs_cache_sync.rs`, `core/crates/meguri-stats/tests/aggregates.rs`, `core/crates/meguri-stats/tests/browse_queries.rs`
 
 **Approach:**
-1. Columnar caches (R1289). Revlog columns: id, card slot, ease, ivl, lastIvl, factor, time, type. Card columns: id, nid, did, odid, type, queue, due, odue, ivl, FSRS stability, difficulty, decay, last-review time. Last-review time comes from card data, else from the card's newest qualifying review row in the complete revlog (read through the `revlog.cid` index during the card build, whatever the history window; qualifying rows per `specs/stats/graphs-cards.md`).
+1. Columnar caches (R1289). Revlog columns: id, card slot, ease, ivl, lastIvl, factor, time, type. Card columns: id, nid, did, odid, type, queue, due, odue, ivl, FSRS stability, difficulty, decay, last-review time. Last-review time is the card data's `lrt` only; a card without one gets its last review instant from U101's retrievability rule, which reads the card's own columns, and the revlog is not read for it (`specs/stats/graphs-common.md` G9.1; corrected 2026-10-27).
    - Written as files in the derived store and memory-mapped read-only, so their clean pages stay out of the app's footprint. Columns use the narrowest lossless widths.
    - Built in the background at utility QoS on the shared maintenance reader (KTD3) once Home has been idle for 2 s after launch, or loaded from the persisted column files. This still meets R1289's "lazy", and the build never runs on the launch path. History-window columns are built first, then the all-history columns in the same idle build (R1292's 40 MB covers all 1.2M rows), so switching to all history never scans on the request path (R1838).
    - The caches are a U26 component with their own stamp (last applied `seq` and `col.mod`): a build from a reader snapshot followed by replay of the observer payloads received since, an incremental applier fed by the U24 observer (answer, undo, card change, delete, sync; the card payload carries every stored column, including `odue`, `nid`, `decay` and `lrt`), and invalidation on `CollectionReplaced`, Check Database and external change. Updates go to a mutable overlay over the read-only mapped base, compacted and re-persisted at suspend and close with the current stamp. Released on a memory-warning call (R1292), which U103 exposes. U104 asserts the footprint.
@@ -8356,7 +8356,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
   - every card in scope with a memory state;
   - a left-out count for review/relearn cards lacking one (R1398);
   - stability in days, difficulty as (D − 1)/9;
-  - retrievability from stability, stored decay (else 0.5) and the exact seconds since the last review at request time, through U82a's retrievability function (the single definition, which also serves U41's queue order and U82's `prop:r`), fed by U98's last-review-time column; its missing-`lrt` rule is that function's, pinned by the oracle;
+  - retrievability from stability, stored decay (else 0.5) and the exact seconds since the last review at request time, with the elapsed rule of `specs/stats/graphs-cards.md` C9.1, missing-`lrt` cards included, and U82a's retrievability function for the `fsrs` call only (C9.2). It differs from `prop:r` and the queue order for the cards C9.6 lists (corrected 2026-10-27);
   - a cached retrievability is never reused across requests (R1294).
   - Nothing is written.
   - "Estimated total knowledge" covers cards and notes (R1403).
@@ -8370,7 +8370,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
 **Test scenarios:**
 - Covers AE57. 30 overdue review cards, 5 buried due today, 3 buried due tomorrow. Backlog off: no negative days, today excludes the 5, tomorrow includes the 3, and daily load includes all 38 cards. Backlog on: the 30 cards appear on negative days.
 - Covers AE60 (core part). Deck "Japanese", separate inactive on. The Young label item query equals `("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")`, and U80 over AE60's joined string returns exactly the Young count; the joined string itself is U225's test.
-- A card with a memory state, no `lrt`, last reviewed 400 days ago → identical retrievability with "last 12 months" and "all history", and the same R as `prop:r` gives in the Browser.
+- A card with a memory state, no `lrt`, last reviewed 400 days ago → identical retrievability with "last 12 months" and "all history", and the same R as `prop:r` gives in the Browser, since it meets C9.6's agreement conditions (a review card whose elapsed days are at least its `ivl`); the C9.6 rows give the cards where the two differ (corrected 2026-10-27).
 - An intraday learning card due 30 min after `next_day_at` gets day index 0. Due 25 h after gets day 1 (truncation toward zero).
 - A filtered-deck card uses `odue` for Future Due.
 - Card Counts: a scheduler-buried card goes to Buried with separate on, and to its type bucket with separate off. Percentages sum with 2-decimal rounding matching the oracle.
@@ -8986,6 +8986,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `core/tools/meguri-cli/src/commands/sync.rs` (scenario `sync` op, harness login, relaunch loop)
 - `conformance/scenarios/sync/normal/`, `sync/conflicts/`, `sync/oneway/`, `sync/media/`, `sync/holdback/`, `sync/coexistence/`, `sync/exchanges/`
 - `conformance/corpora/sync-exchanges/` (decoded Anki client↔server recordings, produced by the oracle maintainer)
+- CloudKit lane (`specs/conformance/cloudkit-acceptance.md` Q2; corrected 2026-10-27): `core/crates/meguri-testkit/src/cloud/` (fake, device harness, checks, scheduler, program generators), `core/crates/meguri-sync/tests/cloud_acceptance.rs`
 
 **Approach:**
 - Scenarios run on U13's multi-party executor (`exec/parties.rs`) and its sync DSL (`specs/conformance/sync-ops.md`): the `sync` op names a U13 actor and a `kind` (normal, upload, download, media). Observations: per-client normalised `db_dump`, server `meta`, media listing, `sync` result kind. This unit adds no executor or DSL of its own. U13 starts a fresh server user per scenario. Oracle clients use desktop-like and AnkiMobile-like version strings (same backend; only the version string differs).
@@ -9035,6 +9036,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `core/crates/meguri-sync/tests/holdback_property.rs`
 - `core/crates/meguri-sync/benches/sync_day.rs`
 - `conformance/scenarios/sync/robustness/`
+- CloudKit lane (`specs/conformance/cloudkit-acceptance.md` Q2; corrected 2026-10-27): `core/crates/meguri-sync/tests/cloud_faults.rs`, `core/crates/meguri-sync/tests/cloud_property.rs`, `core/crates/meguri-testkit/tests/regressions/cloud/`, extending U117's `core/crates/meguri-testkit/src/cloud/`
 
 **Approach:**
 - Fault matrix, for each normal-sync stage and each one-way and media phase:
@@ -9596,10 +9598,10 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
   - wrong `lrt` (R688);
   - orphaned card;
   - `odid` in a normal deck;
-  - revlog row with ivl overflow and type0/time0/ease0;
+  - revlog row with ivl overflow (Anki fails there and Meguri repairs it, deviation `check-db-lrt-reads-needed-columns`, `specs/maintenance/check-database.md` C17; corrected 2026-10-27) and type0/time0/ease0;
   - note id 3 days in the future.
 - `scm` changes only in scenarios with an R1643 category (golden-checked); R1642-only scenarios leave `scm` equal.
-- Healthy collection → "no problems found"; `col.mod` and `scm` match the oracle's behavior.
+- Healthy collection → "no problems found"; `scm` matches the oracle's behavior, and `col.mod` matches it up to deviation `check-db-no-change-keeps-mod` (left unchanged when no row changed, R1472; `specs/maintenance/check-database.md` C17; corrected 2026-10-27).
 - Injected corrupt table b-tree page → corrupt outcome, not `SafetyBackupFailed`; no repair transaction runs; the collection's content is unchanged; lifecycle moves to U132's corrupt state.
 - A backup file precedes the repair commit.
 - Undo stack cleared afterwards, with the disabled reason from C3.
@@ -10551,6 +10553,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - `app/Packages/MeguriKit/Sources/AppModel/Collection/CollectionStore.swift`, `LifecycleState.swift`, `ChangeFanout.swift`, `GenerationScope.swift`
 - `app/Packages/MeguriKit/Sources/AppModel/Lifecycle/AppLifecycleCoordinator.swift`, `ForegroundReturnSequence.swift`, `BackgroundSequence.swift`
 - `app/Packages/MeguriKit/Sources/AppModel/Sync/SyncCoordinator.swift`, `SyncStatusModel.swift`
+- `app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings`, the Sync String Catalog of `specs/sync/status-strings.md` T1, shared with U161 (corrected 2026-10-27; decided 2026-10-27: it lives in AppModel because `SyncStatusModel` and U161's views both take their text from it and the Sync feature depends on AppModel)
 - `app/Packages/MeguriKit/Sources/AppModel/Settings/DeviceSettings.swift`, `CredentialStore.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/Support/FakeCore.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/CollectionStoreTests.swift`, `LifecycleOrderTests.swift`, `SyncCoordinatorTests.swift`, `SyncStatusModelTests.swift`, `CredentialStoreTests.swift`
@@ -10997,6 +11000,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Sync/SyncButton.swift`, `SyncStatusPopover.swift`, `CloudKitConnectionView.swift`
+- `app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings` (U151's Sync String Catalog; this unit adds the keys of `specs/sync/status-strings.md` its views show, corrected 2026-10-27)
 - `app/Packages/MeguriKit/Sources/Features/Settings/AnkiTransfersView.swift`, `AnkiTransferPreview.swift`, `AnkiTransferProgress.swift`
 - `app/Meguri/AnkiWeb/AnkiWebProvider.swift` (build-gated Settings provider)
 - `app/Packages/MeguriKit/Tests/SyncUITests/`
@@ -12111,7 +12115,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Approach:**
 - Read-only queries on the query lane.
-  - Defaults for adding: takes the optional current review card, returns note type and deck (R798, R799).
+  - Defaults for adding: takes the optional current review card and the optional preset deck of U195's deck-preset entry point (`AddEntryPoints`), returns note type and deck (R798, R799, R48; `specs/notes/add-defaults.md` D1, corrected 2026-10-27).
   - Default deck for a note type: used when switching type with `addToCur` off (R800).
   - Field check on an unsaved note draft: returns one of normal, empty first field, duplicate, missing cloze, cloze in non-cloze note type, cloze outside a cloze field (R807, R809–R812). The duplicate check uses the stored checksum, then an exact stripped comparison, excluding the note itself (R774 is U27's).
   - Tag completion: limit 500, matching rules as in the spec (R883).
@@ -13077,7 +13081,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Deck named `a_b*` → item search matches only that deck (escaped by core) (R1078 UI side).
 - Collapsing Decks section → writes `collapseDecks` true; collapsing deck "Japanese" in the sidebar → its browser-collapsed flag changes, `study_collapsed` unchanged, Home tree unaffected.
 - Filter "mam" → `animal::mammal` shown with `animal` expanded, highlighted; clearing the filter restores the previous expansion.
-- Search `deck:French is:due`, ⌘⇧-click deck Spanish → `deck:Spanish is:due`; ⌥⌘-click tag verbs → `deck:French is:due -tag:verbs`. Covers AE43.
+- Search `deck:French is:due`, ⌘⇧-click deck Spanish → `deck:Spanish is:due`; ⌥⌘-click tag verbs → `(deck:French is:due) -tag:verbs` (`specs/search/join-and-replace.md` J9; corrected 2026-10-27). Covers AE43.
 - iPhone long-press on deck Spanish → Replace same kind gives `deck:Spanish is:due`. Covers AE43 (touch).
 - Select tool, ⌘-click tags a, b and c → the search is unchanged and three items are selected; Search any selected with a and b selected → `tag:a OR tag:b`.
 - A tag deleted through a fixture op, then deck "Japanese" and tag `verbs` collapsed in the sidebar → two "Expand/Collapse" undo steps, and the third ⌘Z restores the deleted tag.
@@ -13490,12 +13494,12 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Test scenarios:**
 - Every scenario in `conformance/scenarios/stats/presentation/` → Swift bins, labels, tooltip strings and table values equal the goldens.
-- Reviews 1-year range with 365 daily entries → bins grouped so the first bin label starts "0–4" style per spec and bar count ≤ 70.
+- Reviews 1-year range with 365 daily entries → bins grouped so the first bin label starts "0–4" style per spec; the desired bar count is ≤ 70 and the drawn count follows Anki's edges, 73 bins for 1 year (`specs/stats/graph-presentation.md` P4.6; corrected 2026-10-27).
 - Intervals with range 95% on a histogram whose 95th percentile is 120 days → axis capped at 120; computed from the cumulative histogram (assert no per-card array is built).
 - Day labels: 0 → "Today", 1 → "Tomorrow", −1 → "Yesterday", 5 → "In 5 days", bin 3–5 → "In 3-5 days", −10…−6 → "10-6 days ago" per spec.
 - Bar queries built through U88's builder: Intervals bin 3–5 → `"prop:ivl>=3" "prop:ivl<=5"`; Difficulty's last bar uses `<=` (R1401); an Added range → its `added:` bounds (R1416).
 - Every generated query in the browse-queries scenarios parses with the core search parser (U80) without error (R1420).
-- Range persistence: set Reviews to 3 months, relaunch → 3 months; history back to 12 months while Reviews was "all" → falls back to the spec'd default.
+- Range persistence: set Reviews to 3 months, relaunch → 3 months; history back to 12 months while Reviews was "all" → falls back to 1 year (`specs/stats/graph-presentation.md` P5.3; corrected 2026-10-27).
 - Re-bucketing the largest Reviews and Intervals aggregates returned at 150k / 1.2M rows under 16 ms (performance assertion).
 - VoiceOver element tree of a 70-bar chart → summary first, 70 bin elements with tooltip text, "Show in Browser" action present on clickable graphs only.
 
@@ -13643,7 +13647,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Zero answers today → the core's zero line displayed verbatim: R1298's "Studied 0 cards in 0 seconds today (0s/card)" (R44's "No cards studied today" is an open question). 1 review → singular form.
 - Answer a card, return to Home → line and today cell incremented; undo → decremented (R1300).
 - Empty collection → "No reviews yet", no heatmap, no streak stats.
-- Deck page click on Oct 1 (11 days ago) for deck "Spanish" → Browser search equals that day's U96 search, `deck:"Spanish" prop:rated=-11`; for a deck named `a_b*` the search matches only that deck.
+- Deck page click on Oct 1 (11 days ago) for deck "Spanish" → Browser search equals that day's U96 search, `deck:Spanish prop:rated=-11` (`specs/stats/heatmap-addon.md` A9; corrected 2026-10-27); for a deck named `a_b*` the search matches only that deck.
 - Deck page Stats action → Stats opens scoped to that deck (R1347, R1349 entry point).
 - Streak values at 1 → "1 day"; 0 → "0 days" in neutral colour; Days learned tint at 85% uses level per core.
 - Dynamic Type AX5 on iPhone → 2×2 stats wrap, no truncation (snapshot).
@@ -13725,7 +13729,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Reviews Time mode → subtitle "The time taken to answer the questions." and hour-capped time values.
 - Calendar with "last 12 months" → Back stops at the previous year; with all history → stops at the first year with data or 2000.
 - Change "Week starts on" to Monday → synced `firstDayOfWeek` = 1 written once; reopening keeps it.
-- Card Counts percentages sum display to 100.00% with 2 decimals; Notes row equals distinct notes in scope.
+- Card Counts percentages have at most two decimals with trailing zeros removed (`50%`, `33.33%`) and need not add up to 100 (`specs/stats/graph-presentation.md` P9; corrected 2026-10-27); Notes row equals distinct notes in scope.
 - Snapshot of each card at iPhone and Mac widths, light/dark.
 
 **Verification:** Cards match presentation goldens (U226); click-to-browse UI tests pass; only the three graph-preference keys ever change in config during stats use.
@@ -13758,7 +13762,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Patterns to follow:** U226 components; red→green ramps from `ChartColors`.
 
 **Test scenarios:**
-- Intervals 95% on core data whose 95th percentile is 120 → last bar ends at 120; tooltip "N cards with a 3~5 day interval"; click → `"prop:ivl>=3" "prop:ivl<=5"` joined with scope.
+- Intervals 95% on core data whose 95th percentile is 120 → the axis ends at the widened domain end, 131 for P10's example map (`specs/stats/graph-presentation.md` P10; corrected 2026-10-27); tooltip "N cards with a 3~5 day interval"; click → `"prop:ivl>=3" "prop:ivl<=5"` joined with scope.
 - Stability with 12 review cards lacking memory state → footnote "12 cards … not included" per String Catalog text.
 - Difficulty last bar (95–100%) click → query uses `<=`; range 50% trims to the 25–75% quantiles.
 - Retrievability opened twice an hour apart with an injected clock → different averages (no stale cache).
@@ -14470,7 +14474,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 **Dependencies:** U3, U4, U13, U25, U43, U47, U107, U109, U111, U118, U151, U175, U210, U246. U47/U210 legs wire in when landed.
 
 **Files:**
-- `conformance/scenarios/soak/`, `conformance/scenarios/sync/`
+- `conformance/scenarios/soak/`, `conformance/scenarios/sync/` (the transfer lane only; the cloud lane's soak driver is `core/crates/meguri-testkit/src/cloud/soak.rs`, with shrunk programs in `core/crates/meguri-testkit/tests/regressions/cloud/`, `specs/conformance/cloudkit-acceptance.md` Q2; corrected 2026-10-27)
 - `app/MeguriUITests/Sync/`, `app/Packages/MeguriCore/Tests/CoreBridgeTests/CloudKitSoakTests.swift`
 - `tools/mg` job registrations and result contracts for distinct cloud and transfer lanes
 
