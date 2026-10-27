@@ -292,6 +292,46 @@ deviations:
     scenarios: [preservation/notetype/structure-changes]
     pointer: /steps/9/db_exec/rows
     transform: {replace: [[1, 1, 1]]}
+  # specs/notetypes/structure-changes.md S8 and field-rename.md F3: card
+  # requirements come from the fronts as rewritten; Anki computes them from
+  # the fronts before its rewrite.
+  - id: notetype-reqs-after-field-change
+    requirement: R903
+    summary: Right after Front is renamed Question, Forward's front {{Question}} requires Question (any [0]); Anki stores none until a later save.
+    test: notetypes/structure/reqs-after-rename
+    scenarios: [notetypes/structure/reqs-after-rename]
+    pointer: /steps/1/notetype_structure/Pair/templates/0/requirement
+    transform: {replace: {kind: any, fields: [0]}}
+  - id: notetype-reqs-after-field-change-removal
+    requirement: R903
+    summary: Right after Extra is removed, Hint's front, rewritten to {{Question}}, requires Question (any [0]); Anki stores none until a later save.
+    test: notetypes/structure/reqs-after-rename
+    scenarios: [notetypes/structure/reqs-after-rename]
+    pointer: /steps/3/notetype_structure/Pair/templates/1/requirement
+    transform: {replace: {kind: any, fields: [0]}}
+  # specs/notetypes/structure-changes.md S7 and
+  # specs/notes/deck-placement-and-position.md D4: cards that a template
+  # change generates walk D3's whole list, the note type's last deck
+  # included; Anki skips the last deck and uses Default.
+  - id: deck-placement-regeneration
+    requirement: R792
+    summary: The Third card of the note whose cards are split between Inbox and Other goes to Last, the note type's last deck, instead of Default.
+    test: notetypes/structure/add-template-placement
+    scenarios: [notetypes/structure/add-template-placement]
+    pointer: /steps/5/db_exec/rows
+    transform:
+      replace:
+        - [a, 0, Inbox, 1]
+        - [a, 2, Inbox, 1]
+        - [a, 3, Target, 1]
+        - [b, 0, Inbox, 2]
+        - [b, 1, Other, 2]
+        - [b, 2, Last, 2]
+        - [b, 3, Target, 2]
+        - [c, 0, Last, 3]
+        - [c, 1, Last, 3]
+        - [c, 2, Last, 3]
+        - [c, 3, Target, 3]
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row

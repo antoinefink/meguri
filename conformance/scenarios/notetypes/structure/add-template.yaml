@@ -1,0 +1,45 @@
+# Adding a template to a note type with notes (specs/notetypes/structure-changes.md
+# S2, S7; specs/notes/card-generation.md G9; specs/notes/deck-placement-and-position.md
+# D4, P2). The new template's cards go to each note's shared home deck (all in
+# Default here) and take the position of an existing new sibling; the note
+# whose card is in review draws the next counter value (nextPos 5 to 6). A
+# note with an empty Back gets no card, and a note left with no card at all
+# (a raw delete) is not visited, so it gets none either. No note changes.
+# Then a template no note's fields satisfy adds no card. Each add is a schema
+# change.
+id: notetypes/structure/add-template
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back, Note]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+  notes:
+    - {notetype: Pair, fields: [sun, sol]}
+    - {notetype: Pair, fields: [moon, luna]}
+    - {notetype: Pair, fields: [star, ""]}
+    - {notetype: Pair, fields: [sky, cielo]}
+steps:
+  # #c2 becomes a review card; #n4 loses its only card without a grave
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 6
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Reverse, front: "{{Back}}", back: "{{Front}}"}}]}
+  - observe:
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 12
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Aside, front: "{{Note}}", back: "{{Front}}"}}]}
+  - observe:
+      - {db_dump: {tables: [cards]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}

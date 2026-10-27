@@ -1,0 +1,41 @@
+# Where the cards of added templates go (specs/notetypes/structure-changes.md
+# S7; specs/notes/deck-placement-and-position.md D3, D4). Template Fourth has
+# the deck override Target: every note's Fourth card goes there. Template
+# Third has none: a note whose cards share a home deck gets it there (Inbox,
+# Last); the note whose cards are split between Inbox and Other gets it in
+# the note type's last deck, Last, the deck the last note was added to.
+# Anki puts that card in Default (deviation deck-placement-regeneration,
+# step 5 rows).
+id: notetypes/structure/add-template-placement
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox, Other, Last, Target]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [a, ""]}
+    - {notetype: Pair, deck: Inbox, fields: [b, y]}
+    - {notetype: Pair, deck: Last, fields: [c, z]}
+steps:
+  # #c3 (#n2's Reverse card) moves to Other: #n2's cards are split
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Other') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "SELECT CAST(c.val AS TEXT) = CAST(d.id AS TEXT) FROM config c, decks d, notetypes n WHERE d.name = 'Last' AND n.name = 'Pair' AND c.KEY = '_nt_' || n.id || '_lastDeck'"}
+  - advance: 1m
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - {add_template: {name: Third, front: "{{Front}}!", back: "3"}}
+        - {add_template: {name: Fourth, front: "{{Front}}?", back: "4"}}
+        - {template: {name: Fourth, deck: Target}}
+  - observe:
+      - {notetype_structure: {notetypes: [Pair]}}
+  # step 5
+  - db_exec:
+      sql: >-
+        SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.due FROM cards c
+        JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did
+        ORDER BY n.id, c.ord

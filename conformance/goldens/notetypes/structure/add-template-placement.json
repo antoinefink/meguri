@@ -1,0 +1,125 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "notetype_structure": {
+          "Pair": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Reverse",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Third",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": "Target",
+                "name": "Fourth",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a", 0, "Inbox", 1],
+            ["a", 2, "Inbox", 1],
+            ["a", 3, "Target", 1],
+            ["b", 0, "Inbox", 2],
+            ["b", 1, "Other", 2],
+            ["b", 2, "Default", 2],
+            ["b", 3, "Target", 2],
+            ["c", 0, "Last", 3],
+            ["c", 1, "Last", 3],
+            ["c", 2, "Last", 3],
+            ["c", 3, "Target", 3]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "35f109a617204dd94c88b5a6593fb1fd0ec99d19058a44319b7bc112d03ef4a2",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/add-template-placement",
+  "scenario_sha256": "32dccb558399de48c273435790c268fd9311608858df3ebeeafc617820e1e66c",
+  "tz": "UTC"
+}

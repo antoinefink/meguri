@@ -79,3 +79,24 @@ amsmath
 pagestyle
 setlength
 parindent
+# Structure changes and Restore to Default (structure-changes.md,
+# restore-to-default.md): note, card, grave and config tables and columns,
+# config keys and the config key prefix, the note save's normalization key,
+# the review log table, and the comparison the current note type is chosen by.
+notes
+cards
+graves
+config
+sfld
+csum
+mid
+nid
+ord
+did
+oid
+lastDeck
+lastNotetype
+nextPos
+normalize_note_text
+revlog
+unicase

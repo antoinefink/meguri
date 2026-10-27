@@ -10,7 +10,8 @@ Scenarios: focused engine and real normal-job tests; prepared U34 rename cases a
 This is the production field-rename prerequisite for U107, not full U34.
 U34 remains in M1 without an acceptance trailer for this slice. Field/template
 add, removal, reorder, independent template edits, sort changes, deletion,
-Restore to Default, editors and their full FFI surface remain outside it.
+Restore to Default, editors and their full FFI surface remain outside it
+(`notetypes/structure-changes`, `notetypes/restore-to-default`).
 The plain save continues to refuse field renames and structural changes.
 
 The typed rename operation uses the existing executor, journal and undo path.
@@ -59,10 +60,12 @@ Process every template's front, back, browser front and browser back:
   For cloze types, every other processed text without a cloze replacement gets
   the first field's cloze replacement appended. Retain alternate delimiters.
 
-These are the rename-only rules of prepared structure-changes S4, including
-its text-preservation deviation. There is no field-removal map in this slice.
+These are the rename rules that `notetypes/structure-changes#S4` builds on
+(S4.1 to S4.4), with deviation `template-rewrite-keeps-text` (S14). There is
+no field-removal map in this slice; removals are S4.2.
 Compute saved requirements from the final texts and final field names, as
-`notetypes/records#N6` requires, not from the earlier fronts.
+`notetypes/records#N6` requires, not from the earlier fronts (deviation
+`notetype-reqs-after-field-change`, `notetypes/structure-changes#S8`).
 
 ## F4. Planning and atomic application
 
@@ -100,5 +103,6 @@ round, then run the normal job. The whole edited note type reaches `applyChanges
 and a fresh peer, with matching `scm` and no one-way request. A raw scope write,
 pending-row helper or synthetic acknowledgement does not satisfy that proof.
 
-Reuse the prepared neutral rename expectations. Do not activate mixed U34
+Reuse the neutral rename expectations (`notetypes/structure-changes#S4.4`,
+step 1 of `notetypes/structure/reqs-after-rename`). Do not activate mixed U34
 remove/template-edit scenarios or declare their unsupported capabilities.

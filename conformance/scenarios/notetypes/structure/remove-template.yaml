@@ -1,0 +1,49 @@
+# Moving and removing templates (specs/notetypes/structure-changes.md S2,
+# S6). Moving Three to the front renumbers every card of the three templates
+# and stamps them. Removing One (now at 1) removes its cards with card graves
+# and renumbers Two's cards from 2 to 1; Three's cards keep ordinal 0 and are
+# not touched. Removing Three then leaves the note with Front only (#n3) with
+# no card: the note itself stays and is not stamped. Each change is a schema
+# change. Before each save the cards are reset to a synced state.
+id: notetypes/structure/remove-template
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Tri
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "1"}
+        - {name: Two, front: "{{Back}}", back: "2"}
+        - {name: Three, front: "{{Front}}/{{Back}}", back: "3"}
+  notes:
+    - {notetype: Tri, fields: [a, b]}
+    - {notetype: Tri, fields: ["", y]}
+    - {notetype: Tri, fields: [x, ""]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 4
+  - update_notetype: {notetype: Tri, edits: [{move_template: {template: Three, to: 0}}]}
+  - observe: [card]
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 10
+  - update_notetype: {notetype: Tri, edits: [{remove_template: One}]}
+  - observe:
+      - card
+      - {db_dump: {tables: [graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 16
+  - update_notetype: {notetype: Tri, edits: [{remove_template: Three}]}
+  - observe:
+      - card
+      - {db_dump: {tables: [notes, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT n.sfld, count(c.id) FROM notes n LEFT JOIN cards c ON c.nid = n.id GROUP BY n.id ORDER BY n.id"}

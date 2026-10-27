@@ -1,0 +1,484 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Tri"
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 2,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Default",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "Default",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Tri"
+        }
+      },
+      {
+        "card": {
+          "#c1": null,
+          "#c2": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701720,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 5
+          },
+          "#c4": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701720,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 5
+          },
+          "#c6": null,
+          "#c7": {
+            "data": {},
+            "did": "Default",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1700000000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 5
+          }
+        },
+        "db_dump": {
+          "graves": {
+            "1894701600000,0": {
+              "oid": 1894701600000,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600005,0": {
+              "oid": 1894701600005,
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Tri"
+        }
+      },
+      {
+        "card": {
+          "#c1": null,
+          "#c2": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701780,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": null,
+          "#c4": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701780,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": null,
+          "#c6": null,
+          "#c7": null
+        },
+        "db_dump": {
+          "graves": {
+            "1894701600000,0": {
+              "oid": 1894701600000,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600002,0": {
+              "oid": 1894701600002,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600004,0": {
+              "oid": 1894701600004,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600005,0": {
+              "oid": 1894701600005,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600006,0": {
+              "oid": 1894701600006,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 2264392759,
+              "data": "",
+              "flags": 0,
+              "flds": "a\u001fb",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "a",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600001": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001fy",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600002": {
+              "csum": 301378958,
+              "data": "",
+              "flags": 0,
+              "flds": "x\u001f",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "x",
+              "tags": "",
+              "usn": 5
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a", 1],
+            ["", 1],
+            ["x", 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "35f109a617204dd94c88b5a6593fb1fd0ec99d19058a44319b7bc112d03ef4a2",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/remove-template",
+  "scenario_sha256": "8d160cc7540beafcaf64c8681adf6f83b0cb5e1a927173d2ff0af5a2f1d4508f",
+  "tz": "UTC"
+}

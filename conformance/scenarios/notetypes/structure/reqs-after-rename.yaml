@@ -1,0 +1,33 @@
+# Card requirements after a field rename and a field removal
+# (specs/notetypes/structure-changes.md S8; specs/notetypes/records.md N6).
+# Meguri computes them from the fronts as rewritten: after renaming Front to
+# Question, Forward requires Question (any [0]); after removing Extra, Hint's
+# front is left with no reference and gets the first field, so Hint requires
+# Question too. Anki computes them from the fronts before its rewrite and
+# stores none for both (deviations notetype-reqs-after-field-change and
+# notetype-reqs-after-field-change-removal, steps 1 and 3); a later save (a
+# styling change, step 4) recomputes them on Anki, and both executors then
+# agree. The field editor's saves skip the template checks (Hint's front ends
+# up equal to Forward's).
+id: notetypes/structure/reqs-after-rename
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Hint, front: "{{Extra}}", back: "{{Back}}"}
+steps:
+  - update_notetype: {notetype: Pair, edits: [{rename_field: {from: Front, to: Question}}], skip_checks: true}
+  # step 1: Forward any [0] on Meguri, none on Anki
+  - observe:
+      - {notetype_structure: {notetypes: [Pair]}}
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Extra}], skip_checks: true}
+  # step 3: Hint any [0] on Meguri, none on Anki
+  - observe:
+      - {notetype_structure: {notetypes: [Pair]}}
+  - update_notetype: {notetype: Pair, edits: [{css: ".card { color: black; }"}], skip_checks: true}
+  # step 5: recomputed on Anki; equal
+  - observe:
+      - {notetype_structure: {notetypes: [Pair]}}
