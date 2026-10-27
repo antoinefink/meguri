@@ -471,6 +471,7 @@ private struct HomeDeckBranch: View {
         // Only this leaf owns disclosure semantics; selection and child rows are siblings.
         DisclosureGroup(isExpanded: expanded) { EmptyView() } label: { EmptyView() }
             .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+            .fixedSize(horizontal: true, vertical: false)
             .contentShape(Rectangle())
             .accessibilityRepresentation {
                 Button { expanded.wrappedValue.toggle() } label: {
@@ -504,7 +505,7 @@ private struct HomeDeckBranch: View {
                         .font(.body)
                         .accessibilityIdentifier("home.deck.name.\(node.id)")
                     if let subtitle {
-                        Text(verbatim: subtitle)
+                        Text(subtitle)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
@@ -530,14 +531,33 @@ private struct HomeDeckBranch: View {
         .deckMenu(collection: collection, deck: node)
     }
 
-    private var subtitle: String? {
-        let parts: [String?] = [
-            node.counts.new == 0 ? nil : String(localized: "\(node.counts.new.formatted(.number.locale(locale))) new", bundle: .module),
-            node.counts.learning == 0 ? nil : String(localized: "\(node.counts.learning.formatted(.number.locale(locale))) learning", bundle: .module),
-            node.counts.review == 0 ? nil : String(localized: "\(node.counts.review.formatted(.number.locale(locale))) due", bundle: .module),
+    private var subtitle: AttributedString? {
+        let new = node.counts.new.formatted(.number.locale(locale))
+        let learning = node.counts.learning.formatted(.number.locale(locale))
+        let due = node.counts.review.formatted(.number.locale(locale))
+        let parts: [AttributedString?] = [
+            node.counts.new == 0 ? nil : countSubtitle(String(localized: "\(new) new", bundle: .module),
+                number: new, token: .countNew),
+            node.counts.learning == 0 ? nil : countSubtitle(String(localized: "\(learning) learning", bundle: .module),
+                number: learning, token: .countLearn),
+            node.counts.review == 0 ? nil : countSubtitle(String(localized: "\(due) due", bundle: .module),
+                number: due, token: .countDue),
         ]
         let visible = parts.compactMap { $0 }
-        return visible.isEmpty ? nil : visible.joined(separator: " · ")
+        guard var result = visible.first else { return nil }
+        for part in visible.dropFirst() {
+            result.append(AttributedString(" · "))
+            result.append(part)
+        }
+        return result
+    }
+
+    private func countSubtitle(_ label: String, number: String, token: ColorToken) -> AttributedString {
+        var result = AttributedString(label)
+        if let range = result.range(of: number) {
+            result[range].foregroundColor = token.color
+        }
+        return result
     }
 }
 
