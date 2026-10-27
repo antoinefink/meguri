@@ -90,7 +90,8 @@ mg_mac_hosted_test() {
     return 0
   fi
   MG_SNAP_BROKEN=0
-  mg_snapshots__xcodebuild "$prefix" "platform=macOS,arch=arm64" "$suite" --result-only
+  # SwiftTesting method selectors require terminal (); keep the public pair bare.
+  mg_snapshots__xcodebuild "$prefix" "platform=macOS,arch=arm64" "$suite()" --result-only
   rc=$?
   [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "selected Mac app-hosted test only"
   case "$rc" in

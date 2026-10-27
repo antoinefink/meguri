@@ -134,7 +134,7 @@ not_called() { ! grep -Eq -- "$1" "$STUB_LOG"; }
   called '^begin allow-host=0$'
   called '^build mac Debug Snapshot$'
   called '^take VM$'
-  called "^vm-test .* Snapshot macosx platform=macOS,arch=arm64 Debug -only-testing:MeguriSnapshotTests/$SUITE$"
+  called "^vm-test .* Snapshot macosx platform=macOS,arch=arm64 Debug -only-testing:MeguriSnapshotTests/$SUITE\(\)$"
   not_called 'FORBIDDEN|RAW XCODE|simctl|all$'
   [ "$(field '[.artifacts[] | select(.kind == "xcresult")] | length')" -eq 2 ]
   [ -f "$(field '.artifacts[] | select(.kind == "test-counts") | .path')" ]
