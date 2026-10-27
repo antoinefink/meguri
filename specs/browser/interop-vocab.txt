@@ -46,3 +46,7 @@ noteTags
 originalPosition
 # U85a: batched Question and Deck cell observation.
 card_excerpts
+# U84: the Browse-rows observation (conformance/browser-ops B3) and the
+# SQLite collation that orders sort fields (browser/sorting S2).
+browser_rows
+nocase
