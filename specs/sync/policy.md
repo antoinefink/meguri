@@ -729,6 +729,8 @@ The fence is an input. The policy never clears it: only the explicit choices of 
 
 The optimizer branch of this policy (U47; R699, KTD8) is `sched/optimizer#O12`: its modes, the inputs, actions and state it adds to P3, P4 and P5, and its rules; `sched/optimizer#O13` covers two devices that optimize. They keep this policy pure (P2) and start no Anki transfer (P16).
 
+Decided 2026-10-27 (`sched/optimizer#O12`, Actions): the branch also extends this file in four places, which hold as if written in the sections named. P4: a `RequestFetch` that an optimizer rule emits or adopts carries a call id, and U114 copies it onto each `FetchDrained` (P3) it emits for that call or its one repeat; every other drain carries none. P4: the optimizer actions carry the guard; `optimizer_start` and `optimizer_commit` refuse one that is not current, and `OptimizerCoordinator` runs its actions after the list's core actions, in list order, without waiting for `SyncCoordinator`'s, except `EndProcessingTask`, which `SyncCoordinator` runs in its own order. P2: `OptimizerCoordinator`'s two 5-minute deadlines (Optimize now's and the gate's) are deadlines of one operation, besides those P2 lists, so P20 invariant 7 holds with them. P5: the platform is a constant of the policy state.
+
 ## P19. Tracking rows this file adds
 
 Logical content in `meguri-cloud.db` (K10), per binding:
