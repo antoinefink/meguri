@@ -337,8 +337,10 @@ fn two_owned_observers_retain_sync_images_after_conflicts_undo_discard_and_close
 fn metadata_read_or_typed_card_failure_rolls_back_before_commit_and_publication() {
     use meguri_storage::{Cell, Record, RowKey, Table};
     for unreadable in [true, false] {
-        let h = Harness::open();
+        let probe = Arc::new(FailureProbe::new(Some(false), true));
+        let h = Harness::open_with(Ports::new().observer(probe.clone()));
         let (_, cid) = add_note_with_card(&h.collection, OpSource::UserUndoable, &["front", "back"]).value;
+        probe.clear();
         let before = common::steps::dump(&h.collection);
         let events = h.engine.stream().subscribe();
         let result = h.collection.run(
@@ -359,6 +361,8 @@ fn metadata_read_or_typed_card_failure_rolls_back_before_commit_and_publication(
         );
         assert!(matches!(result, Err(EngineError::Storage(_))));
         assert_eq!(common::steps::dump(&h.collection), before);
+        assert!(probe.seen.lock().unwrap().is_empty());
+        assert!(probe.failed.lock().unwrap().is_empty());
         assert!(events.try_recv().is_none());
     }
 }
@@ -783,4 +787,145 @@ fn generic_access_skips_no_ops_and_created_then_deleted_keys_and_reads_only_visi
         1,
         "only the present side of this row is read"
     );
+}
+
+/// Old-style observe remains the default target; failures and hook panics
+/// are independent per observer, and neither changes commit publication.
+struct FailureProbe {
+    outcome: Option<bool>, // None succeeds; false errors; true panics.
+    hook_panics: bool,
+    seen: Mutex<Vec<meguri_engine::Seq>>,
+    failed: Mutex<Vec<meguri_engine::Seq>>,
+}
+impl FailureProbe {
+    fn new(outcome: Option<bool>, hook_panics: bool) -> Self {
+        Self {
+            outcome,
+            hook_panics,
+            seen: Mutex::new(Vec::new()),
+            failed: Mutex::new(Vec::new()),
+        }
+    }
+    fn clear(&self) {
+        self.seen.lock().unwrap().clear();
+        self.failed.lock().unwrap().clear();
+    }
+}
+impl ChangeObserver for FailureProbe {
+    fn name(&self) -> &str {
+        "failure-probe"
+    }
+    fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
+        self.seen.lock().unwrap().push(commit.seq);
+        match self.outcome {
+            None => Ok(()),
+            Some(false) => Err(EngineError::InvalidArgument {
+                message: "observer refused".into(),
+            }),
+            Some(true) => panic!("observer panic"),
+        }
+    }
+    fn observe_failed(&self, seq: meguri_engine::Seq) {
+        self.failed.lock().unwrap().push(seq);
+        assert!(!self.hook_panics, "failure hook panic");
+    }
+}
+
+#[test]
+fn error_and_panic_hooks_run_once_with_op_seq_and_hook_panics_leave_dispatch_and_publication_intact() {
+    let probes: Vec<_> = [false, true]
+        .into_iter()
+        .flat_map(|panic| [false, true].map(|hook_panics| Arc::new(FailureProbe::new(Some(panic), hook_panics))))
+        .collect();
+    let following = Arc::new(FailureProbe::new(None, false));
+    let mut ports = Ports::new();
+    for probe in &probes {
+        ports = ports.observer(probe.clone());
+    }
+    let h = Harness::open_with(ports.observer(following.clone()));
+    for probe in probes.iter().chain(std::iter::once(&following)) {
+        probe.clear();
+    }
+    let events = h.engine.stream().subscribe();
+    let result = add_note_with_card(&h.collection, OpSource::SyncIncoming, &["committed", "back"]);
+    for probe in &probes {
+        assert_eq!(*probe.seen.lock().unwrap(), [result.seq]);
+        assert_eq!(*probe.failed.lock().unwrap(), [result.seq]);
+    }
+    assert_eq!(*following.seen.lock().unwrap(), [result.seq]);
+    assert!(following.failed.lock().unwrap().is_empty());
+    let published: Vec<_> = std::iter::from_fn(|| events.try_recv()).collect();
+    assert_eq!(change_seqs(&published), [result.seq.0]);
+    assert_eq!(
+        common::note_fields(&h.collection, result.value.0),
+        "committed\u{1f}back"
+    );
+}
+
+type LiveNote = (meguri_engine::Seq, RowImage, meguri_engine::CommitPayload);
+#[derive(Default)]
+struct LiveNotes(Mutex<Vec<LiveNote>>);
+impl ChangeObserver for LiveNotes {
+    fn name(&self) -> &str {
+        "live-note-rows"
+    }
+    fn observe(&self, _: &ObservedCommit<'_>) -> Result<(), EngineError> {
+        panic!("the rows callback must be dispatched")
+    }
+    fn observe_with_rows(
+        &self,
+        commit: &ObservedCommit<'_>,
+        rows: &meguri_engine::ObserverRows<'_>,
+    ) -> Result<(), EngineError> {
+        for key in commit.payload.row_keys(Table::Notes) {
+            let row = rows.row_image(Table::Notes, key)?.expect("stored note");
+            assert!(matches!(
+                commit.payload.row(Table::Notes, key)?.unwrap().after,
+                RowAfter::NoteDigest(_)
+            ));
+            self.0.lock().unwrap().push((commit.seq, row, commit.payload.clone()));
+        }
+        assert!(
+            rows.row_image(Table::Config, &RowKey::text("missing-live-row"))?
+                .is_none()
+        );
+        Ok(())
+    }
+}
+
+#[test]
+fn callback_reads_real_note_row_at_each_commit_while_owned_payload_keeps_only_its_original_digest() {
+    let live = Arc::new(LiveNotes::default());
+    let h = Harness::open_with(Ports::new().observer(live.clone()));
+    let first = add_note_with_card(&h.collection, OpSource::SyncIncoming, &["first", "back"]);
+    let nid = first.value.0;
+    let original = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .row_image(Table::Notes, &RowKey::Id(nid.0))
+        .unwrap()
+        .unwrap();
+    let second = common::set_first_field(&h.collection, OpSource::SyncIncoming, nid, "second").unwrap();
+    let later = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .row_image(Table::Notes, &RowKey::Id(nid.0))
+        .unwrap()
+        .unwrap();
+    let seen = std::mem::take(&mut *live.0.lock().unwrap());
+    assert_eq!(seen.len(), 2);
+    assert_eq!((seen[0].0, seen[1].0), (first.seq, second.seq));
+    assert_eq!(seen[0].1, original);
+    assert_eq!(seen[1].1, later);
+    assert_ne!(seen[0].1, seen[1].1);
+    let before_close = seen[0].2.row(Table::Notes, &RowKey::Id(nid.0)).unwrap().unwrap();
+    h.engine.close().unwrap();
+    // Keeping the payload cannot retain a live reader/writer capability.
+    assert_eq!(
+        seen[0].2.row(Table::Notes, &RowKey::Id(nid.0)).unwrap().unwrap(),
+        before_close
+    );
+    assert!(matches!(before_close.after, RowAfter::NoteDigest(_)));
 }

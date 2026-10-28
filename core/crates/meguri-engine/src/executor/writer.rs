@@ -181,6 +181,10 @@ pub(crate) fn close_owned_collection(
     shared: &ExecShared,
     opened: OpenedCollection,
 ) -> Result<Option<meguri_storage::CheckpointOutcome>, meguri_storage::StorageError> {
+    *shared
+        .open_evidence
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     let identity = opened
         .writer()
         .native_identity()
@@ -663,6 +667,7 @@ fn run_op<T>(
                     payload: payload.clone(),
                     collection: derived.collection,
                 },
+                collection.writer(),
             );
         }
         reservation.fill(generation, None, EventKind::Changes(Arc::clone(&change_set)));
@@ -974,6 +979,18 @@ impl TaskBody for ReplaceTask {
                 factory: None,
             },
             Ok(collection) => {
+                let mut evidence = match crate::collection::OpenEvidence::capture(&collection, shared.generation()) {
+                    Ok(evidence) => evidence,
+                    Err(error) => {
+                        let _ = reply.send(Replaced {
+                            reopened: false,
+                            error: Some(error),
+                            generation: None,
+                            factory: None,
+                        });
+                        return;
+                    }
+                };
                 let factory = collection.reader_factory();
                 *env.external_version = collection.writer().external_data_version().ok();
                 *env.collection = Some(collection);
@@ -981,6 +998,11 @@ impl TaskBody for ReplaceTask {
                 if replacing {
                     shared.corrupt.store(false, Ordering::Release);
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
+                    evidence.generation = generation;
+                    *shared
+                        .open_evidence
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(evidence);
                     initialize_coverage(shared, env.collection.as_ref().expect("reopened writer"));
                     let announce = shared.stream.reserve();
                     match first_day_check(env) {
@@ -1019,6 +1041,10 @@ impl TaskBody for ReplaceTask {
                         }
                     }
                 } else {
+                    *shared
+                        .open_evidence
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(evidence);
                     initialize_coverage(shared, env.collection.as_ref().expect("reopened writer"));
                     Replaced {
                         reopened: true,

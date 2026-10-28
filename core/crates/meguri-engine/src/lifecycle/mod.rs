@@ -468,6 +468,20 @@ impl Engine {
             path,
             last_seq,
         ));
+        if let Some(opened) = opened.as_ref() {
+            match crate::collection::OpenEvidence::capture(opened, generation) {
+                Ok(evidence) => *exec.open_evidence.lock().unwrap_or_else(PoisonError::into_inner) = Some(evidence),
+                Err(error) => {
+                    self.set_state(LifecycleState::Failed {
+                        reason: FailedReason::OpenStep {
+                            step: "open_evidence".into(),
+                            detail: error.to_string(),
+                        },
+                    });
+                    return Err(error);
+                }
+            }
+        }
         let _ = exec.maintenance.set(Arc::downgrade(self.maintenance()));
         let core = Arc::new(CollectionCore {
             backup: config.ports.backup_service.clone(),

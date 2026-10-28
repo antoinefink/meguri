@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use meguri_storage::{ReaderRole, Writer};
+use meguri_storage::{OpenedCollection, ReadRows, ReaderRole, Writer};
 
 use crate::changes::stream::Seq;
 use crate::error::EngineError;
@@ -42,6 +42,38 @@ pub struct Collection {
     pub(crate) undo_session: Option<crate::SessionId>,
 }
 
+/// Facts captured once before engine writes in one SQLite open incarnation.
+/// `native_file` is C9's device/inode pair, not a birthtime identity.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct OpenEvidence {
+    pub generation: Generation,
+    pub previous_clean_shutdown: bool,
+    pub opened_mod: i64,
+    pub opened_scm: i64,
+    pub native_file: (u64, u64),
+}
+
+impl fmt::Debug for OpenEvidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenEvidence")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+impl OpenEvidence {
+    pub(crate) fn capture(opened: &OpenedCollection, generation: Generation) -> Result<Self, EngineError> {
+        let col = opened.writer().col()?;
+        Ok(Self {
+            generation,
+            previous_clean_shutdown: opened.previous_clean_shutdown,
+            opened_mod: col.modified.0,
+            opened_scm: col.schema_modified.0,
+            native_file: opened.writer().native_identity()?,
+        })
+    }
+}
+
 /// Local work guard, independent of SQLite timestamps. `pending` includes
 /// admitted/parked work that has not committed yet. Never a remote revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +94,25 @@ impl fmt::Debug for Collection {
 }
 
 impl Collection {
+    /// Immutable facts for the current open incarnation, including during an
+    /// initial privileged OpenStep. Resume/reopen captures fresh facts.
+    /// No writer work is queued, so Rust callbacks may read this directly.
+    pub fn open_evidence(&self) -> Result<OpenEvidence, EngineError> {
+        let evidence = self
+            .core
+            .exec
+            .open_evidence
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.check_current()?;
+        self.core.exec.require_admission(self.privilege)?;
+        evidence
+            .as_ref()
+            .copied()
+            .filter(|e| e.generation == self.generation)
+            .ok_or_else(|| EngineError::unavailable("no open collection incarnation"))
+    }
+
     pub fn transfer_admission(&self) -> Result<TransferAdmission, EngineError> {
         self.check_current()?;
         self.core.exec.transfer_admission(self.privilege)

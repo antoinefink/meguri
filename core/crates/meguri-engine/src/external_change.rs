@@ -33,6 +33,7 @@ pub(crate) fn notify(shared: &ExecShared, writer: &Writer, touched: &mut TouchIn
             collection: Some(meguri_storage::derived::CollectionMark::of(&col)),
             payload: CommitPayload::external(seq, shared.generation(), col),
         },
+        writer,
     );
     reservation.fill(shared.generation(), None, EventKind::Changes(changes));
     Ok(())

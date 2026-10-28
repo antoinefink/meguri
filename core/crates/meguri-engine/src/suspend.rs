@@ -324,9 +324,11 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
                     .initializers(env.reopen.initializers.clone())
                     .managed();
                 let collection = open_collection(&env.shared.path, &options)?;
+                let evidence = crate::collection::OpenEvidence::capture(&collection, env.shared.generation())?;
                 reply.external_change = changed_file || collection.external_change;
                 *env.external_version = Some(collection.writer().external_data_version()?);
                 *env.collection = Some(collection);
+                *env.shared.open_evidence.lock().unwrap_or_else(PoisonError::into_inner) = Some(evidence);
                 crate::executor::writer::initialize_coverage(
                     env.shared,
                     env.collection.as_ref().expect("resumed writer"),

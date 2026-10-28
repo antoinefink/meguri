@@ -369,3 +369,38 @@ The page limit is 250 rows, not a byte-budget or 150k allocation proof.
 The revlog helper describes live snapshot rows; a held image must compute
 its own image-aware history. Actual reconciliation, sender bounds, P24 and
 U113 acceptance remain open.
+
+## Early-open evidence and observer read/failure ports
+
+Starting commit: `16f12a9b`; recorded before authoring in
+`account-workflow/engine-start.json` under the unit intake directory.
+Filtered author `20261028T052143Z-374` exposes immutable pre-write opening
+facts and a borrowed writer-row read capability for commit observers.
+Initial open, resume, successful replacement and failed-swap reopening
+refresh the facts. Observer errors and panics notify that observer's failure
+hook without undoing the committed operation or preventing other delivery.
+The ordinary row journal and note digest representation are unchanged.
+
+Independent review 1 found live recovery-copy reads in two test fixtures.
+Repair `20261028T054016Z-10328` uses owned Query snapshots instead and fixes
+the test RowError conversion. Review 2 is clear. The first runtime pass
+then found three timestamp fixture failures: incoming operations preserve
+the stamp the assertions expected to change. Repair
+`20261028T054813Z-15301` uses actual local non-undoable writes, retaining
+all assertions and clock advances. Independent review 3 is clear.
+
+- `core-test/20261028T053319Z-7505`: failed build, test error conversion.
+- `core-test/20261028T054721Z-14500`: 18 passed, three fixture failures.
+- `core-test/20261028T054952Z-17090`: all 21 passed, zero skipped.
+- `private/20261028T053317Z-7074`: all 12 initial inputs clear; final
+  fixture `private/20261028T055005Z-17500` is clear.
+- `similarity/20261028T053319Z-7328`: combined initial source clear; final
+  fixture `similarity/20261028T055016Z-17809` is clear.
+- `core-format/20261028T055025Z-18163`: pass.
+
+The two native identifiers omit the creation instant that V8.2 also requires. The scoped reader capability cannot be retained in owned commit data;
+its compile-fail documentation example has not been executed separately.
+Account capture, scan, conditional sending, the enabled test-first harness,
+full S2.4 and 150k allocation checks remain open. Whole-target lint and native
+checks still await the intentionally missing account harness. No U113,
+batch gate or release acceptance is claimed.

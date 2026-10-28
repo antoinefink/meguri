@@ -54,9 +54,9 @@ pub mod threads;
 pub mod undo;
 
 pub use cancel::{CancelToken, StopCause};
-pub use changes::observers::{CardDelta, CommitPayload, ConfigDelta, ObservedCommit};
+pub use changes::observers::{CardDelta, CommitPayload, ConfigDelta, ObservedCommit, ObserverRows};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
-pub use collection::Collection;
+pub use collection::{Collection, OpenEvidence};
 pub use derived_host::{DerivedApplied, DerivedHost, DerivedReadiness, Readiness};
 pub use error::EngineError;
 pub use executor::catalog::{OpDef, UndoClass};

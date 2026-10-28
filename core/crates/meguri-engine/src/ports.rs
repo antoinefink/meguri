@@ -5,7 +5,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::changes::observers::ObservedCommit;
+use crate::changes::observers::{ObservedCommit, ObserverRows};
 use crate::collection::Collection;
 use crate::error::EngineError;
 use crate::lifecycle::Generation;
@@ -17,6 +17,15 @@ pub trait ChangeObserver: Send + Sync {
     fn name(&self) -> &str;
     /// An error is logged; the commit stands and later observers still run.
     fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError>;
+    /// Callback-scoped reads of the same committed rows. Existing observers
+    /// retain their original callback through this default implementation.
+    fn observe_with_rows(&self, commit: &ObservedCommit<'_>, _rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+        self.observe(commit)
+    }
+    /// Called once when this observer returns an error or panics after commit.
+    /// Runs on the writer; must stay short, Rust-only and never reenter it.
+    /// A panic here is isolated and does not call this hook again.
+    fn observe_failed(&self, _seq: crate::Seq) {}
 }
 
 /// Told after every generation change (`engine/lifecycle` L8): U25 clears

@@ -39,6 +39,8 @@ type AfterCommitHook = Box<dyn FnOnce(Seq) + Send>;
 
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    /// One captured value per writer incarnation; never held across callbacks.
+    pub(crate) open_evidence: Mutex<Option<crate::collection::OpenEvidence>>,
     pub(crate) coverage: crate::wal_coverage::Coverage,
     pub(crate) review_journal: Mutex<Option<std::sync::Weak<crate::session::journal::Journal>>>,
     pub(crate) replaying_review: std::sync::atomic::AtomicBool,
@@ -106,6 +108,7 @@ impl ExecShared {
         last_seq: Seq,
     ) -> ExecShared {
         ExecShared {
+            open_evidence: Mutex::new(None),
             coverage: Default::default(),
             answer_caches: Default::default(),
             review_journal: Mutex::default(),

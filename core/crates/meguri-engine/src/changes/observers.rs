@@ -12,12 +12,33 @@ use meguri_model::ids::{CardId, RevlogId};
 use meguri_model::revlog::RevlogEntry;
 use meguri_storage::derived::CollectionMark;
 use meguri_storage::journal::{After, Entry, Journal, NoteDigest};
-use meguri_storage::{Record, RowImage, RowKey, StorageError, Table};
+use meguri_storage::{ReadRows, Record, RowImage, RowKey, StorageError, Table, Writer};
 
 use crate::changes::stream::Seq;
 use crate::error::panic_message;
 use crate::lifecycle::Generation;
 use crate::ports::ChangeObserver;
+
+/// Read-only access to the committed writer's rows, only during a callback.
+/// Copy any needed row images before returning. This capability is never
+/// part of CommitPayload and must not reenter the writer or call Swift.
+///
+/// ```compile_fail
+/// use meguri_engine::ObserverRows;
+/// fn retain<'a>(rows: &'a ObserverRows<'a>) -> &'static ObserverRows<'static> {
+///     rows
+/// }
+/// ```
+pub struct ObserverRows<'a> {
+    writer: &'a Writer,
+}
+
+impl ObserverRows<'_> {
+    /// Reads a real stored row from this commit, before any later op runs.
+    pub fn row_image(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
+        self.writer.row_image(table, key)
+    }
+}
 
 /// One committed op as observers see it.
 #[derive(Debug)]
@@ -333,11 +354,14 @@ fn missing(what: &str) -> StorageError {
 }
 
 /// Runs every observer in order; one that panics does not stop the others.
-pub(crate) fn notify(observers: &[Arc<dyn ChangeObserver>], commit: &ObservedCommit<'_>) {
+pub(crate) fn notify(observers: &[Arc<dyn ChangeObserver>], commit: &ObservedCommit<'_>, writer: &Writer) {
+    let rows = ObserverRows { writer };
     for observer in observers {
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.observe(commit)));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            observer.observe_with_rows(commit, &rows)
+        }));
         match outcome {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => continue,
             Ok(Err(error)) => {
                 tracing::warn!(observer = observer.name(), seq = commit.seq.0, %error, "a change observer failed");
             }
@@ -345,6 +369,14 @@ pub(crate) fn notify(observers: &[Arc<dyn ChangeObserver>], commit: &ObservedCom
                 let message = panic_message(payload.as_ref());
                 tracing::warn!(observer = observer.name(), seq = commit.seq.0, %message, "a change observer panicked");
             }
+        }
+        // Exactly once for this observer's failed callback. A failing hook
+        // cannot recursively signal failure or interrupt later observers.
+        if let Err(payload) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.observe_failed(commit.seq)))
+        {
+            let message = panic_message(payload.as_ref());
+            tracing::warn!(observer = observer.name(), seq = commit.seq.0, %message, "a change observer failure hook panicked");
         }
     }
 }

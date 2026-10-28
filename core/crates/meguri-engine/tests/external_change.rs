@@ -122,3 +122,77 @@ fn failed_reopen_keeps_external_edit_detection_for_the_next_resume() {
         Some(DisabledReason::ChangedExternally)
     );
 }
+
+#[test]
+fn external_notification_uses_live_rows_and_isolates_failure_hooks_before_publication() {
+    use meguri_engine::{ChangeObserver, ObservedCommit, ObserverRows, Ports, Seq};
+    use meguri_storage::{Record, RowKey, Table};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct ExternalRows {
+        note: Mutex<Option<meguri_model::ids::NoteId>>,
+        seen: Mutex<Vec<Seq>>,
+        failed: Mutex<Vec<Seq>>,
+    }
+    impl ChangeObserver for ExternalRows {
+        fn name(&self) -> &str {
+            "external-live-rows"
+        }
+        fn observe(&self, _: &ObservedCommit<'_>) -> Result<(), EngineError> {
+            panic!("external notify must use rows callback")
+        }
+        fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+            if !commit.changes.whole_collection {
+                return Ok(());
+            }
+            let id = self.note.lock().unwrap().unwrap();
+            let row = rows.row_image(Table::Notes, &RowKey::Id(id.0))?.unwrap();
+            assert_eq!(
+                meguri_model::note::Note::from_cells(&row)
+                    .map_err(meguri_storage::StorageError::from)?
+                    .fields,
+                "external\u{1f}back"
+            );
+            assert_eq!(commit.payload.row_keys(Table::Notes).count(), 0);
+            self.seen.lock().unwrap().push(commit.seq);
+            Err(EngineError::InvalidArgument {
+                message: "external observer error".into(),
+            })
+        }
+        fn observe_failed(&self, seq: Seq) {
+            self.failed.lock().unwrap().push(seq);
+            panic!("external hook panic");
+        }
+    }
+    #[derive(Default)]
+    struct Following(Mutex<Vec<Seq>>);
+    impl ChangeObserver for Following {
+        fn name(&self) -> &str {
+            "external-following"
+        }
+        fn observe(&self, c: &ObservedCommit<'_>) -> Result<(), EngineError> {
+            if c.changes.whole_collection {
+                self.0.lock().unwrap().push(c.seq);
+            }
+            Ok(())
+        }
+    }
+    let observer = Arc::new(ExternalRows::default());
+    let following = Arc::new(Following::default());
+    let h = common::Harness::open_with(Ports::new().observer(observer.clone()).observer(following.clone()));
+    let (nid, _) = common::steps::setup_note(&h.collection, "before");
+    *observer.note.lock().unwrap() = Some(nid);
+    let events = h.engine.stream().subscribe();
+    external_edit(&h, nid);
+    assert!(h.engine.resume().unwrap().external_change);
+    let seqs = observer.seen.lock().unwrap().clone();
+    assert_eq!(seqs.len(), 1);
+    assert_eq!(*observer.failed.lock().unwrap(), seqs);
+    assert_eq!(*following.0.lock().unwrap(), seqs);
+    let published: Vec<_> = std::iter::from_fn(|| events.try_recv())
+        .filter(|e| matches!(&e.kind, EventKind::Changes(c) if c.whole_collection))
+        .map(|e| e.seq)
+        .collect();
+    assert_eq!(published, seqs);
+}
