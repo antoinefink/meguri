@@ -13,7 +13,7 @@ use meguri_engine::{
     ChangeObserver, Collection, EngineError, Generation, GenerationListener, ObservedCommit, ObserverRows,
     OpenEvidence, OpenStep, Seq, SuspendParticipant, WalCoverage, WalReceipt,
 };
-use meguri_storage::{Cell, ReadRows, ReaderRole, RowImage, RowKey, Table};
+use meguri_storage::{Cell, ReadRows, ReaderRole, RowKey, Table};
 use serde::{Deserialize, Serialize};
 
 use super::{entity_codec as codec, *};

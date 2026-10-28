@@ -3,14 +3,13 @@ use super::{
     Scope,
     devices::{self, IdentityReads, PreboundDevice, Result, failure},
 };
-use meguri_engine::{Generation, ReaderRole, Seq, SessionId, WalCoverage};
+use meguri_engine::{Generation, Seq, SessionId, WalCoverage};
 use meguri_model::{
     changes::OpSource,
     clock::{Clock, StepClock, UtcOffset},
     ids::{CardId, DeckId, NoteId},
-    rng::SeededRandom,
 };
-use meguri_storage::{ReadRows, RowKey, Table};
+use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
 use meguri_sync::cloud::{
     self as core, entity_codec as codec,
     runtime::{self, IdentityProvider, IdentityStatus},

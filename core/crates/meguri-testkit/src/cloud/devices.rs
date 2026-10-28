@@ -100,7 +100,7 @@ pub(crate) fn options(dir: &Path, now: i64, seed: u64) -> meguri_host::HostConfi
         dir.join("widget"),
         Arc::new(FixedClock::new(now, UtcOffset::UTC)),
         Arc::new(SeededRandom::new(seed)),
-        Arc::new(meguri_engine::StatvfsSpace),
+        Arc::new(meguri_storage::space::StatvfsSpace),
     )
 }
 pub(crate) fn collect<T: ReadRows + ?Sized>(
