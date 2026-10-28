@@ -235,6 +235,7 @@ impl CoreHost {
         let review = process.review.clone();
         if let Some(cloud) = &cloud {
             cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
+            cloud.attach_adapter_clock(config.clock.clone());
             review.add_session_start_hook(cloud.clone());
         }
         let mut ports = derived
@@ -325,6 +326,11 @@ impl CoreHost {
     }
     /// Sync remains unavailable until whole-binding reconciliation and the
     /// guarded root/send/ack integration land.
+    #[cfg(feature = "test-hooks")]
+    pub fn cloud_fixture_sources(&self) -> (Arc<dyn Clock>, Arc<dyn meguri_model::rng::RandomSource>) {
+        (self.clock.clone(), self.initial_open.random.clone())
+    }
+
     pub fn cloud_runtime(&self) -> Option<&Arc<meguri_sync::cloud::runtime::Runtime>> {
         self.cloud.as_ref()
     }

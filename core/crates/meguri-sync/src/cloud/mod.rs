@@ -4,6 +4,8 @@
 //! file, publication and root proofs. Publication/adoption, incoming merge,
 //! structural generations and nonempty media remain unavailable.
 
+pub mod adapter;
+mod adapter_store;
 pub mod control_codec;
 pub mod entity_codec;
 pub mod row_payload;

@@ -323,7 +323,7 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, Er
     serde_json::from_str(text).map_err(|_| Error::InvalidData)
 }
 
-fn validate_entry(entry: &InboxEntry) -> Result<(), Error> {
+pub(super) fn validate_entry(entry: &InboxEntry) -> Result<(), Error> {
     let valid = matches!(
         (&entry.record_type, &entry.value, &entry.reason),
         (

@@ -37,6 +37,7 @@ pub mod review_session;
 mod runtime;
 pub mod sched_ops;
 pub mod suspend;
+pub mod sync;
 pub mod tags;
 #[cfg(feature = "test-hooks")]
 pub mod test_hooks;

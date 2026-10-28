@@ -315,3 +315,173 @@ pub fn test_maintenance_notes_page_offset() -> Result<u64, CoreError> {
         .wait()?;
     Ok(offset)
 }
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudAdapterBaseline {
+    pub record_names: Vec<String>,
+    pub deck_ids: Vec<i64>,
+    pub review_deck_id: i64,
+    pub review_card_id: i64,
+    pub review_record_name: String,
+    pub collection_zone: String,
+    pub incoming_record: crate::sync::CloudRecord,
+    pub root_record: crate::sync::CloudRecord,
+}
+#[uniffi::export]
+pub fn test_cloud_prepare_adapter_baseline(
+    entity_count: u32,
+    local_revision: u64,
+    saved_engine_state: Option<Vec<u8>>,
+    fail_next_inbox_commit: bool,
+    fail_next_state_commit: bool,
+) -> Result<CloudAdapterBaseline, CoreError> {
+    callback::enter("test_cloud_prepare_adapter_baseline");
+    use meguri_model::{
+        card::{CardQueue, CardType},
+        ids::*,
+        revlog::{RevlogEntry, RevlogKind},
+        usn::Usn,
+    };
+    use meguri_storage::{ConfigValue, ReadRows, ReaderRole};
+    use meguri_sync::cloud::{entity_codec as codec, workflow::Saved};
+    if local_revision != 3 || entity_count == 0 || entity_count > 400 {
+        return Err(CoreError::InvalidArgument {
+            message: "unsupported adapter baseline size or revision".into(),
+        });
+    }
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud capture was not composed"))?;
+    let collection = host.collection()?;
+    let (clock, random) = host.cloud_fixture_sources();
+    collection.run(
+        meguri_engine::OpSpec::named("adapter baseline admission", meguri_engine::OpSource::Maintenance),
+        |ctx| {
+            ctx.scope().set_config("fsrs", &ConfigValue::Bool(true))?;
+            ctx.scope()
+                .set_config("loadBalancerEnabled", &ConfigValue::Bool(false))?;
+            Ok(())
+        },
+    )?;
+    let mut decks = Vec::new();
+    for i in 0..entity_count {
+        decks.push(
+            meguri_engine::decks::add(&collection, format!("Synthetic cloud deck {i}"))?
+                .value
+                .id,
+        );
+    }
+    let review_deck = meguri_engine::decks::add(&collection, "Synthetic cloud review".into())?
+        .value
+        .id;
+    let nt = meguri_engine::notetypes::add(
+        &collection,
+        meguri_engine::notetypes::NewNotetype {
+            name: "Synthetic cloud cards".into(),
+            kind: meguri_engine::notetypes::NotetypeKind::Standard,
+            fields: vec!["Front".into(), "Back".into()],
+            templates: vec![meguri_engine::notetypes::NewTemplate {
+                name: "Card".into(),
+                front: "{{Front}}".into(),
+                back: "{{Back}}".into(),
+                ..Default::default()
+            }],
+            css: None,
+        },
+    )?
+    .value
+    .id;
+    let note = meguri_engine::notes::add(
+        &collection,
+        meguri_engine::notes::AddNote {
+            notetype_id: nt,
+            fields: vec!["Synthetic question".into(), "Synthetic answer".into()],
+            tags: vec![],
+            deck_id: review_deck,
+            guid: None,
+            update_add_defaults: false,
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )?
+    .value;
+    let card = collection.reader(ReaderRole::Query)?.cards_of_note(note.id)?[0].id;
+    let prior_review_ms = clock.now_ms() - 86_400_000;
+    collection.run(
+        meguri_engine::OpSpec::named("adapter baseline due review", meguri_engine::OpSource::Maintenance),
+        move |ctx| {
+            let mut row = ctx
+                .scope()
+                .card(card)?
+                .ok_or_else(|| meguri_engine::EngineError::Internal {
+                    message: "synthetic card absent".into(),
+                })?;
+            row.card_type = CardType::Review;
+            row.queue = CardQueue::Review;
+            row.due = -10_000;
+            row.interval = 1;
+            row.reps = 1;
+            row.ease_factor = 2500;
+            ctx.scope().put_card_forced(&row)?;
+            ctx.scope().insert_revlog(&RevlogEntry {
+                id: RevlogId(prior_review_ms),
+                card_id: card,
+                usn: Usn(-1),
+                button: 3,
+                interval: 1,
+                last_interval: 0,
+                ease_factor: 2500,
+                answer_millis: 100,
+                kind: RevlogKind::Review,
+            })?;
+            Ok(())
+        },
+    )?;
+    let media = host.media()?;
+    media
+        .store()
+        .register_full(|_, _| true)
+        .map_err(crate::sync::cloud_error)?;
+    let (_, root, incoming) = core
+        .prepare_adapter_baseline_for_testing(&collection, clock.as_ref(), random.as_ref(), saved_engine_state)
+        .map_err(crate::sync::cloud_error)?;
+    // Two actual commits put every selected deck at revision 3. Capture is
+    // already attached to the host's writer; no revisions or marks are patched.
+    for (i, id) in decks.iter().enumerate() {
+        meguri_engine::decks::rename(&collection, *id, format!("Synthetic second {i}"))?;
+        meguri_engine::decks::rename(&collection, *id, format!("Synthetic third {i}"))?;
+    }
+    core.reconcile_binding(&collection, &media, std::time::Duration::from_secs(1))
+        .map_err(crate::sync::cloud_error)?;
+    core.accept_root_fetch(
+        &core.instance().map_err(crate::sync::cloud_error)?,
+        Some(&root),
+        true,
+        1,
+    )
+    .map_err(crate::sync::cloud_error)?;
+    let names = decks
+        .iter()
+        .map(|id| {
+            codec::entity_name(&[114; 32], codec::Kind::Deck, &codec::id_key(id.0)).map_err(crate::sync::cloud_error)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let review_name =
+        codec::entity_name(&[114; 32], codec::Kind::Card, &codec::id_key(card.0)).map_err(crate::sync::cloud_error)?;
+    core.arm_adapter_faults_for_testing(fail_next_inbox_commit, fail_next_state_commit);
+    let record = |r: Saved| crate::sync::CloudRecord {
+        name: r.name,
+        envelope: r.envelope,
+        system_fields: Some(r.system_fields),
+    };
+    Ok(CloudAdapterBaseline {
+        record_names: names,
+        deck_ids: decks.into_iter().map(|id| id.0).collect(),
+        review_deck_id: review_deck.0,
+        review_card_id: card.0,
+        review_record_name: review_name,
+        collection_zone: meguri_sync::cloud::adapter::collection_zone(meguri_sync::cloud::EpochId([114; 16])),
+        incoming_record: record(incoming),
+        root_record: record(root),
+    })
+}

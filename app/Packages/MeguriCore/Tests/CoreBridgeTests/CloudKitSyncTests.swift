@@ -15,6 +15,283 @@ import Testing
 // These cases share serialization with the process-wide CoreHost suite.
 private final class CloudTaskOriginalFailure: Error {}
 
+enum CloudIdentityReadTrigger: CaseIterable, Sendable, Equatable {
+    case initial, notification, network, foreground
+
+    func read(_ adapter: CloudKitSyncAdapter) async throws {
+        switch self {
+        case .initial: try await adapter.start(automaticallySync: false)
+        case .notification: try await adapter.platformAccountChanged()
+        case .network: try await adapter.networkChanged(reachable: true)
+        case .foreground: try await adapter.foregroundReturned()
+        }
+    }
+}
+
+extension EventTests {
+    /// V3.4/V9.1: stop joins no paused resolver and revokes every read intent.
+    @Test(arguments: CloudIdentityReadTrigger.allCases)
+    func cloudKitStopDuringIdentityReadCannotCreateAnSDK(trigger: CloudIdentityReadTrigger) async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            if trigger == .initial { try await f.adapter.stop() }
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            let count = await f.factory.engines().count
+            let gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))), gate: gate)
+            try await withCloudTask(gates: [gate], operation: {
+                do {
+                    try await trigger.read(f.adapter)
+                    Issue.record("Stopped identity read completed its run intent")
+                } catch is CancellationError { }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                try await f.adapter.stop()
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                #expect(await f.factory.engines().count == count)
+                await gate.open()
+            })
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.factory.engines().count == count)
+            try await f.adapter.foregroundReturned()
+            try await f.adapter.platformAccountChanged()
+            try await f.adapter.networkChanged(reachable: false)
+            try await f.adapter.networkChanged(reachable: true)
+            #expect(await f.factory.engines().count == count)
+        }
+    }
+
+    /// V3.4: a newer successful read owns its SDK while the old resolver returns.
+    @Test func cloudKitSupersededInitialReadCannotStopTheNewOwner() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            let count = await f.factory.engines().count
+            let gate = CloudCallbackGate()
+            let account = CloudResolvedAccount(status: .available, identity: Data("synthetic-account-A".utf8))
+            await f.factory.appendAccountRead(.success(account), gate: gate)
+            let replacementID = try await withCloudTask(gates: [gate], operation: {
+                do {
+                    try await f.adapter.start(automaticallySync: false)
+                    Issue.record("Superseded initial read completed its run intent")
+                } catch is CancellationError { }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                await f.factory.appendAccountRead(.success(account))
+                try await f.adapter.start(automaticallySync: true)
+                let replacement = try await f.engine()
+                #expect(await f.factory.engines().count == count + 1)
+                await gate.open()
+                return replacement.instanceID
+            })
+            #expect(await f.adapter.retainedInstanceIDs() == [replacementID])
+            #expect(await f.factory.engines().count == count + 1)
+            try await f.core.validateSDK(replacementID)
+        }
+    }
+
+    /// V3.4: a cancelled resolver may return, but cannot publish its proof/SDK.
+    @Test func cloudKitCancelledInitialIdentityReadCannotCreateAnSDK() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.stop()
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            let gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))), gate: gate)
+            let count = await f.factory.engines().count
+            let start = Task {
+                do { try await f.adapter.start(automaticallySync: false); _ = await gate.operationSucceeded() }
+                catch { await gate.abort(error); throw error }
+            }
+            do {
+                try await gate.waitForArrival()
+                start.cancel()
+                await gate.open()
+                do { try await start.value; Issue.record("Cancelled initial read started an SDK") }
+                catch is CancellationError { }
+                #expect(await f.factory.engines().count == count)
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                do { _ = try await f.core.registerSDK(automatic: false); Issue.record("Cancelled read verified the owner") }
+                catch { }
+            } catch {
+                await gate.open()
+                start.cancel()
+                _ = await start.result
+                throw error
+            }
+        }
+    }
+
+    /// V3.4: a creation superseded during makeEngine releases only its own SDK.
+    @Test func cloudKitSupersededCreationReleasesItsOwnSDKBeforeReplacement() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.stop()
+            let gate = CloudCallbackGate()
+            await f.factory.pauseNextCreation(gate)
+            try await withCloudTask(gates: [gate], operation: {
+                do {
+                    try await f.adapter.start(automaticallySync: false)
+                    Issue.record("Superseded creation was published")
+                } catch is CancellationError { }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                let superseded = try await f.engine()
+                try await f.adapter.stop()
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                try await withCloudTask(gates: [gate], expectedArrivals: [], operation: {
+                    try await f.adapter.start(automaticallySync: true)
+                }, whileRunning: {
+                    await gate.open()
+                })
+                let replacement = try await f.engine()
+                #expect(replacement.instanceID != superseded.instanceID)
+                #expect(await superseded.recordedTrace().contains(.released))
+                #expect(!(await replacement.recordedTrace()).contains(.released))
+                #expect(await f.adapter.retainedInstanceIDs() == [replacement.instanceID])
+                try await f.core.validateSDK(replacement.instanceID)
+            })
+        }
+    }
+
+    /// V9.1/K10.3: a mere notification lookup cannot discard records then save
+    /// the following cursor. A later resolver failure preserves the live owner.
+    @Test func cloudKitFailedNotificationLookupKeepsOwnerRecordsCursorAndPending() async throws {
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            let guardBefore = try await f.core.currentGuard()
+            let pending = await engine.pendingRecordZoneChanges()
+            let failure = CloudTaskOriginalFailure(), gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.failure(failure), gate: gate)
+            let cursor = Data([0x72, 0x34, 0x01])
+            try await withCloudTask(gates: [gate], operation: {
+                do { try await f.adapter.platformAccountChanged(); Issue.record("Resolver failure was lost") }
+                catch { #expect((error as? CloudTaskOriginalFailure) === failure) }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                try await f.core.validateSDK(engine.instanceID)
+                await engine.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "recordsDuringNotificationLookup")
+                let records = try await f.core.durableSnapshot()
+                #expect(records.inboxNames.contains(f.incoming.name))
+                await engine.emitRetained(.stateUpdate(cursor), label: "cursorDuringNotificationLookup")
+                let advanced = try await f.core.durableSnapshot()
+                #expect(advanced.inboxNames.contains(f.incoming.name) && advanced.serialization == cursor)
+                await gate.open()
+            })
+            #expect(try await f.core.currentGuard() == guardBefore)
+            #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(await engine.pendingRecordZoneChanges() == pending)
+            try await f.adapter.requestSend(zones: [f.zone])
+            let name = try #require(f.names.first)
+            #expect(try await f.core.entityFacts(name: name)?.ackedRev == 3)
+        }
+    }
+
+    /// V9.1/A12/P3: an SDK account event loses SDK state even when the identity
+    /// resolver fails; it keeps the verified owner and restores usable pending.
+    @Test func cloudKitFailedSDKLookupKeepsOwnerAndMarksActualStateLoss() async throws {
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            let guardBefore = try await f.core.currentGuard()
+            let pending = await engine.pendingRecordZoneChanges()
+            let updates = try await f.core.emittedUpdateIDs()
+            let call = try await f.core.beginFetch(sdk: engine.instanceID, zones: [f.zone])
+            await engine.emitRetained(.willFetch(groupID: "before-account-event", reason: .manual), label: "fetchBeforeAccountEvent")
+            await engine.emitRetained(.willFetchZone(zone: f.zone), label: "zoneBeforeAccountEvent")
+            let failure = CloudTaskOriginalFailure(), gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.failure(failure), gate: gate)
+            try await withCloudTask(gates: [gate], operation: {
+                await engine.signInWithUnresolvedIdentity()
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                try await f.core.validateSDK(engine.instanceID)
+                await gate.open()
+            })
+            #expect((await f.adapter.lastFailure as? CloudTaskOriginalFailure) === failure)
+            #expect(try await f.core.currentGuard() == guardBefore)
+            #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(await engine.pendingRecordZoneChanges() == pending)
+            #expect(try await f.core.emittedUpdateIDs().count > updates.count)
+            await engine.emitRetained(.didFetchZone(zone: f.zone, error: nil), label: "oldZoneAfterAccountEvent")
+            await engine.emitRetained(.didFetch(groupID: "before-account-event", reason: .manual), label: "oldFetchAfterAccountEvent")
+            #expect(!(try await f.core.finishFetch(sdk: engine.instanceID, id: call)))
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            try await f.adapter.requestFetch(zones: [f.zone])
+            #expect(!(try await f.core.fetchDrains()).contains { $0.zone == f.zone && !$0.fetched })
+            try await f.adapter.requestSend(zones: [f.zone])
+            let name = try #require(f.names.first)
+            #expect(try await f.core.entityFacts(name: name)?.ackedRev == 3)
+        }
+    }
+
+    /// V9.1: ReadFailed preserves no proof for a previously unverified owner.
+    @Test func cloudKitInitialLookupFailureStaysBlockedUntilSuccessfulRecovery() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            let count = await f.factory.engines().count
+            let failure = CloudTaskOriginalFailure()
+            await f.factory.appendAccountRead(.failure(failure))
+            do { try await f.adapter.start(automaticallySync: false); Issue.record("Initial failure started an SDK") }
+            catch { #expect((error as? CloudTaskOriginalFailure) === failure) }
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.factory.engines().count == count)
+            do { _ = try await f.core.registerSDK(automatic: false); Issue.record("Initial failure verified the owner") }
+            catch { }
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            try await f.adapter.platformAccountChanged()
+            #expect(await f.factory.engines().count == count + 1)
+            let recovered = try await f.engine()
+            try await f.core.validateSDK(recovered.instanceID)
+        }
+    }
+
+    /// V9.1/V3.4: actual sign-out/switch evidence revokes a pending lookup now.
+    @Test(arguments: [true, false])
+    func cloudKitActualAccountChangeDuringLookupCannotBeUndone(signedOut: Bool) async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.currentGuard()
+            let gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))), gate: gate)
+            try await withCloudTask(gates: [gate], operation: {
+                do { try await f.adapter.platformAccountChanged(); Issue.record("Stale lookup restored a changed account") }
+                catch { }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                await engine.emitRetained(.accountChanged(change: signedOut ? .signOut : .switchAccounts,
+                                                         identity: nil), label: "actualAccountChange")
+                try await f.adapter.waitForIdle()
+                #expect(try await f.core.currentGuard() != before)
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+                await gate.open()
+            })
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+        }
+    }
+
+    /// V3.4.
+    @Test func cloudKitIdentityReadValidatesOriginAtomicallyAndAtCompletion() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let old = try await f.engine()
+            let read = try await f.core.beginIdentityRead(transition: true, originSDK: old.instanceID)
+            try await f.core.retireSDK(old.instanceID, policyStop: false)
+            #expect(!(try await f.core.completeIdentityRead(id: read, status: .available, identity: Data("synthetic-account-B".utf8))))
+            try await f.adapter.configureAutomatic(true)
+            let replacement = try await f.engine()
+            let fresh = try await f.core.beginIdentityRead(transition: true, originSDK: replacement.instanceID)
+            let updates = try await f.core.emittedUpdateIDs()
+            let guardBefore = try await f.core.currentGuard()
+            do {
+                _ = try await f.core.beginIdentityRead(transition: true, originSDK: old.instanceID)
+                Issue.record("Stale origin captured the replacement's identity read")
+            } catch { }
+            #expect(try await f.core.currentGuard() == guardBefore)
+            #expect(try await f.core.emittedUpdateIDs() == updates)
+            #expect(try await f.core.completeIdentityRead(id: fresh, status: .available, identity: Data("synthetic-account-A".utf8)))
+            #expect(!(try await f.core.completeIdentityRead(id: fresh, status: .available, identity: Data("synthetic-account-B".utf8))))
+            try await f.core.validateSDK(replacement.instanceID)
+        }
+    }
+}
+
 extension EventTests {
     /// Helper-only regression: no adapter/core outcome is supplied here.
     /// Both terminal paths precede the expected gate, with another owned
@@ -307,7 +584,8 @@ extension EventTests {
                 try await withCloudTask(gates: [gate], operation: {
                     await engine.emitRetained(.stateUpdate(state), label: "state")
                 }, whileRunning: {
-                    #expect(try await f.core.durableSnapshot().serialization == old.serialization)
+                    let snapshot = try await f.core.durableSnapshot()
+                    #expect(snapshot.serialization == old.serialization)
                     #expect(!(await engine.recordedTrace()).contains(.eventEntered("state")))
                     await gate.open()
                 })
@@ -371,7 +649,8 @@ extension EventTests {
             try await f.adapter.waitForIdle()
             let drains = Array((try await f.core.fetchDrains()).dropFirst(old.count))
             #expect(drains.map(\.zone) == ["meguri-root", f.zone])
-            #expect(drains.allSatisfy(\.fetched))
+            let allFetched = drains.allSatisfy { $0.fetched }
+            #expect(allFetched)
             let trace = await engine.recordedTrace()
             #expect(trace.filter { if case .fetchEntered = $0 { true } else { false } }.count == 2)
             #expect(!trace.contains(.reentrantNetworkCall))
@@ -600,6 +879,248 @@ enum CloudFenceTransition: CaseIterable, Sendable {
         case .token:
             try await f.core.setPaused(true)
             try await f.adapter.executePendingActions()
+        }
+    }
+}
+
+extension EventTests {
+    /// R3/K2/K13.1: SDK deletion is persisted before any later cursor delivery.
+    @Test func cloudKitDeletedActiveCannotBeReconfirmedBySuccessfulDrainOrReopen() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            #expect(before.rootEnvelope != nil)
+            await engine.emitRetained(.willFetch(groupID: "delete-root", reason: .scheduled), label: "willDeleteRoot")
+            await engine.emitRetained(.willFetchZone(zone: "meguri-root"), label: "willDeleteRootZone")
+            await engine.emitRetained(.fetched(zone: "meguri-root", records: [], deleted: ["active"]), label: "deletedActive")
+            await engine.emitRetained(.didFetchZone(zone: "meguri-root", error: nil), label: "deletedRootZoneDrained")
+            await engine.emitRetained(.didFetch(groupID: "delete-root", reason: .scheduled), label: "deletedRootDrained")
+            await engine.emitRetained(.stateUpdate(Data([0xde, 0x1e])), label: "cursorAfterDeletion")
+            try await f.adapter.waitForIdle()
+            let deleted = try await f.core.durableSnapshot()
+            #expect(deleted.rootEnvelope == nil && deleted.rootSystemFields == nil)
+            #expect(deleted.serialization == before.serialization)
+            #expect(deleted.trackingContent != before.trackingContent)
+            #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("deletedActive")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            #expect(returned < cancelled)
+
+            try await f.collection.close()
+            let closed = try await f.core.durableSnapshot()
+            let location = CoreBridge.CollectionLocation(
+                collectionDirectory: f.directory.appending(path: "collection"),
+                backupsDirectory: f.directory.appending(path: "backups"),
+                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+            try await f.collection.open(location, randomSeed: 115)
+            let reopened = CoreCloudWorkflowService()
+            let persisted = try await reopened.durableSnapshot()
+            #expect(persisted.binding == deleted.binding)
+            #expect(persisted.rootEnvelope == nil)
+            do { _ = try await reopened.registerSDK(automatic: false); Issue.record("Deleted root admitted a new SDK") }
+            catch { }
+            await engine.emitRetained(.fetched(zone: "meguri-root", records: [f.root], deleted: []), label: "oldRootAfterReopen")
+            #expect(try await f.core.durableSnapshot() == closed)
+            #expect(try await reopened.durableSnapshot() == persisted)
+        }
+    }
+
+    /// R3/K10.3: equality includes same-name content and pending root facts.
+    @Test func cloudKitSnapshotIncludesInboxContentPendingRootAndStaleDeliveries() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let old = try await f.engine()
+            await old.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "firstInbox")
+            let first = try await f.core.durableSnapshot()
+            let different = CloudRecord(name: f.incoming.name, envelope: f.incoming.envelope,
+                                        systemFields: Data([0x72, 0x33, 0x01]))
+            await old.emitRetained(.fetched(zone: f.zone, records: [different], deleted: []), label: "sameNameDifferentInbox")
+            let second = try await f.core.durableSnapshot()
+            #expect(first.inboxNames == second.inboxNames)
+            #expect(first.trackingContent != second.trackingContent && first != second)
+            let root = CloudRecord(name: f.root.name, envelope: f.root.envelope, systemFields: Data([0x72, 0x33, 0x02]))
+            await old.emitRetained(.fetched(zone: "meguri-root", records: [root], deleted: []), label: "pendingRoot")
+            let third = try await f.core.durableSnapshot()
+            #expect(second.rootEnvelope == third.rootEnvelope && second.rootSystemFields == third.rootSystemFields)
+            #expect(second.trackingContent != third.trackingContent && second != third)
+            try await f.adapter.configureAutomatic(true)
+            let stable = try await f.core.durableSnapshot()
+            await old.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: [f.incoming.name]), label: "staleInboxContent")
+            await old.emitRetained(.fetched(zone: "meguri-root", records: [], deleted: ["active"]), label: "staleRootContent")
+            #expect(try await f.core.durableSnapshot() == stable)
+        }
+    }
+
+    /// R3/P12.1/.6/.7: real core joins and records a cancellation once.
+    @Test func cloudKitCoreExchangeJoinAndCancellationKeepActualSelection() async throws {
+        try await withCloudKitFixture { f in
+            let sdk = try await f.engine().instanceID
+            let id = try await f.core.beginExchange(sdk: sdk)
+            #expect(try await f.core.beginExchange(sdk: sdk) == id)
+            let ended = try await f.core.completeExchange(sdk: sdk, id: id, fetched: false, cancelled: true)
+            #expect(ended.collection == .cancelled)
+            #expect(!ended.selectedNames.isEmpty)
+            #expect(ended.ackedNames.isEmpty && ended.outstandingNames == ended.selectedNames)
+            #expect(try await f.core.completeExchange(sdk: sdk, id: id, fetched: true) == ended)
+            #expect(try await f.core.exchangeResult(id: id) == ended)
+            #expect(!(try await f.core.status()).syncingCollection)
+            let next = try await f.core.beginExchange(sdk: sdk)
+            #expect(next != id)
+            _ = try await f.core.completeExchange(sdk: sdk, id: next, fetched: false, cancelled: true)
+        }
+    }
+
+    /// R3/V9.1/A19: stale completions cannot restore a transitioned owner.
+    @Test func cloudKitIdentityTransitionRequiresFreshMatchingRead() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let old = try await f.engine()
+            let oldRead = try await f.core.beginIdentityRead()
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            #expect(!(try await f.core.completeIdentityRead(id: oldRead, status: .available, identity: Data("synthetic-account-A".utf8))))
+            do { try await f.adapter.start(automaticallySync: false); Issue.record("Old platform identity verified a recreated SDK") }
+            catch { }
+            #expect(await old.requestRetainedBatch(zone: f.zone) == nil)
+            #expect(await f.factory.engines().count == 1)
+            let fresh = try await f.core.beginIdentityRead()
+            #expect(try await f.core.completeIdentityRead(id: fresh, status: .available, identity: Data("synthetic-account-A".utf8)))
+            #expect(!(try await f.core.completeIdentityRead(id: fresh, status: .available, identity: Data("synthetic-account-A".utf8))))
+            try await f.adapter.start(automaticallySync: false)
+            #expect(await f.factory.engines().count == 2)
+            let readBeforeClose = try await f.core.beginIdentityRead()
+            try await f.adapter.stop()
+            try await f.collection.close()
+            let closed = try await f.core.durableSnapshot()
+            #expect(!(try await f.core.completeIdentityRead(id: readBeforeClose, status: .available, identity: Data("synthetic-account-A".utf8))))
+            #expect(try await f.core.durableSnapshot() == closed)
+        }
+    }
+}
+
+/// SDK operation errors only. All selection, terminal results and later sends
+/// still pass through the production bridge and Runtime.
+private actor CloudThrowingFetchEngine: CloudKitEngine {
+    nonisolated let instanceID: String
+    let sdk: CloudKitEngineFake
+    private var throwFetch = false
+    private var fetchGate: CloudCallbackGate?
+    func pauseNextFetch(_ gate: CloudCallbackGate) { fetchGate = gate }
+    init(sdk: CloudKitEngineFake) { self.sdk = sdk; instanceID = sdk.instanceID }
+    func failNextFetch() { throwFetch = true }
+    func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { await sdk.pendingRecordZoneChanges() }
+    func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws { await sdk.applyPendingUpdate(update) }
+    func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
+    func sendChanges(zones: [String]) async throws { try await sdk.sendChanges(zones: zones) }
+    func fetchChanges(options: CloudFetchOptions) async throws {
+        if let gate = fetchGate { fetchGate = nil; await gate.enter(); try Task.checkCancellation() }
+        if throwFetch { throwFetch = false; throw CloudTaskOriginalFailure() }
+        try await sdk.fetchChanges(options: options)
+    }
+    func cancelOperations() async { await sdk.cancelOperations() }
+    func release() async { await sdk.release() }
+}
+private actor CloudThrowingFetchFactory: CloudKitEngineFactory {
+    private var engine: CloudThrowingFetchEngine?
+    func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async -> any CloudKitEngine {
+        let result = CloudThrowingFetchEngine(sdk: CloudKitEngineFake(configuration: configuration, delegate: delegate, a23: true, keepAlive: false))
+        engine = result
+        return result
+    }
+    func made() -> CloudThrowingFetchEngine? { engine }
+}
+extension EventTests {
+    @Test func cloudKitThrownFetchTerminatesDurablyAndNextRequestRuns() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.stop()
+            let factory = CloudThrowingFetchFactory()
+            let adapter = CloudKitSyncAdapter(core: f.core, engineFactory: factory)
+            do {
+                try await adapter.start(automaticallySync: false)
+                let sdk = try #require(await factory.made())
+                await sdk.failNextFetch()
+                let failedID = try await f.core.beginExchange(sdk: sdk.instanceID)
+                do { _ = try await adapter.syncNow(); Issue.record("SDK fetch error was lost") }
+                catch is CloudTaskOriginalFailure { }
+                #expect(!(try await f.core.status()).syncingCollection)
+                let failed = try #require(try await f.core.exchangeResult(id: failedID))
+                #expect(failed.collection == .failed)
+                #expect(!failed.selectedNames.isEmpty && failed.outstandingNames == failed.selectedNames && failed.ackedNames.isEmpty)
+                let failedContent = try await f.core.durableSnapshot().trackingContent
+                let completed = try await adapter.syncNow()
+                #expect(completed.collection == .succeeded)
+                #expect(completed.selectedNames == completed.ackedNames && completed.outstandingNames.isEmpty)
+                #expect(try await f.core.exchangeResult(id: completed.id) == completed)
+                #expect(try await f.core.exchangeResult(id: failedID) == failed)
+                #expect(try await f.core.durableSnapshot().trackingContent != failedContent)
+                try await adapter.stop()
+            } catch { try? await adapter.stop(); throw error }
+        }
+    }
+}
+
+extension EventTests {
+    /// K2/K4.1: the fixture, SDK registration and real FFI builder agree.
+    @Test func cloudKitRegisteredZoneUsesCanonicalEpochText() async throws {
+        try await withCloudKitFixture { f in
+            #expect(f.zone == "c-ojzhe4tsojzhe4tsojzhe4tsoi")
+            let sdk = try await f.engine()
+            #expect(await sdk.requestRetainedBatch(zone: "c-72727272727272727272727272727272") == nil)
+            let batch = try #require(await sdk.requestRetainedBatch(zone: "c-ojzhe4tsojzhe4tsojzhe4tsoi"))
+            #expect(!batch.saves.isEmpty)
+        }
+    }
+}
+
+private actor CloudExchangeJoinProbe {
+    private var count = 0
+    let two = CloudCallbackGate()
+    func didJoin() async { count += 1; if count == 2 { await two.open() } }
+    func waitForTwo() async { await two.enter() }
+}
+extension EventTests {
+    /// P12.1/.6/.7: both callers own the same task until a controlled SDK return.
+    @Test func cloudKitConcurrentCallersJoinAndCancelOneOwnedExchange() async throws {
+        try await withCloudKitFixture { f in
+            try await f.adapter.stop()
+            let factory = CloudThrowingFetchFactory(), joins = CloudExchangeJoinProbe()
+            let adapter = CloudKitSyncAdapter(core: f.core, engineFactory: factory,
+                                             exchangeDidJoin: { await joins.didJoin() })
+            try await adapter.start(automaticallySync: false)
+            let sdk = try #require(await factory.made())
+            let gate = CloudCallbackGate()
+            await sdk.pauseNextFetch(gate)
+            let first = Task {
+                do {
+                    let result = try await adapter.syncNow()
+                    _ = await gate.operationSucceeded()
+                    return result
+                } catch { await gate.abort(error); throw error }
+            }
+            do {
+                try await gate.waitForArrival()
+                let id = try await f.core.beginExchange(sdk: sdk.instanceID)
+                let second = Task { try await adapter.syncNow() }
+                await joins.waitForTwo()
+                await adapter.cancelSyncNow()
+                await gate.open()
+                do { _ = try await first.value; Issue.record("First joined caller lost cancellation") }
+                catch is CancellationError { }
+                do { _ = try await second.value; Issue.record("Second joined caller lost cancellation") }
+                catch is CancellationError { }
+                let ended = try #require(try await f.core.exchangeResult(id: id))
+                #expect(ended.collection == .cancelled)
+                #expect(!ended.selectedNames.isEmpty && ended.outstandingNames == ended.selectedNames)
+                #expect(!(try await f.core.status()).syncingCollection)
+                #expect(try await adapter.syncNow().collection == .succeeded)
+                try await adapter.stop()
+            } catch {
+                await gate.open()
+                first.cancel()
+                _ = try? await first.value
+                try? await adapter.stop()
+                throw error
+            }
         }
     }
 }

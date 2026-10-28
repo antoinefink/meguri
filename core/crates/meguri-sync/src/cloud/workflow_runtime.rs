@@ -45,7 +45,7 @@ impl Runtime {
         }
         Ok(())
     }
-    fn instance_locked(s: &State) -> Result<String, RuntimeError> {
+    pub(super) fn instance_locked(s: &State) -> Result<String, RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let binding = b.binding.id.0.iter().map(|v| format!("{v:02x}")).collect::<String>();
         Ok(format!(
@@ -56,8 +56,14 @@ impl Runtime {
     pub fn instance(&self) -> Result<String, RuntimeError> {
         Self::instance_locked(&self.state())
     }
-    fn caller_locked(s: &State, instance: &str) -> Result<(), RuntimeError> {
-        if Self::instance_locked(s)? != instance {
+    pub(super) fn caller_locked(s: &State, instance: &str) -> Result<(), RuntimeError> {
+        let host_instance = Self::instance_locked(s)?;
+        let sdk_valid = s
+            .adapter
+            .sdk
+            .as_ref()
+            .is_some_and(|sdk| sdk.id == instance && sdk.guard == Self::adapter_guard_locked(s) && !sdk.stopping);
+        if !sdk_valid && host_instance != instance {
             return Err(RuntimeError::StaleIncarnation);
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -123,6 +129,7 @@ impl Runtime {
             || !s.root_confirmed
             || s.last_session.is_some()
             || s.review_blocked
+            || s.adapter.paused
         {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
@@ -377,7 +384,7 @@ impl Runtime {
                             }
                         })?;
                         if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
-                            && (old.name != new.name || old.kind != new.kind || old.parent_id != new.parent_id)
+                            && (old.kind != new.kind || old.parent_id != new.parent_id)
                         {
                             return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
                         }
@@ -885,11 +892,26 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        if s.actions.exchange.is_some() {
-            return Err(Error::InvalidData.into());
+        if let Some((id, _)) = &s.actions.exchange {
+            return Ok(*id);
         }
         self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
-        let id = s.actions.next;
+        let next_durable = s
+            .adapter
+            .durable
+            .exchanges
+            .last_key_value()
+            .map(|(id, _)| id.checked_add(1).ok_or(Error::InvalidData))
+            .transpose()?
+            .unwrap_or(1);
+        let next_closed = s
+            .adapter
+            .closed_exchanges
+            .last_key_value()
+            .map(|(id, _)| id.checked_add(1).ok_or(Error::InvalidData))
+            .transpose()?
+            .unwrap_or(1);
+        let id = s.actions.next.max(next_durable).max(next_closed);
         let names = s.actions.desired.keys().cloned().collect::<BTreeSet<_>>();
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let revs = with_tracking_access(|| -> Result<BTreeMap<String, u64>, RuntimeError> {
@@ -904,6 +926,7 @@ impl Runtime {
             }
             Ok(revs)
         })?;
+        s.adapter.exchange_owner = Some((id, instance.into(), s.incarnation));
         s.actions.selected_revs = revs;
         s.actions.exchange_phase = Some(FetchPhase::BeforeSend);
         s.actions.exchange = Some((
@@ -1024,14 +1047,21 @@ impl Runtime {
         s.actions.automatic || s.actions.exchange.is_some()
     }
     pub fn start_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
+        self.start_send_call_mode(instance, false)
+    }
+    pub fn start_manual_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
+        self.start_send_call_mode(instance, true)
+    }
+    fn start_send_call_mode(&self, instance: &str, manual: bool) -> Result<Option<SendCall>, RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
         if s.actions.exchange_phase.is_some()
             || s.actions.handler.is_some()
-            || (!s.actions.automatic && s.actions.exchange.is_none())
+            || (!manual && !s.actions.automatic && s.actions.exchange.is_none())
         {
             return Ok(None);
         }
+        s.adapter.sdk_retrying = false;
         let exchange = s.actions.exchange.as_ref().map(|(id, _)| *id);
         if let Some(id) = exchange
             && s.actions.calls.iter().filter(|c| c.exchange == Some(id)).count() >= 8
@@ -1041,7 +1071,7 @@ impl Runtime {
         let call = SendCall {
             id: s.actions.calls.len() as u64 + 1,
             exchange,
-            automatic: exchange.is_none(),
+            automatic: !manual && exchange.is_none(),
             request_ids: Vec::new(),
             returned: false,
         };

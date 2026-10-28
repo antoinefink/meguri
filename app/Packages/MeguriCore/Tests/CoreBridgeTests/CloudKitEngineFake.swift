@@ -189,12 +189,14 @@ actor CloudKitEngineFake: CloudKitEngine {
             eventActive = true
         }
         trace.append(.eventEntered(label))
+        if let delegate { await delegate.eventWillDeliver(engine: self) }
         if let gate = callbackPause {
             callbackPause = nil
             await gate.enter()
         }
         if let delegate { await delegate.handleEvent(event, engine: self) }
         trace.append(.eventReturned(label))
+        if let delegate { await delegate.eventHandlerReturned(event, engine: self) }
         // Transfer ownership directly. Clearing eventActive before resuming
         // would let a newly arriving event overtake the oldest queued one.
         if eventWaiters.isEmpty { eventActive = false }
@@ -314,6 +316,12 @@ actor CloudKitEngineFake: CloudKitEngine {
                       label: "sameIdentitySignIn")
     }
 
+    func signInWithUnresolvedIdentity() async {
+        pending.removeAll()
+        pendingDatabase.removeAll()
+        await deliver(.accountChanged(change: .signIn, identity: nil), label: "unresolvedIdentitySignIn")
+    }
+
     func cancelOperations() async {
         trace.append(.cancelEntered)
         cancelled = true
@@ -348,6 +356,8 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
     let a23: Bool
     let keepAlive: Bool
     private var made: [CloudKitEngineFake] = []
+    private var accountReads: [(Result<CloudResolvedAccount?, any Error>, CloudCallbackGate?)] = []
+    private var creationPause: CloudCallbackGate?
 
     init(a23: Bool = true, keepAlive: Bool = false) {
         self.a23 = a23
@@ -359,8 +369,22 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
         let engine = CloudKitEngineFake(configuration: configuration, delegate: delegate,
                                         a23: a23, keepAlive: keepAlive)
         made.append(engine)
+        if let gate = creationPause { creationPause = nil; await gate.enter() }
         return engine
     }
+
+    func appendAccountRead(_ result: Result<CloudResolvedAccount?, any Error>, gate: CloudCallbackGate? = nil) {
+        accountReads.append((result, gate))
+    }
+
+    func resolveAccount() async throws -> CloudResolvedAccount? {
+        guard !accountReads.isEmpty else { return nil }
+        let (result, gate) = accountReads.removeFirst()
+        if let gate { await gate.enter() }
+        return try result.get()
+    }
+
+    func pauseNextCreation(_ gate: CloudCallbackGate) { creationPause = gate }
 
     func engines() -> [CloudKitEngineFake] { made }
 }

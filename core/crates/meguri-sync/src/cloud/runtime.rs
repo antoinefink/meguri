@@ -17,6 +17,8 @@ use meguri_storage::{Cell, ReadRows, ReaderRole, RowKey, Table};
 use serde::{Deserialize, Serialize};
 
 use super::{entity_codec as codec, *};
+#[path = "adapter_runtime.rs"]
+mod adapter_impl;
 #[path = "workflow_runtime.rs"]
 mod workflow_impl;
 
@@ -59,6 +61,7 @@ pub enum IdentityStatus {
     Restricted,
     Configuration,
     SignedOut,
+    SwitchedAccounts,
 }
 pub trait IdentityProvider: Send + Sync {
     fn read_identity(&self, scope: &BuildScope) -> IdentityStatus;
@@ -348,6 +351,7 @@ struct State {
     root_reads: std::collections::BTreeSet<u64>,
     trace: Vec<super::workflow::TraceEvent>,
     review_blocked: bool,
+    adapter: super::adapter::AdapterState,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
@@ -360,6 +364,7 @@ struct State {
 pub struct Runtime {
     directory: PathBuf,
     inputs: CloudInputs,
+    adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
     state: Mutex<State>,
     random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
     review: Mutex<std::sync::Weak<meguri_engine::session::ReviewService>>,
@@ -394,6 +399,7 @@ impl Runtime {
         Self {
             directory,
             inputs,
+            adapter_clock: Mutex::new(None),
             random: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
             state: Mutex::new(State {
@@ -435,6 +441,7 @@ impl Runtime {
         }
         let publication = meguri_engine::device_state::DeviceState::for_collection(collection.path()).publication()?;
         let mut state = self.state();
+        Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
         state.bound = None;
         state.scan_required = true;
@@ -509,10 +516,14 @@ impl Runtime {
     pub fn refresh_identity(&self) -> Result<(), RuntimeError> {
         let guard = {
             let state = self.state();
-            state
-                .bound
-                .as_ref()
-                .map(|b| (state.incarnation, b.evidence.generation, b.open_counter))
+            state.bound.as_ref().map(|b| {
+                (
+                    state.incarnation,
+                    b.evidence.generation,
+                    b.open_counter,
+                    Self::adapter_guard_locked(&state),
+                )
+            })
         };
         let Some(guard) = guard else { return Ok(()) };
         let result = self.inputs.identity.read_identity(&self.inputs.scope);
@@ -523,11 +534,14 @@ impl Runtime {
         let instance = self.instance().ok();
         let signed_out = matches!(&result, IdentityStatus::SignedOut);
         let mut state = self.state();
-        if state
-            .bound
-            .as_ref()
-            .map(|b| (state.incarnation, b.evidence.generation, b.open_counter))
-            != Some(guard)
+        if state.bound.as_ref().map(|b| {
+            (
+                state.incarnation,
+                b.evidence.generation,
+                b.open_counter,
+                Self::adapter_guard_locked(&state),
+            )
+        }) != Some(guard)
         {
             return Err(RuntimeError::StaleIncarnation);
         }
@@ -538,7 +552,7 @@ impl Runtime {
                 IdentityStatus::Available(identity) if identity == bound.binding.facts.account => {
                     bound.verified = bound.usable;
                 }
-                IdentityStatus::Available(_) | IdentityStatus::SignedOut => {
+                IdentityStatus::Available(_) | IdentityStatus::SignedOut | IdentityStatus::SwitchedAccounts => {
                     // Close the gate before attempting the isolation commit.
                     bound.verified = false;
                     bound.usable = false;
@@ -1092,10 +1106,14 @@ impl SuspendParticipant for Runtime {
             })
             .map_err(engine_error)?;
         }
+        Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state
             .incarnation
             .checked_add(1)
             .ok_or_else(|| engine_error("incarnation exhausted"))?;
+        if state.adapter.retain_inspection && state.bound.is_some() {
+            state.adapter.closed_snapshot = Some(Self::adapter_snapshot_locked(&state).map_err(engine_error)?);
+        }
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;

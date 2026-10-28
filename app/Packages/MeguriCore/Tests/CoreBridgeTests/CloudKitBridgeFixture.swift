@@ -71,8 +71,8 @@ private struct CloudBaseline: Sendable {
     let reviewCard: Int64
     let reviewName: String
     let zone: String
-    let incoming: CloudRecord
-    let root: CloudRecord
+    let incoming: CoreBridge.CloudRecord
+    let root: CoreBridge.CloudRecord
 }
 
 extension MaintenanceLane {
@@ -87,7 +87,7 @@ extension MaintenanceLane {
             return CloudBaseline(names: raw.recordNames, decks: raw.deckIds,
                                  reviewDeck: raw.reviewDeckId, reviewCard: raw.reviewCardId,
                                  reviewName: raw.reviewRecordName, zone: raw.collectionZone,
-                                 incoming: CloudRecord(raw.incomingRecord), root: CloudRecord(raw.rootRecord))
+                                 incoming: CoreBridge.CloudRecord(raw.incomingRecord), root: CoreBridge.CloudRecord(raw.rootRecord))
         }
     }
 }
@@ -133,8 +133,8 @@ struct CloudKitBridgeFixture: Sendable {
     let reviewCard: Int64
     let reviewName: String
     let zone: String
-    let incoming: CloudRecord
-    let root: CloudRecord
+    let incoming: CoreBridge.CloudRecord
+    let root: CoreBridge.CloudRecord
 
     static func open(count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
                      savedState: Data? = Data([0x73, 0x64, 0x6b]),

@@ -38,3 +38,48 @@ contracts. Do not replace the real persistence assertions with fake outcomes.
 Publication/adoption, incoming reconciliation, media, remaining P24 tests,
 signed-device proof and integration gates remain required. The existing Rust
 stable-binding workflow is partial evidence, not complete iCloud sync.
+
+## Native adapter WIP checkpoint
+
+Production phase starts at `e2ed929e43651281516fd92daa4f94bb7fcc06a3`, after
+the enabled tests and observed missing-API failure. Filtered producer
+`cleanroom/20261028T162353Z-7865` adds typed FFI, lane-backed service,
+SDK ownership, native wrapper and durable event tracking over the Rust Runtime.
+
+R3 found five P1s: deleted-root confirmation, zone encoding, incomplete snapshot
+comparison, exchange termination and stale identity reads. Filtered repair
+`cleanroom/20261028T165416Z-18859` addresses them with additive regressions.
+R4 cleared four repairs and found two identity races: stop during startup and
+failed later reads. It also noted atomic callback-origin validation.
+`cleanroom/20261028T172007Z-30160` repairs these; R5 is clear of P0-P1.
+
+R6 checks the native SDK correction in
+`cleanroom/20261028T173800Z-38230`: routing uses each record's full zone ID,
+with a single SDK callback boundary. R6 is clear of P0-P1. The four local SDK
+tests are additive. Compiler-only corrections `43653` and `47768` qualify DTO
+names and hoist two expressions; independent equivalence checks are clear.
+All assertions and limits remain enabled.
+
+Verification:
+
+- `core-lint/20261028T173412Z-34973`: all four checks pass. Later deltas change
+  Swift/test source only; Rust input is unchanged.
+- `core-test/20261028T171602Z-28376`: base32 literal-vector test passes.
+- `swift-test/20261028T175820Z-49152`: 32 of 33 tests pass. The remaining
+  hold-back case checks its mark after acceptance, before asynchronous row
+  application. Independent diagnosis confirms the existing production flush
+  provides the missing barrier while keeping the session active. Preserve
+  the failed receipt; add that barrier before repeating focused verification.
+- `swift-test/20261028T180137Z-51836`: all 11 routing/registry tests pass.
+- Final source/privacy coverage combines the complete SDK export and the
+  subsequent fixture and assertion-file checks; their scoped receipts remain
+  in MG. The pre-commit privacy hook also checks this checkpoint.
+
+P2 follow-ups remain: release SDK authority if final registration discovery
+  in the MG results. The privacy hook checks this commit.
+name. Retain fault and signed evidence requirements for these paths.
+
+This is WIP, without a Unit trailer. Publication/adoption, incoming application,
+absence processing, K19, assets/media, full result classification, large-data
+budgets, signed integration and full gates remain required. Tests use generated
+collections; no live cloud workflow or complete product acceptance is claimed.
