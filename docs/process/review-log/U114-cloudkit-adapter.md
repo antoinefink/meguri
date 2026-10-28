@@ -75,9 +75,8 @@ Verification:
   subsequent fixture and assertion-file checks; their scoped receipts remain
   in MG. The pre-commit privacy hook also checks this checkpoint.
 
-P2 follow-ups remain: release SDK authority if final registration discovery
-  in the MG results. The privacy hook checks this commit.
-name. Retain fault and signed evidence requirements for these paths.
+P2-REG: registration rollback (R5). P2-OWNER: private-zone ownership (R6).
+Fault and signed checks remain open.
 
 This is WIP, without a Unit trailer. Publication/adoption, incoming application,
 absence processing, K19, assets/media, full result classification, large-data
