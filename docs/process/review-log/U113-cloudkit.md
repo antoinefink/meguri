@@ -303,3 +303,7 @@ clear. Source preparation is now kept stable through the boundary probes.
 Writer fallback for a note's CloudKit digest, the tracking observer/failure
 hook, CloudIncoming/Rekey, structure reports and the 150k consumer allocation
 proof remain open. This accessor does not accept full S2.4 or U113.
+
+The shared final `core-lint/20261028T043423Z-75307` passes all four checks with
+the committed row accessor unchanged. Its focused and guard receipts above
+remain valid. No full U113 or integration acceptance is claimed.

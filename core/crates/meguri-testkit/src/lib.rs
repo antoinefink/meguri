@@ -8,6 +8,7 @@
 pub mod anonymize;
 pub mod bench;
 pub mod catalog;
+pub mod cloud;
 pub mod diff;
 pub mod dump;
 pub mod exec;
