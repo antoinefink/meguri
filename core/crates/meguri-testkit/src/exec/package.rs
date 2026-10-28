@@ -19,8 +19,7 @@ use serde_json::{Map, Value, json};
 
 use super::{ExecError, OpResult, Registry, Session};
 use crate::scenario::{
-    CollectionPackageExportArgs, CollectionPackageImportArgs, ObservationArgs, ObservationRequest,
-    PackageListingRequest, Step,
+    CollectionPackageImportArgs, ObservationArgs, ObservationRequest, PackageExportArgs, PackageListingRequest, Step,
 };
 
 pub(super) fn register(registry: &mut Registry) {
@@ -61,13 +60,23 @@ fn export(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError>
     let Step::Export(args) = step else {
         return Err(invalid("expected export"));
     };
-    let args = CollectionPackageExportArgs::from_mapping(&args.0).map_err(invalid)?;
+    let PackageExportArgs::Collection { name, media, legacy } =
+        PackageExportArgs::from_mapping(&args.0).map_err(invalid)?
+    else {
+        return Err(ExecError::new("unsupported_op", "deck package export is pending"));
+    };
+    if media == Some(true) || legacy == Some(true) {
+        return Err(ExecError::new(
+            "unsupported_op",
+            "collection package options are pending",
+        ));
+    }
     let collection = session.engine_collection()?;
     let directory = session.storage.dir()?;
     let lease = collection.reader(ReaderRole::Maintenance).map_err(error)?;
     write_collection_package_from_live(
         &lease,
-        &directory.join(args.name),
+        &directory.join(name),
         &CollectionPackageWriteContext {
             collection_directory: &directory,
             purpose: Purpose::Export,

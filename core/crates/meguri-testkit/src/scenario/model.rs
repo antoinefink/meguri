@@ -797,6 +797,24 @@ pub struct MoveTemplateEdit {
     pub to: u64,
 }
 
+/// Missing leaves the value unchanged; explicit null clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Presence<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Presence<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Option::<T>::deserialize(deserializer).map(|v| match v {
+            Some(v) => Self::Value(v),
+            None => Self::Null,
+        })
+    }
+}
+
 /// `field_options: {field, ...}`: the options given (`model/protobuf-records`
 /// P6.2 names); missing ones stay as they are.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -819,6 +837,10 @@ pub struct FieldOptionsEdit {
     pub collapsed: Option<bool>,
     #[serde(default, deserialize_with = "present")]
     pub exclude_from_search: Option<bool>,
+    #[serde(default)]
+    pub tag: Presence<u32>,
+    #[serde(default, deserialize_with = "present")]
+    pub prevent_deletion: Option<bool>,
 }
 
 /// `template: {name, ...}`: the values given for the named template; missing
@@ -2053,6 +2075,14 @@ pub const DUMP_TABLES: [&str; 12] = [
 /// Observation kinds (observations.md O4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationKind {
+    AddDefaults,
+    NotetypeLastDeck,
+    SearchBuild,
+    SearchJoin,
+    SearchReplace,
+    TagComplete,
+    CardStats,
+
     BrowserRows,
     NotetypeTemplates,
     StudiedTodayRaw,
@@ -2151,7 +2181,14 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 57] = [
+    pub const ALL: [ObservationKind; 64] = [
+        ObservationKind::AddDefaults,
+        ObservationKind::NotetypeLastDeck,
+        ObservationKind::SearchBuild,
+        ObservationKind::SearchJoin,
+        ObservationKind::SearchReplace,
+        ObservationKind::TagComplete,
+        ObservationKind::CardStats,
         ObservationKind::BrowserRows,
         ObservationKind::NotetypeTemplates,
         ObservationKind::StudiedTodayRaw,
@@ -2213,6 +2250,13 @@ impl ObservationKind {
 
     pub fn name(self) -> &'static str {
         match self {
+            ObservationKind::AddDefaults => "add_defaults",
+            ObservationKind::NotetypeLastDeck => "notetype_last_deck",
+            ObservationKind::SearchBuild => "search_build",
+            ObservationKind::SearchJoin => "search_join",
+            ObservationKind::SearchReplace => "search_replace",
+            ObservationKind::TagComplete => "tag_complete",
+            ObservationKind::CardStats => "card_stats",
             ObservationKind::BrowserRows => "browser_rows",
             ObservationKind::NotetypeTemplates => "notetype_templates",
             ObservationKind::StudiedTodayRaw => "studied_today_raw",
@@ -2279,6 +2323,14 @@ impl ObservationKind {
 
     pub(super) fn shape(self) -> ArgShape {
         match self {
+            ObservationKind::AddDefaults => ArgShape::Mapping,
+            ObservationKind::NotetypeLastDeck => ArgShape::Mapping,
+            ObservationKind::SearchBuild => ArgShape::List,
+            ObservationKind::SearchJoin => ArgShape::List,
+            ObservationKind::SearchReplace => ArgShape::List,
+            ObservationKind::TagComplete => ArgShape::Mapping,
+            ObservationKind::CardStats => ArgShape::CardRefs,
+            ObservationKind::Stats => ArgShape::List,
             ObservationKind::BrowserRows => ArgShape::Mapping,
             ObservationKind::NotetypeTemplates => ArgShape::Mapping,
             ObservationKind::StudiedTodayRaw => ArgShape::None,
@@ -2330,9 +2382,7 @@ impl ObservationKind {
             | ObservationKind::FsrsNext
             | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
             ObservationKind::CardExtractors => ArgShape::Mapping,
-            ObservationKind::DbDump | ObservationKind::Stats | ObservationKind::NotetypeStructure => {
-                ArgShape::OptionalMapping
-            }
+            ObservationKind::DbDump | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
             ObservationKind::ReviewHtml | ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
@@ -2358,7 +2408,8 @@ pub struct ObservationRequest {
 
 impl ObservationRequest {
     /// D8: the kinds that never read a collection, `type_answer`, `text`, `cloze`,
-    /// `fsrs_next`, `studied_today_format`, `canonical_search` and `card_extractors`, and `template` when every case is
+    /// `fsrs_next`, `studied_today_format`, `canonical_search`, the three built-search
+    /// kinds and `card_extractors`, and `template` when every case is
     /// a new-note case.
     pub fn reads_no_collection(&self) -> bool {
         match self.kind {
@@ -2368,6 +2419,9 @@ impl ObservationRequest {
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::CanonicalSearch
+            | ObservationKind::SearchBuild
+            | ObservationKind::SearchJoin
+            | ObservationKind::SearchReplace
             | ObservationKind::CardExtractors
             | ObservationKind::StudiedTodayFormat => true,
             ObservationKind::Template => match &self.args {
@@ -2390,10 +2444,11 @@ impl ObservationRequest {
             None => (trimmed, None),
         };
         let kind = ObservationKind::from_name(name).ok_or_else(|| unknown_kind(name))?;
-        if kind == ObservationKind::CardExcerpts {
-            return Err(FormatError::new(
-                "card_excerpts needs a mapping with a non-empty card list",
-            ));
+        if matches!(kind, ObservationKind::CardExcerpts | ObservationKind::CardStats) {
+            return Err(FormatError::new(format!(
+                "{} needs a mapping with a non-empty card list",
+                kind.name()
+            )));
         }
         if matches!(
             kind,
@@ -2453,8 +2508,16 @@ impl ObservationRequest {
 
     fn checked(kind: ObservationKind, args: ObservationArgs) -> Result<ObservationRequest, FormatError> {
         let name = kind.name();
-        if kind == ObservationKind::CardExcerpts && !matches!(&args, ObservationArgs::Refs(refs) if !refs.is_empty()) {
-            return Err(FormatError::new("card_excerpts needs a non-empty card list"));
+        if matches!(kind, ObservationKind::CardExcerpts | ObservationKind::CardStats)
+            && !matches!(&args, ObservationArgs::Refs(refs) if !refs.is_empty())
+        {
+            return Err(FormatError::new(format!("{} needs a non-empty card list", kind.name())));
+        }
+        if kind == ObservationKind::CardStats
+            && let ObservationArgs::Refs(refs) = &args
+            && refs.iter().collect::<BTreeSet<_>>().len() != refs.len()
+        {
+            return Err(FormatError::new("card_stats needs distinct card references"));
         }
         let ok = match (kind.shape(), &args) {
             (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping | ArgShape::List),
@@ -3599,16 +3662,22 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
             Step::UpdateNotetype(args) => {
                 needs.ops.insert(step.name().to_owned());
                 needs.ops.extend(args.edits.iter().map(NotetypeEdit::capability));
+                if args.edits.iter().any(|edit| {
+                    matches!(edit, NotetypeEdit::FieldOptions(a)
+                    if a.tag != Presence::Missing || a.prevent_deletion.is_some())
+                }) {
+                    needs.ops.insert("update_notetype.field_options.io".to_owned());
+                }
             }
             Step::Export(args) | Step::Import(args) => {
                 needs.ops.insert(step.name().to_owned());
-                if args.0.get("format").and_then(Value::as_str) == Some("colpkg") {
-                    needs.ops.insert(format!("{}.colpkg", step.name()));
-                } else if args.0.get("format").and_then(Value::as_str) == Some("apkg") {
-                    if matches!(step, Step::Export(_)) && args.0.get("legacy") == Some(&Value::Bool(true)) {
-                        needs.ops.insert("export.apkg_legacy".to_owned());
-                    } else {
-                        needs.ops.insert(format!("{}.apkg", step.name()));
+                if matches!(step, Step::Export(_)) {
+                    if let Ok(export) = super::PackageExportArgs::from_mapping(&args.0) {
+                        needs.ops.extend(export.capabilities().into_iter().map(str::to_owned));
+                    }
+                } else if let Some(format) = args.0.get("format").and_then(Value::as_str) {
+                    if matches!(format, "colpkg" | "apkg") {
+                        needs.ops.insert(format!("import.{format}"));
                     }
                 }
             }

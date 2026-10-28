@@ -295,6 +295,18 @@ const FILE_COLUMNS: &[&str] = &[
 /// Returns false for kinds handled by the existing validators.
 pub(super) fn observation(kind: ObservationKind, map: &Map<String, Value>) -> Result<bool, FormatError> {
     let valid = match kind {
+        ObservationKind::AddDefaults => {
+            super::AddDefaultsRequest::from_mapping(map)?;
+            true
+        }
+        ObservationKind::NotetypeLastDeck => {
+            super::NotetypeLastDeckRequest::from_mapping(map)?;
+            true
+        }
+        ObservationKind::TagComplete => {
+            super::TagCompleteRequest::from_mapping(map)?;
+            true
+        }
         ObservationKind::BrowserRows => {
             keys(map, &["columns", "rows"], &[])?;
             names(map.get("columns"), Some(BROWSER_COLUMNS), true)

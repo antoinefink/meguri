@@ -258,3 +258,140 @@ pub(super) fn scenario(s: &Scenario, raw: &Value) -> Result<(), FormatError> {
     }
     Ok(())
 }
+
+/// E1/E9 preserve flag presence, even when false. L6 and E8 are distinct forms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageExportArgs {
+    Collection {
+        name: String,
+        media: Option<bool>,
+        legacy: Option<bool>,
+    },
+    LegacyWholeCollection {
+        name: String,
+    },
+    Deck(DeckPackageExportArgs),
+    LegacyDeck(DeckPackageExportArgs),
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageExportLimit {
+    Collection,
+    Deck(String),
+    Notes(Vec<super::LogicalRef>),
+    Cards(Vec<super::LogicalRef>),
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeckPackageExportArgs {
+    pub name: String,
+    pub limit: PackageExportLimit,
+    pub scheduling: bool,
+    pub presets: bool,
+    pub media: bool,
+}
+impl PackageExportArgs {
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<Self, FormatError> {
+        let bad = || FormatError::new("invalid package export form (legacy export requires L6 or E8 shape)");
+        let format = map.get("format").and_then(Value::as_str).ok_or_else(bad)?;
+        let name = map.get("name").and_then(Value::as_str).ok_or_else(bad)?;
+        let flag = |key: &str| -> Result<Option<bool>, FormatError> {
+            map.get(key).map(|v| v.as_bool().ok_or_else(bad)).transpose()
+        };
+        if format == "colpkg" {
+            if !package_name(name, &[".colpkg"])
+                || !map
+                    .keys()
+                    .all(|k| ["format", "name", "media", "legacy"].contains(&k.as_str()))
+            {
+                return Err(bad());
+            }
+            return Ok(Self::Collection {
+                name: name.to_owned(),
+                media: flag("media")?,
+                legacy: flag("legacy")?,
+            });
+        }
+        if format != "apkg" {
+            return Err(bad());
+        }
+        if !package_name(name, &[".apkg"]) {
+            return Err(FormatError::new(
+                "invalid package file name for legacy export or deck export",
+            ));
+        }
+        if map.len() == 3 && map.get("legacy") == Some(&Value::Bool(true)) {
+            return Ok(Self::LegacyWholeCollection { name: name.to_owned() });
+        }
+        if !map
+            .keys()
+            .all(|k| ["format", "name", "limit", "scheduling", "presets", "media", "legacy"].contains(&k.as_str()))
+            || map.get("legacy").is_some_and(|v| v != &Value::Bool(true))
+        {
+            return Err(bad());
+        }
+        let limit = map.get("limit").ok_or_else(bad)?;
+        let limit = if limit.as_str() == Some("collection") {
+            PackageExportLimit::Collection
+        } else {
+            let m = limit.as_object().filter(|m| m.len() == 1).ok_or_else(bad)?;
+            let (key, value) = m.iter().next().expect("one key");
+            match key.as_str() {
+                "deck" => {
+                    PackageExportLimit::Deck(value.as_str().filter(|s| !s.is_empty()).ok_or_else(bad)?.to_owned())
+                }
+                "notes" | "cards" => {
+                    let items = value.as_array().filter(|i| !i.is_empty()).ok_or_else(bad)?;
+                    let expected = if key == "notes" {
+                        super::RefKind::Note
+                    } else {
+                        super::RefKind::Card
+                    };
+                    let refs = items
+                        .iter()
+                        .map(|v| {
+                            let r: super::LogicalRef = serde::Deserialize::deserialize(v.clone()).map_err(|_| bad())?;
+                            if r.kind != expected {
+                                return Err(bad());
+                            }
+                            Ok(r)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if key == "notes" {
+                        PackageExportLimit::Notes(refs)
+                    } else {
+                        PackageExportLimit::Cards(refs)
+                    }
+                }
+                _ => return Err(bad()),
+            }
+        };
+        let args = DeckPackageExportArgs {
+            name: name.to_owned(),
+            limit,
+            scheduling: flag("scheduling")?.ok_or_else(bad)?,
+            presets: flag("presets")?.ok_or_else(bad)?,
+            media: flag("media")?.ok_or_else(bad)?,
+        };
+        Ok(if map.contains_key("legacy") {
+            Self::LegacyDeck(args)
+        } else {
+            Self::Deck(args)
+        })
+    }
+    pub fn capabilities(&self) -> Vec<&'static str> {
+        match self {
+            Self::Collection { media, legacy, .. } => {
+                let mut needs = vec!["export.colpkg"];
+                if *media == Some(true) {
+                    needs.push("export.colpkg.media");
+                }
+                if *legacy == Some(true) {
+                    needs.push("export.colpkg.legacy");
+                }
+                needs
+            }
+            Self::LegacyWholeCollection { .. } => vec!["export.apkg_legacy"],
+            Self::Deck(_) => vec!["export.apkg"],
+            Self::LegacyDeck(_) => vec!["export.apkg", "export.apkg.legacy"],
+        }
+    }
+}

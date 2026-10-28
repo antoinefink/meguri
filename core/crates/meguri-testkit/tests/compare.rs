@@ -344,3 +344,93 @@ fn golden_text_matches_the_oracle_layout() {
     let parsed: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(observe::golden_text(&parsed), text);
 }
+
+#[test]
+fn card_stats_tolerates_only_declared_memory_and_retrievability_paths_at_the_boundary() {
+    let base = json!({"steps":[{"card_stats":{"#c1":{
+        "memory_state":{"stability":1.0,"difficulty":1.0},"fsrs_retrievability":1.0,
+        "average_secs":1.0,"total_secs":1.0,"desired_retention":1.0,"fsrs_params":[1.0],
+        "revlog":[{"memory_state":{"stability":1.0,"difficulty":1.0},"taken_secs":1.0,"ease":1.0}],
+        "reviews":1000000,"interval":1000000,"ease":1.0
+    }}}]});
+    let paths = [
+        "/memory_state/stability",
+        "/memory_state/difficulty",
+        "/fsrs_retrievability",
+        "/revlog/0/memory_state/stability",
+        "/revlog/0/memory_state/difficulty",
+    ];
+    for path in paths {
+        let pointer = format!("/steps/0/card_stats/#c1{path}");
+        for (relative, passes) in [
+            (0.999e-5, true),
+            (1.001e-5, false),
+            (-0.999e-5, true),
+            (-1.001e-5, false),
+        ] {
+            let mut actual = base.clone();
+            *actual.pointer_mut(&pointer).unwrap() = json!(1.0 + relative);
+            let diff = diff::compare("s/x", &base, &actual, &plain());
+            assert_eq!(diff.differences.is_empty(), passes, "{path}: {relative}");
+        }
+    }
+    for path in [
+        "/average_secs",
+        "/total_secs",
+        "/desired_retention",
+        "/fsrs_params/0",
+        "/revlog/0/taken_secs",
+        "/revlog/0/ease",
+        "/ease",
+    ] {
+        let pointer = format!("/steps/0/card_stats/#c1{path}");
+        let mut actual = base.clone();
+        *actual.pointer_mut(&pointer).unwrap() = json!(1.000000001);
+        assert_eq!(
+            diff::compare("s/x", &base, &actual, &plain()).differences.len(),
+            1,
+            "{path}"
+        );
+    }
+    for path in ["/reviews", "/interval"] {
+        let mut actual = base.clone();
+        *actual.pointer_mut(&format!("/steps/0/card_stats/#c1{path}")).unwrap() = json!(1000001);
+        assert_eq!(diff::compare("s/x", &base, &actual, &plain()).differences.len(), 1);
+    }
+    // Similar field names at unrelated depths/kinds have no card-info tolerance.
+    for pointer in [
+        "/steps/0/card_stats/#c1/other/memory_state/stability",
+        "/steps/0/card_stats/#c1/revlog/0/fsrs_retrievability",
+        "/steps/0/card_stats/#c1/other/fsrs_retrievability",
+        "/steps/0/card/#c1/memory_state/stability",
+    ] {
+        let segments = pointer
+            .trim_start_matches('/')
+            .split('/')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(meguri_testkit::observe::tolerance(&segments), None, "{pointer}");
+    }
+}
+
+#[test]
+fn typed_stats_lists_keep_the_existing_float_tolerance_and_exact_counts_and_keys() {
+    let base = json!({"steps":[{"stats":[{"future_due":{"daily_load":1.0,"future_due":{"0":1000000}},"difficulty":{"average":1.0}}]}]});
+    for relative in [0.999e-6, 1.001e-6] {
+        let mut actual = base.clone();
+        actual["steps"][0]["stats"][0]["difficulty"]["average"] = json!(1.0 + relative);
+        assert_eq!(
+            diff::compare("s/x", &base, &actual, &plain()).differences.is_empty(),
+            relative < 1e-6
+        );
+    }
+    let mut count = base.clone();
+    count["steps"][0]["stats"][0]["future_due"]["future_due"]["0"] = json!(1000001);
+    assert_eq!(diff::compare("s/x", &base, &count, &plain()).differences.len(), 1);
+    let mut keys = base.clone();
+    keys["steps"][0]["stats"][0]["future_due"]["future_due"]
+        .as_object_mut()
+        .unwrap()
+        .remove("0");
+    assert_eq!(diff::compare("s/x", &base, &keys, &plain()).differences.len(), 1);
+}

@@ -6,6 +6,7 @@ mod image_occlusion;
 mod intake;
 mod model;
 mod package;
+mod prepared;
 mod type_answer;
 mod validate;
 mod yaml;
@@ -20,6 +21,7 @@ pub use card_extractors::{CardExtractorInput, CardExtractorsRequest, ExtractorVa
 pub use image_occlusion::ImageOcclusionRequest;
 pub use model::*;
 pub use package::*;
+pub use prepared::*;
 pub use type_answer::{ReviewHtmlCase, TypeAnswerFunction, TypeAnswerRequest};
 pub use validate::draft_requirements;
 

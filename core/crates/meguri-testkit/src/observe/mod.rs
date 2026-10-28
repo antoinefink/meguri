@@ -328,11 +328,16 @@ pub fn f32_value(x: f32) -> Result<Value, FormatError> {
         .ok_or_else(|| FormatError::new("non-finite"))
 }
 
-/// Relative tolerance on memory states inside `next_states` and on the
-/// stability and difficulty columns of `fsrs_next` rows (O7).
+/// Relative tolerance on `next_states` memory states, `fsrs_next` stability
+/// and difficulty, and the declared Card Info memory/retrievability paths (O7).
 pub const MEMORY_STATE_TOLERANCE: f64 = 1e-5;
 /// Relative tolerance on fractional numbers inside `stats` (O7).
 pub const STATS_TOLERANCE: f64 = 1e-6;
+
+fn card_stats_key(key: &str) -> bool {
+    key.parse::<crate::scenario::LogicalRef>()
+        .is_ok_and(|r| r.kind == crate::scenario::RefKind::Card)
+}
 
 /// The relative tolerance declared for the value at this pointer (unescaped
 /// segments of `/steps/<i>/<kind>/...`), if any (O7).
@@ -345,6 +350,28 @@ pub fn tolerance(segments: &[String]) -> Option<f64> {
                 .then_some(MEMORY_STATE_TOLERANCE)
         }
         "stats" => Some(STATS_TOLERANCE),
+        "card_stats" => match segments {
+            [_, _, _, card, field] if card_stats_key(card) && field == "fsrs_retrievability" => {
+                Some(MEMORY_STATE_TOLERANCE)
+            }
+            [_, _, _, card, state, field]
+                if card_stats_key(card)
+                    && state == "memory_state"
+                    && matches!(field.as_str(), "stability" | "difficulty") =>
+            {
+                Some(MEMORY_STATE_TOLERANCE)
+            }
+            [_, _, _, card, revlog, index, state, field]
+                if card_stats_key(card)
+                    && revlog == "revlog"
+                    && index.parse::<usize>().is_ok()
+                    && state == "memory_state"
+                    && matches!(field.as_str(), "stability" | "difficulty") =>
+            {
+                Some(MEMORY_STATE_TOLERANCE)
+            }
+            _ => None,
+        },
         // extractor-ops E4: only R/RR, at the declared 1e-5 tolerance.
         "card_extractors" => match segments {
             [_, _, _, rows, _, field] if rows == "rows" && (field == "r" || field == "rr") => Some(1e-5),

@@ -276,7 +276,7 @@ steps:
       - render(#c1)
       - db_dump
       - {db_dump: {tables: [notes, cards]}}
-      - {stats: {}}
+      - {stats: [{scope: collection, history: year, parts: [context]}]}
       - digest
 "##;
     let value = scenario::parse_yaml(text).unwrap();
@@ -2262,7 +2262,10 @@ fn the_model_reads_the_notetype_edits_as_the_schema_types_them() {
         for (member, member_def) in def["properties"].as_object().unwrap() {
             let nullable = member_def["type"]
                 .as_array()
-                .is_some_and(|t| t.contains(&json!("null")));
+                .is_some_and(|t| t.contains(&json!("null")))
+                || member_def["oneOf"]
+                    .as_array()
+                    .is_some_and(|branches| branches.iter().any(|branch| branch["type"] == "null"));
             let mut wrongs = vec![json!({"a": 1}), json!(-1)];
             if !nullable {
                 wrongs.push(Value::Null);
@@ -2800,7 +2803,6 @@ fn package_forms_enforce_sources_names_and_capability_parts() {
     for args in [
         json!({"format": "colpkg", "name": "x.apkg"}),
         json!({"format": "colpkg", "name": "_x.colpkg"}),
-        json!({"format": "colpkg", "name": "x.colpkg", "media": true}),
     ] {
         assert!(model_accepts(json!({"export": args})).is_err());
     }
@@ -2890,9 +2892,10 @@ fn backup_contracts_preserve_defaults_and_reject_malformed_inputs() {
 
 #[test]
 fn package_observation_requests_follow_the_committed_schema() {
-    let schema: Value =
-        scenario::parse_json(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
-            .unwrap();
+    let schema: Value = meguri_testkit::observe::parse_json(
+        &fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap(),
+    )
+    .unwrap();
     let kinds = schema["$defs"]["observation_request"]["anyOf"]
         .as_array()
         .unwrap()
@@ -3182,7 +3185,7 @@ fn held_observation_shapes_and_pure_formatting_are_recognized() {
         json!({"package_db_dump": {"fixture": "package/standard.colpkg", "tables": ["notes", "cards"], "raw": true}}),
     ];
     let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
-    assert_eq!(K::ALL.len(), 57);
+    assert_eq!(K::ALL.len(), 64);
     for request in &requests {
         let parsed = held_steps(json!([{"observe": [request]}])).unwrap();
         let Step::Observe(observe) = &parsed.steps[0] else {

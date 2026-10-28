@@ -134,9 +134,6 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
-        if let Step::Export(args) = step {
-            legacy_export(args).map_err(at)?;
-        }
         // float-determinism.md F5.1: at most one fsrs_next per observe step.
         if let Step::Observe(requests) = step
             && requests.iter().filter(|r| r.kind == ObservationKind::FsrsNext).count() > 1
@@ -308,19 +305,13 @@ fn review_sessions(s: &Scenario) -> Result<(), FormatError> {
 }
 
 fn draft(op: &str, args: &DraftArgs) -> Result<(), FormatError> {
-    if args.0.get("format").and_then(Value::as_str) == Some("colpkg") {
-        match op {
-            "import" => return super::CollectionPackageImportArgs::from_mapping(&args.0).map(drop),
-            // Preserve the separate legacy-export diagnostic below.
-            "export" if !args.0.contains_key("legacy") => {
-                return super::CollectionPackageExportArgs::from_mapping(&args.0).map(drop);
-            }
-            _ => {}
-        }
+    if op == "export" {
+        return super::PackageExportArgs::from_mapping(&args.0).map(drop);
     }
-    if args.0.get("format").and_then(Value::as_str) == Some("apkg")
-        && (op == "import" || (op == "export" && !args.0.contains_key("legacy")))
-    {
+    if args.0.get("format").and_then(Value::as_str) == Some("colpkg") && op == "import" {
+        return super::CollectionPackageImportArgs::from_mapping(&args.0).map(drop);
+    }
+    if args.0.get("format").and_then(Value::as_str) == Some("apkg") && op == "import" {
         return super::intake::apkg(op, &args.0);
     }
     let Some((_, spec)) = DRAFT_ARGS.iter().find(|(name, _)| *name == op) else {
@@ -597,25 +588,6 @@ fn notetype_op(step: &Step) -> Result<(), FormatError> {
     }
 }
 
-/// model-ops.md L6: an export with `legacy` is exactly
-/// `{format: apkg, name: <package file name>, legacy: true}`. Other forms stay
-/// draft (D7.2).
-fn legacy_export(args: &DraftArgs) -> Result<(), FormatError> {
-    if !args.0.contains_key("legacy") {
-        return Ok(());
-    }
-    let exact = args.0.len() == 3
-        && args.0.get("format").and_then(Value::as_str) == Some("apkg")
-        && args.0.get("name").is_some_and(Value::is_string)
-        && args.0.get("legacy") == Some(&Value::Bool(true));
-    if !exact {
-        return Err(FormatError::new(
-            "a legacy export is exactly {format: apkg, name, legacy: true}",
-        ));
-    }
-    package_name(&args.0["name"])
-}
-
 /// model-ops.md L6: a file in the session directory, `^[A-Za-z0-9][A-Za-z0-9._-]*\.apkg$`.
 fn package_name(value: &Value) -> Result<(), FormatError> {
     let stem = value.as_str().and_then(|name| name.strip_suffix(".apkg"));
@@ -645,6 +617,10 @@ pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result
         ObservationKind::Search => SearchRequest::from_list(items).map(drop),
         ObservationKind::CanonicalSearch => canonical_search_texts(items).map(drop),
         ObservationKind::TodayStats => super::intake::today_stats(items),
+        ObservationKind::Stats => super::StatsRequest::from_list(items).map(drop),
+        ObservationKind::SearchBuild => super::SearchBuildRequest::from_list(items).map(drop),
+        ObservationKind::SearchJoin => super::SearchJoinRequest::from_list(items).map(drop),
+        ObservationKind::SearchReplace => super::SearchReplaceRequest::from_list(items).map(drop),
         other => Err(FormatError::new(format!(
             "observation {} does not take a list",
             other.name()
@@ -657,6 +633,14 @@ pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result
 /// requested at most once per step; two lists do not merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
     for kind in [
+        ObservationKind::AddDefaults,
+        ObservationKind::NotetypeLastDeck,
+        ObservationKind::SearchBuild,
+        ObservationKind::SearchJoin,
+        ObservationKind::SearchReplace,
+        ObservationKind::TagComplete,
+        ObservationKind::CardStats,
+        ObservationKind::Stats,
         ObservationKind::ReviewHtml,
         ObservationKind::Template,
         ObservationKind::FieldsCheck,

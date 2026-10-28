@@ -383,6 +383,50 @@
             "media_pending": { "description": "media-ops.md F11.", "type": "null" },
             "media_quick_check": { "description": "media-sync-ops.md V1.", "type": "null" },
             "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
+            "tag_complete": {
+              "description": "specs/tags/complete.md C7: tag completion per case, limit Meguri's C1 limit (the oracle sends limit - 1 as Anki's match_limit); at most one request per step.",
+              "type": "object",
+              "required": ["cases"],
+              "additionalProperties": false,
+              "properties": {
+                "cases": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["input", "limit"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "input": { "type": "string" },
+                      "limit": { "type": "integer", "minimum": 1, "maximum": 4294967296 }
+                    }
+                  }
+                }
+              }
+            },
+            "add_defaults": {
+              "description": "specs/notes/add-defaults.md D7: the Add screen's starting deck and note type (D1), with the review card's home deck when given; at most one request per step.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "review_card": { "$ref": "#/$defs/card_ref" } }
+            },
+            "notetype_last_deck": {
+              "description": "specs/notes/add-defaults.md D7: a note type's default deck (D2), the note type by its stored name, or by a raw id that names no note type (a leftover key); at most one request per step.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["notetype"],
+                  "additionalProperties": false,
+                  "properties": { "notetype": { "type": "string", "minLength": 1 } }
+                },
+                {
+                  "type": "object",
+                  "required": ["notetype_id"],
+                  "additionalProperties": false,
+                  "properties": { "notetype_id": { "type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807 } }
+                }
+              ]
+            },
             "browser_config": { "description": "browser-config-ops.md B2.", "type": "null" },
             "card_excerpts": {
               "description": "card-excerpt-ops.md E1: the cards' Question and Deck cells, one entry per reference in request order; repeats allowed; at most one request per step.",
@@ -459,6 +503,42 @@
               "minItems": 1,
               "items": { "type": "string" }
             },
+            "search_build": {
+              "description": "search-ops.md S6: built search items (S5) written as search text; never reads the collection.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/search_item" }
+            },
+            "search_join": {
+              "description": "search-ops.md S6: a built item (S5) joined to an existing search text (join-and-replace.md J6); never reads the collection.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["existing", "item", "joiner", "negate"],
+                "additionalProperties": false,
+                "properties": {
+                  "existing": { "type": "string" },
+                  "item": { "$ref": "#/$defs/search_item" },
+                  "joiner": { "enum": ["and", "or"] },
+                  "negate": { "type": "boolean" }
+                }
+              }
+            },
+            "search_replace": {
+              "description": "search-ops.md S6: a built item (S5) put in place of an existing search's terms of its kind (join-and-replace.md J7); never reads the collection.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["existing", "item"],
+                "additionalProperties": false,
+                "properties": {
+                  "existing": { "type": "string" },
+                  "item": { "$ref": "#/$defs/search_item" }
+                }
+              }
+            },
             "db_dump": {
               "description": "observations.md O8: all twelve tables, or the listed ones; raw true leaves out O8's normalization of random values (normalized-dump.md N4).",
               "type": ["object", "null"],
@@ -468,7 +548,35 @@
                 "raw": { "type": "boolean" }
               }
             },
-            "stats": { "description": "Draft.", "type": ["object", "null"] },
+            "stats": {
+              "description": "stats-ops.md H10, stats/graphs-common G14: graph data requests, each a scope, a history and the parts to return.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["scope", "history", "parts"],
+                "additionalProperties": false,
+                "properties": {
+                  "scope": {
+                    "anyOf": [
+                      { "const": "collection" },
+                      { "type": "object", "required": ["deck"], "additionalProperties": false, "properties": { "deck": { "type": "string", "minLength": 1 } } },
+                      { "type": "object", "required": ["search"], "additionalProperties": false, "properties": { "search": { "type": "string" } } }
+                    ]
+                  },
+                  "history": { "enum": ["year", "all"] },
+                  "parts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]
+                    }
+                  }
+                }
+              }
+            },
+            "card_stats": { "description": "stats-ops.md H9: Card Info's raw values for these cards, each listed once.", "$ref": "#/$defs/distinct_card_refs" },
             "digest": { "type": "null" },
             "studied_today_raw": { "description": "stats-ops.md H2.", "type": "null" },
             "studied_today_text": { "description": "stats-ops.md H5.", "type": "null" },
@@ -888,6 +996,79 @@
     },
     "media_entry": {
       "anyOf": [{ "$ref": "#/$defs/media_file" }, { "$ref": "#/$defs/media_dir_entry" }]
+    },
+    "search_item": {
+      "description": "search-ops.md S5: a built search item of join-and-replace.md J3 in its neutral form. The oracle refuses J10's inputs and J3's refusals (invalid_scenario); the schema states the shapes and number ranges.",
+      "anyOf": [
+        { "enum": ["whole_collection", "current_deck", "any_deck", "any_tag", "untagged", "any_notetype"] },
+        {
+          "type": "object",
+          "required": ["text"],
+          "additionalProperties": false,
+          "properties": { "text": { "type": "string" }, "field_text": { "type": "boolean" } }
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "deck": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 },
+            "notetype": { "type": "string", "minLength": 1 },
+            "template": { "type": "integer", "minimum": 0, "maximum": 65534 },
+            "field_present": { "type": "string", "minLength": 1 },
+            "field": {
+              "type": "object",
+              "required": ["name", "text"],
+              "additionalProperties": false,
+              "properties": { "name": { "type": "string", "minLength": 1 }, "text": { "type": "string" } }
+            },
+            "literal": { "type": "string", "minLength": 1 },
+            "flag": { "anyOf": [{ "enum": ["any", "none"] }, { "type": "integer", "minimum": 1, "maximum": 7 }] },
+            "state": { "enum": ["new", "learn", "review", "due", "suspended", "buried"] },
+            "added": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "edited": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "introduced": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "answered": {
+              "type": "object",
+              "required": ["days"],
+              "additionalProperties": false,
+              "properties": {
+                "days": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+                "button": { "type": "integer", "minimum": 1, "maximum": 4 }
+              }
+            },
+            "rescheduled": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "due_on": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+            "due_within": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+            "note_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+            },
+            "dupe": {
+              "type": "object",
+              "required": ["notetype_id", "text"],
+              "additionalProperties": false,
+              "properties": {
+                "notetype_id": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "text": { "type": "string" }
+              }
+            },
+            "group": {
+              "type": "object",
+              "required": ["joiner", "items"],
+              "additionalProperties": false,
+              "properties": {
+                "joiner": { "enum": ["and", "or"] },
+                "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/search_item" } }
+              }
+            },
+            "negated": { "$ref": "#/$defs/search_item" }
+          }
+        }
+      ]
     },
     "extractor_input": {
       "description": "extractor-ops.md E1: one input of a card_extractors request.",
@@ -1467,30 +1648,52 @@
           }
         },
         "export": {
-          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (package-ops.md E7).",
+          "description": "Stable (package): the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6), the collection package form {format: colpkg, name} (package-ops.md E1) and the deck package form {format: apkg, name, limit, scheduling, presets, media} (E7). Draft until the typed model reads them (dsl.md D7.2): the collection package options form with media and legacy (E9) and the deck package form with legacy: true (E8).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
             {
-              "if": { "required": ["legacy"] },
+              "if": { "required": ["legacy"], "not": { "properties": { "format": { "const": "colpkg" } } } },
               "then": {
-                "required": ["format", "name", "legacy"],
-                "additionalProperties": false,
-                "properties": {
-                  "format": { "const": "apkg" },
-                  "name": { "$ref": "#/$defs/package_name" },
-                  "legacy": { "const": true }
-                }
+                "oneOf": [
+                  {
+                    "description": "model-ops.md L6: the whole-collection legacy form.",
+                    "required": ["format", "name", "legacy"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "format": { "const": "apkg" },
+                      "name": { "$ref": "#/$defs/package_name" },
+                      "legacy": { "const": true }
+                    }
+                  },
+                  {
+                    "description": "package-ops.md E8: the deck package form, every key, with legacy: true.",
+                    "required": ["format", "name", "limit", "scheduling", "presets", "media", "legacy"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "format": { "const": "apkg" },
+                      "name": { "$ref": "#/$defs/package_name" },
+                      "limit": { "$ref": "#/$defs/export_limit" },
+                      "scheduling": { "type": "boolean" },
+                      "presets": { "type": "boolean" },
+                      "media": { "type": "boolean" },
+                      "legacy": { "const": true }
+                    }
+                  }
+                ]
               }
             },
             {
               "if": { "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
               "then": {
+                "description": "package-ops.md E1, and E9 with media or legacy (booleans, false when missing).",
                 "required": ["format", "name"],
                 "additionalProperties": false,
                 "properties": {
                   "format": { "const": "colpkg" },
-                  "name": { "$ref": "#/$defs/colpkg_name" }
+                  "name": { "$ref": "#/$defs/colpkg_name" },
+                  "media": { "type": "boolean" },
+                  "legacy": { "type": "boolean" }
                 }
               }
             },
@@ -1921,7 +2124,12 @@
             "description": { "type": "string" },
             "plain_text": { "type": "boolean" },
             "collapsed": { "type": "boolean" },
-            "exclude_from_search": { "type": "boolean" }
+            "exclude_from_search": { "type": "boolean" },
+            "tag": {
+              "description": "Draft (notetype-ops.md T5.1): null removes the tag.",
+              "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 4294967295 }, { "type": "null" }]
+            },
+            "prevent_deletion": { "description": "Draft (notetype-ops.md T5.1).", "type": "boolean" }
           }
         },
         "add_template": {

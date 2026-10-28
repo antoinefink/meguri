@@ -1377,3 +1377,61 @@ fn reference_requires_matching_oracle_replay_with_no_deviation_or_meguri_chain()
         assert!(report.to_json()["scenarios"][0]["reference"].is_object());
     }
 }
+
+#[test]
+fn prepared_batches_remain_pending_without_executing_any_prefix_or_mutating_inputs() {
+    struct PreflightOnly(MeguriExecutor);
+    impl Executor for PreflightOnly {
+        fn name(&self) -> &str {
+            "meguri"
+        }
+        fn missing(&self, needs: &Needs) -> Needs {
+            self.0.missing(needs)
+        }
+        fn run(&self, _: &LoadedScenario) -> Result<Value, ExecError> {
+            panic!("pending scenario was executed")
+        }
+    }
+    let dir = tree();
+    let root = dir.path();
+    for (name, step, missing) in [
+        (
+            "io",
+            json!({"update_notetype":{"notetype":"Pair","edits":[{"field_options":{"field":"Front","tag":null,"prevent_deletion":false}}]}}),
+            "update_notetype.field_options.io",
+        ),
+        (
+            "e8",
+            json!({"export":{"format":"apkg","name":"x.apkg","limit":"collection","scheduling":false,"presets":false,"media":false,"legacy":true}}),
+            "export.apkg.legacy",
+        ),
+        (
+            "e9",
+            json!({"export":{"format":"colpkg","name":"x.colpkg","media":true}}),
+            "export.colpkg.media",
+        ),
+        (
+            "observations",
+            json!({"observe":[{"search_build":["whole_collection"]},{"tag_complete":{"cases":[{"input":"","limit":1}]}},{"card_stats":["#c1"]}]}),
+            "card_stats",
+        ),
+    ] {
+        let id = format!("prepared/{name}");
+        let path = format!("scenarios/{id}.yaml");
+        let value = json!({"id":id,"clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},
+            "steps":[{"db_exec":{"sql":"UPDATE col SET mod = 7"}},step]});
+        let text = serde_json::to_string(&value).unwrap();
+        write(root, &path, &text);
+        golden_for(root, &id, json!({"steps":[{},{}]}));
+        let executor = PreflightOnly(MeguriExecutor::default());
+        let before = executor.0.capabilities();
+        let report = Suite::open(root).unwrap().run(&[id.clone()], &executor, "prepared");
+        assert_eq!(report.outcomes.len(), 1);
+        let outcome = &report.outcomes[0];
+        assert_eq!(outcome.status, Status::Pending);
+        let needs = outcome.missing.as_ref().unwrap();
+        assert!(needs.ops.contains(missing) || needs.observations.contains(missing));
+        assert_eq!(before, executor.0.capabilities());
+        assert_eq!(fs::read_to_string(root.join(path)).unwrap(), text);
+    }
+}

@@ -182,6 +182,48 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
+    // Prepared batch3/4 language must not advertise execution support.
+    assert_eq!(json["language"]["observations"].as_array().unwrap().len(), 64);
+    for kind in [
+        "add_defaults",
+        "notetype_last_deck",
+        "search_build",
+        "search_join",
+        "search_replace",
+        "tag_complete",
+        "card_stats",
+        "stats",
+    ] {
+        assert!(
+            json["language"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == kind),
+            "{kind}"
+        );
+        assert!(
+            !json["supports"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == kind),
+            "{kind}"
+        );
+    }
+    for part in [
+        "update_notetype.field_options.io",
+        "export.apkg",
+        "export.apkg_legacy",
+        "export.apkg.legacy",
+        "export.colpkg.media",
+        "export.colpkg.legacy",
+    ] {
+        assert!(
+            !json["supports"]["ops"].as_array().unwrap().iter().any(|v| v == part),
+            "{part}"
+        );
+    }
     // dsl.md D7.2/D8: the current step vocabulary excludes observe and adds
     // the declared answer.filtered part, including parsing-only operations.
     assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 87);

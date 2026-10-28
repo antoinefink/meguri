@@ -216,6 +216,14 @@ fn apply_edits(scope: &impl ReadRows, mut draft: Notetype, edits: &[NotetypeEdit
         match edit {
             NotetypeEdit::Rename(name) => name.clone_into(&mut draft.name),
             NotetypeEdit::Css(css) => css.clone_into(&mut draft.config.css),
+            NotetypeEdit::FieldOptions(options)
+                if options.tag != scenario::Presence::Missing || options.prevent_deletion.is_some() =>
+            {
+                return Err(ExecError::new(
+                    "unsupported_op",
+                    "update_notetype.field_options.io is pending",
+                ));
+            }
             NotetypeEdit::FieldOptions(options) => {
                 let field = draft
                     .fields
