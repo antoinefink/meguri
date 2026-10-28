@@ -348,3 +348,24 @@ send and shared process harness. Keep these tests enabled. P24 items, U113,
 U117, native/full integration gates and release acceptance stay open. The
 full native durability target now also awaits the missing test interfaces;
 its earlier receipt is not a current whole-target pass.
+
+## Reconciliation read primitives
+
+Starting commit: `16f12a9b`; recorded before work in
+`account-workflow/storage-start.json` under the unit intake directory.
+Filtered author `20261028T052145Z-772` adds a checked stored-row cursor,
+raw notetype part pages and the unfiltered maximum revlog id for one card.
+The cursor preserves raw text keys, the part pages follow signed ordinals
+without assuming contiguous values, and reads retain their snapshot. The
+existing generic pager and manual-transfer behavior are unchanged.
+
+Independent review 1 is clear, including clean-room conformance.
+`core-test/20261028T052704Z-3919`: four passed, zero skipped.
+`private/20261028T052705Z-4156` and `similarity/20261028T052704Z-3693` pass.
+Whole-target lint remains blocked by the separately recorded missing account
+harness; it is not reported as passing for this commit.
+
+The page limit is 250 rows, not a byte-budget or 150k allocation proof.
+The revlog helper describes live snapshot rows; a held image must compute
+its own image-aware history. Actual reconciliation, sender bounds, P24 and
+U113 acceptance remain open.

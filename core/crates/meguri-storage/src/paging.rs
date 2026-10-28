@@ -75,6 +75,32 @@ pub trait ReadRows: sealed::Connected {
         crate::normal_stage::page(self.connection(), "", table, after, false)
     }
 
+    /// Raw fields of one existing parent, in stored `ord` order, at most 250
+    /// rows. Continue after the last returned ordinal; gaps are preserved.
+    /// Cells keep their storage classes and bytes. This is a row-count bound,
+    /// not a byte budget. A missing parent returns an empty page.
+    fn notetype_fields_page(&self, notetype: NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {
+        notetype_parts_page(self.connection(), Table::Fields, notetype, after)
+    }
+
+    /// Raw templates, with the same paging contract as
+    /// [`ReadRows::notetype_fields_page`].
+    fn notetype_templates_page(&self, notetype: NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {
+        notetype_parts_page(self.connection(), Table::Templates, notetype, after)
+    }
+
+    /// Unfiltered maximum stored revlog id for this card on this connection's
+    /// view, or 0 when no row exists. Keeps signed millisecond ids as is.
+    /// This reads live rows (or the reader's snapshot); a future held-image
+    /// history must compute its own image-aware maximum.
+    fn max_revlog_id(&self, card: CardId) -> Result<i64, StorageError> {
+        Ok(self
+            .connection()
+            .query_row("SELECT coalesce(max(id),0) FROM revlog WHERE cid=?1", [card.0], |row| {
+                row.get::<_, i64>(0)
+            })?)
+    }
+
     /// Scalar normal-merge base; validation replay never loads a note body.
     fn sync_row_state(
         &self,
@@ -468,6 +494,34 @@ impl ReadRows for ReadSnapshot<'_> {}
 
 fn limit_value(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
+}
+
+fn notetype_parts_page(
+    conn: &Connection,
+    table: Table,
+    notetype: NotetypeId,
+    after: Option<i64>,
+) -> Result<Vec<RowImage>, StorageError> {
+    let columns = table
+        .columns()
+        .iter()
+        .map(|column| format!("\"{column}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let continuation = if after.is_some() { " AND ord>?2" } else { "" };
+    let mut statement = conn.prepare_cached(&format!(
+        "SELECT {columns} FROM {} WHERE ntid=?1{continuation} \
+         AND EXISTS(SELECT 1 FROM notetypes WHERE id=?1) ORDER BY ord LIMIT {}",
+        table.name(),
+        crate::normal_stage::PAGE,
+    ))?;
+    let mut params = vec![Cell::Integer(notetype.0)];
+    if let Some(ord) = after {
+        params.push(Cell::Integer(ord));
+    }
+    Ok(statement
+        .query_map(params_from_iter(params), |row| rows::row_image(row, table))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 /// One page of a table keyed by `id`: rows with ids above `after`.

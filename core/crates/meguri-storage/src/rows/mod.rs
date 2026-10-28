@@ -231,6 +231,32 @@ impl RowKey {
         RowKey::Text(text.as_bytes().to_vec())
     }
 
+    /// Extract a cursor from a whole stored row for [`crate::ReadRows::row_page`].
+    /// Checks the row width and key storage classes without interpreting other
+    /// columns. Text key bytes are preserved, including invalid UTF-8; the
+    /// pager applies the table's collation. Errors contain no stored content.
+    pub fn from_stored(table: Table, cells: &[Cell]) -> Result<RowKey, RowError> {
+        let error = |column, reason: &str| RowError {
+            table: table.name(),
+            column,
+            key: "<unavailable>".into(),
+            reason: reason.into(),
+        };
+        if cells.len() != table.columns().len() {
+            return Err(error(table.columns()[0], "stored row width"));
+        }
+        for (index, cell) in cells.iter().take(table.key_len()).enumerate() {
+            let valid = match table {
+                Table::Config | Table::Tags => matches!(cell, Cell::Text(_)),
+                _ => matches!(cell, Cell::Integer(_)),
+            };
+            if !valid {
+                return Err(error(table.columns()[index], "stored key storage class"));
+            }
+        }
+        Ok(Self::of(table, cells))
+    }
+
     pub(crate) fn cells(&self) -> Vec<Cell> {
         match self {
             RowKey::Id(id) => vec![Cell::Integer(*id)],
