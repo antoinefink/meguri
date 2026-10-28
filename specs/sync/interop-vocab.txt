@@ -91,3 +91,8 @@ idx_decks_name
 idx_notetypes_name
 _deck_
 _nt_
+# Damaged tracking initial-move interface (V8.1, 2026-10-28)
+meguri-cloud.db.damaged-YYYY-MM-DD-HH.MM.SS.moving
+cloud.tracking.move.after_journal
+cloud.tracking.move.after_wal
+cloud.tracking.move.after_main
