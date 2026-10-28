@@ -259,3 +259,9 @@ actual image builder, P24, shared fake coverage and complete U113 remain open.
 scan. Its only two Clippy findings are documentation indentation in the
 separate fake service; the codec has no lint finding. That repair and the
 shared tree's final lint remain pending. No full integration gate is claimed.
+
+Standalone codec closure on clean `a71284f7`:
+`core-lint/20261028T040241Z-52902` passes all four checks;
+`static-checks/20261028T040240Z-52668` passes. The unfinished fake source was
+preserved outside the checkout for its filtered repair during these checks.
+No codec source changed. U113 and the original integration gate remain open.
