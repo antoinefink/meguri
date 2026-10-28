@@ -11,7 +11,7 @@ use meguri_model::col::Col;
 use meguri_model::ids::{CardId, RevlogId};
 use meguri_model::revlog::RevlogEntry;
 use meguri_storage::derived::CollectionMark;
-use meguri_storage::journal::{Entry, Journal};
+use meguri_storage::journal::{After, Entry, Journal, NoteDigest};
 use meguri_storage::{Record, RowImage, RowKey, StorageError, Table};
 
 use crate::changes::stream::Seq;
@@ -58,6 +58,55 @@ pub struct ConfigDelta {
     pub after: Option<Vec<u8>>,
 }
 
+/// A changed row's stored after-image, or the journal's compact note metadata.
+#[derive(Clone, PartialEq)]
+pub enum RowAfter {
+    Absent,
+    Row(RowImage),
+    NoteDigest(NoteDigest),
+}
+
+impl std::fmt::Debug for RowAfter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Absent => "RowAfter::Absent",
+            Self::Row(_) => "RowAfter::Row",
+            Self::NoteDigest(_) => "RowAfter::NoteDigest",
+        })
+    }
+}
+
+/// One changed row in stored column order, without model coercion.
+/// `before: None` and `after: RowAfter::Absent` mean the row did not exist
+/// on the corresponding side. Notes retain the journal's digest after-image.
+#[derive(Clone, PartialEq)]
+pub struct RowDelta {
+    pub table: Table,
+    /// The journal's original key, including for a case-equivalent tag lookup.
+    pub key: RowKey,
+    pub before: Option<RowImage>,
+    pub after: RowAfter,
+}
+
+impl std::fmt::Debug for RowDelta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RowDelta")
+    }
+}
+
+fn row_delta(journal: &Journal, entry: &Entry) -> Result<RowDelta, StorageError> {
+    Ok(RowDelta {
+        table: entry.table(),
+        key: entry.key().clone(),
+        before: journal.before(entry)?,
+        after: match entry.after() {
+            After::Absent => RowAfter::Absent,
+            After::Note(digest) => RowAfter::NoteDigest(*digest),
+            After::Row(_) | After::Spilled { .. } => journal.after(entry)?.map_or(RowAfter::Absent, RowAfter::Row),
+        },
+    })
+}
+
 /// Owned immutable capability for one commit. It contains no collection reader
 /// or decoded cache. Keys can be enumerated and handles cloned without I/O;
 /// each independent keyed read decodes at most that row on each side.
@@ -101,6 +150,37 @@ impl CommitPayload {
             .iter()
             .flat_map(|j| j.entries())
             .filter(move |e| e.table() == table && (e.existed_before() || e.exists_after()))
+    }
+
+    /// Changed keys in journal order, without reading images. External
+    /// invalidations without a journal have no keys or row deltas.
+    pub fn row_keys(&self, table: Table) -> impl Iterator<Item = &RowKey> {
+        self.entries(table).map(Entry::key)
+    }
+
+    /// Reads only this key's stored sides. `None` means no journalled change;
+    /// keys use the table's collation. Note after-images expose the journal's
+    /// digest and changed columns. Image read failures return a storage error.
+    pub fn row(&self, table: Table, key: &RowKey) -> Result<Option<RowDelta>, StorageError> {
+        let Some(journal) = &self.journal else { return Ok(None) };
+        let Some(entry) = journal.entry(table, key) else {
+            return Ok(None);
+        };
+        if !entry.existed_before() && !entry.exists_after() {
+            return Ok(None);
+        }
+        row_delta(journal, entry).map(Some)
+    }
+
+    /// Reads each visited entry directly, retaining only its row delta.
+    /// Errors are yielded at the affected entry; unvisited images are not read.
+    pub fn rows(&self, table: Table) -> impl Iterator<Item = Result<RowDelta, StorageError>> + '_ {
+        self.journal.iter().flat_map(move |journal| {
+            journal
+                .entries()
+                .filter(move |e| e.table() == table && (e.existed_before() || e.exists_after()))
+                .map(move |entry| row_delta(journal, entry))
+        })
     }
 
     /// Every changed card key, in journal order, without reading any images.

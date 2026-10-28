@@ -265,3 +265,41 @@ Standalone codec closure on clean `a71284f7`:
 `static-checks/20261028T040240Z-52668` passes. The unfinished fake source was
 preserved outside the checkout for its filtered repair during these checks.
 No codec source changed. U113 and the original integration gate remain open.
+
+## Same-commit generic row access
+
+Starting commit: `2c3c32e2`; recorded before work in
+`build/unit-intake/U113-cloudkit/commit-row-access/start.json`.
+Filtered author `20261028T040800Z-55382` adds image-free key enumeration,
+keyed row access and direct lazy delta iteration to the owned journal handle.
+
+Review 1 found P1 `NOTE-ROW-DIGEST-ACCESS`: asking the journal for a full note
+after-image returned Mode and hid both its before-image and digest. Filtered
+repair `20261028T041723Z-60473` exposes `RowAfter::{Absent,Row,NoteDigest}`.
+Notes keep the existing journal digest and changed columns; other rows keep
+fallible image access. It stores no new note image and makes no CloudKit hash
+claim. Independent review 2 is clear.
+
+`core-test/20261028T042143Z-65248`: nine passed, one fixture failed. Its alias
+lookup expected the changed tag spelling as the journal key. The journal
+retains the original key; independent review confirmed the test correction.
+The first small fixer (`20261028T042359Z-67134`) did not start: main changed
+during source preparation. No code or test ran in that attempt. The combined
+filtered repair `20261028T042650Z-69659` corrects only that expectation and
+removes the flagged generic test comment. Independent equivalence review is
+clear. Source preparation is now kept stable through the boundary probes.
+
+- `core-test/20261028T042812Z-71131`: ten observer tests and seventeen
+  separate fake-service tests passed; zero skipped. Includes real note
+  add/edit/delete, raw before-images/digests, composite keys, aliases,
+  failures and retained reads after later commits and close.
+- `private/20261028T042813Z-71353`: all nine inputs clear.
+- `similarity/20261028T042813Z-71357`: supported source clear.
+- `core-lint/20261028T042253Z-66417`: all four checks pass for the accessor.
+  The final shared run `20261028T042914Z-72246` has only three fake-service
+  lint findings; formatting, layering and host scan pass.
+- `static-checks/20261028T042915Z-72485`: pass.
+
+Writer fallback for a note's CloudKit digest, the tracking observer/failure
+hook, CloudIncoming/Rekey, structure reports and the 150k consumer allocation
+proof remain open. This accessor does not accept full S2.4 or U113.
