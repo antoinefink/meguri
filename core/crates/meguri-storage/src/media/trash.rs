@@ -392,12 +392,12 @@ impl MediaStore {
             .map_err(|_| MediaError::Database("media intent mutex poisoned".into()))?;
         for entry in fs::read_dir(self.trash_dir())? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() && receipt_directory(&entry.path())?.is_some() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if safe_component(name) {
-                        pending.insert(name.to_owned());
-                    }
-                }
+            if entry.file_type()?.is_dir()
+                && receipt_directory(&entry.path())?.is_some()
+                && let Some(name) = entry.file_name().to_str()
+                && safe_component(name)
+            {
+                pending.insert(name.to_owned());
             }
         }
         Ok(())

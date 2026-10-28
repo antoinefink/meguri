@@ -672,11 +672,10 @@ fn media_feed_move_before_observation_and_sql_failure_recover_removed_once() {
             .unwrap(),
             before[0].change_counter
         );
-        assert_eq!(
-            db.query_row("SELECT explicit_removal FROM media WHERE name='a.png'", [], |r| r
+        assert!(
+            !db.query_row("SELECT explicit_removal FROM media WHERE name='a.png'", [], |r| r
                 .get::<_, bool>(0))
-                .unwrap(),
-            false
+                .unwrap()
         );
         if sql_failure {
             db.execute_batch("DROP TRIGGER reject_observation").unwrap();

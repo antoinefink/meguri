@@ -115,3 +115,10 @@ Receipts:
 
 This WIP is not accepted. Resolve lint, retain final checks and finish the
 CloudKit dependencies above. The original pending integration base is unchanged.
+
+Lint follow-up: filtered `20261028T014817Z-78054` and
+`20261028T015143Z-81194` keep the same guard order and boolean test condition.
+Both small changes are independently clear. `core-lint/20261028T015244Z-82045`
+passes all four checks. `similarity/20261028T015041Z-80553` clears the final
+production file. No runtime operation changed; the 130-test receipt is retained.
+The complete U113, integration and release checks remain open.
