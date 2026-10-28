@@ -281,7 +281,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
         }
         Control::Flush => {
             if let Some(collection) = env.collection.as_ref() {
-                collection.writer().sync_wal()?;
+                env.shared.coverage.sync(env.shared, collection.writer())?;
                 crate::session::wal_covered(env.shared)?;
             }
         }
@@ -292,8 +292,10 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
             {
                 let result = collection
                     .writer()
-                    .checkpoint_with_timeout(deadline.saturating_sub(monotonic::now()))?;
+                    .checkpoint_with_timeout(deadline.saturating_sub(monotonic::now()))
+                    .inspect_err(|_| env.shared.coverage.failed())?;
                 if !result.succeeded() {
+                    env.shared.coverage.failed();
                     return Err(EngineError::unavailable("checkpoint blocked by an external reader"));
                 }
             }
@@ -325,6 +327,10 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
                 reply.external_change = changed_file || collection.external_change;
                 *env.external_version = Some(collection.writer().external_data_version()?);
                 *env.collection = Some(collection);
+                crate::executor::writer::initialize_coverage(
+                    env.shared,
+                    env.collection.as_ref().expect("resumed writer"),
+                );
             } else if let Some(collection) = env.collection.as_ref() {
                 let version = collection.writer().external_data_version()?;
                 reply.external_change = env.external_version.is_some_and(|v| v != version);

@@ -220,7 +220,11 @@ impl OpenedCollection {
     /// Ordinary C10, after readers close: checkpoint, mark clean when covered,
     /// then restore SQLite's normal last-close WAL/SHM cleanup.
     pub fn close(self) -> Result<CheckpointOutcome, StorageError> {
-        let outcome = self.writer.checkpoint();
+        let outcome = self.writer.validate_native_identity().and_then(|_| {
+            let outcome = self.writer.checkpoint()?;
+            self.writer.validate_native_identity()?;
+            Ok(outcome)
+        });
         if self.managed && outcome.as_ref().is_ok_and(|o| o.succeeded()) {
             self.save_sidecar(true)?;
         }

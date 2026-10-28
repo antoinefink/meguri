@@ -199,6 +199,8 @@ pub enum ReaderRole {
     Search,
     /// Normal and one-way sync snapshots, `VACUUM INTO` for a full upload.
     Sync,
+    /// CloudKit snapshots and scans; independent of manual sync and backups.
+    Cloud,
     /// Maintenance, backups (`VACUUM INTO`), stats cache builds, derived
     /// rebuilds.
     Maintenance,
@@ -207,11 +209,12 @@ pub enum ReaderRole {
 }
 
 impl ReaderRole {
-    pub const ALL: [ReaderRole; 6] = [
+    pub const ALL: [ReaderRole; 7] = [
         ReaderRole::Interactive,
         ReaderRole::Query,
         ReaderRole::Search,
         ReaderRole::Sync,
+        ReaderRole::Cloud,
         ReaderRole::Maintenance,
         ReaderRole::Server,
     ];
@@ -230,6 +233,7 @@ pub struct Reader {
     pub(crate) conn: Connection,
     _recovery_copy: Option<tempfile::TempDir>,
     role: ReaderRole,
+    native_identity: (u64, u64),
     /// The epoch of the derived store attached as `derived`
     /// (`storage/derived-store` D9).
     pub(crate) derived: Option<u64>,
@@ -300,15 +304,26 @@ impl Reader {
         initializers: &Initializers,
         query: &str,
     ) -> Result<Reader, StorageError> {
+        use std::os::unix::fs::MetadataExt;
+        let before = std::fs::metadata(path)?;
+        let native_identity = (before.dev(), before.ino());
         let conn = Connection::open_with_flags(file_uri(path, Some(query)), READ_ONLY)?;
+        validate_identity(&conn, path, native_identity)?;
         conn_init::full(&conn, initializers).map_err(|detail| StorageError::ConnectionInit { detail })?;
         pragmas::reader(&conn, role.query_only())?;
         Ok(Reader {
             conn,
             _recovery_copy: None,
             role,
+            native_identity,
             derived: None,
         })
+    }
+
+    /// Identity checked against SQLite at open; no extra descriptor may be
+    /// closed here while the writer holds POSIX locks on this file.
+    pub fn native_identity(&self) -> (u64, u64) {
+        self.native_identity
     }
 
     pub fn role(&self) -> ReaderRole {
@@ -368,6 +383,30 @@ fn recovery_copy(path: &Path) -> Result<tempfile::TempDir, StorageError> {
         }
     }
     Ok(copy)
+}
+
+/// Checks SQLite's live main file as well as the pathname, without opening
+/// another descriptor (whose close would release this process's POSIX locks).
+pub(crate) fn validate_identity(conn: &Connection, path: &Path, expected: (u64, u64)) -> Result<(), StorageError> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path)?;
+    let mut moved: std::ffi::c_int = -1;
+    // SAFETY: the connection is live on its owning thread and the output int
+    // remains valid throughout this non-retaining SQLite call.
+    let code = unsafe {
+        rusqlite::ffi::sqlite3_file_control(
+            conn.handle(),
+            c"main".as_ptr(),
+            rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
+            std::ptr::from_mut(&mut moved).cast(),
+        )
+    };
+    if (metadata.dev(), metadata.ino()) != expected || code != rusqlite::ffi::SQLITE_OK || moved != 0 {
+        return Err(StorageError::Io {
+            detail: "collection file identity changed".into(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

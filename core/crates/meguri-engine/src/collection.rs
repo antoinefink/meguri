@@ -77,6 +77,28 @@ impl Collection {
         self.core.exec.wait_queued_op(name);
     }
 
+    /// Arms `fail_sync_after_commit` for the next commit.
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_wal_sync_after_next_commit_for_testing(&self) {
+        self.core
+            .exec
+            .fail_sync_after_commit
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Postpones only this collection's automatic WAL flushes. Explicit
+    /// background flush and close still perform their real sync/checkpoint.
+    #[cfg(feature = "test-hooks")]
+    pub fn pause_automatic_wal_flush_for_testing(&self, paused: bool) {
+        self.core.exec.pause_automatic_wal_flush(paused);
+    }
+
+    /// Signals once a coverage waiter is registered, without callbacks.
+    #[cfg(feature = "test-hooks")]
+    pub fn notify_next_wal_wait_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+        self.core.exec.coverage.notify_next_wait(sender);
+    }
+
     /// Runs once after this collection's next op publishes its committed
     /// seq, with no commit lock held, before day invalidation or observers.
     #[cfg(feature = "test-hooks")]
@@ -140,6 +162,21 @@ impl Collection {
     /// The seq of the last committed op.
     pub fn last_seq(&self) -> Seq {
         self.core.exec.last_seq()
+    }
+
+    /// Wait off the writer for actual durable coverage of a snapshot's seq.
+    /// Compare the receipt identity with the snapshot before persisting facts.
+    /// This observes the existing flush schedule; it queues no writer work.
+    pub fn wait_wal_covered(
+        &self,
+        identity: crate::WalIdentity,
+        seq: Seq,
+        timeout: Duration,
+    ) -> Result<crate::WalCoverage, EngineError> {
+        self.core
+            .exec
+            .coverage
+            .wait(&self.core.exec, self.generation, identity, seq, timeout)
     }
 
     /// The declared long write or maintenance task the writer runs now
@@ -232,6 +269,11 @@ impl Collection {
         index: usize,
         require_admission: bool,
     ) -> Result<ReaderLease<'_>, EngineError> {
+        if role == ReaderRole::Cloud && crate::executor::writer::on_writer_thread() {
+            return Err(EngineError::InvalidArgument {
+                message: "the Cloud reader must be leased off the writer".into(),
+            });
+        }
         #[cfg(test)]
         tests::before_lease();
         let mut guard = self.core.readers.lease(role, index, || {

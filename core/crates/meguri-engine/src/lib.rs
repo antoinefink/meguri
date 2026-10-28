@@ -85,3 +85,6 @@ pub use undo::{UndoScope, UndoStatus};
 
 pub use ports::DiskSpaceProvider;
 pub use suspend::{ResumeReport, SuspendOutcome};
+
+mod wal_coverage;
+pub use wal_coverage::{WalCoverage, WalIdentity, WalReceipt};

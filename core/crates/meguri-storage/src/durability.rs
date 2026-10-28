@@ -7,6 +7,17 @@ use rusqlite::ffi;
 use crate::{StorageError, Writer};
 
 impl Writer {
+    /// Refuse durability attribution after the pathname or SQLite main file
+    /// changed. The retained descriptor alone cannot validate a pathname.
+    pub fn validate_native_identity(&self) -> Result<(u64, u64), StorageError> {
+        let identity = self.native_identity()?;
+        let path = self.conn.path().ok_or_else(|| StorageError::Io {
+            detail: "collection connection has no main file".into(),
+        })?;
+        crate::connections::validate_identity(&self.conn, std::path::Path::new(path), identity)?;
+        Ok(identity)
+    }
+
     /// External commits only, unlike SQLITE_FCNTL_DATA_VERSION.
     pub fn external_data_version(&self) -> Result<i64, StorageError> {
         self.conn

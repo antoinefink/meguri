@@ -51,3 +51,5 @@
 - T6 safety admission: plan effect reasons read-only with `OpSpec::schema_changes`; `plan_and_commit` retains one guarded backup across Stale. Mutating preparation (including rollover) must follow admission. Keep the guard through the terminal result. Reuse evidence is opening-local in undo, never inferred from `col.mod`, `peek_undo` or the persisted last-backup instant.
 
 - Recorded-corrupt owners keep the writer executor but no SQLite writer. Diagnostic readers use `ReaderFactory::recovery`; failed probing never discards ownership. A refused preactivation replacement must retain that state without a managed reopen.
+
+- `ReaderLease` is thread-bound; call `wait_wal_covered` after the snapshot.

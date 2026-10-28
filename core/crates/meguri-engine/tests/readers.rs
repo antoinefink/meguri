@@ -193,3 +193,75 @@ fn a_sync_snapshot_never_delays_search_stats_or_backups_and_interactive_reads_st
         "the sync's snapshot held throughout"
     );
 }
+
+#[test]
+fn cloud_has_an_independent_query_only_reader_and_releases_it_for_suspend() {
+    let h = Harness::open();
+    let sync = h.collection.reader(ReaderRole::Sync).unwrap();
+    let backup = h.collection.backup_reader().unwrap();
+    let cloud = h.collection.reader(ReaderRole::Cloud).unwrap();
+    assert_eq!(cloud.role(), ReaderRole::Cloud);
+    assert_eq!(
+        cloud.execute_raw("PRAGMA query_only", &[]).unwrap().rows[0][0],
+        SqlValue::Integer(1)
+    );
+    assert!(
+        cloud
+            .execute_raw("CREATE TEMP TABLE cloud_must_not_write(x)", &[])
+            .is_err()
+    );
+    assert!(cloud.execute_raw("UPDATE col SET mod = mod + 1", &[]).is_err());
+    let snapshot = cloud.snapshot().unwrap();
+    assert_eq!(snapshot.wal_identity().generation(), h.collection.generation());
+    drop(snapshot);
+    drop((cloud, sync, backup));
+    h.engine.suspend(Duration::from_secs(2)).unwrap();
+    assert!(h.collection.reader(ReaderRole::Cloud).is_err());
+    h.engine.resume().unwrap();
+    assert_eq!(
+        h.collection.reader(ReaderRole::Cloud).unwrap().role(),
+        ReaderRole::Cloud
+    );
+}
+
+#[test]
+fn cloud_reader_opens_lazily_once_without_warming_other_roles_and_never_leases_on_writer() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let h = Harness::open();
+    h.engine.close().unwrap();
+    let opens = Arc::new(AtomicUsize::new(0));
+    let mut initializers = meguri_storage::Initializers::new();
+    let count = opens.clone();
+    initializers.register(move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    let collection = h
+        .engine
+        .open_raw(&h.path, common::open_config(&h.clock).initializers(initializers))
+        .unwrap();
+    let baseline = opens.load(Ordering::SeqCst);
+    let sync = collection.reader(ReaderRole::Sync).unwrap();
+    let backup = collection.backup_reader().unwrap();
+    assert_eq!(opens.load(Ordering::SeqCst), baseline + 2);
+    let cloud = collection.reader(ReaderRole::Cloud).unwrap();
+    assert_eq!(opens.load(Ordering::SeqCst), baseline + 3);
+    let current = collection.clone();
+    collection
+        .run(meguri_engine::OpSpec::named("no_op", OpSource::Rollover), move |_| {
+            assert!(matches!(
+                current.reader(ReaderRole::Cloud),
+                Err(EngineError::InvalidArgument { .. })
+            ));
+            Ok(())
+        })
+        .unwrap();
+    drop(cloud);
+    drop(collection.reader(ReaderRole::Cloud).unwrap());
+    assert_eq!(opens.load(Ordering::SeqCst), baseline + 3);
+    drop((sync, backup));
+    h.engine.close().unwrap();
+}

@@ -164,6 +164,7 @@ impl<'a> ReaderLease<'a> {
             inner,
             seq,
             generation: self.generation,
+            wal_identity: crate::WalIdentity::new(self.generation, self.reader().native_identity()),
         })
     }
 
@@ -215,9 +216,16 @@ pub struct Snapshot<'a> {
     inner: ReadSnapshot<'a>,
     seq: Seq,
     generation: Generation,
+    wal_identity: crate::WalIdentity,
 }
 
 impl Snapshot<'_> {
+    /// Physical file checked when this role's connection opened, paired with
+    /// the generation protected by the lease. This is not a durability receipt.
+    pub fn wal_identity(&self) -> crate::WalIdentity {
+        self.wal_identity
+    }
+
     /// The seq of the last commit the snapshot sees: the `since` of its
     /// preconditions (O7).
     pub fn seq(&self) -> Seq {

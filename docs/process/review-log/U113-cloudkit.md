@@ -154,3 +154,54 @@ F3 sync-failure/power-loss runs and U117/U250 evidence remain open; file-layout
 simulations do not supply that proof. Production exclusive ownership across
 all builds remains unwired. Conflict-list and bulk-recovery memory checks also
 remain part of full integration. No Unit or release acceptance is claimed.
+
+## Cloud reader and WAL coverage dependency
+
+Starting commit: `bac351fd`; recorded before work in
+`build/unit-intake/U113-cloudkit/wal-reader-start.json`.
+
+The Cloud reader is lazy, independent and query-only. Snapshots carry native
+file identity and collection generation. A bounded off-writer wait returns
+coverage only after actual WAL sync or a successful close checkpoint. It
+neither starts sync nor calls providers under engine locks. Reopen and replace
+cannot transfer an old receipt. The owned snapshot handoff remains unfinished.
+
+Filtered author `20261028T020809Z-88840`. Source review 1 was clear.
+`core-test/20261028T023645Z-3573` stopped at a private test helper call.
+Filtered repair `20261028T024018Z-5363` uses the public error conversion.
+`core-test/20261028T024430Z-7573`: 34 passed, two failed.
+
+The close fixture held an external reader but expected close success. The
+corrected fixture requires the exact checkpoint refusal, wakes the waiter as
+unavailable, releases that reader, then closes and reopens successfully.
+The two-case diagnostic run `20261028T030046Z-14926` proved this repair and
+retained the no-op failure. Temporary diagnostics were removed afterward.
+
+P1 `WAL-NOOP-TOKEN-COVERAGE`: SQLite's own-commit counter changed after a
+successful operation with no changed rows. Filtered repair
+`20261028T031229Z-19193` rebases that counter only against healthy, clean prior
+coverage with matching pre-commit counter, file identity and generation.
+Prior dirty or unsequenced writes remain uncovered. Two deterministic tests
+pause automatic flushes through a collection-scoped test hook; explicit sync
+remains real. Both verify those prior writes cannot be covered by a no-op.
+Independent review 3 is clear.
+
+Final mechanical repairs remove a flagged generic test comment and move
+`validate_identity` verbatim before its test module
+(`cleanroom/20261028T033329Z-30387`). Independent delta review is clear.
+No assertions, limits, privacy exceptions or runtime operations changed.
+
+- `core-test/20261028T033139Z-28457`: 38 passed, zero skipped.
+- `core-lint/20261028T033222Z-29376`: retained declaration-order failure.
+- `core-lint/20261028T033442Z-31854`: all four checks pass.
+- `similarity/20261028T033139Z-28604`: twelve supported files clear;
+  `20261028T033442Z-31646`: both final files clear.
+- `private/20261028T033139Z-28274`: retained comment finding;
+  `20261028T033443Z-32053`: final two files clear; the other eleven were
+  clear in the earlier scan.
+
+`native-durability/20261028T033543Z-32800`: 76 passed, zero skipped.
+This single native run covers the WAL slice and V8 recovery above, including
+actual Apple connection settings and process-death boundaries. It does not
+supply exhaustive power-loss evidence or accept U113, P24/Q11, integration
+gates or the release.

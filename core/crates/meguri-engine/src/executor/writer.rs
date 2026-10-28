@@ -108,6 +108,11 @@ pub(crate) fn run(
     let mut suspended_file = None;
     let mut collection = collection;
     let mut touched = TouchIndex::new(floor);
+    if let Some(opened) = collection.as_ref() {
+        initialize_coverage(&shared, opened);
+    } else {
+        shared.coverage.failed();
+    }
     if external_at_open && let Some(opened) = &collection {
         let _ = crate::external_change::notify(&shared, opened.writer(), &mut touched);
     }
@@ -156,6 +161,7 @@ pub(crate) fn run(
                 let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.run(&mut env, &meta)));
                 if let Err(payload) = ran {
                     let message = crate::error::panic_message(payload.as_ref());
+                    shared.coverage.failed();
                     tracing::error!(task = meta.name, %message, "a writer task panicked");
                 }
             }
@@ -175,12 +181,33 @@ pub(crate) fn close_owned_collection(
     shared: &ExecShared,
     opened: OpenedCollection,
 ) -> Result<Option<meguri_storage::CheckpointOutcome>, meguri_storage::StorageError> {
-    if shared.corrupt.load(Ordering::Acquire) {
-        opened.close_preserving_recovery()?;
-        Ok(None)
+    let identity = opened
+        .writer()
+        .native_identity()
+        .ok()
+        .map(|native| crate::WalIdentity::new(shared.generation(), native));
+    let result = if shared.corrupt.load(Ordering::Acquire) {
+        opened.close_preserving_recovery().map(|()| None)
     } else {
-        let checkpoint = opened.close()?;
-        Ok(Some(checkpoint))
+        opened.close().map(Some)
+    };
+    shared.coverage.closed(
+        shared,
+        identity,
+        result.as_ref().is_ok_and(|o| o.is_some_and(|c| c.succeeded())),
+    );
+    result
+}
+
+/// Every new writer first covers any surviving WAL, before its first op.
+/// Failure stays visible to waiters and the ordinary automatic retry path.
+pub(crate) fn initialize_coverage(shared: &ExecShared, opened: &OpenedCollection) {
+    match shared.coverage.opened(shared, opened.writer()) {
+        Ok(()) => WalFlush::default().sync_inner(shared, Some(opened), false),
+        Err(error) => {
+            shared.coverage.failed();
+            tracing::error!(%error, "initializing WAL coverage");
+        }
     }
 }
 
@@ -225,11 +252,16 @@ impl WalFlush {
                 let version = (shared.generation(), version);
                 if self.version != Some(version) {
                     // Also covers commits made by the open gate or maintenance.
-                    self.due.get_or_insert_with(|| monotonic::now() + WAL_FLUSH_DELAY);
+                    if shared.coverage.is_synced_version(version.1) {
+                        self.due = None;
+                    } else {
+                        self.due.get_or_insert_with(|| monotonic::now() + WAL_FLUSH_DELAY);
+                    }
                     self.version = Some(version);
                 }
             }
             Err(error) => {
+                shared.coverage.failed();
                 tracing::error!(%error, "reading the writer's WAL durability token");
                 self.due.get_or_insert_with(|| monotonic::now() + WAL_FLUSH_RETRY);
             }
@@ -237,6 +269,14 @@ impl WalFlush {
     }
 
     fn sync(&mut self, shared: &ExecShared, collection: Option<&OpenedCollection>) {
+        #[cfg(feature = "test-hooks")]
+        if shared.automatic_wal_flush_paused() {
+            return;
+        }
+        self.sync_inner(shared, collection, true);
+    }
+
+    fn sync_inner(&mut self, shared: &ExecShared, collection: Option<&OpenedCollection>, retire_review: bool) {
         let Some(collection) = collection else {
             *self = Self::default();
             return;
@@ -245,14 +285,12 @@ impl WalFlush {
         // successful call advances coverage; a failure keeps every commit due.
         #[cfg(feature = "test-hooks")]
         let (started, through) = (monotonic::now(), shared.last_seq());
-        let result = collection
-            .writer()
-            .sync_wal()
-            .map_err(EngineError::from)
-            .and_then(|synced| {
+        let result = shared.coverage.sync(shared, collection.writer()).and_then(|synced| {
+            if retire_review {
                 crate::session::wal_covered(shared)?;
-                Ok(synced)
-            });
+            }
+            Ok(synced)
+        });
         #[cfg(feature = "test-hooks")]
         if !matches!(result, Ok(false)) {
             let completed = monotonic::now();
@@ -389,6 +427,7 @@ fn run_op<T>(
     if spec.source == OpSource::UserUndoable && spec.undo.session.is_none() {
         spec.undo.session = *shared.active_session.lock().unwrap();
     }
+    let pre_commit_version = collection.writer().data_version().ok();
     let mut scope = collection.writer().begin_write(
         spec.stamp_mode(),
         spec.recorded_clock.as_deref().unwrap_or(shared.clock.as_ref()),
@@ -490,16 +529,37 @@ fn run_op<T>(
             scope.rollback()?;
             return Err(EngineError::CollectionCorrupt);
         }
+        shared.coverage.commit_started();
         let committed = scope.commit_with(|journal, col_mod| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 changes::prepare(journal, spec.source, media, col_mod.is_some())
             }))
             .map_err(|payload| EngineError::from_panic(payload.as_ref()))?
             .map_err(EngineError::from)
-        })?;
+        });
+        let committed = match committed {
+            Ok(committed) => committed,
+            Err(error) => {
+                shared
+                    .coverage
+                    .commit_finished(shared, collection.writer(), None, pre_commit_version, None);
+                return Err(error);
+            }
+        };
         shared.undo.safety_commit_pending();
         let reservation = shared.stream.reserve();
         *last = reservation.seq();
+        shared.coverage.commit_finished(
+            shared,
+            collection.writer(),
+            Some(*last),
+            pre_commit_version,
+            Some(&committed.0),
+        );
+        #[cfg(feature = "test-hooks")]
+        if shared.fail_sync_after_commit.swap(false, Ordering::AcqRel) {
+            collection.writer().fail_next_wal_sync_for_test();
+        }
         (committed, reservation)
     };
     let seq = reservation.seq();
@@ -723,8 +783,14 @@ where
                 let _delay = meta
                     .declared
                     .map(|declared| DelayGuard::start(env.shared, meta.name, declared));
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(collection.writer())))
-                    .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())))
+                {
+                    let _commit = env.shared.lock_commit();
+                    env.shared.coverage.maintenance_started();
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(collection.writer())))
+                    .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
+                env.shared.coverage.maintenance_finished(collection.writer());
+                result
             }
         };
         let _ = reply.send(result);
@@ -915,6 +981,7 @@ impl TaskBody for ReplaceTask {
                 if replacing {
                     shared.corrupt.store(false, Ordering::Release);
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
+                    initialize_coverage(shared, env.collection.as_ref().expect("reopened writer"));
                     let announce = shared.stream.reserve();
                     match first_day_check(env) {
                         Ok(()) => Replaced {
@@ -952,6 +1019,7 @@ impl TaskBody for ReplaceTask {
                         }
                     }
                 } else {
+                    initialize_coverage(shared, env.collection.as_ref().expect("reopened writer"));
                     Replaced {
                         reopened: true,
                         error: swapped.err(),

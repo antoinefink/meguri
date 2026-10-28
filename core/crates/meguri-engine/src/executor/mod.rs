@@ -39,6 +39,7 @@ type AfterCommitHook = Box<dyn FnOnce(Seq) + Send>;
 
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    pub(crate) coverage: crate::wal_coverage::Coverage,
     pub(crate) review_journal: Mutex<Option<std::sync::Weak<crate::session::journal::Journal>>>,
     pub(crate) replaying_review: std::sync::atomic::AtomicBool,
     pub(crate) review_accepting: std::sync::atomic::AtomicBool,
@@ -46,6 +47,8 @@ pub(crate) struct ExecShared {
     pub(crate) answer_caches: crate::sched::answer::AnswerCaches,
     #[cfg(feature = "test-hooks")]
     pub(crate) after_commit: Mutex<Option<AfterCommitHook>>,
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fail_sync_after_commit: std::sync::atomic::AtomicBool,
     /// WAL syncs and write phases, recorded only after a test asks
     /// (`Collection::record_durability_events`), so long runs with test hooks
     /// on (benches, fault loops) keep no growing log.
@@ -76,6 +79,8 @@ pub(crate) struct ExecShared {
 }
 
 struct QueueState {
+    #[cfg(feature = "test-hooks")]
+    automatic_wal_flush_paused: bool,
     admitted: u64,
     queues: Queues,
     parked: Vec<Task>,
@@ -101,6 +106,7 @@ impl ExecShared {
         last_seq: Seq,
     ) -> ExecShared {
         ExecShared {
+            coverage: Default::default(),
             answer_caches: Default::default(),
             review_journal: Mutex::default(),
             active_session: Mutex::default(),
@@ -109,8 +115,12 @@ impl ExecShared {
             #[cfg(feature = "test-hooks")]
             after_commit: Mutex::default(),
             #[cfg(feature = "test-hooks")]
+            fail_sync_after_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "test-hooks")]
             durability_events: Mutex::default(),
             queue: Mutex::new(QueueState {
+                #[cfg(feature = "test-hooks")]
+                automatic_wal_flush_paused: false,
                 admitted: 0,
                 queues: Queues::default(),
                 parked: Vec::new(),
@@ -157,6 +167,18 @@ impl ExecShared {
 
     fn lock_queue(&self) -> MutexGuard<'_, QueueState> {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn pause_automatic_wal_flush(&self, paused: bool) {
+        let mut queue = self.lock_queue();
+        queue.automatic_wal_flush_paused = paused;
+        self.wake.notify_one();
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn automatic_wal_flush_paused(&self) -> bool {
+        self.lock_queue().automatic_wal_flush_paused
     }
 
     pub(crate) fn lock_commit(&self) -> MutexGuard<'_, Seq> {
@@ -322,6 +344,8 @@ impl ExecShared {
         let mut queue = self.lock_queue();
         loop {
             let wait = flush_at.map(|at| at.saturating_sub(crate::monotonic::now()));
+            #[cfg(feature = "test-hooks")]
+            let wait = if queue.automatic_wal_flush_paused { None } else { wait };
             if wait == Some(Duration::ZERO) {
                 return WriterWake::Flush;
             }
