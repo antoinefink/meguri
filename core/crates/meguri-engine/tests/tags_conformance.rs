@@ -45,12 +45,12 @@ use meguri_model::usn::Usn;
 use meguri_storage::raw::{RawRows, SqlValue};
 use meguri_storage::{ReadRows, ReaderRole};
 use meguri_testkit::diff::{self, CompareOptions};
-use meguri_testkit::exec::{db_dump_table, db_exec_rows, tag_tree_value};
+use meguri_testkit::exec::{Executor, MeguriExecutor, db_dump_table, db_exec_rows, tag_tree_value};
 use meguri_testkit::scenario::{
     self, EditNoteArgs, Fields, LoadedScenario, LogicalRef, NoteSpec, ObservationArgs, ObservationKind,
     ObservationRequest, RefKind, SqlParam, Step,
 };
-use meguri_testkit::suite::Suite;
+use meguri_testkit::suite::{Status, Suite};
 use meguri_text::checksum::{note_checksum, sort_text_of};
 use meguri_text::field_empty::counts_as_empty;
 use meguri_text::normalize::field_as_saved;
@@ -601,30 +601,83 @@ fn tree_structure() {
     play("tree/structure");
 }
 
-/// No tags scenario goes unplayed: each has its test above.
+/// Every tags scenario has a play test above or explicit prepared pending coverage.
+/// Pending completion cases are not parity passes or U84 acceptance.
 #[test]
-fn every_tags_scenario_is_played_here() {
+fn every_tags_scenario_has_play_or_explicit_pending_coverage() {
+    let played: [&str; 19] = [
+        "bulk/add",
+        "bulk/remove",
+        "canon/normalize",
+        "canon/spelling",
+        "clear-unused/parents",
+        "collapse/set",
+        "delete/children",
+        "flags/set",
+        "marked/mark",
+        "rename/basic",
+        "rename/case-only",
+        "rename/existing-spelling",
+        "rename/implicit-parent",
+        "rename/new-casing",
+        "rename/refused",
+        "rename/rows",
+        "reparent/existing-spelling",
+        "reparent/rules",
+        "tree/structure",
+    ];
+    // Only these five prepared cases await the tag_complete adapter (U84).
+    let pending: [&str; 5] = [
+        "complete/components",
+        "complete/folding",
+        "complete/order-limit",
+        "complete/registry",
+        "complete/separators",
+    ];
+    let suite = Suite::open(&conformance()).unwrap();
+    let files = suite.discover(&["tags".to_owned()]).unwrap();
+    let mut expected: Vec<String> = played
+        .iter()
+        .chain(&pending)
+        .map(|name| format!("tags/{name}"))
+        .collect();
+    expected.sort();
+    let names: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
+    assert_eq!(names, expected, "the exact 24 tags scenario IDs");
+
     let this =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tags_conformance.rs")).unwrap();
-    let root = conformance().join("scenarios/tags");
-    let mut names = Vec::new();
-    for area in std::fs::read_dir(&root).unwrap() {
-        let area = area.unwrap().path();
-        if !area.is_dir() {
-            continue;
-        }
-        for file in std::fs::read_dir(&area).unwrap() {
-            let file = file.unwrap().path();
-            if let Some(stem) = file.file_stem().and_then(|s| s.to_str())
-                && file.extension().is_some_and(|e| e == "yaml")
-            {
-                names.push(format!("{}/{stem}", area.file_name().unwrap().to_str().unwrap()));
-            }
-        }
-    }
-    names.sort();
-    assert_eq!(names.len(), 19, "{names:?}");
-    for name in names {
+    for name in played {
         assert!(this.contains(&format!("play(\"{name}\")")), "tags/{name} is not played");
+    }
+
+    let executor = MeguriExecutor::default();
+    for name in pending {
+        let id = format!("tags/{name}");
+        let file = files.iter().find(|file| file.rel == id).unwrap();
+        let loaded = scenario::load(&file.path).unwrap();
+        scenario::check_id(&loaded, &id).unwrap();
+        let needs = loaded.scenario.needs();
+        assert!(
+            needs.observations.contains("tag_complete"),
+            "{id}: typed completion request required"
+        );
+        // Check missing adapter capabilities before Suite preflight.
+        let missing = executor.missing(&needs);
+        assert_eq!(
+            missing,
+            scenario::Needs {
+                observations: ["tag_complete".to_owned()].into(),
+                ..Default::default()
+            },
+            "{id}: pending coverage requires missing tag_complete; add a play test when it becomes executable"
+        );
+        // Suite preflight checks the parsed ID, golden hash and oracle pin
+        // before classifying the scenario; no setup or steps run while pending.
+        let outcome = suite.check(file, &executor);
+        assert_eq!(outcome.status, Status::Pending, "{id}: {}", outcome.message);
+        assert!(!outcome.active, "{id}: prepared completion must remain inactive");
+        assert_eq!(outcome.scenario_sha256.as_deref(), Some(loaded.sha256.as_str()));
+        assert_eq!(outcome.missing.as_ref(), Some(&missing));
     }
 }
