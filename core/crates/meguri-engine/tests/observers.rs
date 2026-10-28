@@ -939,6 +939,9 @@ fn borrowed_writer_maximum_includes_prior_unjournaled_history_and_signed_raw_ids
         fn name(&self) -> &str {
             "borrowed-history-maximum"
         }
+        fn observe(&self, _: &ObservedCommit<'_>) -> Result<(), EngineError> {
+            panic!("the rows callback must be dispatched")
+        }
         fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
             if commit.changes.config_keys.iter().any(|k| k.key == "read-history") {
                 assert_eq!(commit.payload.rows(Table::Revlog).count(), 0);

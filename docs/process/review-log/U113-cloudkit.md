@@ -588,3 +588,23 @@ Independent review 2 is in progress; these repairs are not yet accepted.
 
 The source is retained as WIP. A narrow fixture compilation repair follows;
 all workflow checks and review findings remain open until verified.
+
+R2 is clear of semantic P0–P2 findings in the stable prebound scope. The
+mechanical repair `cleanroom/20261028T102509Z-81980` adds the test observer's
+required fail-loud fallback and removes a synthetic source-base comment.
+Independent delta review is clear; assertions and production behavior are
+unchanged.
+
+- `core-test/20261028T102517Z-82336`: all 48 selected Cloud tests pass,
+  zero skipped, including the actual review/save/reopen contract and all
+  enabled R1 safety regressions. Guarded child entry tests are included in
+  this count; it is not 48 independent product workflows.
+- `core-test/20261028T102618Z-83002`: all 13 engine observer tests pass.
+- `private/20261028T102638Z-83699` and
+  `similarity/20261028T102641Z-83946`: final two-file delta passes.
+- `core-lint/20261028T102621Z-83263`: fails ten Clippy style diagnostics;
+  formatting, layering and documentation checks pass. A mechanical repair
+  follows; no lint suppression or assertion change is authorized.
+
+Full CloudKit SDK, media, signed-device and milestone verification remains
+open. No Unit trailer or acceptance is added.

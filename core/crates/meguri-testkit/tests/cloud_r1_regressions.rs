@@ -1,4 +1,4 @@
-//! R1 fixes from source base fb4dfd14c3e790163bf76e2d30d296fd9b261009.
+//! Regression coverage for R1 cloud fixes.
 //! Actual CoreHost/runtime/store and shared child SDK; no acceptance claim.
 use meguri_engine::{Collection, OpSource, OpSpec};
 use meguri_host::CoreHost;
