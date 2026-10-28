@@ -82,3 +82,12 @@ This is WIP, without a Unit trailer. Publication/adoption, incoming application,
 absence processing, K19, assets/media, full result classification, large-data
 budgets, signed integration and full gates remain required. Tests use generated
 collections; no live cloud workflow or complete product acceptance is claimed.
+
+### Hold-back verification precondition
+
+`cleanroom/20261028T180526Z-53999` adds the existing production flush after
+answer acceptance. Independent diagnosis and exact-delta review are clear.
+The test keeps its active session and every assertion.
+`swift-test/20261028T180831Z-55452`: the failed case now passes.
+`private/20261028T180838Z-56351`: pass. The corresponding scoped similarity
+receipt is retained in MG. The full focused selection follows on clean master.

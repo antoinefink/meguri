@@ -430,6 +430,7 @@ extension EventTests {
                 guard case .accepted = outcome else {
                     Issue.record("Real answer was not accepted"); try await Core.endSession(sessionID: session); return
                 }
+                try await Core.flushReviewForBackground()
                 try await f.core.pollReview()
                 try await f.adapter.consumePendingUpdates()
                 let held = try #require(try await f.core.entityFacts(name: f.reviewName))
