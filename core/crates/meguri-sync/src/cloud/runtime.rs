@@ -1,8 +1,8 @@
-//! Bounded production runtime for existing acknowledged Note updates.
+//! Host-wired cloud capture and stable prebound workflows.
 //!
-//! Capture uses stored usability, independently of live identity. The Note
-//! reconcile component is real but is not a whole-binding scan: all collection
-//! sending and semantic apply remain unavailable. No transport is started.
+//! Capture uses stored usability independently of live identity. The separate
+//! Note-only reconcile API remains partial; whole completion and conditional
+//! sending use the guarded workflow API. No transport is implicitly started.
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -17,6 +17,8 @@ use meguri_storage::{Cell, ReadRows, ReaderRole, RowImage, RowKey, Table};
 use serde::{Deserialize, Serialize};
 
 use super::{entity_codec as codec, *};
+#[path = "workflow_runtime.rs"]
+mod workflow_impl;
 
 // Serialize probes, writes and connection drops across runtime owners.
 // Foundational store callers must also enter this gate.
@@ -152,6 +154,12 @@ pub struct NoteTracking {
     pub observer_open: u64,
     pub observed_seq: u64,
     pub observed_generation: u64,
+    #[serde(default)]
+    pub acked_rev: u64,
+    #[serde(default)]
+    pub in_flight: Vec<super::workflow::Flight>,
+    #[serde(default)]
+    pub acked_envelope: OpaqueBytes,
 }
 impl NoteTracking {
     pub(super) fn layout_generation(&self) -> Result<u64, Error> {
@@ -243,6 +251,14 @@ pub struct StoredRuntimeState {
     pub drained: bool,
     pub file: Option<NativeFileIdentity>,
     pub note_scan: Option<NoteScanCursor>,
+    #[serde(default)]
+    pub whole_scan: bool,
+    #[serde(default)]
+    pub coverage: Option<super::workflow::CoverageLedger>,
+    #[serde(default)]
+    pub root_ack: Option<super::workflow::RootAcknowledgement>,
+    #[serde(default)]
+    pub close_metadata: Option<(i64, i64)>,
 }
 impl StoredRuntimeState {
     pub(super) fn validate(&self) -> Result<(), Error> {
@@ -260,8 +276,11 @@ impl StoredRuntimeState {
         if self.file.is_some_and(|file| file.created_nanos >= 1_000_000_000) {
             return Err(Error::InvalidData);
         }
+        if let Some(coverage) = &self.coverage {
+            coverage.validate()?;
+        }
         // Note enumeration cannot establish whole-binding drain.
-        if self.drained {
+        if self.drained && (!self.whole_scan || self.coverage.is_none()) {
             return Err(Error::InvalidData);
         }
         Ok(())
@@ -306,6 +325,8 @@ struct Bound {
     open_counter: u64,
     usable: bool,
     verified: bool,
+    latest_mod: i64,
+    latest_scm: i64,
 }
 #[derive(Default)]
 struct State {
@@ -317,6 +338,14 @@ struct State {
     tracking_stopped: bool,
     last_capture: Option<CaptureProof>,
     note_scan: Option<NoteScanProof>,
+    whole_complete: bool,
+    root_confirmed: bool,
+    actions: super::workflow::Actions,
+    last_session: Option<u64>,
+    root_fetch_qualified: bool,
+    root_reads: std::collections::BTreeSet<u64>,
+    trace: Vec<super::workflow::TraceEvent>,
+    review_blocked: bool,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
@@ -328,6 +357,8 @@ pub struct Runtime {
     directory: PathBuf,
     inputs: CloudInputs,
     state: Mutex<State>,
+    random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
+    review: Mutex<std::sync::Weak<meguri_engine::session::ReviewService>>,
     #[cfg(feature = "test-hooks")]
     scan_pause: Mutex<Option<ScanPause>>,
 }
@@ -358,8 +389,11 @@ impl Runtime {
         Self {
             directory,
             inputs,
+            random: Mutex::new(None),
+            review: Mutex::new(std::sync::Weak::new()),
             state: Mutex::new(State {
                 scan_required: true,
+                actions: super::workflow::Actions::new(),
                 ..State::default()
             }),
             #[cfg(feature = "test-hooks")]
@@ -384,6 +418,11 @@ impl Runtime {
         state.scan_running = false;
         state.note_scan = None;
         state.last_capture = None;
+        state.whole_complete = false;
+        state.root_confirmed = false;
+        state.root_fetch_qualified = false;
+        state.root_reads.clear();
+        state.actions = super::workflow::Actions::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             if state.store.is_none() {
                 let outcome = TrackingStore::open(&self.directory, self.inputs.scope.clone())?;
@@ -425,6 +464,8 @@ impl Runtime {
                 }
             }
             let usable = binding.facts.state == BindingState::Active && publication_matches && publication_clear;
+            let latest_mod = evidence.opened_mod;
+            let latest_scm = evidence.opened_scm;
             state.bound = Some(Bound {
                 binding,
                 evidence,
@@ -432,6 +473,8 @@ impl Runtime {
                 open_counter: durable.open_counter,
                 usable,
                 verified: false,
+                latest_mod,
+                latest_scm,
             });
             Ok(())
         })
@@ -449,6 +492,11 @@ impl Runtime {
         };
         let Some(guard) = guard else { return Ok(()) };
         let result = self.inputs.identity.read_identity(&self.inputs.scope);
+        let verified_account = match &result {
+            IdentityStatus::Available(a) => Some(a.clone()),
+            _ => None,
+        };
+        let instance = self.instance().ok();
         let signed_out = matches!(&result, IdentityStatus::SignedOut);
         let mut state = self.state();
         if state
@@ -484,6 +532,15 @@ impl Runtime {
             }
             Ok(())
         });
+        if result.is_ok() {
+            if let (Some(account), Some(instance)) = (verified_account, instance) {
+                if let Ok(account) = String::from_utf8(account.0) {
+                    state
+                        .trace
+                        .push(super::workflow::TraceEvent::IdentityVerified { instance, account });
+                }
+            }
+        }
         if result.is_err() {
             state.tracking_stopped = true;
             state.scan_required = true;
@@ -507,7 +564,7 @@ impl Runtime {
             identity_verified: bound.is_some_and(|b| b.verified),
             scan_required: state.scan_required,
             scan_running: state.scan_running,
-            scan_completed_this_open: false,
+            scan_completed_this_open: state.whole_complete,
             note_scan_completed_this_open: state.note_scan.is_some(),
             tracking_stopped: state.tracking_stopped,
             scan_drained: durable.drained,
@@ -769,10 +826,10 @@ impl Runtime {
         Ok(())
     }
 
-    /// Fails explicitly until whole-binding reconciliation, root control and
-    /// canonical guarded batch/ack integration are implemented.
+    /// Requires current whole coverage, account and root confirmation, with
+    /// no active review. Unsupported workflows keep this gate closed.
     pub fn require_collection_sending(&self) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending))
+        self.workflow_gate()
     }
 
     /// Drop one entire observer transaction before an edit. This changes only
@@ -819,6 +876,12 @@ impl ChangeObserver for Runtime {
         // Whole-collection invalidation has no before-images. Other entity
         // kinds require their own capture/intent support before scan can finish.
         let changes = commit.changes;
+        let generic = with_tracking_access(|| {
+            state
+                .store
+                .as_ref()
+                .is_some_and(|s| s.workflow_has_layouts(binding).unwrap_or(false))
+        });
         let unsupported = changes.whole_collection
             || !changes.cards.is_empty()
             || !changes.notetypes.is_empty()
@@ -830,7 +893,7 @@ impl ChangeObserver for Runtime {
             || !changes.revlog_removed.is_empty()
             || !changes.media_added.is_empty()
             || !changes.media_removed.is_empty();
-        if unsupported {
+        if unsupported && !generic {
             state.scan_required = true;
         }
         #[cfg(feature = "test-hooks")]
@@ -845,6 +908,26 @@ impl ChangeObserver for Runtime {
         #[cfg(feature = "test-hooks")]
         let fail_after = state.fail_capture_after.take();
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
+            if generic {
+                return state.store.as_mut().ok_or(Error::Database)?.capture_workflow(
+                    binding,
+                    open,
+                    commit,
+                    rows,
+                    self.random
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .as_deref()
+                        .ok_or(Error::InvalidData)?,
+                    |_written| {
+                        #[cfg(feature = "test-hooks")]
+                        if fail_after == Some(_written) {
+                            return Err(Error::Io(std::io::ErrorKind::Other));
+                        }
+                        Ok(())
+                    },
+                );
+            }
             state.store.as_mut().ok_or(Error::Database)?.capture_runtime_notes(
                 binding,
                 open,
@@ -869,6 +952,16 @@ impl ChangeObserver for Runtime {
             // A successful local capture clears the tracking stop, but never
             // promotes a Note scan to whole-binding completion.
             state.tracking_stopped = false;
+        }
+        if result.is_ok() {
+            if let (Some(mark), Some(bound)) = (commit.collection.as_ref(), state.bound.as_mut()) {
+                bound.latest_mod = mark.col_mod;
+                bound.latest_scm = mark.scm;
+            }
+        }
+        if result.is_ok() && generic {
+            self.emit_pending_locked(&mut state, super::workflow::UpdateKind::Full, Default::default())
+                .map_err(engine_error)?;
         }
         result.map_err(engine_error)
     }
@@ -923,12 +1016,38 @@ impl SuspendParticipant for Runtime {
         "cloud-note-capture"
     }
     fn flush(&self) -> Result<(), EngineError> {
-        // Capture commits synchronously on the writer; there is no queue to
-        // flush. Incomplete scan stays undrained across suspend and clean close.
         Ok(())
     }
     fn suspend(&self) -> Result<(), EngineError> {
+        // The lifecycle has stopped admission and joined admitted writer ops.
+        let file = self.inputs.files.identity(&self.directory.join("collection.anki2"));
+        let publication =
+            meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
+                .publication();
         let mut state = self.state();
+        let complete = state.whole_complete
+            && !state.scan_required
+            && !state.scan_running
+            && !state.tracking_stopped
+            && state.bound.as_ref().is_some_and(|b| {
+                file.as_ref().is_ok_and(|f| *f == b.file)
+                    && publication.as_ref().is_ok_and(|p| {
+                        p.as_ref().is_some_and(|p| {
+                            p.identity == b.binding.facts.publication
+                                && p.decision == meguri_engine::device_state::PublicationDecision::Clear
+                        })
+                    })
+            });
+        if let Some((id, mod_time, scm)) = state.bound.as_ref().map(|b| (b.binding.id, b.latest_mod, b.latest_scm)) {
+            with_tracking_access(|| {
+                state
+                    .store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .set_workflow_drained(id, complete, (mod_time, scm))
+            })
+            .map_err(engine_error)?;
+        }
         state.incarnation = state
             .incarnation
             .checked_add(1)
@@ -961,7 +1080,7 @@ impl Drop for Runtime {
 
 /// K6.1 conversion of a stored Notes image. No model coercion and no USN in
 /// either digest. The acknowledged layout is retained only for the same MID.
-pub(super) fn note_image(row: &RowImage, nt_struct_gen: u64) -> Result<codec::Note, Error> {
+pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note, Error> {
     if row.len() != Table::Notes.columns().len() {
         return Err(Error::InvalidData);
     }
@@ -993,4 +1112,10 @@ pub(super) fn note_image(row: &RowImage, nt_struct_gen: u64) -> Result<codec::No
         data: text(10)?,
         nt_struct_gen,
     })
+}
+
+impl meguri_engine::session::SessionStartHook for Runtime {
+    fn session_starting(&self) {
+        self.state().review_blocked = true;
+    }
 }

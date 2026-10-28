@@ -509,3 +509,55 @@ capture/reconciliation, current-instance root guard, conditional save/ack
 and pending actions, shared SDK stand-in and actual CoreHost child driver.
 It must pass the three earlier account/root tests and these seven tests.
 No U113/U114/U117, full integration or release acceptance is claimed.
+
+
+## Stable prebound workflow — source handoff, not accepted
+
+Starting main commit: `d96d9a71`; recorded in `review-workflow/production-start.json`.
+Implementer source pass for the ten enabled account/root, adapter and real-review
+contracts already defined test-first. No forbidden source, history or network
+was read. No build, formatter, test, review or gate ran in this pass.
+
+Production source now includes raw `row_payload` projections, additive generic
+entity tracking with an authoritative Note adapter, whole-kind/parts/empty-J6
+coverage, current-instance root proof persistence, conditional batches, Saved
+acknowledgements, ordered pending lists and bounded Sync Now exchanges. Real
+ReviewService start hooks close sending; actual end/drain precedes the full
+pending update. Lifecycle suspension, after admission closes, records durable
+drain; ordinary background flush does not. File guards include creation facts.
+
+The shared testkit exports `cloud::{devices,adapter,coordinator,child_driver}`.
+`PreboundDevice::arrange` captures raw canonical baselines and a matching real
+WAL receipt, acknowledges them through Service and seeds only prior healthy
+tracking. SDKRig and Coordinator use one current-executable CoreHost child via
+bounded Unix IPC; the parent owns the persistent Service. Three guarded
+`cloud_child_entry` functions are infrastructure additions; existing product
+assertions, limits and enablement remain unchanged. SIGKILL uses Child::kill,
+checks signal 9 and reaps. No cargo-built child executable is assumed.
+
+Source consistency corrections included checked signed SQLite boundaries,
+raw REAL bit persistence, snapshot dereference types, RowError conversion
+through StorageError, a guard before child reaping, preservation of deferred
+removals, completion of send calls after handler/actions return and keeping
+snapshot projection/decoding outside shared writer guards. This is source
+inspection only, with no compilation or passing-test claim.
+
+Remaining: integrator formatting/compilation, the ten requested contracts and
+all ten existing host runtime tests, independent review/fixes and every
+provenance/privacy/similarity/native/full gate. Production support is limited
+to the stable prebound subset: no publication/adoption/manual-transfer change,
+K19 structure claim/join/rollback, incoming merge/re-key/absence purge,
+nonempty media/assets/retries/cleanup/reset, new non-Revlog entities or
+acknowledged deletions. Concurrent boundary changes beyond the captured
+snapshot are refused. Swift fake-engine, real SDK, signed A23, Q4/Q5, 150k
+allocation/byte-budget evidence and all remaining plan clauses stay open.
+U113/U114/U117, P24/Q11, milestone and final acceptance remain unaccepted.
+
+Integrator WIP evidence: `core-format/20261028T094612Z-65075` passes.
+`core-test/20261028T094714Z-65746` fails before runtime on two shared-helper
+imports: ReaderRole is in storage, and StatvfsSpace is in storage::space.
+Production sync/host libraries compile; no workflow tests ran.
+`private/20261028T094808Z-66316` and
+`similarity/20261028T094810Z-66586` pass for the 26-file export.
+Independent whole-workflow review is in progress. This commit preserves
+reviewable WIP, not a completed unit or accepted workflow.

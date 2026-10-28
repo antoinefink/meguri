@@ -1292,3 +1292,9 @@ decks:
         assert_eq!(durable.mark, Some(mark));
     }
 }
+
+// Infrastructure entry for the shared CoreHost subprocess protocol.
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}

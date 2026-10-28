@@ -3,7 +3,7 @@ use super::{CodecError, MAX_PAYLOAD_BYTES};
 
 type Result<T> = std::result::Result<T, CodecError>;
 
-pub(super) struct Writer {
+pub(crate) struct Writer {
     bytes: Option<Vec<u8>>,
     pub len: usize,
 }
@@ -59,7 +59,7 @@ impl Writer {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Value<'a> {
+pub(crate) enum Value<'a> {
     Varint(u64),
     Fixed64(u64),
     Bytes(&'a [u8]),
@@ -82,7 +82,7 @@ impl<'a> Value<'a> {
     }
 }
 
-pub(super) struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
 }
@@ -138,7 +138,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-pub(super) trait Message: Sized {
+pub(crate) trait Message: Sized {
     fn write(&self, out: &mut Writer, row: bool) -> Result<()>;
     fn read(bytes: &[u8]) -> Result<Self>;
     fn encoded_len(&self, row: bool) -> Result<usize> {
@@ -167,7 +167,7 @@ pub(super) trait Message: Sized {
     }
 }
 
-pub(super) trait FieldValue: Default {
+pub(crate) trait FieldValue: Default {
     const REQUIRED: bool = false;
     const REPEATED: bool = false;
     fn write_field(&self, tag: u32, out: &mut Writer) -> Result<()>;

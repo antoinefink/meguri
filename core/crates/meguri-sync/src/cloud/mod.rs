@@ -1,12 +1,15 @@
-//! Cloud tracking storage and bounded existing-Note capture/reconciliation.
+//! Cloud tracking and the host-wired stable prebound workflow.
 //!
-//! `runtime` adds host-wired capture and verified-account isolation. Whole-
-//! binding scan completion, root confirmation, sending, semantic apply and
-//! recovery editing remain incomplete. Selecting a stored binding makes no
-//! readiness claim. Inbox and conflict APIs accept storage facts only.
+//! Whole scans, conditional saves and acknowledgements require current account,
+//! file, publication and root proofs. Publication/adoption, incoming merge,
+//! structural generations and nonempty media remain unavailable.
 
+pub mod control_codec;
 pub mod entity_codec;
+pub mod row_payload;
 pub mod runtime;
+pub mod workflow;
+mod workflow_store;
 
 mod open;
 mod recovery;

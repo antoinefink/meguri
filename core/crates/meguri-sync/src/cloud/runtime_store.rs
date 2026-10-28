@@ -25,6 +25,7 @@ CREATE TABLE cloud_runtime_notes(
 /// The outer recovery schema remains V2. Refuse a newer runtime extension in
 /// the private WAL-aware probe, before SQLite opens the original path.
 pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, Error> {
+    super::workflow_store::check_version(connection)?;
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_runtime_schema')",
         [],
@@ -62,6 +63,7 @@ impl TrackingStore {
             transaction.execute_batch(SCHEMA)?;
             transaction.commit()?;
         }
+        self.install_workflow()?;
         // Ordinary payloads belong to their container/environment only.
         let mut statement = self.connection.prepare(
             "SELECT r.binding,r.content FROM cloud_runtime_bindings r JOIN bindings b ON b.id=r.binding
@@ -404,6 +406,9 @@ impl TrackingStore {
             observer_open: 0,
             observed_seq: 0,
             observed_generation: 0,
+            acked_rev: 0,
+            in_flight: Vec::new(),
+            acked_envelope: OpaqueBytes(envelope.to_vec()),
         };
         // Do not allow a fixture to erase pending facts or rewrite a baseline.
         let transaction = self.connection.transaction()?;
@@ -419,12 +424,16 @@ impl TrackingStore {
 pub(super) fn checked(value: u64) -> Result<i64, Error> {
     i64::try_from(value).map_err(|_| Error::InvalidData)
 }
-fn next(value: u64) -> Result<u64, Error> {
+pub(super) fn next(value: u64) -> Result<u64, Error> {
     let value = value.checked_add(1).ok_or(Error::InvalidData)?;
     checked(value)?;
     Ok(value)
 }
-fn note(connection: &rusqlite::Connection, binding: BindingId, id: i64) -> Result<Option<NoteTracking>, Error> {
+pub(super) fn note(
+    connection: &rusqlite::Connection,
+    binding: BindingId,
+    id: i64,
+) -> Result<Option<NoteTracking>, Error> {
     let value: Option<String> = connection
         .query_row(
             "SELECT content FROM cloud_runtime_notes WHERE binding=?1 AND id=?2",
@@ -434,7 +443,7 @@ fn note(connection: &rusqlite::Connection, binding: BindingId, id: i64) -> Resul
         .optional()?;
     value.map(|content| decode(&content)).transpose()
 }
-fn put_note(transaction: &Transaction<'_>, binding: BindingId, value: &NoteTracking) -> Result<(), Error> {
+pub(super) fn put_note(transaction: &Transaction<'_>, binding: BindingId, value: &NoteTracking) -> Result<(), Error> {
     value.validate()?;
     transaction.execute(
         "UPDATE cloud_runtime_notes SET content=?3 WHERE binding=?1 AND id=?2",
@@ -442,7 +451,11 @@ fn put_note(transaction: &Transaction<'_>, binding: BindingId, value: &NoteTrack
     )?;
     Ok(())
 }
-fn put_binding(transaction: &Transaction<'_>, binding: BindingId, value: &StoredRuntimeState) -> Result<(), Error> {
+pub(super) fn put_binding(
+    transaction: &Transaction<'_>,
+    binding: BindingId,
+    value: &StoredRuntimeState,
+) -> Result<(), Error> {
     value.validate()?;
     transaction.execute(
         "INSERT INTO cloud_runtime_bindings(binding,content) VALUES (?1,?2)

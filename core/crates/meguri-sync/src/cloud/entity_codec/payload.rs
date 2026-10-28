@@ -12,6 +12,37 @@ pub enum Stored {
     Text(Vec<u8>),
     Blob(Vec<u8>),
 }
+// Persistence and IPC carry REAL as bits, avoiding JSON float conversion.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum StoredEncoding {
+    Integer(i64),
+    Real(u64),
+    Text(Vec<u8>),
+    Blob(Vec<u8>),
+}
+impl serde::Serialize for Stored {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let wire = match self {
+            Self::Integer(n) => StoredEncoding::Integer(*n),
+            Self::Real(n) => StoredEncoding::Real(n.to_bits()),
+            Self::Text(b) => StoredEncoding::Text(b.clone()),
+            Self::Blob(b) => StoredEncoding::Blob(b.clone()),
+        };
+        serde::Serialize::serialize(&wire, serializer)
+    }
+}
+impl<'de> serde::Deserialize<'de> for Stored {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        Ok(
+            match <StoredEncoding as serde::Deserialize>::deserialize(deserializer)? {
+                StoredEncoding::Integer(n) => Self::Integer(n),
+                StoredEncoding::Real(n) => Self::Real(f64::from_bits(n)),
+                StoredEncoding::Text(b) => Self::Text(b),
+                StoredEncoding::Blob(b) => Self::Blob(b),
+            },
+        )
+    }
+}
 impl Default for Stored {
     fn default() -> Self {
         Self::Integer(0)
@@ -89,7 +120,7 @@ where
 // A deliberately local schema table: the last boolean marks only K6.1 Meguri fields.
 macro_rules! message {
     ($name:ident { $($tag:literal => $field:ident : $ty:ty, $meguri:literal;)* }) => {
-        #[derive(Clone, Default, PartialEq, Eq)]
+        #[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub struct $name { $(pub $field: $ty,)* }
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(stringify!($name)) }
@@ -252,7 +283,7 @@ ordered_rows!(Template);
 macro_rules! payloads {
     ($($name:ident),*) => {
         /// A supplied row image and supplied Meguri fields, without row-reading policy.
-        #[derive(Clone, PartialEq, Eq)]
+        #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub enum Payload { $($name($name),)* }
         impl std::fmt::Debug for Payload {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -334,3 +334,9 @@ decks:
     assert_eq!(server_records(&service, &files), final_records);
     reopened.close_clean().unwrap();
 }
+
+// Infrastructure entry for the shared CoreHost subprocess protocol.
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}

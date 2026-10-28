@@ -24,6 +24,7 @@ meguri-engine.workspace = true
 # The session key's random source (R1875), the records and their schema-11
 # JSON (wire-format.md W6, W8-W10).
 meguri-model.workspace = true
+meguri-text.workspace = true
 # The col row and config rows a check and a sync read (meta-status.md M1,
 # wire-format.md W6.4).
 meguri-storage.workspace = true

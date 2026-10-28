@@ -233,6 +233,10 @@ impl CoreHost {
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = process.queues.clone();
         let review = process.review.clone();
+        if let Some(cloud) = &cloud {
+            cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
+            review.add_session_start_hook(cloud.clone());
+        }
         let mut ports = derived
             .ports(Ports::new())
             .open_step(media.clone())

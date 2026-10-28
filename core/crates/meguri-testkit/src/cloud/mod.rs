@@ -1,5 +1,5 @@
 //! Shared fake CloudKit service foundation (conformance/cloudkit-acceptance Q2,
-//! Q3.1, Q3.2, Q3.6, Q3.7). No engine, scheduler, coordinator or codec lives here.
+//! Q3.1, Q3.2, Q3.6, Q3.7). The Service itself models server state only.
 //!
 //! Each request commits scoped rows, change references and an outcome reference
 //! in one transaction in generated `fake-cloud.db`. Payload bodies are shared
@@ -20,3 +20,8 @@ mod types;
 
 pub use service::{Service, record_non_asset_bytes};
 pub use types::*;
+
+pub mod adapter;
+pub mod child_driver;
+pub mod coordinator;
+pub mod devices;

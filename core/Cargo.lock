@@ -1904,6 +1904,7 @@ dependencies = [
  "meguri-package",
  "meguri-storage",
  "meguri-testkit",
+ "meguri-text",
  "reqwest",
  "rusqlite",
  "rustls",

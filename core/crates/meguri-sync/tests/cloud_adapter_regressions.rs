@@ -547,3 +547,9 @@ fn core_pending_actions_preserve_emission_order() {
     assert_eq!(rig.sdk_pending(), rig.core_tracking_sendables().unwrap());
     rig.close_clean().unwrap();
 }
+
+// Infrastructure entry for the shared CoreHost subprocess protocol.
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}

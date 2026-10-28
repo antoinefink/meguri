@@ -6,7 +6,7 @@
 //! keys must already use the media case key. Raw payload TEXT is never folded.
 mod envelope;
 mod payload;
-mod wire;
+pub(crate) mod wire;
 
 pub use envelope::{
     AssetInput, AssetProblem, DecodeOutcome, Entity, EntityFields, ReceiveError, Received, Refusal, receive,
@@ -43,7 +43,7 @@ impl std::fmt::Display for CodecError {
 }
 impl std::error::Error for CodecError {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum Kind {
     Note = 1,
