@@ -3,9 +3,9 @@ mod common;
 mod session_support;
 use common::{Harness, NOW_MS};
 use meguri_engine::{
-    Engine, EngineConfig, EngineError, EventKind, Generation, LongOp, OpSource,
-    device_state::{AccountBinding, DeviceState, Publication, PublicationDecision},
-    replace::{ReplaceError, ReplaceReason, ReplacementStage, StagingError},
+    DisabledReason, Engine, EngineConfig, EngineError, EventKind, Generation, LongOp, OpSource, UndoScope, UndoStatus,
+    device_state::{AccountBinding, DeviceState, PendingDecisionReason, Publication, PublicationDecision},
+    replace::{CloudAdoptInput, ReplaceError, ReplaceReason, ReplacementStage, StagingError},
 };
 use meguri_model::faultpoint::{self, Fault};
 use meguri_model::{
@@ -53,6 +53,7 @@ fn replacement_op(reason: ReplaceReason) -> LongOp {
         ReplaceReason::Restore => LongOp::Restore,
         ReplaceReason::ColpkgImport => LongOp::ColpkgImport,
         ReplaceReason::FullDownload | ReplaceReason::FullUpload => LongOp::OneWaySync,
+        ReplaceReason::CloudAdopt => LongOp::CloudAdopt,
     }
 }
 fn download_change(reason: ReplaceReason, scope: &mut meguri_storage::WriteScope<'_>) -> Result<(), StorageError> {
@@ -63,6 +64,384 @@ fn download_change(reason: ReplaceReason, scope: &mut meguri_storage::WriteScope
     }
     Ok(())
 }
+
+fn cloud_input(local_only: bool) -> CloudAdoptInput {
+    CloudAdoptInput {
+        operation: serde_json::from_value(serde_json::json!([6106, 1])).unwrap(),
+        candidate: Publication {
+            identity: serde_json::from_value(serde_json::json!([6106, 2])).unwrap(),
+            binding: if local_only {
+                AccountBinding::LocalOnly
+            } else {
+                binding()
+            },
+            decision: PublicationDecision::Clear,
+        },
+    }
+}
+
+fn cloud_stage(directory: &Path) -> ReplacementStage {
+    let candidate = stage(directory, "schema-18.anki2");
+    let db = meguri_storage::raw::PlainDatabase::open(&candidate.path()).unwrap();
+    db.execute_batch(&format!(
+        "UPDATE col SET mod={}, scm={}, ls=19, usn=23, dty=946",
+        NOW_MS - 5000,
+        NOW_MS - 6000
+    ))
+    .unwrap();
+    drop(db);
+    candidate
+}
+
+fn assert_cloud_stamps(collection: &meguri_engine::Collection) {
+    let col = collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    assert_eq!(
+        (col.modified.0, col.schema_modified.0, col.last_sync.0, col.usn.0),
+        (NOW_MS - 5000, NOW_MS - 6000, 19, 23)
+    );
+}
+
+// Synthetic prior decisions are made by real replacements. Only the legacy
+// absence fixture removes the newly optional member through the shared lock.
+fn seed_cloud_prior(engine: &Engine, live: &Path, prior: &str) {
+    if prior == "clear" {
+        return;
+    }
+    let reason = if prior == "colpkg" {
+        ReplaceReason::ColpkgImport
+    } else {
+        ReplaceReason::Restore
+    };
+    let slot = engine.acquire_slot(replacement_op(reason)).unwrap();
+    slot.replace_verified(stage(live.parent().unwrap(), "schema-18.anki2"), reason, |scope| {
+        let mut col = scope.col()?;
+        col.dirty = 722;
+        scope.put_col(&col)?;
+        Ok(())
+    })
+    .unwrap();
+    drop(slot);
+    if prior == "legacy" {
+        meguri_storage::sidecar::update_document(&live.parent().unwrap().join("meguri-sidecar.json"), |doc| {
+            doc["deviceState"]
+                .as_object_mut()
+                .unwrap()
+                .remove("pendingDecisionReason");
+            Ok(())
+        })
+        .unwrap();
+    }
+}
+
+fn prior_reason(prior: &str) -> Option<PendingDecisionReason> {
+    match prior {
+        "restore" => Some(PendingDecisionReason::Restore),
+        "colpkg" => Some(PendingDecisionReason::ColpkgImport),
+        "clear" | "legacy" => None,
+        _ => panic!("unknown synthetic prior"),
+    }
+}
+
+fn assert_reason(live: &Path, expected: Option<PendingDecisionReason>) {
+    assert_eq!(
+        DeviceState::for_collection(live).pending_decision_reason().unwrap(),
+        expected
+    );
+    let document = r6_document(live);
+    let stored = document["deviceState"].get("pendingDecisionReason");
+    match expected {
+        Some(reason) => assert_eq!(stored, Some(&serde_json::to_value(reason).unwrap())),
+        None => assert!(stored.is_none(), "absence must not become JSON null"),
+    }
+}
+
+#[test]
+fn cloud_adopt_from_clear_or_pending_uses_exact_caller_decision_stamps_and_lifecycle() {
+    for prior in ["clear", "restore", "colpkg", "legacy"] {
+        for local_only in [false, true] {
+            let (dir, live) = common::copy_fixture("schema-18.anki2");
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            engine.open_raw(&live, config(binding(), 7)).unwrap();
+            seed_cloud_prior(&engine, &live, prior);
+            // Use the current handle after any prior replacement.
+            engine.close().unwrap();
+            let old = engine.open_raw(&live, config(binding(), 8)).unwrap();
+            assert_reason(&live, prior_reason(prior));
+            let before = publication(&live);
+            let device = DeviceState::for_collection(&live);
+            let old_token = if prior == "clear" {
+                Some(device.publication_token(&binding()).unwrap())
+            } else {
+                assert!(device.publication_token(&binding()).is_err());
+                None
+            };
+            common::add_note_with_card(&old, OpSource::UserUndoable, &["synthetic undo", "back"]);
+            assert!(matches!(
+                old.peek_undo(UndoScope::Global).unwrap(),
+                UndoStatus::Available(_)
+            ));
+            // Open a real reader and release its lease before exclusive drain.
+            drop(old.reader(ReaderRole::Query).unwrap());
+            let subscription = engine.stream().subscribe();
+            let slot = engine.acquire_slot(LongOp::CloudAdopt).unwrap();
+            let mut exclusive = slot.enter_exclusive(true).unwrap();
+            let expected = cloud_input(local_only).candidate;
+            assert_ne!(expected.identity, before.identity);
+            let new = exclusive
+                .replace_verified_cloud_adopt(cloud_stage(dir.path()), cloud_input(local_only))
+                .unwrap();
+            drop(exclusive);
+            drop(slot);
+            assert_eq!(new.generation(), Generation(old.generation().0 + 1));
+            assert!(matches!(
+                old.reader(ReaderRole::Query),
+                Err(EngineError::StaleGeneration { .. })
+            ));
+            assert_eq!(
+                new.peek_undo(UndoScope::Global).unwrap(),
+                UndoStatus::Unavailable(DisabledReason::ClearedByOneWay)
+            );
+            assert_eq!(publication(&live), expected);
+            assert_reason(&live, None);
+            assert_cloud_stamps(&new);
+            assert_eq!(marker(&new), 946);
+            if let Some(token) = old_token {
+                assert!(device.validate_token(&token, &binding()).is_err());
+            }
+            if local_only {
+                assert!(device.publication_token(&binding()).is_err());
+                assert!(device.publication_token(&AccountBinding::LocalOnly).is_err());
+            } else {
+                let token = device.publication_token(&binding()).unwrap();
+                device.validate_token(&token, &binding()).unwrap();
+            }
+            let events = common::drain(&subscription, Duration::from_millis(20));
+            let replacements: Vec<_> = events
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::CollectionReplaced { .. }))
+                .collect();
+            assert_eq!(replacements.len(), 1);
+            assert!(
+                matches!(&replacements[0].kind, EventKind::CollectionReplaced { generation } if *generation == new.generation())
+            );
+            assert_eq!(replacements[0].generation, new.generation());
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(&e.kind, EventKind::Changes(changes) if changes.whole_collection))
+            );
+            let sidecar = meguri_storage::sidecar::Sidecar::load(&dir.path().join("meguri-sidecar.json")).unwrap();
+            assert_eq!((sidecar.last_mod, sidecar.last_scm), (NOW_MS - 5000, NOW_MS - 6000));
+            engine.close().unwrap();
+            let reopened = engine.open_raw(&live, config(binding(), 9)).unwrap();
+            assert_eq!(publication(&live), expected);
+            assert_reason(&live, None);
+            assert_cloud_stamps(&reopened);
+            engine.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn cloud_adopt_without_typed_caller_values_is_invalid_before_any_mutation() {
+    #[derive(Debug)]
+    struct CountedRandom {
+        draws: std::sync::atomic::AtomicUsize,
+        inner: SeededRandom,
+    }
+    impl meguri_model::rng::RandomSource for CountedRandom {
+        fn next_u64(&self) -> u64 {
+            self.draws.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            meguri_model::rng::RandomSource::next_u64(&self.inner)
+        }
+    }
+    for initial in [false, true] {
+        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let random = Arc::new(CountedRandom {
+            draws: std::sync::atomic::AtomicUsize::new(0),
+            inner: SeededRandom::new(7),
+        });
+        let open_config = || {
+            let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
+            let mut open = meguri_engine::OpenConfig::new(clock, random.clone());
+            open.publication_binding = binding();
+            open
+        };
+        if !initial {
+            engine.open_raw(&live, open_config()).unwrap();
+        } else {
+            fs::remove_file(&live).unwrap();
+        }
+        let slot = engine.acquire_slot(LongOp::CloudAdopt).unwrap();
+        let mut exclusive = if initial {
+            None
+        } else {
+            Some(slot.enter_exclusive(true).unwrap())
+        };
+        let candidate = cloud_stage(dir.path());
+        let original_candidate = fs::read(candidate.path()).unwrap();
+        let mut held_candidate = fs::File::open(candidate.path()).unwrap();
+        let durable_files = || {
+            recovery_files(dir.path())
+                .into_iter()
+                .filter(|(path, _)| {
+                    !path
+                        .components()
+                        .any(|c| c.as_os_str().to_string_lossy().starts_with(".meguri-stage-"))
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = durable_files();
+        let draws = random.draws.load(std::sync::atomic::Ordering::SeqCst);
+        let generation = engine.generation();
+        let result = if let Some(exclusive) = exclusive.as_mut() {
+            exclusive.replace_verified(candidate, ReplaceReason::CloudAdopt, |_| {
+                panic!("missing input reached stage change")
+            })
+        } else {
+            slot.replace_verified_initial(&live, open_config(), candidate, ReplaceReason::CloudAdopt, |_| {
+                panic!("missing input reached initial stage change")
+            })
+        };
+        assert!(matches!(
+            result,
+            Err(ReplaceError::Lifecycle(EngineError::InvalidArgument { .. }))
+        ));
+        assert_eq!(engine.generation(), generation);
+        assert_eq!(
+            random.draws.load(std::sync::atomic::Ordering::SeqCst),
+            draws,
+            "R6.6 RNG count"
+        );
+        let mut after = Vec::new();
+        std::io::Read::read_to_end(&mut held_candidate, &mut after).unwrap();
+        assert_eq!(after, original_candidate);
+        // Stage ownership may clean up the rejected file; every other byte,
+        // including the sidecar and intent, must be exactly as before.
+        assert_eq!(durable_files(), before);
+        if initial {
+            assert!(!live.exists());
+            assert!(!dir.path().join("meguri-sidecar.json").exists());
+            assert!(DeviceState::for_collection(&live).publication().unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn pending_decision_reason_roundtrips_restore_colpkg_and_shared_manual_schema_only() {
+    for (reason, stored, typed) in [
+        (ReplaceReason::Restore, "restore", PendingDecisionReason::Restore),
+        (
+            ReplaceReason::ColpkgImport,
+            "colpkgImport",
+            PendingDecisionReason::ColpkgImport,
+        ),
+    ] {
+        let h = Harness::open();
+        assert_reason(&h.path, None);
+        let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+        slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |_| Ok(()))
+            .unwrap();
+        drop(slot);
+        assert_eq!(r6_document(&h.path)["deviceState"]["pendingDecisionReason"], stored);
+        assert_reason(&h.path, Some(typed));
+        // Force a real read/modify/durable-write round trip of the shared state.
+        DeviceState::for_collection(&h.path)
+            .set_manual_transfer_pending(false)
+            .unwrap();
+        h.engine.close().unwrap();
+        h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+        assert_reason(&h.path, Some(typed));
+        h.engine.close().unwrap();
+    }
+    // Frozen manual-transfer operations are deliberately not exercised here.
+    let manual: PendingDecisionReason = serde_json::from_str("\"manualImport\"").unwrap();
+    assert_eq!(manual, PendingDecisionReason::ManualImport);
+    assert_eq!(serde_json::to_string(&manual).unwrap(), "\"manualImport\"");
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        DeviceState::for_collection(&dir.path().join("collection.anki2"))
+            .pending_decision_reason()
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn malformed_pending_decision_reason_errors_without_repairing_original_bytes() {
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!("futureReason"),
+        serde_json::json!(17),
+        serde_json::json!(false),
+        serde_json::json!({}),
+    ] {
+        let h = Harness::open();
+        seed_cloud_prior(&h.engine, &h.path, "restore");
+        h.engine.close().unwrap();
+        let sidecar = h.dir.path().join("meguri-sidecar.json");
+        let mut document = r6_document(&h.path);
+        document["deviceState"]["pendingDecisionReason"] = invalid;
+        fs::write(&sidecar, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+        let original = fs::read(&sidecar).unwrap();
+        let collection_bytes = fs::read(&h.path).unwrap();
+        let device = DeviceState::for_collection(&h.path);
+        assert!(device.pending_decision_reason().is_err());
+        assert!(device.publication().is_err());
+        assert!(device.set_manual_transfer_pending(false).is_err());
+        assert!(h.engine.open_raw(&h.path, common::open_config(&h.clock)).is_err());
+        assert_eq!(fs::read(&sidecar).unwrap(), original);
+        assert_eq!(fs::read(&h.path).unwrap(), collection_bytes);
+    }
+}
+
+#[test]
+fn pre_swap_failure_or_cloud_cancellation_restores_exact_prior_reason_including_absence() {
+    for prior in ["clear", "restore", "colpkg", "legacy"] {
+        for (reason, cancel) in [
+            (ReplaceReason::Restore, false),
+            (ReplaceReason::ColpkgImport, false),
+            (ReplaceReason::CloudAdopt, false),
+            (ReplaceReason::CloudAdopt, true),
+        ] {
+            let h = Harness::open();
+            seed_cloud_prior(&h.engine, &h.path, prior);
+            let before = publication(&h.path);
+            let slot = h.engine.acquire_slot(replacement_op(reason)).unwrap();
+            let mut exclusive = slot.enter_exclusive(true).unwrap();
+            CLOUD_CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+            faultpoint::arm(
+                "replace.after_pause_recorded",
+                if cancel {
+                    Fault::Callback(|| CLOUD_CANCEL.store(true, std::sync::atomic::Ordering::SeqCst))
+                } else {
+                    Fault::IoError(std::io::ErrorKind::Other)
+                },
+            );
+            let result = if reason == ReplaceReason::CloudAdopt {
+                let mut candidate = cloud_stage(h.dir.path());
+                // Existing production cancellation seam, flipped only after
+                // the real intent is durable. No test-owned recovery policy.
+                if cancel {
+                    candidate.media_cancel = Some(Arc::new(|| CLOUD_CANCEL.load(std::sync::atomic::Ordering::SeqCst)));
+                }
+                exclusive.replace_verified_cloud_adopt(candidate, cloud_input(true))
+            } else {
+                exclusive.replace_verified(stage(h.dir.path(), "schema-18.anki2"), reason, |_| Ok(()))
+            };
+            faultpoint::disarm_all();
+            assert!(result.is_err());
+            if cancel {
+                assert!(matches!(result, Err(ReplaceError::Lifecycle(EngineError::Cancelled))));
+            }
+            assert_eq!(publication(&h.path), before);
+            assert_reason(&h.path, prior_reason(prior));
+            CLOUD_CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+static CLOUD_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[test]
 fn real_import_and_restore_stamp_once_expire_handles_and_publish_one_event() {
@@ -518,6 +897,143 @@ fn verified_import_and_transfers_refuse_review_at_both_entries_without_mutation(
 }
 
 #[test]
+fn cloud_adopt_refuses_active_review_at_check_and_typed_exclusive_without_mutation() {
+    use meguri_engine::{OpSpec, SuspendParticipant, WalCoverage};
+    use meguri_storage::{OpenError, StampMode, lockfile::CollectionLock};
+
+    let mut h = session_support::Harness::new(3);
+    let live = h.dir.path().join("collection.anki2");
+    // Seed a real pending Restore decision without losing the review fixture:
+    // only copy its main file after close has checkpointed and closed the WAL.
+    h.engine.close().unwrap();
+    let restored = ReplacementStage::new(h.dir.path()).unwrap();
+    fs::copy(&live, restored.path()).unwrap();
+    (h.engine, h.collection, h.review) = session_support::open(&live, h.clock.clone());
+    let restore = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    h.collection = restore
+        .replace_verified(restored, ReplaceReason::Restore, |_| Ok(()))
+        .unwrap();
+    drop(restore);
+    assert_eq!(publication(&live).decision, PublicationDecision::Pending);
+    assert_reason(&live, Some(PendingDecisionReason::Restore));
+
+    let (id, _) = h.start();
+    h.review.flush().unwrap();
+    h.collection
+        .run(
+            OpSpec::named("cloud adoption refusal barrier", OpSource::Rollover).stamp(StampMode::Raw),
+            |_| Ok(()),
+        )
+        .unwrap();
+    let head = h.review.head(id, 3).unwrap();
+    assert!(!head.items.is_empty());
+    // A completed op/flush is not a WAL receipt. Take the snapshot first,
+    // wait for its actual coverage, then capture bytes; release all reader
+    // leases before the exclusive drain.
+    let (before, identity, seq) = {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = reader.snapshot().unwrap();
+        (snapshot.col().unwrap(), snapshot.wal_identity(), snapshot.seq())
+    };
+    match h
+        .collection
+        .wait_wal_covered(identity, seq, Duration::from_secs(1))
+        .unwrap()
+    {
+        WalCoverage::Covered(receipt) => {
+            assert_eq!(receipt.identity(), identity);
+            assert!(receipt.through() >= seq);
+        }
+        other => panic!("active-review fixture lacks durable WAL coverage: {other:?}"),
+    }
+    let bytes = fs::read(&live).unwrap();
+    let wal = fs::read(live.with_extension("anki2-wal")).unwrap();
+    let sidecar = h.dir.path().join("meguri-sidecar.json");
+    let sidecar_bytes = fs::read(&sidecar).unwrap();
+    let prior = publication(&live);
+    let generation = h.engine.generation();
+    let ready = h.engine.state();
+    assert_eq!(ready, meguri_engine::LifecycleState::Ready { generation });
+    let slot = h.engine.acquire_slot(LongOp::CloudAdopt).unwrap();
+    let candidate = cloud_stage(h.dir.path());
+    let candidate_path = candidate.path();
+    let candidate_bytes = fs::read(&candidate_path).unwrap();
+    let mut held_candidate = fs::File::open(&candidate_path).unwrap();
+    let input = cloud_input(false);
+    assert_ne!(input.candidate.identity, prior.identity);
+    assert_ne!(input.candidate.decision, prior.decision);
+
+    // V14.1 and V14.2 step 7: wait in Ready with the L5 slot held,
+    // outside L7's exclusive phase, while the real session remains active.
+    assert_eq!(
+        slot.check_verified_review(ReplaceReason::CloudAdopt),
+        Err(EngineError::SessionActive)
+    );
+    assert_eq!(h.engine.state(), ready);
+    assert_eq!(h.review.active_session(), Some(id));
+    assert_eq!(h.review.head(id, 3).unwrap(), head);
+    assert_eq!(h.engine.generation(), generation);
+    assert!(matches!(
+        CollectionLock::acquire(h.dir.path()),
+        Err(OpenError::OpenInAnotherProgram)
+    ));
+    assert!(matches!(
+        h.engine.acquire_slot(LongOp::Restore),
+        Err(EngineError::Busy { running_op }) if running_op == LongOp::CloudAdopt.name()
+    ));
+    assert_eq!(h.collection.reader(ReaderRole::Query).unwrap().col().unwrap(), before);
+    assert_eq!(fs::read(&live).unwrap(), bytes);
+    assert_eq!(fs::read(live.with_extension("anki2-wal")).unwrap(), wal);
+    assert_eq!(fs::read(&candidate_path).unwrap(), candidate_bytes);
+    assert_eq!(fs::read(&sidecar).unwrap(), sidecar_bytes);
+    assert_eq!(publication(&live), prior);
+    assert_reason(&live, Some(PendingDecisionReason::Restore));
+
+    // Bypass the early check to exercise the typed production seam itself;
+    // CloudAdopt must never inherit Restore's active-session replacement.
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    let result = exclusive.replace_verified_cloud_adopt(candidate, input);
+    assert!(matches!(
+        result,
+        Err(ReplaceError::Lifecycle(EngineError::SessionActive))
+    ));
+    assert_eq!(exclusive.collection().generation(), generation);
+    assert_eq!(exclusive.collection().path(), live);
+    drop(exclusive);
+    assert_eq!(h.engine.state(), ready);
+    assert_eq!(h.review.active_session(), Some(id));
+    assert_eq!(h.review.head(id, 3).unwrap(), head);
+    assert_eq!(h.engine.generation(), generation);
+    assert_eq!(h.collection.reader(ReaderRole::Query).unwrap().col().unwrap(), before);
+    assert!(matches!(
+        CollectionLock::acquire(h.dir.path()),
+        Err(OpenError::OpenInAnotherProgram)
+    ));
+    assert!(matches!(
+        h.engine.acquire_slot(LongOp::Restore),
+        Err(EngineError::Busy { running_op }) if running_op == LongOp::CloudAdopt.name()
+    ));
+    assert_eq!(fs::read(&live).unwrap(), bytes);
+    assert_eq!(fs::read(live.with_extension("anki2-wal")).unwrap(), wal);
+    // The entry consumes the stage and may unlink it on refusal. Its held
+    // file must retain the original bytes even after that owned cleanup.
+    let mut candidate_after = Vec::new();
+    std::io::Read::read_to_end(&mut held_candidate, &mut candidate_after).unwrap();
+    assert_eq!(candidate_after, candidate_bytes);
+    if candidate_path.exists() {
+        assert_eq!(fs::read(&candidate_path).unwrap(), candidate_bytes);
+    }
+    assert_eq!(fs::read(&sidecar).unwrap(), sidecar_bytes);
+    assert_eq!(publication(&live), prior);
+    assert_reason(&live, Some(PendingDecisionReason::Restore));
+    drop(slot);
+    assert_eq!(h.engine.state(), ready);
+    assert_eq!(h.review.active_session(), Some(id));
+    let next = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    drop(next);
+}
+
+#[test]
 fn restore_and_legacy_replace_still_support_active_session() {
     for verified in [false, true] {
         let h = session_support::Harness::new(3);
@@ -582,6 +1098,12 @@ fn replacement_crash_worker() {
     let mode = std::env::var("MEGURI_REPLACE_MODE").unwrap();
     let point = std::env::var("MEGURI_REPLACE_POINT").unwrap();
     let reason: ReplaceReason = serde_json::from_str(&std::env::var("MEGURI_REPLACE_REASON").unwrap()).unwrap();
+    let cloud = reason == ReplaceReason::CloudAdopt;
+    let cloud_prior = if cloud {
+        mode.split('-').nth(1).unwrap()
+    } else {
+        "clear"
+    };
     let engine = Engine::new(EngineConfig::default()).unwrap();
     if mode == "raw-recover" {
         faultpoint::arm(&point, Fault::Abort);
@@ -589,7 +1111,7 @@ fn replacement_crash_worker() {
         panic!("recovery fault point was not reached: {point}");
     }
     let raw = mode == "raw" || mode == "raw-identical";
-    let initial = mode == "absent" || mode == "identical" || raw;
+    let initial = mode == "absent" || mode == "identical" || raw || (cloud && cloud_prior == "absent");
     if !initial {
         engine.open_raw(&live, config(binding(), 991)).unwrap();
     }
@@ -603,17 +1125,27 @@ fn replacement_crash_worker() {
         })
         .unwrap();
     }
+    if cloud && !initial {
+        seed_cloud_prior(&engine, &live, cloud_prior);
+        engine.close().unwrap();
+        fs::copy(&live, live.with_extension("cloud-old-before")).unwrap();
+        engine.open_raw(&live, config(binding(), 992)).unwrap();
+    }
     if let Some(prior) = DeviceState::for_collection(&live).publication().unwrap() {
         fs::write(directory.join("prior.json"), serde_json::to_vec(&prior).unwrap()).unwrap();
     }
-    let candidate = stage(
-        directory,
-        if mode == "older" {
-            "schema-11.anki2"
-        } else {
-            "schema-18.anki2"
-        },
-    );
+    let candidate = if cloud {
+        cloud_stage(directory)
+    } else {
+        stage(
+            directory,
+            if mode == "older" {
+                "schema-11.anki2"
+            } else {
+                "schema-18.anki2"
+            },
+        )
+    };
     *PATHS.lock().unwrap() = Some((live.clone(), candidate.path()));
     faultpoint::arm("replace.after_pause_recorded", Fault::Callback(capture_intent_boundary));
     if point != "replace.after_pause_recorded" {
@@ -623,6 +1155,17 @@ fn replacement_crash_worker() {
         faultpoint::arm("replace.after_finalise", Fault::Callback(make_identical_before_intent));
     }
     let slot = engine.acquire_slot(replacement_op(reason)).unwrap();
+    if cloud {
+        let input = cloud_input(mode.ends_with("-local"));
+        if initial {
+            slot.replace_verified_cloud_adopt_initial(&live, config(binding(), 991), candidate, input)
+                .unwrap();
+        } else {
+            let mut exclusive = slot.enter_exclusive(true).unwrap();
+            exclusive.replace_verified_cloud_adopt(candidate, input).unwrap();
+        }
+        panic!("CloudAdopt fault point was not reached: {point}");
+    }
     let change = |scope: &mut meguri_storage::WriteScope<'_>| -> Result<(), StorageError> {
         download_change(reason, scope)?;
         let mut col = scope.col()?;
@@ -667,6 +1210,268 @@ fn crash(live: &Path, point: &str, mode: &str, reason: ReplaceReason) {
         "worker must abort at the real fault boundary: {point}"
     );
 }
+
+const CLOUD_CRASH_POINTS: [&str; 7] = [
+    "replace.after_check",
+    "replace.after_finalise",
+    "replace.after_pause_recorded",
+    "replace.after_live_wal_removed",
+    "replace.after_rename",
+    "replace.after_dir_sync",
+    "replace.after_durable_activation",
+];
+
+fn cloud_swapped(point: &str) -> bool {
+    matches!(
+        point,
+        "replace.after_rename" | "replace.after_dir_sync" | "replace.after_durable_activation"
+    )
+}
+
+fn assert_recorded_file_proof(live: &Path, intent: &serde_json::Value, candidate: bool) {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::MetadataExt;
+    let bytes = fs::read(live).unwrap();
+    let file_key = if candidate { "candidate_file" } else { "old_file" };
+    let native_key = if candidate { "candidate_native" } else { "old_native" };
+    assert_eq!(intent[file_key]["length"].as_u64().unwrap(), bytes.len() as u64);
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    assert_eq!(intent[file_key]["sha256"], serde_json::to_value(digest).unwrap());
+    let native = fs::symlink_metadata(live).unwrap();
+    assert_eq!(intent[native_key]["device"].as_u64().unwrap(), native.dev());
+    assert_eq!(intent[native_key]["inode"].as_u64().unwrap(), native.ino());
+}
+
+fn recover_cloud_twice(
+    live: &Path,
+    expected: &Publication,
+    reason: Option<PendingDecisionReason>,
+    expected_marker: i64,
+) {
+    for _ in 0..2 {
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let collection = engine.open_raw(live, config(binding(), 144)).unwrap();
+        assert_eq!(&publication(live), expected);
+        assert_reason(live, reason);
+        assert!(r6_document(live)["deviceState"]["intent"].is_null());
+        assert_eq!(marker(&collection), expected_marker);
+        if expected_marker == 946 {
+            assert_cloud_stamps(&collection);
+        }
+        engine.close().unwrap();
+        assert!(meguri_storage::integrity::integrity_check(live).unwrap().is_ok());
+    }
+}
+
+#[test]
+fn cloud_adopt_kill_at_every_r8_boundary_recovers_proven_old_or_exact_candidate() {
+    for mode in [
+        "cloud-clear-bound",
+        "cloud-restore-bound",
+        "cloud-colpkg-local",
+        "cloud-legacy-local",
+    ] {
+        for point in CLOUD_CRASH_POINTS {
+            let (dir, live) = common::copy_fixture("schema-18.anki2");
+            settled_old(&live);
+            crash(&live, point, mode, ReplaceReason::CloudAdopt);
+            let prior: Publication = serde_json::from_slice(&fs::read(dir.path().join("prior.json")).unwrap()).unwrap();
+            let expected = cloud_input(mode.ends_with("-local"));
+            let document = r6_document(&live);
+            let intent = &document["deviceState"]["intent"];
+            if !intent.is_null() {
+                assert_eq!(intent["operation"], serde_json::to_value(expected.operation).unwrap());
+                assert_eq!(intent["reason"], "CloudAdopt");
+                assert_eq!(intent["candidate"], serde_json::to_value(&expected.candidate).unwrap());
+                assert_eq!(intent["prior"], serde_json::to_value(&prior).unwrap());
+                assert_eq!(intent["candidate"]["decision"], "Clear");
+                assert_recorded_file_proof(&live, intent, cloud_swapped(point));
+                assert!(
+                    DeviceState::for_collection(&live)
+                        .publication_token(&binding())
+                        .is_err()
+                );
+            }
+            let prior_kind = mode.split('-').nth(1).unwrap();
+            if cloud_swapped(point) {
+                assert_eq!(
+                    fs::read(&live).unwrap(),
+                    fs::read(live.with_extension("candidate-final")).unwrap()
+                );
+                recover_cloud_twice(&live, &expected.candidate, None, 946);
+            } else {
+                assert_eq!(
+                    fs::read(&live).unwrap(),
+                    fs::read(live.with_extension("cloud-old-before")).unwrap()
+                );
+                recover_cloud_twice(
+                    &live,
+                    &prior,
+                    prior_reason(prior_kind),
+                    if prior_kind == "clear" { 0 } else { 722 },
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cloud_adopt_no_old_file_succeeds_and_recovers_each_real_crash_boundary() {
+    for local_only in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let slot = engine.acquire_slot(LongOp::CloudAdopt).unwrap();
+        let new = slot
+            .replace_verified_cloud_adopt_initial(
+                &live,
+                config(binding(), 7),
+                cloud_stage(dir.path()),
+                cloud_input(local_only),
+            )
+            .unwrap();
+        assert_eq!(new.generation(), Generation(1));
+        assert_eq!(publication(&live), cloud_input(local_only).candidate);
+        assert_reason(&live, None);
+        assert_cloud_stamps(&new);
+        drop(slot);
+        engine.close().unwrap();
+        for point in CLOUD_CRASH_POINTS {
+            let dir = tempfile::tempdir().unwrap();
+            let live = dir.path().join("collection.anki2");
+            crash(
+                &live,
+                point,
+                if local_only {
+                    "cloud-absent-local"
+                } else {
+                    "cloud-absent-bound"
+                },
+                ReplaceReason::CloudAdopt,
+            );
+            if cloud_swapped(point) {
+                let document = r6_document(&live);
+                let intent = &document["deviceState"]["intent"];
+                assert!(intent["old_file"].is_null());
+                assert!(intent["old_native"].is_null());
+                assert_recorded_file_proof(&live, intent, true);
+                recover_cloud_twice(&live, &cloud_input(local_only).candidate, None, 946);
+            } else {
+                assert!(!live.exists());
+                let prior = DeviceState::for_collection(&live).publication().unwrap();
+                for _ in 0..2 {
+                    let engine = Engine::new(EngineConfig::default()).unwrap();
+                    assert!(engine.open_raw(&live, config(binding(), 8)).is_err());
+                    assert!(!live.exists());
+                    assert_eq!(DeviceState::for_collection(&live).publication().unwrap(), prior);
+                    if prior.is_some() {
+                        assert_reason(&live, None);
+                        assert!(r6_document(&live)["deviceState"]["intent"].is_null());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cloud_adopt_startup_uses_actual_account_input_and_leaves_no_pending_reason_on_mismatch() {
+    for point in [
+        "replace.after_rename",
+        "replace.after_dir_sync",
+        "replace.after_durable_activation",
+    ] {
+        for local_only in [false, true] {
+            let (_dir, live) = common::copy_fixture("schema-18.anki2");
+            settled_old(&live);
+            crash(
+                &live,
+                point,
+                if local_only {
+                    "cloud-restore-local"
+                } else {
+                    "cloud-restore-bound"
+                },
+                ReplaceReason::CloudAdopt,
+            );
+            // This is the actual platform input for this launch. Do not edit
+            // saved account facts to make the comparison appear to happen.
+            let changed_account = AccountBinding::Connected {
+                account: "different-synthetic-account".into(),
+                configuration: "test-app".into(),
+                environment: "test".into(),
+            };
+            let expected = cloud_input(local_only).candidate;
+            for _ in 0..2 {
+                let engine = Engine::new(EngineConfig::default()).unwrap();
+                let collection = engine.open_raw(&live, config(changed_account.clone(), 88)).unwrap();
+                let active = publication(&live);
+                assert_eq!(active.identity, expected.identity);
+                assert_eq!(
+                    active.decision,
+                    if local_only {
+                        PublicationDecision::Clear
+                    } else {
+                        PublicationDecision::Pending
+                    }
+                );
+                if local_only {
+                    assert_eq!(active.binding, AccountBinding::LocalOnly);
+                } else {
+                    assert_ne!(
+                        active.binding, changed_account,
+                        "authorization must not transfer to the current account"
+                    );
+                }
+                assert_reason(&live, None);
+                assert_eq!(marker(&collection), 946);
+                assert_cloud_stamps(&collection);
+                assert!(r6_document(&live)["deviceState"]["intent"].is_null());
+                assert!(
+                    DeviceState::for_collection(&live)
+                        .publication_token(&changed_account)
+                        .is_err()
+                );
+                engine.close().unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn cloud_adopt_requires_both_native_and_finalized_byte_proof_before_resolving_an_intent() {
+    for point in ["replace.after_pause_recorded", "replace.after_rename"] {
+        for damage in ["native", "bytes", "metadata"] {
+            let (dir, live) = common::copy_fixture("schema-18.anki2");
+            settled_old(&live);
+            crash(&live, point, "cloud-restore-bound", ReplaceReason::CloudAdopt);
+            match damage {
+                "native" => {
+                    let bytes = fs::read(&live).unwrap();
+                    fs::rename(&live, live.with_extension("held-native")).unwrap();
+                    fs::write(&live, bytes).unwrap();
+                }
+                "bytes" => fs::write(&live, b"neither finalized file identity").unwrap(),
+                "metadata" => fs::write(dir.path().join("meguri-sidecar.json"), b"{\"deviceState\":").unwrap(),
+                _ => unreachable!(),
+            }
+            let evidence = recovery_files(dir.path());
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            assert!(engine.open_raw(&live, config(binding(), 55)).is_err());
+            assert!(
+                DeviceState::for_collection(&live)
+                    .publication_token(&binding())
+                    .is_err()
+            );
+            assert_eq!(
+                recovery_files(dir.path()),
+                evidence,
+                "unproven recovery must retain its evidence"
+            );
+        }
+    }
+}
+
 fn settled_old(live: &Path) {
     let engine = Engine::new(EngineConfig::default()).unwrap();
     engine.open_raw(live, config(binding(), 7)).unwrap();
@@ -1656,4 +2461,68 @@ fn raw_restore_matching_final_databases_block_the_old_wal_move() {
             .to_string_lossy()
             .starts_with(".meguri-restore-wal-")
     }));
+}
+
+#[test]
+fn replacement_witness_extensions_stay_with_the_old_candidate_across_real_replacements() {
+    for legacy in [true, false] {
+        let h = Harness::open();
+        let before = publication(&h.path).identity;
+        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+        slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
+            Ok(())
+        })
+        .unwrap();
+        drop(slot);
+        let old_identity = publication(&h.path).identity;
+        assert_ne!(old_identity, before);
+        let extension = serde_json::json!({"synthetic": "old-witness-extension"});
+        meguri_storage::sidecar::update_document(&h.dir.path().join("meguri-sidecar.json"), |doc| {
+            let fields = doc["deviceState"].as_object_mut().unwrap();
+            fields.get_mut("lastReplacement").unwrap()["futureWitnessMember"] = extension.clone();
+            if legacy {
+                // Use the existing legacy compatibility fixture: only the
+                // single activation witness predates the retained chain.
+                fields.remove("replacements");
+            } else {
+                fields.get_mut("replacements").unwrap()[0]["futureWitnessMember"] = extension.clone();
+            }
+            Ok(())
+        })
+        .unwrap();
+        let old_witness = r6_document(&h.path)["deviceState"]["lastReplacement"].clone();
+        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+        slot.replace_verified(stage(h.dir.path(), "schema-18.anki2"), ReplaceReason::Restore, |_| {
+            Ok(())
+        })
+        .unwrap();
+        drop(slot);
+        let new_identity = publication(&h.path).identity;
+        assert_ne!(new_identity, old_identity);
+        let document = r6_document(&h.path);
+        let fields = &document["deviceState"];
+        let retained = fields["replacements"].as_array().unwrap();
+        assert_eq!(retained.len(), 2);
+        let old_id = serde_json::to_value(old_identity).unwrap();
+        let new_id = serde_json::to_value(new_identity).unwrap();
+        let old = retained
+            .iter()
+            .find(|record| record["candidate"]["identity"] == old_id)
+            .unwrap();
+        let new = retained
+            .iter()
+            .find(|record| record["candidate"]["identity"] == new_id)
+            .unwrap();
+        assert_eq!(old, &old_witness, "legacy={legacy}");
+        assert_eq!(old.get("futureWitnessMember"), Some(&extension));
+        assert!(new.get("futureWitnessMember").is_none());
+        assert_eq!(fields["lastReplacement"]["candidate"]["identity"], new_id);
+        assert!(fields["lastReplacement"].get("futureWitnessMember").is_none());
+        let proof = DeviceState::for_collection(&h.path)
+            .local_replacement_successor(before)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.after(), new_identity);
+        h.engine.close().unwrap();
+    }
 }
