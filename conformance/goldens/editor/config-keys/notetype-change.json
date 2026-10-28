@@ -1,0 +1,90 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "notetype_last_deck": {
+          "deck": "Destination"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {},
+      {
+        "notetype_last_deck": {
+          "deck": "Destination"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "868c57cca15ba1afb5901ad33d8c632c042e733f4f2c09c306ad6b6fe84db372",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/config-keys/notetype-change",
+  "scenario_sha256": "408392d76379f12d1181aefc91ff49d643b79ab7eda268d997675092c25fe136",
+  "tz": "UTC"
+}

@@ -1,0 +1,118 @@
+# K4.1 name-order fallback: assign the lower-id own note type the name Zulu and the higher-id one alpha, then test missing, JSON-string and valid-integer curModel. Renames use temporary names to avoid uniqueness collisions; no real ids are observed.
+# Spec: editor/config-keys K4/K7; notes/add-defaults D7.
+{
+  "id": "editor/config-keys/first-notetype-fallback",
+  "clock": {
+    "tz": "UTC",
+    "start": "2030-01-15T10:00:00"
+  },
+  "setup": {
+    "decks": [
+      "Current"
+    ],
+    "notetypes": [
+      {
+        "name": "Alpha",
+        "fields": [
+          "Question",
+          "Answer"
+        ],
+        "templates": [
+          {
+            "name": "Prompt",
+            "front": "{{Question}}",
+            "back": "{{Answer}}"
+          }
+        ],
+        "css": ".card { font-family: sans-serif; }"
+      },
+      {
+        "name": "Zulu",
+        "fields": [
+          "Question",
+          "Answer"
+        ],
+        "templates": [
+          {
+            "name": "Prompt",
+            "front": "{{Question}}",
+            "back": "{{Answer}}"
+          }
+        ],
+        "css": ".card { font-family: sans-serif; }"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "db_exec": {
+        "sql": "DELETE FROM config WHERE KEY LIKE '_deck_%_lastNotetype' OR KEY LIKE '_nt_%_lastDeck'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "UPDATE notetypes SET name = 'Fixture_' || name WHERE name IN ('Alpha', 'Zulu')"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "UPDATE notetypes SET name = 'Zulu' WHERE id = (SELECT MIN(id) FROM notetypes WHERE name IN ('Fixture_Alpha', 'Fixture_Zulu'))"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "UPDATE notetypes SET name = 'alpha' WHERE name IN ('Fixture_Alpha', 'Fixture_Zulu')"
+      }
+    },
+    {
+      "reopen": {}
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curDeck', 0, 0, CAST(id AS BLOB) FROM decks WHERE name = 'Current'"
+      }
+    },
+    {
+      "set_config": {
+        "key": "addToCur",
+        "value": false
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM config WHERE KEY = 'curModel'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curModel', 0, 0, CAST('\"' || id || '\"' AS BLOB) FROM notetypes WHERE name = 'Zulu'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curModel', 0, 0, CAST(id AS BLOB) FROM notetypes WHERE name = 'Zulu'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    }
+  ]
+}

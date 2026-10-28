@@ -1,0 +1,3 @@
+# K7 scenarios await their Meguri adapter; recording a golden does not activate them.
+area: editor
+active: []

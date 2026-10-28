@@ -1,0 +1,176 @@
+# K4.1 false: note type last deck normal, filtered, deleted and missing; deleted curModel falls back by name. Stored keys are set after setup; no real ids are observed.
+# Spec: editor/config-keys K4/K7; notes/add-defaults D7.
+{
+  "id": "editor/config-keys/add-defaults-by-notetype",
+  "clock": {
+    "tz": "UTC",
+    "start": "2030-01-15T10:00:00"
+  },
+  "setup": {
+    "decks": [
+      "Current",
+      "Destination",
+      "Retired"
+    ],
+    "notetypes": [
+      {
+        "name": "Alpha",
+        "fields": [
+          "Question",
+          "Answer"
+        ],
+        "templates": [
+          {
+            "name": "Prompt",
+            "front": "{{Question}}",
+            "back": "{{Answer}}"
+          }
+        ],
+        "css": ".card { font-family: sans-serif; }"
+      },
+      {
+        "name": "Beta",
+        "fields": [
+          "Question",
+          "Answer"
+        ],
+        "templates": [
+          {
+            "name": "Prompt",
+            "front": "{{Question}}",
+            "back": "{{Answer}}"
+          }
+        ],
+        "css": ".card { font-family: sans-serif; }"
+      },
+      {
+        "name": "RetiredType",
+        "fields": [
+          "Question",
+          "Answer"
+        ],
+        "templates": [
+          {
+            "name": "Prompt",
+            "front": "{{Question}}",
+            "back": "{{Answer}}"
+          }
+        ],
+        "css": ".card { font-family: sans-serif; }"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "db_exec": {
+        "sql": "DELETE FROM config WHERE KEY LIKE '_deck_%_lastNotetype' OR KEY LIKE '_nt_%_lastDeck'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Practice', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curModel', 0, 0, CAST(id AS BLOB) FROM notetypes WHERE name = 'Alpha'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curDeck', 0, 0, CAST(id AS BLOB) FROM decks WHERE name = 'Current'"
+      }
+    },
+    {
+      "set_config": {
+        "key": "addToCur",
+        "value": false
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || o.id || '_lastDeck', 0, 0, CAST(v.id AS BLOB) FROM notetypes o, decks v WHERE o.name = 'Alpha' AND v.name = 'Destination'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || o.id || '_lastDeck', 0, 0, CAST(v.id AS BLOB) FROM notetypes o, decks v WHERE o.name = 'Alpha' AND v.name = 'Practice'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || o.id || '_lastDeck', 0, 0, CAST(v.id AS BLOB) FROM notetypes o, decks v WHERE o.name = 'Alpha' AND v.name = 'Retired'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM decks WHERE name = 'Retired'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM config WHERE KEY = '_nt_' || (SELECT id FROM notetypes WHERE name = 'Alpha') || '_lastDeck'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT '_nt_' || o.id || '_lastDeck', 0, 0, CAST(v.id AS BLOB) FROM notetypes o, decks v WHERE o.name = 'Beta' AND v.name = 'Destination'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) SELECT 'curModel', 0, 0, CAST(id AS BLOB) FROM notetypes WHERE name = 'RetiredType'"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'RetiredType')"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'RetiredType')"
+      }
+    },
+    {
+      "db_exec": {
+        "sql": "DELETE FROM notetypes WHERE name = 'RetiredType'"
+      }
+    },
+    {
+      "observe": [
+        {
+          "add_defaults": {}
+        }
+      ]
+    }
+  ]
+}

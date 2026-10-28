@@ -1,0 +1,119 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Destination",
+          "notetype": "Alpha"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Current",
+          "notetype": "Alpha"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Current",
+          "notetype": "Alpha"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Current",
+          "notetype": "Alpha"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Current",
+          "notetype": "Alpha"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "868c57cca15ba1afb5901ad33d8c632c042e733f4f2c09c306ad6b6fe84db372",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/config-keys/add-defaults-by-notetype",
+  "scenario_sha256": "a3739b484db127d03bf372a2ee434e342d6dcdf65f4860e79401a66628bd59d4",
+  "tz": "UTC"
+}

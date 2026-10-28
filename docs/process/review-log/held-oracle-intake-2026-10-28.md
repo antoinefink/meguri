@@ -91,3 +91,36 @@ Its complete disposition is retained in the search-data review log.
 No guard exception or unit acceptance was introduced. Focus the native
 closing failure before running the next complete T0; preserve the failed
 receipt and unchanged timeout.
+
+## Native diagnosis and K7 recordings
+
+`conformance/20261028T064413Z-68158` passes all native testkit checks,
+including the repaired package count, and the exact scheduling case
+(`--lane native --jobs 1 sched/day/config-values`). The full-workload
+timeout from `20261028T062248Z-42326` is retained; a focused passing run
+does not establish its cause or replace the next full T0.
+
+The spec writer supplied the four missing K7 cases from K4/D7. Starting
+commit `d5babca7` is recorded in `oracle-batch4/k7-start.json` under the
+unit intake directory. Independent scenario review is clear. All 23
+recorded values agree with the spec-derived packet; SQL result rows
+remain empty, and no real IDs occur in observations. The fourth case
+proves backend default reads, not Add-screen selection retention.
+
+- `oracle/20261028T065613Z-76503`: all four recorded using the existing
+  driver, with no driver or server changes.
+- `oracle/20261028T070035Z-79062`: all four repeat comparisons pass.
+- `conformance/20261028T070035Z-79034`: four parse and remain pending,
+  zero T0 failures. No missing adapter was activated.
+- `private/20261028T070106Z-80325`: two invented deck names flagged.
+  Only those source strings were replaced; no golden was edited by hand.
+- `oracle/20261028T070325Z-81422`: affected case re-recorded; independent
+  equivalence/value review is clear.
+- `oracle/20261028T070434Z-82756`: renamed case repeat comparison passes.
+- `goldens-check/20261028T070432Z-82470`: all 1,006 scenarios fresh;
+  2,133 schema inputs checked, zero errors.
+- `private/20261028T070435Z-82957`: all nine scenario/golden inputs clear.
+
+This closes the four K7 recording follow-ups. Their Meguri adapters and
+UI evidence remain pending. P24, O19, four R1881 flags and the next full
+T0/integration gate stay open. No Unit trailer or release acceptance.
