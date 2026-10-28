@@ -18,6 +18,8 @@ pub struct HostConfig {
     pub random: Arc<dyn RandomSource>,
     pub disk_space_provider: Arc<dyn DiskSpaceProvider>,
     pub engine: EngineConfig,
+    /// Optional bounded capture; platform providers supply real account facts.
+    pub cloud: Option<meguri_sync::cloud::runtime::CloudInputs>,
     pub backup_entry_times: Arc<dyn meguri_engine::maintenance::BackupEntryTimes>,
     #[cfg(feature = "test-hooks")]
     pub(crate) test_backup: Option<Arc<dyn meguri_engine::ports::BackupService>>,
@@ -46,6 +48,7 @@ impl HostConfig {
             random,
             disk_space_provider,
             engine: EngineConfig::default(),
+            cloud: None,
             backup_entry_times: Arc::new(meguri_engine::maintenance::OsBackupEntryTimes),
             #[cfg(feature = "test-hooks")]
             test_backup: None,

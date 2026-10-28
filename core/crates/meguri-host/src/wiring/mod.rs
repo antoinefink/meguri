@@ -76,12 +76,19 @@ pub fn validate_ports(ports: &Ports) -> Result<(), EngineError> {
             PortKind::OpenStep => ports.open_steps.iter().map(|p| p.name()).collect(),
         }
     };
+    // The optional capture component does not fulfill ServicePort::Sync.
+    let has_cloud = PortKind::ALL
+        .iter()
+        .any(|role| actual(*role).contains(&"cloud-note-capture"));
     for role in PortKind::ALL {
         let mut expected: Vec<_> = PROVIDED
             .iter()
             .filter(|b| b.roles.contains(&role))
             .map(|b| b.name)
             .collect();
+        if has_cloud {
+            expected.push("cloud-note-capture");
+        }
         let mut found = actual(role);
         expected.sort_unstable();
         found.sort_unstable();

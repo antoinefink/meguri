@@ -404,3 +404,57 @@ Account capture, scan, conditional sending, the enabled test-first harness,
 full S2.4 and 150k allocation checks remain open. Whole-target lint and native
 checks still await the intentionally missing account harness. No U113,
 batch gate or release acceptance is claimed.
+
+## Existing-Note capture and reconciliation component
+
+Starting commit: `46f39d6d`; recorded before work in
+`account-workflow/runtime-start.json` under the unit intake directory.
+The enabled account/root regressions at `16f12a9b` preceded this work.
+Filtered author `cleanroom/20261028T055446Z-20632` adds an optional
+production runtime through normal CoreHost composition. It captures
+existing acknowledged Notes before live identity verification, isolates
+changed accounts without deleting pending facts and reconciles those
+Notes from a held CloudReader snapshot with a matching WAL receipt.
+The runtime extension has its own version inside outer tracking V2.
+All four runtime ports register before engine open; default configuration
+keeps the component disabled.
+
+Independent review 1 required streaming capture instead of retaining all
+changed bodies, reading scan pages outside writer-shared locks, scoping
+ordinary payload validation to this build and fixing account-reason
+precedence. Repair `cleanroom/20261028T061413Z-31932` closes those four
+findings and adds ten tests using real CoreHost operations. Tracking
+capture is atomic; newer observer captures survive scan page merges.
+Review 2 found test barriers that could hang on an early failure.
+Repair `cleanroom/20261028T062858Z-52822` bounds reached/completion waits
+and releases paused workers before scoped joins on error. An unreached
+barrier cannot certify completion. Review 3 is clear, including the
+unchanged production behavior and clean-room scope.
+
+- `core-test/20261028T061054Z-28117`: initial component compiled; three
+  existing host composition checks passed, one existing milestone-owner
+  check remained ignored. This did not execute the new runtime.
+- `core-test/20261028T064020Z-64392`: all ten new host runtime tests and
+  60 separate format checks passed, zero skipped. Feature:
+  `meguri-host/test-hooks`, target `cloud_runtime`.
+- Tests cover disabled/enabled composition, capture with identity
+  unavailable, rollback of a failed tracking capture while retaining the
+  collection commit, concurrent edits during paused reconciliation, stale
+  account/incarnation guards, build scope, isolation precedence and
+  lifecycle refusal of drained/sending status.
+- `private/20261028T061124Z-28699`: new comments and identifier spellings
+  flagged; rephrased/renamed without a guard exception. Final
+  `private/20261028T064024Z-64694` passes for all ten inputs.
+- `similarity/20261028T061126Z-28962`: initial source clear. Final
+  `similarity/20261028T064024Z-64699`: pass.
+- `core-format/20261028T064000Z-63930`: pass.
+
+This is a component, not whole-binding reconciliation. New/deleted Notes,
+other entity kinds, structural layouts, intent replay, root confirmation,
+transport, conditional sending/acknowledgements and the shared process
+harness remain open. Scan-required stays set; whole-binding drained and
+sending remain disabled, and the Sync service is pending. Pages are
+limited by row count; the full byte-budget/150k allocation proof remains
+open. The three enabled end-to-end account/root regressions still await
+the missing testkit helpers. Whole-target lint/native durability and
+full U113/U117 acceptance remain open. The integration base is unchanged.

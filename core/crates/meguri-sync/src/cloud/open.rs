@@ -109,6 +109,7 @@ pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
         if !(1..=SCHEMA_VERSION).contains(&version) {
             return Ok(Probe::Damaged);
         }
+        super::runtime_store::check_version(&connection)?;
         let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         if integrity != "ok" {
             return Ok(Probe::Damaged);
@@ -118,6 +119,7 @@ pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
     })();
     match checked {
         Ok(result) => Ok(result),
+        Err(Error::RuntimeSchemaUnsupported) => Err(Error::RuntimeSchemaUnsupported),
         Err(_) => Ok(Probe::Damaged),
     }
 }

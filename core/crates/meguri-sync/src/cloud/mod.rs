@@ -1,14 +1,16 @@
-//! Internal CloudKit tracking storage (K10, V2.1, V3, V8.1).
+//! Cloud tracking storage and bounded existing-Note capture/reconciliation.
 //!
-//! This is a storage foundation, with no provider or account policy. Callers
-//! supply already classified inbox facts. Collection writes, validation/apply,
-//! account verification, engine-instance guards and recovery editing belong
-//! to later slices. Storage-only damaged-tracking salvage is implemented here. In particular, selecting a stored binding makes no readiness claim.
+//! `runtime` adds host-wired capture and verified-account isolation. Whole-
+//! binding scan completion, root confirmation, sending, semantic apply and
+//! recovery editing remain incomplete. Selecting a stored binding makes no
+//! readiness claim. Inbox and conflict APIs accept storage facts only.
 
 pub mod entity_codec;
+pub mod runtime;
 
 mod open;
 mod recovery;
+mod runtime_store;
 mod store;
 mod types;
 
@@ -28,6 +30,7 @@ pub enum Error {
     IsolatedBinding,
     RecoveryRequired,
     RecoveryRefused,
+    RuntimeSchemaUnsupported,
 }
 
 impl std::fmt::Display for Error {
@@ -42,6 +45,7 @@ impl std::fmt::Display for Error {
             Self::IsolatedBinding => "cloud binding is isolated",
             Self::RecoveryRequired => "cloud tracking recovery must finish before opening",
             Self::RecoveryRefused => "cloud tracking recovery evidence is inconsistent",
+            Self::RuntimeSchemaUnsupported => "cloud runtime tracking schema is unsupported",
         })
     }
 }

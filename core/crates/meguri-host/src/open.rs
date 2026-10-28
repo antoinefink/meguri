@@ -180,6 +180,7 @@ enum CloseState {
 }
 
 pub struct CoreHost {
+    cloud: Option<Arc<meguri_sync::cloud::runtime::Runtime>>,
     pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
     pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
@@ -222,11 +223,17 @@ impl CoreHost {
         wiring::validate()?;
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
         let engine = process.engine.clone();
+        let cloud = config.cloud.clone().map(|inputs| {
+            Arc::new(meguri_sync::cloud::runtime::Runtime::new(
+                config.collection_directory.clone(),
+                inputs,
+            ))
+        });
         let derived = DerivedHost::builder(&engine).start()?;
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = process.queues.clone();
         let review = process.review.clone();
-        let ports = derived
+        let mut ports = derived
             .ports(Ports::new())
             .open_step(media.clone())
             .suspend_participant(media.clone())
@@ -236,6 +243,13 @@ impl CoreHost {
             .observer(review.clone())
             .generation_listener(review.clone())
             .suspend_participant(review.clone());
+        if let Some(cloud) = &cloud {
+            ports = ports
+                .open_step(cloud.clone())
+                .observer(cloud.clone())
+                .generation_listener(cloud.clone())
+                .suspend_participant(cloud.clone());
+        }
         if let Err(error) = wiring::validate_ports(&ports) {
             let media_cleanup = media.close_until(meguri_engine::monotonic::now() + Duration::from_secs(5));
             let derived_cleanup = derived.close();
@@ -281,6 +295,7 @@ impl CoreHost {
             initial_open: options.clone(),
         });
         let host = Self {
+            cloud,
             manual_transfers,
             backup_inputs,
             initial_open: options.clone(),
@@ -303,6 +318,11 @@ impl CoreHost {
     }
     pub fn collection(&self) -> Result<Collection, EngineError> {
         self.engine.collection()
+    }
+    /// Sync remains unavailable until whole-binding reconciliation and the
+    /// guarded root/send/ack integration land.
+    pub fn cloud_runtime(&self) -> Option<&Arc<meguri_sync::cloud::runtime::Runtime>> {
+        self.cloud.as_ref()
     }
     pub fn derived(&self) -> &DerivedHost {
         &self.derived
