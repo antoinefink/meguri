@@ -8,6 +8,7 @@
 - Test files named `tests/canary_*.rs` run first and alone in `tools/mg core-test`, and a failure there stops the run (AE82 ordering). Keep them fast. That phase builds only the packages holding a canary, so keep the pin canary in layering-check, which depends on no workspace crate: a pin bump that breaks a domain crate then still reports the drift.
 - A test with a wall-clock bound runs alone through a `threads-required = "num-test-threads"` override in `.config/nextest.toml`, so a full run's load cannot push it past its bound. Tests that assert a wall-clock budget on the 150k collection are named `*_at_150k`, which one override already matches; any other bounded test needs its own entry.
 - Keep domain crates Linux-buildable: Docker runs all Rust tests. Apple-only dependencies go under `cfg(target_vendor = "apple")`.
+- SQLite INTEGER boundaries use checked `i64` conversions. The pinned rusqlite has neither `FromSql<u64>` nor `ToSql<u64>`, including optional values and test queries.
 - The `test-hooks` (model, engine, sync, ffi) and `ankiweb` (sync, ffi) features are never default.
 - Fault points are `meguri_model::faultpoint!("<name>")?`. Whether they fire is meguri-model's `test-hooks` feature, not the calling crate's: a crate's own `test-hooks` must enable `meguri-model/test-hooks`. Names belong to U250's catalog.
 - Host builds write `core/target/`; Docker builds use the `cargo-target` volume.
