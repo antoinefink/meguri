@@ -458,3 +458,54 @@ limited by row count; the full byte-budget/150k allocation proof remains
 open. The three enabled end-to-end account/root regressions still await
 the missing testkit helpers. Whole-target lint/native durability and
 full U113/U117 acceptance remain open. The integration base is unchanged.
+
+## Saved/action ordering and real review contracts — test first
+
+Starting commit: `712d84f3`; recorded before actual authoring in
+`review-workflow/start.json` under the unit intake directory. The earlier
+`cleanroom/20261028T065914Z-78171` admission refused dirty K7 preparation;
+no author ran in that attempt.
+
+Filtered test author `cleanroom/20261028T070611Z-84346` adds six enabled
+Saved/pending-action contracts and one real review round-trip contract.
+They cover a local revision 3 in flight followed by revision 4; held edits
+waiting for SessionEnded; deferred additions/removals and blob deletion
+ordering; automatic sync off with 400 selected records, the first 250
+failing limitExceeded, completion within eight calls; and complete action
+emission order. The separate review test requires actual CoreHost
+start/show-answer/Good/end-and-drain, canonical Card/Revlog service saves
+and local persistence after reopening. Millisecond review identity is
+compared without dividing it by 1,000.
+
+Q2/Q11 permit Rust coverage of U114's core side first. The stand-in must
+remove Saved names at handler return and defer the whole UpdatePending,
+removals included. Actual CoreHost, production actions and Service results
+are required; helper-inserted outcomes are not evidence. Swift fake-engine,
+real SDK and signed A23 proof remain separate requirements. The P24 item
+is not removed by this partial test phase.
+
+Independent review 1 is clear. Mechanical repair
+`cleanroom/20261028T073018Z-8442` renames new helper methods to
+`drive_ready`/`drive_until_response`, rephrases two comments and makes
+owned name collection explicit. Independent equivalence review 2 is clear;
+all seven tests and assertions remain enabled. No production/helper code
+was added before these tests.
+
+- `core-test/20261028T072216Z-5243`: failed build on missing shared
+  adapter/device APIs, with associated inference diagnostics. Zero tests ran.
+- `private/20261028T072217Z-5693`: new helper spellings/comments flagged;
+  repaired without exceptions.
+- `similarity/20261028T072216Z-5437`: initial source clear.
+- `core-test/20261028T085409Z-34670`: still failed build, missing
+  `cloud::{adapter,devices}` and cascading unsized-name diagnostics despite
+  the explicit owned collection type. Zero runtime tests ran; this is the
+  enabled test-first state, not a pass or skip.
+- `private/20261028T085410Z-34894` and
+  `similarity/20261028T085411Z-35042`: final source passes.
+- `core-format/20261028T085332Z-33958`: pass.
+
+Next implement one coherent stable-layout review workflow: common entity
+capture/reconciliation, current-instance root guard, conditional save/ack
+and pending actions, shared SDK stand-in and actual CoreHost child driver.
+It must pass the three earlier account/root tests and these seven tests.
+No U113/U114/U117, full integration or release acceptance is claimed.
