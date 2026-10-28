@@ -91,3 +91,18 @@ The test keeps its active session and every assertion.
 `swift-test/20261028T180831Z-55452`: the failed case now passes.
 `private/20261028T180838Z-56351`: pass. The corresponding scoped similarity
 receipt is retained in MG. The full focused selection follows on clean master.
+
+### Focused checkpoint on master
+
+Code commit: `70c25740113e805dd038f187c370cca229d5f9f8`.
+
+- `core-test/20261028T181337Z-58452`: 48 affected Rust cloud tests pass,
+  zero skipped.
+- `swift-test/20261028T181519Z-59336`: all 33 focused Swift tests pass,
+  zero skipped, on the clean code commit.
+- `swift-test/20261028T180137Z-51836`: all 11 SDK-routing/registry tests pass;
+  their source and production inputs are unchanged by the test barrier.
+
+The prior failed hold-back run remains evidence. The next full gate retains
+base `1416a520542a8c5daa38a23bfe398da704c3d6c9`. Both P2 notes and all full-cloud
+requirements above remain open; this checkpoint accepts no unit or milestone.
