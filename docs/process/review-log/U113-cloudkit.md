@@ -79,3 +79,39 @@ Keep the unfinished UI units, retained frozen/signed limitations, U127
 escalation and incomplete integration gates in
 [the maintenance integration log](maintenance-integration-2026-10-27.md).
 The independent store slice does not accept those units or any release gate.
+
+## J6 media feed dependency — work in progress
+
+Starting commit: `3c0b5114c084e2456ed5a39d9596f6691e54813b`;
+recorded before work in `build/unit-intake/U113-cloudkit/media-feed-start.json`.
+This is additive U31 work for U113, with no new Unit acceptance.
+
+The journal adds version 3 file-fact snapshots, a persistent feed identity,
+registration completeness, removal causes and floor-based retention. Separate
+facts preserve unsyncable files without changing manual Awaiting rows. Normal
+transfer bookkeeping remains unchanged. U113 remains incomplete.
+
+Filtered author `20261028T005705Z-49821`; repair
+`20261028T011628Z-58337`. Independent review 1 found a move-before-observation
+crash gap, direct OS randomness and missing facts for unsyncable Awaiting files.
+The repair adds a durable origin receipt, verifies the moved file before replay,
+retains the injected RandomSource and stores independent physical facts.
+Review 2 closed those findings; it found a test build error and a child status
+check to fix. Repair: `20261028T013151Z-66458`. Review 3: clear.
+Wording repairs used no guard change; `20261028T013728Z-70497`
+changes only one test identifier. No runtime operation or assertion changed.
+
+Receipts:
+
+- `core-test/20261028T012647Z-64056`: retained test compile failure.
+- `core-test/20261028T013516Z-69418`: 130 passed, zero skipped, including
+  media storage, import, staging, reset and actual process-death recovery.
+- `similarity/20261028T013908Z-71834`: 33 supported source files clear;
+  includes this core slice and independent scanner infrastructure.
+- `private/20261028T013910Z-72261`: media source clear; separate scanner
+  fixtures still need wording repairs.
+- `core-lint/20261028T013909Z-72070`: rustfmt, layering and host scan pass;
+  two collapsible-if diagnostics in receipt enumeration remain to fix.
+
+This WIP is not accepted. Resolve lint, retain final checks and finish the
+CloudKit dependencies above. The original pending integration base is unchanged.

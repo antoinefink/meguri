@@ -44,7 +44,12 @@ impl Drop for Armed {
     }
 }
 fn open(root: &Path) -> MediaStore {
-    let store = MediaStore::open(&root.join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &root.join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store
         .bind_sync_owner(&MediaBaselineOwner::new("m6:download-fixture"))
         .unwrap();

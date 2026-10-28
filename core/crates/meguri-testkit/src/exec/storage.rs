@@ -141,6 +141,7 @@ impl Storage {
     pub(super) fn media(
         &mut self,
         clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+        random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
     ) -> Result<meguri_storage::media::MediaStore, ExecError> {
         if let Some(SessionCollection::Hosted { host, .. }) = &self.collection {
             return host.media().map(|service| service.store().clone()).map_err(core);
@@ -150,7 +151,7 @@ impl Storage {
                 .collection()
                 .ok_or_else(|| invalid("no collection is open"))?
                 .path();
-            self.media = Some(meguri_storage::media::MediaStore::open(path, clock).map_err(core)?);
+            self.media = Some(meguri_storage::media::MediaStore::open(path, clock, random).map_err(core)?);
         }
         Ok(self.media.as_ref().expect("media store was initialized").clone())
     }

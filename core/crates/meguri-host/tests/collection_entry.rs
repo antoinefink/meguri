@@ -1882,7 +1882,8 @@ fn media_initial_unprovable_restoration_and_j4_failure_retain_typed_authority() 
         let live = options.collection_directory.join("collection.anki2");
         let during_j4 = mode == 1;
         if mode != 0 {
-            let store = meguri_storage::media::MediaStore::open(&live, options.clock.clone()).unwrap();
+            let store =
+                meguri_storage::media::MediaStore::open(&live, options.clock.clone(), options.random.clone()).unwrap();
             if during_j4 {
                 fs::write(store.staging_dir().join("orphan.bin"), b"recoverable old stage").unwrap();
             }
@@ -1931,7 +1932,7 @@ fn media_initial_unprovable_restoration_and_j4_failure_retain_typed_authority() 
         assert!(evidence.join("journal").is_file());
         assert!(options.collection_directory.join("meguri-media.db").is_file());
         assert!(!live.exists());
-        assert!(meguri_storage::media::MediaStore::open(&live, options.clock.clone()).is_err());
+        assert!(meguri_storage::media::MediaStore::open(&live, options.clock.clone(), options.random.clone()).is_err());
         if during_j4 {
             let entries: Vec<_> = fs::read_dir(options.collection_directory.join("media.trash"))
                 .unwrap()

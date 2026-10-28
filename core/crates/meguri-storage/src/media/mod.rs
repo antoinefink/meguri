@@ -2,6 +2,7 @@
 mod case_fold;
 mod check_report;
 mod collection_import;
+mod feed;
 mod folder;
 mod journal_db;
 mod staging;
@@ -12,11 +13,14 @@ pub use collection_import::{
     CollectionMediaIntent, ImportMediaBackup, ImportMediaCounts, IncomingMedia, InitialMediaState, MediaImportOwner,
     MediaPreparationFailure, validate_incoming_name,
 };
+pub use feed::{
+    MediaAbsenceCause, MediaFeedId, MediaFeedItem, MediaFeedSnapshot, MediaFeedStatus, MediaFileFacts, MediaFileState,
+};
 pub use status::recorded_sizes;
 
 pub use check_report::MediaCheckReport;
 pub use journal_db::{MediaEntry, MediaSyncState, PendingChange, TrackedMediaName};
-use meguri_model::clock::Clock;
+use meguri_model::{clock::Clock, rng::RandomSource};
 use rusqlite::Connection;
 pub use staging::{NoteReference, RecoveryReport, StagedOp};
 use std::{
@@ -95,6 +99,8 @@ struct Inner {
     trash: PathBuf,
     staging: PathBuf,
     clock: Arc<dyn Clock>,
+    random: Arc<dyn RandomSource>,
+    removal_intents: Mutex<std::collections::BTreeSet<String>>,
     scans: AtomicU64,
     hashes: AtomicU64,
     case_sensitive: bool,
@@ -113,12 +119,13 @@ pub struct Diagnostics {
 }
 
 impl MediaStore {
-    pub fn open(collection: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
-        Self::open_checked(collection, clock, &|| false, None, None)
+    pub fn open(collection: &Path, clock: Arc<dyn Clock>, random: Arc<dyn RandomSource>) -> Result<Self> {
+        Self::open_checked(collection, clock, random, &|| false, None, None)
     }
     fn open_checked(
         collection: &Path,
         clock: Arc<dyn Clock>,
+        random: Arc<dyn RandomSource>,
         cancel: &dyn Fn() -> bool,
         admission: Option<&str>,
         empty_native: Option<(u64, u64)>,
@@ -135,7 +142,7 @@ impl MediaStore {
         if std::fs::symlink_metadata(&journal).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(MediaError::InvalidName);
         }
-        let db = journal_db::open_initial_owned(&journal, empty_native)?;
+        let db = journal_db::open_initial_owned(&journal, empty_native, random.as_ref())?;
         use std::os::unix::fs::MetadataExt;
         let journal_metadata = std::fs::symlink_metadata(&journal)?;
         if !journal_metadata.is_file() || journal_metadata.nlink() != 1 {
@@ -160,12 +167,15 @@ impl MediaStore {
                 trash,
                 staging,
                 clock,
+                random,
+                removal_intents: Mutex::new(Default::default()),
                 scans: AtomicU64::new(0),
                 hashes: AtomicU64::new(0),
                 case_sensitive,
                 importing: std::sync::atomic::AtomicBool::new(false),
             }),
         };
+        store.load_removal_intents()?;
         store.reconcile_trash_checked(cancel)?;
         Ok(store)
     }
@@ -181,6 +191,7 @@ impl MediaStore {
                 "collection media replacement owns the store".into(),
             ));
         }
+        self.recover_removal_intents(&guard)?;
         Ok(guard)
     }
     fn import_db(&self) -> Result<JournalGuard<'_>> {
@@ -230,7 +241,7 @@ impl MediaStore {
             if std::fs::symlink_metadata(&self.inner.journal).is_ok_and(|m| m.file_type().is_symlink()) {
                 return Err(MediaError::InvalidName);
             }
-            *guard = Some(journal_db::open(&self.inner.journal)?);
+            *guard = Some(journal_db::open(&self.inner.journal, self.inner.random.as_ref())?);
         }
         Ok(())
     }
@@ -301,7 +312,12 @@ mod lifecycle_tests {
             0,
             meguri_model::clock::UtcOffset::UTC,
         ));
-        let store = MediaStore::open(&dir.path().join("collection.anki2"), clock).unwrap();
+        let store = MediaStore::open(
+            &dir.path().join("collection.anki2"),
+            clock,
+            Arc::new(meguri_model::rng::SeededRandom::new(7)),
+        )
+        .unwrap();
         store.add("owned.txt", b"synthetic").unwrap();
         let before = store.pending().unwrap();
         let held = store.db().unwrap();

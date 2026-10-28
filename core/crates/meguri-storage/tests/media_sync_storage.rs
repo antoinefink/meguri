@@ -8,7 +8,12 @@ use sha1::{Digest, Sha1};
 use std::{collections::BTreeSet, fs, os::unix::fs::MetadataExt, path::Path, sync::Arc};
 
 fn open(root: &Path) -> MediaStore {
-    MediaStore::open(&root.join("collection.anki2"), Arc::new(common::clock())).unwrap()
+    MediaStore::open(
+        &root.join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap()
 }
 fn owner(value: &str) -> MediaBaselineOwner {
     MediaBaselineOwner::new(value)
@@ -655,7 +660,11 @@ fn foreign_wal_refusal_changes_neither_database_nor_sidecars() {
     let originals = ["meguri-media.db", "meguri-media.db-wal", "meguri-media.db-shm"]
         .map(|name| (name, fs::read(dir.path().join(name)).unwrap()));
     assert!(matches!(
-        MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())),
+        MediaStore::open(
+            &dir.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random()
+        ),
         Err(MediaError::Database(_))
     ));
     for (name, bytes) in originals {
@@ -669,7 +678,14 @@ fn migration_failure_rolls_back_the_version_and_can_be_reopened() {
     let dir = tempfile::tempdir().unwrap();
     v1_fixture(dir.path());
     let armed = Armed::io("media.sync.migration.before_commit");
-    assert!(MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).is_err());
+    assert!(
+        MediaStore::open(
+            &dir.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random()
+        )
+        .is_err()
+    );
     drop(armed);
     let db = Connection::open(dir.path().join("meguri-media.db")).unwrap();
     assert_eq!(

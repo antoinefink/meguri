@@ -184,8 +184,13 @@ impl SlotGuard {
                     Err(e) => return Err(EngineError::from(meguri_storage::StorageError::from(e)).into()),
                 }
             }
-            crate::device_state::reconcile(live, &config.publication_binding, config.clock.clone())
-                .map_err(EngineError::from)?;
+            crate::device_state::reconcile(
+                live,
+                &config.publication_binding,
+                config.clock.clone(),
+                config.random.clone(),
+            )
+            .map_err(EngineError::from)?;
             let mut initializers = config.initializers.clone();
             initializers.register(meguri_search::sqlfns::register);
             initializers.register(meguri_sched::sqlfns::register);
@@ -209,6 +214,7 @@ impl SlotGuard {
                 Some(crate::replace::PreparedMedia::new_initial(
                     live,
                     config.clock.clone(),
+                    config.random.clone(),
                     &mut stage,
                     incoming,
                 )?)
@@ -261,8 +267,13 @@ impl SlotGuard {
                     .err()
                     .unwrap_or_else(|| EngineError::internal("media recovery incomplete").into()));
             }
-            crate::device_state::reconcile(live, &config.publication_binding, config.clock.clone())
-                .map_err(EngineError::from)?;
+            crate::device_state::reconcile(
+                live,
+                &config.publication_binding,
+                config.clock.clone(),
+                config.random.clone(),
+            )
+            .map_err(EngineError::from)?;
             match swapped {
                 Err(error) if !changed => Err(error),
                 outcome => Ok::<_, ReplaceError>((ownership, outcome.err())),

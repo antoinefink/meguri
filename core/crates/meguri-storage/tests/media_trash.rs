@@ -15,7 +15,12 @@ fn media_restore_never_discards_bytes_owned_only_by_an_uncommitted_stage() {
     assert_eq!(fs::read(media.media_dir().join("a.png")).unwrap(), b"recoverable");
 }
 fn store(dir: &std::path::Path) -> MediaStore {
-    MediaStore::open(&dir.join("collection.anki2"), Arc::new(common::clock())).unwrap()
+    MediaStore::open(
+        &dir.join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap()
 }
 #[test]
 fn media_trash_survives_a_deleted_journal_and_restores_newest_numeric_version_first() {

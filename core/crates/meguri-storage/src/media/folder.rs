@@ -191,7 +191,7 @@ pub(super) fn live(db: &Connection, name: &str, hash: String, m: &Metadata, forc
     let old = journal_db::entry(db, name)?;
     let syncable = (1..=104_857_600).contains(&m.len());
     if !syncable && old.as_ref().is_some_and(|o| o.sync_state == MediaSyncState::Awaiting) {
-        return Ok(());
+        return super::feed::independent_present(db, name, &hash, m);
     }
     let state = if syncable {
         MediaSyncState::Live
@@ -224,9 +224,10 @@ pub(super) fn live(db: &Connection, name: &str, hash: String, m: &Metadata, forc
         pending_download: old.as_ref().is_some_and(|o| o.pending_download),
         sync_state: state,
     };
-    journal_db::save(db, &entry)
+    journal_db::save_file(db, &entry)
 }
 pub(super) fn deleted(db: &Connection, name: &str) -> Result<()> {
+    super::feed::independent_absent(db, name)?;
     let Some(mut entry) = journal_db::entry(db, name)? else {
         return Ok(());
     };
@@ -349,7 +350,10 @@ impl MediaStore {
                 report.skipped += 1;
                 continue;
             };
-            let old = journal_db::entry(&*self.db()?, &name)?;
+            let (old, independent) = {
+                let db = self.db()?;
+                (journal_db::entry(&db, &name)?, super::feed::independent(&db, &name)?)
+            };
             let mut path = file.path();
             if name != disk && !old.as_ref().is_some_and(|e| same_stat(e, &m)) {
                 let canonical = self.media_dir().join(&name);
@@ -370,7 +374,11 @@ impl MediaStore {
                 }
             }
             found.insert(name.clone());
-            let same = old.as_ref().is_some_and(|o| same_stat(o, &m));
+            let independent_facts = independent.as_ref().and_then(|(_, facts)| facts.as_ref());
+            let same = old.as_ref().is_some_and(|o| same_stat(o, &m))
+                || independent_facts.is_some_and(|f| {
+                    f.size == m.len() && f.mtime_secs == m.mtime() && i64::from(f.mtime_nanos) == m.mtime_nsec()
+                });
             if same
                 && old
                     .as_ref()
@@ -381,7 +389,9 @@ impl MediaStore {
             // No lock across hashing or the external progress callback.
             let hash = if same {
                 old.as_ref()
+                    .filter(|e| e.live)
                     .and_then(|e| e.sha1.clone())
+                    .or_else(|| independent_facts.map(|f| f.sha1.clone()))
                     .ok_or_else(|| MediaError::Database("missing media hash".into()))?
             } else {
                 self.inner.hashes.fetch_add(1, Ordering::Relaxed);
@@ -407,7 +417,7 @@ impl MediaStore {
                 continue;
             }
             let db = self.db()?;
-            if journal_db::entry(&db, &name)? != old {
+            if journal_db::entry(&db, &name)? != old || super::feed::independent(&db, &name)? != independent {
                 stable = false;
                 continue;
             }
@@ -430,6 +440,8 @@ impl MediaStore {
         }
         let mut db = self.db()?;
         let tx = db.savepoint()?;
+        super::feed::observe_registered(&tx, self.media_dir(), &found, cutoff)?;
+        super::feed::independent_missing(&tx, &found, cutoff)?;
         for entry in journal_db::entries(&tx)? {
             if entry.live && entry.change_counter <= cutoff && !found.contains(&entry.name) {
                 if entry.sync_state == MediaSyncState::Live {
@@ -442,6 +454,9 @@ impl MediaStore {
         // A racing reset must retain its unset marker.
         if stable && super::sync_state::epoch(&tx)? == epoch {
             journal_db::set_marker(&tx, Some(&before))?;
+            if fs::metadata(self.media_dir()).is_ok_and(|m| stamp(&m) == before) {
+                super::feed::complete_registration(&tx)?;
+            }
         }
         tx.commit()?;
         Ok(())

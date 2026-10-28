@@ -46,7 +46,7 @@ impl MediaService {
             Some(state) => state.clone(),
             None => {
                 let state = Arc::new(MediaState {
-                    store: MediaStore::open(collection.path(), clock).map_err(error)?,
+                    store: MediaStore::open(collection.path(), clock, collection.core.random.clone()).map_err(error)?,
                     jobs: MediaJobLock::default(),
                 });
                 *bound = Some(state.clone());

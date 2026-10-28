@@ -338,3 +338,11 @@ pub fn tag(name: &str) -> meguri_model::tag::Tag {
         ..meguri_model::tag::Tag::default()
     }
 }
+
+/// One synthetic session stream, retained across all its media-store opens.
+pub fn media_random() -> std::sync::Arc<SeededRandom> {
+    thread_local! {
+        static RANDOM: std::sync::Arc<SeededRandom> = std::sync::Arc::new(SeededRandom::new(7));
+    }
+    RANDOM.with(Clone::clone)
+}

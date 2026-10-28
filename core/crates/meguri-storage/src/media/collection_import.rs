@@ -280,6 +280,7 @@ impl InitialMediaState {
         &self,
         collection: &Path,
         clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+        random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
         cancel: &dyn Fn() -> bool,
     ) -> Result<MediaStore> {
         if self.absent {
@@ -294,6 +295,7 @@ impl InitialMediaState {
         MediaStore::open_checked(
             collection,
             clock,
+            random,
             cancel,
             Some(&self.reference),
             self.absent.then_some(self.journal_native),
@@ -954,9 +956,10 @@ impl CollectionMediaIntent {
         &self,
         collection: &Path,
         clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+        random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
     ) -> Result<MediaStore> {
         let allowed = self.validate_initial_admission(collection)?;
-        MediaStore::open_checked(collection, clock, &|| false, allowed, None)
+        MediaStore::open_checked(collection, clock, random, &|| false, allowed, None)
     }
     /// The replacement owner must first prove durable R6 completion from its
     /// retained operation/publication record. No store open is needed here.
@@ -1217,6 +1220,7 @@ impl CollectionMediaIntent {
         if !self.journal_ready {
             let mut db = store.import_db()?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            super::feed::replace_identity(&tx, store.inner.random.as_ref())?;
             tx.execute_batch("DELETE FROM media; DELETE FROM media_downloads; DELETE FROM meta WHERE key IN ('baseline_owner','folder_mtime'); UPDATE meta SET value='0' WHERE key='last_usn';")?;
             // Counters remain monotonic to invalidate old acknowledgements.
             let epoch = super::sync_state::epoch(&tx)?.checked_add(1).ok_or_else(invalid)?;
@@ -1238,6 +1242,7 @@ impl CollectionMediaIntent {
                 )?;
             }
             journal_db::set_marker(&tx, Some(&folder::stamp(&fs::metadata(store.media_dir())?)))?;
+            super::feed::complete_registration(&tx)?;
             tx.commit()?;
             checkpoint(&db, &store.inner.journal)?;
             drop(db);
@@ -1362,6 +1367,15 @@ impl CollectionMediaIntent {
             }
         }
         drop(backup);
+        // An R6 backup prepared before J6 may contain a v2 journal. Restoring
+        // it must not leave this already-open store without its feed schema.
+        let restored_version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if restored_version == 2 {
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            super::feed::migrate(&tx, store.inner.random.as_ref())?;
+            tx.pragma_update(None, "user_version", 3)?;
+            tx.commit()?;
+        }
         checkpoint(&db, &store.inner.journal)?;
         // Restored media/baseline rows are the snapshot's exact preimages.
         // Newly published bytes remain visible in J3 trash even in this same

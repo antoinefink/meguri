@@ -5,7 +5,12 @@ use std::{fs, sync::Arc};
 
 fn store() -> (tempfile::TempDir, MediaStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     (dir, store)
 }
 

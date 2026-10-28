@@ -1265,7 +1265,10 @@ mod media_adapter_tests {
             let steps = &loaded.scenario.steps;
             let original = json!({"media_quick_check":{"x":"11f6ad8ec52a2984abaafd7c3b516503785c2072"}});
             assert_eq!(executor.step(&mut session, &steps[0]).unwrap(), original);
-            let store = session.storage.media(session.clock.clone()).unwrap();
+            let store = session
+                .storage
+                .media(session.clock.clone(), session.random.clone())
+                .unwrap();
             let before = store.diagnostics();
             executor.step(&mut session, &steps[1]).unwrap();
             assert_eq!(executor.step(&mut session, &steps[2]).unwrap(), original);
@@ -1301,7 +1304,10 @@ mod media_adapter_tests {
         executor.new_collection(&mut session).unwrap();
         // trash_media promotes, so exercise reset against that same hosted owner.
         session.engine_collection().unwrap();
-        let store = session.storage.media(session.clock.clone()).unwrap();
+        let store = session
+            .storage
+            .media(session.clock.clone(), session.random.clone())
+            .unwrap();
         store
             .bind_sync_owner(&MediaBaselineOwner::new("synthetic-owner"))
             .unwrap();

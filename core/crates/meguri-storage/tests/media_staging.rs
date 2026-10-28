@@ -3,7 +3,12 @@ use meguri_storage::media::{MediaStore, NoteReference};
 use std::{fs, sync::Arc};
 
 fn open(dir: &std::path::Path) -> MediaStore {
-    MediaStore::open(&dir.join("collection.anki2"), Arc::new(common::clock())).unwrap()
+    MediaStore::open(
+        &dir.join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap()
 }
 fn reference() -> NoteReference {
     NoteReference {

@@ -29,6 +29,7 @@ pub(crate) struct CollectionCore {
     /// once the store's open step ran.
     pub(crate) derived: OnceLock<Arc<crate::derived_host::Attachment>>,
     pub(crate) render_cache: crate::rendering::ParseCache,
+    pub(crate) random: Arc<dyn meguri_model::rng::RandomSource>,
     pub(crate) media: std::sync::Mutex<Option<Arc<crate::media::MediaState>>>,
 }
 

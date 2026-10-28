@@ -25,7 +25,12 @@ fn media_import_partial_preparation_cleans_reservations_and_preserves_unrelated_
         CANCEL_PREPARATION.store(false, Ordering::Release);
         let root = tempfile::tempdir().unwrap();
         let stage = tempfile::tempdir().unwrap();
-        let store = MediaStore::open(&root.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+        let store = MediaStore::open(
+            &root.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random(),
+        )
+        .unwrap();
         store.add("collision.bin", b"old bytes").unwrap();
         let unrelated = store.staging_dir().join("r6-unrelated");
         fs::create_dir(&unrelated).unwrap();
@@ -80,7 +85,12 @@ fn media_import_partial_preparation_cleans_reservations_and_preserves_unrelated_
 fn media_import_failed_unpublished_cleanup_retains_owned_reservation_authority() {
     let root = tempfile::tempdir().unwrap();
     let stage = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&root.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &root.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store.add("collision.bin", b"old bytes").unwrap();
     fs::write(stage.path().join("media-0"), b"candidate bytes").unwrap();
     let mut owner = store.own_collection_import().unwrap();
@@ -111,5 +121,12 @@ fn media_import_failed_unpublished_cleanup_retains_owned_reservation_authority()
     owner.recovery_required();
     drop(owner);
     assert!(store.pending().is_err());
-    assert!(MediaStore::open(&root.path().join("collection.anki2"), Arc::new(common::clock())).is_err());
+    assert!(
+        MediaStore::open(
+            &root.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random()
+        )
+        .is_err()
+    );
 }

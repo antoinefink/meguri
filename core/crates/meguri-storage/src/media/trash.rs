@@ -1,7 +1,7 @@
 use super::{MediaError, MediaStore, Result, case_fold::*, folder, journal_db};
 use crate::atomic_file::move_new;
 use rusqlite::{Connection, params};
-use std::{fs, path::Path};
+use std::{fs, io::Write, path::Path};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrashEntry {
@@ -29,6 +29,20 @@ fn identity(path: &str) -> Option<(i64, i64, &str)> {
 }
 fn remove_empty_parent(root: &Path, relative: &str) -> Result<()> {
     if let Some((parent, _)) = relative.split_once('/') {
+        // The payload is already restored/deleted (or was never moved).
+        if let Some(directory) = receipt_directory(&root.join(parent))? {
+            match fs::remove_file(directory.join(REMOVAL_INTENT)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            match fs::remove_dir(directory) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
+                Err(e) => return Err(e.into()),
+            }
+            crate::atomic_file::sync_directory(&root.join(parent))?;
+        }
         match fs::remove_dir(root.join(parent)) {
             Ok(()) => crate::atomic_file::sync_directory(root)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
@@ -130,18 +144,43 @@ impl MediaStore {
         };
         let destination = self.trash_dir().join(&entry.path);
         let identity = file.metadata()?;
+        // SQL here may be inside a caller's savepoint. A separately synced
+        // filesystem receipt must precede the rename; uncommitted SQL cannot
+        // preserve its cause across rollback or process death.
+        if source == self.media_dir().join(name) {
+            self.prepare_removal_intent(db, &entry, &identity)?;
+        }
+        meguri_model::faultpoint!("media.trash.before_move")?;
         let outcome = move_new(source, &destination);
-        *moved = outcome.is_ok()
-            || fs::symlink_metadata(&destination).is_ok_and(|m| m.dev() == identity.dev() && m.ino() == identity.ino());
+        *moved = fs::symlink_metadata(&destination)
+            .is_ok_and(|m| m.is_file() && m.dev() == identity.dev() && m.ino() == identity.ino());
+        // Deterministic crash boundary: durable move, no observation SQL yet.
+        if *moved {
+            meguri_model::faultpoint!("media.trash.after_move_before_observation")?;
+        }
+        let source_absent =
+            *moved && fs::symlink_metadata(source).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        if *moved && source_absent && source == self.media_dir().join(name) {
+            db.execute_batch("SAVEPOINT media_trash_cause")?;
+            let recorded: Result<()> = (|| {
+                super::feed::observe_removal(db, name)?;
+                if outcome.is_ok() && record_deletion {
+                    folder::deleted(db, name)?;
+                }
+                Ok(())
+            })();
+            if recorded.is_err() {
+                db.execute_batch("ROLLBACK TO media_trash_cause")?;
+            }
+            db.execute_batch("RELEASE media_trash_cause")?;
+            recorded?;
+        }
         if let Err(e) = outcome {
             if source.exists() {
                 db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
                 remove_empty_parent(self.trash_dir(), &entry.path)?;
             }
             return Err(e.into());
-        }
-        if record_deletion {
-            folder::deleted(db, name)?;
         }
         Ok(entry)
     }
@@ -305,5 +344,314 @@ impl MediaStore {
         }
         db.execute("DELETE FROM trash_entries WHERE path IS NULL", [])?;
         Ok(())
+    }
+}
+
+const REMOVAL_DIRECTORIES: [&str; 2] = [".meguri-removal", ".meguri-removal-alt"];
+const REMOVAL_INTENT: &str = "intent.json";
+fn receipt_directory(parent: &Path) -> Result<Option<std::path::PathBuf>> {
+    let mut found = None;
+    for name in REMOVAL_DIRECTORIES {
+        let path = parent.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {
+                if found.is_some() {
+                    return Err(MediaError::InvalidManifest("ambiguous media removal receipt".into()));
+                }
+                found = Some(path);
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(found)
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemovalIntent {
+    version: u8,
+    origin: String,
+    path: String,
+    name: String,
+    feed_id: [u8; 16],
+    counter: u64,
+    entry_counter: Option<u64>,
+    journal_native: (u64, u64),
+    source_native: (u64, u64),
+    size: u64,
+    mtime_secs: i64,
+    mtime_nanos: i64,
+}
+impl MediaStore {
+    pub(super) fn load_removal_intents(&self) -> Result<()> {
+        let mut pending = self
+            .inner
+            .removal_intents
+            .lock()
+            .map_err(|_| MediaError::Database("media intent mutex poisoned".into()))?;
+        for entry in fs::read_dir(self.trash_dir())? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() && receipt_directory(&entry.path())?.is_some() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if safe_component(name) {
+                        pending.insert(name.to_owned());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn prepare_removal_intent(&self, db: &Connection, entry: &TrashEntry, m: &fs::Metadata) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let entry_counter = match super::feed::independent(db, &entry.name)? {
+            Some((counter, _)) => Some(counter),
+            None => journal_db::entry(db, &entry.name)?.map(|e| e.change_counter),
+        };
+        let counter = entry_counter.unwrap_or(journal_db::counter(db)?);
+        let (parent, _) = entry.path.split_once('/').ok_or(MediaError::InvalidName)?;
+        let receipt = RemovalIntent {
+            version: 1,
+            origin: "collection.media".into(),
+            path: entry.path.clone(),
+            name: entry.name.clone(),
+            feed_id: super::feed::status(db)?.feed_id.0,
+            counter,
+            entry_counter,
+            journal_native: self.inner.journal_native,
+            source_native: (m.dev(), m.ino()),
+            size: m.len(),
+            mtime_secs: m.mtime(),
+            mtime_nanos: m.mtime_nsec(),
+        };
+        let metadata_name = if entry.name == REMOVAL_DIRECTORIES[0] {
+            REMOVAL_DIRECTORIES[1]
+        } else {
+            REMOVAL_DIRECTORIES[0]
+        };
+        let directory = self.trash_dir().join(parent).join(metadata_name);
+        fs::create_dir(&directory)?;
+        crate::atomic_file::sync_directory(&self.trash_dir().join(parent))?;
+        let path = directory.join(REMOVAL_INTENT);
+        self.inner
+            .removal_intents
+            .lock()
+            .map_err(|_| MediaError::Database("media intent mutex poisoned".into()))?
+            .insert(parent.into());
+        let mut output = crate::atomic_file::AtomicFile::new(&path, crate::atomic_file::Purpose::Media)?;
+        output
+            .file_mut()
+            .write_all(&serde_json::to_vec(&receipt).map_err(|e| MediaError::InvalidManifest(e.to_string()))?)?;
+        output.publish_new(|_| Ok(()))?;
+        Ok(())
+    }
+
+    /// Called under the shared journal guard before another operation may
+    /// change a protocol stamp. Receipts remain until committed SQL or physical
+    /// restoration makes them obsolete, so outer SQL rollback is harmless.
+    pub(super) fn recover_removal_intents(&self, db: &Connection) -> Result<()> {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let mut pending = self
+            .inner
+            .removal_intents
+            .lock()
+            .map_err(|_| MediaError::Database("media intent mutex poisoned".into()))?;
+        let mut settled = Vec::new();
+        for parent in pending.iter() {
+            let parent_directory = self.trash_dir().join(parent);
+            if !fs::symlink_metadata(&parent_directory).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) {
+                settled.push(parent.clone());
+                continue;
+            }
+            let Some(directory) = receipt_directory(&parent_directory)? else {
+                settled.push(parent.clone());
+                continue;
+            };
+            let path = directory.join(REMOVAL_INTENT);
+            let file = match fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(&path)
+            {
+                Ok(file) if file.metadata()?.is_file() && file.metadata()?.len() <= 16384 => file,
+                Ok(_) => return Err(MediaError::InvalidManifest("invalid media removal receipt".into())),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    settled.push(parent.clone());
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
+            let intent: RemovalIntent =
+                serde_json::from_reader(file).map_err(|e| MediaError::InvalidManifest(e.to_string()))?;
+            if intent.version != 1
+                || intent.origin != "collection.media"
+                || !safe_component(&intent.name)
+                || intent.entry_counter.is_some_and(|c| c != intent.counter)
+                || intent.path != format!("{parent}/{}", intent.name)
+                || identity(&intent.path).is_none_or(|(_, _, name)| name != intent.name)
+            {
+                return Err(MediaError::InvalidManifest(
+                    "invalid media removal receipt ownership".into(),
+                ));
+            }
+            let current = super::feed::status(db)?;
+            let row = journal_db::entry(db, &intent.name)?;
+            let independent = super::feed::independent(db, &intent.name)?;
+            let stamp = independent
+                .as_ref()
+                .map(|(c, _)| *c)
+                .or_else(|| row.as_ref().map(|e| e.change_counter));
+            let already_observed: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM media WHERE name=?1 AND live=1 AND explicit_removal=1
+                    UNION ALL SELECT 1 FROM media_feed_facts WHERE name=?1 AND live=1 AND explicit_removal=1)",
+                [&intent.name],
+                |r| r.get(0),
+            )?;
+            let moved = folder::regular(&self.trash_dir().join(&intent.path))?.is_some_and(|m| {
+                (m.dev(), m.ino()) == intent.source_native
+                    && m.len() == intent.size
+                    && m.mtime() == intent.mtime_secs
+                    && m.mtime_nsec() == intent.mtime_nanos
+            });
+            // A missing source, an old namesake in trash, or matching bytes
+            // alone never prove a move of this receipt's original inode.
+            let source_absent = match fs::symlink_metadata(self.media_dir().join(&intent.name)) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                Err(e) => return Err(e.into()),
+                Ok(_) => false,
+            };
+            let valid = current.feed_id.0 == intent.feed_id
+                && self.inner.journal_native == intent.journal_native
+                && intent.counter <= current.counter
+                && moved
+                && source_absent;
+            if valid && (stamp == intent.entry_counter || already_observed) {
+                super::feed::observe_removal(db, &intent.name)?;
+            } else if db.is_autocommit() {
+                if !source_absent
+                    && current.feed_id.0 == intent.feed_id
+                    && self.inner.journal_native == intent.journal_native
+                {
+                    db.execute_batch("SAVEPOINT media_restored_cause")?;
+                    let clear: Result<()> = (|| {
+                        db.execute("UPDATE media SET explicit_removal=0 WHERE name=?1", [&intent.name])?;
+                        db.execute(
+                            "UPDATE media_feed_facts SET explicit_removal=0 WHERE name=?1",
+                            [&intent.name],
+                        )?;
+                        Ok(())
+                    })();
+                    if clear.is_err() {
+                        db.execute_batch("ROLLBACK TO media_restored_cause")?;
+                    }
+                    db.execute_batch("RELEASE media_restored_cause")?;
+                    clear?;
+                }
+                // Never delete a receipt based on uncommitted SQL, which an
+                // outer savepoint might still discard. Physical restoration
+                // and a committed later stamp both invalidate this ownership.
+                match fs::remove_file(&path) {
+                    Ok(()) => {
+                        fs::remove_dir(&directory)?;
+                        crate::atomic_file::sync_directory(&parent_directory)?;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+                settled.push(parent.clone());
+            }
+        }
+        for parent in settled {
+            pending.remove(&parent);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod feed_rollback_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn media_feed_unregistered_original_move_recovers_before_complete_registration() {
+        let root = tempfile::tempdir().unwrap();
+        let random = Arc::new(meguri_model::rng::SeededRandom::new(7));
+        let clock = Arc::new(meguri_model::clock::FixedClock::new(
+            0,
+            meguri_model::clock::UtcOffset::UTC,
+        ));
+        let media = MediaStore::open(&root.path().join("collection.anki2"), clock.clone(), random.clone()).unwrap();
+        fs::write(media.media_dir().join("unregistered.png"), b"original").unwrap();
+        {
+            let mut db = media.db().unwrap();
+            let m = fs::metadata(media.media_dir().join("unregistered.png")).unwrap();
+            meguri_model::faultpoint::arm(
+                "media.trash.after_move_before_observation",
+                meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+            );
+            let result = media.trash_one_locked(&mut db, "unregistered.png", &folder::hash_bytes(b"original"), &m);
+            meguri_model::faultpoint::disarm("media.trash.after_move_before_observation");
+            assert!(result.is_err());
+            assert!(journal_db::entries(&db).unwrap().is_empty());
+        }
+        drop(media);
+        let media = MediaStore::open(&root.path().join("collection.anki2"), clock, random).unwrap();
+        let snapshot = media.media_feed_snapshot().unwrap();
+        assert!(!snapshot.status.complete);
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(
+            snapshot.items[0].state,
+            super::super::MediaFileState::Absent(super::super::MediaAbsenceCause::Removed)
+        );
+        assert_eq!(media.media_feed_snapshot().unwrap(), snapshot);
+    }
+
+    #[test]
+    fn media_feed_outer_sql_rollback_keeps_durable_move_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let random = Arc::new(meguri_model::rng::SeededRandom::new(7));
+        let clock = Arc::new(meguri_model::clock::FixedClock::new(
+            0,
+            meguri_model::clock::UtcOffset::UTC,
+        ));
+        let media = MediaStore::open(&root.path().join("collection.anki2"), clock.clone(), random.clone()).unwrap();
+        media.add("a.png", b"original").unwrap();
+        let status = media.media_feed_status().unwrap();
+        media
+            .set_media_feed_floor(status.feed_id, Some(status.counter))
+            .unwrap();
+        let before = media.entries().unwrap();
+        {
+            let mut db = media.db().unwrap();
+            db.execute_batch("SAVEPOINT protocol_outer").unwrap();
+            let m = fs::metadata(media.media_dir().join("a.png")).unwrap();
+            media
+                .trash_one_locked(&mut db, "a.png", before[0].sha1.as_deref().unwrap(), &m)
+                .unwrap();
+            assert!(!journal_db::entry(&db, "a.png").unwrap().unwrap().live);
+            db.execute_batch("ROLLBACK TO protocol_outer; RELEASE protocol_outer")
+                .unwrap();
+            assert_eq!(journal_db::entries(&db).unwrap(), before);
+            assert!(
+                !db.query_row("SELECT explicit_removal FROM media WHERE name='a.png'", [], |r| r
+                    .get::<_, bool>(0))
+                    .unwrap()
+            );
+        }
+        // Both trash SQL and cause SQL rolled back; only the synced filesystem
+        // intent and the exact original inode survived.
+        drop(media);
+        let media = MediaStore::open(&root.path().join("collection.anki2"), clock, random).unwrap();
+        media.register_full(|_, _| true).unwrap();
+        let snapshot = media.media_feed_snapshot().unwrap();
+        assert_eq!(
+            snapshot.items[0].state,
+            super::super::MediaFileState::Absent(super::super::MediaAbsenceCause::Removed)
+        );
+        assert!(snapshot.items[0].change_counter > status.counter);
+        media.register_full(|_, _| true).unwrap();
+        assert_eq!(media.media_feed_snapshot().unwrap(), snapshot);
     }
 }

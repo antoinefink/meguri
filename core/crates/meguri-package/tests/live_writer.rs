@@ -542,6 +542,7 @@ fn user_export_includes_direct_unregistered_empty_large_unicode_and_case_variant
     let store = meguri_storage::media::MediaStore::open(
         &directory.path().join("collection.anki2"),
         std::sync::Arc::new(clock(NOW)),
+        std::sync::Arc::new(meguri_model::rng::SeededRandom::new(7)),
     )
     .unwrap();
     assert_eq!(

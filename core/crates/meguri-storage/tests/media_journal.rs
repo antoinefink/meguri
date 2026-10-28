@@ -13,7 +13,11 @@ fn media_journal_refuses_a_foreign_database_without_changing_it() {
         .unwrap();
     drop(db);
     let bytes = fs::read(&path).unwrap();
-    let result = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock()));
+    let result = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    );
     assert!(matches!(result, Err(MediaError::Database(_))));
     assert_eq!(fs::read(&path).unwrap(), bytes);
     assert!(!dir.path().join("meguri-media.db-wal").exists());
@@ -23,14 +27,14 @@ fn media_journal_refuses_a_foreign_database_without_changing_it() {
 fn media_journal_refuses_a_future_version_without_changing_it() {
     let dir = tempfile::tempdir().unwrap();
     let collection = dir.path().join("collection.anki2");
-    drop(MediaStore::open(&collection, Arc::new(common::clock())).unwrap());
+    drop(MediaStore::open(&collection, Arc::new(common::clock()), common::media_random()).unwrap());
     let path = dir.path().join("meguri-media.db");
     let db = Connection::open(&path).unwrap();
     db.pragma_update(None, "user_version", 999).unwrap();
     drop(db);
     let bytes = fs::read(&path).unwrap();
     assert!(matches!(
-        MediaStore::open(&collection, Arc::new(common::clock())),
+        MediaStore::open(&collection, Arc::new(common::clock()), common::media_random()),
         Err(MediaError::Database(_))
     ));
     assert_eq!(fs::read(&path).unwrap(), bytes);
@@ -39,7 +43,12 @@ fn media_journal_refuses_a_future_version_without_changing_it() {
 #[test]
 fn media_journal_acknowledgement_cannot_hide_a_newer_local_change() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store.ensure_static_media("asset.png", b"old").unwrap();
     let old = store.pending().unwrap().pop().unwrap();
     store.ensure_static_media("asset.png", b"new").unwrap();
@@ -53,7 +62,12 @@ fn media_journal_acknowledgement_cannot_hide_a_newer_local_change() {
 #[test]
 fn tracked_names_preserve_journal_bytes_filter_nonlive_and_never_scan() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     // Write journal rows directly to prove the query returns stored keys,
     // including canonically equivalent but byte-distinct spellings.
     let db = Connection::open(dir.path().join("meguri-media.db")).unwrap();

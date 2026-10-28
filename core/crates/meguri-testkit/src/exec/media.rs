@@ -31,7 +31,7 @@ fn invalid(message: impl Into<String>) -> ExecError {
     ExecError::new("invalid_scenario", message)
 }
 fn store(session: &mut Session<'_>) -> Result<MediaStore, ExecError> {
-    session.storage.media(session.clock.clone())
+    session.storage.media(session.clock.clone(), session.random.clone())
 }
 fn time(seconds: i64) -> Result<SystemTime, ExecError> {
     let duration = Duration::from_secs(seconds.unsigned_abs());

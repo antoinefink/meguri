@@ -37,10 +37,14 @@ pub struct PendingChange {
     pub sha1: Option<String>,
     pub change_counter: u64,
 }
-pub(super) fn open(path: &Path) -> Result<Connection> {
-    open_initial_owned(path, None)
+pub(super) fn open(path: &Path, random: &dyn meguri_model::rng::RandomSource) -> Result<Connection> {
+    open_initial_owned(path, None, random)
 }
-pub(super) fn open_initial_owned(path: &Path, empty_native: Option<(u64, u64)>) -> Result<Connection> {
+pub(super) fn open_initial_owned(
+    path: &Path,
+    empty_native: Option<(u64, u64)>,
+    random: &dyn meguri_model::rng::RandomSource,
+) -> Result<Connection> {
     use std::os::unix::fs::MetadataExt;
     let owned_empty = if let Some(expected) = empty_native {
         let m = std::fs::symlink_metadata(path)?;
@@ -52,7 +56,7 @@ pub(super) fn open_initial_owned(path: &Path, empty_native: Option<(u64, u64)>) 
         false
     };
     const APPLICATION_ID: i64 = 0x4d47524d;
-    const VERSION: i64 = 2;
+    const VERSION: i64 = 3;
     let mut old_version = 0;
     if !owned_empty && path.try_exists()? {
         // Probe a copy when SQLite might need sidecar recovery. Even a refused
@@ -124,6 +128,9 @@ pub(super) fn open_initial_owned(path: &Path, empty_native: Option<(u64, u64)>) 
     if old_version == 1 {
         meguri_model::faultpoint!("media.sync.migration.before_commit")?;
     }
+    if old_version < 3 {
+        super::feed::migrate(&tx, random)?;
+    }
     tx.pragma_update(None, "application_id", APPLICATION_ID)?;
     tx.pragma_update(None, "user_version", VERSION)?;
     tx.commit()?;
@@ -193,6 +200,14 @@ pub(super) fn tracked_names(db: &Connection) -> Result<Vec<TrackedMediaName>> {
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 pub(super) fn save(db: &Connection, value: &MediaEntry) -> Result<()> {
+    save_observed(db, value, false)
+}
+/// A file was actually observed/published, rather than protocol bookkeeping
+/// merely retaining its previous facts. Clear any interrupted trash intent.
+pub(super) fn save_file(db: &Connection, value: &MediaEntry) -> Result<()> {
+    save_observed(db, value, true)
+}
+fn save_observed(db: &Connection, value: &MediaEntry, file_observed: bool) -> Result<()> {
     if meguri_text::normalize::nfc(&value.name) != value.name
         || value.dirty && !matches!(value.sync_state, MediaSyncState::Live | MediaSyncState::Deleted)
         || value.sync_state == MediaSyncState::Live && !value.syncable()
@@ -209,14 +224,26 @@ pub(super) fn save(db: &Connection, value: &MediaEntry) -> Result<()> {
     let outcome = (|| {
         let counter = next_counter(db)?;
         db.execute(
-            "INSERT INTO media(name,case_key,sha1,size,mtime_secs,mtime_nanos,live,dirty,change_counter,pending_download,sync_state)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(name) DO UPDATE SET
+            "INSERT INTO media(name,case_key,sha1,size,mtime_secs,mtime_nanos,live,dirty,change_counter,pending_download,sync_state,absence_cause)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,
+                CASE WHEN ?7 THEN 'missing' ELSE COALESCE((SELECT absence_cause FROM media_feed_removals
+                    WHERE name=?1 ORDER BY change_counter DESC LIMIT 1),'missing') END)
+            ON CONFLICT(name) DO UPDATE SET
             case_key=excluded.case_key,sha1=excluded.sha1,size=excluded.size,mtime_secs=excluded.mtime_secs,
             mtime_nanos=excluded.mtime_nanos,live=excluded.live,dirty=excluded.dirty,change_counter=excluded.change_counter,
-            pending_download=excluded.pending_download,sync_state=excluded.sync_state",
+            pending_download=excluded.pending_download,sync_state=excluded.sync_state,
+            absence_cause=CASE WHEN excluded.live=1 THEN 'missing' WHEN media.live=0 THEN media.absence_cause
+                WHEN media.explicit_removal=1 THEN 'removed' ELSE 'missing' END,
+            explicit_removal=CASE WHEN excluded.live=1 AND NOT ?12 THEN media.explicit_removal ELSE 0 END",
             params![value.name,case_key(&value.name),value.sha1,sqlite_integer(value.size)?,value.mtime_secs,
-                value.mtime_nanos,value.live,value.dirty,sqlite_integer(counter)?,value.pending_download,value.sync_state as i64],
+                value.mtime_nanos,value.live,value.dirty,sqlite_integer(counter)?,value.pending_download,value.sync_state as i64,file_observed],
         )?;
+        if file_observed {
+            db.execute("DELETE FROM media_feed_facts WHERE name=?1", [&value.name])?;
+        }
+        if value.live {
+            db.execute("DELETE FROM media_feed_removals WHERE name=?1", [&value.name])?;
+        }
         Ok(())
     })();
     if outcome.is_err() {
@@ -233,14 +260,13 @@ pub(super) fn next_counter(db: &Connection) -> Result<u64> {
     db.execute("UPDATE meta SET value=?1 WHERE key='counter'", [next.to_string()])?;
     Ok(next)
 }
-/// Deletions consume a global stamp too: removing and recreating a name cannot
-/// make an in-flight acknowledgement match a different incarnation.
+/// The J6 deletion trigger also covers bulk clears. It allocates the same T8
+/// global stamp as before; already absent rows retain their OLD stamp in the
+/// removal item, independently of the allocation that invalidates callbacks.
 pub(super) fn remove(db: &Connection, name: &str) -> Result<()> {
     db.execute_batch("SAVEPOINT media_entry_remove")?;
     let outcome = (|| {
-        if db.execute("DELETE FROM media WHERE name=?1", [name])? != 0 {
-            next_counter(db)?;
-        }
+        db.execute("DELETE FROM media WHERE name=?1", [name])?;
         Ok(())
     })();
     if outcome.is_err() {

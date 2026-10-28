@@ -858,7 +858,12 @@ impl TaskBody for ReplaceTask {
                 detail: "collection media recovery must complete before reopen".into(),
             })
         } else {
-            crate::device_state::reconcile(&shared.path, &reopen.binding, reopen.clock.clone())
+            crate::device_state::reconcile(
+                &shared.path,
+                &reopen.binding,
+                reopen.clock.clone(),
+                reopen.random.clone(),
+            )
         };
         if let Err(error) = recovered {
             let _ = reply.send(Replaced {

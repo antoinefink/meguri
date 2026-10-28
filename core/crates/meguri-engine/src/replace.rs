@@ -441,6 +441,7 @@ impl PreparedMedia {
     pub(crate) fn new_initial(
         live: &Path,
         clock: Arc<dyn meguri_model::clock::Clock>,
+        random: Arc<dyn meguri_model::rng::RandomSource>,
         stage: &mut ReplacementStage,
         incoming: Vec<meguri_storage::media::IncomingMedia>,
     ) -> Result<Self, ReplaceError> {
@@ -459,7 +460,7 @@ impl PreparedMedia {
             }
         })?;
         stage.media_previous_journal_absent = initial.journal_was_absent();
-        let store = match initial.open_store(live, clock, &cancelled) {
+        let store = match initial.open_store(live, clock, random, &cancelled) {
             Ok(store) => store,
             Err(error) => return Err(Self::initial_failure(initial, None, media_error(error).into())),
         };
@@ -692,7 +693,7 @@ pub(crate) fn run_swap(
                         Ok(()) => unreachable!(),
                     };
                 }
-                match device_state::reconcile_with_media(&live, &binding, clock, Some(&m.store)) {
+                match device_state::reconcile_with_media(&live, &binding, clock, random.clone(), Some(&m.store)) {
                     Ok(()) => {
                         match device_state::media_activation(&live, m.intent.recovery_reference()) {
                             Ok(Some(true)) => activated.store(true, std::sync::atomic::Ordering::Release),

@@ -740,13 +740,15 @@ pub(crate) fn reconcile(
     live: &Path,
     binding: &AccountBinding,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
 ) -> Result<(), StorageError> {
-    reconcile_with_media(live, binding, clock, None)
+    reconcile_with_media(live, binding, clock, random, None)
 }
 pub(crate) fn reconcile_with_media(
     live: &Path,
     binding: &AccountBinding,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
     shared: Option<&meguri_storage::media::MediaStore>,
 ) -> Result<(), StorageError> {
     let path = sidecar_path(live);
@@ -802,7 +804,7 @@ pub(crate) fn reconcile_with_media(
                 (false, true) => {
                     // A crash after rename may have preceded directory sync.
                     meguri_storage::atomic_file::sync_directory(live.parent().unwrap_or(Path::new(".")))?;
-                    finish_media(live, &intent, true, clock.clone(), shared)?;
+                    finish_media(live, &intent, true, clock.clone(), random.clone(), shared)?;
                     activate(live, binding)?;
                     return cleanup_completed_media(live, binding);
                 }
@@ -819,6 +821,7 @@ pub(crate) fn reconcile_with_media(
         &intent,
         decision.identity == intent.candidate.identity,
         clock,
+        random,
         shared,
     )?;
     // Keep decision and intent together in the first durable write. Clearing
@@ -989,6 +992,7 @@ fn finish_media(
     intent: &Intent,
     candidate: bool,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
     shared: Option<&meguri_storage::media::MediaStore>,
 ) -> Result<(), StorageError> {
     let Some(mut media) = intent.media.clone() else {
@@ -1002,7 +1006,7 @@ fn finish_media(
         Some(store) => store,
         None => {
             opened = media
-                .open_recovery_store(live, clock)
+                .open_recovery_store(live, clock, random)
                 .map_err(|e| failure(e.to_string()))?;
             &opened
         }

@@ -10,16 +10,16 @@ static SCAN_HOOK: std::sync::Mutex<Option<ScanHook>> = std::sync::Mutex::new(Non
 fn media_reopening_preserves_the_unchanged_folder_fast_path() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("collection.anki2");
-    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(&path, Arc::new(common::clock()), common::media_random()).unwrap();
     store.add("registered.png", b"registered").unwrap();
     drop(store);
-    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(&path, Arc::new(common::clock()), common::media_random()).unwrap();
     store.check_changes().unwrap();
     assert_eq!(store.diagnostics().scans, 0);
     assert_eq!(store.diagnostics().hashes, 0);
     fs::write(store.media_dir().join("outside.png"), b"outside").unwrap();
     drop(store);
-    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(&path, Arc::new(common::clock()), common::media_random()).unwrap();
     store.check_changes().unwrap();
     assert_eq!(store.diagnostics().scans, 1);
     assert!(store.entries().unwrap().iter().any(|e| e.name == "outside.png"));
@@ -28,7 +28,12 @@ fn media_reopening_preserves_the_unchanged_folder_fast_path() {
 #[test]
 fn marker_report_skips_callbacks_and_refuses_suspension_before_folder_access() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store.check_changes_report().unwrap();
     let before = store.diagnostics();
     let report = store
@@ -53,7 +58,12 @@ fn marker_report_skips_callbacks_and_refuses_suspension_before_folder_access() {
 fn marker_preflight_io_failure_replaces_a_nonempty_report_and_recovers() {
     for with_progress in [false, true] {
         let dir = tempfile::tempdir().unwrap();
-        let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+        let store = MediaStore::open(
+            &dir.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random(),
+        )
+        .unwrap();
         fs::write(store.media_dir().join("cached.png"), b"cached").unwrap();
         let successful = store.register_full_report(|_, _| true).unwrap();
         assert!(successful.completed && successful.listed);
@@ -113,7 +123,12 @@ fn run_scan_hook() {
 #[test]
 fn media_scanning_does_not_hold_the_journal_lock_while_hashing() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     fs::write(store.media_dir().join("scan.png"), b"scan").unwrap();
     let concurrent = store.clone();
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -149,7 +164,12 @@ fn media_scanning_does_not_hold_the_journal_lock_while_hashing() {
 fn scan_reset_keeps_the_marker_unset_until_absent_retained_facts_are_removed() {
     for rebind in [false, true] {
         let dir = tempfile::tempdir().unwrap();
-        let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+        let store = MediaStore::open(
+            &dir.path().join("collection.anki2"),
+            Arc::new(common::clock()),
+            common::media_random(),
+        )
+        .unwrap();
         store.bind_sync_owner(&MediaBaselineOwner::new("m6:before")).unwrap();
         store.add("absent.png", b"absent").unwrap();
         fs::remove_file(store.media_dir().join("absent.png")).unwrap();
@@ -203,7 +223,12 @@ fn scan_reset_keeps_the_marker_unset_until_absent_retained_facts_are_removed() {
 #[test]
 fn media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     for i in 0..30_000 {
         fs::write(store.media_dir().join(format!("file-{i}.png")), []).unwrap();
     }
@@ -231,7 +256,12 @@ fn media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash() {
 #[test]
 fn media_pending_query_uses_its_partial_index_with_20000_clean_tombstones() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store.add("dirty.png", b"dirty").unwrap();
     let mut db = Connection::open(dir.path().join("meguri-media.db")).unwrap();
     let tx = db.transaction().unwrap();
@@ -266,7 +296,12 @@ fn media_pending_query_uses_its_partial_index_with_20000_clean_tombstones() {
 #[test]
 fn media_cancelled_scan_leaves_completed_rows_and_requires_a_fresh_scan() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     fs::write(store.media_dir().join("a.png"), b"a").unwrap();
     fs::write(store.media_dir().join("b.png"), b"b").unwrap();
     assert_eq!(store.register_full(|done, _| done == 0), Err(MediaError::Cancelled));
@@ -280,7 +315,12 @@ fn media_cancelled_scan_leaves_completed_rows_and_requires_a_fresh_scan() {
 #[test]
 fn media_add_during_a_scan_is_not_mistaken_for_a_deleted_file() {
     let dir = tempfile::tempdir().unwrap();
-    let store = MediaStore::open(&dir.path().join("collection.anki2"), Arc::new(common::clock())).unwrap();
+    let store = MediaStore::open(
+        &dir.path().join("collection.anki2"),
+        Arc::new(common::clock()),
+        common::media_random(),
+    )
+    .unwrap();
     store.add("first.png", b"first").unwrap();
     let mut added = false;
     store

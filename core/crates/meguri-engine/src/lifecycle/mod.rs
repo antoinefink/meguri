@@ -372,7 +372,12 @@ impl Engine {
                 Some(ownership) => ownership,
                 None => Arc::new(meguri_storage::lockfile::CollectionLock::acquire(directory)?),
             };
-            crate::device_state::reconcile(path, &config.publication_binding, config.clock.clone())?;
+            crate::device_state::reconcile(
+                path,
+                &config.publication_binding,
+                config.clock.clone(),
+                config.random.clone(),
+            )?;
             crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
             if !initial_replacement {
                 meguri_storage::leftovers::cleanup(directory)?;
@@ -470,6 +475,7 @@ impl Engine {
             readers: Readers::new(factory),
             derived: std::sync::OnceLock::new(),
             media: std::sync::Mutex::new(None),
+            random: config.random.clone(),
             render_cache: Default::default(),
             space: config.disk_space_provider,
         });
