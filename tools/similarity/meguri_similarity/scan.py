@@ -184,10 +184,25 @@ class Scanner:
 
     def scan_file(self, path, text):
         lang = self.in_scope(path)
-        result = FileResult(path, lang)
         channels = self.cfg["scan"]["channels_by_language"][lang]
+        return self._scan(path, text, lang, channels)
+
+    def scan_search_data(self, path, text):
+        from . import search_data
+
+        if search_data._scope(path) is None:
+            raise search_data.SearchDataError("search-data input is outside the two search roots")
+        return self._scan(path, text, "search-data", search_data.CHANNELS)
+
+    def _scan(self, path, text, lang, channels):
+        result = FileResult(path, lang)
         try:
-            lexed = self.lexer.lex(text, lang, want_struct="struct" in channels)
+            if lang == "search-data":
+                from . import search_data
+
+                lexed = search_data.lex(text, path, self.lexer)
+            else:
+                lexed = self.lexer.lex(text, lang, want_struct="struct" in channels)
         except ValueError as e:
             result.status, result.error = "error", f"cannot parse {path}: {e}"
             return result

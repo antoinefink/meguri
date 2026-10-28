@@ -7,7 +7,7 @@
 # MG_SIMILARITY_REFS overrides the corpus directory (scanner development only).
 
 mg_job similarity host mg_similarity \
-  "Similarity scan of Meguri files against every Anki tag since 2.1.50 (R1957); --base <ref> changed files only, --rev <ref> that commit's tree, -- <paths> given files"
+  "Similarity scan against pinned releases; --base <ref>, --rev <ref>, -- <files>, or --search-data -- <paired search paths>"
 mg_job similarity-nightly host mg_similarity_nightly \
   "JPlag comparison of Meguri with selected Anki tags (nightly second opinion); report stays under build/"
 mg_job similarity-selftest host mg_similarity_selftest \
@@ -172,7 +172,7 @@ mg__similarity_given() {
 }
 
 mg_similarity() {
-  local base="" rev="" rebuild="" given="" paths=() a
+  local base="" rev="" rebuild="" given="" search_data="" paths=() a
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base) base="${2:-}"; shift 2 || shift ;;
@@ -180,6 +180,7 @@ mg_similarity() {
       --rev) rev="${2:-}"; shift 2 || shift ;;
       --rev=*) rev="${1#--rev=}"; shift ;;
       --rebuild-index) rebuild=--rebuild; shift ;;
+      --search-data) search_data=--search-data; shift ;;
       --)
         shift
         for a in "$@"; do
@@ -195,13 +196,18 @@ mg_similarity() {
         break
         ;;
       *)
-        mg_failure usage "unknown argument '$1'; usage: tools/mg similarity [--base <ref>] [--rev <ref>] [--rebuild-index] [-- paths...]"
+        mg_failure usage "unknown argument '$1'; usage: tools/mg similarity [--base <ref>] [--rev <ref>] [--rebuild-index] [--search-data] [-- paths...]"
         mg_status error
         return 0
         ;;
     esac
   done
   mg__similarity_guard || return 0
+  if [ -n "$search_data" ] && { [ -n "$base$rev" ] || [ -z "$given" ]; }; then
+    mg_failure usage "--search-data requires explicit paired search paths and cannot use --base or --rev"
+    mg_status error
+    return 0
+  fi
   local refs
   refs="$(mg__similarity_corpus)"
   [ -n "$refs" ] || { mg__similarity_no_corpus; return 0; }
@@ -247,7 +253,7 @@ mg_similarity() {
   mg__similarity_run "$refs" python3 -m meguri_similarity scan \
     --refs /refs --cache /work/build/similarity-index \
     --root "/work/$root_rel" --vocab-root "/work/$root_rel" \
-    --files-from "/work/$rel/files.lst" --null --out "/work/$rel/scan" $rebuild
+    --files-from "/work/$rel/files.lst" --null --out "/work/$rel/scan" $rebuild $search_data
   rc=$?
   rm -rf "$tree"
   [ "$rc" -eq 125 ] && return 0
@@ -283,17 +289,21 @@ mg__similarity_record() {
   mg_detail corpus "$(jq -c '.corpus' "$summary")"
   mg_detail timing "$(jq -c '.timing' "$summary")"
   mg_detail counts "$(jq -c '.counts' "$summary")"
-  jq -c '.flags[] | {
+  if jq -e '.search_data' "$summary" >/dev/null; then
+    mg_detail search_data "$(jq -c '.search_data' "$summary")"
+  fi
+  jq -c '. as $summary | .flags[] | {
       id: ("similarity:" + .path + ":" + .channel),
       message: (.path + " lines " + ([.regions[] | "\(.[0])-\(.[1])"] | join(", ")) + ": " + (.reasons | join("; ")) + "; rewrite this region from the spec"),
-      repro: ("tools/mg similarity -- " + (.path | @sh))}' "$summary" >>"$MG_STATE/failures.jsonl"
+      repro: (if $summary.search_data then "tools/mg similarity --search-data -- conformance/scenarios/search conformance/goldens/search"
+        else "tools/mg similarity -- " + (.path | @sh) end)}' "$summary" >>"$MG_STATE/failures.jsonl"
   jq -c '.errors[] | {id: "similarity:error", message: ., repro: "tools/mg similarity"}' "$summary" >>"$MG_STATE/failures.jsonl"
   jq -c '(.missing // [])[] | {id: "similarity:missing",
       message: (. + ": listed for the scan but not in the scanned tree; it was not checked"),
       repro: ("tools/mg similarity -- " + (. | @sh))}' "$summary" >>"$MG_STATE/failures.jsonl"
   local status
   status="$(jq -r '.status' "$summary")"
-  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted" + (if .counts.missing > 0 then ", \(.counts.missing) listed but missing" else "" end) + "; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)"' "$summary")"
+  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted" + (if .counts.missing > 0 then ", \(.counts.missing) listed but missing" else "" end) + "; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)" + (if .search_data then "; search data: \(.search_data.pairs) pairs, \(.search_data.limited | length) files below fingerprint limits; provenance unproven" else "" end)' "$summary")"
   case "$status" in
     pass | warn | fail | error) mg_status "$status" ;;
     *) mg_status error ;;

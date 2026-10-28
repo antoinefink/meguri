@@ -14,6 +14,7 @@ import sys
 import time
 
 from . import report
+from . import search_data
 from .config import ConfigError, load_allowlist, load_config, load_vocab
 from .corpus import CorpusError, open_or_build, plan_corpus
 from .lexer import KEYWORDS, Lexer
@@ -95,13 +96,17 @@ def cmd_scan(args):
     if args.files_from:
         paths += read_list(args.files_from, args.null)
     paths = checkout_paths(args.root, paths)
+    data_inputs, pairs = None, 0
+    if getattr(args, "search_data", False):
+        cfg = load_config(args.config)
+        data_inputs, pairs = search_data.inputs(args.root, paths, cfg["corpus"]["max_blob_bytes"])
     cfg, stop, mask, index, corpus = _prepare(args)
     allow = load_allowlist(args.allowlist)
     t_scan = time.monotonic()
     lexer = Lexer(mask, stop)
     scanner = Scanner(cfg, index, lexer, allow)
     files, skipped, missing = [], 0, []
-    for path in paths:
+    for path in ([] if data_inputs is not None else paths):
         if not scanner.in_scope(path):
             skipped += 1
             continue
@@ -111,6 +116,8 @@ def cmd_scan(args):
             missing.append(path)
             continue
         files.append(scanner.scan_file(path, read_text(args.root, path)))
+    if data_inputs is not None:
+        files = [scanner.scan_search_data(item["path"], item["text"]) for item in data_inputs]
     scan_seconds = time.monotonic() - t_scan
     flagged = [f for f in files if f.status == "flagged"]
     errors = [f for f in files if f.status == "error"]
@@ -130,6 +137,24 @@ def cmd_scan(args):
         "timing": {"scan_seconds": round(scan_seconds, 3), "total_seconds": round(time.monotonic() - t_start, 3)},
         "corpus": corpus,
     }
+    if data_inputs is not None:
+        def meaningful(file):
+            return any(
+                channel.fingerprints >= (cfg["channels"][name]["min_fingerprints"] if name == "lex" else 1)
+                for name, channel in file.channels.items()
+            )
+        coverage = [{"path": file.path,
+                     "fingerprints": {name: channel.fingerprints for name, channel in file.channels.items()},
+                     "meaningful": meaningful(file)} for file in files]
+        summary["search_data"] = {
+            "pairs": pairs,
+            "manifest": [{"path": item["path"], "sha256": item["sha256"]} for item in data_inputs],
+            "coverage": coverage,
+            "limited": [item["path"] for item in coverage if not item["meaningful"]],
+            "limits": "Similarity does not establish provenance or exclude copying below the configured fingerprint limits.",
+        }
+        if summary["search_data"]["limited"] and status == "pass":
+            status = summary["status"] = "warn"
     paths_out = report.write(args.out, files, summary)
     # The summary carries the implementer view of each flag only.
     summary["flags"] = [
@@ -171,6 +196,7 @@ def main(argv=None):
     p.add_argument("--files-from", help="file listing paths to scan, one per line")
     p.add_argument("--null", action="store_true", help="paths in --files-from are NUL-terminated")
     p.add_argument("--out", required=True, help="report directory")
+    p.add_argument("--search-data", action="store_true", help="explicit paired search scenario/golden data scan")
     p.add_argument("paths", nargs="*")
     p.set_defaults(func=cmd_scan)
     p = sub.add_parser("jplag", help="nightly JPlag comparison against selected Anki tags")
@@ -185,7 +211,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, CorpusError, InputError) as e:
+    except (ConfigError, CorpusError, InputError, search_data.SearchDataError) as e:
         log(f"similarity: {e}")
         result = {"status": "error", "error": str(e)}
         if args.cmd == "scan":

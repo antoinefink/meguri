@@ -10,3 +10,4 @@
 - `build/similarity-index/` is shared by concurrent scans, across containers: build only in a `mkdtemp` `.tmp-*` directory, and publish, evict or open an index only under the `.lock` flock (`corpus.py`).
 - The scanner runs from the bind mount (`PYTHONPATH=/work/tools/similarity`): code changes need no image rebuild. numpy and PyYAML come from the image's Ubuntu packages.
 - JPlag reports (`similarity-nightly`) embed the compared Anki sources: keep them in the main checkout's build/.
+- `similarity --search-data -- <paths>` is a separate paired-data lane for only the two search scenario/golden roots. Default exclusions stay in force elsewhere. Read/hash/scan the same nofollow bytes; keep aliases, links and unpaired inputs refused. A limited-fingerprint warning or any similarity result does not prove R1881 provenance.

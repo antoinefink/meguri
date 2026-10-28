@@ -686,6 +686,51 @@ STUB
   [ "$(field '.failures[0].id')" = usage ]
 }
 
+@test "similarity search data requires explicit paths and rejects revision modes" {
+  mg similarity --search-data
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  mg similarity --search-data --rev HEAD -- conformance/scenarios/search conformance/goldens/search
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  mg similarity --search-data --base HEAD -- conformance/scenarios/search conformance/goldens/search
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+}
+
+@test "similarity search data keeps the implementer guard" {
+  mg worktree new --role implementer search-data
+  MG_AT="$BATS_TEST_TMPDIR/repo-wt/search-data" mg similarity --search-data -- conformance/scenarios/search conformance/goldens/search
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = implementer-worktree ]
+}
+
+@test "similarity search data forwards the mode and retains coverage in the receipt" {
+  mkdir -p "$SB/refs/anki"
+  export FX_SEARCH_ARGS="$BATS_TEST_TMPDIR/search-args"
+  cat >"$SB/tools/mg.d/zz-search-data-fake.sh" <<'EOF'
+mg__similarity_run() {
+  shift
+  printf '%s\n' "$@" >"$FX_SEARCH_ARGS"
+  local out="$MG_RUN_DIR/scan" file
+  mkdir -p "$out"
+  for file in implementer.md implementer.json reviewer.md reviewer.json; do
+    echo '{}' >"$out/$file"
+  done
+  cat >"$out/summary.json" <<'JSON'
+{"status":"warn","counts":{"scanned":2,"flagged":0,"allowlisted":0,"clean":2,"errors":0,"skipped":0,"missing":0},"corpus":{"tags":2,"first_tag":"a","last_tag":"b"},"timing":{},"flags":[],"errors":[],"missing":[],"search_data":{"pairs":1,"manifest":[{"path":"conformance/scenarios/search/a.yaml","sha256":"synthetic"}],"coverage":[{"path":"conformance/scenarios/search/a.yaml","fingerprints":{"lex":0,"com":0,"text":0},"meaningful":false}],"limited":["conformance/scenarios/search/a.yaml"]}}
+JSON
+}
+EOF
+  mg similarity --search-data -- conformance/scenarios/search conformance/goldens/search
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  grep -Fx -- '--search-data' "$FX_SEARCH_ARGS"
+  [ "$(field '.details.search_data.pairs')" -eq 1 ]
+  [ "$(field '.details.search_data.limited | length')" -eq 1 ]
+  validate "$result"
+}
+
 @test "the implementer deny profile template covers every quarantined source" {
   local p="$SB/.claude/settings.implementer.json" rule
   # Built from parts: the merge gate's static check refuses an AnkiWeb host
