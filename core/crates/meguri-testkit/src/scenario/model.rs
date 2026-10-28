@@ -3675,10 +3675,10 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                     if let Ok(export) = super::PackageExportArgs::from_mapping(&args.0) {
                         needs.ops.extend(export.capabilities().into_iter().map(str::to_owned));
                     }
-                } else if let Some(format) = args.0.get("format").and_then(Value::as_str) {
-                    if matches!(format, "colpkg" | "apkg") {
-                        needs.ops.insert(format!("import.{format}"));
-                    }
+                } else if let Some(format) = args.0.get("format").and_then(Value::as_str)
+                    && matches!(format, "colpkg" | "apkg")
+                {
+                    needs.ops.insert(format!("import.{format}"));
                 }
             }
             other => {
