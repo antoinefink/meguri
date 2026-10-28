@@ -101,7 +101,7 @@ The field holds a protobuf message `meguri.cloud.v1.Entity`:
 
 | No. | Field | Type | Meaning |
 |---|---|---|---|
-| 1 | `format` | uint32 | envelope format, 1 |
+| 1 | `format` | uint32 | envelope and kind-specific payload format together, 1 (K6.1) |
 | 2 | `kind` | uint32 | kind code (K6) |
 | 3 | `key` | bytes | key bytes (K4.2) |
 | 4 | `origin` | bytes (16) | random identity given when the entity was first tracked (K11.1); changes only when K14.1 identifies the entity with a server entity |
@@ -142,7 +142,9 @@ Fields are listed as number, name, type. A field is always present unless marked
 
 ### K5.4 Newer formats
 
-A record whose `format` (envelope or payload) is above what this build supports is kept in the inbox (K13) with reason `format`, never applied and never overwritten by this device: the entity is not sent while such a record is the server's version. Status reports unsupported schema (R1561) until Meguri is updated.
+For `MGEntity`, `Entity.format` selects the envelope and the kind-specific payload schema together. Value 1 uses K5.1 and K6.1. A payload has no separate format field: its fields and their numbers are exactly those of K6.1, with no change to format-1 bytes.
+
+A record whose `format` is above what this build supports is kept in the inbox (K13) with reason `format`, never applied and never overwritten by this device: the entity is not sent while such a record is the server's version. Status reports unsupported schema (R1561) until Meguri is updated.
 
 ## K6. Entity kinds and payloads
 
