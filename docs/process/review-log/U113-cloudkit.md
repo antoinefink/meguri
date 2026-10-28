@@ -307,3 +307,44 @@ proof remain open. This accessor does not accept full S2.4 or U113.
 The shared final `core-lint/20261028T043423Z-75307` passes all four checks with
 the committed row accessor unchanged. Its focused and guard receipts above
 remain valid. No full U113 or integration acceptance is claimed.
+
+## P24 account and root regressions — enabled, failing build
+
+Starting commit: `5755bbc0`; recorded before test authoring in
+`build/unit-intake/U113-cloudkit/account-workflow/start.json`.
+No production account/capture/reconcile/send implementation preceded these
+regression definitions. The approved focused-fixture interpretation is in
+`build/cloudkit-intake/account-test-first-packet.json`: arrange prior bound
+state only; the edit, lifecycle, scan, guarded builder and Service SAVE must
+be real. Full Q4/Q5 and signed requirements remain unchanged.
+
+Filtered test author `20261028T044616Z-80826` adds three enabled tests in
+`cloud_recovery.rs`: lost capture through crash/offline clean close; edits
+before a different identity; finite current-instance root-confirmation cases.
+Review 1 required the loss to precede editing and cover the whole capture
+transaction, separate counter domains, keep durable drained false while open,
+use the fixed fake-clock origin and require an exact revision increment.
+Repair `20261028T050226Z-88228` implements those corrections.
+Review 2 found a row-versus-payload digest assertion; repair
+`20261028T050947Z-92666` separates the hashes and requires a nonzero baseline
+layout generation. Review 3 is clear. Final equivalent explicit Save
+assertions (`20261028T051342Z-95682`) preserve the conditional tag; independent
+review 4 is clear. Existing recovery tests are unchanged.
+
+- `core-test/20261028T051531Z-97100`: **failed build**, only the missing
+  `meguri_testkit::cloud::{devices,coordinator}` interfaces. Zero runtime tests
+  ran. This is the recorded test-first failing state, not a pass or skip.
+- `private/20261028T051533Z-97360`: pass.
+- `similarity/20261028T051533Z-97399`: pass.
+
+Earlier build failures `20261028T050726Z-91208` and
+`20261028T051210Z-94257` also included a concrete mutation-reference error,
+now removed. The initial generic fixture/comment privacy findings
+`20261028T045958Z-86778` were rewritten without a guard exception.
+
+Next: implement the supported production composition, early-open evidence,
+observer capture, lifecycle, reconciliation, account/root guards, conditional
+send and shared process harness. Keep these tests enabled. P24 items, U113,
+U117, native/full integration gates and release acceptance stay open. The
+full native durability target now also awaits the missing test interfaces;
+its earlier receipt is not a current whole-target pass.

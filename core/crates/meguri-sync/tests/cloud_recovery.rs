@@ -729,3 +729,566 @@ fn deferred_foreign_key_failure_at_actual_destination_commit_keeps_main_and_wal(
     drop(db);
     assert_eq!(recover(dir.path(), &random).conflict_copies().unwrap().len(), 3);
 }
+
+// U113 test-first RED: P24 account-check/root_read and Q11. The shared Service
+// exists; cloud::devices/coordinator intentionally do not yet exist. These are
+// enabled regressions, not acceptance evidence. No publication/adoption lane
+// is claimed by arranging an already healthy, bound component fixture.
+mod account_and_root_regressions {
+    use meguri_model::rng::SeededRandom;
+    use meguri_sync::cloud::{BindingState, IsolationReason, entity_codec as codec};
+    use meguri_testkit::{
+        cloud::{
+            self, Config, Field, LogOutcome, Mutation, Record, ReplyReference, RequestKind, Scope, Service,
+            coordinator::{Barrier, Coordinator, ReadKind, TraceEvent},
+            devices::{DeviceFacts, DirtySource, IdentityReads, PreboundDevice},
+        },
+        generate::recipe::{Recipe, generate_recipe},
+    };
+
+    const SEED: u64 = 0x2411_0051;
+    const EDIT: [&str; 2] = ["generic update", "back update"];
+
+    fn fixture() -> (tempfile::TempDir, Service<SeededRandom>, PreboundDevice) {
+        let run = tempfile::tempdir().unwrap();
+        let collection = run.path().join("device");
+        let recipe = Recipe::parse(
+            r#"recipe: p24-bound-note
+description: Generic test
+now: "2025-01-01T00:00:00Z"
+decks:
+  - name: Generic deck
+    notetype: basic
+    new: 1
+    fields: ["generic", "back"]
+"#,
+        )
+        .unwrap();
+        let manifest = generate_recipe(&recipe, SEED, &collection).unwrap();
+        assert_eq!(manifest.counts.notes, 1);
+        assert_eq!(manifest.counts.cards, 1);
+        assert_eq!(manifest.counts.revlog, 0);
+        let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(SEED)).unwrap();
+        // Arrange an already healthy layout: local and acked notetype struct_gen,
+        // Note/Card payloads and their acknowledgements must all agree on 1.
+        // This seeds the baseline; it must not publish a live generation.
+        let files = PreboundDevice::arrange(&collection, &mut service, SEED).unwrap();
+        let baseline = files.read_durable().unwrap();
+        assert_eq!(baseline.note, files.note);
+        assert_eq!(baseline.note.nt_struct_gen, 1);
+        let payload = codec::Payload::Note(baseline.note.clone());
+        assert_ne!(payload.row_digest().unwrap(), payload.payload_digest().unwrap());
+        assert_eq!(baseline.mark, None);
+        assert!(baseline.pending_names.is_empty());
+        assert_eq!(baseline.binding_state, BindingState::Active);
+        assert!(baseline.scan_drained);
+        assert!(baseline.sidecar_clean);
+        assert_eq!(decode(&files, &record(&service, &files)).1, files.note);
+        (run, service, files)
+    }
+
+    fn record(service: &Service<SeededRandom>, files: &PreboundDevice) -> Record {
+        service.inspect(&files.scope).unwrap().unwrap().zones[&files.collection_zone].records[&files.entity_name]
+            .clone()
+    }
+
+    fn decode(files: &PreboundDevice, record: &Record) -> (codec::Entity, codec::Note) {
+        assert_eq!(record.name, files.entity_name);
+        assert_eq!(record.record_type, "MGEntity");
+        let Field::EncryptedBytes(bytes) = &record.fields["e"] else {
+            panic!("expected the actual encrypted entity envelope");
+        };
+        let received = codec::receive(
+            &files.binding.facts.record_key.0,
+            &record.name,
+            bytes,
+            codec::AssetInput::Absent,
+        )
+        .unwrap();
+        let Some(codec::Payload::Note(note)) = received.payload else {
+            panic!("expected the actual canonical Note payload");
+        };
+        assert_eq!(received.entity.fields.key, codec::id_key(files.note.id));
+        (received.entity, note)
+    }
+
+    fn cursor(service: &Service<SeededRandom>) -> u64 {
+        service.request_log().unwrap().last().map_or(0, |r| r.request_id)
+    }
+
+    fn assert_no_writes_since(service: &Service<SeededRandom>, after: u64) {
+        // Global log includes every account/container/environment partition.
+        for request in service.request_log().unwrap().iter().filter(|r| r.request_id > after) {
+            assert!(!matches!(
+                request.kind,
+                RequestKind::Modify | RequestKind::CreateZone | RequestKind::DeleteZone
+            ));
+        }
+    }
+
+    fn assert_no_transfer_or_replacement(trace: &[TraceEvent]) {
+        assert!(!trace.iter().any(|e| matches!(
+            e,
+            TraceEvent::PublishStarted
+                | TraceEvent::AdoptStarted
+                | TraceEvent::CollectionReplaced
+                | TraceEvent::ManualTransferStarted
+        )));
+    }
+
+    fn assert_closed(session: &mut Coordinator, service: &mut Service<SeededRandom>) {
+        let before = cursor(service);
+        let attempt = session.request_collection_batch(service).unwrap();
+        assert!(attempt.mutations.is_empty());
+        assert!(attempt.request_ids.is_empty());
+        assert_no_writes_since(service, before);
+    }
+
+    fn assert_service_read(
+        service: &Service<SeededRandom>,
+        files: &PreboundDevice,
+        request_id: u64,
+        instance: &str,
+        record_type: &str,
+    ) {
+        let log = service.request_log().unwrap();
+        let request = log.iter().find(|r| r.request_id == request_id).unwrap();
+        assert_eq!(request.kind, RequestKind::Read);
+        assert_eq!(request.scope, files.scope);
+        assert_eq!(request.caller.instance.as_deref(), Some(instance));
+        assert_eq!(request.outcome, LogOutcome::Success);
+        let outcomes = service.outcomes().unwrap();
+        let outcome = outcomes.iter().find(|r| r.request_id == request_id).unwrap();
+        let Ok(ReplyReference::Record(reference)) = &outcome.result else {
+            panic!("expected a persisted successful Service read");
+        };
+        let record = service.resolve_record(&files.scope, reference).unwrap();
+        assert_eq!(record.record_type, record_type);
+        assert_eq!(request.records.len(), 1);
+        assert_eq!(request.records[0].name, record.name);
+    }
+
+    fn assert_tracking_unchanged(before: &DeviceFacts, after: &DeviceFacts) {
+        assert_eq!(after.change_counter, before.change_counter);
+        assert_eq!(after.local_rev, before.local_rev);
+        assert_eq!(after.last_observed_digest, before.last_observed_digest);
+        assert_eq!(after.mark, before.mark);
+        assert_eq!(after.pending_names, before.pending_names);
+    }
+
+    fn assert_observer_capture(session: &Coordinator, edit: &cloud::coordinator::Edit) {
+        let proof = session.capture_proof(edit).unwrap();
+        assert_eq!(proof.observed_seq, edit.seq);
+        assert_eq!(proof.generation, edit.generation);
+        assert!(proof.attempted);
+        assert!(proof.persisted);
+    }
+
+    fn assert_saved(
+        session: &mut Coordinator,
+        service: &mut Service<SeededRandom>,
+        files: &PreboundDevice,
+        baseline: &Record,
+        expected: &codec::Note,
+    ) {
+        let (old_entity, _) = decode(files, baseline);
+        let before = cursor(service);
+        let attempt = session.request_collection_batch(service).unwrap();
+        assert_eq!(attempt.mutations.len(), 1);
+        {
+            let mutation: &cloud::Mutation = &attempt.mutations[0];
+            let Mutation::Save { record, if_unchanged } = mutation else {
+                panic!("expected a Save mutation");
+            };
+            assert_eq!(record.name, files.entity_name);
+            assert_eq!(if_unchanged.as_ref(), Some(&baseline.system_fields));
+        }
+        assert!(!attempt.request_ids.is_empty());
+        let saved = record(service, files);
+        let (entity, note) = decode(files, &saved);
+        assert_eq!(&note, expected);
+        assert_eq!(note.flds, EDIT.join("\u{1f}").as_bytes());
+        assert_eq!(entity.fields.erev, old_entity.fields.erev.checked_add(1).unwrap());
+        assert_ne!(saved.system_fields, baseline.system_fields);
+        let log = service.request_log().unwrap();
+        let outcomes = service.outcomes().unwrap();
+        let mut accepted = 0;
+        for request in log
+            .iter()
+            .filter(|r| r.request_id > before && r.kind == RequestKind::Modify)
+        {
+            assert!(attempt.request_ids.contains(&request.request_id));
+            assert_eq!(request.scope, files.scope);
+            assert_eq!(request.zone.as_deref(), Some(files.collection_zone.as_str()));
+            assert_eq!(request.caller.instance.as_deref(), Some(session.instance().as_str()));
+            assert_eq!(request.outcome, LogOutcome::Success);
+            let outcome = outcomes.iter().find(|r| r.request_id == request.request_id).unwrap();
+            let Ok(ReplyReference::Modified(items)) = &outcome.result else {
+                panic!("expected a persisted Service modify outcome");
+            };
+            for item in items {
+                assert_eq!(item.name, files.entity_name);
+                let reference = item.result.as_ref().unwrap().as_ref().unwrap();
+                assert_eq!(service.resolve_record(&files.scope, reference).unwrap(), saved);
+                accepted += 1;
+            }
+        }
+        assert_eq!(accepted, 1);
+        assert_no_transfer_or_replacement(session.trace());
+    }
+
+    #[test]
+    fn dropped_dirty_mark_offline_clean_close_next_verified_open_scans_and_saves() {
+        let (_run, mut service, files) = fixture();
+        let baseline = record(&service, &files);
+        let before = cursor(&service);
+        let mut first = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        first.reach(Barrier::BeforeRootConfirmation).unwrap();
+        let tracking_before = first.facts().unwrap();
+        assert_eq!(tracking_before.mark, None);
+        assert!(tracking_before.pending_names.is_empty());
+        // P24: roll back the whole observer capture; remain paused until SIGKILL.
+        let before_loss = first.trace().len();
+        first.arm_capture_loss_for_test(files.note.id).unwrap();
+        let edit = first.edit_note_fields(files.note.id, &EDIT).unwrap();
+        assert_ne!(edit.note.flds, tracking_before.note.flds);
+        let capture = first.capture_proof(&edit).unwrap();
+        assert_eq!(capture.observed_seq, edit.seq);
+        assert_eq!(capture.generation, edit.generation);
+        assert!(capture.attempted);
+        assert!(!capture.persisted);
+        let captured = first.facts().unwrap();
+        assert_eq!(captured.note, edit.note);
+        assert_tracking_unchanged(&tracking_before, &captured);
+        let proof = first.wal_proof(&edit).unwrap();
+        assert!(proof.through >= edit.seq);
+        assert_eq!(proof.generation, edit.generation);
+        assert_eq!(proof.native_file, edit.native_file);
+        assert_eq!(first.facts().unwrap().mark, None);
+        assert_eq!(record(&service, &files), baseline);
+        assert!(
+            !first.trace()[before_loss..]
+                .iter()
+                .any(|e| matches!(e, TraceEvent::ScanCommitted { .. }))
+        );
+        let killed = first.kill_sigkill().unwrap();
+        assert_eq!(killed.signal, Some(9));
+        assert!(!killed.clean_close);
+        let after_kill = files.read_durable().unwrap();
+        assert_eq!(after_kill.note, edit.note);
+        assert_eq!(after_kill.mark, None);
+        assert_tracking_unchanged(&tracking_before, &after_kill);
+        assert_no_writes_since(&service, before);
+
+        let mut offline = Coordinator::open(&files, IdentityReads::FailAllSession).unwrap();
+        offline.reach(Barrier::IdentityBlocked).unwrap();
+        assert_closed(&mut offline, &mut service);
+        let offline_facts = offline.facts().unwrap();
+        assert_eq!(offline_facts.note, edit.note);
+        assert_tracking_unchanged(&tracking_before, &offline_facts);
+        assert!(!offline_facts.scan_drained);
+        offline.close_clean().unwrap();
+        assert!(!offline.trace().iter().any(|e| matches!(
+            e,
+            TraceEvent::IdentityVerified { .. }
+                | TraceEvent::ScanCommitted { .. }
+                | TraceEvent::EngineStarted { .. }
+                | TraceEvent::CollectionBatchBuilt { .. }
+        )));
+        assert_no_transfer_or_replacement(offline.trace());
+        // These are fresh reads of persisted scan_state, collection and sidecar.
+        let closed = files.read_durable().unwrap();
+        assert!(closed.sidecar_clean);
+        assert!(!closed.scan_drained);
+        assert_eq!(closed.note, edit.note);
+        assert_eq!(closed.mark, None);
+        assert_tracking_unchanged(&tracking_before, &closed);
+        assert_no_writes_since(&service, before);
+        assert_eq!(record(&service, &files), baseline);
+
+        let mut online = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        online.reach(Barrier::ScanCommitted).unwrap();
+        let scan = online.scan_proof().unwrap();
+        assert_eq!(scan.snapshot_native_file, proof.native_file);
+        assert_eq!(scan.receipt.native_file, scan.snapshot_native_file);
+        assert_eq!(scan.receipt.generation, scan.snapshot_generation);
+        assert!(scan.receipt.through >= scan.snapshot_seq);
+        let recovered = online.facts().unwrap();
+        // P24: persisted drain waits for clean close; this open has finished scanning.
+        assert!(!recovered.scan_drained);
+        let scan_state = online.scan_state().unwrap();
+        assert!(!scan_state.scan_required);
+        assert!(!scan_state.scan_running);
+        assert!(scan_state.scan_completed_this_open);
+        assert_eq!(recovered.note, edit.note);
+        let mark = recovered.mark.unwrap();
+        assert_eq!(mark.binding, files.binding.id);
+        assert_eq!(mark.source, DirtySource::Snapshot);
+        assert!(mark.change_seq > tracking_before.change_counter);
+        assert!(mark.change_seq <= recovered.change_counter);
+        assert!(recovered.local_rev > tracking_before.local_rev);
+        assert_eq!(edit.note.nt_struct_gen, files.note.nt_struct_gen);
+        let payload = codec::Payload::Note(edit.note.clone());
+        assert_eq!(recovered.last_observed_digest, Some(payload.row_digest().unwrap()));
+        assert_ne!(payload.row_digest().unwrap(), payload.payload_digest().unwrap());
+        assert_eq!(
+            mark.payload_digest,
+            codec::Payload::Note(edit.note.clone()).payload_digest().unwrap()
+        );
+        assert!(recovered.pending_names.contains(&files.entity_name));
+        assert!(!online.trace().iter().any(|e| matches!(
+            e,
+            TraceEvent::EngineStarted { .. } | TraceEvent::CollectionBatchBuilt { .. }
+        )));
+        let instance = online.instance();
+        let verified = online
+            .trace()
+            .iter()
+            .position(|e| {
+                matches!(e,
+            TraceEvent::IdentityVerified { instance: i, account }
+                if i == &instance && account == &files.scope.account)
+            })
+            .unwrap();
+        let scanned = online
+            .trace()
+            .iter()
+            .position(|e| {
+                matches!(e,
+            TraceEvent::ScanCommitted { instance: i, native_file, generation, covered_seq, recovered_names }
+                if i == &instance && native_file == &scan.snapshot_native_file
+                    && generation == &scan.snapshot_generation && covered_seq == &scan.receipt.through
+                    && recovered_names.contains(&files.entity_name))
+            })
+            .unwrap();
+        assert!(verified < scanned);
+        online.reach(Barrier::BeforeRootConfirmation).unwrap();
+        let started = online
+            .trace()
+            .iter()
+            .position(|e| {
+                matches!(e,
+            TraceEvent::EngineStarted { instance: i, account }
+                if i == &instance && account == &files.scope.account)
+            })
+            .unwrap();
+        assert!(scanned < started);
+        assert_closed(&mut online, &mut service);
+        let root = online.read(&mut service, ReadKind::ActiveNoState).unwrap();
+        assert_eq!(root.instance, instance);
+        assert_eq!(root.active_epoch, Some(files.binding.facts.epoch));
+        assert_service_read(&service, &files, root.request_id, &instance, "MGActive");
+        online.deliver_read(&root).unwrap();
+        assert_saved(&mut online, &mut service, &files, &baseline, &edit.note);
+        online.close_clean().unwrap();
+        let drained = files.read_durable().unwrap();
+        assert!(drained.scan_drained);
+        assert!(drained.sidecar_clean);
+        assert_eq!(drained.note, edit.note);
+    }
+
+    #[test]
+    fn preverification_edits_then_different_identity_never_send() {
+        let (_run, mut service, files) = fixture();
+        let baseline_a = service.inspect(&files.scope).unwrap();
+        let b = Scope {
+            account: "synthetic-account-b".into(),
+            ..files.scope.clone()
+        };
+        assert_ne!(b.account, files.scope.account);
+        let baseline_b = service.inspect(&b).unwrap();
+        let before = cursor(&service);
+        let mut session = Coordinator::open(&files, IdentityReads::FailAllSession).unwrap();
+        session.reach(Barrier::IdentityBlocked).unwrap();
+        let before_edit = session.facts().unwrap();
+        let edit = session.edit_note_fields(files.note.id, &EDIT).unwrap();
+        assert_observer_capture(&session, &edit);
+        let local = session.facts().unwrap();
+        assert_eq!(local.binding_state, BindingState::Active);
+        assert_eq!(local.note, edit.note);
+        let mark = local.mark.unwrap();
+        assert_eq!(mark.binding, files.binding.id);
+        assert_eq!(mark.source, DirtySource::Observer);
+        assert!(mark.change_seq > before_edit.change_counter);
+        assert!(mark.change_seq <= local.change_counter);
+        assert_eq!(
+            mark.payload_digest,
+            codec::Payload::Note(edit.note.clone()).payload_digest().unwrap()
+        );
+        assert!(local.pending_names.contains(&files.entity_name));
+        assert_closed(&mut session, &mut service);
+        // A successful external account event; automatic reads still fail.
+        session.verify_identity(b.account.clone()).unwrap();
+        assert_closed(&mut session, &mut service);
+        assert_eq!(
+            session.facts().unwrap().binding_state,
+            BindingState::Isolated(IsolationReason::AccountChanged)
+        );
+        session.close_clean().unwrap();
+        let durable = files.read_durable().unwrap();
+        assert_eq!(durable.note, edit.note);
+        assert_eq!(durable.mark, Some(mark));
+        assert_eq!(
+            durable.binding_state,
+            BindingState::Isolated(IsolationReason::AccountChanged)
+        );
+        assert!(durable.pending_names.contains(&files.entity_name));
+        assert!(session.trace().iter().any(|e| matches!(e,
+            TraceEvent::IdentityVerified { account, .. } if account == &b.account)));
+        assert!(!session.trace().iter().any(|e| matches!(
+            e,
+            TraceEvent::EngineStarted { .. } | TraceEvent::CollectionBatchBuilt { .. }
+        )));
+        assert_no_transfer_or_replacement(session.trace());
+        assert_no_writes_since(&service, before);
+        assert_eq!(service.inspect(&files.scope).unwrap(), baseline_a);
+        assert_eq!(service.inspect(&b).unwrap(), baseline_b);
+    }
+
+    #[test]
+    fn root_confirmation_safety_finite_permutations_require_current_instance_proof() {
+        // P24 root_read / K21.20 / V22.14. Finite deterministic property:
+        // all six orders of epoch-only, stale read and stale drain, followed by
+        // each valid current-instance proof. No publisher is present here;
+        // accepted publication `done` remains an allowed production proof.
+        const ORDERS: [[u8; 3]; 6] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        for order in ORDERS {
+            for own_drain in [false, true] {
+                let (_run, mut service, files) = fixture();
+                let baseline = record(&service, &files);
+                let mut prior =
+                    Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+                prior.reach(Barrier::BeforeRootConfirmation).unwrap();
+                let before_edit = prior.facts().unwrap();
+                let edit = prior.edit_note_fields(files.note.id, &EDIT).unwrap();
+                assert_observer_capture(&prior, &edit);
+                let local = prior.facts().unwrap();
+                let mark = local.mark.unwrap();
+                assert_eq!(mark.binding, files.binding.id);
+                assert_eq!(mark.source, DirtySource::Observer);
+                assert!(mark.change_seq > before_edit.change_counter);
+                assert!(mark.change_seq <= local.change_counter);
+                assert!(prior.facts().unwrap().pending_names.contains(&files.entity_name));
+                assert_closed(&mut prior, &mut service);
+                let stale_read = prior.read(&mut service, ReadKind::ActiveNoState).unwrap();
+                assert_service_read(&service, &files, stale_read.request_id, &prior.instance(), "MGActive");
+                let stale_fetch = prior.fetch_root(&mut service).unwrap();
+                prior.deliver_read(&stale_read).unwrap();
+                assert!(prior.trace().iter().any(|e| matches!(e,
+                    TraceEvent::RootConfirmed { instance } if instance == &prior.instance())));
+                // Close without sending: a new instance must discard this flag.
+                prior.close_clean().unwrap();
+                let mut current =
+                    Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+                current.reach(Barrier::BeforeRootConfirmation).unwrap();
+                assert_ne!(current.instance(), prior.instance());
+                assert!(current.facts().unwrap().pending_names.contains(&files.entity_name));
+                assert_closed(&mut current, &mut service);
+                for event in order {
+                    match event {
+                        0 => {
+                            let epoch = current.read(&mut service, ReadKind::Epoch).unwrap();
+                            assert_service_read(&service, &files, epoch.request_id, &current.instance(), "MGEpoch");
+                            current.deliver_read(&epoch).unwrap();
+                        }
+                        1 => current.deliver_read(&stale_read).unwrap(),
+                        2 => current.deliver_root_fetch(&stale_fetch).unwrap(),
+                        _ => unreachable!(),
+                    }
+                    assert!(current.facts().unwrap().pending_names.contains(&files.entity_name));
+                    assert!(!current.trace().iter().any(|e| matches!(e,
+                        TraceEvent::RootConfirmed { instance } if instance == &current.instance())));
+                    assert_closed(&mut current, &mut service);
+                    assert_eq!(record(&service, &files), baseline);
+                }
+                if own_drain {
+                    let own = current.fetch_root(&mut service).unwrap();
+                    assert_eq!(own.instance, current.instance());
+                    assert!(!own.responses.is_empty());
+                    assert!(matches!(&own.responses.last().unwrap().result,
+                        Ok(cloud::Reply::ZoneChanges(page)) if !page.more));
+                    let log = service.request_log().unwrap();
+                    for response in &own.responses {
+                        let request = log.iter().find(|r| r.request_id == response.request_id).unwrap();
+                        assert_eq!(request.kind, RequestKind::FetchZone);
+                        assert_eq!(request.scope, files.scope);
+                        assert_eq!(request.zone.as_deref(), Some("meguri-root"));
+                        assert_eq!(request.caller.instance.as_deref(), Some(current.instance().as_str()));
+                        assert_eq!(request.outcome, LogOutcome::Success);
+                    }
+                    current.deliver_root_fetch(&own).unwrap();
+                } else {
+                    let own = current.read(&mut service, ReadKind::ActiveNoState).unwrap();
+                    assert_eq!(own.instance, current.instance());
+                    assert_eq!(own.active_epoch, Some(files.binding.facts.epoch));
+                    assert_service_read(&service, &files, own.request_id, &current.instance(), "MGActive");
+                    current.deliver_read(&own).unwrap();
+                }
+                assert!(current.trace().iter().any(|e| matches!(e,
+                    TraceEvent::RootConfirmed { instance } if instance == &current.instance())));
+                assert_saved(&mut current, &mut service, &files, &baseline, &edit.note);
+                current.close_clean().unwrap();
+            }
+        }
+
+        let (_run, mut service, files) = fixture();
+        let mut lost = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        lost.reach(Barrier::BeforeRootConfirmation).unwrap();
+        let before_edit = lost.facts().unwrap();
+        let edit = lost.edit_note_fields(files.note.id, &EDIT).unwrap();
+        assert_observer_capture(&lost, &edit);
+        let local = lost.facts().unwrap();
+        let mark = local.mark.unwrap();
+        assert_eq!(mark.binding, files.binding.id);
+        assert_eq!(mark.source, DirtySource::Observer);
+        assert!(mark.change_seq > before_edit.change_counter);
+        assert!(mark.change_seq <= local.change_counter);
+        assert!(lost.facts().unwrap().pending_names.contains(&files.entity_name));
+        assert_closed(&mut lost, &mut service);
+        // Delete only the synthetic bound zone using the existing Service.
+        service
+            .request(
+                &files.scope,
+                cloud::Caller::default(),
+                cloud::Operation::DeleteZone {
+                    zone: files.collection_zone.clone(),
+                    cause: cloud::RemovalCause::Deleted,
+                },
+            )
+            .unwrap()
+            .result
+            .unwrap();
+        let before = cursor(&service);
+        let read = lost.read(&mut service, ReadKind::ActiveAfterLostZone).unwrap();
+        assert_eq!(read.instance, lost.instance());
+        assert_eq!(read.active_epoch, Some(files.binding.facts.epoch));
+        assert_service_read(&service, &files, read.request_id, &lost.instance(), "MGActive");
+        lost.deliver_read(&read).unwrap();
+        assert!(lost.trace().iter().any(|e| matches!(e,
+            TraceEvent::RootReadRecorded { instance, request_id }
+                if instance == &lost.instance() && request_id == &read.request_id)));
+        assert!(
+            !lost
+                .trace()
+                .iter()
+                .any(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+        );
+        assert_eq!(
+            lost.facts().unwrap().binding_state,
+            BindingState::Isolated(IsolationReason::ZoneMissing)
+        );
+        assert_eq!(lost.facts().unwrap().note, edit.note);
+        assert_eq!(lost.facts().unwrap().mark, Some(mark.clone()));
+        assert_closed(&mut lost, &mut service);
+        assert_no_writes_since(&service, before);
+        assert_no_transfer_or_replacement(lost.trace());
+        lost.close_clean().unwrap();
+        let durable = files.read_durable().unwrap();
+        assert_eq!(
+            durable.binding_state,
+            BindingState::Isolated(IsolationReason::ZoneMissing)
+        );
+        assert_eq!(durable.note, edit.note);
+        assert_eq!(durable.mark, Some(mark));
+    }
+}
