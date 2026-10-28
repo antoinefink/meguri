@@ -89,7 +89,7 @@ It changes only these defaults. An add from the Add screen writes the keys of `n
 
 ## K7. Scenarios
 
-Requested from the oracle maintainer, in `conformance/scenarios/editor/config-keys/`; none is recorded yet. The ops they need do not exist yet. The model is `conformance/browser-config-ops` B1 and B2: an `editor_config_set` op (a whole-value set of one of the four keys, no undo entry) and an `editor_config` observation kind (the four typed reads with defaults). The K4 scenarios need no op of their own: they use the two observation kinds that `notes/add-defaults` D7 requests, `add_defaults` (K4.1) and `notetype_last_deck` (the per-note-type default deck that K4.2 applies), so one driver change serves both directories. K4.2's Add-screen behaviour (which deck stays selected) has no oracle counterpart; Meguri's Add screen model tests cover it (`notes/add-defaults` D7).
+Requested from the oracle maintainer, in `conformance/scenarios/editor/config-keys/`; none is recorded yet. The four K4 recordings (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) can now use the `add_defaults` and `notetype_last_deck` observations of `notes/add-defaults` D7, but their recordings and goldens remain open. They need no additional operation. The separate `editor_config_set` op (a whole-value set of one of the four keys, no undo entry) and `editor_config` observation kind (the four typed reads with defaults), modeled on `conformance/browser-config-ops` B1 and B2, remain requested for the other cases. K4.2's Add-screen behaviour (which deck stays selected) has no oracle counterpart; Meguri's Add screen model tests cover it (`notes/add-defaults` D7).
 
 | Scenario | Covers |
 |---|---|

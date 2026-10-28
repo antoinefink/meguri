@@ -47,3 +47,21 @@ and remain open and inactive. No frozen server work is authorized by this
 intake. P24, O19, the R1881 data findings and the final acceptance gates
 remain open. Batch 4 spec corrections have a separately reviewed proposal;
 the four K7 recordings still require oracle-maintainer work.
+
+## Prepared merge and spec follow-ups
+
+`conformance/20261028T062006Z-39976` parsed all 89 affected prepared
+cases before the merge: 89 pending, zero invalid, zero T0 failures.
+Pending is not product conformance. `c5926bb3` merges only the prepared
+batch 4 top and preserves all twelve commits. The sole conflict was
+package vocabulary documentation: both prepared oracle coverage and
+the verified typed-language availability were retained. D7.2 now agrees.
+
+The spec-writer proposal based on the supplied handoff corrects search
+parse-error order, recursive item details, saved names versus escaping,
+and the filtered-home-deck Card Info failure. Independent review is clear.
+No new oracle observation is claimed. K7 now names the four recordable
+cases while keeping their recordings and goldens open. The typed Meguri
+error remains unchanged. P24, O19 and all other retained gates stay open.
+
+Golden checks, dual-lane T0 and the new-input R1881 recheck follow.

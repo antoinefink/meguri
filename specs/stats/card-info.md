@@ -413,7 +413,8 @@ The snapshot fails as a whole, with no rows, history or curve, and one typed err
 | `fsrs_failed` | the crate refuses the home preset's parameter list (a length other than 0, 17, 19 or 21, `sched/presets#V6`), or fails while computing the memory state (C3.4) or replaying the history (C6.3) |
 
 - The parameter list and the cutoff date are checked for every card, new cards and cards with a stored memory state included, even when there is no row to replay: Anki builds the model and reads the cutoff from the preset before it looks at the history, so its card stats fail for every card of such a preset.
-- Anki's card stats fail in each of these cases. Check Database repairs the damaged references (U128), the kinds `missing_note` to `missing_preset`; it does not change a preset's cutoff date or parameter list.
+- Anki's card stats fail in these cases. When the home deck is filtered, the pinned backend panics and the oracle reports `worker_died`, rather than an ordinary `anki_error`. No scenario/golden covers that case; it does not change Meguri's typed `filtered_home_deck` error above. A card currently in a filtered deck with a normal home deck is a different case.
+- Check Database repairs the damaged references (U128), the kinds `missing_note` to `missing_preset`; it does not change a preset's cutoff date or parameter list.
 - The view's texts for each kind are C12's.
 
 ## C12. Strings

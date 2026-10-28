@@ -17,6 +17,7 @@ The search text Meguri writes for UI actions: searches built from structured ite
 
 - They read no collection, config or clock: the same input always gives the same text.
 - Errors: a parse error of `existing` (`errors.md` E1) or of a parsed-text item (J3), and `invalid_item{reason}` for a built item J3 refuses. No run error (E3) is raised here; running the result may raise one.
+- **Parse-error order.** `join` and `replace` read `existing` first and return its parse error before reading a parsed-text part of the built item. After that, or for `build`, parsed-text parts are read in item order: a group visits its items in list order, fully descending into each before the next; a negation visits its child. The first parse error is returned. This specifies parse-error selection, not a new precedence among `invalid_item` refusals.
 - A parse error carries a `source`: `existing`, or the path of the parsed-text item in the built item, which is the list of steps from the top item down to it (in a group, the item's index; under a negation, 0). Its range lies in that text: U214 highlights it in the field only when `source` is `existing`, or a parsed-text item with `field_text` set (J3).
 - Ranges cross the FFI in UTF-16 code units (`errors.md` E5).
 
@@ -64,6 +65,8 @@ Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is 
 - A group of one item is that item, with no brackets. A group of two or more items is a group (`query-model.md` Q1) of the items joined by its joiner.
 - Days, ids and numbers are those of `grammar.md` G8 and G9; the item stores them as numbers, so `canonical-form.md` F5 and F6 write them.
 - `field_text` is set by a caller whose text comes from a search field (typed, pasted or picked from history, J2). Saved searches, AnkiConnect texts and other stored texts leave it unset. `existing` is always field text (J2).
+
+Save normalization and search escaping are separate. A note type save removes `"` from its name; a field save removes `:` (and the other characters of `notetypes/records` N4). The builder does not apply that save normalization: it writes the name it is given. A caller building a search for a saved object uses the stored name returned by the save. An escaped query for a name that the save changed need not find that object.
 
 ### J3.1 Names that are special values
 
@@ -169,7 +172,9 @@ Negated operator words are not terms and are never replaced. Consequences, all A
 | build deck `x\y` | `deck:x\\y` |
 | build tag `x y` | `"tag:x y"`, which matches no note (`names-and-ids.md` N2.2 step 3, R1051) |
 | build note type `Basic (and reversed card)` | `"note:Basic (and reversed card)"` |
-| build field present `Extra Info`, `my:field` | `"Extra Info:_*"`, `my\:field:_*` |
+| build field present `Extra Info` | `"Extra Info:_*"` |
+| build field present `my:field` | `my\:field:_*`; it does not find the field saved from `my:field`, whose stored name is `myfield` (J3) |
+| build field present stored name `myfield` | `myfield:_*` |
 | build literal `and`, `-x`, `3:30`, `50%_off` | `"and"`, `"-x"`, `3\:30`, `50%\_off` |
 | build group AND (note type `Basic`, template ordinal 0) | `note:Basic card:1` |
 | build group OR (state new, state learn) | `is:new OR is:learn` |
