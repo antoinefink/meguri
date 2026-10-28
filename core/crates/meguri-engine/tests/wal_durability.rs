@@ -430,6 +430,39 @@ fn paused_wal_baseline(h: &Harness) -> meguri_engine::WalIdentity {
 }
 
 #[test]
+fn explicit_flush_records_one_event_for_one_native_full_wal_sync() {
+    use meguri_storage::counting_vfs::CountingVfs;
+    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let path = path.canonicalize().unwrap();
+    let probe = CountingVfs::for_path(&path);
+    let h = Harness::open_path(dir, path);
+    let identity = paused_wal_baseline(&h);
+    let before = probe.records().len();
+    let commit = add_note_with_card(&h.collection, OpSource::UserUndoable, &["explicit sync event", "x"]);
+    assert!(h.collection.durability_events().syncs.is_empty());
+
+    let started = monotonic::now();
+    h.engine.flush_for_background().unwrap();
+    let completed = monotonic::now();
+    covered(&h.collection, identity, commit.seq, Duration::ZERO);
+    let events = h.collection.durability_events();
+    assert_eq!(events.syncs.len(), 1, "{events:?}");
+    let sync = &events.syncs[0];
+    assert!(sync.succeeded);
+    assert_eq!(sync.through, commit.seq);
+    assert!(started <= sync.started && sync.started <= sync.completed && sync.completed <= completed);
+
+    let wal = h.path.with_extension("anki2-wal").to_string_lossy().into_owned();
+    let records = probe.records();
+    let actual: Vec<_> = records[before..]
+        .iter()
+        .filter(|r| r.filename == wal && r.open_flags & 0x80000 != 0 && r.flags & 0x0f == 3)
+        .collect();
+    assert_eq!(actual.len(), 1, "{records:?}");
+    assert_eq!(actual[0].result, 0);
+}
+
+#[test]
 fn production_receipt_noop_keeps_prior_real_write_uncovered_until_explicit_sync() {
     use meguri_engine::WalCoverage;
     let h = Harness::open();

@@ -287,26 +287,7 @@ impl WalFlush {
         };
         // No other commit can run on this writer during xSync. Only a
         // successful call advances coverage; a failure keeps every commit due.
-        #[cfg(feature = "test-hooks")]
-        let (started, through) = (monotonic::now(), shared.last_seq());
-        let result = shared.coverage.sync(shared, collection.writer()).and_then(|synced| {
-            if retire_review {
-                crate::session::wal_covered(shared)?;
-            }
-            Ok(synced)
-        });
-        #[cfg(feature = "test-hooks")]
-        if !matches!(result, Ok(false)) {
-            let completed = monotonic::now();
-            shared.record_durability(|events| {
-                events.syncs.push(super::durability_events::WalSync {
-                    started,
-                    completed,
-                    through,
-                    succeeded: result.is_ok(),
-                });
-            });
-        }
+        let result = sync_wal(shared, collection.writer(), retire_review);
         match result {
             Ok(_) => {
                 if self.failures > 0 {
@@ -346,6 +327,30 @@ impl WalFlush {
             }
         }
     }
+}
+
+pub(crate) fn sync_wal(shared: &ExecShared, writer: &Writer, retire_review: bool) -> Result<bool, EngineError> {
+    #[cfg(feature = "test-hooks")]
+    let (started, through) = (monotonic::now(), shared.last_seq());
+    let result = shared.coverage.sync(shared, writer).and_then(|synced| {
+        if retire_review {
+            crate::session::wal_covered(shared)?;
+        }
+        Ok(synced)
+    });
+    #[cfg(feature = "test-hooks")]
+    if !matches!(result, Ok(false)) {
+        let completed = monotonic::now();
+        shared.record_durability(|events| {
+            events.syncs.push(super::durability_events::WalSync {
+                started,
+                completed,
+                through,
+                succeeded: result.is_ok(),
+            });
+        });
+    }
+    result
 }
 
 /// Why a dequeued task must not run: corruption, cancellation while it waited,

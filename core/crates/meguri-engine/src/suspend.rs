@@ -281,8 +281,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
         }
         Control::Flush => {
             if let Some(collection) = env.collection.as_ref() {
-                env.shared.coverage.sync(env.shared, collection.writer())?;
-                crate::session::wal_covered(env.shared)?;
+                crate::executor::writer::sync_wal(env.shared, collection.writer(), true)?;
             }
         }
         Control::Suspend { deadline } => {
