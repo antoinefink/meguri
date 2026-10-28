@@ -38,3 +38,17 @@ Keep the prepared search cases inactive until U81/U82. Resolve the flags,
 limited coverage and spec-side provenance before acceptance. No reference or
 private source was read by the infra author, fixer or reviewer. The real scanner
 ran as a black box through MG; no raw reviewer report was passed to authors.
+
+## Expanded batch 4 inputs
+
+`similarity/20261028T062248Z-42310` rechecks the newly merged input set:
+150 files, 75 pairs, four flagged files, zero allowlisted, 18 inputs below
+fingerprint limits, zero errors, missing files or skips. The three SQL
+regions above remain flagged. The new flag is
+`conformance/goldens/search/builder/items.json`, line 251, text channel.
+The generated value has not been edited by hand. Its provenance and any
+required disposition remain open; the unchanged scanner is red.
+
+Keep these cases inactive pending their owning units and provenance proof.
+This scan neither accepts the generated result nor changes any threshold,
+exclusion or allowlist. No raw reviewer view or reference code was read.

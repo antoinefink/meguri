@@ -65,3 +65,29 @@ cases while keeping their recordings and goldens open. The typed Meguri
 error remains unchanged. P24, O19 and all other retained gates stay open.
 
 Golden checks, dual-lane T0 and the new-input R1881 recheck follow.
+
+## Post-merge verification
+
+- `goldens-check/20261028T062214Z-41651`: all 1,002 scenarios fresh;
+  2,124 schema inputs checked with zero errors.
+- `conformance/20261028T062248Z-42326`: **failed**. Docker has zero
+  required-case failures and 638 passing product cases. The native testkit
+  suite found the package inventory count still at 70 after 14 new package
+  cases landed. Native `sched/day/config-values` also failed at step 15
+  closing the collection (`suspend deadline exceeded: completion`).
+  That native timeout remains unresolved; no full T0 pass is claimed.
+- Filtered repair `cleanroom/20261028T063451Z-60722` changes only the exact
+  package count to 84. Every file ID/hash assertion remains. Independent
+  review 4 is clear.
+- `core-test/20261028T064020Z-64392`: all 60 scenario-format checks and
+  ten separate CloudKit host checks passed, zero skipped. This closes the
+  count failure, not the native scheduling failure.
+- `private/20261028T064024Z-64694` and
+  `similarity/20261028T064024Z-64699`: pass for the final source.
+
+The expanded search scan `similarity/20261028T062248Z-42310` fails with
+four flagged files, including one newly landed generated builder result.
+Its complete disposition is retained in the search-data review log.
+No guard exception or unit acceptance was introduced. Focus the native
+closing failure before running the next complete T0; preserve the failed
+receipt and unchanged timeout.

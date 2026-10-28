@@ -2752,7 +2752,7 @@ steps:
 fn prepared_package_contracts_load_with_their_recorded_hashes() {
     let mut files = Vec::new();
     scenario_files(&conformance_dir().join("scenarios/package"), "package", &mut files);
-    assert_eq!(files.len(), 29 + 16 + 14 + 2 + 9);
+    assert_eq!(files.len(), 29 + 16 + 14 + 2 + 9 + 14);
     for (path, id) in files {
         let loaded = scenario::load(&path).unwrap_or_else(|e| panic!("{id}: {e}"));
         assert_eq!(loaded.scenario.id, id);
