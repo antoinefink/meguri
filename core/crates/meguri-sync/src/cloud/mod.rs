@@ -5,6 +5,8 @@
 //! account verification, engine-instance guards and recovery editing belong
 //! to later slices. Storage-only damaged-tracking salvage is implemented here. In particular, selecting a stored binding makes no readiness claim.
 
+pub mod entity_codec;
+
 mod open;
 mod recovery;
 mod store;

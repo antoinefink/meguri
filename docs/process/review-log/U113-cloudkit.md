@@ -205,3 +205,57 @@ This single native run covers the WAL slice and V8 recovery above, including
 actual Apple connection settings and process-death boundaries. It does not
 supply exhaustive power-loss evidence or accept U113, P24/Q11, integration
 gates or the release.
+
+## Pure entity wire codecs
+
+Starting commit: `f7a83f2b`; recorded before work in
+`build/unit-intake/U113-cloudkit/entity-codec-start.json`.
+The reviewed format clarification is `d2eef6ac`.
+Filtered author: `20261028T033809Z-35437`.
+
+The codec covers K4 entity naming, the format-1 Entity envelope, all nine
+K6.1 payload messages, canonical bytes, storage-class presence, digests and
+inline/asset classification. Inputs include the caller's canonical key and
+computed history/identity fields. No row reads, tracking policy, provider,
+asset I/O, account decisions or P24 behavior are added.
+
+Review 1: P1 `CODEC-DEFERRED-ORD-VALIDATION`. Filtered repair
+`20261028T035116Z-44417` checks `ord` before `push`. Four tests cover
+`FieldValue::read_field`. Independent review 2 is clear.
+
+The first focused build (`20261028T034824Z-42028`) stopped at an ambiguous
+empty-vector assertion. The next run (`20261028T035322Z-45953`) passed 20 of
+21 selected tests, including those four parser checks; 42 unrelated library
+tests were unselected. A malformed fixture's one-byte format prefix consumed
+the next field tag as its value, producing supported decoding of an
+unsupported format rather than truncation. Repair `20261028T035617Z-48060`
+uses the standalone truncated byte and preserves every other refusal and
+newer-format check. Its pair-iteration lint edit is equivalent. Independent
+review confirms both changes.
+
+- `core-test/20261028T035759Z-49411`: 29 passed, zero skipped: all seventeen
+  codec integration tests plus twelve separate fake-service foundation tests.
+  The four parser unit passes above remain valid; production code did not
+  change after that run.
+- `core-deny/20261028T034825Z-42245`: all four dependency checks pass.
+- `private/20261028T035323Z-46197`: all ten codec inputs clear; the final
+  test file is also clear in `20261028T035800Z-49640`, whose failures are
+  confined to the disjoint fake-service files.
+- `similarity/20261028T035800Z-49642`: eleven supported files clear,
+  including the final codec and the separate fake foundation.
+
+The lockfile adds HMAC and its required transitive packages; no existing
+version changes. The initial new-package update could not select an absent
+lock entry (`20261028T034731Z-40761`). Resolving with the existing base32
+package fixed at its current version succeeded (`20261028T034802Z-41397`).
+No broad dependency update or guard exception.
+
+`receive` is wire/integrity validation. Payload-to-envelope identity, model
+row readability and live/tombstone rules still require semantic validation;
+`Received` is not permission to apply a row. Other control envelopes, the
+actual image builder, P24, shared fake coverage and complete U113 remain open.
+
+`core-lint/20261028T035900Z-50556` passes formatting, layering and the host
+scan. Its only two Clippy findings are documentation indentation in the
+separate fake service; the codec has no lint finding. That repair and the
+shared tree's final lint remain pending. No full integration gate is claimed.
