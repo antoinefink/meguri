@@ -94,11 +94,12 @@ receipt and unchanged timeout.
 
 ## Native diagnosis and K7 recordings
 
-`conformance/20261028T064413Z-68158` passes all native testkit checks,
-including the repaired package count, and the exact scheduling case
-(`--lane native --jobs 1 sched/day/config-values`). The full-workload
-timeout from `20261028T062248Z-42326` is retained; a focused passing run
-does not establish its cause or replace the next full T0.
+`conformance/20261028T064413Z-68158` passes only the exact selected
+scheduling case (`--lane native --jobs 1 sched/day/config-values`).
+Correction: filtered runs omit native testkit-unit checks; the earlier
+wording overstated that receipt. `--jobs` controls the live lane, not T0.
+The full-workload timeout from `20261028T062248Z-42326` remains retained;
+this focused run does not establish its cause or replace full T0.
 
 The spec writer supplied the four missing K7 cases from K4/D7. Starting
 commit `d5babca7` is recorded in `oracle-batch4/k7-start.json` under the
@@ -124,3 +125,14 @@ proves backend default reads, not Add-screen selection retention.
 This closes the four K7 recording follow-ups. Their Meguri adapters and
 UI evidence remain pending. P24, O19, four R1881 flags and the next full
 T0/integration gate stay open. No Unit trailer or release acceptance.
+
+## Second full workload
+
+`conformance/20261028T070615Z-84638` fails only native
+`sched/day/config-values`, now at closing step 43 with the same suspend
+completion deadline. The native unit suite passes, including the corrected
+package count. Docker again has zero required-case failures and 638 product
+passes. No third unchanged full run was started: source analysis found
+cross-directory sidecar serialization, recorded and repaired in the
+native-close-sidecar review log. Full verification of that actual change
+follows its passing seven storage and 32 native scenario checks.
