@@ -42,3 +42,17 @@ full-sync flags and the five-second close budget are unchanged.
 A new full T0 must still cover the original workload before the timeout is
 considered resolved. Earlier failures remain preserved. No new Unit trailer,
 performance-budget exception, retry or full integration acceptance.
+
+## Full-workload result after the repair
+
+`conformance/20261028T091118Z-43499` passes complete dual-lane T0 on
+clean commit `11c2f23d`: native unit checks pass, all 1,006 scenarios are
+considered on both lanes and there are zero required-case failures.
+Docker has 638 product passes; native has 637. Inactive errors/failures,
+live cases, pending adapters and reference cases retain their classifications;
+they are not product passes. The earlier two failed receipts remain intact.
+
+This verifies the sidecar repair against the full workload with unchanged
+deadlines, sync flags and normal worker policy. It is not a full integration
+or milestone receipt. The original batch base, missing CloudKit workflow
+helpers, R1881 findings, six media-driver gaps and other open gates remain.
