@@ -122,7 +122,7 @@ The raw values of Card Info for one or more cards (`stats/card-info` C3, C6.1).
 - **Errors.** A card stats failure is a run error (`anki_error` in the oracle; the matching typed error in Meguri, `stats/card-info` C11).
 - **No text.** Anki's Python-side stats backend returns no display text (R1887). If U226's headless graphs-page image lands, a later `card_info_text` kind may record the card-info page's texts; until then `stats/card-info` C4 to C7 are tested from that spec.
 - **Anki's write.** Anki may rewrite the card's data while it computes the value (`stats/card-info` C13.3); Meguri never writes. Scenarios follow `stats/card-info` C13.4.
-- **Status.** Draft: the driver has no op and the runner no adapter. What lands with the support is `stats/card-info` C13.2; the scenarios are `stats/card-info` C14.1.
+- **Status.** Draft. As of 2026-10-27 the oracle driver has the kind (`oracle/driver/ops/stats.py`), with its shape in `conformance/schema/` and its O4 and O7 rows (`stats/card-info` C13.2); the runner has no adapter yet. The scenarios of `stats/card-info` C14.1 are under `conformance/scenarios/stats/card-info/`, each with a golden at the current pin, except `damaged`: its two cases are run errors, which a golden cannot hold (`dsl.md` D11), so the driver's self-tests cover them. `ae46-no-state` carries the deviation entries of C13.4.
 
 ## H10. `stats` (observation kind, draft)
 
@@ -153,7 +153,7 @@ The Stats screen's graph data for one or more requests: the draft `stats` kind o
 - **Meguri.** The core's graph request (`stats/graphs-common` G8) with `Collection`, `Deck(<id of the named deck>)` or `Search(<text>)`, mapped into these shapes. A deck name that names no deck is a run error (`unknown_ref`).
 - **Comparison.** Numbers compare with the 1e-6 relative tolerance of `conformance/observations` O7; keys and counts compare exactly (C12).
 - **Read only.** As H7 (`stats/graphs-common` G11).
-- **Status.** Draft: no executor has the kind. The oracle-maintainer adds the driver op (`oracle/driver/ops/stats.py`) with the scenarios of `stats/graphs-common` G15, `stats/graphs-revlog` V10 and `stats/graphs-cards` C13. Meguri's side goes into the testkit's stats adapter (`core/crates/meguri-testkit/src/observe/stats.rs`) with the graph units' executor support; the schema shape lands with that support.
+- **Status.** Draft. As of 2026-10-27 the oracle driver has the kind (`oracle/driver/ops/stats.py`) and its shape is in `conformance/schema/`. The scenarios of `stats/graphs-common` G15, `stats/graphs-revlog` V10 and `stats/graphs-cards` C13 are under `conformance/scenarios/stats/graphs/`, each with a golden at the current pin; V10's `buttons/tz-matrix` is four scenarios, one per zone (`dsl.md` D5), and `calendar/ae58-paris-spring-forward` observes only `stats` until the add-on image exists (H4). Meguri's side goes into the testkit's stats adapter (`core/crates/meguri-testkit/src/observe/stats.rs`) with the graph units' executor support.
 
 ## H11. `heatmap_report` (observation kind, draft)
 

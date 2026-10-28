@@ -1,0 +1,129 @@
+# R1078; specs/search/join-and-replace.md J3, J4, J5, J11; items in the
+# neutral form of specs/conformance/search-ops.md S5. Every item of J3 that
+# Anki has, other than names (builder/names): the "any" and current items,
+# flags, the six states Anki's item has, day and due items, note-id lists,
+# duplicates, template ordinals, literal and field text, parsed text, groups
+# of one and of several items, nested groups and negations. J10's inputs (0
+# days, special names, other white space) stay out (J11). Nothing reads the
+# collection, so there is no setup.
+id: search/builder/items
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_build:
+          # whole collection, current deck and the "any" items
+          - whole_collection
+          - current_deck
+          - any_deck
+          - any_tag
+          - untagged
+          - any_notetype
+          # flags: any, none, each color
+          - {flag: any}
+          - {flag: none}
+          - {flag: 1}
+          - {flag: 2}
+          - {flag: 3}
+          - {flag: 4}
+          - {flag: 5}
+          - {flag: 6}
+          - {flag: 7}
+          # the six states
+          - {state: new}
+          - {state: learn}
+          - {state: review}
+          - {state: due}
+          - {state: suspended}
+          - {state: buried}
+          # day items
+          - {added: 1}
+          - {added: 4294967295}
+          - {edited: 2}
+          - {introduced: 30}
+          - {answered: {days: 1}}
+          - {answered: {days: 7, button: 1}}
+          - {answered: {days: 7, button: 2}}
+          - {answered: {days: 7, button: 3}}
+          - {answered: {days: 4294967295, button: 4}}
+          - {rescheduled: 0}
+          - {rescheduled: 3}
+          # due items
+          - {due_on: 0}
+          - {due_on: -3}
+          - {due_on: 7}
+          - {due_on: -2147483648}
+          - {due_on: 2147483647}
+          - {due_within: 0}
+          - {due_within: -1}
+          - {due_within: 30}
+          # note ids, in the given order
+          - {note_ids: [5, 3]}
+          - {note_ids: [1600000000000]}
+          - {note_ids: [0, 9007199254740991, 0]}
+          # duplicates
+          - {dupe: {notetype_id: 1600000000000, text: 'a\b "c"'}}
+          - {dupe: {notetype_id: 1, text: "x y"}}
+          - {dupe: {notetype_id: 1, text: ""}}
+          - {dupe: {notetype_id: 1, text: "a*b_c:d"}}
+          - {dupe: {notetype_id: 0, text: "-x"}}
+          # template ordinals (0-based)
+          - {template: 0}
+          - {template: 1}
+          - {template: 65534}
+          # literal text
+          - {literal: and}
+          - {literal: OR}
+          - {literal: "-x"}
+          - {literal: "3:30"}
+          - {literal: "50%_off"}
+          - {literal: 'a"b'}
+          - {literal: "(x)"}
+          - {literal: "re:x"}
+          - {literal: "x y"}
+          - {literal: 'a\b'}
+          - {literal: "*"}
+          - {literal: "ünï"}
+          # field text, normal mode
+          - {field: {name: Front, text: "a b"}}
+          - {field: {name: Front, text: ""}}
+          - {field: {name: Front, text: "re:x"}}
+          - {field: {name: Front, text: "nc:x"}}
+          - {field: {name: "a*b", text: "c_d"}}
+          - {field: {name: "Back Side", text: "-x"}}
+          # parsed text
+          - {text: ""}
+          - {text: "a  b"}
+          - {text: "a or b"}
+          - {text: "(a b)"}
+          - {text: "((a b))"}
+          - {text: "-(a)"}
+          - {text: "deck:x", field_text: true}
+          - {text: "a b", field_text: false}
+          # groups: of one item, of several, nested
+          - {group: {joiner: and, items: [{deck: X}]}}
+          - {group: {joiner: or, items: [{group: {joiner: and, items: [{state: new}, {flag: 1}]}}]}}
+          - {group: {joiner: and, items: [{notetype: Memo}, {template: 0}]}}
+          - {group: {joiner: or, items: [{state: new}, {state: learn}, {state: review}]}}
+          - {group: {joiner: and, items: [{state: due}, {negated: {due_on: 0}}]}}
+          - {group: {joiner: and, items: [{group: {joiner: or, items: [{flag: 1}, {flag: 2}]}}, {state: due}]}}
+          - {group: {joiner: or, items: [{group: {joiner: and, items: [{flag: 1}, {flag: 2}]}}, {state: due}]}}
+          - {group: {joiner: and, items: [{text: "a or b"}, {deck: X}]}}
+          - {group: {joiner: and, items: [{text: "a"}, {text: "b c"}]}}
+          - {group: {joiner: or, items: [whole_collection, {tag: x}]}}
+          # negations (J5)
+          - {negated: {deck: X}}
+          - {negated: {negated: {deck: X}}}
+          - {negated: {negated: {negated: {deck: X}}}}
+          - {negated: {flag: any}}
+          - {negated: untagged}
+          - {negated: {group: {joiner: and, items: [{state: new}, {flag: 1}]}}}
+          - {negated: {group: {joiner: and, items: [{deck: X}]}}}
+          - {negated: {text: "a b"}}
+          - {negated: {text: "-a"}}
+          - {negated: whole_collection}
+          # parse errors of parsed text, one per item
+          - {text: "(a"}
+          - {text: "is:foo"}
+          - {negated: {text: "a)"}}
+          - {group: {joiner: and, items: [{deck: X}, {text: '"x'}]}}
+          - {text: "prop:ease>x"}

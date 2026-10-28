@@ -1,0 +1,86 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "context": {
+              "fsrs": true,
+              "rollover_hour": 4
+            },
+            "difficulty": {
+              "average": 44.444447,
+              "eases": {
+                "44": 2
+              }
+            },
+            "retrievability": {
+              "average": 82.50286,
+              "retrievability": {
+                "82": 2
+              },
+              "sum_by_card": 1.6500572,
+              "sum_by_note": 1.6500572
+            },
+            "stability": {
+              "intervals": {
+                "5": 2
+              }
+            }
+          }
+        ]
+      },
+      {},
+      {
+        "stats": [
+          {
+            "context": {
+              "rollover_hour": 4
+            },
+            "difficulty": {
+              "average": 44.444447,
+              "eases": {
+                "44": 2
+              }
+            },
+            "retrievability": {
+              "average": 82.50286,
+              "retrievability": {
+                "82": 2
+              },
+              "sum_by_card": 1.6500572,
+              "sum_by_note": 1.6500572
+            },
+            "stability": {
+              "intervals": {
+                "5": 2
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/fsrs/fsrs-off",
+  "scenario_sha256": "98496860cf0b12ae065923375c6cdbec8147fc8b08cf982f2c5ef56a00096026",
+  "tz": "Europe/Paris"
+}

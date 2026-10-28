@@ -1,0 +1,32 @@
+# Matching by names (specs/package/notetype-merge.md J3, J4.1, J7, J9;
+# package-ops.md E6). The fixture is Anki 2.1.26's own export
+# (oracle/fixtures/package/oldclient.py, legacy 1): its note type Pair
+# stores no field or template ids. The first import (no merge) adds Pair
+# under the package's id, still without ids. The target then renames Back to
+# Answer. Importing the package again with Merge note types on merges Pair
+# with itself by id; its fields match by names: Front matches, Back matches
+# nothing and is added as new, after Answer. With Update notes always the
+# twelve notes are updated through the field map: Back's values go to the
+# new field and Answer is emptied.
+id: package/notetype-merge/by-name
+description: Fields without ids match by names; a field renamed on one side is added as new.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/legacy-1.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{rename_field: {from: Back, to: Answer}}]}
+  - advance: 1m
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - import: {format: apkg, fixture: package/apkg/legacy-1.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT ord, name FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Pair') ORDER BY ord"}
+  - db_exec: {sql: "SELECT ord, name FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Pair') ORDER BY ord"}
+  - db_exec: {sql: "SELECT id, flds FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm FROM col"}

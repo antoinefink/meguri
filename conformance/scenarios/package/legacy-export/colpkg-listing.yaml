@@ -1,0 +1,37 @@
+# The layout of a legacy collection package (specs/package/legacy-export.md
+# L3, L5, L8; apkg-export.md A14; package-ops.md E3, E9). The collection
+# exported with Support older Anki versions on, first without media, then
+# with media and the folder's two files (one referenced, one not: a
+# collection package carries every file): entries meta (stored),
+# collection.anki21 (deflated), the placeholder collection.anki2, the raw
+# numbered media entries and the JSON media map (stored); meta_version 2;
+# collection.anki21 at schema 11 in rollback mode with the collection's
+# counts. Only the packages are observed: Anki downgrades its live collection
+# for the export (L13).
+id: package/legacy-export/colpkg-listing
+description: A legacy collection package's entries, methods and meta version, without and with media.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["one <img src=\"p.png\">", a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+  media_files:
+    - {name: p.png, text: "picture"}
+    - {name: q.txt, text: "unused text"}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  - advance: 1m
+  - export: {format: colpkg, name: plain.colpkg, legacy: true}
+  - export: {format: colpkg, name: media.colpkg, legacy: true, media: true}
+  - observe:
+      - package_listing: {name: plain.colpkg}
+  - observe:
+      - package_listing: {name: media.colpkg}

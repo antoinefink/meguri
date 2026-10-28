@@ -1,0 +1,196 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_replace": [
+          {
+            "text": "z deck:X z"
+          },
+          {
+            "text": "Notes:_* Notes:_*"
+          },
+          {
+            "text": "Back:q Back:q deck:X"
+          },
+          {
+            "text": "tag:t OR tag:t -tag:t"
+          },
+          {
+            "text": "tag:_*"
+          },
+          {
+            "text": "deck:D OR (deck:D -deck:D)"
+          },
+          {
+            "text": "deck:D deck:D x"
+          },
+          {
+            "text": "deck:current did:5"
+          },
+          {
+            "text": "deck:_* did:5"
+          },
+          {
+            "text": "did:9 deck:A mid:7"
+          },
+          {
+            "text": "note:B mid:7 card:2 card:Recall"
+          },
+          {
+            "text": "note:_* mid:7 card:2 card:Recall"
+          },
+          {
+            "text": "note:A card:1 (card:1)"
+          },
+          {
+            "text": "mid:9 note:A did:5"
+          },
+          {
+            "text": "is:review added:3"
+          },
+          {
+            "text": "is:learn -is:learn is:learn"
+          },
+          {
+            "text": "flag:3 -flag:3"
+          },
+          {
+            "text": "flag:0"
+          },
+          {
+            "text": "rated:1:1 is:due"
+          },
+          {
+            "text": "resched:2 resched:2"
+          },
+          {
+            "text": "rated:9"
+          },
+          {
+            "text": "added:7 edited:2 introduced:3"
+          },
+          {
+            "text": "added:1 edited:7 introduced:3"
+          },
+          {
+            "text": "added:1 edited:2 introduced:7"
+          },
+          {
+            "text": "nid:5,3 cid:2"
+          },
+          {
+            "text": "cid:9 nid:1 x"
+          },
+          {
+            "text": "dupe:2,y a"
+          },
+          {
+            "text": "rated:2 prop:due=0"
+          },
+          {
+            "text": "prop:due<=3 prop:due<=3 prop:due<=3 prop:due<=3"
+          },
+          {
+            "text": "re:z nc:b sc:c w:d"
+          },
+          {
+            "text": "re:a nc:b sc:c w:z"
+          },
+          {
+            "text": "re:a nc:z sc:c w:d"
+          },
+          {
+            "text": "re:a nc:b sc:z w:d"
+          },
+          {
+            "text": "has-cd:z preset:b x"
+          },
+          {
+            "text": "has-cd:a preset:z x"
+          },
+          {
+            "text": "has-cd:x has-cd:y"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "a deck:*"
+          },
+          {
+            "text": "-(deck:C (x OR -deck:C))"
+          },
+          {
+            "text": "a (b (c -(tag:u)))"
+          },
+          {
+            "text": "deck:Lang"
+          },
+          {
+            "text": "tag:a"
+          },
+          {
+            "text": "deck:A"
+          },
+          {
+            "text": "deck:A note:N"
+          },
+          {
+            "text": "deck:A x"
+          },
+          {
+            "text": "deck:B"
+          },
+          {
+            "text": "deck:B"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "a OR b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "(a b)"
+          },
+          {
+            "text": "is:due"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "context": "1:5",
+            "error": "invalid_answer_button",
+            "provided": "5"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5e1f02e08a6a337ae6e5f0db1d97f43a049fa75e79e47c24f0dd37394ad07199",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/join-replace/replace",
+  "scenario_sha256": "b70a5ac52fc66e9198eeb0a8e60d431ed335958c39c00a485176f63928d9295c",
+  "tz": "UTC"
+}

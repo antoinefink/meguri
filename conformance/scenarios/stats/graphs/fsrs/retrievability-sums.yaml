@@ -1,0 +1,22 @@
+# stats/graphs-cards C13 (C9.4) at the retrievability clock (stats/graphs-cards C13: clock start 2030-01-15T11:00:00 Paris, advance 30d; now_s 1897293600, today 30, N 1897354800): note A with the first card of
+# C9.6 (lrt now_s - 864,000, s 2.5, d 5) and a second card without s and d;
+# note B with the second card of C9.6 (review, no lrt, H 35, ivl 20, s 5,
+# d 5). Expected sum_by_card 1.4844089, average 74.22044, sum_by_note
+# 1.1252699.
+id: stats/graphs/fsrs/retrievability-sums
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Two", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}, {"name": "Reverse", "front": "{{Back}}", "back": "{{Front}}"}]}
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Two", "deck": "Lang", "fields": ["a", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["b", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":2.5,\"d\":5.0,\"lrt\":1896429600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}]}]}

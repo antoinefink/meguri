@@ -1,0 +1,54 @@
+# stats/graphs-cards C13 AE57 (C3.3 to C3.5): 30 review cards due 1 to 3 days
+# ago (10 on each day), 5 buried review cards due today and 3 due tomorrow,
+# all with ivl 2. The collection is created at the clock start, so today is
+# day 0 and dues are day numbers around it. Expected future_due {-3: 10,
+# -2: 10, -1: 10, 1: 3}, have_backlog true, daily_load 19.
+id: stats/graphs/future-due/ae57-buried-backlog
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n9", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n10", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n11", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n12", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n13", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n14", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n15", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n16", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n17", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n18", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n19", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n20", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n21", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n22", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n23", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n24", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n25", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n26", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n27", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n28", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n29", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n30", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n31", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n32", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n33", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n34", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n35", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n36", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n37", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n38", "x"]}
+steps:
+  - {"db_exec": {"sql": "WITH c(k, id) AS (SELECT ROW_NUMBER() OVER (ORDER BY id) - 1, id FROM cards) UPDATE cards SET type = 2, ivl = 2, queue = CASE WHEN (SELECT k FROM c WHERE c.id = cards.id) < 30 THEN 2 ELSE -2 END, due = CASE WHEN (SELECT k FROM c WHERE c.id = cards.id) < 10 THEN -1 WHEN (SELECT k FROM c WHERE c.id = cards.id) < 20 THEN -2 WHEN (SELECT k FROM c WHERE c.id = cards.id) < 30 THEN -3 WHEN (SELECT k FROM c WHERE c.id = cards.id) < 35 THEN 0 ELSE 1 END"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}]}]}

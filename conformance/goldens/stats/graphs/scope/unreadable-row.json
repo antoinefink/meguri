@@ -1,0 +1,90 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 1
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 1
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 1
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/unreadable-row",
+  "scenario_sha256": "390a9f4036004dd17505c0496e39227b1b4cb0c06a8e8e4ef6a1cf4adfda2bce",
+  "tz": "Europe/Paris"
+}

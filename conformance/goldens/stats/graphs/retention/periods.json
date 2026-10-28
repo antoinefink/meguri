@@ -1,0 +1,68 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "true_retention": {
+              "month": {
+                "mature_passed": 8
+              },
+              "today": {
+                "mature_passed": 2
+              },
+              "week": {
+                "mature_passed": 6
+              },
+              "year": {
+                "mature_passed": 10
+              },
+              "yesterday": {
+                "mature_passed": 2
+              }
+            }
+          },
+          {
+            "true_retention": {
+              "all_time": {
+                "mature_passed": 11
+              },
+              "month": {
+                "mature_passed": 8
+              },
+              "today": {
+                "mature_passed": 2
+              },
+              "week": {
+                "mature_passed": 6
+              },
+              "year": {
+                "mature_passed": 10
+              },
+              "yesterday": {
+                "mature_passed": 2
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/retention/periods",
+  "scenario_sha256": "de339bd6e8df7d018f196f407a9a7fb9becd80db8aef9fc48e656cc4b8697624",
+  "tz": "Europe/Paris"
+}

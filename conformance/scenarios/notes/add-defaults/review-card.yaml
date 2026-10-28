@@ -1,0 +1,56 @@
+# The starting defaults with a review card (specs/notes/add-defaults.md D1,
+# editor/config-keys K4.1). The review deck is the card's odid when not 0,
+# else its did; a card that no longer exists gives none. It counts only when
+# curDeck names no existing normal deck.
+# Cards: c1 in the filtered deck Cram, home deck Spanish (Vocab); c2 in
+# French (Idiom); c3 deleted (its note removed).
+# The setup adds write _deck_<Spanish>_lastNotetype = Vocab and
+# _deck_<French>_lastNotetype = Idiom; Default has no last note type, and
+# curModel is set to Grammar, which has no note.
+# curDeck names Cram, then the deleted deck Gone; addToCur true, then false
+# (the note type Grammar has no last deck, so the deck falls to the current
+# deck for adding as well).
+# Needs the add_defaults observation (D7).
+id: notes/add-defaults/review-card
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Spanish, French, Gone]
+  notetypes:
+    - {name: Vocab, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Idiom, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Grammar, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+  notes:
+    - {notetype: Vocab, deck: Spanish, fields: [uno, one]}
+    - {notetype: Idiom, deck: French, fields: [deux, two]}
+    - {notetype: Idiom, deck: French, fields: [cinq, five]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  # c1 sits in Cram, its home deck Spanish in odid.
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"
+  - db_exec:
+      sql: "UPDATE config SET val = CAST((SELECT id FROM notetypes WHERE name = 'Grammar') AS BLOB) WHERE KEY = 'curModel'"
+  - delete_notes: {notes: ["#n3"]}
+  - reopen: {}
+  - set_config: {key: addToCur, value: true}
+  - set_config: {key: curDeck, value: 900}
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - observe: [{add_defaults: {review_card: "#c2"}}]
+  - observe: [{add_defaults: {review_card: "#c3"}}]
+  - observe: [{add_defaults: {}}]
+  - db_exec:
+      sql: "UPDATE config SET val = CAST((SELECT id FROM decks WHERE name = 'Gone') AS BLOB) WHERE KEY = 'curDeck'"
+  - delete_decks: {decks: [Gone]}
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - observe: [{add_defaults: {review_card: "#c2"}}]
+  - observe: [{add_defaults: {review_card: "#c3"}}]
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - observe: [{add_defaults: {review_card: "#c2"}}]
+  - observe: [{add_defaults: {review_card: "#c3"}}]
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: curDeck, value: 900}
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - observe: [{add_defaults: {}}]

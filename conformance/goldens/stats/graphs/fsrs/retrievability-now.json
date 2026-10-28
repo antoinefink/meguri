@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "retrievability": {
+              "average": 95.96036,
+              "retrievability": {
+                "95": 1,
+                "96": 1
+              },
+              "sum_by_card": 1.9192071,
+              "sum_by_note": 1.9192071
+            }
+          }
+        ]
+      },
+      {},
+      {
+        "stats": [
+          {
+            "retrievability": {
+              "average": 88.06551,
+              "retrievability": {
+                "82": 1,
+                "93": 1
+              },
+              "sum_by_card": 1.7613102,
+              "sum_by_note": 1.7613102
+            }
+          },
+          {
+            "retrievability": {
+              "average": 88.06551,
+              "retrievability": {
+                "82": 1,
+                "93": 1
+              },
+              "sum_by_card": 1.7613102,
+              "sum_by_note": 1.7613102
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/fsrs/retrievability-now",
+  "scenario_sha256": "5b5117b42c8115bfb206c855ed96c088a8bed7e17346e54cb865d2379a8867a8",
+  "tz": "Europe/Paris"
+}

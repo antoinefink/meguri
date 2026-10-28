@@ -1,0 +1,20 @@
+# stats/graphs-common G15 (G2, G10): a Search scope follows the notes as they
+# are at each request. Notes one (tagged verbs) and two (untagged), one row
+# today each; then one loses the tag and two gains it. Expected Search
+# tag:verbs counts one's row, then two's.
+id: stats/graphs/scope/scope-follows-retag
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["one", "x"], "tags": ["verbs"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["two", "x"]}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 1, 30, 2500, 0, 1), (1791799200001, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, 3, 1, 5, 2500, 0, 1)"}}
+  - {"observe": [{"stats": [{"scope": {"search": "tag:verbs"}, "history": "year", "parts": ["reviews", "card_counts"]}]}]}
+  - {"remove_note_tags": {"notes": ["#n1"], "tags": "verbs"}}
+  - {"add_note_tags": {"notes": ["#n2"], "tags": "verbs"}}
+  - {"observe": [{"stats": [{"scope": {"search": "tag:verbs"}, "history": "year", "parts": ["reviews", "card_counts"]}]}]}

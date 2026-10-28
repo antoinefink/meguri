@@ -1,0 +1,35 @@
+# stats/card-info C14.1 (C3.1, C5.5): custom data as stored text, one new card
+# per value of C5.5's table. Each card's data holds an lrt (C13.4), so Anki
+# writes nothing. Expected custom_data as stored, {} included.
+id: stats/card-info/custom-data
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n9", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n10", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n11", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"a\\\":1,\\\"b\\\":\\\"x\\\"}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"2\\\":1,\\\"1\\\":2,\\\"z\\\":3}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"v\\\":null,\\\"t\\\":true,\\\"f\\\":1.50}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"n\\\":[1,2],\\\"o\\\":{\\\"p\\\":1}}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"a\\\":1,\\\"b\\\":2,\\\"a\\\":3}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{\\\"a\\\":1e21}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"{}\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"5\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"true\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"xyz\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET data = '{\"lrt\":0,\"cd\":\"null\"}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)"}}
+  - {"observe": [{"card_stats": ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11"]}]}

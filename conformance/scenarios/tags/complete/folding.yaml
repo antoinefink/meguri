@@ -1,0 +1,38 @@
+# Letter case in tag completion (specs/tags/complete.md C3): simple case
+# folding, no other normalization. Rows Über, Straße, Σοφία and fullwidth
+# Ｇｒａｍｍａｒ through add_note; through db_exec, since a save's NFC would
+# change them, a row with U+212A KELVIN SIGN (K) and a row with a
+# decomposed e U+0301. limit 500.
+# Needs the tag_complete observation (C7).
+id: tags/complete/folding
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["Über", "Straße", "Σοφία", "Ｇｒａｍｍａｒ"]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES (?, 0, 0, NULL)"
+      params: ["Kelvin"]
+  - db_exec:
+      sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES (?, 0, 0, NULL)"
+      params: ["café"]
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: "über", limit: 500}
+            - {input: "ÜBER", limit: 500}
+            - {input: "STRAẞE", limit: 500}
+            - {input: "strasse", limit: 500}
+            - {input: "σοφ", limit: 500}
+            - {input: "ΣΟΦΊΑ", limit: 500}
+            - {input: "ｇｒａ", limit: 500}
+            - {input: gra, limit: 500}
+            - {input: k, limit: 500}
+            - {input: K, limit: 500}
+            - {input: "K", limit: 500}
+            - {input: "café", limit: 500}
+            - {input: "café", limit: 500}
+            - {input: cafe, limit: 500}

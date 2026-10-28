@@ -1,0 +1,35 @@
+# Order and limit of tag completion (specs/tags/complete.md C4): rows are
+# read in the registry's unicase order and collected until limit rows
+# match; the prefix matches of that cut come first, then its inner matches.
+# A late prefix match can be cut while an earlier inner match stays.
+# Rows Grammar::Japan, Japan and Japanese with the input jap at each limit;
+# then rows _x, A, b and ä, whose unicase order differs from code-point
+# order, with an empty input. The oracle sends limit - 1 as Anki's
+# match_limit (C4, C7).
+# Needs the tag_complete observation (C7).
+id: tags/complete/order-limit
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["Grammar::Japan", Japan, Japanese]}
+steps:
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: jap, limit: 1}
+            - {input: jap, limit: 2}
+            - {input: jap, limit: 3}
+            - {input: jap, limit: 4}
+            - {input: jap, limit: 500}
+  - add_note: {notetype: Plain, fields: [two], tags: [_x, A, b, "ä"]}
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: "", limit: 1}
+            - {input: "", limit: 3}
+            - {input: "", limit: 500}
+            - {input: a, limit: 500}
+            - {input: jap, limit: 2}

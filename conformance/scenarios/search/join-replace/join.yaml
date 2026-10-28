@@ -1,0 +1,58 @@
+# R1079; specs/search/join-and-replace.md J5, J6, J9, J11; items in the
+# neutral form of specs/conformance/search-ops.md S5. Existing searches of one
+# item, of several items, of one group and empty; AND and OR; negated items
+# and groups (negate set, and negations of negations); canonical-form.md F7's
+# shapes in existing; parse errors of existing and of a parsed-text item.
+# Nothing reads the collection, so there is no setup.
+id: search/join-replace/join
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_join:
+          # existing of one item, never bracketed
+          - {existing: "deck:Lang", item: {tag: verbs}, joiner: and, negate: false}
+          - {existing: "deck:Lang", item: {tag: verbs}, joiner: or, negate: false}
+          - {existing: "-is:new", item: {flag: any}, joiner: and, negate: false}
+          - {existing: "-is:new", item: {flag: any}, joiner: and, negate: true}
+          - {existing: "-is:new", item: {flag: any}, joiner: or, negate: true}
+          - {existing: "  stem:\"oak\"  ", item: {state: due}, joiner: and, negate: false}
+          # existing of several items, always bracketed
+          - {existing: "deck:Lang is:due", item: {tag: verbs}, joiner: and, negate: true}
+          - {existing: "deck:Lang is:due", item: {tag: verbs}, joiner: or, negate: false}
+          - {existing: "a or b", item: {literal: c}, joiner: and, negate: false}
+          - {existing: "a or b", item: {literal: c}, joiner: or, negate: false}
+          - {existing: "a and b or c", item: {state: new}, joiner: or, negate: true}
+          - {existing: "a -b", item: {deck: X}, joiner: and, negate: false}
+          # existing of one group, kept as one
+          - {existing: "(x y)", item: {state: due}, joiner: or, negate: false}
+          - {existing: "(x or y)", item: {state: due}, joiner: and, negate: false}
+          - {existing: "-(x y)", item: {state: due}, joiner: and, negate: false}
+          - {existing: "((x y))", item: {state: due}, joiner: and, negate: false}
+          # empty existing: the whole collection
+          - {existing: "", item: {deck: Other}, joiner: and, negate: false}
+          - {existing: "   ", item: {deck: Other}, joiner: or, negate: false}
+          - {existing: "", item: whole_collection, joiner: and, negate: false}
+          # grouped items: bracketed whatever the joiner
+          - {existing: "a", item: {group: {joiner: and, items: [{notetype: Memo}, {template: 0}]}}, joiner: and, negate: false}
+          - {existing: "a", item: {group: {joiner: or, items: [{flag: 1}, {flag: 2}]}}, joiner: or, negate: false}
+          - {existing: "a", item: {group: {joiner: and, items: [{flag: 1}]}}, joiner: and, negate: false}
+          - {existing: "a b", item: {group: {joiner: or, items: [{flag: 1}, {flag: 2}]}}, joiner: and, negate: true}
+          - {existing: "a", item: {text: "b c"}, joiner: and, negate: false}
+          - {existing: "a", item: {text: "b or c"}, joiner: and, negate: true}
+          # negated items and double negation (J5)
+          - {existing: "a", item: {negated: {deck: X}}, joiner: and, negate: false}
+          - {existing: "a", item: {negated: {deck: X}}, joiner: and, negate: true}
+          - {existing: "a", item: untagged, joiner: and, negate: true}
+          - {existing: "a", item: {negated: {negated: {tag: t}}}, joiner: or, negate: true}
+          # F7's shapes in existing
+          - {existing: "a -and b", item: {literal: c}, joiner: and, negate: false}
+          - {existing: "-OR", item: {literal: c}, joiner: and, negate: false}
+          - {existing: 'preset:a\"b', item: {literal: c}, joiner: and, negate: false}
+          - {existing: 'has\-cd:x', item: {literal: c}, joiner: or, negate: false}
+          # parse errors of existing, and of a parsed-text item
+          - {existing: "(a", item: {deck: X}, joiner: and, negate: false}
+          - {existing: "a)", item: {deck: X}, joiner: or, negate: true}
+          - {existing: "is:foo", item: {deck: X}, joiner: and, negate: false}
+          - {existing: "and", item: {deck: X}, joiner: and, negate: false}
+          - {existing: "prop:ivl>x", item: {deck: X}, joiner: and, negate: false}
+          - {existing: "a", item: {text: '"b'}, joiner: and, negate: false}

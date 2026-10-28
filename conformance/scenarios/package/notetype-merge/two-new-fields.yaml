@@ -1,0 +1,54 @@
+# Two new fields placed before a field the target has (specs/package/
+# notetype-merge.md J3, J4.1, J7, J11, J14; package-ops.md E6). The package's
+# Pair is Front, Hint, Source, Back (ids 1001, 1004, 1005, 1002), newer than
+# the target's Front, Back (the edits reverted in the target by inverse
+# edits, its mtime set back). The merge keeps the target's fields in place
+# and appends the new ones; the updated note's values follow the field map.
+# Meguri appends them in the incoming order, Hint then Source (J4.1, field
+# map 0, 3, 1, 2); Anki 26.9.3 can reverse them (deviation
+# apkg-merge-layout).
+id: package/notetype-merge/two-new-fields
+description: Two new fields inserted before a target field are appended after the target's fields.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Hint}, {add_field: Source}, {move_field: {field: Hint, to: 1}}, {move_field: {field: Source, to: 2}}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Hint, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1004}
+          - {name: Source, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1005}
+          - {name: Back, ord: 3, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - edit_note: {note: "#n1", fields: {Hint: hint, Source: source}}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Hint}, {remove_field: Source}]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}

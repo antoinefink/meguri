@@ -1,0 +1,156 @@
+# R1078; specs/search/join-and-replace.md J3, J3.1, J4, J9, J11. Deck, tag,
+# note type and field names with spaces, brackets, quotes, a backslash, *, _,
+# :, a leading -, :: and non-ASCII letters, in the neutral form of
+# specs/conformance/search-ops.md S5. Each built text that can find rows is
+# then run with search on this collection, which holds the named objects and
+# look-alikes that the name read as wildcards would also match (a_b* next to
+# axb, a_bc and a_b*x): the built text finds only the named object and, for
+# decks and tags, its children. The search queries are the texts J3 and J4
+# give; the golden of the first step shows that they are the built texts.
+# Field names cannot hold : and note type names cannot hold " (a note type
+# save drops them), so my:field and q"n are built only. J10's names
+# (current, filtered, none, _*, other white space) stay out.
+id: search/builder/names
+tags: [needs-deck, needs-tag, needs-notetype, needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks:
+    - "a_b*"
+    - "a_b*::Sub"
+    - "a_b*x"
+    - axb
+    - a_bc
+    - "My Deck"
+    - "My"
+    - "C++ (old)"
+    - 'say "hi"'
+    - 'x\y'
+    - xy
+    - "-lead"
+    - lead
+    - "x:y"
+    - "Top::Mid"
+    - "Top::Mid::Low"
+    - "Top"
+    - "Ünï"
+    - "ünï::Kid"
+  notetypes:
+    - name: "N_1*"
+      fields: [Front, "f_*", "Extra Info"]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Front}}"}]
+      css: ".card { margin: 0; }"
+    - name: Nx1
+      fields: [Front, fxx, "Extra"]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Front}}"}]
+      css: ".card { margin: 0; }"
+    - name: "N_1*z"
+      fields: [Front, "f_*z"]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Front}}"}]
+      css: ".card { margin: 0; }"
+    - name: "Memo (and reversed)"
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: 'n\m'
+      fields: [Front]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Front}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    # decks: #n1-#n19, one note per deck in the order above
+    - {notetype: Nx1, deck: "a_b*", fields: [d1, "", ""]}
+    - {notetype: Nx1, deck: "a_b*::Sub", fields: [d2, "", ""]}
+    - {notetype: Nx1, deck: "a_b*x", fields: [d3, "", ""]}
+    - {notetype: Nx1, deck: axb, fields: [d4, "", ""]}
+    - {notetype: Nx1, deck: a_bc, fields: [d5, "", ""]}
+    - {notetype: Nx1, deck: "My Deck", fields: [d6, "", ""]}
+    - {notetype: Nx1, deck: "My", fields: [d7, "", ""]}
+    - {notetype: Nx1, deck: "C++ (old)", fields: [d8, "", ""]}
+    - {notetype: Nx1, deck: 'say "hi"', fields: [d9, "", ""]}
+    - {notetype: Nx1, deck: 'x\y', fields: [d10, "", ""]}
+    - {notetype: Nx1, deck: xy, fields: [d11, "", ""]}
+    - {notetype: Nx1, deck: "-lead", fields: [d12, "", ""]}
+    - {notetype: Nx1, deck: lead, fields: [d13, "", ""]}
+    - {notetype: Nx1, deck: "x:y", fields: [d14, "", ""]}
+    - {notetype: Nx1, deck: "Top::Mid", fields: [d15, "", ""]}
+    - {notetype: Nx1, deck: "Top::Mid::Low", fields: [d16, "", ""]}
+    - {notetype: Nx1, deck: "Top", fields: [d17, "", ""]}
+    - {notetype: Nx1, deck: "Ünï", fields: [d18, "", ""]}
+    - {notetype: Nx1, deck: "ünï::Kid", fields: [d19, "", ""]}
+    # tags: #n20-#n31
+    - {notetype: Nx1, fields: [t20, "", ""], tags: ["t_x*"]}
+    - {notetype: Nx1, fields: [t21, "", ""], tags: ["t_x*::kid"]}
+    - {notetype: Nx1, fields: [t22, "", ""], tags: [tax]}
+    - {notetype: Nx1, fields: [t23, "", ""], tags: ["t_x*y"]}
+    - {notetype: Nx1, fields: [t24, "", ""], tags: ["re:x"]}
+    - {notetype: Nx1, fields: [t25, "", ""], tags: ['q"t']}
+    - {notetype: Nx1, fields: [t26, "", ""], tags: ['b\s']}
+    - {notetype: Nx1, fields: [t27, "", ""], tags: [bs]}
+    - {notetype: Nx1, fields: [t28, "", ""], tags: ["-lead"]}
+    - {notetype: Nx1, fields: [t29, "", ""], tags: ["(p)"]}
+    - {notetype: Nx1, fields: [t30, "", ""], tags: ["Ünï::kid"]}
+    - {notetype: Nx1, fields: [t31, "", ""], tags: [x, y]}
+    # note types and fields: #n32-#n38
+    - {notetype: "N_1*", fields: [f32, "v_1*", "e"]}
+    - {notetype: "N_1*", fields: [f33, "vx1", ""]}
+    - {notetype: "N_1*", fields: [f34, "", "e"]}
+    - {notetype: "N_1*z", fields: [f35, "v_1*"]}
+    - {notetype: Nx1, fields: [f36, "v_1*", "e"]}
+    - {notetype: "Memo (and reversed)", fields: [f37, b]}
+    - {notetype: 'n\m', fields: [f38]}
+steps:
+  - observe:
+      - search_build:
+          - {deck: "a_b*"}
+          - {deck: "My Deck"}
+          - {deck: "C++ (old)"}
+          - {deck: 'say "hi"'}
+          - {deck: 'x\y'}
+          - {deck: "-lead"}
+          - {deck: "x:y"}
+          - {deck: "Top::Mid"}
+          - {deck: "Ünï"}
+          - {tag: "t_x*"}
+          - {tag: "re:x"}
+          - {tag: 'q"t'}
+          - {tag: 'b\s'}
+          - {tag: "-lead"}
+          - {tag: "(p)"}
+          - {tag: "Ünï"}
+          - {tag: "x y"}
+          - {notetype: "N_1*"}
+          - {notetype: "Memo (and reversed)"}
+          - {notetype: 'n\m'}
+          - {notetype: 'q"n'}
+          - {field_present: "f_*"}
+          - {field_present: "Extra Info"}
+          - {field_present: "my:field"}
+          - {field: {name: "f_*", text: "v_1*"}}
+          - {field: {name: "Extra Info", text: "e"}}
+          - {literal: "v_1*"}
+  - observe:
+      - search:
+          - {query: 'deck:a\_b\*', kind: notes}
+          - {query: '"deck:My Deck"', kind: notes}
+          - {query: '"deck:C++ (old)"', kind: notes}
+          - {query: '"deck:say \"hi\""', kind: notes}
+          - {query: 'deck:x\\y', kind: notes}
+          - {query: 'deck:-lead', kind: notes}
+          - {query: 'deck:x:y', kind: notes}
+          - {query: 'deck:Top::Mid', kind: notes}
+          - {query: 'deck:Ünï', kind: notes}
+          - {query: 'tag:t\_x\*', kind: notes}
+          - {query: 'tag:re\:x', kind: notes}
+          - {query: 'tag:q\"t', kind: notes}
+          - {query: 'tag:b\\s', kind: notes}
+          - {query: 'tag:-lead', kind: notes}
+          - {query: '"tag:(p)"', kind: notes}
+          - {query: 'tag:Ünï', kind: notes}
+          - {query: '"tag:x y"', kind: notes}
+          - {query: 'note:N\_1\*', kind: notes}
+          - {query: '"note:Memo (and reversed)"', kind: notes}
+          - {query: 'note:n\\m', kind: notes}
+          - {query: 'f\_\*:_*', kind: notes}
+          - {query: '"Extra Info:_*"', kind: notes}
+          - {query: 'f\_\*:v\_1\*', kind: notes}
+          - {query: '"Extra Info:e"', kind: notes}
+          - {query: 'v\_1\*', kind: notes}

@@ -1,0 +1,21 @@
+# stats/graphs-common G15 (G2.1, R1283): a card whose did is the filtered deck
+# F (a decks row written as deck-ops.md K13 says) and whose odid is Top::H is
+# in the scope of F, of Top::H and of Top, not of the sibling Top::H2. The
+# other card stays in Top::H2. Two Review rows today on the moved card.
+# Expected reviews, card_counts and added follow the card likewise.
+id: stats/graphs/scope/filtered-deck-card
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Top", "Top::H", "Top::H2"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Top::H", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Top::H2", "fields": ["n2", "x"]}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET odid = did, did = 900, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"reopen": {}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 1, 30, 2500, 0, 1), (1791799200001, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 1, 30, 2500, 0, 1)"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "F"}, "history": "year", "parts": ["reviews", "card_counts", "added"]}, {"scope": {"deck": "Top::H"}, "history": "year", "parts": ["reviews", "card_counts", "added"]}, {"scope": {"deck": "Top"}, "history": "year", "parts": ["reviews", "card_counts", "added"]}, {"scope": {"deck": "Top::H2"}, "history": "year", "parts": ["reviews", "card_counts", "added"]}]}]}

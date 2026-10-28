@@ -1,0 +1,182 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_build": [
+          {
+            "text": "deck:a\\_b\\*"
+          },
+          {
+            "text": "\"deck:My Deck\""
+          },
+          {
+            "text": "\"deck:C++ (old)\""
+          },
+          {
+            "text": "\"deck:say \\\"hi\\\"\""
+          },
+          {
+            "text": "deck:x\\\\y"
+          },
+          {
+            "text": "deck:-lead"
+          },
+          {
+            "text": "deck:x:y"
+          },
+          {
+            "text": "deck:Top::Mid"
+          },
+          {
+            "text": "deck:Ünï"
+          },
+          {
+            "text": "tag:t\\_x\\*"
+          },
+          {
+            "text": "tag:re\\:x"
+          },
+          {
+            "text": "tag:q\\\"t"
+          },
+          {
+            "text": "tag:b\\\\s"
+          },
+          {
+            "text": "tag:-lead"
+          },
+          {
+            "text": "\"tag:(p)\""
+          },
+          {
+            "text": "tag:Ünï"
+          },
+          {
+            "text": "\"tag:x y\""
+          },
+          {
+            "text": "note:N\\_1\\*"
+          },
+          {
+            "text": "\"note:Memo (and reversed)\""
+          },
+          {
+            "text": "note:n\\\\m"
+          },
+          {
+            "text": "note:q\\\"n"
+          },
+          {
+            "text": "f\\_\\*:_*"
+          },
+          {
+            "text": "\"Extra Info:_*\""
+          },
+          {
+            "text": "my\\:field:_*"
+          },
+          {
+            "text": "f\\_\\*:v\\_1\\*"
+          },
+          {
+            "text": "\"Extra Info:e\""
+          },
+          {
+            "text": "v\\_1\\*"
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#n6"]
+          },
+          {
+            "ids": ["#n8"]
+          },
+          {
+            "ids": ["#n9"]
+          },
+          {
+            "ids": ["#n10"]
+          },
+          {
+            "ids": ["#n12"]
+          },
+          {
+            "ids": ["#n14"]
+          },
+          {
+            "ids": ["#n15", "#n16"]
+          },
+          {
+            "ids": ["#n18", "#n19"]
+          },
+          {
+            "ids": ["#n20", "#n21"]
+          },
+          {
+            "ids": ["#n24"]
+          },
+          {
+            "ids": ["#n25"]
+          },
+          {
+            "ids": ["#n26"]
+          },
+          {
+            "ids": ["#n28"]
+          },
+          {
+            "ids": ["#n29"]
+          },
+          {
+            "ids": ["#n30"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#n32", "#n33", "#n34"]
+          },
+          {
+            "ids": ["#n37"]
+          },
+          {
+            "ids": ["#n38"]
+          },
+          {
+            "ids": ["#n32", "#n33"]
+          },
+          {
+            "ids": ["#n32", "#n34"]
+          },
+          {
+            "ids": ["#n32"]
+          },
+          {
+            "ids": ["#n32", "#n34"]
+          },
+          {
+            "ids": ["#n32", "#n35", "#n36"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/builder/names",
+  "scenario_sha256": "f615255bf7853170fc4ab92240fbe96dd00ea819b906450136a5bedbbb8b5e39",
+  "tz": "UTC"
+}

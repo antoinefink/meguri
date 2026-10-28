@@ -1,0 +1,40 @@
+# The starting defaults when no deck candidate exists (specs/notes/add-defaults.md
+# D1): deck 1's row deleted with db_exec, curDeck naming the filtered deck
+# Cram, no review card, so every candidate of editor/config-keys K4.1 fails:
+# NotFound, the error kind not_found, with addToCur true, and with false when
+# the note type has no usable last deck. A review card whose home deck exists
+# gives that deck. With every note type removed too, both errors apply: the
+# mode picks, not_found with true (the deck is resolved first) and
+# invalid_argument with false (the note type first).
+# Needs the add_defaults observation (D7).
+id: notes/add-defaults/missing-default-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Spanish]
+  notetypes:
+    - {name: Vocab, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+  notes:
+    - {notetype: Vocab, deck: Spanish, fields: [uno, one]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec: {sql: "DELETE FROM decks WHERE id = 1"}
+  # The add wrote _nt_<Vocab>_lastDeck = Spanish; remove it, so that with
+  # addToCur false the deck also falls to the current deck for adding.
+  - db_exec: {sql: "DELETE FROM config WHERE KEY LIKE '\\_nt\\_%\\_lastDeck' ESCAPE '\\'"}
+  # Anki's deck cache survives a db_exec write.
+  - reopen: {}
+  - set_config: {key: curDeck, value: 900}
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - db_exec: {sql: "DELETE FROM notetypes"}
+  - db_exec: {sql: "DELETE FROM fields"}
+  - db_exec: {sql: "DELETE FROM templates"}
+  - reopen: {}
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]

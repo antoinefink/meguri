@@ -1,0 +1,26 @@
+# stats/graphs-cards C13 (C10): the added day of a card id at the day edges
+# (N = 1791856800): card ids N, N - 86,399 s, 1 ms before and at N - 86,400 s,
+# N + 1 s and N - 400 days, set with db_exec. Expected {0: 2, -1: 2, 1: 1,
+# -400: 1}, with year and all.
+id: stats/graphs/added/day-edges
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791856800000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791770401000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791770400999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791770400000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n4')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791856801000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n5')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1757296800000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n6')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["added"]}, {"scope": "collection", "history": "all", "parts": ["added"]}]}]}

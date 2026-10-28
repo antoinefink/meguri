@@ -1,0 +1,35 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "future_due": {
+              "daily_load": 3,
+              "future_due": {
+                "1": 5
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "5e1f02e08a6a337ae6e5f0db1d97f43a049fa75e79e47c24f0dd37394ad07199",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/future-due/daily-load",
+  "scenario_sha256": "005f9e513a1de57ed95bc7381bfbdaa02b68d64f63d76b72ba99259a84d89d52",
+  "tz": "Europe/Paris"
+}

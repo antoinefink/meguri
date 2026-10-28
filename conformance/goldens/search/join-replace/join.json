@@ -1,0 +1,142 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_join": [
+          {
+            "text": "deck:Lang tag:verbs"
+          },
+          {
+            "text": "deck:Lang OR tag:verbs"
+          },
+          {
+            "text": "-is:new -flag:0"
+          },
+          {
+            "text": "-is:new flag:0"
+          },
+          {
+            "text": "-is:new OR flag:0"
+          },
+          {
+            "text": "stem:oak is:due"
+          },
+          {
+            "text": "(deck:Lang is:due) -tag:verbs"
+          },
+          {
+            "text": "(deck:Lang is:due) OR tag:verbs"
+          },
+          {
+            "text": "(a OR b) c"
+          },
+          {
+            "text": "(a OR b) OR c"
+          },
+          {
+            "text": "(a b OR c) OR -is:new"
+          },
+          {
+            "text": "(a -b) deck:X"
+          },
+          {
+            "text": "(x y) OR is:due"
+          },
+          {
+            "text": "(x OR y) is:due"
+          },
+          {
+            "text": "-(x y) is:due"
+          },
+          {
+            "text": "((x y)) is:due"
+          },
+          {
+            "text": "deck:* deck:Other"
+          },
+          {
+            "text": "deck:* OR deck:Other"
+          },
+          {
+            "text": "deck:* deck:*"
+          },
+          {
+            "text": "a (note:Memo card:1)"
+          },
+          {
+            "text": "a OR (flag:1 OR flag:2)"
+          },
+          {
+            "text": "a flag:1"
+          },
+          {
+            "text": "(a b) -(flag:1 OR flag:2)"
+          },
+          {
+            "text": "a (b c)"
+          },
+          {
+            "text": "a -(b OR c)"
+          },
+          {
+            "text": "a -deck:X"
+          },
+          {
+            "text": "a deck:X"
+          },
+          {
+            "text": "a tag:_*"
+          },
+          {
+            "text": "a OR -tag:t"
+          },
+          {
+            "text": "(a -  b) c"
+          },
+          {
+            "text": "- OR  c"
+          },
+          {
+            "text": "preset:a\\\\\"b c"
+          },
+          {
+            "text": "has-cd:x OR c"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "context": "ivl>x",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "error": "unclosed_quote"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/join-replace/join",
+  "scenario_sha256": "0bb94f939b0ac8d6b926a7c967223f663cb5dc02422e65bc206535ec4577bb5a",
+  "tz": "UTC"
+}

@@ -1,0 +1,44 @@
+# Which media files a legacy deck package carries (specs/package/
+# legacy-export.md L3, L5; apkg-export.md A9; package-ops.md E8, E10).
+# apkg-export/media-selection's source exported with Support older Anki
+# versions on: the package holds exactly the referenced files that exist
+# (sound, an entity in the name, the LaTeX image, the CSS and template
+# underscore files) as raw numbered entries named by a JSON map; sizes and
+# SHA-1 computed from the entries. Anki writes media in an order of its own,
+# so the list is compared as a set (A16, E10).
+id: package/legacy-export/apkg-media
+description: A legacy deck package carries the referenced media that exist as raw entries.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+compare:
+  set: [/steps/3/package_media]
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "<script src=\"_x.js\"></script>{{Front}}", back: "{{Back}}"}]
+      css: "@font-face { font-family: f; src: url(_f.woff); }\n@import \"_base.css\";\n@import \"_t.CSS\";\n.card { margin: 0; }"
+  notes:
+    - notetype: Pair
+      deck: Lang
+      fields:
+        - "[sound:a.mp3] <img src=\"b&amp;c.jpg\"> <img src=\"http://example.com/r.jpg\">"
+        - "<img src=\"gone.png\"> [latex]x^2[/latex]"
+  media_files:
+    - {name: a.mp3, text: "sound bytes"}
+    - {name: "b&c.jpg", text: "picture"}
+    - {name: latex-7046d961a8144b7b2c2da6066849a9f889ff2ac9.png, text: "formula"}
+    - {name: _f.woff, text: "font"}
+    - {name: _base.css, text: ".base { margin: 1px; }"}
+    - {name: _t.CSS, text: ".t { margin: 2px; }"}
+    - {name: _x.js, text: "var x = 1;"}
+    - {name: c.png, text: "unused"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: media.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true, legacy: true}
+  - observe:
+      - package_media: {name: media.apkg}
+  - observe:
+      - package_listing: {name: media.apkg}

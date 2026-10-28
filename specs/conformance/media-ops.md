@@ -135,7 +135,7 @@ A Check Media run (`maintenance/check-media` C2) to its end.
 
 ### F14.4 Case-variant setup
 
-F3 and F4 refuse names that are case variants of each other, so that every scenario runs on case-insensitive volumes. The scenarios of C5 (`case/same-content`, `case/other-content`) need such names.
+F3 and F4 refuse names that are case variants of each other, so that every scenario runs on case-insensitive volumes. The scenarios of C5 (`case/same-content`, `case/other-content`, `case/same-content-no-key`) need such names.
 
 - A scenario tagged `media-case-variants` (`dsl.md` D4 `tags`) may list case variants in `media_files` and `media_outside`; names equal after NFC (byte comparison) still may not appear together. The loader reads the tag; executors do not.
 - For every scenario with the tag, the loader adds the need `media_files.case_variants` (`dsl.md` D4, D8.1), a capability an executor declares only when its media folder is on a case-sensitive volume: the Linux oracle and Meguri's Linux lane. On macOS the scenario is `pending` and never runs. Its golden is the Linux oracle's (F13).

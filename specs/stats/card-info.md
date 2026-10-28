@@ -453,8 +453,8 @@ Later Anki steps on that card (another `card_stats`, an answer, a search) read t
 
 | Entry | Requirement | Difference | Transform |
 |---|---|---|---|
-| `card-info-no-lrt-backfill` | R1252, R1425 | after a `card_stats` observation Anki's card data holds an `lrt` it did not hold before | drop `lrt` from the observed card's `data` in Anki's later `card` and `db_dump` observations when it was absent before |
-| `card-info-computed-retrievability` | R1251, AE46 | for a card whose data has no memory state, Meguri returns `fsrs_retrievability`, Anki `null` | ignore `fsrs_retrievability` when Anki's is `null` and the card's data has no `s`/`d` |
+| `card-info-no-lrt-backfill` | R1252 (an entry names one requirement; R1425 states the same no-write rule, C1) | after a `card_stats` observation Anki's card data holds an `lrt` it did not hold before | in `ae46-no-state`, `replace: {}` at `/steps/5/card/#c1/data` (the card observation after `card_stats`): the data Meguri keeps unchanged; that scenario reads `col.mod` around it and has no `db_dump` |
+| `card-info-computed-retrievability` | R1251 (AE46) | for a card whose data has no memory state, Meguri returns `fsrs_retrievability`, Anki `null` | in `ae46-no-state`, `replace: 0.9710832` at `/steps/4/card_stats/#c1/fsrs_retrievability`: C3.5 for the computed state, worked in f32 from Anki's own `memory_state` stability 42.094368 in that observation, `t` = (now 1,894,698,000 − `L` 1,893,920,400) ÷ 86,400 = 9 and the Default preset's decay 0.1542 (empty parameter list); compared within O7's tolerance. U92 confirms the value, or adds an ignore transform to the testkit if Meguri's differs |
 
 The `card-info-no-lrt-backfill` transform covers only the added `lrt`, so card-info scenarios keep C13.3's rebuild from changing anything else:
 
@@ -466,7 +466,7 @@ The `card-info-no-lrt-backfill` transform covers only the added `lrt`, so card-i
 
 ### C14.1 Scenarios for the oracle-maintainer
 
-None is in the tree: the driver has no `card_stats` op and the runner no adapter (C13.2). Each lands with its golden recorded at the current oracle pin, under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
+As of 2026-10-27 the oracle has the kind and every scenario below except `damaged` is in the tree with its golden recorded at the current oracle pin; the runner has no adapter yet (C13.2). `damaged`'s two cases are run errors, which a golden cannot hold (`conformance/dsl` D11): the driver's self-tests check them, and U92's unit tests check Meguri's typed errors. Each is under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
 
 | Scenario | Pins |
 |---|---|

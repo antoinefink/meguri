@@ -1,0 +1,162 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 6.4275,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1894870800,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": 1894179600,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9460589,
+            "interval": 4,
+            "lapses": 0,
+            "latest_review": 1894525200,
+            "memory_state": {
+              "difficulty": 5.0,
+              "stability": 4.0
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 2,
+            "revlog": [
+              {
+                "button_chosen": 0,
+                "ease": 2500,
+                "interval": 345600,
+                "last_interval": 345600,
+                "memory_state": {
+                  "difficulty": 2.1112142,
+                  "stability": 16.177273
+                },
+                "review_kind": 4,
+                "taken_secs": 1.0,
+                "time": 1894611600
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 345600,
+                "last_interval": 172800,
+                "memory_state": {
+                  "difficulty": 2.1112142,
+                  "stability": 16.177273
+                },
+                "review_kind": 1,
+                "taken_secs": 8.855,
+                "time": 1894525200
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 172800,
+                "last_interval": 600,
+                "memory_state": {
+                  "difficulty": 2.118104,
+                  "stability": 2.3065
+                },
+                "review_kind": 0,
+                "taken_secs": 3.0,
+                "time": 1894179600
+              }
+            ],
+            "total_secs": 12.855
+          },
+          "#c2": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c2",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1894870800,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": 1894179600,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9460589,
+            "interval": 4,
+            "lapses": 0,
+            "latest_review": 1894525200,
+            "memory_state": {
+              "difficulty": 5.0,
+              "stability": 4.0
+            },
+            "note_id": "#n2",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 2,
+            "revlog": [
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 345600,
+                "last_interval": 172800,
+                "memory_state": {
+                  "difficulty": 2.1112142,
+                  "stability": 16.177273
+                },
+                "review_kind": 1,
+                "taken_secs": 0.0,
+                "time": 1894525200
+              },
+              {
+                "button_chosen": 3,
+                "ease": 2500,
+                "interval": 172800,
+                "last_interval": 600,
+                "memory_state": {
+                  "difficulty": 2.118104,
+                  "stability": 2.3065
+                },
+                "review_kind": 0,
+                "taken_secs": 0.0,
+                "time": 1894179600
+              }
+            ],
+            "total_secs": 0.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/times",
+  "scenario_sha256": "cf7dc3f67be42cb4a6fecfc4ad4be6f0489ffb92e222e2d5d389b78176a012fa",
+  "tz": "Europe/Paris"
+}

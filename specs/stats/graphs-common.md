@@ -271,7 +271,7 @@ The scope scenarios observe the draft `stats` kind (`conformance/observations` O
 
 ## G15. Scenarios
 
-`conformance/scenarios/stats/graphs/scope/`, for the oracle-maintainer to add with the `stats` kind (G14) and the stats op of `oracle/driver/ops/stats.py`. None exists yet: no executor has the kind. Review-log rows come from `db_exec` as in `conformance/stats-ops` H3. All in Europe/Paris, rollover 4, unless named.
+`conformance/scenarios/stats/graphs/scope/`, for the oracle-maintainer to add with the `stats` kind (G14) and the stats op of `oracle/driver/ops/stats.py`. As of 2026-10-27 each is in the tree with its golden; the oracle has the kind, the runner not yet. `unreadable-row`'s third case stores a `lastIvl` of 3,000,000,000 instead of NULL, which the `revlog` table refuses (NOT NULL). Review-log rows come from `db_exec` as in `conformance/stats-ops` H3. All in Europe/Paris, rollover 4, unless named.
 
 | Scenario | Pins | Expected |
 |---|---|---|
@@ -283,7 +283,7 @@ The scope scenarios observe the draft `stats` kind (`conformance/observations` O
 | `card-graphs-ignore-history` | G3 | cards created 400 and 10 days ago: `added` and `card_counts` equal for `year` and `all` |
 | `invalid-search` | G2, G8.2 | `prop:foo<`, `prop:ivl>`, `"abc`: their search error kinds, no parts |
 | `odd-row-values` | G4 | rows with `type` 260, −1, 6 and 1.5, `time` −5, 5,000,000,000 and 1.5, `lastIvl` 20.9 and 21: the 260 row is skipped as Manual, −1, 6 and 1.5 count as Learn, the three times count 0 ms, 20.9 is young, 21 mature |
-| `unreadable-row` | G4 | Collection scope, a row with `ease` 300 dated 400 days ago: `year` returns data, `all` returns `unreadable_row`; the same with `factor` −1 and with a NULL `lastIvl` |
+| `unreadable-row` | G4 | Collection scope, a row with `ease` 300 dated 400 days ago: `year` returns data, `all` returns `unreadable_row`; the same with `factor` −1 and with a `lastIvl` of 3,000,000,000 (beyond 32 bits, G4) |
 | `scope-follows-retag` | G2, G10 | Search `tag:verbs`: a note retagged between two observations moves its cards' rows in and out |
 | `read-only` | G11 | `timing`, `db_dump`, `stats` for every scope and history, `db_dump`: the dumps are equal |
 

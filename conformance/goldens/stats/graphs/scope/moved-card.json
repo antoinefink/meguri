@@ -1,0 +1,96 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 3
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 3
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "reviews": {}
+          },
+          {
+            "reviews": {}
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {}
+          },
+          {
+            "reviews": {}
+          },
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 3
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          },
+          {
+            "reviews": {
+              "count": {
+                "0": {
+                  "mature": 3
+                }
+              },
+              "time": {
+                "0": {}
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/moved-card",
+  "scenario_sha256": "78b83b85eaf7ba86acef4aa397dfea389a32c36108401a2a02cb245ea63cdf11",
+  "tz": "Europe/Paris"
+}

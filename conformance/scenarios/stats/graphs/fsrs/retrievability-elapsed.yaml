@@ -1,0 +1,28 @@
+# stats/graphs-cards C13 (C9.1 to C9.3, C9.6): the first seven rows of C9.6,
+# one card each, at the retrievability clock (stats/graphs-cards C13: clock start 2030-01-15T11:00:00 Paris, advance 30d; now_s 1897293600, today 30, N 1897354800). Expected retrievability {2: 2, 3: 1, 61: 1,
+# 71: 1, 76: 1, 99: 1}.
+id: stats/graphs/fsrs/retrievability-elapsed
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":2.5,\"d\":5.0,\"lrt\":1896429600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1897293610}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 0, due = 1897294200, data = '{\"s\":5.0,\"d\":5.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 2, due = 1897290000, data = '{\"s\":4.0,\"d\":6.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 40, due = 35, data = '{\"s\":5.0,\"d\":5.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 0, queue = 0, due = 5, data = '{\"s\":5.0,\"d\":5.0}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}]}]}

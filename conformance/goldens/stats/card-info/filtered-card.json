@@ -1,0 +1,93 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "F",
+            "desired_retention": null,
+            "due_date": 1895043600,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9460589,
+            "interval": 10,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": {
+              "difficulty": 5.0,
+              "stability": 12.0
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": "Lang",
+            "preset": "Home",
+            "reviews": 3,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c2": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c2",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "F",
+            "desired_retention": null,
+            "due_date": null,
+            "due_position": -99999,
+            "ease": 0,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n2",
+            "notetype": "Pair",
+            "original_deck": "Lang",
+            "preset": "Home",
+            "reviews": 0,
+            "revlog": [],
+            "total_secs": 0.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/filtered-card",
+  "scenario_sha256": "a16479e2ce907d6ff6166841d2b65e74641efc1130fa4916bff98c5320035c80",
+  "tz": "Europe/Paris"
+}

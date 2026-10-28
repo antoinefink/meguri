@@ -1,0 +1,29 @@
+# What tag completion reads (specs/tags/complete.md C1): registered rows only.
+# The implicit parent Bar of the row Bar::x is never suggested; a tag whose
+# last note was deleted keeps its row and is still suggested, until Clear
+# Unused Tags removes the row (tags/tags T11). limit 500.
+# Needs the tag_complete observation (C7).
+id: tags/complete/registry
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["Bar::x"]}
+    - {notetype: Plain, fields: [two], tags: [Lone]}
+steps:
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: bar, limit: 500}
+            - {input: "bar::", limit: 500}
+            - {input: lone, limit: 500}
+            - {input: "", limit: 500}
+  - clear_unused_tags: {}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: lone, limit: 500}
+            - {input: "", limit: 500}

@@ -1,0 +1,34 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "stats": [
+          {
+            "error": "invalid_property",
+            "provided": "foo<"
+          },
+          {
+            "context": "ivl>",
+            "error": "invalid_positive_whole_number",
+            "provided": ""
+          },
+          {
+            "error": "unclosed_quote"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/invalid-search",
+  "scenario_sha256": "c38151e5a98c3bf61a3b2f1c798a8cd36661b10951cfccc02b1f71e161ffa5f5",
+  "tz": "Europe/Paris"
+}

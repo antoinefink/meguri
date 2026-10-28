@@ -1,0 +1,27 @@
+# Separators in tag completion (specs/tags/complete.md C2): the input splits
+# at each "::" left to right, an empty piece being a filter that fits every
+# component; a single colon is an ordinary character. Rows ratio:a and
+# a:::b (components a and :b), beside Japanese::Audio and japan. limit 500.
+# Needs the tag_complete observation (C7).
+id: tags/complete/separators
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["ratio:a", "a:::b", "Japanese::Audio", japan]}
+steps:
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: "::", limit: 500}
+            - {input: "jap::", limit: 500}
+            - {input: "::aud", limit: 500}
+            - {input: "a:::b", limit: 500}
+            - {input: "a::", limit: 500}
+            - {input: ":", limit: 500}
+            - {input: ":b", limit: 500}
+            - {input: "o:a", limit: 500}
+            - {input: ":::", limit: 500}
+            - {input: "::::", limit: 500}

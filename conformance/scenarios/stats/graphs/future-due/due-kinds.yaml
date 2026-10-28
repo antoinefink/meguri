@@ -1,0 +1,32 @@
+# stats/graphs-cards C13 (C3.2) at the retrievability clock (stats/graphs-cards
+# C13: clock start 2030-01-15T11:00:00 Paris, advance 30d; now_s 1897293600,
+# today 30, N 1897354800), so a day number and a timestamp key differ from
+# their stored values. Learning cards due N + 1,800 s, N + 90,000 s, N - 1 s
+# and N - 86,400 s; an interday learning card due today (30); a review card due
+# today + 3 (33); a learning card with due 1,000,000,000. Expected keys 0: 3,
+# 1: 1, -1: 1, 3: 1 and 999,999,970 (1,000,000,000 - today): 1.
+id: stats/graphs/future-due/due-kinds
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1897356600 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1897444800 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1897354799 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1897268400 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 3, due = 30 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 33 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1000000000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}]}]}

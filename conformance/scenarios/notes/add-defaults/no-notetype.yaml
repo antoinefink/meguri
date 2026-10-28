@@ -1,0 +1,27 @@
+# The starting defaults with no note type (specs/notes/add-defaults.md D1,
+# editor/config-keys K4.1): InvalidArgument, the error kind invalid_argument,
+# with addToCur true and false and with a review card. Every note type row is
+# removed with db_exec (with its fields and templates), so curModel names a
+# missing note type and the first-by-name fallback finds none.
+# Needs the add_defaults observation (D7).
+id: notes/add-defaults/no-notetype
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Spanish]
+  notetypes:
+    - {name: Vocab, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+  notes:
+    - {notetype: Vocab, deck: Spanish, fields: [uno, one]}
+steps:
+  - observe: [{add_defaults: {}}]
+  - db_exec: {sql: "DELETE FROM notetypes"}
+  - db_exec: {sql: "DELETE FROM fields"}
+  - db_exec: {sql: "DELETE FROM templates"}
+  # Anki's note type cache survives a db_exec write.
+  - reopen: {}
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - observe: [{add_defaults: {review_card: "#c1"}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]
+  - observe: [{add_defaults: {review_card: "#c1"}}]

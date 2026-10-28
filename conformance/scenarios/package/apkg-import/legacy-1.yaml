@@ -1,0 +1,25 @@
+# A legacy 1 deck package from an old client (specs/package/apkg-import.md
+# I3, I6, P17; package/container.md P17; package-ops.md E4, E6). The fixture
+# is Anki 2.1.26's own export without scheduling of a v1-scheduler
+# collection (oracle/fixtures/package/oldclient.py): collection.anki2 at
+# schema 11, a JSON media map with dot.png, no meta. Its note type Pair
+# stores no field or template ids; its decks Lang and Lang::Sub, the filtered
+# decks Cram and Peek, and twelve new cards (2.1.26 reset them all), six of
+# them still in Cram and Peek with odid 0. The import makes Cram and Peek
+# normal decks (I6, package/apkg-export A5) and those cards stay in them. The
+# target has its own Lang: the package's Lang maps to it, and dot.png reaches
+# the media folder.
+id: package/apkg-import/legacy-1
+description: A legacy 1 package written by Anki 2.1.26 imports with its media.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/legacy-1.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - db_dump: {tables: [notes, cards, revlog, decks, deck_config, tags]}
+      - media_dir
+  - db_exec: {sql: "SELECT ord, name FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Pair') ORDER BY ord"}

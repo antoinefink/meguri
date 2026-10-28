@@ -1,0 +1,30 @@
+# stats/graphs-cards C13 (C2) at the retrievability clock (stats/graphs-cards
+# C13: clock start 2030-01-15T11:00:00 Paris, advance 30d; today 30), so the
+# key of a home due 0 (-today) differs from key 0: the home due is odue when
+# odid is above 0, due otherwise. Filtered deck F (deck-ops.md K13 row) with
+# home H: a review card (due -100,000, odue today + 5) and a learning card with
+# odue 0 there; in H a review card with odid 0, due today + 2 and odue
+# today + 7, and a review card with odid -1, due today + 3 and odue today + 9.
+# Expected keys 5, -30, 2 and 3 in Collection and Deck H, keys 5 and -30 in
+# Deck F.
+id: stats/graphs/future-due/filtered-odue
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["H"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "H", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "H", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "H", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "H", "fields": ["n4", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, did = 900, odid = (SELECT id FROM decks WHERE name = 'H'), due = -100000, odue = 35 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 3, did = 900, odid = (SELECT id FROM decks WHERE name = 'H'), due = -100001, odue = 0 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 32, odue = 37 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, odid = -1, due = 33, odue = 39 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"reopen": {}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}, {"scope": {"deck": "H"}, "history": "year", "parts": ["future_due"]}, {"scope": {"deck": "F"}, "history": "year", "parts": ["future_due"]}]}]}

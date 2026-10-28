@@ -3,7 +3,7 @@
 Spec: search/join-and-replace
 Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (AE43, core part; AE60 only for J11's test that its text parses and that its canonical form equals a golden)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/ (not yet recorded: J11)
+Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/
 
 The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
 
@@ -193,7 +193,7 @@ Negated operator words are not terms and are never replaced. Consequences, all A
 | replace (empty), deck `X` | `deck:*` |
 | replace `(a  b)`, deck `X` | `a b` |
 
-AE43 (core part) is the first join and the first replace above. In 26.09.3 the join brackets the existing two-item search; the plan's AE43 text without brackets predates this check, and the goldens of J11 decide.
+AE43 (core part) is the first join and the first replace above. In 26.09.3 the join brackets the existing two-item search, as the golden of `search/join-replace/ae43` records; the plan's AE43 text without brackets predates this check.
 
 ## J10. Differences from Anki
 
@@ -207,12 +207,12 @@ Meguri writes Anki's text for every built item except these, where Anki's text w
 | a tag, field name or text holding White_Space other than U+0020, or U+001C–U+001F | the character kept; the search splits there | `_` (J3), or J3.2 for tags |
 | a field named like a reserved key | the reserved term (`deck:_*`) | refused (J3.3) |
 | duplicates text holding such a character | the character kept | refused (J3.4) |
-| an empty id list, a negative id, an empty name or text | text that fails to parse or searches something else | refused (J3) |
+| an empty id list, a negative id, an empty name or literal text | text that fails to parse or searches something else | refused (J3) |
 | 0 days for added, edited, first review, answered | `added:0` (read back as 1) | `added:1` (canonical at once) |
 
 ## J11. Scenarios
 
-Neither directory exists yet. Both need observation kinds the oracle does not have: `search_build`, `search_join` and `search_replace`, each taking built items in a neutral JSON form (`{deck: "<name>"}`, `{tag: ...}`, `{flag: "any" | "none" | 1–7}`, `{group: {joiner, items}}`, `{negated: ...}`, `{text: "<search>"}` and so on) and returning the text or the parse error. The oracle maps each item to Anki's own structured search item. These J3 items have no structured counterpart in Anki and stay out of the oracle scenarios: note type by id (`mid:`), card-id and deck-id lists, and the states `buried-manually` and `buried-sibling`. U88's `tests/builder.rs` covers them from this text. To record (oracle maintainer):
+Both directories use the observation kinds `search_build`, `search_join` and `search_replace` (`conformance/search-ops` S6), each taking built items in the neutral JSON form of `conformance/search-ops` S5 (`{deck: "<name>"}`, `{tag: ...}`, `{flag: "any" | "none" | 1–7}`, `{group: {joiner, items}}`, `{negated: ...}`, `{text: "<search>"}` and so on) and returning the text or the parse error. The oracle maps each item to Anki's own structured search item. These J3 items have no structured counterpart in Anki and stay out of the oracle scenarios: note type by id (`mid:`), card-id and deck-id lists, and the states `buried-manually` and `buried-sibling`. U88's `tests/builder.rs` covers them from this text. Recorded at the current oracle pin:
 
 | Scenario | Covers |
 |---|---|

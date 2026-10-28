@@ -1,0 +1,63 @@
+# A note whose note type differs on the two sides (specs/package/
+# notetype-merge.md J3, J4.1, J6, J8, J14; package-ops.md E6). After the
+# export the target moves note one by Change Note Type from Pair (fields
+# Front 1001, Back 1002) to Other (Back 1002, Front 1001, Extra 1003; its
+# template has Pair's id) and fills Extra. The package still holds note one
+# under Pair. Stage 2 pairs I = Pair with E = Other: Pair gains Extra, note
+# one moves back to Pair with Other's maps (values by name, Extra kept),
+# Other, left without notes, is removed. Pair's own note two keeps its values
+# in place on Meguri (J6 step 3, Pair's own origins and sort field); Anki
+# 26.9.3 remaps it with Other's maps (deviation apkg-merge-conflict-remap).
+id: package/notetype-merge/guid-conflict
+description: A note moved to another note type in the target goes back to the package's note type.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Other
+      fields: [Back, Front, Extra]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}} {{Extra}}"}]
+      css: ".card { margin: 1px; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - legacy_update:
+      notetype: Other
+      patch:
+        flds:
+          - {name: Back, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Front, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Extra, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1003}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}} {{Extra}}", id: 2001}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - change_notetype_info: {notes: ["#n1"], notetype: Other}
+  - change_notetype: {}
+  - edit_note: {note: "#n1", fields: {Extra: more}}
+  - db_exec: {sql: "SELECT t.name, n.flds, n.sfld FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT t.name, n.flds, n.sfld FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name IN ('Pair', 'Other') ORDER BY name"}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT c.ord, n.sfld FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}

@@ -1,0 +1,21 @@
+# stats/graphs-common G15 (G11, R1295): graph requests write nothing. After a
+# timing observation (Anki's day computation writes localOffset, stats-ops.md
+# H3), a dump, every part for every scope and history, and a second dump.
+# Expected the two dumps equal.
+id: stats/graphs/scope/read-only
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4, "fsrs": true}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 30, due = 3, data = '{\"s\":20.0,\"d\":5.0,\"lrt\":1790935200}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 1, 30, 2500, 0, 1), (1791799200001, 1000, -1, 3, 1, 30, 2500, 0, 1)"}}
+  - {"observe": ["timing"]}
+  - {"observe": ["db_dump"]}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}, {"scope": "collection", "history": "all", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}, {"scope": {"deck": "Lang"}, "history": "year", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}, {"scope": {"deck": "Lang"}, "history": "all", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}, {"scope": {"search": "deck:Lang"}, "history": "year", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}, {"scope": {"search": "deck:Lang"}, "history": "all", "parts": ["reviews", "true_retention", "hours", "buttons", "future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added", "context"]}]}]}
+  - {"observe": ["db_dump"]}

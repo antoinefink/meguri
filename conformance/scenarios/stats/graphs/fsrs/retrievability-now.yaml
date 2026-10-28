@@ -1,0 +1,20 @@
+# stats/graphs-cards C13 (C9.5, R1294): R is computed at every request. Review
+# cards with lrt 2 and 20 days back (s 6 and 50, d 5): stats with year,
+# advance 10 days, stats with year and all. Expected the keys move between
+# the first two outputs and the last two are equal.
+id: stats/graphs/fsrs/retrievability-now
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 3, data = '{\"s\":6.0,\"d\":5.0,\"lrt\":1791626400}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 50, due = 30, data = '{\"s\":50.0,\"d\":5.0,\"lrt\":1790071200}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}]}]}
+  - {"advance": "10d"}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}, {"scope": "collection", "history": "all", "parts": ["retrievability"]}]}]}

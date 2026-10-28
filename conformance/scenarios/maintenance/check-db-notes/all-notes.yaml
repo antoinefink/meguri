@@ -5,8 +5,7 @@
 # generates take ids from now_ms up, which C10.4 would then need for a future
 # card), and so do no-notetypes (it deletes every note) and
 # default-deck-missing (Anki fails). io-field-tags' field damage stays out
-# too (N10.2 holds it until an op can change a field's tag and protection).
-# The tag rows are not observed: Meguri
+# too (N10.2). The tag rows are not observed: Meguri
 # keeps them (deviation check-db-tags-keep-rows, shown by tag-rebuild). No
 # undo_status (check-database C14). A second run finds nothing.
 id: maintenance/check-db-notes/all-notes

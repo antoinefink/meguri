@@ -1,0 +1,16 @@
+# stats/card-info C14.1 (C3.1): the cards of a cloze note with three
+# deletions. Expected card_type is the first template's name for each, the
+# card with ord 2 included.
+id: stats/card-info/cloze-type
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+    - {"name": "Gap", "kind": "cloze", "fields": ["Text", "Extra"], "templates": [{"name": "Gap Card", "front": "{{cloze:Text}}", "back": "{{cloze:Text}}<br>{{Extra}}"}]}
+  notes:
+    - {"notetype": "Gap", "deck": "Lang", "fields": ["{{c1::one}} {{c2::two}} {{c3::three}}", ""]}
+steps:
+  - {"db_exec": {"sql": "SELECT ord FROM cards ORDER BY ord"}}
+  - {"observe": [{"card_stats": ["#c1", "#c2", "#c3"]}]}

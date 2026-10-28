@@ -3,7 +3,7 @@
 Spec: tags/complete
 Requirements: R883; supports R882, R884, R1190
 Anki: 26.09.3
-Scenarios: conformance/scenarios/tags/complete/
+Scenarios: conformance/scenarios/tags/complete/ (listed in C7, recorded on the Linux oracle)
 
 The suggestions the tag editor shows while the user types a tag (R883): which registered tags match a partial name, in which order, and how many. U191 provides the query. The tag editor (U193) and Browse's tag entry (U218, R1190) call it. Tag terms (components, registered, implicit parent) are `tags/tags` T1.
 
@@ -107,11 +107,11 @@ None of these differences is visible to a scenario, which calls the query direct
 
 ## C7. Scenarios
 
-Requested from the oracle maintainer. None is recorded yet: the oracle driver has no op or observation kind for C1.
+Status (2026-10-27): the oracle driver has the observation kind, and the five scenarios below are recorded on the Linux oracle.
 
-Requested observation kind `tag_complete`, modeled on `fields_check` (`conformance/note-ops` N4). It reads the collection and changes nothing.
+The observation kind `tag_complete`, modeled on `fields_check` (`conformance/note-ops` N4). It reads the collection and changes nothing, and may be requested once per observe step.
 
-- **Request** `{tag_complete: {cases: [{input: <text>, limit: <integer ≥ 1>}, ...]}}`.
+- **Request** `{tag_complete: {cases: [{input: <text>, limit: <integer from 1 to 2^32>}, ...]}}` (Anki's `match_limit` is a 32-bit unsigned integer).
 - **Value** a list of results, one per case in case order. Each result is the list of tag names, in the order returned.
 - **Oracle.** The backend's tag completion with `input` as given and `match_limit` `limit` − 1.
 - **Meguri.** The C1 query with the same input and limit.

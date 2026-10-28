@@ -1,0 +1,12 @@
+# stats/graphs-revlog V10 AE59 (G3, V4.2, V5.2, V6.2): mature Good rows today
+# and 400 days ago at 12:00. Expected with all: true_retention all_time
+# mature_passed 2, year 1; hours all_time hour 12 {total 2, correct 2};
+# buttons all_time mature [0, 0, 2, 0]; with year the same parts without
+# all_time.
+id: stats/graphs/retention/ae59-history-parts
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, 1000, -1, 3, 1, 30, 2500, 0, 1), (1757239200000, 1000, -1, 3, 1, 30, 2500, 0, 1)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "all", "parts": ["true_retention", "hours", "buttons"]}, {"scope": "collection", "history": "year", "parts": ["true_retention", "hours", "buttons"]}]}]}

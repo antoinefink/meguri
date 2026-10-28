@@ -1,0 +1,60 @@
+# A template list moved and grown (specs/package/notetype-merge.md J3, J4.1,
+# J5 step 4, J7; apkg-import.md I8, I11.1; J14; package-ops.md E6). The
+# package's Pair has templates Card 2 (id 2002) and Card 3 (2003); the
+# target's has Card 1 (2001, front {{Hint}}) and Card 2. Merged: Card 1,
+# Card 2, Card 3, template map 0 -> 1, 1 -> 2; G9 adds Card 3 cards to the
+# target's notes. Note one has all three cards: its incoming cards find their
+# mapped pairs and are skipped. Note two (empty Hint, so no Card 1 card) has
+# a target id other than its package id (moved to 500 in the target): Meguri
+# maps its cards by the package note's note type and skips both (I11.1);
+# Anki 26.9.3 tests the package ordinal 0, finds no card there, and adds the
+# incoming Card 2 card at ordinal 0 (deviation apkg-merge-card-ordinal).
+id: package/notetype-merge/template-moved
+description: Incoming cards follow the template map; a card whose mapped pair exists is skipped.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back, Hint]
+      templates:
+        - {name: Card 2, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 3, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a, h]}
+    - {notetype: Pair, deck: Lang, fields: [two, b, ""]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Hint, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1003}
+        tmpls:
+          - {name: Card 2, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2002}
+          - {name: Card 3, ord: 1, qfmt: "{{Back}}", afmt: "{{Front}}", id: 2003}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Card 1, front: "{{Hint}}", back: "{{Front}}"}}, {move_template: {template: Card 1, to: 0}}, {remove_template: Card 3}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        tmpls:
+          - {name: Card 1, ord: 0, qfmt: "{{Hint}}", afmt: "{{Front}}", id: 2001}
+          - {name: Card 2, ord: 1, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2002}
+  # Note two's target id moved to 500 (its cards with it).
+  - db_exec: {sql: "UPDATE cards SET nid = 500 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE notes SET id = 500 WHERE sfld = 'two'"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}

@@ -1,0 +1,25 @@
+# stats/card-info C14.1: a card answered Good four times (Learn, Learn, Review,
+# Review) with FSRS on, so its data holds the stored memory state and lrt.
+# Expected: due from a day number, interval, memory state, retrievability from
+# lrt, first and latest review, a memory state per entry (a complete history)
+# and D:xx% factors in the history.
+id: stats/card-info/review-card
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+steps:
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 4000}}
+  - {"advance": "10m"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 3000}}
+  - {"advance": "3d"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 5000}}
+  - {"advance": "9d"}
+  - {"answer": {"card": "#c1", "rating": "good", "time_ms": 2500}}
+  - {"advance": "4d"}
+  - {"observe": [{"card": ["#c1"]}]}
+  - {"observe": [{"card_stats": ["#c1"]}]}

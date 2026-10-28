@@ -1,0 +1,8 @@
+# stats/graphs-common G15 (G2, G8.2): a Search scope that fails to parse gives
+# its search error kind and no parts: prop:foo<, prop:ivl> and "abc.
+id: stats/graphs/scope/invalid-search
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+steps:
+  - {"observe": [{"stats": [{"scope": {"search": "prop:foo<"}, "history": "year", "parts": ["added"]}, {"scope": {"search": "prop:ivl>"}, "history": "year", "parts": ["added"]}, {"scope": {"search": "\"abc"}, "history": "year", "parts": ["added"]}]}]}
