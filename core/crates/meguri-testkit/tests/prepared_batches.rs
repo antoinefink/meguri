@@ -62,10 +62,10 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
             _ => panic!("unsupported schema keyword: {keyword}"),
         }
     }
-    if let Some(r) = def["$ref"].as_str() {
-        if !conforms(root, root.pointer(r.strip_prefix('#').unwrap()).unwrap(), value) {
-            return false;
-        }
+    if let Some(r) = def["$ref"].as_str()
+        && !conforms(root, root.pointer(r.strip_prefix('#').unwrap()).unwrap(), value)
+    {
+        return false;
     }
     for (key, minimum, maximum) in [
         ("allOf", usize::MAX, usize::MAX),
@@ -96,15 +96,15 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
             return false;
         }
     }
-    if let Some(v) = def.get("const") {
-        if value != v {
-            return false;
-        }
+    if let Some(v) = def.get("const")
+        && value != v
+    {
+        return false;
     }
-    if let Some(v) = def["enum"].as_array() {
-        if !v.contains(value) {
-            return false;
-        }
+    if let Some(v) = def["enum"].as_array()
+        && !v.contains(value)
+    {
+        return false;
     }
     if let Some(t) = def.get("type") {
         let is = |t: &str| match t {
@@ -119,16 +119,16 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
         };
         if !t
             .as_str()
-            .map(&is)
+            .map(is)
             .unwrap_or_else(|| t.as_array().unwrap().iter().any(|t| is(t.as_str().unwrap())))
         {
             return false;
         }
     }
-    if let Some(n) = value.as_f64() {
-        if def["minimum"].as_f64().is_some_and(|lo| n < lo) || def["maximum"].as_f64().is_some_and(|hi| n > hi) {
-            return false;
-        }
+    if let Some(n) = value.as_f64()
+        && (def["minimum"].as_f64().is_some_and(|lo| n < lo) || def["maximum"].as_f64().is_some_and(|hi| n > hi))
+    {
+        return false;
     }
     if let Some(s) = value.as_str() {
         if def["minLength"]
@@ -137,10 +137,10 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
         {
             return false;
         }
-        if let Some(pattern) = def["pattern"].as_str() {
-            if !regex::Regex::new(pattern).unwrap().is_match(s) {
-                return false;
-            }
+        if let Some(pattern) = def["pattern"].as_str()
+            && !regex::Regex::new(pattern).unwrap().is_match(s)
+        {
+            return false;
         }
     }
     if let Some(items) = value.as_array() {
@@ -152,10 +152,10 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
         if def["uniqueItems"] == true && items.iter().enumerate().any(|(i, v)| items[..i].contains(v)) {
             return false;
         }
-        if let Some(item) = def.get("items") {
-            if !items.iter().all(|v| conforms(root, item, v)) {
-                return false;
-            }
+        if let Some(item) = def.get("items")
+            && !items.iter().all(|v| conforms(root, item, v))
+        {
+            return false;
         }
     }
     if let Some(map) = value.as_object() {
@@ -171,19 +171,19 @@ fn conforms(root: &Value, def: &Value, value: &Value) -> bool {
             return false;
         }
         for (k, v) in map {
-            if let Some(names) = def.get("propertyNames") {
-                if !conforms(root, names, &json!(k)) {
-                    return false;
-                }
+            if let Some(names) = def.get("propertyNames")
+                && !conforms(root, names, &json!(k))
+            {
+                return false;
             }
             if let Some(d) = def["properties"].get(k) {
                 if !conforms(root, d, v) {
                     return false;
                 }
-            } else if let Some(extra) = def.get("additionalProperties") {
-                if !conforms(root, extra, v) {
-                    return false;
-                }
+            } else if let Some(extra) = def.get("additionalProperties")
+                && !conforms(root, extra, v)
+            {
+                return false;
             }
         }
     }

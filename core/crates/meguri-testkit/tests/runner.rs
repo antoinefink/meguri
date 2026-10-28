@@ -1425,7 +1425,9 @@ fn prepared_batches_remain_pending_without_executing_any_prefix_or_mutating_inpu
         golden_for(root, &id, json!({"steps":[{},{}]}));
         let executor = PreflightOnly(MeguriExecutor::default());
         let before = executor.0.capabilities();
-        let report = Suite::open(root).unwrap().run(&[id.clone()], &executor, "prepared");
+        let report = Suite::open(root)
+            .unwrap()
+            .run(std::slice::from_ref(&id), &executor, "prepared");
         assert_eq!(report.outcomes.len(), 1);
         let outcome = &report.outcomes[0];
         assert_eq!(outcome.status, Status::Pending);

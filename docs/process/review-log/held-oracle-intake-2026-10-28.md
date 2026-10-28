@@ -150,3 +150,22 @@ This verifies the sidecar repair against the full workload with unchanged
 deadlines, sync flags and normal worker policy. It is not a full integration
 or milestone receipt. The original batch base, missing CloudKit workflow
 helpers, R1881 findings, six media-driver gaps and other open gates remain.
+
+## Mechanical lint closure after Cloud integration
+
+The all-target lint check reached style diagnostics in the prepared runner
+work. Filtered repairs `cleanroom/20261028T102936Z-86793` and
+`cleanroom/20261028T103153Z-88794` preserve capability branch priority, strict
+recursive schema validation, unknown-keyword rejection and every assertion.
+Independent delta reviews are clear. The single-input runner slice now uses
+`from_ref`; no fixture, bound, pending classification or expected output changes.
+
+`private/20261028T103048Z-87875` and
+`similarity/20261028T103049Z-88104` pass for the model delta.
+`private/20261028T103315Z-89662` and
+`similarity/20261028T103316Z-90092` pass for the test-helper delta.
+`core-test/20261028T103318Z-90400` passes all 38 affected tests, zero skipped.
+The initial final lint run (`103316Z-89888`) retained only a formatter failure;
+canonical formatting `103348Z-91076` resolves it. Full
+`core-lint/20261028T103402Z-91405` passes all four checks.
+This adds no adapter capability or unit acceptance.

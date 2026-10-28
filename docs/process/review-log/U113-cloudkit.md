@@ -618,3 +618,25 @@ five-file delta passes `private/20261028T102900Z-85987` and
 let-chain diagnostic in the earlier scenario prerequisite work
 (`meguri-testkit/src/scenario/model.rs`). That mechanical repair remains;
 this is not a passing full-lint receipt.
+
+### Verified stable-prebound checkpoint
+
+All required semantic R1 fixes are verified in their scoped tests, and R2 is
+clear. Mechanical deltas have separate clear equivalence reviews. Remaining
+runner lint repairs are recorded with the oracle intake work; they preserve
+all fixtures and assertions.
+
+- `core-test/20261028T102517Z-82336`: 48 selected Cloud tests pass, including
+  the review/save/reopen workflow, prior host contracts and new safety tests.
+- `core-test/20261028T102618Z-83002`: 13 engine observer tests pass.
+- `core-test/20261028T103318Z-90400`: 38 affected schema/runner tests pass.
+- `core-format/20261028T103348Z-91076`: pass.
+- `core-lint/20261028T103402Z-91405`: all four checks pass.
+
+These are focused receipts, not a full gate or a live Apple SDK result.
+The earlier full T0 receipt predates this workflow. Keep the original pending
+integration base `1416a520542a8c5daa38a23bfe398da704c3d6c9` and all existing
+integration failures. No Unit trailer, P24 item removal, milestone or release
+acceptance follows from this checkpoint. Publication/adoption, incoming
+reconciliation, K19 structure, nonempty media, Swift adapter and signed
+cross-device verification remain open.
