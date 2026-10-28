@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use super::*;
 
-pub(super) const SCHEMA: &str = "
+pub(super) const V1_SCHEMA: &str = "
 CREATE TABLE bindings (
     id BLOB PRIMARY KEY CHECK(length(id)=16),
     container TEXT NOT NULL,
@@ -30,18 +30,52 @@ CREATE TABLE inbox (
 );
 ";
 
+pub(super) const V2_SCHEMA: &str = "
+CREATE TABLE salvage_bindings (
+    id BLOB PRIMARY KEY CHECK(length(id)=16),
+    metadata TEXT NOT NULL CHECK(json_valid(metadata))
+);
+CREATE TABLE conflicts (
+    id BLOB PRIMARY KEY CHECK(length(id)=16),
+    binding BLOB NOT NULL CHECK(length(binding)=16),
+    content TEXT NOT NULL CHECK(json_valid(content))
+);
+CREATE INDEX conflicts_binding ON conflicts(binding);
+";
+
 /// A connection bound permanently to one container/environment. SQL access is
 /// private so callers cannot accidentally write another build's binding rows.
 pub struct TrackingStore {
     pub(super) connection: Connection,
     pub(super) scope: BuildScope,
+    pub(super) directory: std::path::PathBuf,
 }
 
 impl TrackingStore {
-    /// The caller serializes file/schema setup with other builds sharing the
-    /// directory. This function does not open or attach the collection file.
+    /// The caller serializes the entire probe/open against ALL writers and
+    /// checkpoints, including other stores/builds sharing the directory.
+    /// This function does not open or attach the collection file.
     pub fn open(directory: &Path, scope: BuildScope) -> Result<OpenOutcome, Error> {
         super::open::open(directory, scope)
+    }
+
+    /// V8.1 storage recovery under caller-held exclusive ownership against
+    /// ALL tracking opens/writes/checkpoints, across stores and builds. This
+    /// function does not acquire host ownership; production wiring is pending.
+    /// A failure returns no store, including after a partial salvage commit.
+    pub fn recover(
+        directory: &Path,
+        scope: BuildScope,
+        clock: &dyn Clock,
+        random: &dyn RandomSource,
+    ) -> Result<OpenOutcome, Error> {
+        super::recovery::recover(directory, scope, clock, random)
+    }
+
+    /// Permanent attention/debug filenames. Kept damaged sources are never
+    /// read again, removed by retention, or treated as recoverable work.
+    pub fn retained_damaged_sources(&self) -> Result<Vec<String>, Error> {
+        super::recovery::retained_sources(&self.directory)
     }
 
     pub fn scope(&self) -> &BuildScope {
@@ -57,7 +91,7 @@ impl TrackingStore {
         random: &dyn RandomSource,
     ) -> Result<Binding, Error> {
         if facts.state == BindingState::Isolated(IsolationReason::TrackingDamaged) {
-            // Only the future salvage transaction may create such a binding.
+            // Only the salvage transaction may create such an owner.
             return Err(Error::InvalidData);
         }
         let mut bits = [0; 16];
@@ -214,20 +248,78 @@ impl TrackingStore {
         Ok(entries)
     }
 
+    /// Storage-only K16 made-once insertion, scoped to an ordinary binding of
+    /// this build. Digests are caller-classified inputs, not envelope checks.
+    pub fn store_conflict(&mut self, binding: BindingId, copy: &ConflictCopy) -> Result<CopyId, Error> {
+        let owner = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        if owner.facts.state == BindingState::Isolated(IsolationReason::TrackingDamaged) {
+            return Err(Error::IsolatedBinding);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut statement = transaction.prepare("SELECT content FROM conflicts WHERE binding=?1")?;
+        let mut rows = statement.query([binding.0.as_slice()])?;
+        while let Some(row) = rows.next()? {
+            let prior: ConflictCopy = decode(&row.get::<_, String>(0)?)?;
+            if prior.kind == copy.kind
+                && prior.key == copy.key
+                && prior.reason == copy.reason
+                && prior.losing_payload_digest == copy.losing_payload_digest
+                && prior.winning_payload_digest == copy.winning_payload_digest
+            {
+                return Ok(prior.id);
+            }
+        }
+        drop(rows);
+        drop(statement);
+        transaction.execute(
+            "INSERT INTO conflicts(id,binding,content) VALUES (?1,?2,?3)",
+            params![copy.id.0.as_slice(), binding.0.as_slice(), encode(copy)?],
+        )?;
+        transaction.commit()?;
+        Ok(copy.id)
+    }
+
+    /// Local preservation listing across all builds, including resolved copies.
+    /// This grants no ordinary writes to other builds or salvage owners.
+    pub fn conflict_copies(&self) -> Result<Vec<StoredConflict>, Error> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT binding,content FROM conflicts ORDER BY id")?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?)))?;
+        rows.map(|row| {
+            let (binding, content) = row?;
+            Ok(StoredConflict {
+                binding: binding_id(binding)?,
+                copy: decode(&content)?,
+            })
+        })
+        .collect()
+    }
+
+    pub fn salvage_bindings(&self) -> Result<Vec<SalvageBinding>, Error> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT metadata FROM salvage_bindings ORDER BY id")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| decode(&row?)).collect()
+    }
+
     fn require_binding(&self, binding: BindingId) -> Result<(), Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound).map(|_| ())
     }
 }
 
-fn binding_id(bytes: Vec<u8>) -> Result<BindingId, Error> {
+pub(super) fn binding_id(bytes: Vec<u8>) -> Result<BindingId, Error> {
     Ok(BindingId(bytes.try_into().map_err(|_| Error::InvalidData)?))
 }
 
-fn encode(value: &impl serde::Serialize) -> Result<String, Error> {
+pub(super) fn encode(value: &impl serde::Serialize) -> Result<String, Error> {
     serde_json::to_string(value).map_err(|_| Error::InvalidData)
 }
 
-fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, Error> {
+pub(super) fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, Error> {
     serde_json::from_str(text).map_err(|_| Error::InvalidData)
 }
 
@@ -244,7 +336,7 @@ fn validate_entry(entry: &InboxEntry) -> Result<(), Error> {
     if valid { Ok(()) } else { Err(Error::InvalidData) }
 }
 
-pub(super) fn validate(connection: &Connection) -> Result<(), Error> {
+pub(super) fn validate(connection: &Connection, version: i64) -> Result<(), Error> {
     let mut bindings =
         connection.prepare("SELECT id,container,environment,created_at_ms,facts,active,salvage FROM bindings")?;
     let mut rows = bindings.query([])?;
@@ -272,6 +364,33 @@ pub(super) fn validate(connection: &Connection) -> Result<(), Error> {
         binding_id(row.get(0)?)?;
         let _: Vec<u8> = row.get(1)?;
         let _: i64 = row.get(2)?;
+    }
+    if version >= 2 {
+        let mut statement = connection.prepare("SELECT id,metadata FROM salvage_bindings")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let id = binding_id(row.get(0)?)?;
+            let metadata: SalvageBinding = decode(&row.get::<_, String>(1)?)?;
+            if metadata.id != id || !super::recovery::is_source_name(&metadata.source) {
+                return Err(Error::InvalidData);
+            }
+        }
+        let mut statement = connection.prepare("SELECT id,binding,content FROM conflicts")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: Vec<u8> = row.get(0)?;
+            let binding = binding_id(row.get(1)?)?;
+            let copy: ConflictCopy = decode(&row.get::<_, String>(2)?)?;
+            if id != copy.id.0 {
+                return Err(Error::InvalidData);
+            }
+            let owners: i64 = connection.query_row(
+                "SELECT (SELECT count(*) FROM bindings WHERE id=?1) + (SELECT count(*) FROM salvage_bindings WHERE id=?1)",
+                [binding.0.as_slice()], |row| row.get(0))?;
+            if owners != 1 {
+                return Err(Error::InvalidData);
+            }
+        }
     }
     let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
     if foreign_keys.query([])?.next()?.is_some() {

@@ -5,9 +5,9 @@ use rusqlite::{Connection, OpenFlags};
 use super::{BuildScope, Error, TrackingStore, store};
 
 pub const TRACKING_FILE: &str = "meguri-cloud.db";
-pub(super) const SCHEMA_VERSION: i64 = 1;
+pub(super) const SCHEMA_VERSION: i64 = 2;
 
-/// Damaged files are preserved for the next slice's crash-safe salvage.
+/// Plain open refuses damage; explicit recovery must finish before use.
 /// Missing creates an empty store, without inferring any server facts.
 pub enum OpenOutcome {
     Missing(TrackingStore),
@@ -16,13 +16,18 @@ pub enum OpenOutcome {
     NewerSchema { found: i64 },
 }
 
-enum Probe {
+pub(super) enum Probe {
     Supported,
     Damaged,
     Newer(i64),
 }
 
 pub(super) fn open(directory: &Path, scope: BuildScope) -> Result<OpenOutcome, Error> {
+    super::recovery::require_settled(directory)?;
+    open_current(directory, scope)
+}
+
+pub(super) fn open_current(directory: &Path, scope: BuildScope) -> Result<OpenOutcome, Error> {
     let path = directory.join(TRACKING_FILE);
     let exists = match std::fs::metadata(&path) {
         Ok(metadata) if metadata.is_file() => true,
@@ -52,11 +57,25 @@ pub(super) fn open(directory: &Path, scope: BuildScope) -> Result<OpenOutcome, E
     connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
     if !exists {
         let transaction = connection.transaction()?;
-        transaction.execute_batch(store::SCHEMA)?;
+        transaction.execute_batch(store::V1_SCHEMA)?;
+        transaction.execute_batch(store::V2_SCHEMA)?;
         transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         transaction.commit()?;
     }
-    let store = TrackingStore { connection, scope };
+    if exists {
+        let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version == 1 {
+            let transaction = connection.transaction()?;
+            transaction.execute_batch(store::V2_SCHEMA)?;
+            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            transaction.commit()?;
+        }
+    }
+    let store = TrackingStore {
+        connection,
+        scope,
+        directory: directory.to_owned(),
+    };
     Ok(if exists {
         OpenOutcome::Opened(store)
     } else {
@@ -64,13 +83,13 @@ pub(super) fn open(directory: &Path, scope: BuildScope) -> Result<OpenOutcome, E
     })
 }
 
-fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+pub(super) fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(suffix);
     PathBuf::from(name)
 }
 
-fn probe(path: &Path) -> Result<Probe, Error> {
+pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
     let private = tempfile::tempdir()?;
     let copy = private.path().join(TRACKING_FILE);
     std::fs::copy(path, &copy)?;
@@ -87,14 +106,14 @@ fn probe(path: &Path) -> Result<Probe, Error> {
         if version > SCHEMA_VERSION {
             return Ok(Probe::Newer(version));
         }
-        if version != SCHEMA_VERSION {
+        if !(1..=SCHEMA_VERSION).contains(&version) {
             return Ok(Probe::Damaged);
         }
         let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         if integrity != "ok" {
             return Ok(Probe::Damaged);
         }
-        store::validate(&connection)?;
+        store::validate(&connection, version)?;
         Ok(Probe::Supported)
     })();
     match checked {

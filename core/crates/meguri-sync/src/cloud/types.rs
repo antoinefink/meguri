@@ -186,3 +186,74 @@ pub struct StoredInboxEntry {
     pub id: i64,
     pub entry: InboxEntry,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyId(pub [u8; 16]);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayloadDigest(pub [u8; 32]);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConflictKind {
+    Note,
+    Card,
+    Deck,
+    Preset,
+    Notetype,
+    MediaName,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConflictReason {
+    FieldConflict,
+    EditVsDelete,
+    BlobConflict,
+    NotetypeConflict,
+    MissingNotetype,
+    StructureRollback,
+    UnmappedStructure,
+    MediaContent,
+}
+
+/// Opaque storage input. The caller supplies both payload digests; this type
+/// does not decode an envelope or assert semantic CloudKit record validation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConflictCopy {
+    pub id: CopyId,
+    pub kind: ConflictKind,
+    pub key: OpaqueBytes,
+    pub reason: ConflictReason,
+    pub losing_envelope: OpaqueBytes,
+    pub losing_payload_digest: PayloadDigest,
+    pub winning_payload_digest: PayloadDigest,
+    pub field_names: Option<Vec<String>>,
+    pub template_names: Option<Vec<String>>,
+    pub note_deck: Option<i64>,
+    pub staged_path: Option<String>,
+    pub created_at_ms: i64,
+    pub resolved_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredConflict {
+    pub binding: BindingId,
+    pub copy: ConflictCopy,
+}
+
+/// A destination-only, permanently non-resumable owner. Kept separately from
+/// ordinary bindings so absent provenance cannot become a usable identity.
+/// State is always isolated/tracking_damaged; there is no transition API.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SalvageBinding {
+    pub id: BindingId,
+    pub source: String,
+    pub original_binding: Option<BindingId>,
+    pub created_at_ms: i64,
+    pub original_created_at_ms: Option<i64>,
+    pub container: Option<ContainerId>,
+    pub environment: Option<Environment>,
+    pub account: Option<OpaqueBytes>,
+    pub epoch: Option<EpochId>,
+    pub record_key: Option<RecordKey>,
+    pub publication: Option<PublicationId>,
+}

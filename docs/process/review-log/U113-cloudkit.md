@@ -122,3 +122,35 @@ Both small changes are independently clear. `core-lint/20261028T015244Z-82045`
 passes all four checks. `similarity/20261028T015041Z-80553` clears the final
 production file. No runtime operation changed; the 130-test receipt is retained.
 The complete U113, integration and release checks remain open.
+
+## V8 tracking recovery dependency
+
+Starting commit: `bac351fd`; recorded before work in
+`build/unit-intake/U113-cloudkit/salvage-start.json`.
+The reviewed spec correction is `e8ef12d0`.
+
+Filtered author `20261028T015847Z-84709` adds version 2 migration, conflict
+storage and explicit recovery. A durable move journal precedes either file
+move. Recovery checks main/WAL identity, repeats sync barriers, commits copied
+rows before source finalization and keeps unreadable sources. Copies retain
+their ids and known old identity fields; separate salvage owners never resume.
+No acknowledgement, engine cursor or pending work is copied.
+
+Source review 1 is clear. The first focused run,
+`core-test/20261028T022018Z-93770`, passed 65 of 66 cases. Its corruption fixture
+used a 17-byte id for a 16-byte key and changed zero rows. Filtered repair
+`20261028T022543Z-96657` uses a bound id, checks one affected row and reads back
+the bad content. The expected recovery and retention checks remain unchanged.
+Review 2 is clear. A flagged comment was removed; no guard exception.
+
+- `core-test/20261028T022815Z-98533`: 66 passed, zero skipped. Includes actual
+  SIGABRT at all five V8 boundaries with a real WAL.
+- `private/20261028T022817Z-98793`: pass.
+- `core-lint/20261028T022905Z-99626`: pass.
+- `similarity/20261028T022903Z-99379`: pass.
+
+Native verification is shared with the pending WAL-reader slice. Exhaustive
+F3 sync-failure/power-loss runs and U117/U250 evidence remain open; file-layout
+simulations do not supply that proof. Production exclusive ownership across
+all builds remains unwired. Conflict-list and bulk-recovery memory checks also
+remain part of full integration. No Unit or release acceptance is claimed.

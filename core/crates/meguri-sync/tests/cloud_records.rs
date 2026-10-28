@@ -246,3 +246,55 @@ fn without_active_selection_uses_newest_and_never_a_salvage_binding() {
         Err(Error::InvalidData)
     );
 }
+
+fn conflict(id: u8) -> ConflictCopy {
+    ConflictCopy {
+        id: CopyId([id; 16]),
+        kind: ConflictKind::Note,
+        key: OpaqueBytes(vec![0, 255, id]),
+        reason: ConflictReason::FieldConflict,
+        losing_envelope: OpaqueBytes(b"opaque storage input; not a validated record".to_vec()),
+        losing_payload_digest: PayloadDigest([id; 32]),
+        winning_payload_digest: PayloadDigest([91; 32]),
+        field_names: Some(vec!["Front".into(), "Back".into()]),
+        template_names: Some(vec!["Forward".into(), "Reverse".into()]),
+        note_deck: Some(42),
+        staged_path: Some("cloud-stage/retained-copy".into()),
+        created_at_ms: -123,
+        resolved_at_ms: Some(456),
+    }
+}
+
+#[test]
+fn typed_conflict_storage_preserves_all_copy_fields_and_made_once_resolved_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let build = scope("test.container", Environment::Development);
+    let random = SeededRandom::new(1234);
+    let mut store = open(directory.path(), build.clone());
+    let binding = store
+        .create_binding(facts(BindingState::Active), &clock(1), &random)
+        .unwrap();
+    let copy = conflict(1);
+    assert_eq!(store.store_conflict(binding.id, &copy).unwrap(), copy.id);
+    let mut repeated = copy.clone();
+    repeated.id = CopyId([2; 16]);
+    repeated.field_names = None;
+    repeated.resolved_at_ms = None;
+    assert_eq!(store.store_conflict(binding.id, &repeated).unwrap(), copy.id);
+    drop(store);
+    let mut foreign = open(directory.path(), scope("other.container", Environment::Production));
+    assert_eq!(
+        foreign.store_conflict(binding.id, &conflict(3)),
+        Err(Error::BindingNotFound)
+    );
+    drop(foreign);
+    let store = open(directory.path(), build);
+    assert_eq!(
+        store.conflict_copies().unwrap(),
+        vec![StoredConflict {
+            binding: binding.id,
+            copy
+        }]
+    );
+    assert!(store.salvage_bindings().unwrap().is_empty());
+}

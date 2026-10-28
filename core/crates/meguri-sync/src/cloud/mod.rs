@@ -2,10 +2,11 @@
 //!
 //! This is a storage foundation, with no provider or account policy. Callers
 //! supply already classified inbox facts. Collection writes, validation/apply,
-//! account verification, engine-instance guards and recovery belong to later
-//! slices. In particular, selecting a stored binding makes no readiness claim.
+//! account verification, engine-instance guards and recovery editing belong
+//! to later slices. Storage-only damaged-tracking salvage is implemented here. In particular, selecting a stored binding makes no readiness claim.
 
 mod open;
+mod recovery;
 mod store;
 mod types;
 
@@ -23,6 +24,8 @@ pub enum Error {
     InvalidData,
     BindingNotFound,
     IsolatedBinding,
+    RecoveryRequired,
+    RecoveryRefused,
 }
 
 impl std::fmt::Display for Error {
@@ -35,6 +38,8 @@ impl std::fmt::Display for Error {
             Self::InvalidData => "invalid cloud tracking data",
             Self::BindingNotFound => "cloud binding not found in this build",
             Self::IsolatedBinding => "cloud binding is isolated",
+            Self::RecoveryRequired => "cloud tracking recovery must finish before opening",
+            Self::RecoveryRefused => "cloud tracking recovery evidence is inconsistent",
         })
     }
 }
@@ -52,6 +57,15 @@ impl From<rusqlite::Error> for Error {
         match error.sqlite_error_code() {
             Some(rusqlite::ErrorCode::ConstraintViolation) => Self::Constraint,
             _ => Self::Database,
+        }
+    }
+}
+
+impl From<meguri_storage::StorageError> for Error {
+    fn from(error: meguri_storage::StorageError) -> Self {
+        match error {
+            meguri_storage::StorageError::DestinationExists => Self::RecoveryRefused,
+            _ => Self::Io(std::io::ErrorKind::Other),
         }
     }
 }
