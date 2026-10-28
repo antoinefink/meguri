@@ -929,3 +929,58 @@ fn callback_reads_real_note_row_at_each_commit_while_owned_payload_keeps_only_it
     );
     assert!(matches!(before_close.after, RowAfter::NoteDigest(_)));
 }
+
+#[test]
+fn borrowed_writer_maximum_includes_prior_unjournaled_history_and_signed_raw_ids() {
+    use meguri_engine::ObserverRows;
+    use meguri_model::ids::CardId;
+    struct Maximum(Mutex<Vec<(i64, i64, i64)>>);
+    impl ChangeObserver for Maximum {
+        fn name(&self) -> &str {
+            "borrowed-history-maximum"
+        }
+        fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+            if commit.changes.config_keys.iter().any(|k| k.key == "read-history") {
+                assert_eq!(commit.payload.rows(Table::Revlog).count(), 0);
+                self.0.lock().unwrap().push((
+                    rows.max_revlog_id(CardId(41))?,
+                    rows.max_revlog_id(CardId(42))?,
+                    rows.max_revlog_id(CardId(43))?,
+                ));
+            }
+            Ok(())
+        }
+    }
+    let observer = Arc::new(Maximum(Mutex::new(Vec::new())));
+    let h = Harness::open_with(Ports::new().observer(observer.clone()));
+    h.collection
+        .run(
+            OpSpec::named("raw history", OpSource::SyncIncoming).stamp(StampMode::Raw),
+            |ctx| {
+                for (card, id, kind) in [
+                    (41, 1_735_689_600_123, 3),
+                    (41, 1_735_689_600_999, 5),
+                    (42, i64::MIN, 4),
+                    (42, -1, 5),
+                ] {
+                    let mut row = revlog(CardId(card)).to_cells();
+                    row[0] = Cell::Integer(id);
+                    row[3] = Cell::Integer(0);
+                    row[8] = Cell::Integer(kind);
+                    ctx.scope().restore(Table::Revlog, &RowKey::Id(id), Some(&row))?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.collection
+        .run(
+            OpSpec::named("read prior raw history", OpSource::UserNonUndoable),
+            |ctx| {
+                ctx.scope().set_config("read-history", &ConfigValue::Integer(1))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(*observer.0.lock().unwrap(), [(1_735_689_600_999, -1, 0)]);
+}

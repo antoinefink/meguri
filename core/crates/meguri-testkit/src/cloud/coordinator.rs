@@ -80,7 +80,8 @@ impl Coordinator {
             self.scanned = true;
         }
         if barrier == Barrier::BeforeRootConfirmation && !self.started {
-            self.rig.get_mut().driver.call::<()>(Input::StartSDK)?;
+            let instance = self.rig.get_mut().instance();
+            self.rig.get_mut().driver.call::<()>(Input::StartSDK(instance))?;
             self.started = true;
         }
         self.refresh()

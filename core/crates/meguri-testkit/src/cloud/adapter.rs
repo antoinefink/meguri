@@ -18,6 +18,7 @@ pub struct BatchAttempt {
 }
 #[derive(Clone, Debug)]
 pub struct ResponseBatch {
+    pub instance: String,
     pub mutations: Vec<Mutation>,
     pub response: Response,
 }
@@ -115,12 +116,14 @@ impl SDKRig {
         Ok(facts.into_iter().filter(|e| e.mark.is_some()).map(|e| e.name).collect())
     }
     pub fn core_pending_transition(&mut self, kind: UpdateKind, snapshot: PendingSnapshot) -> Result<PendingUpdate> {
-        let u = self.driver.call(Input::Transition(kind, snapshot))?;
+        let u = self
+            .driver
+            .call(Input::Transition(self.instance.clone(), kind, snapshot))?;
         self.refresh()?;
         Ok(u)
     }
     fn updates(&mut self) -> Result<()> {
-        let updates: Vec<PendingUpdate> = self.driver.call(Input::Updates)?;
+        let updates: Vec<PendingUpdate> = self.driver.call(Input::Updates(self.instance.clone()))?;
         for u in updates {
             for name in &u.removes {
                 self.pending.remove(name);
@@ -131,7 +134,8 @@ impl SDKRig {
                     added.push(name.clone());
                 }
             }
-            self.driver.call::<()>(Input::AppliedUpdate(u.id, added))?;
+            self.driver
+                .call::<()>(Input::AppliedUpdate(self.instance.clone(), u.id, added))?;
             self.applied.push(u);
         }
         self.refresh()
@@ -213,7 +217,8 @@ impl SDKRig {
                     }
                 }
                 if !entities.is_empty() {
-                    self.driver.call::<()>(Input::Fetched(entities))?;
+                    self.driver
+                        .call::<()>(Input::Fetched(self.instance.clone(), entities))?;
                 }
                 if !page.more {
                     if root_zone {
@@ -230,7 +235,8 @@ impl SDKRig {
                 token = Some(page.token);
             }
         }
-        self.driver.call::<()>(Input::FetchCompleted(phase, seen))?;
+        self.driver
+            .call::<()>(Input::FetchCompleted(self.instance.clone(), phase, seen))?;
         self.refresh()
     }
     pub fn reconcile_and_confirm_root(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
@@ -239,7 +245,7 @@ impl SDKRig {
         }
         self.driver.call::<()>(Input::Identity(None))?;
         self.driver.call::<()>(Input::Reconcile)?;
-        self.driver.call::<()>(Input::StartSDK)?;
+        self.driver.call::<()>(Input::StartSDK(self.instance.clone()))?;
         self.qualify_no_state(service, steps - 3)?;
         let due: bool = self.driver.call(Input::ReadDue)?;
         if !due {
@@ -284,7 +290,7 @@ impl SDKRig {
         self.root.clone().ok_or_else(failure)
     }
     fn build(&mut self) -> Result<(BuiltBatch, Vec<Mutation>)> {
-        self.driver.call::<()>(Input::Poll)?;
+        self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
         self.updates()?;
         let requested = self
             .pending
@@ -292,7 +298,7 @@ impl SDKRig {
             .filter(|(_, v)| **v == PendingChange::Save)
             .map(|(n, _)| n.clone())
             .collect();
-        let b: BuiltBatch = self.driver.call(Input::Build(requested))?;
+        let b: BuiltBatch = self.driver.call(Input::Build(self.instance.clone(), requested))?;
         let mutations = b
             .saves
             .iter()
@@ -314,7 +320,11 @@ impl SDKRig {
                 changes: mutations.clone(),
             },
         )?;
-        let batch = ResponseBatch { mutations, response };
+        let batch = ResponseBatch {
+            instance: self.instance.clone(),
+            mutations,
+            response,
+        };
         self.sent.insert(batch.response.request_id, batch.clone());
         self.waiting = Some(batch.response.request_id);
         Ok(batch)
@@ -347,11 +357,11 @@ impl SDKRig {
         if mutations.is_empty() {
             return Err(failure());
         }
-        let call: Option<SendCall> = self.driver.call(Input::StartCall)?;
+        let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
         let call = call.ok_or_else(failure)?;
         let b = self.send(service, mutations)?;
         self.driver
-            .call::<()>(Input::RecordCall(call.id, b.response.request_id))?;
+            .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.response.request_id))?;
         self.calls.insert(b.response.request_id, call.id);
         self.refresh()?;
         Ok(b)
@@ -371,7 +381,7 @@ impl SDKRig {
                 continue;
             }
             self.fetch_exchange(service, &mut remaining)?;
-            self.driver.call::<()>(Input::Poll)?;
+            self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
             self.updates()?;
             let wants_send: bool = self.driver.call(Input::WantsSend)?;
             if !wants_send {
@@ -380,25 +390,26 @@ impl SDKRig {
             }
             let (_, mutations) = self.build()?;
             if mutations.is_empty() {
-                self.driver.call::<()>(Input::SendsFinished)?;
+                self.driver.call::<()>(Input::SendsFinished(self.instance.clone()))?;
                 self.fetch_exchange(service, &mut remaining)?;
                 self.refresh()?;
                 return Ok(());
             }
-            let call: Option<SendCall> = self.driver.call(Input::StartCall)?;
+            let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
             let Some(call) = call else {
                 self.refresh()?;
                 return Ok(());
             };
             let b = self.send(service, mutations)?;
             self.driver
-                .call::<()>(Input::RecordCall(call.id, b.response.request_id))?;
+                .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.response.request_id))?;
             self.calls.insert(b.response.request_id, call.id);
         }
         Err(failure())
     }
     pub fn sdk_drop_nonretry_failures(&mut self, response: &Response) -> Result<()> {
         let b = self.sent.get(&response.request_id).ok_or_else(failure)?;
+        self.driver.call::<()>(Input::Validate(b.instance.clone()))?;
         match &response.result {
             Err(_) => {
                 for m in &b.mutations {
@@ -429,7 +440,8 @@ impl SDKRig {
         }
         let batch = self.sent.get(&response.request_id).ok_or_else(failure)?.clone();
         self.sdk_drop_nonretry_failures(response)?;
-        self.driver.call::<()>(Input::EnterHandler(response.request_id))?;
+        self.driver
+            .call::<()>(Input::EnterHandler(batch.instance.clone(), response.request_id))?;
         self.handler = Some(response.request_id);
         let mut saved = Vec::new();
         let mut failed = Vec::new();
@@ -467,8 +479,13 @@ impl SDKRig {
             }
             _ => return Err(failure()),
         }
-        self.driver
-            .call::<()>(Input::Sent(response.request_id, saved, failed, batch.mutations.len()))?;
+        self.driver.call::<()>(Input::Sent(
+            batch.instance.clone(),
+            response.request_id,
+            saved,
+            failed,
+            batch.mutations.len(),
+        ))?;
         self.refresh()?;
         Ok(())
     }
@@ -476,14 +493,21 @@ impl SDKRig {
         if self.handler.is_some() {
             return Err(failure());
         }
-        self.driver.call::<()>(Input::EnterHandler(0))?;
-        self.driver.call::<()>(Input::Sent(0, Vec::new(), Vec::new(), 0))?;
+        self.driver.call::<()>(Input::EnterHandler(self.instance.clone(), 0))?;
+        self.driver
+            .call::<()>(Input::Sent(self.instance.clone(), 0, Vec::new(), Vec::new(), 0))?;
         self.handler = Some(0);
         self.refresh()
     }
     pub fn return_sent_handler(&mut self) -> Result<()> {
-        let id = self.handler.take().ok_or_else(failure)?;
-        let returned: u64 = self.driver.call(Input::ReturnHandler)?;
+        let id = self.handler.ok_or_else(failure)?;
+        let instance = self
+            .sent
+            .get(&id)
+            .map(|b| b.instance.clone())
+            .unwrap_or_else(|| self.instance.clone());
+        let returned: u64 = self.driver.call(Input::ReturnHandler(instance.clone()))?;
+        self.handler = None;
         if id != returned {
             return Err(failure());
         }
@@ -497,19 +521,20 @@ impl SDKRig {
                     }
                 }
             }
-            self.driver.call::<()>(Input::SavedRemoved(id, removed))?;
+            self.driver
+                .call::<()>(Input::SavedRemoved(instance.clone(), id, removed))?;
         }
         if self.waiting == Some(id) {
             self.waiting = None;
         }
         self.updates()?;
         if let Some(call) = self.calls.remove(&id) {
-            self.driver.call::<()>(Input::FinishCall(call))?;
+            self.driver.call::<()>(Input::FinishCall(instance, call))?;
         }
         self.refresh()
     }
     pub fn sync_now(&mut self) -> Result<u64> {
-        let id = self.driver.call(Input::SyncNow)?;
+        let id = self.driver.call(Input::SyncNow(self.instance.clone()))?;
         self.updates()?;
         Ok(id)
     }

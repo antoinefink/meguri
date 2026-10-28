@@ -16,9 +16,9 @@ impl Runtime {
     pub fn trace(&self) -> Vec<TraceEvent> {
         self.state().trace.clone()
     }
-    pub fn start_sdk_instance(&self) -> Result<(), RuntimeError> {
-        let instance = self.instance()?;
+    pub fn start_sdk_instance(&self, instance: &str) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if !s.whole_complete || s.scan_required || !s.bound.as_ref().is_some_and(|b| b.verified && b.usable) {
             return Err(RuntimeError::IdentityUnverified);
         }
@@ -36,19 +36,46 @@ impl Runtime {
         if !s
             .trace
             .iter()
-            .any(|e| matches!(e,TraceEvent::EngineStarted{instance:i,..} if *i==instance))
+            .any(|e| matches!(e,TraceEvent::EngineStarted{instance:i,..} if i==instance))
         {
-            s.trace.push(TraceEvent::EngineStarted { instance, account });
+            s.trace.push(TraceEvent::EngineStarted {
+                instance: instance.into(),
+                account,
+            });
         }
         Ok(())
     }
-    pub fn instance(&self) -> Result<String, RuntimeError> {
-        let s = self.state();
+    fn instance_locked(s: &State) -> Result<String, RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        Ok(format!("{}-{}-{}", b.open_counter, s.incarnation, b.file.inode))
+        let binding = b.binding.id.0.iter().map(|v| format!("{v:02x}")).collect::<String>();
+        Ok(format!(
+            "{binding}-{}-{}-{}",
+            b.open_counter, s.incarnation, b.file.inode
+        ))
     }
-    pub fn set_automatic(&self, on: bool) {
-        self.state().actions.automatic = on;
+    pub fn instance(&self) -> Result<String, RuntimeError> {
+        Self::instance_locked(&self.state())
+    }
+    fn caller_locked(s: &State, instance: &str) -> Result<(), RuntimeError> {
+        if Self::instance_locked(s)? != instance {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if !b.usable || !b.verified || b.binding.facts.state != BindingState::Active {
+            return Err(RuntimeError::IdentityUnverified);
+        }
+        Ok(())
+    }
+    /// SDKs call this before changing their own pending state for a delivery.
+    /// Every mutating core API repeats the check under its commit's state lock.
+    pub fn validate_caller(&self, instance: &str) -> Result<(), RuntimeError> {
+        Self::caller_locked(&self.state(), instance)
+    }
+    pub fn set_automatic(&self, instance: &str, on: bool) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
+        s.actions.automatic = on;
+        Ok(())
     }
     fn active_review(&self) -> Option<u64> {
         self.review
@@ -59,9 +86,12 @@ impl Runtime {
             .map(|s| s.0)
     }
     /// Called off the writer after real ReviewService inputs complete.
-    pub fn poll_review(&self) -> Result<(), RuntimeError> {
+    pub fn poll_review(&self, instance: &str) -> Result<(), RuntimeError> {
         let active = self.active_review();
         let mut s = self.state();
+        if Self::caller_locked(&s, instance).is_err() {
+            return Ok(());
+        }
         s.review_blocked = active.is_some();
         if let Some(old) = s.last_session {
             if active != Some(old) {
@@ -81,7 +111,7 @@ impl Runtime {
         let s = self.state();
         Self::gate_locked(&s)
     }
-    fn gate_locked(s: &State) -> Result<(), RuntimeError> {
+    pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if !b.usable || !b.verified {
             return Err(RuntimeError::IdentityUnverified);
@@ -124,29 +154,7 @@ impl Runtime {
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let store = s.store.as_ref().ok_or(Error::Database)?;
-        let mut names = BTreeMap::new();
-        for kind in [
-            codec::Kind::Note,
-            codec::Kind::Card,
-            codec::Kind::Revlog,
-            codec::Kind::Deck,
-            codec::Kind::Config,
-        ] {
-            let mut after = None;
-            loop {
-                let page = store.entity_page(b.binding.id, kind, after.as_deref())?;
-                if page.is_empty() {
-                    break;
-                }
-                for e in page {
-                    after = Some(e.key.clone());
-                    if e.mark.is_some() {
-                        names.insert(e.name, PendingChange::Save);
-                    }
-                }
-            }
-        }
-        Ok(PendingSnapshot(names))
+        Ok(store.dirty_names(b.binding.id)?)
     }
     pub(super) fn emit_pending_locked(
         &self,
@@ -158,14 +166,25 @@ impl Runtime {
         let snapshot = with_tracking_access(|| Self::sendables_locked(s))?;
         Ok(s.actions.update(kind, snapshot, force))
     }
-    pub fn pending_transition(&self, kind: UpdateKind, snapshot: PendingSnapshot) -> PendingUpdate {
-        self.state().actions.update(kind, snapshot, BTreeSet::new())
+    pub fn pending_transition(
+        &self,
+        instance: &str,
+        kind: UpdateKind,
+        snapshot: PendingSnapshot,
+    ) -> Result<PendingUpdate, RuntimeError> {
+        let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
+        Ok(s.actions.update(kind, snapshot, BTreeSet::new()))
     }
     pub fn tracking_sendables(&self) -> BTreeMap<String, PendingChange> {
         self.state().actions.desired.clone()
     }
-    pub fn take_pending_updates(&self) -> Vec<PendingUpdate> {
-        self.state().actions.take()
+    pub fn take_pending_updates(&self, instance: &str) -> Result<Vec<PendingUpdate>, RuntimeError> {
+        let mut s = self.state();
+        if Self::caller_locked(&s, instance).is_err() {
+            return Ok(Vec::new());
+        }
+        Ok(s.actions.take())
     }
     pub fn observations(&self) -> Vec<Observation> {
         self.state().actions.observations.clone()
@@ -173,12 +192,14 @@ impl Runtime {
     pub fn emitted_update_ids(&self) -> Vec<u64> {
         self.state().actions.emitted.clone()
     }
-    pub fn sdk_update_applied(&self, id: u64, added: &[String]) -> Result<(), RuntimeError> {
+    pub fn sdk_update_applied(&self, instance: &str, id: u64, added: &[String]) -> Result<(), RuntimeError> {
         let mut s = self.state();
-        let action = s.actions.handed_updates.remove(&id).ok_or(Error::InvalidData)?;
+        Self::caller_locked(&s, instance)?;
+        let action = s.actions.handed_updates.get(&id).ok_or(Error::InvalidData)?;
         if added.iter().any(|n| !action.adds.contains_key(n)) {
             return Err(Error::InvalidData.into());
         }
+        s.actions.handed_updates.remove(&id);
         for name in added {
             s.actions.observations.push(Observation::PendingAdded {
                 name: name.clone(),
@@ -187,15 +208,17 @@ impl Runtime {
         }
         Ok(())
     }
-    pub fn sdk_saved_removed(&self, request_id: u64, names: &[String]) -> Result<(), RuntimeError> {
+    pub fn sdk_saved_removed(&self, instance: &str, request_id: u64, names: &[String]) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if s.actions.handler.is_some() {
             return Err(Error::InvalidData.into());
         }
-        let expected = s.actions.saved_callbacks.remove(&request_id).unwrap_or_default();
+        let expected = s.actions.saved_callbacks.get(&request_id).cloned().unwrap_or_default();
         if names.iter().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(Error::InvalidData.into());
         }
+        s.actions.saved_callbacks.remove(&request_id);
         for name in names {
             s.actions.observations.push(Observation::SavedPendingRemoved {
                 name: name.clone(),
@@ -221,11 +244,15 @@ impl Runtime {
             Ok(ack.epoch)
         })
     }
-    pub fn enter_sent_handler(&self, request_id: u64) -> Result<(), RuntimeError> {
-        Ok(self.state().actions.begin_handler(request_id)?)
+    pub fn enter_sent_handler(&self, instance: &str, request_id: u64) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
+        Ok(s.actions.begin_handler(request_id)?)
     }
-    pub fn return_sent_handler(&self) -> Result<u64, RuntimeError> {
-        Ok(self.state().actions.end_handler()?)
+    pub fn return_sent_handler(&self, instance: &str) -> Result<u64, RuntimeError> {
+        let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
+        Ok(s.actions.end_handler()?)
     }
     pub fn reconcile_binding(
         &self,
@@ -233,16 +260,19 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         timeout: Duration,
     ) -> Result<NoteScanProof, RuntimeError> {
+        #[cfg(feature = "test-hooks")]
+        let mut scan_pause = self.scan_pause.lock().unwrap_or_else(PoisonError::into_inner).take();
         let guard = {
             let mut s = self.state();
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             if !b.usable || !b.verified {
                 return Err(RuntimeError::IdentityUnverified);
             }
-            if s.scan_running || s.tracking_stopped {
+            if s.scan_running || s.invalidation_exhausted {
                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
             }
             let g = ScanGuard {
+                invalidation: s.invalidation,
                 binding: b.binding.id,
                 open: b.open_counter,
                 generation: b.evidence.generation,
@@ -267,6 +297,8 @@ impl Runtime {
                 }
                 Ok(())
             })?;
+            #[cfg(feature = "test-hooks")]
+            Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeSnapshot)?;
             let lease = collection.reader(ReaderRole::Cloud)?;
             let snapshot = lease.snapshot()?;
             let receipt = match collection.wait_wal_covered(snapshot.wal_identity(), snapshot.seq(), timeout)? {
@@ -403,6 +435,8 @@ impl Runtime {
             if feed.status != end_feed {
                 return Err(RuntimeError::StaleIncarnation);
             }
+            #[cfg(feature = "test-hooks")]
+            Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeMerge)?;
             let col = snapshot.col()?;
             let proof = NoteScanProof {
                 snapshot_seq: snapshot.seq(),
@@ -453,6 +487,11 @@ impl Runtime {
                 s.note_scan = Some(proof.clone());
                 s.whole_complete = true;
                 s.scan_required = false;
+                s.tracking_stopped = false;
+                if Self::gate_locked(s).is_ok() {
+                    let snapshot = Self::sendables_locked(s)?;
+                    s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
+                }
                 for (kind, row_count) in counts {
                     s.actions
                         .observations
@@ -484,10 +523,8 @@ impl Runtime {
     /// A completed SDK fetch at the current no-state point, with no root-zone
     /// delivery, permits the V26.1 record-ID fallback. It is not confirmation.
     pub fn sdk_fetch_completed_without_root(&self, instance: &str) -> Result<(), RuntimeError> {
-        if self.instance()? != instance {
-            return Err(RuntimeError::StaleIncarnation);
-        }
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if !s.whole_complete || s.scan_required {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
         }
@@ -517,11 +554,11 @@ impl Runtime {
         lost_zone: bool,
         completed_fetch: bool,
     ) -> Result<bool, RuntimeError> {
-        if self.instance()? != instance {
-            return Ok(false);
-        }
         let active = super::super::control_codec::Active::decode(envelope).map_err(|_| Error::InvalidData)?;
         let mut s = self.state();
+        if Self::caller_locked(&s, instance).is_err() {
+            return Ok(false);
+        }
         if !completed_fetch {
             s.trace.push(TraceEvent::RootReadRecorded {
                 instance: instance.into(),
@@ -591,7 +628,7 @@ impl Runtime {
         completed: bool,
         request_id: u64,
     ) -> Result<bool, RuntimeError> {
-        if !completed || self.instance()? != instance {
+        if !completed {
             return Ok(false);
         }
         let Some(active) = applied_active else { return Ok(false) };
@@ -609,10 +646,20 @@ impl Runtime {
     }
     pub fn build_collection_batch(
         &self,
+        instance: &str,
         collection: &Collection,
         requested: &BTreeSet<String>,
     ) -> Result<BuiltBatch, RuntimeError> {
-        self.poll_review()?;
+        {
+            let s = self.state();
+            if Self::caller_locked(&s, instance).is_err() {
+                return Ok(BuiltBatch {
+                    id: 0,
+                    saves: Vec::new(),
+                });
+            }
+        }
+        self.poll_review(instance)?;
         if self.workflow_gate().is_err() {
             return Ok(BuiltBatch {
                 id: 0,
@@ -621,8 +668,10 @@ impl Runtime {
         }
         let guard = {
             let s = self.state();
+            Self::caller_locked(&s, instance)?;
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             ScanGuard {
+                invalidation: s.invalidation,
                 binding: b.binding.id,
                 open: b.open_counter,
                 generation: b.evidence.generation,
@@ -630,123 +679,139 @@ impl Runtime {
                 incarnation: s.incarnation,
             }
         };
-        self.with_scan(&guard, collection, |_| Ok(()))?;
-        let mut s = self.state();
-        Self::gate_locked(&s)?;
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
-        let mut saves = Vec::new();
-        let mut bytes = 0;
-        let limit = s.actions.record_limit;
-        let byte_limit = s.actions.byte_limit;
-        with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_mut().ok_or(Error::Database)?;
-            for name in requested {
-                if saves.len() >= limit {
-                    break;
-                }
-                let Some(e) = store.entity_facts(b.id, name)? else {
-                    continue;
-                };
-                if e.mark.is_none()
-                    || !matches!(
-                        e.kind,
-                        codec::Kind::Note
-                            | codec::Kind::Card
-                            | codec::Kind::Revlog
-                            | codec::Kind::Deck
-                            | codec::Kind::Config
+        self.with_scan(&guard, collection, |s| {
+            Self::caller_locked(s, instance)?;
+            Self::gate_locked(s)?;
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
+            let mut saves = Vec::new();
+            let mut bytes = 0;
+            let limit = s.actions.record_limit;
+            let byte_limit = s.actions.byte_limit;
+            (|| -> Result<(), RuntimeError> {
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                for name in requested {
+                    if saves.len() >= limit {
+                        break;
+                    }
+                    let Some(e) = store.entity_facts(b.id, name)? else {
+                        continue;
+                    };
+                    if e.mark.is_none()
+                        || !matches!(
+                            e.kind,
+                            codec::Kind::Note
+                                | codec::Kind::Card
+                                | codec::Kind::Revlog
+                                | codec::Kind::Deck
+                                | codec::Kind::Config
+                        )
+                    {
+                        continue;
+                    }
+                    let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
+                    let payload = e.payload.encode().map_err(|_| Error::InvalidData)?;
+                    let entity = codec::Entity::build(
+                        codec::EntityFields {
+                            kind: e.kind,
+                            key: e.key.clone(),
+                            origin: e.origin,
+                            erev,
+                            generation: None,
+                            tombstone: false,
+                            deleted_at_ms: 0,
+                            writer: b.id.0,
+                            base_sha256: if e.server_erev > 0 {
+                                Some(e.acked_payload_digest)
+                            } else {
+                                None
+                            },
+                        },
+                        &payload,
                     )
-                {
-                    continue;
-                }
-                let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
-                let payload = e.payload.encode().map_err(|_| Error::InvalidData)?;
-                let entity = codec::Entity::build(
-                    codec::EntityFields {
-                        kind: e.kind,
-                        key: e.key.clone(),
-                        origin: e.origin,
-                        erev,
-                        generation: None,
-                        tombstone: false,
-                        deleted_at_ms: 0,
-                        writer: b.id.0,
-                        base_sha256: if e.server_erev > 0 {
-                            Some(e.acked_payload_digest)
+                    .map_err(|_| Error::InvalidData)?;
+                    if entity.payload.is_none() {
+                        return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+                    }
+                    let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
+                    let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
+                    if size > byte_limit {
+                        return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+                    }
+                    if bytes + size > byte_limit {
+                        break;
+                    }
+                    bytes += size;
+                    store.persist_flight(
+                        b.id,
+                        name,
+                        Flight {
+                            local_rev: e.local_rev,
+                            payload_digest: entity.payload_sha256,
+                            row_digest: e.payload.row_digest().map_err(|_| Error::InvalidData)?,
+                            payload: e.payload.clone(),
+                            erev,
+                        },
+                    )?;
+                    saves.push(SaveInput {
+                        name: name.clone(),
+                        envelope,
+                        system_fields: if e.server_erev > 0 {
+                            Some(e.acked_system_fields)
                         } else {
                             None
                         },
-                    },
-                    &payload,
-                )
-                .map_err(|_| Error::InvalidData)?;
-                if entity.payload.is_none() {
-                    return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+                    });
                 }
-                let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
-                let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
-                if size > byte_limit {
-                    return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-                }
-                if bytes + size > byte_limit {
-                    break;
-                }
-                bytes += size;
-                store.persist_flight(
-                    b.id,
-                    name,
-                    Flight {
-                        local_rev: e.local_rev,
-                        payload_digest: entity.payload_sha256,
-                        row_digest: e.payload.row_digest().map_err(|_| Error::InvalidData)?,
-                        payload: e.payload.clone(),
-                        erev,
-                    },
-                )?;
-                saves.push(SaveInput {
-                    name: name.clone(),
-                    envelope,
-                    system_fields: if e.server_erev > 0 {
-                        Some(e.acked_system_fields)
-                    } else {
-                        None
-                    },
+                Ok(())
+            })()?;
+            if !saves.is_empty() {
+                s.trace.push(TraceEvent::CollectionBatchBuilt {
+                    instance: instance.into(),
+                    names: saves.iter().map(|v| v.name.clone()).collect(),
                 });
             }
-            Ok(())
-        })?;
-        if !saves.is_empty() {
-            let instance = format!(
-                "{}-{}-{}",
-                s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter,
-                s.incarnation,
-                s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.file.inode
-            );
-            s.trace.push(TraceEvent::CollectionBatchBuilt {
-                instance,
-                names: saves.iter().map(|v| v.name.clone()).collect(),
-            });
-        }
-        s.actions.batch += 1;
-        let id = s.actions.batch;
-        if !saves.is_empty() {
-            s.actions.observations.push(Observation::BatchBuilt {
-                batch_id: id,
-                names: saves.iter().map(|e| e.name.clone()).collect(),
-            });
-        }
-        drop(s);
-        self.with_scan(&guard, collection, |state| Self::gate_locked(state))?;
-        Ok(BuiltBatch { id, saves })
+            s.actions.batch += 1;
+            let id = s.actions.batch;
+            if !saves.is_empty() {
+                s.actions.observations.push(Observation::BatchBuilt {
+                    batch_id: id,
+                    names: saves.iter().map(|e| e.name.clone()).collect(),
+                });
+            }
+            Ok(BuiltBatch { id, saves })
+        })
+    }
+    fn decode_saved(&self, instance: &str, records: &[Saved]) -> Result<Vec<codec::Received>, RuntimeError> {
+        let key = {
+            let s = self.state();
+            Self::caller_locked(&s, instance)?;
+            s.bound
+                .as_ref()
+                .ok_or(RuntimeError::StaleIncarnation)?
+                .binding
+                .facts
+                .record_key
+                .0
+        };
+        records
+            .iter()
+            .map(|record| {
+                codec::receive(&key, &record.name, &record.envelope, codec::AssetInput::Absent)
+                    .map_err(|_| RuntimeError::Tracking(Error::InvalidData))
+            })
+            .collect()
     }
     pub fn sent_results(
         &self,
+        instance: &str,
         request_id: u64,
         saved: &[Saved],
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
+        let decoded = self.decode_saved(instance, saved)?;
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if s.actions.handler != Some(request_id) {
             return Err(Error::InvalidData.into());
         }
@@ -754,16 +819,15 @@ impl Runtime {
             .iter()
             .any(|(_, error)| matches!(error, SendError::ZoneMissing | SendError::Other))
         {
-            s.scan_required = true;
-            s.tracking_stopped = true;
+            Self::invalidate_locked(&mut s);
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let mut force = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
-            for saved in saved {
-                if store.acknowledge(b, saved)? {
+            for (saved, received) in saved.iter().zip(decoded) {
+                if store.acknowledge(b, saved, received)? {
                     force.insert(saved.name.clone());
                 }
             }
@@ -805,13 +869,22 @@ impl Runtime {
         }
         Ok(())
     }
-    pub fn sync_now(&self, collection: &Collection) -> Result<u64, RuntimeError> {
-        self.poll_review()?;
+    pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
+        self.poll_review(instance)?;
         self.workflow_gate()?;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         let boundary = snapshot.seq().0;
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
+        Self::gate_locked(&s)?;
+        if !collection.is_current()
+            || s.bound
+                .as_ref()
+                .is_none_or(|b| b.evidence.generation != snapshot.generation())
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         if s.actions.exchange.is_some() {
             return Err(Error::InvalidData.into());
         }
@@ -847,19 +920,14 @@ impl Runtime {
     pub fn exchange_fetch_due(&self) -> Option<FetchPhase> {
         self.state().actions.exchange_phase
     }
-    pub fn accept_fetched_baseline(&self, records: &[Saved]) -> Result<(), RuntimeError> {
+    pub fn accept_fetched_baseline(&self, instance: &str, records: &[Saved]) -> Result<(), RuntimeError> {
+        let decoded = self.decode_saved(instance, records);
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
-            for record in records {
-                let received = codec::receive(
-                    &b.facts.record_key.0,
-                    &record.name,
-                    &record.envelope,
-                    codec::AssetInput::Absent,
-                )
-                .map_err(|_| Error::InvalidData)?;
+            for (record, received) in records.iter().zip(decoded?) {
                 let e = store
                     .entity_facts(b.id, &record.name)?
                     .ok_or(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation))?;
@@ -874,36 +942,67 @@ impl Runtime {
             Ok(())
         });
         if result.is_err() {
-            s.scan_required = true;
-            s.tracking_stopped = true;
+            Self::invalidate_locked(&mut s);
         }
         result
     }
-    pub fn exchange_fetch_completed(&self, phase: FetchPhase, seen: &BTreeSet<String>) -> Result<(), RuntimeError> {
+    pub fn exchange_fetch_completed(
+        &self,
+        instance: &str,
+        phase: FetchPhase,
+        seen: &BTreeSet<String>,
+    ) -> Result<(), RuntimeError> {
+        // Full baseline discovery stays off the writer. Copy one bounded body
+        // under the guards, then decode and compare after releasing both.
+        for kind in row_payload::KINDS {
+            let mut after = None;
+            loop {
+                let page = {
+                    let s = self.state();
+                    Self::caller_locked(&s, instance)?;
+                    if s.actions.exchange_phase != Some(phase) {
+                        return Err(Error::InvalidData.into());
+                    }
+                    let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+                    with_tracking_access(|| {
+                        s.store
+                            .as_ref()
+                            .ok_or(Error::Database)?
+                            .entity_keys_page(binding, kind, after.as_deref())
+                    })?
+                };
+                if page.is_empty() {
+                    break;
+                }
+                for key in page {
+                    let content = {
+                        let s = self.state();
+                        Self::caller_locked(&s, instance)?;
+                        if s.actions.exchange_phase != Some(phase) {
+                            return Err(Error::InvalidData.into());
+                        }
+                        let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+                        with_tracking_access(|| {
+                            s.store
+                                .as_ref()
+                                .ok_or(Error::Database)?
+                                .entity_content(binding, kind, &key)
+                        })?
+                        .ok_or(Error::InvalidData)?
+                    };
+                    let entity = super::super::workflow_store::decode_entity(kind, &content)?;
+                    if entity.server_erev > 0 && !seen.contains(&entity.name) {
+                        return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+                    }
+                    after = Some(key);
+                }
+            }
+        }
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if s.actions.exchange_phase != Some(phase) {
             return Err(Error::InvalidData.into());
         }
-        let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_ref().ok_or(Error::Database)?;
-            for kind in row_payload::KINDS {
-                let mut after = None;
-                loop {
-                    let page = store.entity_page(binding, kind, after.as_deref())?;
-                    if page.is_empty() {
-                        break;
-                    }
-                    for e in page {
-                        after = Some(e.key);
-                        if e.server_erev > 0 && !seen.contains(&e.name) {
-                            return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
-                        }
-                    }
-                }
-            }
-            Ok(())
-        })?;
         s.actions.exchange_phase = None;
         if phase == FetchPhase::AfterSend {
             if let Some((id, r)) = s.actions.exchange.take() {
@@ -912,8 +1011,9 @@ impl Runtime {
         }
         Ok(())
     }
-    pub fn exchange_sends_finished(&self) -> Result<(), RuntimeError> {
+    pub fn exchange_sends_finished(&self, instance: &str) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if s.actions.exchange.is_some() {
             s.actions.exchange_phase = Some(FetchPhase::AfterSend);
         }
@@ -923,8 +1023,9 @@ impl Runtime {
         let s = self.state();
         s.actions.automatic || s.actions.exchange.is_some()
     }
-    pub fn start_send_call(&self) -> Result<Option<SendCall>, RuntimeError> {
+    pub fn start_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         if s.actions.exchange_phase.is_some()
             || s.actions.handler.is_some()
             || (!s.actions.automatic && s.actions.exchange.is_none())
@@ -947,8 +1048,9 @@ impl Runtime {
         s.actions.calls.push(call.clone());
         Ok(Some(call))
     }
-    pub fn send_call_request(&self, id: u64, request: u64) -> Result<(), RuntimeError> {
+    pub fn send_call_request(&self, instance: &str, id: u64, request: u64) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         let c = s
             .actions
             .calls
@@ -958,8 +1060,9 @@ impl Runtime {
         c.request_ids.push(request);
         Ok(())
     }
-    pub fn finish_send_call(&self, id: u64) -> Result<(), RuntimeError> {
+    pub fn finish_send_call(&self, instance: &str, id: u64) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        Self::caller_locked(&s, instance)?;
         let call = s
             .actions
             .calls

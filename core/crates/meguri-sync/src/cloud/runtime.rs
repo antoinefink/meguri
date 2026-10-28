@@ -331,6 +331,8 @@ struct Bound {
 #[derive(Default)]
 struct State {
     incarnation: u64,
+    invalidation: u64,
+    invalidation_exhausted: bool,
     store: Option<TrackingStore>,
     bound: Option<Bound>,
     scan_required: bool,
@@ -349,6 +351,8 @@ struct State {
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
+    last_capture_body_reads: usize,
+    #[cfg(feature = "test-hooks")]
     fail_capture_after: Option<usize>,
 }
 
@@ -363,6 +367,7 @@ pub struct Runtime {
     scan_pause: Mutex<Option<ScanPause>>,
 }
 struct ScanGuard {
+    invalidation: u64,
     binding: BindingId,
     open: u64,
     generation: Generation,
@@ -403,6 +408,24 @@ impl Runtime {
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    fn invalidate_locked(state: &mut State) {
+        match state.invalidation.checked_add(1) {
+            Some(next) => state.invalidation = next,
+            None => state.invalidation_exhausted = true,
+        }
+        state.scan_required = true;
+        state.whole_complete = false;
+        state.tracking_stopped = true;
+        if let Some(id) = state.bound.as_ref().map(|b| b.binding.id) {
+            let _ = with_tracking_access(|| {
+                state
+                    .store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .set_workflow_drained(id, false, (0, 0))
+            });
+        }
+    }
     fn bind(&self, collection: &Collection) -> Result<(), RuntimeError> {
         // Providers and sidecar RMW locks never run under tracking/state locks.
         let evidence = collection.open_evidence()?;
@@ -416,6 +439,7 @@ impl Runtime {
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;
+        state.tracking_stopped = state.invalidation_exhausted;
         state.note_scan = None;
         state.last_capture = None;
         state.whole_complete = false;
@@ -617,7 +641,8 @@ impl Runtime {
             ) != (guard.binding, guard.open, guard.generation, guard.file)
             || !bound.usable
             || !bound.verified
-            || state.tracking_stopped
+            || state.invalidation != guard.invalidation
+            || state.invalidation_exhausted
             || !collection.is_current()
             || collection.generation() != guard.generation
             || !publication.as_ref().is_some_and(|p| {
@@ -642,13 +667,14 @@ impl Runtime {
             if !bound.usable || !bound.verified {
                 return Err(RuntimeError::IdentityUnverified);
             }
-            if state.tracking_stopped || state.scan_running {
+            if state.invalidation_exhausted || state.scan_running {
                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
             }
             if bound.evidence.generation != collection.generation() {
                 return Err(RuntimeError::StaleIncarnation);
             }
             let guard = ScanGuard {
+                invalidation: state.invalidation,
                 binding: bound.binding.id,
                 open: bound.open_counter,
                 generation: bound.evidence.generation,
@@ -815,6 +841,19 @@ impl Runtime {
         }
         Ok(())
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn stored_state_for_testing(&self) -> Result<StoredRuntimeState, RuntimeError> {
+        let state = self.state();
+        let id = state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        with_tracking_access(|| Ok(state.store.as_ref().ok_or(Error::Database)?.runtime_binding(id)?))
+    }
+
+    /// Counts actual workflow entity body materializations on the last observer callback.
+    #[cfg(feature = "test-hooks")]
+    pub fn last_capture_body_reads_for_testing(&self) -> usize {
+        self.state().last_capture_body_reads
+    }
+
     /// Fail after a real tracking row write, before the transaction can commit.
     #[cfg(feature = "test-hooks")]
     pub fn arm_capture_failure_for_testing(&self, after_writes: usize) -> Result<(), RuntimeError> {
@@ -854,10 +893,12 @@ impl ChangeObserver for Runtime {
         "cloud-note-capture"
     }
     fn observe(&self, _commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
-        self.state().scan_required = true;
+        Self::invalidate_locked(&mut self.state());
         Err(engine_error("callback row capability required"))
     }
     fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+        #[cfg(feature = "test-hooks")]
+        let body_reads_before = super::workflow_store::body_reads();
         let mut state = self.state();
         let Some(bound) = state.bound.as_ref() else {
             return Ok(());
@@ -894,7 +935,7 @@ impl ChangeObserver for Runtime {
             || !changes.media_added.is_empty()
             || !changes.media_removed.is_empty();
         if unsupported && !generic {
-            state.scan_required = true;
+            Self::invalidate_locked(&mut state);
         }
         #[cfg(feature = "test-hooks")]
         if state
@@ -902,7 +943,7 @@ impl ChangeObserver for Runtime {
             .is_some_and(|id| commit.changes.notes.iter().any(|n| n.id.0 == id))
         {
             state.drop_capture = None;
-            state.scan_required = true;
+            Self::invalidate_locked(&mut state);
             return Ok(());
         }
         #[cfg(feature = "test-hooks")]
@@ -943,14 +984,13 @@ impl ChangeObserver for Runtime {
             )
         });
         if result.is_err() {
-            state.scan_required = true;
-            state.tracking_stopped = true;
+            Self::invalidate_locked(&mut state);
         } else {
             if let Some(proof) = state.last_capture.as_mut() {
                 proof.persisted = true;
             }
-            // A successful local capture clears the tracking stop, but never
-            // promotes a Note scan to whole-binding completion.
+            // Restore capture availability only. The independent watermark and
+            // scan_required retain every uncovered failure/unsupported commit.
             state.tracking_stopped = false;
         }
         if result.is_ok() {
@@ -959,16 +999,19 @@ impl ChangeObserver for Runtime {
                 bound.latest_scm = mark.scm;
             }
         }
-        if result.is_ok() && generic {
+        if result.is_ok() && generic && Self::gate_locked(&state).is_ok() {
             self.emit_pending_locked(&mut state, super::workflow::UpdateKind::Full, Default::default())
                 .map_err(engine_error)?;
+        }
+        #[cfg(feature = "test-hooks")]
+        {
+            state.last_capture_body_reads = super::workflow_store::body_reads().saturating_sub(body_reads_before);
         }
         result.map_err(engine_error)
     }
     fn observe_failed(&self, seq: Seq) {
         let mut state = self.state();
-        state.scan_required = true;
-        state.tracking_stopped = true;
+        Self::invalidate_locked(&mut state);
         if let Some(proof) = state.last_capture.as_mut().filter(|proof| proof.observed_seq == seq) {
             proof.persisted = false;
         }
@@ -1030,7 +1073,9 @@ impl SuspendParticipant for Runtime {
             && !state.scan_running
             && !state.tracking_stopped
             && state.bound.as_ref().is_some_and(|b| {
-                file.as_ref().is_ok_and(|f| *f == b.file)
+                b.usable
+                    && b.verified
+                    && file.as_ref().is_ok_and(|f| *f == b.file)
                     && publication.as_ref().is_ok_and(|p| {
                         p.as_ref().is_some_and(|p| {
                             p.identity == b.binding.facts.publication

@@ -94,9 +94,14 @@ pub(crate) struct Boot {
 pub(crate) enum Input {
     Boot(Boot),
     Instance,
+    Validate(String),
+    SignOut,
+    Reopen,
+    BodyReads,
+    StoredState,
     Identity(Option<String>),
     Reconcile,
-    StartSDK,
+    StartSDK(String),
     Facts,
     ScanState,
     ScanProof,
@@ -107,33 +112,33 @@ pub(crate) enum Input {
     Payloads,
     Entity(String),
     AllEntities,
-    Poll,
+    Poll(String),
     Trace,
     Observations,
     Emitted,
-    Updates,
-    Transition(UpdateKind, PendingSnapshot),
+    Updates(String),
+    Transition(String, UpdateKind, PendingSnapshot),
     Sendables,
-    Build(BTreeSet<String>),
-    EnterHandler(u64),
-    ReturnHandler,
-    Sent(u64, Vec<Saved>, Vec<(String, SendError)>, usize),
-    AppliedUpdate(u64, Vec<String>),
-    SavedRemoved(u64, Vec<String>),
+    Build(String, BTreeSet<String>),
+    EnterHandler(String, u64),
+    ReturnHandler(String),
+    Sent(String, u64, Vec<Saved>, Vec<(String, SendError)>, usize),
+    AppliedUpdate(String, u64, Vec<String>),
+    SavedRemoved(String, u64, Vec<String>),
     Qualify(String),
     RootRead(String, u64, Vec<u8>, Vec<u8>, bool),
     RootFetch(String, Option<Saved>, bool, u64),
     ReadDue,
     RootEpoch,
-    SyncNow,
+    SyncNow(String),
     FetchDue,
-    FetchCompleted(FetchPhase, BTreeSet<String>),
-    Fetched(Vec<Saved>),
-    SendsFinished,
+    FetchCompleted(String, FetchPhase, BTreeSet<String>),
+    Fetched(String, Vec<Saved>),
+    SendsFinished(String),
     WantsSend,
-    StartCall,
-    RecordCall(u64, u64),
-    FinishCall(u64),
+    StartCall(String),
+    RecordCall(String, u64, u64),
+    FinishCall(String, u64),
     Calls,
     Exchange(u64),
     Begin(i64),
@@ -221,6 +226,39 @@ impl ChildDriver {
         write_frame(&mut self.stream, &input)?;
         let result: std::result::Result<serde_json::Value, String> = read_frame(&mut self.stream)?;
         Ok(serde_json::from_value(result.map_err(|_| failure())?)?)
+    }
+    pub fn reconcile_binding(&mut self) -> Result<()> {
+        self.call(Input::Reconcile)
+    }
+    pub fn qualify_without_root(&mut self, instance: String) -> Result<()> {
+        self.call(Input::Qualify(instance))
+    }
+    pub fn stored_runtime_state(&mut self) -> Result<runtime::StoredRuntimeState> {
+        self.call(Input::StoredState)
+    }
+    pub fn set_account_for_testing(&mut self, account: String) -> Result<()> {
+        self.call(Input::Identity(Some(account)))
+    }
+    pub fn sign_out_for_testing(&mut self) -> Result<()> {
+        self.call(Input::SignOut)
+    }
+    pub fn reopen_for_testing(&mut self) -> Result<String> {
+        self.call(Input::Reopen)
+    }
+    pub fn build_for_instance(&mut self, instance: String, names: BTreeSet<String>) -> Result<BuiltBatch> {
+        self.call(Input::Build(instance, names))
+    }
+    pub fn accept_root_for_instance(
+        &mut self,
+        instance: String,
+        id: u64,
+        envelope: Vec<u8>,
+        fields: Vec<u8>,
+    ) -> Result<bool> {
+        self.call(Input::RootRead(instance, id, envelope, fields, false))
+    }
+    pub fn last_capture_body_reads(&mut self) -> Result<usize> {
+        self.call(Input::BodyReads)
     }
     pub fn edit_note_fields(&mut self, id: i64, fields: &[&str]) -> Result<Edit> {
         self.call(Input::Edit(id, fields.iter().map(|s| (*s).to_owned()).collect()))
@@ -319,6 +357,8 @@ impl IdentityProvider for Account {
 }
 struct Device {
     host: meguri_host::CoreHost,
+    options: meguri_host::HostConfig,
+    automatic: bool,
     account: Arc<Account>,
     clock: Arc<StepClock>,
     binding: core::BindingId,
@@ -339,10 +379,11 @@ impl Device {
             identity: account.clone(),
             files: Arc::new(devices::NativeFiles),
         });
-        let host = meguri_host::CoreHost::open(options)?;
-        host.cloud_runtime().ok_or_else(failure)?.set_automatic(b.automatic);
+        let host = meguri_host::CoreHost::open(options.clone())?;
         Ok(Self {
             host,
+            options,
+            automatic: b.automatic,
             account,
             clock,
             binding: b.binding,
@@ -466,6 +507,23 @@ impl Device {
         }
         match input {
             Input::Boot(_) => Err(failure()),
+            Input::Validate(i) => {
+                self.runtime()?.validate_caller(&i)?;
+                value(())
+            }
+            Input::SignOut => {
+                *self.account.0.lock().unwrap() = IdentityStatus::SignedOut;
+                self.runtime()?.refresh_identity()?;
+                value(())
+            }
+            Input::Reopen => {
+                self.host.close()?;
+                self.host = meguri_host::CoreHost::open(self.options.clone())?;
+                self.runtime()?.refresh_identity()?;
+                value(self.runtime()?.instance()?)
+            }
+            Input::StoredState => value(self.runtime()?.stored_state_for_testing()?),
+            Input::BodyReads => value(self.runtime()?.last_capture_body_reads_for_testing()),
             Input::Instance => value(self.runtime()?.instance()?),
             Input::Identity(account) => {
                 if let Some(a) = account {
@@ -480,8 +538,9 @@ impl Device {
                     .reconcile_binding(&c, &self.host.media()?, IPC_TIMEOUT)?;
                 value(())
             }
-            Input::StartSDK => {
-                self.runtime()?.start_sdk_instance()?;
+            Input::StartSDK(i) => {
+                self.runtime()?.set_automatic(&i, self.automatic)?;
+                self.runtime()?.start_sdk_instance(&i)?;
                 value(())
             }
             Input::Facts => value(self.facts()?),
@@ -563,35 +622,36 @@ impl Device {
             Input::Payloads => value(self.payloads()?),
             Input::Entity(n) => value(self.runtime()?.entity_facts(&n)?.ok_or_else(failure)?),
             Input::AllEntities => value(self.all_facts()?),
-            Input::Poll => {
-                self.runtime()?.poll_review()?;
+            Input::Poll(i) => {
+                self.runtime()?.poll_review(&i)?;
                 value(())
             }
             Input::Trace => value(self.runtime()?.trace()),
             Input::Observations => value(self.runtime()?.observations()),
             Input::Emitted => value(self.runtime()?.emitted_update_ids()),
-            Input::Updates => value(self.runtime()?.take_pending_updates()),
-            Input::Transition(k, p) => value(self.runtime()?.pending_transition(k, p)),
+            Input::Updates(i) => value(self.runtime()?.take_pending_updates(&i)?),
+            Input::Transition(i, k, p) => value(self.runtime()?.pending_transition(&i, k, p)?),
             Input::Sendables => value(self.runtime()?.tracking_sendables()),
-            Input::Build(names) => value(
-                self.runtime()?
-                    .build_collection_batch(&self.host.collection()?, &names)?,
-            ),
-            Input::EnterHandler(id) => {
-                self.runtime()?.enter_sent_handler(id)?;
+            Input::Build(i, names) => value(self.runtime()?.build_collection_batch(
+                &i,
+                &self.host.collection()?,
+                &names,
+            )?),
+            Input::EnterHandler(i, id) => {
+                self.runtime()?.enter_sent_handler(&i, id)?;
                 value(())
             }
-            Input::ReturnHandler => value(self.runtime()?.return_sent_handler()?),
-            Input::Sent(id, saved, failed, n) => {
-                self.runtime()?.sent_results(id, &saved, &failed, n)?;
+            Input::ReturnHandler(i) => value(self.runtime()?.return_sent_handler(&i)?),
+            Input::Sent(i, id, saved, failed, n) => {
+                self.runtime()?.sent_results(&i, id, &saved, &failed, n)?;
                 value(())
             }
-            Input::AppliedUpdate(id, names) => {
-                self.runtime()?.sdk_update_applied(id, &names)?;
+            Input::AppliedUpdate(i, id, names) => {
+                self.runtime()?.sdk_update_applied(&i, id, &names)?;
                 value(())
             }
-            Input::SavedRemoved(id, names) => {
-                self.runtime()?.sdk_saved_removed(id, &names)?;
+            Input::SavedRemoved(i, id, names) => {
+                self.runtime()?.sdk_saved_removed(&i, id, &names)?;
                 value(())
             }
             Input::Qualify(i) => {
@@ -604,28 +664,28 @@ impl Device {
             }
             Input::ReadDue => value(self.runtime()?.root_read_due()?),
             Input::RootEpoch => value(self.runtime()?.accepted_root_epoch()?),
-            Input::SyncNow => value(self.runtime()?.sync_now(&self.host.collection()?)?),
+            Input::SyncNow(i) => value(self.runtime()?.sync_now(&i, &self.host.collection()?)?),
             Input::FetchDue => value(self.runtime()?.exchange_fetch_due()),
-            Input::FetchCompleted(phase, seen) => {
-                self.runtime()?.exchange_fetch_completed(phase, &seen)?;
+            Input::FetchCompleted(i, phase, seen) => {
+                self.runtime()?.exchange_fetch_completed(&i, phase, &seen)?;
                 value(())
             }
-            Input::Fetched(records) => {
-                self.runtime()?.accept_fetched_baseline(&records)?;
+            Input::Fetched(i, records) => {
+                self.runtime()?.accept_fetched_baseline(&i, &records)?;
                 value(())
             }
-            Input::SendsFinished => {
-                self.runtime()?.exchange_sends_finished()?;
+            Input::SendsFinished(i) => {
+                self.runtime()?.exchange_sends_finished(&i)?;
                 value(())
             }
             Input::WantsSend => value(self.runtime()?.wants_send()),
-            Input::StartCall => value(self.runtime()?.start_send_call()?),
-            Input::RecordCall(id, request) => {
-                self.runtime()?.send_call_request(id, request)?;
+            Input::StartCall(i) => value(self.runtime()?.start_send_call(&i)?),
+            Input::RecordCall(i, id, request) => {
+                self.runtime()?.send_call_request(&i, id, request)?;
                 value(())
             }
-            Input::FinishCall(id) => {
-                self.runtime()?.finish_send_call(id)?;
+            Input::FinishCall(i, id) => {
+                self.runtime()?.finish_send_call(&i, id)?;
                 value(())
             }
             Input::Calls => value(self.runtime()?.send_calls()),
@@ -661,7 +721,7 @@ impl Device {
                     return Err(failure());
                 };
                 self.session_started.insert(session_id.0, self.clock.now_ms());
-                self.runtime()?.poll_review()?;
+                self.runtime()?.poll_review(&self.runtime()?.instance()?)?;
                 value(session_id.0)
             }
             Input::Start(s) => {
@@ -712,7 +772,7 @@ impl Device {
             Input::End(s) => {
                 self.host.review().end(SessionId(s))?;
                 self.host.review().application_barrier_for_testing()?;
-                self.runtime()?.poll_review()?;
+                self.runtime()?.poll_review(&self.runtime()?.instance()?)?;
                 value(())
             }
             Input::Hold(s) => {

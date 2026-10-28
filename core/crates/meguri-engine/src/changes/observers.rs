@@ -34,6 +34,12 @@ pub struct ObserverRows<'a> {
 }
 
 impl ObserverRows<'_> {
+    /// Exact raw millisecond ID from the borrowed committed writer view.
+    /// Returns zero only when this card has no history.
+    pub fn max_revlog_id(&self, card: CardId) -> Result<i64, StorageError> {
+        self.writer.max_revlog_id(card)
+    }
+
     /// Reads a real stored row from this commit, before any later op runs.
     pub fn row_image(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
         self.writer.row_image(table, key)

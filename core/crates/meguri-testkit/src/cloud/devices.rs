@@ -71,7 +71,7 @@ pub(crate) fn build_scope(s: &Scope) -> Result<production::BuildScope> {
         },
     })
 }
-pub(crate) struct NativeFiles;
+pub struct NativeFiles;
 impl FileIdentityProvider for NativeFiles {
     fn identity(&self, path: &Path) -> std::result::Result<runtime::NativeFileIdentity, runtime::RuntimeError> {
         use std::os::unix::fs::MetadataExt;
@@ -93,10 +93,13 @@ impl FileIdentityProvider for NativeFiles {
         })
     }
 }
-pub(crate) fn options(dir: &Path, now: i64, seed: u64) -> meguri_host::HostConfig {
+pub fn options(dir: &Path, now: i64, seed: u64) -> meguri_host::HostConfig {
+    let mut backup_name = dir.file_name().expect("owned collection directory").to_os_string();
+    backup_name.push("-backups");
+    let backups = dir.with_file_name(backup_name);
     meguri_host::HostConfig::new(
         dir.to_owned(),
-        dir.join("backups"),
+        backups,
         dir.join("widget"),
         Arc::new(FixedClock::new(now, UtcOffset::UTC)),
         Arc::new(SeededRandom::new(seed)),

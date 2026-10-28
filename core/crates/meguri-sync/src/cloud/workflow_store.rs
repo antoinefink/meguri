@@ -10,6 +10,21 @@ use super::{
 };
 use meguri_storage::{RowImage, RowKey, Table};
 use rusqlite::{Connection, OptionalExtension, params};
+#[cfg(feature = "test-hooks")]
+thread_local! { static BODY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(feature = "test-hooks")]
+pub(super) fn body_reads() -> usize {
+    BODY_READS.with(std::cell::Cell::get)
+}
+#[cfg(feature = "test-hooks")]
+fn body_read() {
+    BODY_READS.with(|v| v.set(v.get().saturating_add(1)));
+}
+fn generic_facts(content: &str) -> Result<EntityFacts, Error> {
+    #[cfg(feature = "test-hooks")]
+    body_read();
+    decode(content)
+}
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cloud_workflow_schema(version INTEGER NOT NULL); INSERT INTO cloud_workflow_schema SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM cloud_workflow_schema); CREATE TABLE IF NOT EXISTS cloud_runtime_entities(binding BLOB NOT NULL REFERENCES bindings(id),kind INTEGER NOT NULL,key BLOB NOT NULL,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));";
 pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
     let exists: bool = c.query_row(
@@ -45,6 +60,8 @@ pub(super) fn row_key(kind: codec::Kind, key: &[u8]) -> Result<RowKey, Error> {
     })
 }
 fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
+    #[cfg(feature = "test-hooks")]
+    body_read();
     let p = codec::Payload::decode(codec::Kind::Note, &n.local_payload.0).map_err(|_| Error::InvalidData)?;
     let ack = codec::Payload::decode(codec::Kind::Note, &n.acknowledged.payload.0).map_err(|_| Error::InvalidData)?;
     Ok(EntityFacts {
@@ -91,7 +108,7 @@ pub(super) fn entity(
             |r| r.get(0),
         )
         .optional()?;
-    value.map(|v| decode(&v)).transpose()
+    value.map(|v| generic_facts(&v)).transpose()
 }
 pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) -> Result<(), Error> {
     e.validate()?;
@@ -154,6 +171,12 @@ impl TrackingStore {
     pub(super) fn install_workflow(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
         self.connection.execute_batch(SCHEMA)?;
+        // Expression indexes are maintained by every note/entity writer, including
+        // the legacy note capture path. Dirty discovery reads keys only.
+        self.connection.execute_batch("CREATE INDEX IF NOT EXISTS cloud_notes_by_name ON cloud_runtime_notes(binding,json_extract(content,'$.name'));
+CREATE INDEX IF NOT EXISTS cloud_entities_by_name ON cloud_runtime_entities(binding,json_extract(content,'$.name'));
+CREATE INDEX IF NOT EXISTS cloud_dirty_notes ON cloud_runtime_notes(binding,json_extract(content,'$.name')) WHERE json_extract(content,'$.mark') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(binding,kind,json_extract(content,'$.name')) WHERE json_extract(content,'$.mark') IS NOT NULL;")?;
         let mut s=self.connection.prepare("SELECT r.content,r.kind,r.key FROM cloud_runtime_entities r JOIN bindings b ON b.id=r.binding WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0")?;
         let mut rows = s.query(params![self.scope.container.as_str(), self.scope.environment.code()])?;
         while let Some(r) = rows.next()? {
@@ -197,6 +220,18 @@ impl TrackingStore {
                 .optional()?
         })
     }
+    pub(super) fn dirty_names(&self, b: BindingId) -> Result<PendingSnapshot, Error> {
+        let mut names = std::collections::BTreeMap::new();
+        let mut notes = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_notes INDEXED BY cloud_dirty_notes WHERE binding=?1 AND json_extract(content,'$.mark') IS NOT NULL")?;
+        for name in notes.query_map([b.0.as_slice()], |r| r.get::<_, String>(0))? {
+            names.insert(name?, PendingChange::Save);
+        }
+        let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND kind IN (2,3,4,8) AND json_extract(content,'$.mark') IS NOT NULL")?;
+        for name in entities.query_map([b.0.as_slice()], |r| r.get::<_, String>(0))? {
+            names.insert(name?, PendingChange::Save);
+        }
+        Ok(PendingSnapshot(names))
+    }
     pub(super) fn workflow_has_layouts(&self, b: BindingId) -> Result<bool, Error> {
         Ok(self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM cloud_runtime_entities WHERE binding=?1 AND kind=6)",
@@ -237,7 +272,7 @@ impl TrackingStore {
                 |r| r.get(0),
             )
             .optional()?;
-        generic.map(|v| decode(&v)).transpose()
+        generic.map(|v| generic_facts(&v)).transpose()
     }
     pub(super) fn set_workflow_drained(
         &mut self,
@@ -303,15 +338,12 @@ impl TrackingStore {
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn acknowledge(&mut self, b: BindingId, saved: &Saved) -> Result<bool, Error> {
-        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
-        let received = codec::receive(
-            &binding.facts.record_key.0,
-            &saved.name,
-            &saved.envelope,
-            codec::AssetInput::Absent,
-        )
-        .map_err(|_| Error::InvalidData)?;
+    pub(super) fn acknowledge(
+        &mut self,
+        b: BindingId,
+        saved: &Saved,
+        received: codec::Received,
+    ) -> Result<bool, Error> {
         let p = received.payload.ok_or(Error::InvalidData)?;
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         if received.entity.fields.origin != e.origin
@@ -515,12 +547,7 @@ impl TrackingStore {
                     .map_err(Error::from)?;
                     continue;
                 }
-                let view = CommitView {
-                    c: &tx,
-                    b,
-                    rows,
-                    commit,
-                };
+                let view = CommitView { c: &tx, b, rows };
                 let p = row_payload::project(&view, kind, &raw.ok_or(Error::InvalidData)?, |id| layout(&tx, b, id))?;
                 let mut e = if let Some(e) = existing {
                     e
@@ -599,7 +626,6 @@ struct CommitView<'a, 'r> {
     c: &'a Connection,
     b: BindingId,
     rows: &'a meguri_engine::ObserverRows<'r>,
-    commit: &'a meguri_engine::ObservedCommit<'r>,
 }
 impl View for CommitView<'_, '_> {
     fn row(&self, t: Table, k: &RowKey) -> Result<Option<RowImage>, Error> {
@@ -635,31 +661,7 @@ impl View for CommitView<'_, '_> {
             .collect()
     }
     fn history(&self, id: i64) -> Result<i64, Error> {
-        let mut max = 0;
-        let mut after = None;
-        loop {
-            let page = keys(self.c, self.b, codec::Kind::Revlog, after.as_deref())?;
-            if page.is_empty() {
-                break;
-            }
-            for k in page {
-                if let Some(row) = self.row(Table::Revlog, &row_key(codec::Kind::Revlog, &k)?)? {
-                    if row_payload::int(&row, 1)? == id {
-                        max = max.max(row_payload::int(&row, 0)?);
-                    }
-                }
-                after = Some(k);
-            }
-        }
-        for delta in self.commit.payload.rows(Table::Revlog) {
-            let delta = delta.map_err(meguri_storage::StorageError::from)?;
-            if let Some(row) = self.row(Table::Revlog, &delta.key)? {
-                if row_payload::int(&row, 1)? == id {
-                    max = max.max(row_payload::int(&row, 0)?);
-                }
-            }
-        }
-        Ok(max)
+        Ok(self.rows.max_revlog_id(meguri_model::ids::CardId(id))?)
     }
 }
 
@@ -667,6 +669,6 @@ pub(super) fn decode_entity(kind: codec::Kind, content: &str) -> Result<EntityFa
     if kind == codec::Kind::Note {
         note_facts(decode(content)?)
     } else {
-        decode(content)
+        generic_facts(content)
     }
 }

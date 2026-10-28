@@ -561,3 +561,30 @@ Production sync/host libraries compile; no workflow tests ran.
 `similarity/20261028T094810Z-66586` pass for the 26-file export.
 Independent whole-workflow review is in progress. This commit preserves
 reviewable WIP, not a completed unit or accepted workflow.
+
+## Stable workflow R1 repairs — verification in progress
+
+Starting main commit: `540ae56e`. Independent review found three P1 issues:
+stale callbacks could mutate current tracking, a scan could clear a newer
+capture failure, and Card history missed raw untracked or negative IDs. It
+also found P2 collection-wide body decoding inside ordinary writer callbacks.
+The shared device fixture placed backups inside the collection directory;
+all ten new workflow tests failed that valid production overlap guard before
+reaching their workflow assertions (`core-test/20261028T095807Z-70968`,
+32 pass and 10 fail).
+
+Filtered fixer `cleanroom/20261028T100440Z-73238` exports instance-bound
+mutation APIs, scan invalidation guards, the borrowed writer history query,
+indexed dirty-name discovery and owned sibling backup fixtures. Five new
+behavioral regressions and one engine observer regression remain enabled.
+The earlier account, adapter, review and host assertions are preserved.
+Independent review 2 is in progress; these repairs are not yet accepted.
+
+- `core-format/20261028T102338Z-80150`: pass.
+- `private/20261028T102416Z-81033`: pass for the ten source paths.
+- `similarity/20261028T102418Z-81283`: pass for those paths.
+- `core-test/20261028T102400Z-80713`: build fails because the new test
+  observer omits the required `observe` method. No runtime pass is claimed.
+
+The source is retained as WIP. A narrow fixture compilation repair follows;
+all workflow checks and review findings remain open until verified.
