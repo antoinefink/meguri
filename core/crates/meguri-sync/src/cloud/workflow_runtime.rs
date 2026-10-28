@@ -376,10 +376,10 @@ impl Runtime {
                                 _ => Err(Error::InvalidData),
                             }
                         })?;
-                        if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p) {
-                            if old.name != new.name || old.kind != new.kind || old.parent_id != new.parent_id {
-                                return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
-                            }
+                        if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
+                            && (old.name != new.name || old.kind != new.kind || old.parent_id != new.parent_id)
+                        {
+                            return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
                         }
                         if !matches!(
                             kind,
@@ -412,7 +412,7 @@ impl Runtime {
             }
             // Only the empty physical/J6 case is supported by this workflow.
             let feed = media.store().media_feed_snapshot().map_err(|_| Error::InvalidData)?;
-            if !feed.status.complete || !feed.items.is_empty() || media.tracked_names()?.names.len() != 0 {
+            if !feed.status.complete || !feed.items.is_empty() || !media.tracked_names()?.names.is_empty() {
                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
             }
             let mut entries = std::fs::read_dir(media.store().media_dir()).map_err(Error::from)?;
@@ -1004,10 +1004,10 @@ impl Runtime {
             return Err(Error::InvalidData.into());
         }
         s.actions.exchange_phase = None;
-        if phase == FetchPhase::AfterSend {
-            if let Some((id, r)) = s.actions.exchange.take() {
-                s.actions.exchanges.insert(id, r);
-            }
+        if phase == FetchPhase::AfterSend
+            && let Some((id, r)) = s.actions.exchange.take()
+        {
+            s.actions.exchanges.insert(id, r);
         }
         Ok(())
     }
@@ -1033,10 +1033,10 @@ impl Runtime {
             return Ok(None);
         }
         let exchange = s.actions.exchange.as_ref().map(|(id, _)| *id);
-        if let Some(id) = exchange {
-            if s.actions.calls.iter().filter(|c| c.exchange == Some(id)).count() >= 8 {
-                return Ok(None);
-            }
+        if let Some(id) = exchange
+            && s.actions.calls.iter().filter(|c| c.exchange == Some(id)).count() >= 8
+        {
+            return Ok(None);
         }
         let call = SendCall {
             id: s.actions.calls.len() as u64 + 1,

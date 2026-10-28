@@ -488,12 +488,12 @@ fn apply_image(
         state.change_counter = next(state.change_counter)?;
         // A snapshot never recreates a lost before-image. Its merge fallback
         // is the acknowledged payload, per K11.2.
-        if tracked.mark.is_none() {
-            if let Some(before) = before {
-                let payload = codec::Payload::Note(before.clone());
-                if payload.row_digest().map_err(|_| Error::InvalidData)? == tracked.acknowledged.row_digest {
-                    tracked.base = Some(OpaqueBytes(payload.encode().map_err(|_| Error::InvalidData)?));
-                }
+        if tracked.mark.is_none()
+            && let Some(before) = before
+        {
+            let payload = codec::Payload::Note(before.clone());
+            if payload.row_digest().map_err(|_| Error::InvalidData)? == tracked.acknowledged.row_digest {
+                tracked.base = Some(OpaqueBytes(payload.encode().map_err(|_| Error::InvalidData)?));
             }
         }
         tracked.mark = Some(DirtyMark {

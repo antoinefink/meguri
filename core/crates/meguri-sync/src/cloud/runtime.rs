@@ -556,14 +556,13 @@ impl Runtime {
             }
             Ok(())
         });
-        if result.is_ok() {
-            if let (Some(account), Some(instance)) = (verified_account, instance) {
-                if let Ok(account) = String::from_utf8(account.0) {
-                    state
-                        .trace
-                        .push(super::workflow::TraceEvent::IdentityVerified { instance, account });
-                }
-            }
+        if result.is_ok()
+            && let (Some(account), Some(instance)) = (verified_account, instance)
+            && let Ok(account) = String::from_utf8(account.0)
+        {
+            state
+                .trace
+                .push(super::workflow::TraceEvent::IdentityVerified { instance, account });
         }
         if result.is_err() {
             state.tracking_stopped = true;
@@ -993,11 +992,11 @@ impl ChangeObserver for Runtime {
             // scan_required retain every uncovered failure/unsupported commit.
             state.tracking_stopped = false;
         }
-        if result.is_ok() {
-            if let (Some(mark), Some(bound)) = (commit.collection.as_ref(), state.bound.as_mut()) {
-                bound.latest_mod = mark.col_mod;
-                bound.latest_scm = mark.scm;
-            }
+        if result.is_ok()
+            && let (Some(mark), Some(bound)) = (commit.collection.as_ref(), state.bound.as_mut())
+        {
+            bound.latest_mod = mark.col_mod;
+            bound.latest_scm = mark.scm;
         }
         if result.is_ok() && generic && Self::gate_locked(&state).is_ok() {
             self.emit_pending_locked(&mut state, super::workflow::UpdateKind::Full, Default::default())

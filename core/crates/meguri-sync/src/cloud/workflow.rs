@@ -131,10 +131,10 @@ impl EntityFacts {
                 return Err(Error::InvalidData);
             }
         }
-        if let Some(m) = &self.mark {
-            if m.payload_digest != self.payload.payload_digest().map_err(|_| Error::InvalidData)? {
-                return Err(Error::InvalidData);
-            }
+        if let Some(m) = &self.mark
+            && m.payload_digest != self.payload.payload_digest().map_err(|_| Error::InvalidData)?
+        {
+            return Err(Error::InvalidData);
         }
         Ok(())
     }

@@ -597,10 +597,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 {
                     return Err(Error::InvalidData.into());
                 }
-                if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p) {
-                    if old.name != new.name || old.kind != new.kind || old.parent_id != new.parent_id {
-                        return Err(Error::InvalidData.into());
-                    }
+                if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
+                    && (old.name != new.name || old.kind != new.kind || old.parent_id != new.parent_id)
+                {
+                    return Err(Error::InvalidData.into());
                 }
                 e.observe(p, DirtySource::Observer, &mut state.change_counter)?;
                 e.observer_open = open;

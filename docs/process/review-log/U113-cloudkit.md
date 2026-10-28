@@ -608,3 +608,13 @@ unchanged.
 
 Full CloudKit SDK, media, signed-device and milestone verification remains
 open. No Unit trailer or acceptance is added.
+
+Filtered lint repair `cleanroom/20261028T102726Z-84562` resolves all ten
+Cloud diagnostics using equivalent let-chains and `is_empty`. Independent
+review confirms evaluation and mutation order are unchanged. The final
+five-file delta passes `private/20261028T102900Z-85987` and
+`similarity/20261028T102902Z-86222`.
+`core-lint/20261028T102846Z-85593` gets past Sync and reports one remaining
+let-chain diagnostic in the earlier scenario prerequisite work
+(`meguri-testkit/src/scenario/model.rs`). That mechanical repair remains;
+this is not a passing full-lint receipt.
