@@ -1,6 +1,6 @@
 # Cloud capture regression repair
 
-Status: WIP; no unit or milestone acceptance.
+Status: focused repair verified; full integration acceptance remains open.
 Starting commit: `efcf26cabdcb42653e6adff2811249aff1d97340`.
 Integration base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 
@@ -34,4 +34,22 @@ R554 audio failure, snapshot differences, credential entitlement failure and
 missing/queued VM results remain separate outstanding evidence. The dedicated
 VM was restarted only after the verification job ended.
 `doctor/20261028T200115Z-18333` confirms its SSH and Xcode are available again.
-Catch-up requires a clean checkout and will run after committing this WIP.
+Catch-up requires a clean checkout. The first dirty-tree attempt was refused;
+`catch-up/20261028T200558Z-22170` passed on the committed WIP, with nothing queued.
+This does not complete the cancelled gate or its missing VM checks.
+
+## Final mechanical correction
+
+`cleanroom/20261028T200555Z-21866` removes only the two redundant borrows.
+Independent R2 confirms equivalence and unchanged assertions.
+
+- `core-format/20261028T200758Z-23268`: pass.
+- `core-test/20261028T200813Z-23597`: all seven affected regression tests
+  pass, zero skipped. Other inputs covered by the earlier 110-test selection
+  are unchanged.
+- `core-lint/20261028T200902Z-24085`: all four checks pass.
+- `private/20261028T200904Z-24479`: pass.
+- `similarity/20261028T200904Z-24336`: pass.
+
+The fixture failure is repaired. The full integration gate and the separately
+recorded release evidence remain outstanding; no Unit trailer is added.

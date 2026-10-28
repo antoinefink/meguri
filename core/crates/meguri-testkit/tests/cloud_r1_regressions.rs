@@ -451,7 +451,7 @@ fn unsupported_notetype_sort_field_and_deck_parent_changes_remain_gated_through_
         let c = h.collection().unwrap();
         let runtime = h.cloud_runtime().unwrap();
         runtime.reconcile_binding(&c, &h.media().unwrap(), TIMEOUT).unwrap();
-        let instance = confirm_root(&runtime, &mut service, &files);
+        let instance = confirm_root(runtime, &mut service, &files);
         let (op, name) = if table == Table::Notetypes {
             let id = NotetypeId(files.note.mid);
             let name = codec::entity_name(
@@ -579,7 +579,7 @@ fn flat_deck_rename_is_captured_with_payload_revision_and_pending_save() {
     let c = h.collection().unwrap();
     let runtime = h.cloud_runtime().unwrap();
     runtime.reconcile_binding(&c, &h.media().unwrap(), TIMEOUT).unwrap();
-    let instance = confirm_root(&runtime, &mut service, &files);
+    let instance = confirm_root(runtime, &mut service, &files);
     let id = {
         let lease = c.reader(ReaderRole::Query).unwrap();
         // The same first deck row and flat name used by the stale fixture.
