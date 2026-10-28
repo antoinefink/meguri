@@ -1,7 +1,7 @@
-# U32 Apple durability evidence at U37's collection-FFI boundary. Ordinary
-# Rust checks stay in Docker; these exact suites measure the native WAL path.
+# U32/U37 Apple WAL/collection-FFI durability and U113 cloud tracking proof.
+# Ordinary Rust checks stay in Docker; these exact suites prove native sync.
 mg_job native-durability host mg_native_durability \
-  "Apple silicon native U32/U37 suspend, WAL durability and collection FFI tests; no arguments, retries or UI"
+  "Apple silicon native U32/U37 suspend, WAL/collection FFI and U113 cloud tracking durability; no arguments, retries or UI"
 
 mg_native_durability() {
   if [ "$#" -ne 0 ]; then
@@ -21,7 +21,8 @@ mg_native_durability() {
   fi
   mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
-  local package suite json log rc binary counts passed failed skipped
+  local package suite target_name kind json log rc binary counts passed failed skipped
+  local suites="suspend wal_durability collection_ffi cloud_records cloud_recovery cloud_unit"
   local total_passed=0 total_failed=0 total_skipped=0 broken=false
   local target="$MG_ROOT/build/native-durability/target"
   # Synthetic benchmark collections only, regardless of a caller's override.
@@ -30,17 +31,21 @@ mg_native_durability() {
   # caller's Cargo environment normally cross-compiles. Reuse this dedicated
   # target cache across runs without replacing Xcode's shared core products.
   # Missing locked test dependencies may download here, outside measurement.
-  for package in meguri-engine meguri-ffi; do
+  for package in meguri-engine meguri-ffi meguri-sync; do
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
       (cd core && cargo test --locked -p meguri-engine --test suspend --test wal_durability \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
-    else
+    elif [ "$package" = meguri-ffi ]; then
       (cd core && cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
+    else
+      (cd core && cargo test --locked -p meguri-sync --features test-hooks --lib \
+        --test cloud_records --test cloud_recovery --target aarch64-apple-darwin \
+        --target-dir "$target" --no-run --message-format json-render-diagnostics) >"$json" 2>"$log"
     fi
     rc=$?
     mg_artifact build-jsonl "$json" "$package native compiler artifacts"
@@ -54,12 +59,21 @@ mg_native_durability() {
   done
   # Resolve every executable before running any suite. Missing/ambiguous
   # compiler artifacts must never turn an incomplete build into a pass.
-  for suite in suspend wal_durability collection_ffi; do
+  for suite in $suites; do
     package=meguri-engine
-    [ "$suite" != collection_ffi ] || package=meguri-ffi
-    binary="$(jq -ser --arg suite "$suite" '
+    target_name="$suite" kind=test
+    case "$suite" in
+      collection_ffi) package=meguri-ffi;;
+      cloud_records|cloud_recovery) package=meguri-sync;;
+      cloud_unit) package=meguri-sync; target_name=meguri_sync; kind=lib;;
+    esac
+    binary="$(jq -ser --arg suite "$target_name" --arg kind "$kind" '
+      if ([.[] | select(.reason == "build-finished")] | length) == 1
+        and .[-1].reason == "build-finished" and .[-1].success == true
+      then . else error("expected a complete successful Cargo stream") end
+      |
       [.[] | select(.reason == "compiler-artifact" and .profile.test == true
-        and .target.name == $suite and (.target.kind | index("test")) != null)
+        and .target.name == $suite and (.target.kind | index($kind)) != null)
         | .executable | select(type == "string" and length > 0)]
       | if length == 1 then .[0] else error("expected one native test executable") end
       ' "$MG_RUN_DIR/$package-build.jsonl" 2>/dev/null)"
@@ -72,10 +86,15 @@ mg_native_durability() {
     printf '%s\n' "$binary" >"$MG_RUN_DIR/$suite-executable.txt"
   done
   mg_host_lease --no-session || return 0
-  for suite in suspend wal_durability collection_ffi; do
+  for suite in $suites; do
     binary="$(cat "$MG_RUN_DIR/$suite-executable.txt")"
     log="$MG_RUN_DIR/$suite.log"
-    "$binary" --test-threads=1 --nocapture >"$log" 2>&1
+    if [ "$suite" = cloud_unit ]; then
+      # Keep the private cloud settings proof; frozen server tests stay out.
+      "$binary" cloud:: --test-threads=1 --nocapture >"$log" 2>&1
+    else
+      "$binary" --test-threads=1 --nocapture >"$log" 2>&1
+    fi
     rc=$?
     mg_artifact test-log "$log" "$suite native libtest output, including timing evidence"
     cat "$log" >&2

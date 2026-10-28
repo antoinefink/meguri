@@ -143,7 +143,7 @@ runs:
     tier: T0
     placement: host
     class: data-safety
-    triggers: [core/crates/meguri-ffi/, core/crates/meguri-host/, core/crates/meguri-engine/src/lifecycle/, core/crates/meguri-engine/src/suspend.rs, core/crates/meguri-engine/src/executor/, core/crates/meguri-engine/tests/suspend.rs, core/crates/meguri-engine/tests/wal_durability.rs, core/crates/meguri-storage/src/durability.rs, core/crates/meguri-storage/src/pragmas.rs, tools/mg.d/native-durability.sh, tools/tests/native_durability.bats]
+    triggers: [core/crates/meguri-ffi/, core/crates/meguri-host/, core/crates/meguri-engine/src/lifecycle/, core/crates/meguri-engine/src/suspend.rs, core/crates/meguri-engine/src/executor/, core/crates/meguri-engine/tests/suspend.rs, core/crates/meguri-engine/tests/wal_durability.rs, core/crates/meguri-storage/src/durability.rs, core/crates/meguri-storage/src/pragmas.rs, core/crates/meguri-sync/src/cloud/, core/crates/meguri-sync/tests/cloud_records.rs, core/crates/meguri-sync/tests/cloud_recovery.rs, core/crates/meguri-sync/Cargo.toml, tools/mg.d/native-durability.sh, tools/tests/native_durability.bats]
     budget_s: 1800
 
   # --- T0: conformance on the committed goldens --------------------------------

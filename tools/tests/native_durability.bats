@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Real job reporting with fake native Cargo artifacts and libtest binaries.
+# U32/U37/U113 job reporting with fake native Cargo artifacts and libtest binaries.
 bats_require_minimum_version 1.5.0
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -47,6 +47,7 @@ fi
 case "$package" in
   meguri-engine) suites="suspend wal_durability";;
   meguri-ffi) suites="collection_ffi";;
+  meguri-sync) suites="cloud_records cloud_recovery cloud_unit";;
   *) exit 97;;
 esac
 for suite in $suites; do
@@ -55,9 +56,28 @@ for suite in $suites; do
   cp "$FX_NATIVE_BIN/template" "$exe"
   chmod +x "$exe"
   [ "${FX_NOT_EXECUTABLE:-}" != "$suite" ] || chmod -x "$exe"
-  jq -nc --arg suite "$suite" --arg exe "$exe" \
-    '{reason:"compiler-artifact",profile:{test:true},target:{name:$suite,kind:["test"]},executable:$exe}'
+  target_name="$suite"; kind=test
+  [ "$suite" != cloud_unit ] || { target_name=meguri_sync; kind=lib; }
+  [ "${FX_WRONG_KIND:-}" != "$suite" ] || { if [ "$kind" = lib ]; then kind=test; else kind=lib; fi; }
+  artifact="$(jq -nc --arg name "$target_name" --arg exe "$exe" --arg kind "$kind" \
+    --argjson test "$([ "${FX_WRONG_PROFILE:-}" != "$suite" ] && echo true || echo false)" \
+    --argjson missing "$([ "${FX_NO_EXECUTABLE:-}" = "$suite" ] && echo true || echo false)" \
+    '{reason:"compiler-artifact",profile:{test:$test},target:{name:$name,kind:[$kind]},executable:(if $missing then null else $exe end)}')"
+  # Cargo also reports the ordinary library without a test executable.
+  if [ "$suite" = cloud_unit ]; then
+    printf '%s\n' "$artifact" | jq -c '.profile.test = false | .executable = null'
+  fi
+  printf '%s\n' "$artifact"
+  [ "${FX_DUPLICATE:-}" != "$suite" ] || printf '%s\n' "$artifact"
 done
+if [ "${FX_STREAM_PACKAGE:-}" = "$package" ]; then
+  case "${FX_STREAM:-}" in
+    incomplete) exit 0;;
+    failed) echo '{"reason":"build-finished","success":false}'; exit 0;;
+    malformed) echo '{'; exit 0;;
+  esac
+fi
+echo '{"reason":"build-finished","success":true}'
 EOF
   chmod +x "$BIN/cargo"
   cat >"$FX_NATIVE_BIN/template" <<'EOF'
@@ -75,8 +95,13 @@ elif [ "${FX_TEST_FAIL:-}" = "$suite" ]; then
   echo "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
   exit 101
 else
-  echo "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  passed=2
+  case "$suite" in cloud_records|cloud_recovery) passed=5;; cloud_unit) passed=1;; esac
+  echo "test result: ok. $passed passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
 fi
+[ "${FX_DOUBLE_SUMMARY:-}" != "$suite" ] || echo "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+[ "${FX_EXIT_FAIL:-}" != "$suite" ] || exit 101
+exit 0
 EOF
   export PATH="$BIN:$PATH"
 }
@@ -88,18 +113,26 @@ mg() {
 }
 field() { jq -r "$@" "$result"; }
 
-@test "native durability builds before leasing, runs three suites once and retains timing" {
+@test "native durability builds before leasing, runs six suites once and retains timing" {
   FX_CACHE_COLD=1 MEGURI_BENCH_FIXTURES=/must-not-use mg
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
-  [ "$(field .summary.passed)" -eq 6 ]
-  [ "$(field .summary.total)" -eq 6 ]
+  [ "$(field .summary.passed)" -eq 17 ]
+  [ "$(field .summary.total)" -eq 17 ]
   [ "$(field .details.environment.rustc)" = 'rustc fake' ]
   grep -Fx "rustc $SB/core -V" "$STUB_LOG"
   [ "$(field '.details.wal_durability.passed')" -eq 2 ]
-  [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 2 ]
-  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 3 ]
-  [ "$(sed -n '4p' "$STUB_LOG")" = 'lease --no-session' ]
+  [ "$(field '.details.cloud_records.passed')" -eq 5 ]
+  [ "$(field '.details.cloud_recovery.passed')" -eq 5 ]
+  [ "$(field '.details.cloud_unit.passed')" -eq 1 ]
+  local target="$SB/build/native-durability/target"
+  grep -Fx "cargo test --locked -p meguri-engine --test suspend --test wal_durability --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  grep -Fx "cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  grep -Fx "cargo test --locked -p meguri-sync --features test-hooks --lib --test cloud_records --test cloud_recovery --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 3 ]
+  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 6 ]
+  grep -Fx 'run cloud_unit cloud:: --test-threads=1 --nocapture' "$STUB_LOG"
+  [ "$(sed -n '5p' "$STUB_LOG")" = 'lease --no-session' ]
   grep -q '^U32 full WAL sync: p50=123us, p95=456us' "$(dirname "$result")/wal_durability.log"
   grep -Fx "fixtures $SB/build/fixtures" "$(dirname "$result")/suspend.log"
   python3 "$SB/tools/tests/validate_result.py" "$result"
@@ -119,6 +152,30 @@ field() { jq -r "$@" "$result"; }
   ! grep -Eq '^(run|lease) ' "$STUB_LOG"
 }
 
+@test "native durability cloud artifacts require one executable of the correct kind and profile" {
+  local suite fault
+  for suite in cloud_records cloud_recovery cloud_unit; do
+    for fault in FX_OMIT FX_DUPLICATE FX_NO_EXECUTABLE FX_NOT_EXECUTABLE FX_WRONG_KIND FX_WRONG_PROFILE; do
+      export "$fault=$suite"
+      mg
+      unset "$fault"
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = "executable/$suite" ]
+      ! grep -Eq '^(run|lease) ' "$STUB_LOG"
+    done
+  done
+}
+
+@test "native durability requires a complete successful Cargo JSON stream" {
+  local stream
+  for stream in incomplete failed malformed; do
+    FX_STREAM_PACKAGE=meguri-sync FX_STREAM="$stream" mg
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = executable/cloud_records ]
+    ! grep -Eq '^(run|lease) ' "$STUB_LOG"
+  done
+}
+
 @test "native durability build failure is final and preserves artifacts" {
   FX_BUILD_FAIL=meguri-engine mg
   [ "$status" -eq 1 ]
@@ -133,13 +190,23 @@ field() { jq -r "$@" "$result"; }
   ! grep -Eq '^(run|lease) ' "$STUB_LOG"
 }
 
+@test "native durability sync build failure is final before the lease" {
+  FX_BUILD_FAIL=meguri-sync mg
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = build/meguri-sync ]
+  [ "$(grep -c '^cargo ' "$STUB_LOG")" -eq 3 ]
+  [ -f "$(dirname "$result")/meguri-sync-build.jsonl" ]
+  grep -Fx 'fake native build failure for meguri-sync' "$(dirname "$result")/meguri-sync-build.log"
+  ! grep -Eq '^(run|lease) ' "$STUB_LOG"
+}
+
 @test "native durability failing libtest is counted and never retried" {
   FX_TEST_FAIL=wal_durability mg
   [ "$status" -eq 1 ]
   [ "$(field .summary.failed)" -eq 1 ]
   [ "$(field '.details.wal_durability.exit_code')" -eq 101 ]
   [ "$(grep -c '^run wal_durability ' "$STUB_LOG")" -eq 1 ]
-  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 3 ]
+  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 6 ]
 }
 
 @test "native durability rejects empty suites and absent summaries" {
@@ -149,6 +216,42 @@ field() { jq -r "$@" "$result"; }
   FX_NO_SUMMARY=collection_ffi mg
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = summary/collection_ffi ]
+}
+
+@test "native durability cloud suites reject zero tests and missing or duplicate summaries" {
+  local suite
+  for suite in cloud_records cloud_recovery cloud_unit; do
+    FX_EMPTY="$suite" mg
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = "empty/$suite" ]
+    [ "$(field ".details.$suite.passed")" -eq 0 ]
+    FX_NO_SUMMARY="$suite" mg
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = "summary/$suite" ]
+    FX_DOUBLE_SUMMARY="$suite" mg
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = "summary/$suite" ]
+  done
+}
+
+@test "native durability cloud failures and nonzero exits cannot pass or retry" {
+  local suite fault
+  for suite in cloud_records cloud_recovery cloud_unit; do
+    for fault in FX_TEST_FAIL FX_EXIT_FAIL; do
+      : >"$STUB_LOG"
+      export "$fault=$suite"
+      mg
+      unset "$fault"
+      [ "$status" -eq 1 ]
+      [ "$(field '.failures[0].id')" = "test/$suite" ]
+      [ "$(field ".details.$suite.exit_code")" -eq 101 ]
+      if [ "$fault" = FX_TEST_FAIL ]; then
+        [ "$(field .summary.failed)" -eq 1 ]
+      fi
+      [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
+      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 6 ]
+    done
+  done
 }
 
 @test "native durability exposes no arbitrary native Cargo or shell interface" {

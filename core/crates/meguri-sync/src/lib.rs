@@ -13,6 +13,7 @@
 // Built only with the build switch; nothing outside it names the service.
 #[cfg(feature = "ankiweb")]
 pub mod ankiweb;
+pub mod cloud;
 pub mod endpoint;
 #[cfg(feature = "test-hooks")]
 pub mod endpoint_guard;
