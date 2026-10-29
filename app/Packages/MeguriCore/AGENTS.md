@@ -16,3 +16,5 @@
 - Manual transfer results are inspected only after the matching job drains. An activated typed failure outranks cancellation. Passwords are transient; only the device-only Keychain stores login labels/keys. Native cancellation-cause preferences contain backend operation ids and enum values only; they never change backend acceptance/recovery/cooldown.
 
 - Preparation cancellation uses the drained job’s policy id, never history differencing. Recovery Preview can retain activation/acceptance evidence; closing its native view does not cancel that operation. Publication checks the manual operation’s own cancellation state.
+
+- Swift `CKSyncEngine`: async fetch/send APIs only. Objective-C completion overloads are unavailable in Swift.
