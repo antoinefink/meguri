@@ -46,11 +46,6 @@ impl Runtime {
         s.adapter.durable = durable;
         s.adapter.next_sdk = s.adapter.next_sdk.checked_add(1).ok_or(Error::InvalidData)?;
         let id = format!("sdk:{host}:{}", s.adapter.next_sdk);
-        s.adapter.sdk = Some(SDKAuthority {
-            id: id.clone(),
-            guard: Self::adapter_guard_locked(&s),
-            stopping: false,
-        });
         if s.adapter.next_sdk > 1 {
             s.root_confirmed = false;
         }
@@ -60,7 +55,15 @@ impl Runtime {
         s.adapter.scheduled = None;
         s.actions.automatic = automatic;
         s.actions.handler = None;
+        #[cfg(feature = "test-hooks")]
+        meguri_model::faultpoint!("cloud.adapter.register_sdk.before_pending").map_err(Error::from)?;
         self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
+        // Failed pending discovery must leave the SDK slot available for retry.
+        s.adapter.sdk = Some(SDKAuthority {
+            id: id.clone(),
+            guard: Self::adapter_guard_locked(&s),
+            stopping: false,
+        });
         Ok((id, serialization, collection_zone(b.facts.epoch)))
     }
     pub fn sdk_root_confirmed(&self) -> bool {

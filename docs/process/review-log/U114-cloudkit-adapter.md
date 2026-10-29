@@ -81,6 +81,9 @@ Fault and signed checks remain open.
 P2-OWNER is repaired and focused-verified in `U114-native-owner.md`. P2-REG
 remains open. The historical review findings and failed receipts are retained.
 
+P2-REG is now repaired and focused-verified in `U114-registration-retry.md`.
+The broader SDK, workflow and gate requirements below remain open.
+
 This is WIP, without a Unit trailer. Publication/adoption, incoming application,
 absence processing, K19, assets/media, full result classification, large-data
 budgets, signed integration and full gates remain required. Tests use generated
