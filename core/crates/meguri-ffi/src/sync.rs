@@ -692,9 +692,18 @@ impl CloudWorkflow {
         // the inbox. Its guards are gone before the host admits a writer/WAL
         // wait. The serialized native event completes before later cursor events.
         if zone != "meguri-root" {
-            self.host
-                .apply_cloud_incoming(std::time::Duration::from_secs(1))
-                .map_err(cloud_error)?;
+            loop {
+                match self
+                    .host
+                    .apply_native_cloud_incoming(&sdk, std::time::Duration::from_secs(1))
+                    .map_err(cloud_error)?
+                {
+                    c::incoming::IncomingDisposition::Progress(0) | c::incoming::IncomingDisposition::Deferred(_) => {
+                        break;
+                    }
+                    c::incoming::IncomingDisposition::Progress(_) => {}
+                }
+            }
         }
         Ok(())
     }

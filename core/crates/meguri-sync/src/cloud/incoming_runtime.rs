@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 struct IncomingGuard {
     scan: ScanGuard,
     recovery: Option<RecoveryGuard>,
+    sdk: Option<String>,
 }
 #[derive(Clone)]
 struct RecoveryGuard {
@@ -169,6 +170,7 @@ impl Runtime {
                         ..anchor
                     },
                     recovery: Some(recovery),
+                    sdk: None,
                 }
             } else {
                 // A recovery row with no intents must not grant a full receive.
@@ -181,6 +183,7 @@ impl Runtime {
                 IncomingGuard {
                     scan: anchor,
                     recovery: None,
+                    sdk: None,
                 }
             };
             s.incoming.running = true;
@@ -188,7 +191,7 @@ impl Runtime {
         };
         let running = Running(self.state.clone(), self.incoming_idle.clone());
         self.with_incoming(&guard, collection, |_| Ok(()))?;
-        self.replay_ordinary(collection, &guard, timeout)?;
+        self.replay_ordinary(collection, &guard, timeout)?.into_result()?;
         drop(running);
         if guard.recovery.is_some() {
             // The current usable owner's own crash intents still precede its
@@ -199,6 +202,9 @@ impl Runtime {
     }
 
     fn check_incoming_locked(s: &State, guard: &IncomingGuard) -> Result<(), RuntimeError> {
+        if let Some(sdk) = &guard.sdk {
+            Self::sdk_locked(s, sdk)?;
+        }
         let anchor = guard.recovery.as_ref().map_or(&guard.scan, |r| &r.anchor);
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if s.incarnation != anchor.incarnation
@@ -241,7 +247,10 @@ impl Runtime {
         work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
         let Some(r) = &guard.recovery else {
-            return self.with_scan(&guard.scan, collection, work);
+            return self.with_scan(&guard.scan, collection, |s| {
+                Self::check_incoming_locked(s, guard)?;
+                work(s)
+            });
         };
         // Never call account/file providers under a writer or tracking lock.
         let account = self.publication_account()?;
@@ -335,9 +344,35 @@ impl Runtime {
         Ok(())
     }
 
+    /// Process-local diagnostics retain the writer error without serializing or
+    /// logging collection values. Native event handling does not throw it.
+    pub fn incoming_deferred_error(&self) -> Option<EngineError> {
+        self.state().incoming.last_deferred_error.clone()
+    }
+
     /// Bounded work grant, called by an actual fetch/event trigger, never a timer.
     /// Collection is borrowed per call; Runtime owns no collection handle.
     pub fn drain_incoming(&self, collection: &Collection, timeout: Duration) -> Result<usize, RuntimeError> {
+        self.drain_incoming_bounded(collection, timeout, None)?.into_result()
+    }
+
+    /// Native continuation consumes no new receive/retry grant. Every bounded
+    /// operation pins and rechecks the exact SDK as well as collection authority.
+    pub fn drain_native_incoming(
+        &self,
+        collection: &Collection,
+        sdk: &str,
+        timeout: Duration,
+    ) -> Result<IncomingDisposition, RuntimeError> {
+        self.drain_incoming_bounded(collection, timeout, Some(sdk))
+    }
+
+    fn drain_incoming_bounded(
+        &self,
+        collection: &Collection,
+        timeout: Duration,
+        sdk: Option<&str>,
+    ) -> Result<IncomingDisposition, RuntimeError> {
         self.refresh_identity()?;
         if let Ok(instance) = self.instance() {
             self.poll_review(&instance)?;
@@ -384,79 +419,140 @@ impl Runtime {
         let guard = IncomingGuard {
             scan: guard,
             recovery: None,
+            sdk: sdk.map(str::to_owned),
         };
         let _running = Running(self.state.clone(), self.incoming_idle.clone());
         self.with_incoming(&guard, collection, |_| Ok(()))?;
-        let replayed = self.replay_ordinary(collection, &guard, timeout)?;
-        let (entries, retry_granted, failed_this_open) = self.with_incoming(&guard, collection, |s| {
-            Ok((
-                s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?,
-                s.incoming.retry_granted,
-                s.incoming.failed_this_open.clone(),
-            ))
-        })?;
-        let retry = entries
-            .iter()
-            .find(|e| {
-                retry_granted
-                    && matches!(e.entry.reason, InboxReason::ApplyFailed { .. })
-                    && (e.entry.retry_count < 5 || !failed_this_open.contains(&e.id))
-            })
-            .cloned();
-        let mut entries: Vec<_> = entries
-            .into_iter()
-            .filter(|e| matches!(e.entry.reason, InboxReason::Ready | InboxReason::Reference))
-            .collect();
-        entries.sort_by_key(|e| {
-            let entity = match &e.entry.value {
-                InboxValue::Record { envelope, .. } => codec::Entity::decode(&envelope.0).ok(),
-                _ => None,
-            };
-            if let Some(codec::DecodeOutcome::Supported(v)) = entity {
-                let order = match v.fields.kind {
-                    codec::Kind::Preset => 0,
-                    codec::Kind::Deck => 1,
-                    codec::Kind::Notetype => 2,
-                    codec::Kind::Note => 3,
-                    codec::Kind::Card => 4,
-                    codec::Kind::Revlog => 5,
-                    codec::Kind::Tag => 6,
-                    codec::Kind::Config => 7,
-                    _ => 8,
+        let replayed = match self.replay_ordinary(collection, &guard, timeout)? {
+            IncomingDisposition::Progress(count) => count,
+            deferred @ IncomingDisposition::Deferred(_) => return Ok(deferred),
+        };
+        // A bounded op can park every selected entry without applying a row.
+        // Continue selecting here until an apply completes or no eligible work
+        // remains; zero applied entries is never a native continuation signal.
+        let mut parked = false;
+        loop {
+            let (entries, retry_granted, failed_this_open) = self.with_incoming(&guard, collection, |s| {
+                Ok((
+                    s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?,
+                    s.incoming.retry_granted,
+                    s.incoming.failed_this_open.clone(),
+                ))
+            })?;
+            let references = self.eligible_incoming_references(collection, &guard, &entries)?;
+            let retry = entries
+                .iter()
+                .find(|e| {
+                    retry_granted
+                        && matches!(e.entry.reason, InboxReason::ApplyFailed { .. })
+                        && (e.entry.retry_count < 5 || !failed_this_open.contains(&e.id))
+                })
+                .cloned();
+            let mut entries: Vec<_> = entries
+                .into_iter()
+                .filter(|e| matches!(e.entry.reason, InboxReason::Ready) || references.contains(&e.id))
+                .collect();
+            entries.sort_by_key(|e| {
+                let entity = match &e.entry.value {
+                    InboxValue::Record { envelope, .. } => codec::Entity::decode(&envelope.0).ok(),
+                    _ => None,
                 };
-                (v.fields.tombstone, order, e.entry.record_name.clone(), v.fields.erev)
-            } else {
-                (true, 9, e.entry.record_name.clone(), 0)
-            }
-        });
-        entries.truncate(500);
-        if entries.is_empty() {
-            if let Some(entry) = retry {
-                entries.push(entry);
-            }
-        }
-        if entries.is_empty() {
-            if replayed > 0 {
-                self.finish_incoming(_running)?;
-            }
-            return Ok(0);
-        }
-        self.with_incoming(&guard, collection, |s| {
-            s.incoming.retry_granted = false;
-            for e in &entries {
-                if matches!(e.entry.reason, InboxReason::ApplyFailed { .. }) {
-                    s.incoming.failed_this_open.insert(e.id);
+                if let Some(codec::DecodeOutcome::Supported(v)) = entity {
+                    let order = match v.fields.kind {
+                        codec::Kind::Preset => 0,
+                        codec::Kind::Deck => 1,
+                        codec::Kind::Notetype => 2,
+                        codec::Kind::Note => 3,
+                        codec::Kind::Card => 4,
+                        codec::Kind::Revlog => 5,
+                        codec::Kind::Tag => 6,
+                        codec::Kind::Config => 7,
+                        _ => 8,
+                    };
+                    (v.fields.tombstone, order, e.entry.record_name.clone(), v.fields.erev)
+                } else {
+                    (true, 9, e.entry.record_name.clone(), 0)
+                }
+            });
+            entries.truncate(500);
+            if entries.is_empty() {
+                if let Some(entry) = retry {
+                    entries.push(entry);
                 }
             }
-            Ok(())
+            if entries.is_empty() {
+                if replayed > 0 || parked {
+                    self.finish_incoming(_running)?;
+                }
+                return Ok(IncomingDisposition::Progress(0));
+            }
+            self.with_incoming(&guard, collection, |s| {
+                s.incoming.retry_granted = false;
+                for e in &entries {
+                    if matches!(e.entry.reason, InboxReason::ApplyFailed { .. }) {
+                        s.incoming.failed_this_open.insert(e.id);
+                    }
+                }
+                Ok(())
+            })?;
+            // Select at most one version of each name. A protected older intent is
+            // replayed above before a newer version can be considered here.
+            let mut names = BTreeSet::new();
+            entries.retain(|e| names.insert(e.entry.record_name.clone()));
+            let disposition = self.apply_ordinary_entries(collection, &guard, entries, None, timeout)?;
+            if matches!(disposition, IncomingDisposition::Progress(0)) {
+                parked = true;
+                continue;
+            }
+            if matches!(disposition, IncomingDisposition::Progress(_)) {
+                self.finish_incoming(_running)?;
+            }
+            return Ok(disposition);
+        }
+    }
+
+    fn eligible_incoming_references(
+        &self,
+        collection: &Collection,
+        guard: &IncomingGuard,
+        entries: &[StoredInboxEntry],
+    ) -> Result<BTreeSet<i64>, RuntimeError> {
+        if !entries.iter().any(|e| matches!(e.entry.reason, InboxReason::Reference)) {
+            return Ok(BTreeSet::new());
+        }
+        let (key, layouts) = self.with_incoming(guard, collection, |s| {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            Ok((
+                store
+                    .binding(guard.binding)?
+                    .ok_or(Error::BindingNotFound)?
+                    .facts
+                    .record_key
+                    .0,
+                layouts(store, guard.binding)?,
+            ))
         })?;
-        // Select at most one version of each name. A protected older intent is
-        // replayed above before a newer version can be considered here.
-        let mut names = BTreeSet::new();
-        entries.retain(|e| names.insert(e.entry.record_name.clone()));
-        let count = self.apply_ordinary_entries(collection, &guard, entries, None, timeout)?;
-        self.finish_incoming(_running)?;
-        Ok(count)
+        let lease = collection.reader(ReaderRole::Cloud)?;
+        let snapshot = lease.snapshot()?;
+        let mut eligible = BTreeSet::new();
+        for entry in entries
+            .iter()
+            .filter(|e| matches!(e.entry.reason, InboxReason::Reference))
+        {
+            let InboxValue::Record { envelope, .. } = &entry.entry.value else {
+                continue;
+            };
+            let received = codec::receive(&key, &entry.entry.record_name, &envelope.0, codec::AssetInput::Absent)
+                .map_err(|_| Error::InvalidData)?;
+            if let Some(payload) = received.payload
+                && references(&*snapshot, &payload, &layouts)?
+            {
+                eligible.insert(entry.id);
+            }
+        }
+        // Eligibility is advisory. The journalled writer checks references and
+        // the exact SDK/collection authority again before any apply or commit.
+        Ok(eligible)
     }
 
     fn apply_ordinary_entries(
@@ -466,7 +562,7 @@ impl Runtime {
         entries: Vec<StoredInboxEntry>,
         replay_of: Option<i64>,
         timeout: Duration,
-    ) -> Result<usize, RuntimeError> {
+    ) -> Result<IncomingDisposition, RuntimeError> {
         collection.check_rollover()?;
         self.with_incoming(guard, collection, |_| Ok(()))?;
         let shared = self.state.clone();
@@ -477,19 +573,30 @@ impl Runtime {
         let binding = guard.binding;
         let writer_guard = guard.clone();
         let attempted: Vec<_> = entries.iter().map(|e| e.id).collect();
+        // The writer transports EngineError only. Retain typed tracking/guard
+        // failures before that conversion so they can never become Deferred.
+        let fatal = Arc::new(Mutex::new(None));
+        let writer_fatal = fatal.clone();
         let result = collection.run(
             meguri_engine::OpSpec::named("cloud_incoming_apply", meguri_engine::OpSource::CloudIncoming),
             move |ctx| {
                 if ctx.generation() != generation {
                     return Err(engine_error("incoming generation"));
                 }
+                let capture = |error: RuntimeError| {
+                    let mapped = engine_error(&error);
+                    if !matches!(error, RuntimeError::Engine(_)) {
+                        *writer_fatal.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
+                    }
+                    mapped
+                };
                 let applied = {
                     let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
                         apply(ctx, &mut s, binding, file, generation, entries, replay_of)
                     })
-                    .map_err(engine_error)?
+                    .map_err(capture)?
                 };
                 // Still inside the journalled writer, before collection COMMIT,
                 // but neither runtime state nor TRACKING_ACCESS is held.
@@ -505,7 +612,7 @@ impl Runtime {
                 }
                 // A callback may have invalidated the opening while paused.
                 let s = shared.lock().unwrap_or_else(PoisonError::into_inner);
-                with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(engine_error)?;
+                with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(capture)?;
                 let targets: BTreeSet<_> = ctx
                     .scope()
                     .journal()
@@ -530,20 +637,44 @@ impl Runtime {
                     return Err(error.into());
                 }
                 let cancel = matches!(error, EngineError::Cancelled);
-                self.with_incoming(guard, collection, |s| {
-                    Ok(s.store
-                        .as_mut()
-                        .ok_or(Error::Database)?
-                        .rollback_apply(binding, &attempted, cancel)?)
+                let rollback = self.with_incoming(guard, collection, |s| {
+                    let rollback = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        s.store
+                            .as_mut()
+                            .ok_or(Error::Database)?
+                            .rollback_apply(binding, &attempted, cancel)
+                    }))
+                    .unwrap_or(Err(Error::Database));
+                    if rollback.is_err() {
+                        // Close the gate under the existing tracking lock.
+                        // Full invalidation runs after that lock is released.
+                        s.tracking_stopped = true;
+                        s.scan_required = true;
+                        s.whole_complete = false;
+                    }
+                    Ok(rollback)
                 })?;
+                if rollback.is_err() {
+                    Self::invalidate_locked(&mut self.state());
+                }
+                rollback?;
                 #[cfg(feature = "test-hooks")]
                 self.incoming_hooks
                     .hit(super::super::testing::IncomingStage::IncomingRollbackComplete);
-                return Err(error.into());
+                if let Some(fatal) = fatal.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                    // Existing non-native callers keep the writer's error
+                    // conversion; native callers retain the typed fatal cause.
+                    return Err(if guard.sdk.is_some() { fatal } else { error.into() });
+                }
+                self.with_incoming(guard, collection, |s| {
+                    s.incoming.last_deferred_error = Some(error.clone());
+                    Ok(())
+                })?;
+                return Ok(IncomingDisposition::Deferred(error));
             }
         };
         let (Some(intent_id), targets) = result.value else {
-            return Ok(0);
+            return Ok(IncomingDisposition::Progress(0));
         };
         if let Ok(instance) = self.instance() {
             self.poll_review(&instance)?;
@@ -604,7 +735,7 @@ impl Runtime {
         self.incoming_hooks
             .hit(super::super::testing::IncomingStage::ApplyAfterCommit);
         self.settle_ordinary(collection, guard, intent_id, timeout)?;
-        Ok(attempted.len())
+        Ok(IncomingDisposition::Progress(attempted.len()))
     }
 
     fn settle_ordinary(
@@ -746,7 +877,7 @@ impl Runtime {
         collection: &Collection,
         guard: &IncomingGuard,
         timeout: Duration,
-    ) -> Result<usize, RuntimeError> {
+    ) -> Result<IncomingDisposition, RuntimeError> {
         let intents = self.with_incoming(guard, collection, |s| {
             Ok(s.store.as_ref().ok_or(Error::Database)?.apply_intents(guard.binding)?)
         })?;
@@ -785,7 +916,11 @@ impl Runtime {
                         .map(|id| by_id.remove(id).ok_or(Error::InvalidData.into()))
                         .collect()
                 })?;
-                self.apply_ordinary_entries(collection, guard, entries, Some(i.id), timeout)?;
+                if let deferred @ IncomingDisposition::Deferred(_) =
+                    self.apply_ordinary_entries(collection, guard, entries, Some(i.id), timeout)?
+                {
+                    return Ok(deferred);
+                }
                 self.with_incoming(guard, collection, |s| {
                     if s.store
                         .as_ref()
@@ -800,7 +935,7 @@ impl Runtime {
                 })?;
             }
         }
-        Ok(count)
+        Ok(IncomingDisposition::Progress(count))
     }
 }
 
@@ -1156,7 +1291,7 @@ fn deck_descendants(
 }
 
 fn references(
-    rows: &impl ReadRows,
+    rows: &(impl ReadRows + ?Sized),
     p: &codec::Payload,
     layouts: &BTreeMap<i64, codec::Notetype>,
 ) -> Result<bool, Error> {

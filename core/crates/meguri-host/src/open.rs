@@ -391,6 +391,18 @@ impl CoreHost {
             .ok_or(meguri_sync::cloud::runtime::RuntimeError::IdentityUnverified)?;
         runtime.drain_incoming(&self.collection()?, timeout)
     }
+    /// Reach one bounded native apply, moving past parked work without receiving again.
+    pub fn apply_native_cloud_incoming(
+        &self,
+        sdk: &str,
+        timeout: Duration,
+    ) -> Result<meguri_sync::cloud::incoming::IncomingDisposition, meguri_sync::cloud::runtime::RuntimeError> {
+        let runtime = self
+            .cloud
+            .as_ref()
+            .ok_or(meguri_sync::cloud::runtime::RuntimeError::IdentityUnverified)?;
+        runtime.drain_native_incoming(&self.collection()?, sdk, timeout)
+    }
     pub fn derived(&self) -> &DerivedHost {
         &self.derived
     }

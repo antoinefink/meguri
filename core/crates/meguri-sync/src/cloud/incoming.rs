@@ -2,6 +2,22 @@
 use super::{entity_codec as c, *};
 use serde::{Deserialize, Serialize};
 
+/// One bounded native apply. Deferred is produced only after rollback and its
+/// tracking commit succeed; the original writer error stays available locally.
+#[derive(Debug)]
+pub enum IncomingDisposition {
+    Progress(usize),
+    Deferred(meguri_engine::EngineError),
+}
+impl IncomingDisposition {
+    pub(super) fn into_result(self) -> Result<usize, runtime::RuntimeError> {
+        match self {
+            Self::Progress(count) => Ok(count),
+            Self::Deferred(error) => Err(error.into()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyKeyRole {
     Entry,
@@ -59,6 +75,7 @@ pub(crate) struct ProcessState {
     pub failed_this_open: std::collections::BTreeSet<i64>,
     pub runs: Vec<ApplyRun>,
     pub receipts: Vec<meguri_engine::WalReceipt>,
+    pub last_deferred_error: Option<meguri_engine::EngineError>,
 }
 
 pub(crate) fn digest(p: Option<&c::Payload>) -> Result<Option<[u8; 32]>, Error> {

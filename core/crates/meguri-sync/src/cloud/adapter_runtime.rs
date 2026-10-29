@@ -73,7 +73,7 @@ impl Runtime {
         let s = self.state();
         Self::sdk_locked(&s, sdk)
     }
-    fn sdk_locked(s: &State, sdk: &str) -> Result<(), RuntimeError> {
+    pub(super) fn sdk_locked(s: &State, sdk: &str) -> Result<(), RuntimeError> {
         if !s
             .adapter
             .sdk

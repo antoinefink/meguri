@@ -205,6 +205,488 @@ fn fetched_applies_to_real_collection_and_redelivery_does_not_write_again() {
     );
 }
 
+// Synthetic remote records pass the production codec, inbox and host writer.
+fn incoming_record(payload: c::entity_codec::Payload, erev: u64) -> CloudRecord {
+    use c::entity_codec as codec;
+    let key = c::row_payload::payload_key(&payload).unwrap();
+    CloudRecord {
+        name: codec::entity_name(&[114; 32], payload.kind(), &key).unwrap(),
+        envelope: codec::Entity::build(
+            codec::EntityFields {
+                kind: payload.kind(),
+                key,
+                origin: [51; 16],
+                erev,
+                generation: None,
+                tombstone: false,
+                deleted_at_ms: 0,
+                writer: [61; 16],
+                base_sha256: None,
+            },
+            &payload.encode().unwrap(),
+        )
+        .unwrap()
+        .encode()
+        .unwrap(),
+        system_fields: Some(erev.to_be_bytes().to_vec()),
+    }
+}
+fn blocked_record(erev: u64) -> CloudRecord {
+    incoming_record(
+        c::entity_codec::Payload::Note(c::entity_codec::Note {
+            id: 114_502,
+            mid: 114_999,
+            guid: b"synthetic-waiting".to_vec(),
+            flds: erev.to_string().into_bytes(),
+            ..Default::default()
+        }),
+        erev,
+    )
+}
+
+#[test]
+fn native_fetched_drains_502_exactly_once_in_operations_of_at_most_500() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, _) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let records: Vec<_> = (0..502)
+        .map(|i| {
+            incoming_record(
+                c::entity_codec::Payload::Config(c::entity_codec::Config {
+                    key: format!("synthetic-bounded-{i}").into_bytes(),
+                    mtime_secs: NOW / 1000,
+                    val: b"true".to_vec(),
+                }),
+                2,
+            )
+        })
+        .collect();
+    workflow
+        .fetched(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            records.clone(),
+            vec![],
+        )
+        .unwrap();
+    let snapshot = workflow.durable_snapshot().unwrap();
+    let runs = workflow.core.incoming_runs();
+    assert_eq!(runs.iter().map(|r| r.entry_ids.len()).sum::<usize>(), 502);
+    assert_eq!(runs.len(), 2);
+    assert!(runs.iter().all(|r| !r.entry_ids.is_empty() && r.entry_ids.len() <= 500));
+    let ids: std::collections::BTreeSet<_> = runs.iter().flat_map(|r| r.entry_ids.iter()).collect();
+    assert_eq!(ids.len(), 502);
+    let collection = workflow.host.collection().unwrap();
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    for (i, record) in records.iter().enumerate() {
+        assert!(!snapshot.inbox_names.contains(&record.name));
+        assert_eq!(
+            reader.config_value(&format!("synthetic-bounded-{i}")).unwrap(),
+            Some(ConfigValue::Bool(true))
+        );
+        let facts = workflow.entity_facts(record.name.clone()).unwrap().unwrap();
+        assert!(facts.payload_digest == facts.acked_payload_digest);
+    }
+    drop(reader);
+    let seq = collection.last_seq();
+    workflow
+        .fetched(sdk.instance_id, sdk.collection_zone, records, vec![])
+        .unwrap();
+    assert_eq!(collection.last_seq(), seq);
+    assert_eq!(workflow.core.incoming_runs().len(), 2);
+}
+
+#[test]
+fn native_deferred_reference() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, _) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let record = blocked_record(2);
+    workflow
+        .fetched(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            vec![record.clone()],
+            vec![],
+        )
+        .unwrap();
+    let binding = workflow.core.status().unwrap().binding.unwrap().id;
+    let entries = workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].entry.record_name, record.name);
+    assert!(matches!(entries[0].entry.reason, c::InboxReason::Reference));
+    assert!(workflow.core.incoming_runs().is_empty());
+    let cursor = vec![2, 4, 6];
+    workflow.state_update(sdk.instance_id, cursor.clone()).unwrap();
+    assert_eq!(workflow.durable_snapshot().unwrap().serialization, Some(cursor));
+}
+
+#[test]
+fn native_fetched_advances_ready_content_after_500_notes_park_on_references() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, incoming) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let mut records: Vec<_> = (0..500)
+        .map(|i| {
+            incoming_record(
+                c::entity_codec::Payload::Note(c::entity_codec::Note {
+                    id: 115_000 + i,
+                    mid: 114_999,
+                    guid: i.to_string().into_bytes(),
+                    flds: b"2".to_vec(),
+                    ..Default::default()
+                }),
+                2,
+            )
+        })
+        .collect();
+    records.push(incoming.clone());
+    workflow
+        .fetched(sdk.instance_id.clone(), sdk.collection_zone, records, vec![])
+        .unwrap();
+    assert_eq!(fixture.incoming_value(), Some(ConfigValue::Bool(true)));
+    let binding = workflow.core.status().unwrap().binding.unwrap().id;
+    let entries = workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 500);
+    assert!(
+        entries
+            .iter()
+            .all(|e| matches!(e.entry.reason, c::InboxReason::Reference))
+    );
+    assert!(entries.iter().all(|e| e.entry.retry_count == 0));
+    let runs = workflow.core.incoming_runs();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].entry_ids.len(), 1);
+    let facts = workflow.entity_facts(incoming.name).unwrap().unwrap();
+    assert!(facts.payload_digest == facts.acked_payload_digest);
+    let seq = workflow.host.collection().unwrap().last_seq();
+    assert!(matches!(
+        workflow
+            .host
+            .apply_native_cloud_incoming(&sdk.instance_id, Duration::from_secs(1))
+            .unwrap(),
+        c::incoming::IncomingDisposition::Progress(0)
+    ));
+    assert_eq!(workflow.host.collection().unwrap().last_seq(), seq);
+    assert_eq!(workflow.core.incoming_runs().len(), 1);
+    assert_eq!(workflow.core.inbox_entries(binding).unwrap(), entries);
+}
+
+fn incoming_deck(fixture: &Fixture, id: i64, parent_id: i64, name: &[u8]) -> CloudRecord {
+    use c::entity_codec as codec;
+    let collection = fixture.workflow.host.collection().unwrap();
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    let row = reader
+        .row_image(meguri_storage::Table::Decks, &meguri_storage::RowKey::Id(1))
+        .unwrap()
+        .unwrap();
+    let codec::Payload::Deck(mut deck) =
+        c::row_payload::project(&c::row_payload::ReadView(&*reader), codec::Kind::Deck, &row, |_| {
+            Err(c::Error::InvalidData)
+        })
+        .unwrap()
+    else {
+        panic!("expected deck payload");
+    };
+    deck.id = id;
+    deck.parent_id = parent_id;
+    deck.name = name.to_vec();
+    incoming_record(codec::Payload::Deck(deck), 2)
+}
+
+#[test]
+fn native_fetched_retries_a_parked_reference_when_its_real_parent_arrives() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, _) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let child = incoming_deck(&fixture, 116_002, 116_001, b"RemoteParent\x1fRemoteChild");
+    workflow
+        .fetched(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            vec![child.clone()],
+            vec![],
+        )
+        .unwrap();
+    let binding = workflow.core.status().unwrap().binding.unwrap().id;
+    let entries = workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(matches!(entries[0].entry.reason, c::InboxReason::Reference));
+    assert!(workflow.core.incoming_runs().is_empty());
+    let parent = incoming_deck(&fixture, 116_001, 0, b"RemoteParent");
+    workflow
+        .fetched(sdk.instance_id, sdk.collection_zone, vec![parent.clone()], vec![])
+        .unwrap();
+    assert!(workflow.core.inbox_entries(binding).unwrap().is_empty());
+    let collection = workflow.host.collection().unwrap();
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    for id in [116_001, 116_002] {
+        assert!(
+            reader
+                .row_image(meguri_storage::Table::Decks, &meguri_storage::RowKey::Id(id))
+                .unwrap()
+                .is_some()
+        );
+    }
+    for record in [parent, child] {
+        let facts = workflow.entity_facts(record.name).unwrap().unwrap();
+        assert!(facts.payload_digest == facts.acked_payload_digest);
+    }
+    assert_eq!(
+        workflow
+            .core
+            .incoming_runs()
+            .iter()
+            .map(|r| r.entry_ids.len())
+            .sum::<usize>(),
+        2
+    );
+}
+
+#[test]
+fn failed_rollback_tracking_transaction_stops_the_sdk_and_retains_intent_and_cursor() {
+    use c::testing::{ApplyInterruption, TrackingFault};
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, incoming) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let before = workflow.durable_snapshot().unwrap();
+    let seq = workflow.host.collection().unwrap().last_seq();
+    let binding = workflow.core.status().unwrap().binding.unwrap().id;
+    workflow
+        .core
+        .interrupt_next_incoming_for_testing(ApplyInterruption::Error);
+    c::testing::arm_tracking_fault("cloud.tracking.commit.rollback", TrackingFault::Constraint).unwrap();
+    assert!(
+        workflow
+            .fetched(
+                sdk.instance_id.clone(),
+                sdk.collection_zone,
+                vec![incoming.clone()],
+                vec![]
+            )
+            .is_err()
+    );
+    let after = workflow.durable_snapshot().unwrap();
+    assert!(after.tracking_stopped);
+    assert_eq!(after.serialization, before.serialization);
+    assert_eq!(after.inbox_names, vec![incoming.name.clone()]);
+    let entries = workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].entry.retry_count, 0);
+    assert!(matches!(entries[0].entry.reason, c::InboxReason::Ready));
+    let intents = workflow.core.apply_intents(binding).unwrap();
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].inbox_ids, vec![entries[0].id]);
+    assert!(intents[0].result_seq.is_none());
+    assert!(workflow.core.incoming_runs().is_empty());
+    assert_eq!(fixture.incoming_value(), None);
+    assert_eq!(workflow.host.collection().unwrap().last_seq(), seq);
+    assert!(workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+    assert!(workflow.register_sdk(false).is_err());
+    assert!(workflow.state_update(sdk.instance_id, vec![8, 6, 4]).is_err());
+    assert_eq!(workflow.durable_snapshot().unwrap().serialization, before.serialization);
+    assert_eq!(workflow.core.apply_intents(binding).unwrap(), intents);
+    assert_eq!(workflow.core.inbox_entries(binding).unwrap(), entries);
+}
+
+#[test]
+fn native_fetched_refuses_retired_sdk_between_bounded_operations_without_tracking_stop() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, _) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let before = workflow.durable_snapshot().unwrap();
+    let core = Arc::downgrade(&workflow.core);
+    let instance = sdk.instance_id.clone();
+    let settled = Arc::new(AtomicUsize::new(0));
+    let observed = settled.clone();
+    workflow.core.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::IntentSettlementComplete && observed.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            core.upgrade().unwrap().retire_sdk(&instance, false).unwrap();
+        }
+    });
+    let records: Vec<_> = (0..502)
+        .map(|i| {
+            incoming_record(
+                c::entity_codec::Payload::Config(c::entity_codec::Config {
+                    key: format!("synthetic-{i}").into_bytes(),
+                    mtime_secs: NOW / 1000,
+                    val: b"true".to_vec(),
+                }),
+                2,
+            )
+        })
+        .collect();
+    assert!(
+        workflow
+            .fetched(sdk.instance_id.clone(), sdk.collection_zone, records.clone(), vec![])
+            .is_err()
+    );
+    assert_eq!(settled.load(Ordering::SeqCst), 1);
+    let after = workflow.durable_snapshot().unwrap();
+    assert!(!after.tracking_stopped);
+    assert_eq!(after.serialization, before.serialization);
+    assert_eq!(after.inbox_names.len(), 2);
+    let runs = workflow.core.incoming_runs();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].entry_ids.len(), 500);
+    let collection = workflow.host.collection().unwrap();
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    for (i, record) in records.iter().enumerate() {
+        assert_eq!(
+            reader.config_value(&format!("synthetic-{i}")).unwrap().is_some(),
+            !after.inbox_names.contains(&record.name)
+        );
+    }
+    assert!(workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+    assert!(workflow.state_update(sdk.instance_id, vec![7, 5, 3]).is_err());
+    assert_eq!(
+        workflow.durable_snapshot().unwrap().tracking_content,
+        after.tracking_content
+    );
+}
+
+#[test]
+fn native_fetched_keeps_a_real_commit_completed_error_fatal_and_retains_replay_intent() {
+    struct Disarm;
+    impl Drop for Disarm {
+        fn drop(&mut self) {
+            meguri_model::faultpoint::disarm("storage.commit.after");
+        }
+    }
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, incoming) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let before = workflow.durable_snapshot().unwrap();
+    let seq = workflow.host.collection().unwrap().last_seq();
+    let rollback = Arc::new(AtomicUsize::new(0));
+    let observed = rollback.clone();
+    workflow.core.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::ApplyAfterIntent {
+            meguri_model::faultpoint::arm(
+                "storage.commit.after",
+                meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+            );
+        }
+        if stage == c::testing::IncomingStage::IncomingRollbackComplete {
+            observed.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let disarm = Disarm;
+    let result = workflow.fetched(sdk.instance_id, sdk.collection_zone, vec![incoming.clone()], vec![]);
+    drop(disarm);
+    assert!(result.is_err());
+    assert_eq!(rollback.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.incoming_value(), Some(ConfigValue::Bool(true)));
+    let committed = workflow.host.collection().unwrap().last_seq();
+    assert!(committed > seq);
+    let binding = workflow.core.status().unwrap().binding.unwrap().id;
+    let entries = workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].entry.retry_count, 0);
+    assert!(matches!(entries[0].entry.reason, c::InboxReason::Ready));
+    let intents = workflow.core.apply_intents(binding).unwrap();
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].inbox_ids, vec![entries[0].id]);
+    assert_eq!(intents[0].result_seq, Some(committed.0));
+    assert!(workflow.core.incoming_runs().is_empty());
+    assert_eq!(workflow.durable_snapshot().unwrap().serialization, before.serialization);
+}
+
+#[test]
+fn native_fetched_keeps_rolled_back_and_cancelled_work_without_a_retry_grant() {
+    use c::testing::ApplyInterruption;
+    for interruption in [ApplyInterruption::Error, ApplyInterruption::Cancel] {
+        let fixture = Fixture::new(Keys::new([]));
+        let (sdk, _, incoming) = fixture.baseline();
+        let workflow = &fixture.workflow;
+        let seq = workflow.host.collection().unwrap().last_seq();
+        workflow.core.interrupt_next_incoming_for_testing(interruption);
+        workflow
+            .fetched(
+                sdk.instance_id.clone(),
+                sdk.collection_zone.clone(),
+                vec![incoming.clone()],
+                vec![],
+            )
+            .unwrap();
+        let binding = workflow.core.status().unwrap().binding.unwrap().id;
+        let entries = workflow.core.inbox_entries(binding).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].entry.record_name, incoming.name);
+        if interruption == ApplyInterruption::Cancel {
+            assert!(matches!(entries[0].entry.reason, c::InboxReason::Ready));
+            assert_eq!(entries[0].entry.retry_count, 0);
+        } else {
+            assert!(matches!(entries[0].entry.reason, c::InboxReason::ApplyFailed { .. }));
+            assert_eq!(entries[0].entry.retry_count, 1);
+        }
+        assert!(workflow.core.apply_intents(binding).unwrap().is_empty());
+        assert!(workflow.core.incoming_runs().is_empty());
+        assert_eq!(workflow.host.collection().unwrap().last_seq(), seq);
+        assert_eq!(fixture.incoming_value(), None);
+        workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+        workflow
+            .state_update(sdk.instance_id, b"after-deferred-apply".to_vec())
+            .unwrap();
+        assert_eq!(
+            workflow.durable_snapshot().unwrap().serialization,
+            Some(b"after-deferred-apply".to_vec())
+        );
+        // No new receive: an ordinary failure cannot get a retry from this drain.
+        if interruption != ApplyInterruption::Cancel {
+            assert_eq!(workflow.host.apply_cloud_incoming(Duration::from_secs(1)).unwrap(), 0);
+            assert_eq!(workflow.core.inbox_entries(binding).unwrap()[0].entry.retry_count, 1);
+        }
+    }
+}
+
+#[test]
+fn legacy_drain_still_returns_the_actual_rolled_back_engine_error() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, incoming) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    workflow
+        .core
+        .adapter_fetched(&sdk.instance_id, &sdk.collection_zone, &[incoming.saved()], &[])
+        .unwrap();
+    workflow
+        .core
+        .interrupt_next_incoming_for_testing(c::testing::ApplyInterruption::Cancel);
+    assert!(matches!(
+        workflow.host.apply_cloud_incoming(Duration::from_secs(1)),
+        Err(r::RuntimeError::Engine(meguri_engine::EngineError::Cancelled))
+    ));
+}
+
+#[test]
+fn durable_snapshot_distinguishes_real_same_name_queued_content() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, _) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    let first = blocked_record(2);
+    let newer = blocked_record(3);
+    assert_eq!(first.name, newer.name);
+    workflow
+        .fetched(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            vec![first],
+            vec![],
+        )
+        .unwrap();
+    let before = workflow.durable_snapshot().unwrap();
+    workflow
+        .fetched(sdk.instance_id, sdk.collection_zone, vec![newer], vec![])
+        .unwrap();
+    let after = workflow.durable_snapshot().unwrap();
+    assert_eq!(before.inbox_names.len(), 1);
+    assert_eq!(before.inbox_names, after.inbox_names);
+    assert_ne!(before.tracking_content, after.tracking_content);
+    assert_eq!(before.serialization, after.serialization);
+    assert!(workflow.core.incoming_runs().is_empty());
+}
+
 #[test]
 fn fetched_rejects_wrong_zone_and_retired_sdk_before_any_mutation() {
     let fixture = Fixture::new(Keys::new([]));

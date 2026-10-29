@@ -439,6 +439,8 @@ impl TrackingStore {
                 tx.execute("DELETE FROM cloud_apply_intents WHERE id=?1", [i.id])?;
             }
         }
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&tx, "cloud.tracking.commit.rollback")?;
         tx.commit()?;
         Ok(())
     }

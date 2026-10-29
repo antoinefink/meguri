@@ -485,3 +485,60 @@ pub fn test_cloud_prepare_adapter_baseline(
         root_record: record(root),
     })
 }
+
+/// Interrupt the next real incoming writer after its durable intent.
+#[uniffi::export]
+pub fn test_cloud_interrupt_next_incoming(cancel: bool) -> Result<(), CoreError> {
+    callback::enter("test_cloud_interrupt_next_incoming");
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud capture unavailable"))?;
+    core.interrupt_next_incoming_for_testing(if cancel {
+        meguri_sync::cloud::testing::ApplyInterruption::Cancel
+    } else {
+        meguri_sync::cloud::testing::ApplyInterruption::Constraint
+    });
+    Ok(())
+}
+
+/// Valid remote note with an absent notetype: the real apply parks it Reference.
+#[uniffi::export]
+pub fn test_cloud_reference_wait_record(erev: u64) -> Result<crate::sync::CloudRecord, CoreError> {
+    callback::enter("test_cloud_reference_wait_record");
+    use meguri_sync::cloud::{entity_codec as codec, row_payload};
+    if !(2..=3).contains(&erev) {
+        return Err(CoreError::InvalidArgument {
+            message: "unsupported synthetic revision".into(),
+        });
+    }
+    let payload = codec::Payload::Note(codec::Note {
+        id: 114_502,
+        mid: 114_999,
+        guid: b"synthetic-waiting".to_vec(),
+        flds: erev.to_string().into_bytes(),
+        ..Default::default()
+    });
+    let key = row_payload::payload_key(&payload).map_err(crate::sync::cloud_error)?;
+    Ok(crate::sync::CloudRecord {
+        name: codec::entity_name(&[114; 32], codec::Kind::Note, &key).map_err(crate::sync::cloud_error)?,
+        envelope: codec::Entity::build(
+            codec::EntityFields {
+                kind: codec::Kind::Note,
+                key,
+                origin: [51; 16],
+                erev,
+                generation: None,
+                tombstone: false,
+                deleted_at_ms: 0,
+                writer: [61; 16],
+                base_sha256: None,
+            },
+            &payload.encode().map_err(crate::sync::cloud_error)?,
+        )
+        .map_err(crate::sync::cloud_error)?
+        .encode()
+        .map_err(crate::sync::cloud_error)?,
+        system_fields: Some(erev.to_be_bytes().to_vec()),
+    })
+}

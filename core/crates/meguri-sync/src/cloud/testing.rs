@@ -87,7 +87,10 @@ static TRACKING_FAULT: Mutex<Option<(String, TrackingFault)>> = Mutex::new(None)
 pub fn arm_tracking_fault(name: &str, fault: TrackingFault) -> Result<(), Error> {
     if !matches!(
         name,
-        "cloud.tracking.commit.inbox" | "cloud.tracking.commit.engine_state" | "cloud.tracking.commit.intent"
+        "cloud.tracking.commit.inbox"
+            | "cloud.tracking.commit.engine_state"
+            | "cloud.tracking.commit.intent"
+            | "cloud.tracking.commit.rollback"
     ) {
         return Err(Error::InvalidData);
     }
