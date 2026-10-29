@@ -693,3 +693,22 @@ remains a coverage limit; no new hook or fabricated tracking fact was added.
   Deleted-card side-effect handling still fails reconciliation.
 
 Keep both failures enabled. No Unit, P24 or full-batch acceptance is claimed.
+
+## Identify the extra own-save intent entry
+
+Start: `73733d7a`. Diagnostic export `cleanroom/20261029T174309Z-38940`
+keeps the exact assertion and adds fixed metadata only. Independent review
+is clear: no names, payloads, digests or system fields are printed.
+
+`core-test/20261029T174504Z-40307` fails at the same count in action `undo`.
+Both entries are actual successful saves from the submitted batch: Config
+and the target Note. Both are Entry keys, with unchanged before/after digests
+and own-flight evidence. The preceding row, mtime, undo and event checks pass.
+The fixture assumed a single record after submitting the complete batch.
+
+- `private/20261029T174508Z-40797`: pass.
+- `similarity/20261029T174507Z-40570`: pass.
+
+Next check the exact successful batch membership and each no-op entry, keeping
+the target Note's exact digest assertions. No production grouping change or
+acceptance follows from this diagnostic run.

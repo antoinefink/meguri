@@ -689,7 +689,26 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         assert_eq!(state.change_events, before_apply.change_events);
         assert_eq!(pair.receiver.driver().collection_rows().unwrap(), current_rows);
         let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
-        assert_eq!(intent.keys.len(), 1);
+        assert_eq!(
+            intent.keys.len(),
+            1,
+            "action={action}; intent keys (kind, role, is_target, before_digest==after_digest, own_flight_present, in_successful_saved_items)={:?}",
+            intent
+                .keys
+                .iter()
+                .map(|intent_key| (
+                    &intent_key.kind,
+                    &intent_key.role,
+                    intent_key.name == key,
+                    intent_key.before_digest == intent_key.after_digest,
+                    intent_key.own_flight.is_some(),
+                    items
+                        .iter()
+                        .any(|item| item.name == intent_key.name
+                            && matches!(&item.result, Ok(MutationSuccess::Saved(_)))),
+                ))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(intent.keys[0].role, ApplyKeyRole::Entry);
         assert_eq!(intent.keys[0].before_digest, Some(current.row_digest().unwrap()));
         assert_eq!(intent.keys[0].after_digest, Some(current.row_digest().unwrap()));
