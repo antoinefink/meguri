@@ -54,7 +54,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use meguri_engine::{device_state::PublicationDecision, replace::ReplaceReason};
+use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
 use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::{
     BindingState, IsolationReason,
@@ -943,7 +943,7 @@ fn cancel_after_file_mismatch_or_restore_preserves_isolation_fence_and_backup_no
         assert!(cancelled.decision == preserved);
         if !external {
             assert!(cancelled.decision.publication.decision == PublicationDecision::Pending);
-            assert_eq!(cancelled.decision.pending_reason, Some(ReplaceReason::Restore));
+            assert_eq!(cancelled.decision.pending_reason, Some(PendingDecisionReason::Restore));
             rig.verify_identity(scope.account.clone()).unwrap();
         }
         no_scan_since(&rig, observation_start);
@@ -1022,7 +1022,7 @@ fn other_build_decision_survives_cancel_and_all_three_bound_restart_cases() {
         rig.driver().restore_backup(&backup).unwrap();
         let pending = rig.facts().unwrap().decision;
         assert!(pending.publication.decision == PublicationDecision::Pending);
-        assert_eq!(pending.pending_reason, Some(ReplaceReason::Restore));
+        assert_eq!(pending.pending_reason, Some(PendingDecisionReason::Restore));
         let point = if restart_case == 'a' {
             Point::BoundBeforeDecision
         } else {
@@ -1095,20 +1095,30 @@ fn prior_binding_media_and_resolution_intents_settle_before_new_publication_scan
         let sender_dir = generated(run.path(), "sender", true);
         let mut sender = open(&sender_dir, &scope, ORIGIN, ScriptedKeys::new(None));
         publish(&mut sender, &mut service);
-        sender
-            .driver()
-            .put_media("photo.jpg", b"synthetic initial image")
-            .unwrap();
-        sender.sync_now_and_drain(&mut service, STEPS).unwrap();
+        if !resolution {
+            sender
+                .driver()
+                .put_media("photo.jpg", b"synthetic initial image")
+                .unwrap();
+            sender.sync_now_and_drain(&mut service, STEPS).unwrap();
+        }
         let dir = generated(run.path(), "receiver", true);
         let mut receiver = open(&dir, &scope, ORIGIN, ScriptedKeys::new(None));
         let preview = receiver.preview(&mut service, STEPS).unwrap();
         receiver.adopt_cloud(&preview).unwrap(); // actual production adoption, not arrange
         receiver.drive_ready(&mut service, STEPS).unwrap();
-        assert_eq!(
-            receiver.driver().media_files().unwrap()["photo.jpg"],
-            b"synthetic initial image"
-        );
+        if resolution {
+            assert!(!receiver.driver().media_files().unwrap().contains_key("photo.jpg"));
+            assert!(!receiver.facts().unwrap().entities.values().any(|entity| matches!(
+                &entity.payload,
+                codec::Payload::MediaName(media) if media.name == b"photo.jpg"
+            )));
+        } else {
+            assert_eq!(
+                receiver.driver().media_files().unwrap()["photo.jpg"],
+                b"synthetic initial image"
+            );
+        }
         let old = receiver.facts().unwrap().current.unwrap();
         if resolution {
             let note = receiver
