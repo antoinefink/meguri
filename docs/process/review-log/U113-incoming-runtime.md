@@ -518,3 +518,16 @@ and reopen assertions remain. All-after checks remain unchanged. R1 is clear.
 - `similarity/20261029T161017Z-80018`: pass.
 
 This closes that recovery-case failure, not the remaining incoming suite.
+
+## Integrated incoming checkpoint
+
+At `88fa0a75`, `core-test/20261029T161031Z-80591` runs all three incoming
+targets: 23 execute, 15 pass, eight fail, zero skipped. This includes the
+three child entry helpers. Recovery, WAL coverage, parent/child delivery,
+the large batch, ordinary review persistence and retained replies pass.
+
+Open failures remain enabled: interruptions/retry, failed inbox commit,
+revision ordering under an overlapping apply, own-landed save handling,
+deletion side-effect base capture, two held-review send cases and the
+remaining fetch-crash case. The original full batch base remains
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`; no Unit or P24 acceptance is claimed.
