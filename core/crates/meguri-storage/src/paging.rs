@@ -101,6 +101,16 @@ pub trait ReadRows: sealed::Connected {
             })?)
     }
 
+    /// Maximum below an exclusive id bound, for a held-image history that
+    /// omits newly created review rows without scanning the whole collection.
+    fn max_revlog_id_before(&self, card: CardId, before: i64) -> Result<i64, StorageError> {
+        Ok(self.connection().query_row(
+            "SELECT coalesce(max(id),0) FROM revlog WHERE cid=?1 AND id<?2",
+            (card.0, before),
+            |row| row.get::<_, i64>(0),
+        )?)
+    }
+
     /// Scalar normal-merge base; validation replay never loads a note body.
     fn sync_row_state(
         &self,
@@ -560,3 +570,10 @@ impl sealed::Connected for crate::snapshot::SyncSnapshot {
     }
 }
 impl ReadRows for crate::snapshot::SyncSnapshot {}
+
+impl sealed::Connected for crate::snapshot::CloudSnapshot {
+    fn connection(&self) -> &Connection {
+        &self.reader.conn
+    }
+}
+impl ReadRows for crate::snapshot::CloudSnapshot {}

@@ -265,3 +265,45 @@ fn cloud_reader_opens_lazily_once_without_warming_other_roles_and_never_leases_o
     drop((sync, backup));
     h.engine.close().unwrap();
 }
+
+#[test]
+fn cloud_capture_pins_its_own_role_and_rejects_sync_without_consuming_it() {
+    use meguri_engine::OpSpec;
+    use meguri_storage::RowKey;
+    let h = Harness::open();
+    let c = &h.collection;
+    let first = add_note_with_card(c, OpSource::UserUndoable, &["first", "back"]);
+    c.run(OpSpec::named("settle", OpSource::Rollover), |_| Ok(())).unwrap();
+    let mut sync = c.reader(ReaderRole::Sync).unwrap();
+    assert!(matches!(
+        sync.capture_cloud(c, Vec::new()),
+        Err(EngineError::InvalidArgument { .. })
+    ));
+    let manual = sync.snapshot().unwrap();
+    let mut cloud = c.reader(ReaderRole::Cloud).unwrap();
+    let before = c.last_seq();
+    let (snapshot, hold) = cloud
+        .capture_cloud(c, vec![(Table::Notes, RowKey::Id(first.value.0.0))])
+        .unwrap();
+    assert_eq!(hold.snapshot, before);
+    assert_eq!(snapshot.seq(), before);
+    assert_eq!(
+        snapshot.wal_identity().native_file(),
+        c.open_evidence().unwrap().native_file
+    );
+    assert_eq!(snapshot.generation(), c.generation());
+    assert!(!hold.flagged.is_empty());
+    let second = add_note_with_card(c, OpSource::UserUndoable, &["second", "back"]);
+    assert!(snapshot.note(first.value.0).unwrap().is_some());
+    assert!(snapshot.note(second.value.0).unwrap().is_none());
+    assert!(manual.note(second.value.0).unwrap().is_none());
+    drop((snapshot, manual));
+    drop((cloud, sync));
+    assert!(
+        c.reader(ReaderRole::Cloud)
+            .unwrap()
+            .note(second.value.0)
+            .unwrap()
+            .is_some()
+    );
+}

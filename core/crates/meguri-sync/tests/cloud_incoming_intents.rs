@@ -1210,3 +1210,61 @@ fn failed_inbox_commit_keeps_cursor_and_collection_behind_the_batch() {
 fn cloud_child_entry() {
     meguri_testkit::cloud::child_driver::child_entry().unwrap();
 }
+
+#[test]
+fn detached_review_rows_and_incoming_held_names_wait_for_real_session_end() {
+    let (mut pair, id, key, _, _) = changed_note();
+    let session = pair.receiver.driver().review_begin(id).unwrap();
+    let card = pair.receiver.driver().review_start(session).unwrap();
+    pair.receiver.driver().review_show_answer(session, card.id).unwrap();
+    let answer = pair.receiver.driver().review_answer_good(session, card.id).unwrap();
+    pair.receiver
+        .driver()
+        .edit_note_fields(id, &["held local", "back"])
+        .unwrap();
+    let held = pair.receiver.driver().read_cloud_review_hold(session).unwrap();
+    assert!(held.op_ids.contains(&answer.op_id));
+    let remote = saved(&pair, &key);
+    pair.receiver.driver().deliver_collection_records(&[remote]).unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    let b = binding(&pair);
+    settled(&mut pair, b);
+    assert!(
+        pair.receiver
+            .driver()
+            .read_cloud_review_hold(session)
+            .unwrap()
+            .op_ids
+            .is_empty()
+    );
+    // A later local full update cannot release the incoming-held name. The
+    // detached answer still supplies absent Revlog and the old Card history.
+    pair.receiver.advance_clock_ms(61_001).unwrap();
+    pair.receiver
+        .driver()
+        .edit_note_fields(id, &["later local", "back"])
+        .unwrap();
+    let card_name = name(&pair, codec::Kind::Card, card.id);
+    let revlog_name = name(&pair, codec::Kind::Revlog, answer.revlog_id);
+    let requested = BTreeSet::from([key.clone(), card_name.clone(), revlog_name.clone()]);
+    let instance = pair
+        .receiver
+        .driver()
+        .incoming_observation(b)
+        .unwrap()
+        .engine_instance
+        .unwrap();
+    let batch = pair
+        .receiver
+        .driver()
+        .build_for_instance(instance.clone(), requested.clone())
+        .unwrap();
+    assert!(batch.saves.is_empty());
+    pair.receiver.driver().review_end_and_drain(session).unwrap();
+    let released = pair.receiver.driver().build_for_instance(instance, requested).unwrap();
+    let names: BTreeSet<_> = released.saves.iter().map(|save| save.name.clone()).collect();
+    assert!(names.contains(&key));
+    assert!(names.contains(&card_name));
+    assert!(names.contains(&revlog_name));
+    pair.close();
+}

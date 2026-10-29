@@ -650,7 +650,14 @@ impl CloudWorkflow {
             })
             .collect::<Vec<_>>();
         self.core
-            .sent_results(&sdk, batch_id, &saved, &failed, batch_count as usize)
+            .sent_results(
+                &sdk,
+                &self.host.collection()?,
+                batch_id,
+                &saved,
+                &failed,
+                batch_count as usize,
+            )
             .map_err(cloud_error)
     }
     pub fn handler_returned(&self, sdk: String) -> Result<(), CoreError> {

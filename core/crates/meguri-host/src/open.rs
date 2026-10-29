@@ -242,7 +242,6 @@ impl CoreHost {
             if let Some(keys) = &config.cloud_key_bytes {
                 cloud.attach_key_bytes(keys.clone());
             }
-            review.add_session_start_hook(cloud.clone());
         }
         let mut ports = derived
             .ports(Ports::new())

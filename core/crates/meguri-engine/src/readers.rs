@@ -194,6 +194,53 @@ impl<'a> ReaderLease<'a> {
         Ok(result.value)
     }
 
+    /// P7: acquire this lease off the writer; pin and flag atomically between
+    /// ops. The returned value borrows the lease, keeping replacement excluded.
+    pub fn capture_cloud(
+        &mut self,
+        collection: &crate::Collection,
+        keys: Vec<(meguri_storage::Table, meguri_storage::RowKey)>,
+    ) -> Result<(CloudSnapshot<'_>, crate::CloudHold), EngineError> {
+        if self.generation != collection.generation() || !std::ptr::eq(self.exec, &*collection.core.exec) {
+            return Err(EngineError::internal("cloud reader belongs to another collection"));
+        }
+        let reader = self
+            .guard
+            .as_ref()
+            .ok_or_else(|| EngineError::internal("cloud reader already captured"))?;
+        if reader.role() != ReaderRole::Cloud {
+            return Err(EngineError::InvalidArgument {
+                message: "Cloud capture requires the Cloud reader".into(),
+            });
+        }
+        let identity = crate::WalIdentity::new(self.generation, self.reader().native_identity());
+        let reader = self
+            .guard
+            .take()
+            .ok_or_else(|| EngineError::internal("cloud reader already captured"))?;
+        let exec = collection.core.exec.clone();
+        let result = collection.run(
+            crate::OpSpec::named("cloud_snapshot_barrier", crate::OpSource::CloudIncoming),
+            move |ctx| {
+                let snapshot = reader.pin_cloud()?;
+                let session = *exec.active_session.lock().unwrap();
+                let hold = ctx.begin_cloud_hold(session, &keys)?;
+                Ok((snapshot, hold, session))
+            },
+        )?;
+        let (inner, hold, session) = result.value;
+        Ok((
+            CloudSnapshot {
+                inner,
+                seq: hold.snapshot,
+                session,
+                identity,
+                lease: std::marker::PhantomData,
+            },
+            hold,
+        ))
+    }
+
     fn begin(&self) -> Result<ReadSnapshot<'_>, EngineError> {
         Ok(self.reader().begin_snapshot()?)
     }
@@ -241,6 +288,36 @@ impl<'a> Deref for Snapshot<'a> {
     type Target = ReadSnapshot<'a>;
 
     fn deref(&self) -> &ReadSnapshot<'a> {
+        &self.inner
+    }
+}
+
+/// A Cloud snapshot cannot outlive its role lease. It carries the real
+/// pre-barrier seq and physical identity; neither is a durability receipt.
+pub struct CloudSnapshot<'a> {
+    inner: meguri_storage::snapshot::CloudSnapshot,
+    seq: Seq,
+    identity: crate::WalIdentity,
+    session: Option<crate::SessionId>,
+    lease: std::marker::PhantomData<&'a mut ()>,
+}
+impl CloudSnapshot<'_> {
+    pub fn active_session(&self) -> Option<crate::SessionId> {
+        self.session
+    }
+    pub fn seq(&self) -> Seq {
+        self.seq
+    }
+    pub fn generation(&self) -> Generation {
+        self.identity.generation()
+    }
+    pub fn wal_identity(&self) -> crate::WalIdentity {
+        self.identity
+    }
+}
+impl Deref for CloudSnapshot<'_> {
+    type Target = meguri_storage::snapshot::CloudSnapshot;
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }

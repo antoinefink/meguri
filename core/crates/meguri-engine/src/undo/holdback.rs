@@ -63,6 +63,27 @@ impl HeldBackRun {
         })
     }
 
+    /// Journal keys only, with no image access (including spilled journals).
+    pub fn keys(&self) -> impl Iterator<Item = (Table, &RowKey)> + '_ {
+        self.journals
+            .iter()
+            .flat_map(|journal| journal.entries())
+            .filter(|change| change.table() != Table::Col)
+            .map(|change| (change.table(), change.key()))
+    }
+
+    /// Seq immediately before the oldest step that changed this row.
+    pub fn image_seq(&self, table: Table, key: &RowKey) -> Option<Seq> {
+        if table == Table::Col {
+            return None;
+        }
+        self.journals
+            .iter()
+            .zip(self.steps.iter().rev())
+            .find(|(journal, _)| journal.entry(table, key).is_some())
+            .map(|(_, step)| Seq(step.id.0.saturating_sub(1)))
+    }
+
     /// The oldest step's change of the row, with that step's journal.
     fn first_change(&self, table: Table, key: &RowKey) -> Option<(&Journal, &JournalEntry)> {
         if table == Table::Col {

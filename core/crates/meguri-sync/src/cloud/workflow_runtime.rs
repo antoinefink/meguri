@@ -83,7 +83,7 @@ impl Runtime {
         s.actions.automatic = on;
         Ok(())
     }
-    fn active_review(&self) -> Option<u64> {
+    pub(super) fn active_review(&self) -> Option<u64> {
         self.review
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -98,11 +98,13 @@ impl Runtime {
         if Self::caller_locked(&s, instance).is_err() {
             return Ok(());
         }
-        s.review_blocked = active.is_some();
         if let Some(old) = s.last_session {
             if active != Some(old) {
                 s.actions.observations.push(Observation::SessionEnded { session: old });
                 s.last_session = active;
+                s.cloud.detached.clear();
+                s.cloud.incoming_held.clear();
+                s.cloud.deferred.clear();
                 self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
             }
         } else {
@@ -111,9 +113,6 @@ impl Runtime {
         Ok(())
     }
     pub(super) fn workflow_gate(&self) -> Result<(), RuntimeError> {
-        if self.active_review().is_some() {
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
         let s = self.state();
         Self::gate_locked(&s)
     }
@@ -130,8 +129,6 @@ impl Runtime {
             || s.scan_running
             || s.tracking_stopped
             || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
-            || s.last_session.is_some()
-            || s.review_blocked
             || s.adapter.paused
             || s.incoming.running
         {
@@ -165,7 +162,11 @@ impl Runtime {
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let store = s.store.as_ref().ok_or(Error::Database)?;
-        Ok(store.dirty_names(b.binding.id)?)
+        let mut pending = store.dirty_names(b.binding.id)?;
+        pending
+            .0
+            .retain(|name, _| !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name));
+        Ok(pending)
     }
     pub(super) fn emit_pending_locked(
         &self,
@@ -173,6 +174,9 @@ impl Runtime {
         kind: UpdateKind,
         force: BTreeSet<String>,
     ) -> Result<PendingUpdate, RuntimeError> {
+        if kind == UpdateKind::Full {
+            s.cloud.deferred.clear();
+        }
         // Callers with the state guard hold tracking access only for row reads.
         let snapshot = with_tracking_access(|| Self::sendables_locked(s))?;
         Ok(s.actions.update(kind, snapshot, force))
@@ -185,6 +189,13 @@ impl Runtime {
     ) -> Result<PendingUpdate, RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
+        if kind == UpdateKind::Full {
+            s.cloud.deferred.clear();
+        }
+        let mut snapshot = snapshot;
+        snapshot
+            .0
+            .retain(|name, _| !s.cloud.incoming_held.contains(name) && !s.cloud.deferred.contains(name));
         Ok(s.actions.update(kind, snapshot, BTreeSet::new()))
     }
     pub fn tracking_sendables(&self) -> BTreeMap<String, PendingChange> {
@@ -300,18 +311,11 @@ impl Runtime {
         });
         let instance = self.instance()?;
         let result = (|| {
-            self.with_scan(&guard, collection, |s| {
-                if !s
-                    .store
-                    .as_ref()
-                    .ok_or(Error::Database)?
-                    .inbox(guard.binding)?
-                    .is_empty()
-                {
-                    return Err(Error::InvalidData.into());
-                }
-                Ok(())
-            })?;
+            // V2.4 settles existing intents before this scan, but a durable
+            // Ready delivery can still be queued after a fetch restart. Scan
+            // only local facts alongside it; ApplyReady owns its envelope,
+            // cursor and acknowledged base, and must settle before any send.
+            self.with_scan(&guard, collection, |_| Ok(()))?;
             #[cfg(feature = "test-hooks")]
             Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeSnapshot)?;
             let lease = collection.reader(ReaderRole::Cloud)?;
@@ -542,6 +546,7 @@ impl Runtime {
                 s.scan_required = false;
                 s.tracking_stopped = false;
                 if Self::gate_locked(s).is_ok() {
+                    s.cloud.deferred.clear();
                     let snapshot = Self::sendables_locked(s)?;
                     s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
                 }
@@ -709,22 +714,20 @@ impl Runtime {
         collection: &Collection,
         requested: &BTreeSet<String>,
     ) -> Result<BuiltBatch, RuntimeError> {
+        let empty = || BuiltBatch {
+            id: 0,
+            saves: Vec::new(),
+        };
         {
             let s = self.state();
             if Self::caller_locked(&s, instance).is_err() {
-                return Ok(BuiltBatch {
-                    id: 0,
-                    saves: Vec::new(),
-                });
+                return Ok(empty());
             }
         }
-        self.drain_incoming(collection, Duration::from_secs(30))?;
         self.poll_review(instance)?;
+        self.drain_incoming(collection, Duration::from_secs(30))?;
         if self.workflow_gate().is_err() {
-            return Ok(BuiltBatch {
-                id: 0,
-                saves: Vec::new(),
-            });
+            return Ok(empty());
         }
         let guard = {
             let s = self.state();
@@ -739,123 +742,309 @@ impl Runtime {
                 incarnation: s.incarnation,
             }
         };
+        // Named entity rows only. This is tracking data, never a collection
+        // snapshot or a lease taken on the writer.
+        let named = self.with_scan(&guard, collection, |s| {
+            let mut named: BTreeMap<(Table, RowKey), BTreeSet<String>> = BTreeMap::new();
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            for name in requested {
+                if let Some(e) = store.entity_facts(guard.binding, name)? {
+                    for (table, key, _) in row_payload::payload_rows(&e.payload)? {
+                        named.entry((table, key)).or_default().insert(name.clone());
+                    }
+                }
+            }
+            Ok(named)
+        })?;
+        let mut lease = collection.reader(ReaderRole::Cloud)?;
+        let (snapshot, hold) = lease.capture_cloud(collection, named.keys().cloned().collect())?;
+        #[cfg(feature = "test-hooks")]
+        if let Some(hook) = self.take_cloud_capture_hook_for_test() {
+            hook(self);
+        }
+        let (mut runs, facts, blocked, publishing, ready, binding) = self.with_scan(&guard, collection, |s| {
+            // Keep the actual EntryId -> named keys map even on a missed flush
+            // or a no-record result. Later barriers never acknowledge it.
+            for (id, keys) in &hold.flagged {
+                let names = s.cloud.flagged.entry(*id).or_default();
+                for key in keys {
+                    if let Some(named) = named.get(key) {
+                        names.extend(named.iter().cloned());
+                    }
+                }
+            }
+            let mut facts = BTreeMap::new();
+            let mut blocked = s.cloud.incoming_held.clone();
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            for name in requested {
+                if store.incoming_blocks_name(guard.binding, name)? {
+                    blocked.insert(name.clone());
+                }
+                if let Some(e) = store.entity_facts(guard.binding, name)? {
+                    facts.insert(name.clone(), e);
+                }
+            }
+            let ready = Self::gate_locked(s).is_ok()
+                && s.cloud.incoming_seq <= snapshot.seq().0
+                && s.last_session == snapshot.active_session().map(|session| session.0);
+            Ok((
+                s.cloud.detached.clone(),
+                facts,
+                blocked,
+                Self::publication_allows_send_locked(s),
+                ready,
+                s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone(),
+            ))
+        })?;
+        if !ready {
+            return Ok(empty());
+        }
+        runs.push(hold.run);
+        // P7's entire WAL wait is bounded by one second and runs without the
+        // writer, runtime state or tracking lock. Only a real matching receipt
+        // permits any flight or record to leave this call.
+        let receipt =
+            match collection.wait_wal_covered(snapshot.wal_identity(), snapshot.seq(), Duration::from_secs(1))? {
+                WalCoverage::Covered(receipt)
+                    if receipt.identity() == snapshot.wal_identity()
+                        && receipt.through() >= snapshot.seq()
+                        && snapshot.generation() == guard.generation
+                        && snapshot.wal_identity().native_file() == guard.file.pair() =>
+                {
+                    receipt
+                }
+                _ => return Ok(empty()),
+            };
+        let mut deferred = BTreeSet::new();
+        let mut images = BTreeMap::new();
+        // All collection reads, lazy journal reads and projection/encoding are
+        // off the writer and outside state/tracking guards. Incoming merge L
+        // continues to be read directly from its write scope.
+        for (name, e) in &facts {
+            if blocked.contains(name)
+                || (e.observed_generation == snapshot.generation().0 && e.observed_seq > snapshot.seq().0)
+            {
+                deferred.insert(name.clone());
+                continue;
+            }
+            if e.mark.is_none()
+                || (!publishing
+                    && !matches!(
+                        e.kind,
+                        codec::Kind::Note
+                            | codec::Kind::Card
+                            | codec::Kind::Revlog
+                            | codec::Kind::Deck
+                            | codec::Kind::Config
+                    ))
+            {
+                continue;
+            }
+            let view = super::super::held_view::HeldView::new(&*snapshot, &runs, snapshot.seq());
+            let table = row_payload::table(e.kind).ok_or(Error::InvalidData)?;
+            let key = super::super::workflow_store::row_key(e.kind, &e.key)?;
+            let Some(row) = view.row(table, &key)? else {
+                // A held creation is absent, never a deletion/tombstone.
+                deferred.insert(name.clone());
+                continue;
+            };
+            let payload = row_payload::project(&view, e.kind, &row, |id| {
+                let tracked = self
+                    .with_scan(&guard, collection, |s| {
+                        let name = codec::entity_name(
+                            &s.bound
+                                .as_ref()
+                                .ok_or(RuntimeError::StaleIncarnation)?
+                                .binding
+                                .facts
+                                .record_key
+                                .0,
+                            codec::Kind::Notetype,
+                            &codec::id_key(id),
+                        )
+                        .map_err(|_| Error::InvalidData)?;
+                        Ok(s.store
+                            .as_ref()
+                            .ok_or(Error::Database)?
+                            .entity_facts(guard.binding, &name)?)
+                    })
+                    .map_err(|_| Error::InvalidData)?;
+                if let Some(e) = tracked {
+                    if let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload) {
+                        return Ok(n);
+                    }
+                }
+                if publishing {
+                    let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                    return row_payload::notetype(&view, &row, 1);
+                }
+                Err(Error::InvalidData)
+            });
+            let payload = match payload {
+                Ok(payload) => payload,
+                Err(Error::InvalidData) => {
+                    deferred.insert(name.clone());
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let (image_seq, held) = view.image();
+            if payload.row_digest().map_err(|_| Error::InvalidData)? == e.acked_row_digest && e.server_erev > 0 {
+                if held {
+                    deferred.insert(name.clone());
+                }
+                continue;
+            }
+            images.insert(name.clone(), (payload, image_seq, held));
+        }
+        let mut prepared = BTreeMap::new();
+        for (name, (payload, image_seq, held)) in images {
+            let e = facts.get(&name).ok_or(Error::InvalidData)?;
+            let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
+            let entity = codec::Entity::build(
+                codec::EntityFields {
+                    kind: e.kind,
+                    key: e.key.clone(),
+                    origin: e.origin,
+                    erev,
+                    generation: None,
+                    tombstone: false,
+                    deleted_at_ms: 0,
+                    writer: binding.id.0,
+                    base_sha256: if e.server_erev > 0 {
+                        Some(e.acked_payload_digest)
+                    } else {
+                        None
+                    },
+                },
+                &payload.encode().map_err(|_| Error::InvalidData)?,
+            )
+            .map_err(|_| Error::InvalidData)?;
+            if entity.payload.is_none() {
+                return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+            }
+            let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
+            let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
+            let references = super::super::publication_store::references(&payload)?
+                .into_iter()
+                .map(|(kind, key)| {
+                    codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let flight = Flight {
+                local_rev: e.local_rev,
+                payload_digest: entity.payload_sha256,
+                row_digest: payload.row_digest().map_err(|_| Error::InvalidData)?,
+                payload,
+                erev,
+                image_seq,
+                held,
+            };
+            prepared.insert(name, (flight, envelope, size, references));
+        }
         self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
-            Self::gate_locked(s)?;
+            if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+                return Ok(empty());
+            }
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
-            let mut saves = Vec::new();
-            let mut bytes = 0;
-            let limit = s.actions.record_limit;
-            let byte_limit = s.actions.byte_limit;
-            (|| -> Result<(), RuntimeError> {
-                let publishing = Self::publication_allows_send_locked(s);
-                let store = s.store.as_mut().ok_or(Error::Database)?;
-                for name in requested {
-                    if store.incoming_blocks_name(b.id, name)? {
+            let store = s.store.as_mut().ok_or(Error::Database)?;
+            // This transport uses ordinary non-atomic batches. Unacked
+            // references go first; dependents wait until their real ACK.
+            // These waits stay pending; only image deferrals persist below.
+            let mut waiting = BTreeSet::new();
+            loop {
+                let mut changed = false;
+                for (name, (_, _, _, references)) in &prepared {
+                    if deferred.contains(name) {
                         continue;
                     }
-                    if saves.len() >= limit {
-                        break;
-                    }
-                    let Some(e) = store.entity_facts(b.id, name)? else {
-                        continue;
-                    };
-                    if e.mark.is_none()
-                        || (!publishing
-                            && !matches!(
-                                e.kind,
-                                codec::Kind::Note
-                                    | codec::Kind::Card
-                                    | codec::Kind::Revlog
-                                    | codec::Kind::Deck
-                                    | codec::Kind::Config
-                            ))
-                    {
-                        continue;
-                    }
-                    if publishing {
-                        let references = super::super::publication_store::references(&e.payload)?;
-                        let mut ready = true;
-                        for (kind, key) in references {
-                            let name = codec::entity_name(&b.facts.record_key.0, kind, &key)
-                                .map_err(|_| Error::InvalidData)?;
-                            if !store
-                                .entity_facts(b.id, &name)?
-                                .is_some_and(|entity| entity.server_erev > 0)
-                            {
-                                ready = false;
-                                break;
-                            }
+                    for reference in references {
+                        if deferred.contains(reference)
+                            || s.cloud.deferred.contains(reference)
+                            || s.cloud.incoming_held.contains(reference)
+                            || store.incoming_blocks_name(b.id, reference)?
+                        {
+                            changed |= deferred.insert(name.clone());
+                            break;
                         }
-                        if !ready {
-                            continue;
+                        if waiting.contains(reference)
+                            || !store
+                                .entity_facts(b.id, reference)?
+                                .is_some_and(|e| e.server_erev > 0 && e.acked_payload.is_some())
+                        {
+                            changed |= waiting.insert(name.clone());
                         }
                     }
-                    let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
-                    let payload = e.payload.encode().map_err(|_| Error::InvalidData)?;
-                    let entity = codec::Entity::build(
-                        codec::EntityFields {
-                            kind: e.kind,
-                            key: e.key.clone(),
-                            origin: e.origin,
-                            erev,
-                            generation: None,
-                            tombstone: false,
-                            deleted_at_ms: 0,
-                            writer: b.id.0,
-                            base_sha256: if e.server_erev > 0 {
-                                Some(e.acked_payload_digest)
-                            } else {
-                                None
-                            },
-                        },
-                        &payload,
-                    )
-                    .map_err(|_| Error::InvalidData)?;
-                    if entity.payload.is_none() {
-                        return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-                    }
-                    let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
-                    let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
-                    if size > byte_limit {
-                        return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-                    }
-                    if bytes + size > byte_limit {
-                        break;
-                    }
-                    bytes += size;
-                    store.persist_flight(
-                        b.id,
-                        name,
-                        Flight {
-                            local_rev: e.local_rev,
-                            payload_digest: entity.payload_sha256,
-                            row_digest: e.payload.row_digest().map_err(|_| Error::InvalidData)?,
-                            payload: e.payload.clone(),
-                            erev,
-                        },
-                    )?;
-                    saves.push(SaveInput {
-                        name: name.clone(),
-                        envelope,
-                        system_fields: if e.server_erev > 0 {
-                            Some(e.acked_system_fields)
-                        } else {
-                            None
-                        },
-                    });
                 }
-                Ok(())
-            })()?;
-            if !saves.is_empty() {
-                s.trace.push(TraceEvent::CollectionBatchBuilt {
-                    instance: instance.into(),
-                    names: saves.iter().map(|v| v.name.clone()).collect(),
+                if !changed {
+                    break;
+                }
+            }
+            let mut saves = Vec::new();
+            let mut bytes = 0usize;
+            for (name, (flight, envelope, size, _)) in prepared {
+                if deferred.contains(&name) || waiting.contains(&name) || store.incoming_blocks_name(b.id, &name)? {
+                    continue;
+                }
+                if saves.len() >= s.actions.record_limit {
+                    break;
+                }
+                let e = store.entity_facts(b.id, &name)?.ok_or(Error::InvalidData)?;
+                let captured = facts.get(&name).ok_or(Error::InvalidData)?;
+                // Another saved callback may have advanced the conditional
+                // tag while this snapshot was being encoded. Rebuild later.
+                if e.server_erev != captured.server_erev
+                    || e.acked_payload_digest != captured.acked_payload_digest
+                    || e.acked_system_fields != captured.acked_system_fields
+                {
+                    continue;
+                }
+                if size > s.actions.byte_limit {
+                    return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+                }
+                if bytes + size > s.actions.byte_limit {
+                    break;
+                }
+                bytes += size;
+                let image = (name.clone(), flight.erev, flight.payload_digest);
+                let image_seq = flight.image_seq;
+                store.persist_flight(b.id, &name, flight)?;
+                s.cloud
+                    .handed_images
+                    .entry(image)
+                    .and_modify(|seq| *seq = (*seq).max(image_seq))
+                    .or_insert(image_seq);
+                saves.push(SaveInput {
+                    name,
+                    envelope,
+                    system_fields: if e.server_erev > 0 {
+                        Some(e.acked_system_fields)
+                    } else {
+                        None
+                    },
                 });
             }
+            // A full update after S already released old deferrals. Do not
+            // reinstall them from a snapshot preceding that local operation.
+            if s.last_capture
+                .as_ref()
+                .is_none_or(|proof| proof.observed_seq <= snapshot.seq())
+            {
+                s.cloud.deferred.extend(deferred);
+            }
+            let pending = Self::sendables_locked(s)?;
+            s.actions.update(UpdateKind::Changes, pending, BTreeSet::new());
+            // Retain the actual receipt and pinned view through flight commit.
+            let _covered = &receipt;
             s.actions.batch += 1;
             let id = s.actions.batch;
             if !saves.is_empty() {
+                let names = saves.iter().map(|v| v.name.clone()).collect();
+                s.trace.push(TraceEvent::CollectionBatchBuilt {
+                    instance: instance.into(),
+                    names,
+                });
                 s.actions.observations.push(Observation::BatchBuilt {
                     batch_id: id,
                     names: saves.iter().map(|e| e.name.clone()).collect(),
@@ -884,28 +1073,80 @@ impl Runtime {
             })
             .collect()
     }
+    /// Called only after a durable ACK/settle, while tracking access is held.
+    /// Each named key must independently be acked through this step, or clean.
+    pub(super) fn settle_cloud_uploaded_locked(s: &mut State, collection: &Collection) -> Result<(), RuntimeError> {
+        if !collection.is_current() || s.cloud.generation != Some(collection.generation()) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let store = s.store.as_ref().ok_or(Error::Database)?;
+        let mut uploaded = Vec::new();
+        for (id, names) in &s.cloud.flagged {
+            let mut complete = !names.is_empty();
+            for name in names {
+                let e = store.entity_facts(b, name)?;
+                let acked = s.cloud.acked_images.get(name).is_some_and(|seq| *seq >= id.0);
+                let clean = e.is_some_and(|e| e.server_erev > 0 && e.mark.is_none());
+                complete &= acked || clean;
+            }
+            if complete {
+                uploaded.push(*id);
+            }
+        }
+        collection.mark_cloud_uploaded(&uploaded)?;
+        for id in uploaded {
+            s.cloud.flagged.remove(&id);
+        }
+        Ok(())
+    }
     pub fn sent_results(
         &self,
         instance: &str,
+        collection: &Collection,
         request_id: u64,
         saved: &[Saved],
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
         let decoded = self.decode_saved(instance, saved)?;
+        let evidence = collection.open_evidence()?;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
+        if s.bound
+            .as_ref()
+            .is_none_or(|b| b.evidence.generation != evidence.generation || b.file.pair() != evidence.native_file)
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         if s.actions.handler != Some(request_id) {
             return Err(Error::InvalidData.into());
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let mut force = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_mut().ok_or(Error::Database)?;
             for (saved, received) in saved.iter().zip(decoded) {
+                let image_key = (
+                    saved.name.clone(),
+                    received.entity.fields.erev,
+                    received.entity.payload_sha256,
+                );
+                let image = s.cloud.handed_images.get(&image_key).copied();
+                let store = s.store.as_mut().ok_or(Error::Database)?;
                 if store.acknowledge(b, saved, received)? {
                     force.insert(saved.name.clone());
                 }
+                if let Some(image) = image {
+                    s.cloud
+                        .acked_images
+                        .entry(saved.name.clone())
+                        .and_modify(|seq| *seq = (*seq).max(image))
+                        .or_insert(image);
+                }
+                s.cloud
+                    .handed_images
+                    .retain(|(name, erev, _), _| name != &image_key.0 || *erev > image_key.1);
+                Self::settle_cloud_uploaded_locked(&mut s, collection)?;
             }
             Ok(())
         })?;
@@ -957,6 +1198,9 @@ impl Runtime {
     }
     pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
         self.poll_review(instance)?;
+        if self.active_review().is_some() {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         self.workflow_gate()?;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;

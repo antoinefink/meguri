@@ -574,3 +574,56 @@ Durable-Ready gate-opening cases are unchanged. Independent R1 is clear.
 
 The correction adds required user intent to the fixtures; it grants no
 automatic fetch permission to the product.
+
+## Cloud review capture: resumed implementation
+
+Phase start: `2cafb4360ed6ef8bff5cda14f5c55b694388fab8`; original unit and
+batch bases remain unchanged. Run `cleanroom/20261029T162917Z-93071` stopped
+on Antoine's pause request. Its permitted source was preserved and recovered.
+Resume export `cleanroom/20261029T164715Z-1120` adds a separate Cloud reader
+barrier, lazy held-image projection, per-image acknowledgement evidence and
+detached-session retention. Explicit SyncNow remains blocked during review.
+Mechanical FFI and test callers pass Collection to acknowledgement handling.
+Local reconciliation now retains queued Ready inbox entries for real apply
+before sending; old-owner publication exclusion remains.
+
+`core-test/20261029T165533Z-4895` found one E0502 borrow error. Fixer export
+`cleanroom/20261029T165848Z-7335` corrects only that borrow order, removes
+two flagged comment lines and adds the two real authority regressions below.
+Existing assertions remain unchanged. Independent comparison confirms the
+other 13 seed files are identical.
+
+## Review findings and real authority failures
+
+R1 found two P1 cases: a binding change and a rejected capture leave the
+same step UploadPending after real ACKs. The Engine must retain the original
+row-key authority for both. Tests use native edits, Stop, publication and
+Service acknowledgements.
+
+Both tests initially stopped at an earlier publication regression. Existing
+publication also failed in `core-test/20261029T170606Z-12177`; Cloud reader
+capture passed. A transient parent-ACK wait was stored as a persistent held
+deferral. `cleanroom/20261029T170831Z-13467` separates those states. Independent
+review confirms only the builder changes; held protection and tests remain.
+
+`core-test/20261029T171129Z-15581`: publication and reader checks pass. Both
+new authority cases reach the intended final failure: the same native step
+remains UploadPending instead of AlreadyUploaded after real new-binding ACKs.
+This is the required RED evidence before the authority repair.
+
+## Current Cloud review verification
+
+- `core-format/20261029T171119Z-15242`: pass.
+- `core-test/20261029T171219Z-16080`: 29 execute, 26 pass, three fail;
+  31 excluded. All Cloud undo tests, partial acknowledgement, detached-session,
+  inbox restart and reply/review cases pass. Remaining workflow failures:
+  another-writer identity equality, own-landed stale incarnation, and a
+  `remote_built_on_a_lost_save`. These cases remain red.
+- `core-test/20261029T171434Z-17921`: all 78 FFI library tests pass.
+- `private/20261029T171250Z-16496`: all 17 paths pass.
+- `similarity/20261029T171307Z-16987`: all 17 paths pass.
+
+This is a compiled WIP checkpoint with the two P1 regressions enabled.
+No Unit, P24, milestone or full-batch acceptance is claimed. Implementation
+session is `s-20261025T134357Z-235af9a2`; source corrections and additive
+regressions use fixer session `s-20261025T162405Z-9dc656e4`.

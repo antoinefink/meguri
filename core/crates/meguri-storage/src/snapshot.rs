@@ -74,3 +74,25 @@ impl Drop for SyncSnapshot {
         let _ = self.reader.conn.execute_batch("ROLLBACK");
     }
 }
+
+/// Owned transaction reserved for the independent Cloud reader role.
+#[derive(Debug)]
+pub struct CloudSnapshot {
+    pub(crate) reader: Reader,
+}
+impl Reader {
+    pub fn pin_cloud(self) -> Result<CloudSnapshot, StorageError> {
+        if self.role() != crate::ReaderRole::Cloud || !self.conn.is_autocommit() {
+            return Err(StorageError::TransactionOpen);
+        }
+        self.conn.execute_batch("BEGIN DEFERRED")?;
+        self.conn
+            .query_row("SELECT id FROM col WHERE id = 1", [], |r| r.get::<_, i64>(0))?;
+        Ok(CloudSnapshot { reader: self })
+    }
+}
+impl Drop for CloudSnapshot {
+    fn drop(&mut self) {
+        let _ = self.reader.conn.execute_batch("ROLLBACK");
+    }
+}

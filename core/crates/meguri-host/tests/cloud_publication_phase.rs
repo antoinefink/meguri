@@ -262,7 +262,7 @@ fn initial_rows_are_unacknowledged_until_actual_sdk_saves_and_own_switch_is_last
                 }
                 runtime.enter_sent_handler(&instance, response.request_id).unwrap();
                 runtime
-                    .sent_results(&instance, response.request_id, &saved, &[], saved.len())
+                    .sent_results(&instance, &collection, response.request_id, &saved, &[], saved.len())
                     .unwrap();
                 runtime.return_sent_handler(&instance).unwrap();
             }
@@ -704,7 +704,14 @@ fn send_actual_batch(
     }
     runtime.enter_sent_handler(&instance, response.request_id).unwrap();
     runtime
-        .sent_results(&instance, response.request_id, &saved, &failed, batch.saves.len())
+        .sent_results(
+            &instance,
+            &host.collection().unwrap(),
+            response.request_id,
+            &saved,
+            &failed,
+            batch.saves.len(),
+        )
         .unwrap();
     runtime.return_sent_handler(&instance).unwrap();
     failed_names
@@ -2041,4 +2048,294 @@ fn actual_field_conflict_retains_isolated_owner_once_after_republication_and_cle
                 meguri_testkit::cloud::RequestKind::Modify | meguri_testkit::cloud::RequestKind::DeleteZone
             )
     }));
+}
+
+#[test]
+fn partial_cloud_ack_keeps_a_multi_note_step_pending_until_every_named_key_is_saved() {
+    use meguri_engine::{DisabledReason, OpSource, OpSpec, UndoScope, UndoStatus};
+    use meguri_model::ids::NoteId;
+    use meguri_storage::ReadRows;
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("partial-ack");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(614)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let c = host.collection().unwrap();
+    let notes = runtime
+        .entity_facts_page(cloud::entity_codec::Kind::Note, None)
+        .unwrap();
+    assert_eq!(notes.len(), 2);
+    let ids: Vec<_> = notes
+        .iter()
+        .map(|e| NoteId(i64::from_be_bytes(e.key.as_slice().try_into().unwrap())))
+        .collect();
+    c.run(
+        OpSpec::named("cloud_multi_note_edit", OpSource::UserUndoable),
+        move |ctx| {
+            for (at, id) in ids.into_iter().enumerate() {
+                let mut note = ctx.scope().note(id)?.unwrap();
+                note.data = "x".repeat(if at == 0 { 16 } else { 8192 });
+                ctx.scope().put(&note)?;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    let instance = runtime.instance().unwrap();
+    let names = notes.iter().map(|e| e.name.clone()).collect();
+    let batch = runtime.build_collection_batch(&instance, &c, &names).unwrap();
+    assert_eq!(batch.saves.len(), 2);
+    assert!(matches!(
+        c.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    ));
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+    let largest = batch
+        .saves
+        .iter()
+        .map(|save| {
+            meguri_testkit::cloud::record_non_asset_bytes(
+                &zone,
+                &RecordInput::encrypted(&save.name, "MGEntity", save.envelope.clone()),
+            )
+        })
+        .max()
+        .unwrap();
+    let mut limited = Config::default();
+    limited.limits.non_asset_per_record = largest - 1;
+    service
+        .request(&scope(), Caller::default(), Operation::Configure(limited))
+        .unwrap()
+        .result
+        .unwrap();
+    let failed = send_actual_batch(&host, &mut service, &batch);
+    assert_eq!(failed.len(), 1);
+    assert!(matches!(
+        c.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    ));
+    let clean: BTreeSet<_> = names.difference(&failed).cloned().collect();
+    assert!(
+        runtime
+            .build_collection_batch(&instance, &c, &clean)
+            .unwrap()
+            .saves
+            .is_empty()
+    );
+    assert!(matches!(
+        c.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    ));
+    service
+        .request(&scope(), Caller::default(), Operation::Configure(Config::default()))
+        .unwrap()
+        .result
+        .unwrap();
+    let retry = runtime.build_collection_batch(&instance, &c, &failed).unwrap();
+    assert_eq!(retry.saves.len(), 1);
+    assert!(send_actual_batch(&host, &mut service, &retry).is_empty());
+    assert!(matches!(
+        c.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::AlreadyUploaded)
+    ));
+    host.close().unwrap();
+}
+
+fn republish_pending_native_note(stop_at_capture: bool) {
+    use cloud::entity_codec::{self as codec, Payload};
+    use meguri_engine::{DisabledReason, EntryId, OpSource, UndoScope, UndoStatus};
+    use meguri_model::ids::NoteId;
+    use meguri_storage::{ReadRows, ReaderRole};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("pending-republication");
+    generated(&dir);
+    let keys = keys();
+    let host = open_host(&dir, keys.clone());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(615)).unwrap();
+    let old = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let evidence = collection.open_evidence().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Some(Payload::Note(base)) = before.acked_payload.clone() else {
+        panic!("actually published note required");
+    };
+    assert!(before.mark.is_none() && before.server_erev > 0);
+    let old_zone = cloud::adapter::collection_zone(old.facts.epoch);
+    let old_record = service.inspect(&scope()).unwrap().unwrap().zones[&old_zone].records[&before.name].clone();
+    let mut fields: Vec<String> = std::str::from_utf8(&base.flds)
+        .unwrap()
+        .split('\u{1f}')
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(fields.len(), 2);
+    fields[1] = "native edit awaiting publication under its next binding".into();
+    let expected_fields = fields.join("\u{1f}");
+    let edit = meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id: NoteId(base.id),
+            fields,
+            tags: std::str::from_utf8(&base.tags)
+                .unwrap()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(edit.value.written);
+    let UndoStatus::Available(step) = collection.peek_undo(UndoScope::Global).unwrap() else {
+        panic!("the real native edit must start undoable");
+    };
+    assert_eq!(step.id, EntryId(edit.seq.0));
+    assert_eq!(collection.undo_depth_for_testing().unwrap(), 1);
+    {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        assert_eq!(lease.note(NoteId(base.id)).unwrap().unwrap().fields, expected_fields);
+    }
+    let edited = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert_eq!(edited.observed_seq, step.id.0);
+    assert!(edited.mark.is_some());
+    let Payload::Note(note) = &edited.payload else {
+        panic!("native note payload required");
+    };
+    assert_eq!(note.id, base.id);
+    assert_eq!(note.flds, expected_fields.as_bytes());
+    assert_ne!(edited.payload, Payload::Note(base.clone()));
+
+    let instance = runtime.instance().unwrap();
+    let names = BTreeSet::from([before.name.clone()]);
+    let at_gap = Arc::new(Mutex::new(None));
+    if stop_at_capture {
+        let observed = at_gap.clone();
+        let captured_collection = collection.clone();
+        runtime.set_cloud_capture_hook_for_test(move |runtime| {
+            let pending = captured_collection.peek_undo(UndoScope::Global);
+            let stopped = runtime.adapter_stop_syncing();
+            *observed.lock().unwrap() = Some((pending, stopped));
+        });
+    }
+    let calls = service.request_log().unwrap().len();
+    let built = runtime.build_collection_batch(&instance, &collection, &names);
+    if stop_at_capture {
+        let (pending, stopped) = at_gap.lock().unwrap().take().expect("capture gap must be reached");
+        assert_eq!(
+            pending.unwrap(),
+            UndoStatus::Unavailable(DisabledReason::UploadPending),
+            "Engine must have flagged the native step before Stop"
+        );
+        stopped.unwrap();
+        assert!(matches!(built, Err(cloud::runtime::RuntimeError::StaleIncarnation)));
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::Stopped)
+        );
+        assert!(
+            runtime
+                .entity_facts(&before.name)
+                .unwrap()
+                .unwrap()
+                .in_flight
+                .is_empty()
+        );
+    } else {
+        let batch = built.unwrap();
+        assert_eq!(batch.saves.len(), 1);
+        let save = &batch.saves[0];
+        assert_eq!(save.name, before.name);
+        let image = codec::receive(
+            &old.facts.record_key.0,
+            &save.name,
+            &save.envelope,
+            codec::AssetInput::Absent,
+        )
+        .unwrap();
+        assert_eq!(image.payload, Some(edited.payload.clone()));
+        // Keep this actual old-binding image unacknowledged.
+    }
+    assert_eq!(
+        service.request_log().unwrap().len(),
+        calls,
+        "the old build must send nothing"
+    );
+    assert_eq!(
+        collection.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    );
+    assert_eq!(collection.undo_depth_for_testing().unwrap(), 1);
+
+    // Explicit confirmation on the same live collection draws a new record key.
+    // The helper drives real scans, Service entity saves/ACKs and the active switch.
+    let new = publish_actual_collection(&host, &mut service);
+    assert_ne!(new.id, old.id);
+    assert_ne!(new.facts.epoch, old.facts.epoch);
+    assert!(new.facts.record_key.0 != old.facts.record_key.0);
+    assert_eq!(new.facts.state, cloud::BindingState::Active);
+    assert_eq!(collection.open_evidence().unwrap().generation, evidence.generation);
+    assert_eq!(collection.open_evidence().unwrap().native_file, evidence.native_file);
+    let published = runtime
+        .entity_facts_page(codec::Kind::Note, None)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.key == before.key)
+        .unwrap();
+    assert_ne!(published.name, before.name);
+    assert_eq!(published.payload, edited.payload);
+    assert_eq!(published.acked_payload, Some(edited.payload.clone()));
+    assert!(published.mark.is_none() && published.acked_rev > 0 && published.server_erev > 0);
+    let db = service.inspect(&scope()).unwrap().unwrap();
+    let record = &db.zones[&cloud::adapter::collection_zone(new.facts.epoch)].records[&published.name];
+    assert!(record.fields["e"] == Field::EncryptedBytes(published.acked_envelope.0.clone()));
+    assert_eq!(record.system_fields.bytes(), published.acked_system_fields.as_slice());
+    assert!(db.zones[&old_zone].records[&before.name] == old_record);
+    assert!(service.request_log().unwrap()[calls..].iter().all(|r| {
+        r.kind != meguri_testkit::cloud::RequestKind::Modify || r.zone.as_deref() != Some(old_zone.as_str())
+    }));
+    assert_eq!(
+        collection.undo_depth_for_testing().unwrap(),
+        1,
+        "retain the same native step"
+    );
+    let settled = collection.peek_undo(UndoScope::Global).unwrap();
+    {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        assert_eq!(lease.note(NoteId(base.id)).unwrap().unwrap().fields, expected_fields);
+    }
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    let reopened = open_host(&dir, keys);
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
+    assert!(runtime.publication_op().unwrap().is_none());
+    let note = runtime.binding_entity(new.id, &published.name).unwrap().unwrap();
+    assert_eq!(note.acked_payload, Some(edited.payload));
+    assert_eq!(note.acked_envelope, published.acked_envelope);
+    assert_eq!(note.acked_system_fields, published.acked_system_fields);
+    assert!(note.mark.is_none());
+    reopened.close().unwrap();
+
+    // This is the status observed on the original Engine, before closing it.
+    assert_eq!(
+        settled,
+        UndoStatus::Unavailable(DisabledReason::AlreadyUploaded),
+        "the same native step {} must settle after real new-binding ACKs (capture gap: {stop_at_capture})",
+        step.id
+    );
+}
+
+#[test]
+fn new_binding_publication_ack_settles_the_native_step_flagged_by_an_unacked_old_batch() {
+    republish_pending_native_note(false);
+}
+
+#[test]
+fn stop_between_cloud_capture_and_registration_rejects_the_old_build_and_new_binding_ack_settles_the_step() {
+    republish_pending_native_note(true);
 }

@@ -77,6 +77,10 @@ pub struct Flight {
     pub row_digest: [u8; 32],
     pub payload: c::Payload,
     pub erev: u64,
+    #[serde(default)]
+    pub image_seq: u64,
+    #[serde(default)]
+    pub held: bool,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityFacts {
@@ -107,6 +111,9 @@ impl EntityFacts {
             || self.in_flight.len() > 250
         {
             return Err(Error::InvalidData);
+        }
+        for flight in &self.in_flight {
+            super::runtime_store::checked(flight.image_seq)?;
         }
         for n in [
             self.local_rev,
@@ -205,6 +212,22 @@ pub struct ExchangeResult {
     pub acked_names: BTreeSet<String>,
     pub outstanding_names: BTreeSet<String>,
 }
+/// Opening-local undo authority. No Collection/Runtime strong references.
+#[derive(Default)]
+pub(crate) struct CloudFrontier {
+    pub generation: Option<meguri_engine::Generation>,
+    pub native_file: Option<super::runtime::NativeFileIdentity>,
+    pub detached: Vec<meguri_engine::undo::holdback::HeldBackRun>,
+    pub incoming_held: BTreeSet<String>,
+    pub deferred: BTreeSet<String>,
+    pub flagged: BTreeMap<meguri_engine::EntryId, BTreeSet<String>>,
+    pub acked_images: BTreeMap<String, u64>,
+    // A persisted flight from an earlier process has no authority over this
+    // opening's undo ids, even if its numeric image seq happens to match.
+    pub handed_images: BTreeMap<(String, u64, [u8; 32]), u64>,
+    pub incoming_seq: u64,
+}
+
 /// Action ordering lives in production. SDK implementations execute complete lists
 /// only after the sent event returns; a later full update cannot overtake one.
 #[derive(Default)]

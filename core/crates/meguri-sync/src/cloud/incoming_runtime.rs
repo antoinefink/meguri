@@ -339,6 +339,9 @@ impl Runtime {
     /// Collection is borrowed per call; Runtime owns no collection handle.
     pub fn drain_incoming(&self, collection: &Collection, timeout: Duration) -> Result<usize, RuntimeError> {
         self.refresh_identity()?;
+        if let Ok(instance) = self.instance() {
+            self.poll_review(&instance)?;
+        }
         let guard = {
             let mut s = self.state();
             if s.incoming.running {
@@ -503,7 +506,15 @@ impl Runtime {
                 // A callback may have invalidated the opening while paused.
                 let s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                 with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(engine_error)?;
-                Ok(applied)
+                let targets: BTreeSet<_> = ctx
+                    .scope()
+                    .journal()
+                    .into_iter()
+                    .flat_map(|journal| journal.entries())
+                    .filter(|entry| entry.table() != Table::Col)
+                    .map(|entry| (entry.table(), entry.key().clone()))
+                    .collect();
+                Ok((applied, targets))
             },
         );
         let result = match result {
@@ -531,14 +542,25 @@ impl Runtime {
                 return Err(error.into());
             }
         };
-        let Some(intent_id) = result.value else {
+        let (Some(intent_id), targets) = result.value else {
             return Ok(0);
         };
+        if let Ok(instance) = self.instance() {
+            self.poll_review(&instance)?;
+        }
+        let active = self.active_review();
         self.with_incoming(guard, collection, |s| {
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .record_apply_seq(binding, intent_id, result.seq.0)?;
+            s.cloud.incoming_seq = result.seq.0;
+            if active.is_some() {
+                if let Some(run) = result.cloud_detached_run {
+                    // Retain the actual op result before any fallible tracking
+                    // write. Only the corresponding real session end releases it.
+                    if run.steps.iter().any(|step| step.session.map(|s| s.0) == active) {
+                        s.last_session = active;
+                        s.cloud.detached.push(run);
+                    }
+                }
+            }
             let intent = s
                 .store
                 .as_ref()
@@ -547,6 +569,21 @@ impl Runtime {
                 .into_iter()
                 .find(|i| i.id == intent_id)
                 .ok_or(Error::InvalidData)?;
+            if active.is_some() && s.last_session == active {
+                for key in &intent.keys {
+                    let table = row_payload::table(key.kind).ok_or(Error::InvalidData)?;
+                    let row_key = super::super::workflow_store::row_key(key.kind, &key.key)?;
+                    if targets.contains(&(table, row_key.clone()))
+                        && s.cloud.detached.iter().any(|run| run.touches(table, &row_key))
+                    {
+                        s.cloud.incoming_held.insert(key.name.clone());
+                    }
+                }
+            }
+            s.store
+                .as_mut()
+                .ok_or(Error::Database)?
+                .record_apply_seq(binding, intent_id, result.seq.0)?;
             s.incoming.runs.push(ApplyRun {
                 intent_id,
                 seq: result.seq.0,
@@ -622,7 +659,18 @@ impl Runtime {
                 }
                 .into());
             }
-            s.store.as_mut().ok_or(Error::Database)?.settle_apply(
+            let store = s.store.as_mut().ok_or(Error::Database)?;
+            let mut own = BTreeMap::new();
+            for key in &i.keys {
+                if let Some(rev) = key.own_flight {
+                    let flights = store
+                        .entity_facts(i.binding, &key.name)?
+                        .ok_or(Error::InvalidData)?
+                        .in_flight;
+                    own.insert(key.name.clone(), (rev, flights));
+                }
+            }
+            store.settle_apply(
                 &i,
                 guard.open,
                 seq.0,
@@ -630,6 +678,36 @@ impl Runtime {
                 &current,
                 guard.recovery.is_none(),
             )?;
+            for key in &i.keys {
+                if key.role != ApplyKeyRole::Entry {
+                    continue;
+                }
+                s.cloud.acked_images.remove(&key.name);
+                if let Some((rev, flights)) = own.get(&key.name) {
+                    let e = store.entity_facts(i.binding, &key.name)?.ok_or(Error::InvalidData)?;
+                    if let Some(image) = flights
+                        .iter()
+                        .filter(|f| f.local_rev == *rev && f.payload_digest == e.acked_payload_digest)
+                        .filter_map(|f| {
+                            s.cloud
+                                .handed_images
+                                .get(&(key.name.clone(), f.erev, f.payload_digest))
+                                .copied()
+                        })
+                        .max()
+                    {
+                        s.cloud.acked_images.insert(key.name.clone(), image);
+                    }
+                    s.cloud
+                        .handed_images
+                        .retain(|(name, erev, _), _| name != &key.name || *erev > e.server_erev);
+                } else {
+                    s.cloud.handed_images.retain(|(name, _, _), _| name != &key.name);
+                }
+            }
+            if guard.recovery.is_none() {
+                Self::settle_cloud_uploaded_locked(s, collection)?;
+            }
             Ok(())
         })?;
         #[cfg(feature = "test-hooks")]

@@ -385,10 +385,10 @@ struct State {
     root_confirmed: bool,
     actions: super::workflow::Actions,
     last_session: Option<u64>,
+    cloud: super::workflow::CloudFrontier,
     root_fetch_qualified: bool,
     root_reads: std::collections::BTreeSet<u64>,
     trace: Vec<super::workflow::TraceEvent>,
-    review_blocked: bool,
     adapter: super::adapter::AdapterState,
     publication: super::publication::ProcessState,
     incoming: super::incoming::ProcessState,
@@ -417,6 +417,8 @@ pub struct Runtime {
     scan_pause: Mutex<Option<ScanPause>>,
     #[cfg(feature = "test-hooks")]
     current_account_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(feature = "test-hooks")]
+    cloud_capture_hook: Mutex<Option<Box<dyn FnOnce(&Runtime) + Send>>>,
 }
 #[derive(Clone)]
 struct ScanGuard {
@@ -464,6 +466,8 @@ impl Runtime {
             scan_pause: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             current_account_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            cloud_capture_hook: Mutex::new(None),
         }
     }
     /// Change external test inputs immediately before the fresh account read.
@@ -474,6 +478,20 @@ impl Runtime {
     #[cfg(feature = "test-hooks")]
     fn take_current_account_hook_for_test(&self) -> Option<Box<dyn FnOnce() + Send>> {
         self.current_account_hook
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+    /// One-shot observation after writer capture, before fallible registration.
+    /// The hook mutex is released before invocation; the pinned reader lease
+    /// still excludes replacement. Do not reenter the Cloud reader.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_cloud_capture_hook_for_test(&self, hook: impl FnOnce(&Runtime) + Send + 'static) {
+        *self.cloud_capture_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+    #[cfg(feature = "test-hooks")]
+    fn take_cloud_capture_hook_for_test(&self) -> Option<Box<dyn FnOnce(&Runtime) + Send>> {
+        self.cloud_capture_hook
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
@@ -513,6 +531,14 @@ impl Runtime {
         let mut state = self.state();
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
+        if state.cloud.generation != Some(evidence.generation) || state.cloud.native_file != Some(file) {
+            state.cloud = super::workflow::CloudFrontier {
+                generation: Some(evidence.generation),
+                native_file: Some(file),
+                ..Default::default()
+            };
+            state.last_session = None;
+        }
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;
@@ -1014,8 +1040,8 @@ impl Runtime {
         Ok(())
     }
 
-    /// Requires current whole coverage, account and root confirmation, with
-    /// no active review. Unsupported workflows keep this gate closed.
+    /// Requires current whole coverage, account and root confirmation.
+    /// Active reviews use the per-batch eligibility frontier.
     pub fn require_collection_sending(&self) -> Result<(), RuntimeError> {
         self.workflow_gate()
     }
@@ -1331,12 +1357,6 @@ pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note
         data: text(10)?,
         nt_struct_gen,
     })
-}
-
-impl meguri_engine::session::SessionStartHook for Runtime {
-    fn session_starting(&self) {
-        self.state().review_blocked = true;
-    }
 }
 
 #[cfg(feature = "test-hooks")]

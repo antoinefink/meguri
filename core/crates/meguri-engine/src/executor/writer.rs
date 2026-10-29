@@ -442,7 +442,11 @@ fn run_op<T>(
     // Before any owned row mutation (including undo and revlog USN updates),
     // retire every committed answer witness. No commit/snapshot lock is held.
     crate::session::retire_witnesses(shared, collection.writer())?;
-    if spec.source == OpSource::UserUndoable && spec.undo.session.is_none() {
+    if matches!(
+        spec.source,
+        OpSource::UserUndoable | OpSource::CloudIncoming | OpSource::CloudRekey
+    ) && spec.undo.session.is_none()
+    {
         spec.undo.session = *shared.active_session.lock().unwrap();
     }
     let pre_commit_version = collection.writer().data_version().ok();

@@ -11,6 +11,7 @@ pub mod adoption;
 mod adoption_store;
 pub mod control_codec;
 pub mod entity_codec;
+mod held_view;
 pub mod publication;
 mod publication_store;
 pub mod row_payload;

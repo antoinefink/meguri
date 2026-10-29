@@ -1386,7 +1386,8 @@ impl Device {
             }
             Input::ReturnHandler(i) => value(self.runtime()?.return_sent_handler(&i)?),
             Input::Sent(i, id, saved, failed, n) => {
-                self.runtime()?.sent_results(&i, id, &saved, &failed, n)?;
+                self.runtime()?
+                    .sent_results(&i, &self.host.collection()?, id, &saved, &failed, n)?;
                 value(())
             }
             Input::AppliedUpdate(i, id, names) => {
