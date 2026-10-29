@@ -468,9 +468,9 @@ Independent R2 has no P0-P2 finding.
 - `core-test/20261029T160458Z-72625`: 27 pass, one fails; 13 excluded.
   Actual WAL coverage, all 18 publication cases and all eight reply/review
   cases pass. The restarted-publication case passes its former blocked
-  confirmation and reaches the later run-count assertion: two instead of
-  one. The observation currently includes every binding; the cause is still
-  unproven. Preserve the failure and investigate before accepting that case.
+  confirmation and reaches the later intent-ID assertion: two instead of
+  one. The run-count assertion itself passes. Preserve the failure and
+  investigate before accepting that case.
 
 This WIP commit does not claim complete incoming-safety verification.
 
@@ -492,3 +492,12 @@ clean close remain. Independent R1 found no P0-P2 issue.
 
 This closes the batch-fixture mismatch without changing product counters or
 weakening the collection comparison. Other incoming failures remain open.
+
+### Recovery diagnostic correction
+
+`core-test/20261029T160829Z-77879` confirms one apply run. It fails only
+because replay uses intent ID 2 while the test expects original ID 1.
+The earlier interpretation as two apply operations was incorrect.
+The temporary data-free diagnostic from `cleanroom/20261029T160718Z-76209`
+is preserved under build intake and removed from source. No safety assertion
+was weakened. Confirm the required intent identity before making a repair.
