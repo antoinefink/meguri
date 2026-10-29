@@ -78,6 +78,9 @@ Verification:
 P2-REG: registration rollback (R5). P2-OWNER: private-zone ownership (R6).
 Fault and signed checks remain open.
 
+P2-OWNER is repaired and focused-verified in `U114-native-owner.md`. P2-REG
+remains open. The historical review findings and failed receipts are retained.
+
 This is WIP, without a Unit trailer. Publication/adoption, incoming application,
 absence processing, K19, assets/media, full result classification, large-data
 budgets, signed integration and full gates remain required. Tests use generated

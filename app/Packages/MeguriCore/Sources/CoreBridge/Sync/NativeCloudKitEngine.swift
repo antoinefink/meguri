@@ -4,11 +4,87 @@ import Foundation
 
 public enum NativeCloudKitFailure: Error { case invalidSerialization, invalidSystemFields, unsupportedRecord, unsupportedAsset }
 
+enum NativeCloudKitIdentityValidation {
+    static func requireCurrentOwner(_ id: CKRecordZone.ID) throws {
+        guard id.ownerName == CKCurrentUserDefaultName else { throw NativeCloudKitFailure.unsupportedRecord }
+    }
+    static func zoneName(_ id: CKRecordZone.ID) throws -> String {
+        try requireCurrentOwner(id)
+        return id.zoneName
+    }
+    static func zoneNames(_ ids: [CKRecordZone.ID]) throws -> [String] {
+        for id in ids { try requireCurrentOwner(id) }
+        return ids.map(\.zoneName)
+    }
+    static func collectionRecordNames(_ ids: [CKRecord.ID], zoneID: CKRecordZone.ID) throws -> [String] {
+        try requireCurrentOwner(zoneID)
+        guard ids.allSatisfy({ $0.zoneID == zoneID }) else { throw NativeCloudKitFailure.unsupportedRecord }
+        return ids.map(\.recordName)
+    }
+    static func fetchOptions(zoneIDs: [CKRecordZone.ID]?, priorityZones: [CKRecordZone.ID], fallback: [String], groupID: String) throws -> CloudFetchOptions {
+        for id in (zoneIDs ?? []) + priorityZones { try requireCurrentOwner(id) }
+        return .init(zones: zoneIDs?.map(\.zoneName) ?? fallback, priorityZones: priorityZones.map(\.zoneName), groupID: groupID)
+    }
+    static func databaseZoneNames(_ changes: [CKSyncEngine.PendingDatabaseChange]) throws -> Set<String> {
+        let ids = try changes.map { change in
+            switch change {
+            case .saveZone(let zone): return zone.zoneID
+            case .deleteZone(let id): return id
+            @unknown default: throw NativeCloudKitFailure.unsupportedRecord
+            }
+        }
+        return Set(try zoneNames(ids))
+    }
+}
+
+struct NativeCloudKitPendingRecordChanges {
+    private let changes: [CKSyncEngine.PendingRecordZoneChange]
+    init(_ changes: [CKSyncEngine.PendingRecordZoneChange], zoneID: CKRecordZone.ID) throws {
+        let ids = try changes.map { change in
+            switch change {
+            case .saveRecord(let id), .deleteRecord(let id): return id
+            @unknown default: throw NativeCloudKitFailure.unsupportedRecord
+            }
+        }
+        _ = try NativeCloudKitIdentityValidation.collectionRecordNames(ids, zoneID: zoneID)
+        self.changes = changes
+    }
+    var byName: [String: CloudPendingChange] {
+        var result: [String: CloudPendingChange] = [:]
+        for change in changes {
+            switch change {
+            case .saveRecord(let id): result[id.recordName] = .save
+            case .deleteRecord(let id): result[id.recordName] = .delete
+            @unknown default: break
+            }
+        }
+        return result
+    }
+    func removals(names: Set<String>) -> [CKSyncEngine.PendingRecordZoneChange] {
+        changes.filter { change in
+            switch change {
+            case .saveRecord(let id), .deleteRecord(let id): names.contains(id.recordName)
+            @unknown default: false
+            }
+        }
+    }
+}
+
 enum NativeCloudKitRecordRouting {
     struct Group {
         let zoneID: CKRecordZone.ID
         let records: [CKRecord]
         let deleted: [CKRecord.ID]
+    }
+    static func validatedGroups(records: [CKRecord], deleted: [CKRecord.ID]) throws -> [Group] {
+        _ = try NativeCloudKitIdentityValidation.zoneNames(records.map { $0.recordID.zoneID } + deleted.map(\.zoneID))
+        return groups(records: records, deleted: deleted)
+    }
+    static func sentBatchID(saved: [CKRecord.ID], failed: [CKRecord.ID], deleted: [CKRecord.ID], zoneID: CKRecordZone.ID, batches: [String: UInt64], pendingBatch: UInt64?) throws -> UInt64 {
+        _ = try NativeCloudKitIdentityValidation.collectionRecordNames(saved + failed + deleted, zoneID: zoneID)
+        let ids = Set((saved + failed).compactMap { batches[$0.recordName] })
+        guard ids.count <= 1, let batch = ids.first ?? pendingBatch else { throw NativeCloudKitFailure.unsupportedRecord }
+        return batch
     }
     static func groups(records: [CKRecord], deleted: [CKRecord.ID]) -> [Group] {
         let recordsByZone = Dictionary(grouping: records, by: { $0.recordID.zoneID })
@@ -76,50 +152,53 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     }
     private func zone(_ name: String) -> CKRecordZone.ID { .init(zoneName: name, ownerName: CKCurrentUserDefaultName) }
     private func recordID(_ name: String, zone: String) -> CKRecord.ID { .init(recordName: name, zoneID: self.zone(zone)) }
+    private var collectionZone: String?
+    private func validatedPendingRecords() throws -> NativeCloudKitPendingRecordChanges {
+        guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
+        return try .init(sdk?.state.pendingRecordZoneChanges ?? [], zoneID: zone(collectionZone))
+    }
     func pendingRecordZoneChanges() -> [String: CloudPendingChange] {
-        var result: [String: CloudPendingChange] = [:]
-        for change in sdk?.state.pendingRecordZoneChanges ?? [] {
-            switch change { case .saveRecord(let id): result[id.recordName] = .save; case .deleteRecord(let id): result[id.recordName] = .delete; @unknown default: break }
-        }
-        return result
+        guard failure == nil else { return [:] }
+        do { return try validatedPendingRecords().byName }
+        catch { failure = error; return [:] }
     }
     func pendingDatabaseChanges() -> Set<String> {
-        Set((sdk?.state.pendingDatabaseChanges ?? []).map {
-            switch $0 { case .saveZone(let zone): zone.zoneID.zoneName; case .deleteZone(let id): id.zoneName; @unknown default: "unsupported" }
-        })
+        guard failure == nil else { return [] }
+        do { return try NativeCloudKitIdentityValidation.databaseZoneNames(sdk?.state.pendingDatabaseChanges ?? []) }
+        catch { failure = error; return [] }
     }
-    private func pendingID(_ name: String) -> CKRecord.ID? {
-        for change in sdk?.state.pendingRecordZoneChanges ?? [] {
-            switch change {
-            case .saveRecord(let id), .deleteRecord(let id): if id.recordName == name { return id }
-            @unknown default: break
-            }
-        }
-        return nil
-    }
-    private var collectionZone: String?
     func applyPendingUpdate(_ update: CloudPendingUpdate) throws {
+        if let failure { throw failure }
         guard let sdk else { return }
-        guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
-        let removes = sdk.state.pendingRecordZoneChanges.filter { change in
-            switch change { case .saveRecord(let id), .deleteRecord(let id): update.removes.contains(id.recordName); @unknown default: false }
+        do {
+            let pending = try validatedPendingRecords()
+            guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
+            let removes = pending.removals(names: update.removes)
+            let adds: [CKSyncEngine.PendingRecordZoneChange] = update.adds.map { name, change in
+                let id = recordID(name, zone: collectionZone)
+                return change == .save ? .saveRecord(id) : .deleteRecord(id)
+            }
+            sdk.state.remove(pendingRecordZoneChanges: removes)
+            sdk.state.add(pendingRecordZoneChanges: adds)
+        } catch {
+            failure = error
+            throw error
         }
-        sdk.state.remove(pendingRecordZoneChanges: removes)
-        let adds: [CKSyncEngine.PendingRecordZoneChange] = update.adds.map { name, change in
-            let id = recordID(name, zone: collectionZone)
-            return change == .save ? .saveRecord(id) : .deleteRecord(id)
-        }
-        sdk.state.add(pendingRecordZoneChanges: adds)
     }
     func setCollectionZone(_ zone: String) { collectionZone = zone }
     func removePendingDatabaseChanges() {
-        guard let sdk else { return }
-        sdk.state.remove(pendingDatabaseChanges: sdk.state.pendingDatabaseChanges)
+        guard failure == nil, let sdk else { return }
+        do {
+            let changes = sdk.state.pendingDatabaseChanges
+            _ = try NativeCloudKitIdentityValidation.databaseZoneNames(changes)
+            sdk.state.remove(pendingDatabaseChanges: changes)
+        } catch { failure = error }
     }
     func sendChanges(zones: [String]) async throws {
         guard let sdk else { throw CancellationError() }
         if let failure { throw failure }
         if let returnedWork { await returnedWork.value }
+        if let failure { throw failure }
         try await sdk.sendChanges(.init(scope: .zoneIDs(zones.map(zone))))
         if let returnedWork { await returnedWork.value }
         if let failure { throw failure }
@@ -128,6 +207,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         guard let sdk else { throw CancellationError() }
         if let failure { throw failure }
         if let returnedWork { await returnedWork.value }
+        if let failure { throw failure }
         let group = CKOperationGroup(); group.name = options.groupID
         var native = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
         native.prioritizedZoneIDs = options.priorityZones.map(zone)
@@ -143,6 +223,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         return archive.encodedData
     }
     private func decode(_ record: CKRecord) throws -> CloudRecord {
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
         guard ["MGEntity", "MGActive", "MGEpoch"].contains(record.recordType) else { throw NativeCloudKitFailure.unsupportedRecord }
         guard record["pa"] == nil && record["ma"] == nil && record["a"] == nil else { throw NativeCloudKitFailure.unsupportedAsset }
         guard let bytes = record.encryptedValues["e"] as? Data else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -191,7 +272,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 switch change.changeType { case .signIn: kind = .signIn; case .signOut: kind = .signOut; case .switchAccounts: kind = .switchAccounts; @unknown default: throw NativeCloudKitFailure.unsupportedRecord }
                 forwarded = .accountChanged(change: kind, identity: nil)
             case .fetchedRecordZoneChanges(let fetched):
-                let groups = NativeCloudKitRecordRouting.groups(records: fetched.modifications.map(\.record), deleted: fetched.deletions.map(\.recordID))
+                let groups = try NativeCloudKitRecordRouting.validatedGroups(records: fetched.modifications.map(\.record), deleted: fetched.deletions.map(\.recordID))
                 let events: [CloudEngineEvent] = try groups.map {
                     .fetched(zone: $0.zoneID.zoneName, records: try $0.records.map(decode), deleted: $0.deleted.map(\.recordName))
                 }
@@ -199,12 +280,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 // Empty batches own a callback too; no zone or drain is inferred.
                 forwarded = events.last ?? .databaseChanges
             case .sentRecordZoneChanges(let sent):
-                let ids = Set(sent.savedRecords.compactMap { batches[$0.recordID.recordName] } + sent.failedRecordSaves.compactMap { batches[$0.record.recordID.recordName] })
-                guard ids.count <= 1, let batch = ids.first ?? pendingBatch else { throw NativeCloudKitFailure.unsupportedRecord }
+                guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
+                let batch = try NativeCloudKitRecordRouting.sentBatchID(saved: sent.savedRecords.map(\.recordID), failed: sent.failedRecordSaves.map { $0.record.recordID }, deleted: sent.deletedRecordIDs, zoneID: zone(collectionZone), batches: batches, pendingBatch: pendingBatch)
                 forwarded = .sent(batchID: batch, saved: try sent.savedRecords.map(decode), failed: sent.failedRecordSaves.map { .init(name: $0.record.recordID.recordName, code: code($0.error)) }, deleted: sent.deletedRecordIDs.map(\.recordName))
             case .willFetchChanges(let will): forwarded = .willFetch(groupID: will.context.options.operationGroup.name ?? "", reason: will.context.reason == .manual ? .manual : .scheduled)
-            case .willFetchRecordZoneChanges(let will): forwarded = .willFetchZone(zone: will.zoneID.zoneName)
-            case .didFetchRecordZoneChanges(let did): forwarded = .didFetchZone(zone: did.zoneID.zoneName, error: did.error.map(code))
+            case .willFetchRecordZoneChanges(let will):
+                forwarded = .willFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(will.zoneID))
+            case .didFetchRecordZoneChanges(let did):
+                forwarded = .didFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(did.zoneID), error: did.error.map(code))
             case .didFetchChanges(let did): forwarded = .didFetch(groupID: did.context.options.operationGroup.name ?? "", reason: did.context.reason == .manual ? .manual : .scheduled)
             case .willSendChanges: forwarded = .willSend(zone: collectionZone ?? "")
             case .didSendChanges: forwarded = .didSend(zone: collectionZone ?? "")
@@ -237,6 +320,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         guard failure == nil, let collectionZone else { return nil }
         if let returnedWork { await returnedWork.value }
         var pending = pendingRecordZoneChanges()
+        guard failure == nil else { return nil }
         switch context.options.scope {
         case .zoneIDs(let ids): guard ids.contains(zone(collectionZone)) else { return nil }
         case .recordIDs(let ids):
@@ -247,6 +331,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         @unknown default: return nil
         }
         guard let batch = await delegate.nextRecordZoneChangeBatch(pending: pending, zone: collectionZone, engine: self) else { return nil }
+        guard failure == nil else { return nil }
         do {
             let saves = try batch.saves.map { try encode($0, zone: collectionZone) }
             pendingBatch = batch.id
@@ -261,19 +346,26 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         }
     }
     func nextFetchChangesOptions(_ context: CKSyncEngine.FetchChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.FetchChangesOptions {
-        guard let collectionZone else { return .init(scope: .zoneIDs([])) }
+        guard failure == nil, let collectionZone else { return .init(scope: .zoneIDs([])) }
         let group = context.options.operationGroup
         // Preserve manual scopes exactly; scheduled callbacks are narrowed to
         // the registered root and collection zones.
-        let requested: [String]
+        let requested: [CKRecordZone.ID]?
         switch context.options.scope {
-        case .zoneIDs(let ids): requested = ids.map(\.zoneName)
-        default: requested = ["meguri-root", collectionZone]
+        case .zoneIDs(let ids): requested = ids
+        default: requested = nil
         }
-        let options = await delegate.nextFetchChangesOptions(.init(zones: requested, priorityZones: context.options.prioritizedZoneIDs.map(\.zoneName), groupID: group.name ?? ""), engine: self)
-        var result = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
-        result.prioritizedZoneIDs = options.priorityZones.map(zone)
-        return result
+        do {
+            let input = try NativeCloudKitIdentityValidation.fetchOptions(zoneIDs: requested, priorityZones: context.options.prioritizedZoneIDs, fallback: ["meguri-root", collectionZone], groupID: group.name ?? "")
+            let options = await delegate.nextFetchChangesOptions(input, engine: self)
+            guard failure == nil else { return .init(scope: .zoneIDs([])) }
+            var result = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
+            result.prioritizedZoneIDs = options.priorityZones.map(zone)
+            return result
+        } catch {
+            failure = error
+            return .init(scope: .zoneIDs([]))
+        }
     }
 }
 #endif
