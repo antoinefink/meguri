@@ -63,6 +63,9 @@ fn list(db: &Connection) -> Result<Vec<TrashEntry>> {
     }
     Ok(entries)
 }
+pub(super) fn cloud_move_entries(db: &Connection) -> Result<Vec<TrashEntry>> {
+    list(db)
+}
 impl MediaStore {
     pub fn trash_entries(&self) -> Result<Vec<TrashEntry>> {
         list(&*self.db()?)
@@ -107,11 +110,28 @@ impl MediaStore {
         record_deletion: bool,
         moved: &mut bool,
     ) -> Result<TrashEntry> {
+        self.move_to_trash_checked_locked(db, name, hash, size, source, record_deletion, moved, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn move_to_trash_checked_locked(
+        &self,
+        db: &mut Connection,
+        name: &str,
+        hash: &str,
+        size: u64,
+        source: &Path,
+        record_deletion: bool,
+        moved: &mut bool,
+        verify: Option<&dyn Fn(&Path) -> Result<bool>>,
+    ) -> Result<TrashEntry> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let file = fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(source)?;
+        if !file.metadata()?.is_file() {
+            return Err(MediaError::InvalidName);
+        }
         crate::atomic_file::full_sync(&file)?;
         let now = self.inner.clock.now_ms();
         let entry = loop {
@@ -151,9 +171,48 @@ impl MediaStore {
             self.prepare_removal_intent(db, &entry, &identity)?;
         }
         meguri_model::faultpoint!("media.trash.before_move")?;
+        if let Some(verify) = verify {
+            let checked: Result<bool> = (|| {
+                Ok(
+                    folder::regular(source)?.is_some_and(|m| folder::unchanged_file(&identity, &m))
+                        && verify(source)?
+                        && folder::unchanged_file(&identity, &file.metadata()?),
+                )
+            })();
+            if !matches!(checked, Ok(true)) {
+                db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
+                remove_empty_parent(self.trash_dir(), &entry.path)?;
+                checked?;
+                return Err(MediaError::NameTaken);
+            }
+        }
         let outcome = move_new(source, &destination);
         *moved = fs::symlink_metadata(&destination)
             .is_ok_and(|m| m.is_file() && m.dev() == identity.dev() && m.ino() == identity.ino());
+        if verify.is_some() && *moved {
+            meguri_model::faultpoint!("media.trash.after_move_before_verify")?;
+        }
+        if let Some(verify) = verify.filter(|_| outcome.is_ok() || destination.exists()) {
+            let checked = verify(&destination);
+            if !*moved || !matches!(checked, Ok(true)) {
+                // Restore with the observed facts; the expected version no longer owns these bytes.
+                let metadata = fs::symlink_metadata(&destination)?;
+                let actual_hash = folder::hash_file(&destination)?;
+                let mut actual = entry.clone();
+                actual.sha1 = actual_hash;
+                actual.size = metadata.len();
+                db.execute(
+                    "UPDATE trash_entries SET sha1=?2,size=?3 WHERE id=?1",
+                    params![actual.id, actual.sha1, journal_db::sqlite_integer(actual.size)?],
+                )?;
+                self.restore_original_locked(db, &actual, name).map_err(|_| {
+                    MediaError::Io("changed media retained in trash; restoration needs recovery".into())
+                })?;
+                *moved = false;
+                checked?;
+                return Err(MediaError::NameTaken);
+            }
+        }
         // Deterministic crash boundary: durable move, no observation SQL yet.
         if *moved {
             meguri_model::faultpoint!("media.trash.after_move_before_observation")?;

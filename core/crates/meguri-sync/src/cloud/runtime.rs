@@ -23,6 +23,8 @@ mod adapter_impl;
 mod adoption_impl;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
+#[path = "media_runtime.rs"]
+mod media_impl;
 #[path = "policy_runtime.rs"]
 mod policy_impl;
 #[path = "publication_runtime.rs"]
@@ -395,6 +397,7 @@ struct State {
     policy: super::policy::RuntimeEvidenceState,
     publication: super::publication::ProcessState,
     incoming: super::incoming::ProcessState,
+    media: super::media::Process,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
@@ -661,6 +664,7 @@ impl Runtime {
                     .as_ref()
                     .and_then(|op| (op.step != super::publication::PublishStep::Confirmed).then_some(op.step)),
             });
+            state.media = super::media::Process::default();
             state.bound = Some(Bound {
                 binding,
                 evidence,
@@ -1383,6 +1387,9 @@ impl Runtime {
             .interruption
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(interruption);
+    }
+    pub fn fail_next_media_io_for_testing(&self) {
+        super::media::io::fail_next_open();
     }
     pub fn incoming_sdk_instance_for_testing(&self) -> Option<String> {
         self.state().adapter.sdk.as_ref().map(|sdk| sdk.id.clone())

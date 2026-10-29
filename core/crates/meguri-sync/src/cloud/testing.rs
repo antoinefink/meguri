@@ -14,6 +14,13 @@ pub enum IncomingStage {
     IncomingRollbackComplete,
     BeforeCollectionSave,
     IntentSettlementComplete,
+    ResolutionBeforeMove,
+    ResolutionMoveBeforeRewrite,
+    ResolutionRewriteCommitted,
+    MediaTrashBeforeInstall,
+    MediaReplyBeforeApply,
+    MediaReplyBeforeTracking,
+    MediaSettlementBeforeCommit,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyInterruption {

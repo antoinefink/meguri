@@ -52,6 +52,9 @@ impl Runtime {
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
+        if self.status()?.binding.is_some() && self.status()?.identity_verified {
+            self.replay_media_intents(collection, &self.media_service(collection)?)?;
+        }
         let has_work = {
             let s = self.state();
             with_tracking_access(|| -> Result<bool, RuntimeError> {
@@ -422,6 +425,8 @@ impl Runtime {
             sdk: sdk.map(str::to_owned),
         };
         let _running = Running(self.state.clone(), self.incoming_idle.clone());
+        self.replay_media_intents(collection, &self.media_service(collection)?)?;
+        self.drain_media_metadata(collection, &self.media_service(collection)?)?;
         self.with_incoming(&guard, collection, |_| Ok(()))?;
         let replayed = match self.replay_ordinary(collection, &guard, timeout)? {
             IncomingDisposition::Progress(count) => count,
@@ -450,7 +455,8 @@ impl Runtime {
                 .cloned();
             let mut entries: Vec<_> = entries
                 .into_iter()
-                .filter(|e| matches!(e.entry.reason, InboxReason::Ready) || references.contains(&e.id))
+                .filter(|e| (matches!(e.entry.reason, InboxReason::Ready) || references.contains(&e.id))
+                    && !matches!(&e.entry.value, InboxValue::Record { envelope, .. } if matches!(codec::Entity::decode(&envelope.0), Ok(codec::DecodeOutcome::Supported(v)) if v.fields.kind == codec::Kind::MediaName)))
                 .collect();
             entries.sort_by_key(|e| {
                 let entity = match &e.entry.value {
@@ -883,6 +889,9 @@ impl Runtime {
         })?;
         let count = intents.len();
         for i in intents {
+            if i.media.is_some() {
+                continue;
+            }
             collection.check_rollover()?;
             if i.native_file != guard.file {
                 return Err(RuntimeError::FileIdentityUnavailable);
@@ -1177,6 +1186,7 @@ fn apply(
     let id = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         store.persist_apply_intent(
             &ApplyIntent {
+                media: None,
                 id: 0,
                 binding,
                 inbox_ids: ids,

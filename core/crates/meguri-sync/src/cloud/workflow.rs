@@ -105,6 +105,11 @@ pub struct EntityFacts {
     pub observed_generation: u64,
 }
 impl EntityFacts {
+    pub(crate) fn acked_media_tombstone(&self) -> bool {
+        self.kind == c::Kind::MediaName
+            && matches!(c::Entity::decode(&self.acked_envelope.0),
+            Ok(c::DecodeOutcome::Supported(e)) if e.fields.tombstone && e.fields.kind == c::Kind::MediaName)
+    }
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.kind != self.payload.kind()
             || super::row_payload::payload_key(&self.payload)? != self.key
@@ -136,6 +141,18 @@ impl EntityFacts {
                 || self.acked_system_fields.is_empty()
             {
                 return Err(Error::InvalidData);
+            }
+            if self.acked_media_tombstone() {
+                let c::DecodeOutcome::Supported(entity) =
+                    c::Entity::decode(&self.acked_envelope.0).map_err(|_| Error::InvalidData)?
+                else {
+                    return Err(Error::InvalidData);
+                };
+                if entity.payload_sha256 != self.acked_payload_digest
+                    || entity.payload.as_deref() != Some(p.encode().map_err(|_| Error::InvalidData)?.as_slice())
+                {
+                    return Err(Error::InvalidData);
+                }
             }
         }
         if let Some(m) = &self.mark

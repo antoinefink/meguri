@@ -3,7 +3,7 @@
 //! Whole scans, conditional saves and acknowledgements require current account,
 //! file, publication and root proofs. Explicit publication uses the durable
 //! recovery protocol and active-epoch collection adoption. Structural
-//! generations and nonempty media remain refused before replacement.
+//! generations remain refused before replacement; media uses its own durable executor.
 
 pub mod adapter;
 mod adapter_store;
@@ -24,6 +24,7 @@ mod workflow_store;
 pub mod incoming;
 mod incoming_merge;
 mod incoming_store;
+pub mod media;
 mod open;
 mod recovery;
 mod runtime_store;

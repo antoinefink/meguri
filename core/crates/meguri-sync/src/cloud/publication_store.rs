@@ -72,6 +72,7 @@ pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Erro
         "inbox",
         "cloud_runtime_notes",
         "cloud_runtime_entities",
+        "cloud_media_state",
         "cloud_runtime_bindings",
         "cloud_adapter_state",
         "cloud_publication_bindings",

@@ -39,6 +39,8 @@ pub struct ApplyKey {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplyIntent {
+    #[serde(default)]
+    pub media: Option<super::media::Apply>,
     pub id: i64,
     pub binding: BindingId,
     pub inbox_ids: Vec<i64>,
@@ -126,7 +128,7 @@ pub(crate) fn classify(key: &[u8; 32], records: &[workflow::Saved], at: i64) -> 
                 } else if received.entity.fields.generation.is_some() {
                     Some(InboxReason::Generation)
                 } else if received.entity.fields.kind == c::Kind::MediaName {
-                    Some(InboxReason::Asset)
+                    Some(InboxReason::Ready)
                 } else {
                     Some(InboxReason::Ready)
                 }

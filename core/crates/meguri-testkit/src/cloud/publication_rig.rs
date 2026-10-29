@@ -1,3 +1,5 @@
+#[path = "media_driver.rs"]
+mod media_driver;
 use super::super::{
     adapter::{Observation, ResponseBatch, SDKRig},
     child_driver::{ChildDriver, Input},
@@ -27,8 +29,13 @@ pub enum Point {
     BeforeActiveSave,
     BeforeZoneDeletion,
     ZoneDeletionReply,
+    ResolutionBeforeMove,
+    ResolutionRewriteCommitted,
     ResolutionMoveBeforeRewrite,
     MediaTrashBeforeInstall,
+    MediaReplyBeforeApply,
+    MediaReplyBeforeTracking,
+    MediaSettlementBeforeCommit,
     FetchBeforeInbox,
     FetchAfterInbox,
     FetchAfterCursor,
@@ -43,6 +50,13 @@ impl Point {
     fn incoming_stage(self) -> Option<cloud::testing::IncomingStage> {
         use cloud::testing::IncomingStage as Stage;
         Some(match self {
+            Self::ResolutionBeforeMove => Stage::ResolutionBeforeMove,
+            Self::ResolutionMoveBeforeRewrite => Stage::ResolutionMoveBeforeRewrite,
+            Self::ResolutionRewriteCommitted => Stage::ResolutionRewriteCommitted,
+            Self::MediaTrashBeforeInstall => Stage::MediaTrashBeforeInstall,
+            Self::MediaReplyBeforeApply => Stage::MediaReplyBeforeApply,
+            Self::MediaReplyBeforeTracking => Stage::MediaReplyBeforeTracking,
+            Self::MediaSettlementBeforeCommit => Stage::MediaSettlementBeforeCommit,
             Self::FetchBeforeInbox => Stage::FetchBeforeInbox,
             Self::FetchAfterInbox => Stage::FetchAfterInbox,
             Self::FetchAfterCursor => Stage::FetchAfterCursor,
@@ -695,7 +709,7 @@ impl PublicationRig {
                         self.sdk.get_mut().qualify_budget(service, remaining)?;
                         self.needs_no_state_listing = false;
                     }
-                    self.sdk.get_mut().drive_budget(service, remaining)?;
+                    self.sdk.get_mut().drive_media_budget(service, remaining)?;
                     self.work = None;
                     if self
                         .facts()?
@@ -722,7 +736,7 @@ impl PublicationRig {
                             return self.refresh();
                         }
                         self.submit_explicit_sync()?;
-                        self.sdk.get_mut().drive_budget(service, remaining)?;
+                        self.sdk.get_mut().drive_media_budget(service, remaining)?;
                     }
                     return self.refresh();
                 }
@@ -743,6 +757,8 @@ impl PublicationRig {
             self.sdk.get_mut().resume_fetch_callback()?;
             self.last_sync_phase = "publication_trigger";
             self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
+            self.last_sync_phase = "media_resume";
+            self.sdk.get_mut().driver.call::<()>(Input::MediaResume)?;
             let mut remaining = steps;
             self.last_sync_phase = "read_publication_facts";
             if self.facts()?.recovery_ops.is_empty() {
@@ -757,7 +773,9 @@ impl PublicationRig {
             self.last_sync_phase = "drive_budget";
             self.drive_budget(service, &mut remaining)?;
             self.last_sync_phase = "finish_collection_drain";
-            self.finish_collection_drain(service, &mut remaining)
+            self.finish_collection_drain(service, &mut remaining)?;
+            self.last_sync_phase = "drive_cloud_media";
+            self.sdk.get_mut().drive_media_budget(service, &mut remaining)
         })();
         self.finish_worker_drive(result)
     }

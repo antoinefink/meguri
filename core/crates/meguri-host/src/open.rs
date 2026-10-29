@@ -201,6 +201,10 @@ pub struct CoreHost {
 }
 
 impl CoreHost {
+    pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
+        self.backup_inputs.space.as_ref()
+    }
+
     pub fn open(config: HostConfig) -> Result<Self, EngineError> {
         ProcessCore::new(config.engine.clone())?.open(config)
     }
@@ -412,7 +416,12 @@ impl CoreHost {
         &self.derived
     }
     pub fn media(&self) -> Result<MediaService, EngineError> {
-        MediaService::open(&self.collection()?, self.clock.clone())
+        let media = MediaService::open(&self.collection()?, self.clock.clone())?;
+        if let Some(runtime) = &self.cloud {
+            let consumer: Arc<dyn meguri_engine::media::MediaFeedConsumer> = runtime.clone();
+            media.set_feed_consumer(Arc::downgrade(&consumer));
+        }
+        Ok(media)
     }
     pub fn queues(&self) -> &meguri_engine::sched::queue::QueueProvider {
         &self.queues

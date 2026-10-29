@@ -119,6 +119,16 @@ impl TrackingStore {
         for entity in entities {
             super::workflow_store::put(&tx, op.binding_after, &entity?)?;
         }
+        tx.execute(
+            "INSERT INTO cloud_media_state VALUES(?1,?2)",
+            params![
+                op.binding_after.0.as_slice(),
+                encode(&super::media::Ledger {
+                    adoption: true,
+                    ..Default::default()
+                })?
+            ],
+        )?;
         op.step = AdoptStep::Ready;
         tx.execute(
             "INSERT INTO cloud_adoption_authority(binding,controls) VALUES(?1,?2)",

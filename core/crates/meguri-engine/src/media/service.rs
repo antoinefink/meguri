@@ -13,10 +13,20 @@ pub struct MediaService {
     collection: Collection,
     state: Arc<MediaState>,
 }
+pub trait MediaFeedConsumer: Send + Sync {
+    fn committed(&self, collection: &Collection, media: &MediaService, generation: crate::Generation);
+}
+struct FeedHook(std::sync::Weak<dyn MediaFeedConsumer>);
+impl std::fmt::Debug for FeedHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MediaFeedHook")
+    }
+}
 #[derive(Debug)]
 pub(crate) struct MediaState {
     store: MediaStore,
     jobs: MediaJobLock,
+    consumer: std::sync::Mutex<Option<FeedHook>>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MediaNameSnapshot {
@@ -48,6 +58,7 @@ impl MediaService {
                 let state = Arc::new(MediaState {
                     store: MediaStore::open(collection.path(), clock, collection.core.random.clone()).map_err(error)?,
                     jobs: MediaJobLock::default(),
+                    consumer: std::sync::Mutex::new(None),
                 });
                 *bound = Some(state.clone());
                 state
@@ -57,6 +68,25 @@ impl MediaService {
             collection: collection.clone(),
             state,
         })
+    }
+    pub fn set_feed_consumer(&self, consumer: std::sync::Weak<dyn MediaFeedConsumer>) {
+        *self
+            .state
+            .consumer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(FeedHook(consumer));
+    }
+    fn notify_feed(&self, generation: crate::Generation) {
+        let consumer = self
+            .state
+            .consumer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(|h| h.0.upgrade());
+        if let Some(consumer) = consumer {
+            consumer.committed(&self.collection, self, generation);
+        }
     }
     pub fn store(&self) -> &MediaStore {
         &self.state.store
@@ -79,15 +109,18 @@ impl MediaService {
     }
     /// Editor attachments outside a note transaction commit immediately.
     pub fn add(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
-        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
+        let reader = self.collection.operation_reader(ReaderRole::Query)?;
+        let generation = self.collection.generation();
         let stored = self.state.store.add(name, bytes).map_err(error)?;
         self.collection.core.exec.stream.publish(
-            self.collection.generation(),
+            generation,
             None,
             EventKind::Extension(Arc::new(MediaArrived {
                 names: vec![stored.clone()],
             })),
         );
+        drop(reader);
+        self.notify_feed(generation);
         Ok(stored)
     }
     /// M6 fixed-name write for local ingestion. Replaced bytes go through the
@@ -95,15 +128,18 @@ impl MediaService {
     /// The store returns a present case variant when it already has these bytes.
     /// Cloud incoming installs additionally need K9.3's case-collision refusal.
     pub fn write_exact(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
-        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
+        let reader = self.collection.operation_reader(ReaderRole::Query)?;
+        let generation = self.collection.generation();
         let stored = self.state.store.ensure_static_media(name, bytes).map_err(error)?;
         self.collection.core.exec.stream.publish(
-            self.collection.generation(),
+            generation,
             None,
             EventKind::Extension(Arc::new(MediaArrived {
                 names: vec![stored.clone()],
             })),
         );
+        drop(reader);
+        self.notify_feed(generation);
         Ok(stored)
     }
     pub fn begin_staging(&self) -> Result<StagedOp, EngineError> {

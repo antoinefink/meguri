@@ -158,7 +158,7 @@ pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) 
     c.execute("INSERT INTO cloud_runtime_entities(binding,kind,key,content) VALUES(?1,?2,?3,?4) ON CONFLICT(binding,kind,key) DO UPDATE SET content=excluded.content",params![b.0.as_slice(),e.kind as i64,&e.key,encode(e)?])?;
     Ok(())
 }
-fn new_pending_entity(
+pub(super) fn new_pending_entity(
     record_key: &RecordKey,
     payload: codec::Payload,
     origin: [u8; 16],
@@ -218,6 +218,7 @@ impl TrackingStore {
     pub(super) fn install_workflow(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
         self.connection.execute_batch(SCHEMA)?;
+        super::media::store::install(&self.connection)?;
         // Expression indexes are maintained by every note/entity writer, including
         // the legacy note capture path. Dirty discovery reads keys only.
         self.connection.execute_batch("CREATE INDEX IF NOT EXISTS cloud_notes_by_name ON cloud_runtime_notes(binding,json_extract(content,'$.name'));
@@ -282,10 +283,20 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         | super::publication::PublishStep::Complete
                 )
         });
-        let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND (kind IN (2,3,4,8) OR ?2) AND json_extract(content,'$.mark') IS NOT NULL")?;
+        let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND (kind IN (2,3,4,8,9) OR ?2) AND json_extract(content,'$.mark') IS NOT NULL")?;
         for name in entities.query_map(params![b.0.as_slice(), publishing], |r| r.get::<_, String>(0))? {
             names.insert(name?, PendingChange::Save);
         }
+        let media = self.media_ledger(b)?;
+        names.retain(|name, _| {
+            self.entity_facts(b, name).ok().flatten().is_none_or(|e| {
+                e.kind != codec::Kind::MediaName
+                    || std::str::from_utf8(&e.key)
+                        .ok()
+                        .and_then(|key| media.names.get(key))
+                        .is_none_or(|f| f.sendable())
+            })
+        });
         let blocked: Vec<_> = names
             .keys()
             .filter_map(|name| match self.incoming_blocks_name(b, name) {
@@ -446,6 +457,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         saved: &Saved,
         received: codec::Received,
     ) -> Result<bool, Error> {
+        if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
+            return self.acknowledge_media_tombstone(b, saved, received);
+        }
         let p = received.payload.ok_or(Error::InvalidData)?;
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         if received.entity.fields.origin != e.origin

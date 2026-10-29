@@ -469,31 +469,25 @@ impl Runtime {
                 }
                 counts.push((kind, count));
             }
-            // Only the empty physical/J6 case is supported by this workflow.
+            self.consume_media_feed(collection, media)?;
             let feed = media.store().media_feed_snapshot().map_err(|_| Error::InvalidData)?;
-            if !feed.status.complete || !feed.items.is_empty() || !media.tracked_names()?.names.is_empty() {
+            if !feed.status.complete {
                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
             }
-            let mut entries = std::fs::read_dir(media.store().media_dir()).map_err(Error::from)?;
-            if entries.next().transpose().map_err(Error::from)?.is_some() {
-                return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
-            }
-            self.with_scan(&guard, collection, |s| {
-                if !s
-                    .store
-                    .as_ref()
-                    .ok_or(Error::Database)?
-                    .entity_page(guard.binding, codec::Kind::MediaName, None)?
-                    .is_empty()
-                {
-                    return Err(Error::InvalidData.into());
+            let media_count = self.with_scan(&guard, collection, |s| {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                let mut after = None;
+                let mut count = 0u64;
+                loop {
+                    let page = store.entity_page(guard.binding, codec::Kind::MediaName, after.as_deref())?;
+                    if page.is_empty() {
+                        break;
+                    }
+                    count += page.len() as u64;
+                    after = page.last().map(|e| e.key.clone());
                 }
-                Ok(())
+                Ok(count)
             })?;
-            let end_feed = media.store().media_feed_status().map_err(|_| Error::InvalidData)?;
-            if feed.status != end_feed {
-                return Err(RuntimeError::StaleIncarnation);
-            }
             #[cfg(feature = "test-hooks")]
             Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeMerge)?;
             let col = snapshot.col()?;
@@ -518,7 +512,7 @@ impl Runtime {
                     },
                 )?;
                 let mut coverage_counts = counts.iter().map(|(k, n)| (*k, *n as u64)).collect::<Vec<_>>();
-                coverage_counts.push((codec::Kind::MediaName, 0));
+                coverage_counts.push((codec::Kind::MediaName, media_count));
                 s.store.as_mut().ok_or(Error::Database)?.finish_workflow_scan(
                     guard.binding,
                     CoverageLedger {
@@ -559,10 +553,10 @@ impl Runtime {
                 }
                 s.actions.observations.push(Observation::ReconcileKindCompleted {
                     kind: codec::Kind::MediaName,
-                    row_count: 0,
+                    row_count: media_count as usize,
                 });
                 s.actions.observations.push(Observation::MediaFeedDrained {
-                    entry_count: 0,
+                    entry_count: feed.items.len(),
                     feed_id: feed.status.feed_id.0,
                     cursor: feed.status.counter,
                 });
@@ -727,6 +721,7 @@ impl Runtime {
             }
         }
         self.poll_review(instance)?;
+        self.consume_media_feed(collection, &self.media_service(collection)?)?;
         self.drain_incoming(collection, Duration::from_secs(30))?;
         if self.workflow_gate().is_err() {
             return Ok(empty());
@@ -751,6 +746,9 @@ impl Runtime {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             for name in requested {
                 if let Some(e) = store.entity_facts(guard.binding, name)? {
+                    if e.kind == codec::Kind::MediaName {
+                        continue;
+                    }
                     for (table, key, _) in row_payload::payload_rows(&e.payload)? {
                         named.entry((table, key)).or_default().insert(name.clone());
                     }
@@ -833,8 +831,13 @@ impl Runtime {
                             | codec::Kind::Revlog
                             | codec::Kind::Deck
                             | codec::Kind::Config
+                            | codec::Kind::MediaName
                     ))
             {
+                continue;
+            }
+            if e.kind == codec::Kind::MediaName {
+                images.insert(name.clone(), (e.payload.clone(), snapshot.seq().0, false));
                 continue;
             }
             let view = super::super::held_view::HeldView::new(&*snapshot, &runs, snapshot.seq());
@@ -898,6 +901,22 @@ impl Runtime {
         for (name, (payload, image_seq, held)) in images {
             let e = facts.get(&name).ok_or(Error::InvalidData)?;
             let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
+            let tombstone_at = if e.kind == codec::Kind::MediaName {
+                self.with_scan(&guard, collection, |s| {
+                    Ok(s.store.as_ref().ok_or(Error::Database)?.media_ledger(guard.binding)?)
+                })?
+                .names
+                .get(std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?)
+                .and_then(|n| n.tombstone_at)
+            } else {
+                None
+            };
+            let payload = if tombstone_at.is_some() {
+                e.acked_payload.clone().ok_or(Error::InvalidData)?
+            } else {
+                payload
+            };
+            let encoded_payload = payload.encode().map_err(|_| Error::InvalidData)?;
             let entity = codec::Entity::build(
                 codec::EntityFields {
                     kind: e.kind,
@@ -905,8 +924,8 @@ impl Runtime {
                     origin: e.origin,
                     erev,
                     generation: None,
-                    tombstone: false,
-                    deleted_at_ms: 0,
+                    tombstone: tombstone_at.is_some(),
+                    deleted_at_ms: tombstone_at.unwrap_or(0),
                     writer: binding.id.0,
                     base_sha256: if e.server_erev > 0 {
                         Some(e.acked_payload_digest)
@@ -914,7 +933,7 @@ impl Runtime {
                         None
                     },
                 },
-                &payload.encode().map_err(|_| Error::InvalidData)?,
+                &encoded_payload,
             )
             .map_err(|_| Error::InvalidData)?;
             if entity.payload.is_none() {
@@ -922,12 +941,32 @@ impl Runtime {
             }
             let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
             let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
-            let references = super::super::publication_store::references(&payload)?
+            let mut references = super::super::publication_store::references(&payload)?
                 .into_iter()
                 .map(|(kind, key)| {
                     codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            if let codec::Payload::Note(note) = &payload {
+                let fields = std::str::from_utf8(&note.flds).map_err(|_| Error::InvalidData)?;
+                for local_name in meguri_text::media_refs::local_references(fields) {
+                    let case = local_name.to_lowercase();
+                    let media_name =
+                        codec::entity_name(&binding.facts.record_key.0, codec::Kind::MediaName, case.as_bytes())
+                            .map_err(|_| Error::InvalidData)?;
+                    let hold = self.with_scan(&guard, collection, |s| {
+                        let store = s.store.as_ref().ok_or(Error::Database)?;
+                        let ledger = store.media_ledger(guard.binding)?;
+                        Ok(ledger.names.get(&case).is_none_or(|n| n.withheld.is_none())
+                            && store
+                                .entity_facts(guard.binding, &media_name)?
+                                .is_some_and(|m| m.server_erev == 0 || m.acked_media_tombstone()))
+                    })?;
+                    if hold {
+                        references.push(media_name);
+                    }
+                }
+            }
             let flight = Flight {
                 local_rev: e.local_rev,
                 payload_digest: entity.payload_sha256,
@@ -1270,6 +1309,7 @@ impl Runtime {
     }
     pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
         self.poll_review(instance)?;
+        self.consume_media_feed(collection, &self.media_service(collection)?)?;
         if self.active_review().is_some() {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }

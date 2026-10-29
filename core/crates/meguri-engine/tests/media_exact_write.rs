@@ -95,3 +95,34 @@ fn fixed_name_write_refuses_a_retained_service_from_an_older_generation() {
         b"original image"
     );
 }
+
+#[derive(Default)]
+struct FeedReader(std::sync::Mutex<Vec<meguri_engine::Generation>>);
+impl meguri_engine::media::MediaFeedConsumer for FeedReader {
+    fn committed(
+        &self,
+        collection: &meguri_engine::Collection,
+        media: &MediaService,
+        generation: meguri_engine::Generation,
+    ) {
+        media.check_generation(generation.0).unwrap();
+        let _reader = collection.reader(meguri_storage::ReaderRole::Query).unwrap();
+        assert_eq!(generation, collection.generation());
+        self.0.lock().unwrap().push(generation);
+    }
+}
+#[test]
+fn media_write_callbacks_can_acquire_the_query_reader_after_publication() {
+    let h = Harness::open();
+    let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
+    let consumer = std::sync::Arc::new(FeedReader::default());
+    let hook: std::sync::Arc<dyn meguri_engine::media::MediaFeedConsumer> = consumer.clone();
+    media.set_feed_consumer(std::sync::Arc::downgrade(&hook));
+    media.add("photo.jpg", b"first file").unwrap();
+    media.write_exact("photo.jpg", b"second file").unwrap();
+    assert_eq!(*consumer.0.lock().unwrap(), vec![h.collection.generation(); 2]);
+    assert_eq!(
+        fs::read(media.store().media_dir().join("photo.jpg")).unwrap(),
+        b"second file"
+    );
+}

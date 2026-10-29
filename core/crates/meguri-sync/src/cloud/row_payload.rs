@@ -292,7 +292,10 @@ pub fn payload_key(payload: &c::Payload) -> Result<Vec<u8>, Error> {
             std::str::from_utf8(&p.key).map_err(|_| Error::InvalidData)?;
             p.key.clone()
         }
-        P::MediaName(_) => return Err(Error::InvalidData),
+        P::MediaName(p) => std::str::from_utf8(&p.name)
+            .map_err(|_| Error::InvalidData)?
+            .to_lowercase()
+            .into_bytes(),
     })
 }
 

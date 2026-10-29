@@ -776,3 +776,36 @@ fn restored_collection_runs_real_generation_listener_and_invalidates_old_capture
     host.close().unwrap();
     assert!(!fixture.durable().drained);
 }
+
+#[test]
+fn delayed_media_notification_cannot_stop_a_reopened_runtime() {
+    use meguri_engine::media::MediaFeedConsumer;
+    let fixture = Fixture::new(BindingState::Active);
+    let process = ProcessCore::new(fixture.options.engine.clone()).unwrap();
+    let host = process.open(fixture.options.clone()).unwrap();
+    let old_collection = host.collection().unwrap();
+    let old_media = host.media().unwrap();
+    let issued = old_collection.generation();
+    host.close().unwrap();
+    let reopened = process.open(fixture.options.clone()).unwrap();
+    let current = reopened.collection().unwrap();
+    let media = reopened.media().unwrap();
+    let runtime = reopened.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    assert_ne!(issued, current.generation());
+    let before = runtime.status().unwrap();
+    assert!(before.stored_usable);
+    assert!(before.identity_verified);
+    assert!(!before.tracking_stopped);
+    runtime.committed(&old_collection, &old_media, issued);
+    runtime.committed(&current, &media, issued);
+    let after = runtime.status().unwrap();
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(after.stored_usable, before.stored_usable);
+    assert_eq!(after.identity_verified, before.identity_verified);
+    assert_eq!(after.tracking_stopped, before.tracking_stopped);
+    assert_eq!(after.change_counter, before.change_counter);
+    media.write_exact("callback.bin", b"current generation file").unwrap();
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    reopened.close().unwrap();
+}

@@ -190,8 +190,9 @@ impl SDKRig {
         self.refresh()?;
         Ok(u)
     }
-    fn updates(&mut self) -> Result<()> {
+    pub(super) fn updates(&mut self) -> Result<bool> {
         let updates: Vec<PendingUpdate> = self.driver.call(Input::Updates(self.instance.clone()))?;
+        let changed = updates.iter().any(|u| !u.adds.is_empty() || !u.removes.is_empty());
         for u in updates {
             for name in &u.removes {
                 self.pending.remove(name);
@@ -206,7 +207,8 @@ impl SDKRig {
                 .call::<()>(Input::AppliedUpdate(self.instance.clone(), u.id, added))?;
             self.applied.push(u);
         }
-        self.refresh()
+        self.refresh()?;
+        Ok(changed)
     }
     pub(crate) fn caller(&self) -> Caller {
         Caller {
@@ -577,6 +579,21 @@ impl SDKRig {
         self.drive_budget(service, &mut remaining)
     }
     pub(crate) fn drive_budget(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
+        self.drive_budget_inner(service, remaining, false)
+    }
+    pub(super) fn drive_media_budget(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        remaining: &mut usize,
+    ) -> Result<()> {
+        self.drive_budget_inner(service, remaining, true)
+    }
+    fn drive_budget_inner(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        remaining: &mut usize,
+        media: bool,
+    ) -> Result<()> {
         while *remaining > 0 {
             *remaining -= 1;
             if self.handler.is_some() {
@@ -594,11 +611,17 @@ impl SDKRig {
             self.updates()?;
             let wants_send: bool = self.driver.call(Input::WantsSend)?;
             if !wants_send {
+                if media && self.drive_cloud_media(service, remaining)? {
+                    continue;
+                }
                 self.refresh()?;
                 return Ok(());
             }
             let (_, mutations) = self.build()?;
             if mutations.is_empty() {
+                if media && self.drive_cloud_media(service, remaining)? {
+                    continue;
+                }
                 self.driver.call::<()>(Input::SendsFinished(self.instance.clone()))?;
                 self.fetch_exchange(service, remaining)?;
                 self.refresh()?;

@@ -1,5 +1,7 @@
 //! Meguri's flat media store and independent journal (media/media-journal).
 mod case_fold;
+mod cloud;
+pub use cloud::{CloudInstall, CloudMoveEvidence};
 mod check_report;
 mod collection_import;
 mod feed;

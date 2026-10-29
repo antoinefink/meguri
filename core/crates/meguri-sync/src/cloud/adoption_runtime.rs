@@ -150,21 +150,13 @@ fn check_space(space: &dyn SpaceProvider, directory: &Path) -> Result<(), Runtim
     meguri_storage::space::require_space(space, directory, required)?;
     Ok(())
 }
-fn require_empty_media(media: &meguri_engine::media::MediaService) -> Result<(), RuntimeError> {
-    let store = media.store();
-    let feed = store.media_feed_snapshot().map_err(|_| refused())?;
-    let mut entries = fs::read_dir(store.media_dir()).map_err(storage_io)?;
-    if !feed.status.complete
-        || !feed.items.is_empty()
-        || !store.tracked_names().map_err(|_| refused())?.is_empty()
-        || store.pending_any().map_err(|_| refused())?
-        || entries.next().transpose().map_err(storage_io)?.is_some()
-    {
-        return Err(PublicationError::MediaApplyUnavailable.into());
+fn require_registered_media(media: &meguri_engine::media::MediaService) -> Result<(), RuntimeError> {
+    if !media.store().media_feed_status().map_err(|_| refused())?.complete {
+        return Err(refused());
     }
     Ok(())
 }
-fn inventory_empty_media<'a>(
+fn inventory_registered_media<'a>(
     collection: &'a Collection,
     media: &MediaService,
 ) -> Result<(ReaderLease<'a>, MediaJobLease), RuntimeError> {
@@ -174,7 +166,7 @@ fn inventory_empty_media<'a>(
     let job = media.try_job(MediaJobKind::CheckMedia)?;
     media.check_generation(collection.generation().0)?;
     media.store().check_changes().map_err(|_| refused())?;
-    require_empty_media(media)?;
+    require_registered_media(media)?;
     media.check_generation(collection.generation().0)?;
     Ok((reader, job))
 }
@@ -582,13 +574,15 @@ impl Runtime {
         let epoch = epoch(op)?;
         let paths = spool(&owner.directory)?;
         let mut keys = BTreeSet::new();
-        let mut has_media = false;
+
         for path in &paths {
             let record = saved(path)?;
             let received = received(op, &record)?;
             let payload = received.payload.ok_or_else(refused)?;
             if payload.kind() == codec::Kind::MediaName {
-                has_media = true;
+                if !keys.insert((received.entity.fields.kind, received.entity.fields.key)) {
+                    return Err(refused());
+                }
                 continue;
             }
             if !keys.insert((received.entity.fields.kind, received.entity.fields.key)) {
@@ -636,11 +630,8 @@ impl Runtime {
                 _ => {}
             }
         }
-        if has_media {
-            return Err(PublicationError::MediaApplyUnavailable.into());
-        }
         self.settle_before_transition(collection, Duration::from_secs(30))?;
-        let (_media_reader, _media_job) = inventory_empty_media(collection, media)?;
+        let (_media_reader, _media_job) = inventory_registered_media(collection, media)?;
         let clock = self
             .adapter_clock
             .lock()
@@ -676,6 +667,9 @@ impl Runtime {
             let view = crate::cloud::row_payload::ReadView(&reader);
             for path in &paths {
                 let payload = received(op, &saved(path)?)?.payload.ok_or_else(refused)?;
+                if payload.kind() == codec::Kind::MediaName {
+                    continue;
+                }
                 let table = crate::cloud::row_payload::table(payload.kind()).ok_or_else(refused)?;
                 let key = crate::cloud::row_payload::payload_key(&payload)?;
                 let row_key = if (payload.kind() as u8) <= 6 {
@@ -753,7 +747,7 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         self.settle_before_transition(collection, Duration::from_secs(30))?;
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
-        let (media_reader, _media_job) = inventory_empty_media(collection, media)?;
+        let (media_reader, _media_job) = inventory_registered_media(collection, media)?;
         // Replacement closes every reader. Keep media-job exclusion through
         // activation, but release this generation pin before entering it.
         drop(media_reader);
@@ -761,7 +755,7 @@ impl Runtime {
         let working = exclusive.collection().clone();
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
         self.check_adoption_before(op, exclusive.collection())?;
-        require_empty_media(media)?;
+        require_registered_media(media)?;
         let stage = owner
             .stage
             .lock()
@@ -786,7 +780,7 @@ impl Runtime {
                         .ok_or_else(|| engine_error("adoption safety backup unavailable"))?;
                     pin = Some(guarded);
                     self.check_adoption_before(op, &working).map_err(engine_error)?;
-                    require_empty_media(media).map_err(engine_error)?;
+                    require_registered_media(media).map_err(engine_error)?;
                     Ok(receipt)
                 },
             )

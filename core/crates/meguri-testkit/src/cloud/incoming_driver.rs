@@ -112,6 +112,8 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
             | Input::DrainIncoming(..)
             | Input::Reconcile
             | Input::Build(..)
+            | Input::MediaReply(..)
+            | Input::MediaWork
     ) {
         return Ok(Some(input));
     }
@@ -206,6 +208,15 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                         }
                     }
                     Ok(serde_json::to_value(count)?)
+                }
+                Input::MediaWork => Ok(serde_json::to_value(runtime.cloud_media_work_with_space(
+                    &collection,
+                    &media,
+                    &meguri_storage::space::StatvfsSpace,
+                )?)?),
+                Input::MediaReply(work, reply) => {
+                    runtime.cloud_media_reply(&collection, &media, &work, reply)?;
+                    Ok(serde_json::Value::Null)
                 }
                 Input::Reconcile => {
                     if unbound {

@@ -30,6 +30,29 @@ use std::{
 };
 const FRAME: usize = 16 * 1024 * 1024;
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+static TRASH_WRITE: Mutex<Option<(std::path::PathBuf, Vec<u8>, bool)>> = Mutex::new(None);
+fn write_during_trash() {
+    use std::os::unix::fs::MetadataExt;
+    meguri_model::faultpoint::disarm("media.trash.before_move");
+    let (path, bytes, in_place) = TRASH_WRITE.lock().unwrap().take().unwrap();
+    if in_place {
+        let before = std::fs::metadata(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(&bytes).unwrap();
+        file.sync_all().unwrap();
+        let after = file.metadata().unwrap();
+        assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
+    } else {
+        let mut replacement = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+        replacement.write_all(&bytes).unwrap();
+        replacement.as_file().sync_all().unwrap();
+        replacement.persist(&path).unwrap();
+    }
+}
 pub use core::incoming::{ApplyIntent, ApplyKeyRole};
 use core::testing::IncomingStage;
 pub use core::testing::{ApplyInterruption, TrackingFault};
@@ -174,6 +197,15 @@ pub(crate) enum Input {
     StoredState,
     Identity(Option<String>),
     Reconcile,
+    MediaWork,
+    MediaResume,
+    MediaAdapterPause(bool),
+    MediaTrash(String),
+    MediaConflicts,
+    MediaReply(core::media::Work, core::media::Reply),
+    MediaValidate(core::media::Work),
+    FailMediaIo,
+    WriteDuringMediaTrash(String, Vec<u8>, bool),
     StartSDK(String),
     Facts,
     ScanState,
@@ -552,6 +584,48 @@ impl ChildDriver {
             _ => Err(failure()),
         }
     }
+    pub(crate) fn complete_pending_media_io_failure(&mut self) -> Result<()> {
+        let key = self.pending_work.clone().ok_or_else(failure)?;
+        self.resume_incoming_work()?;
+        let index = self
+            .completed_work
+            .iter()
+            .position(|(completed, _)| *completed == key)
+            .ok_or_else(failure)?;
+        let (_, reply) = self.completed_work.remove(index);
+        match reply {
+            Err(ChildFailure::RuntimeTracking(StoreFailure::Io)) => Ok(()),
+            Err(error) => Err(error.into_error()),
+            Ok(_) => Err(failure()),
+        }
+    }
+    pub fn complete_pending_media_reply(&mut self) -> Result<()> {
+        let key = self.pending_work.clone().ok_or_else(failure)?;
+        if !matches!(serde_json::from_slice::<Input>(&key)?, Input::MediaReply(..)) {
+            return Err(failure());
+        }
+        self.resume_incoming_work()?;
+        let index = self
+            .completed_work
+            .iter()
+            .position(|(completed, _)| *completed == key)
+            .ok_or_else(failure)?;
+        let (_, result) = self.completed_work.remove(index);
+        result.map_err(ChildFailure::into_error)?;
+        Ok(())
+    }
+    pub fn pause_media_adapter(&mut self, paused: bool) -> Result<()> {
+        self.call(Input::MediaAdapterPause(paused))
+    }
+    pub fn write_during_media_trash(&mut self, name: &str, bytes: &[u8], in_place: bool) -> Result<()> {
+        self.call(Input::WriteDuringMediaTrash(name.into(), bytes.to_vec(), in_place))
+    }
+    pub fn trash_media(&mut self, name: &str) -> Result<()> {
+        self.call(Input::MediaTrash(name.into()))
+    }
+    pub fn media_conflicts(&mut self) -> Result<Vec<core::ConflictCopy>> {
+        self.call(Input::MediaConflicts)
+    }
     pub fn pause_automatic_wal_flush_for_testing(&mut self, paused: bool) -> Result<()> {
         self.call(Input::PauseAutomaticWAL(paused))
     }
@@ -886,6 +960,13 @@ impl ChildDriver {
                 IncomingStage::IncomingRollbackComplete,
                 IncomingStage::BeforeCollectionSave,
                 IncomingStage::IntentSettlementComplete,
+                IncomingStage::ResolutionBeforeMove,
+                IncomingStage::ResolutionMoveBeforeRewrite,
+                IncomingStage::ResolutionRewriteCommitted,
+                IncomingStage::MediaTrashBeforeInstall,
+                IncomingStage::MediaReplyBeforeApply,
+                IncomingStage::MediaReplyBeforeTracking,
+                IncomingStage::MediaSettlementBeforeCommit,
             ] {
                 self.release_incoming_stage(stage)?;
             }
@@ -1387,6 +1468,47 @@ impl Device {
             Input::Trace => value(self.runtime()?.trace()),
             Input::Observations => value(self.runtime()?.observations()),
             Input::Emitted => value(self.runtime()?.emitted_update_ids()),
+            Input::MediaWork => value(self.host.next_cloud_media_work()?),
+            Input::MediaAdapterPause(paused) => {
+                self.runtime()?.adapter_pause(paused)?;
+                value(())
+            }
+            Input::MediaTrash(name) => {
+                let media = self.host.media()?;
+                media.store().trash(&[name]).map_err(|_| failure())?;
+                self.runtime()?.consume_media_feed(&self.host.collection()?, &media)?;
+                value(())
+            }
+            Input::MediaConflicts => {
+                let copies = self.runtime()?.media_conflicts_for_testing()?;
+                value(copies)
+            }
+            Input::MediaResume => {
+                self.runtime()?.resume_cloud_media();
+                value(())
+            }
+            Input::MediaReply(work, reply) => {
+                self.host.cloud_media_reply(&work, reply)?;
+                value(())
+            }
+            Input::MediaValidate(work) => {
+                self.runtime()?
+                    .validate_cloud_media_work(&self.host.collection()?, &work)?;
+                value(())
+            }
+            Input::WriteDuringMediaTrash(name, bytes, in_place) => {
+                let path = self.host.media()?.store().media_dir().join(name);
+                *TRASH_WRITE.lock().unwrap() = Some((path, bytes, in_place));
+                meguri_model::faultpoint::arm(
+                    "media.trash.before_move",
+                    meguri_model::faultpoint::Fault::Callback(write_during_trash),
+                );
+                value(())
+            }
+            Input::FailMediaIo => {
+                self.runtime()?.fail_next_media_io_for_testing();
+                value(())
+            }
             Input::Updates(i) => value(self.runtime()?.take_pending_updates(&i)?),
             Input::Transition(i, k, p) => value(self.runtime()?.pending_transition(&i, k, p)?),
             Input::Sendables => value(self.runtime()?.tracking_sendables()),
