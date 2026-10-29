@@ -59,3 +59,27 @@ Production R2 clears the lease, queue, ACK and batch repairs. One P1 remains:
 multiple cleanup targets still share a read across an earlier deletion reply
 wait. A two-zone interleaving and fresh authorization are required before this
 source can be integrated. The previous delivery gaps remain open.
+
+## Two-zone cleanup regression, before production
+
+Fixer `cleanroom/20261029T082440Z-21069` retains the first actual Service reply
+in the parent and delivers it on resume without a second submission. Each later
+deletion reads and checks Active again before its enqueue. Independent R3 finds
+no remaining P0-P1 or new P2 in this repair. The previous production files and
+committed tests remain unchanged outside the two driver files.
+
+Its new `cloud_publication_cleanup.rs` is independently reviewed and extracted
+first. Three unbound hosts create two due zones. While the first deletion reply
+is held, another publisher promotes the remaining zone. Assertions require the
+first result to persist and the new Active zone and its due mark to survive,
+including reopen. Actual Service logs and outcomes constrain the hold.
+
+- `core-format/20261029T082945Z-22987`: pass.
+- `core-test/20261029T082957Z-23579`: expected compile RED on missing Rig and
+  Point before production. No executed pass is claimed.
+- `private/20261029T082956Z-23311`: one file passes.
+- `similarity/20261029T082956Z-23484`: one file, no findings or exemptions.
+
+The reviewer also clears a behavior-RED stage with only the fresh-read additions
+removed, keeping the actual reply hold and all test assertions. That stage still
+needs compilation and execution. Full delivery and integration remain open.
