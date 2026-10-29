@@ -2,37 +2,44 @@
 use meguri_sync::cloud::{BindingId, BindingState, OpaqueBytes, policy::*};
 
 fn ready() -> State {
-    let mut state = State::default();
-    state.settings = DeviceSettings {
-        enabled: true,
-        paused: false,
-        automatic: true,
-        media: false,
-    };
-    state.account = Account {
-        status: AccountStatus::Available,
-        identity: Some(OpaqueBytes(vec![1])),
-    };
-    state.facts.lifecycle = Lifecycle::Ready;
-    state.facts.generation = 7;
-    state.facts.binding = Some(BindingView {
-        id: BindingId([1; 16]),
-        state: BindingState::Active,
-        account: OpaqueBytes(vec![1]),
-        usable: true,
-        verified: true,
-        publish_step: None,
-    });
-    state.facts.summary.collection_known = true;
-    state.facts.summary.attention_known = true;
-    state.facts.summary.scan = Scan::None;
-    state.reachable = true;
-    state.engine = Some(Engine {
-        instance: "sdk1".into(),
-        binding: BindingId([1; 16]),
-        stopping: false,
-    });
-    state
+    State {
+        settings: DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: true,
+            media: false,
+        },
+        account: Account {
+            status: AccountStatus::Available,
+            identity: Some(OpaqueBytes(vec![1])),
+        },
+        facts: CoreFacts {
+            lifecycle: Lifecycle::Ready,
+            generation: 7,
+            binding: Some(BindingView {
+                id: BindingId([1; 16]),
+                state: BindingState::Active,
+                account: OpaqueBytes(vec![1]),
+                usable: true,
+                verified: true,
+                publish_step: None,
+            }),
+            summary: Summary {
+                collection_known: true,
+                attention_known: true,
+                scan: Scan::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        reachable: true,
+        engine: Some(Engine {
+            instance: "sdk1".into(),
+            binding: BindingId([1; 16]),
+            stopping: false,
+        }),
+        ..Default::default()
+    }
 }
 fn run(state: State, event: Event) -> (State, Vec<Action>) {
     step(
@@ -499,7 +506,8 @@ fn generated_event_orders_never_send_when_gate_closed_or_restart_a_live_engine()
                     assert!(!before.engine_runs() || before.engine.as_ref().unwrap().stopping);
                 }
                 if let ActionKind::BackgroundFlush { until_ms } = a.kind {
-                    assert!(until_ms <= 125_000 && until_ms <= 127_000);
+                    assert!(until_ms <= 125_000);
+                    assert!(until_ms <= 127_000);
                 }
                 assert_eq!(a.guard, next.guard());
             }

@@ -268,8 +268,7 @@ impl Runtime {
                     refused,
                     serialization,
                     &s.adapter.durable,
-                    at_ms,
-                    fail,
+                    super::super::adapter_store::AdapterCommitOptions { at_ms, fail },
                 )
             }))
             .unwrap_or(Err(Error::Database))
@@ -808,8 +807,10 @@ impl Runtime {
                     &[],
                     saved_state.as_deref(),
                     &Durable::default(),
-                    clock.now_ms(),
-                    false,
+                    super::super::adapter_store::AdapterCommitOptions {
+                        at_ms: clock.now_ms(),
+                        fail: false,
+                    },
                 )?;
                 Ok(())
             })?;

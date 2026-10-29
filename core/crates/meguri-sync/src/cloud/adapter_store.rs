@@ -5,6 +5,11 @@ use super::{
     *,
 };
 use rusqlite::{OptionalExtension, params};
+pub(super) struct AdapterCommitOptions {
+    pub at_ms: i64,
+    pub fail: bool,
+}
+
 impl TrackingStore {
     pub(super) fn adapter_install(&mut self) -> Result<(), Error> {
         self.connection.execute_batch("CREATE TABLE IF NOT EXISTS cloud_adapter_state(binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content)))")?;
@@ -28,9 +33,9 @@ impl TrackingStore {
         refused: &[super::incoming::RefusedEntry],
         state: Option<&[u8]>,
         durable: &Durable,
-        at_ms: i64,
-        fail: bool,
+        options: AdapterCommitOptions,
     ) -> Result<(), Error> {
+        let AdapterCommitOptions { at_ms, fail } = options;
         if self.binding(binding)?.ok_or(Error::BindingNotFound)?.facts.state != BindingState::Active {
             return Err(Error::IsolatedBinding);
         }

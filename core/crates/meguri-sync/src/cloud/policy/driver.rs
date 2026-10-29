@@ -288,13 +288,32 @@ impl Driver {
         );
         owned.state = state;
         actions.extend(emitted);
+        // A start may still be awaiting native construction. Reissue that
+        // intent with the current scheduling preference; its old value is
+        // rejected by validate_locked without invalidating other actions.
+        if owned.state.engine.is_none()
+            && owned.state.gate_open()
+            && actions
+                .iter()
+                .any(|a| matches!(a.kind, ActionKind::ConfigureAutomatic { .. }))
+            && !actions.iter().any(|a| matches!(a.kind, ActionKind::StartEngine { .. }))
+            && let Some(binding) = &owned.state.facts.binding
+        {
+            actions.push(Action {
+                guard: owned.state.guard(),
+                kind: ActionKind::StartEngine {
+                    binding: binding.id,
+                    automatic: owned.state.automatic(),
+                },
+            });
+        }
         // Durable rows are loaded after owner invalidation; old timestamps are never inferred.
         let (state, emitted) = step(
             owned.state.clone(),
             Input {
                 now_ms,
                 facts: None,
-                event: Event::EvidenceCommitted(projection.evidence),
+                event: Event::EvidenceCommitted(Box::new(projection.evidence)),
             },
         );
         owned.state = state;
@@ -365,10 +384,14 @@ impl Driver {
     pub fn native_disposition(&self, command: &Command) -> Result<NativeDisposition, DriverError> {
         let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         self.validate_locked(&owned, command)?;
-        // Settings are already retained by step. With no engine there is
-        // nothing to reconfigure; native must not turn this into a start.
+        // Only an unbound Host has no native configuration intent. A bound
+        // start may still be awaiting construction even though no SDK exists.
         Ok(
             if matches!(command.action.kind, ActionKind::ConfigureAutomatic { .. })
+                && command.action.guard.binding.is_none()
+                && command.owner.is_empty()
+                && command.backend_guard.generation == 0
+                && command.backend_guard.binding.is_empty()
                 && !self.runtime.policy_has_engine(&command.backend_guard)?
             {
                 NativeDisposition::NoOperation
@@ -383,6 +406,17 @@ impl Driver {
             || command.owner != self.runtime.instance().unwrap_or_default()
             || runtime != command.backend_guard
         {
+            return Err(DriverError::StaleCommand);
+        }
+        // Scheduling values are snapshots, unlike authority for manual work.
+        // Async native construction must revalidate the original command here
+        // at its registration/factory boundary as well as before enqueueing.
+        let automatic = match command.action.kind {
+            ActionKind::StartEngine { automatic, .. } => Some(automatic),
+            ActionKind::ConfigureAutomatic { on } => Some(on),
+            _ => None,
+        };
+        if automatic.is_some_and(|value| value != owned.state.automatic()) {
             return Err(DriverError::StaleCommand);
         }
         // Unbound Runtime has no collection generation. Only Host control
@@ -417,7 +451,7 @@ impl Driver {
             ActionKind::UpdatePending(update) => self
                 .runtime
                 .policy_update_pending(guard, *update)
-                .map(|_| Event::EvidenceCommitted(owned.state.evidence.clone())),
+                .map(|_| Event::EvidenceCommitted(Box::new(owned.state.evidence.clone()))),
             ActionKind::ProbeTracking => self
                 .runtime
                 .policy_probe(guard)
@@ -457,7 +491,7 @@ impl Driver {
                 }
                 self.runtime
                     .policy_record_quiet(guard, *at_ms)
-                    .map(Event::EvidenceCommitted)
+                    .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
             }
             ActionKind::RecordExchange(record) => {
                 if owned.issued_records.get(&record.exchange) != Some(record) {
@@ -465,7 +499,7 @@ impl Driver {
                 }
                 self.runtime
                     .policy_record_exchange(collection, guard, &command.owner, record)
-                    .map(Event::EvidenceCommitted)
+                    .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
             }
             ActionKind::RunCleanup => return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup")),
             ActionKind::StatusChanged(_) => return Ok(Vec::new()),

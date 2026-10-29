@@ -264,13 +264,13 @@ pub(super) fn merge(base: Option<&P>, local: &P, server: &P) -> Result<(P, Optio
             };
             let mut r = s.clone();
             r.val = pick!(b.map(|b| &b.val), &l.val, &s.val);
-            if matches!(s.key.as_slice(), b"nextPos" | b"lastUnburied") {
-                if let (Ok(l), Ok(s)) = (
+            if matches!(s.key.as_slice(), b"nextPos" | b"lastUnburied")
+                && let (Ok(l), Ok(s)) = (
                     std::str::from_utf8(&l.val).unwrap_or("").parse::<i64>(),
                     std::str::from_utf8(&s.val).unwrap_or("").parse::<i64>(),
-                ) {
-                    r.val = l.max(s).to_string().into_bytes();
-                }
+                )
+            {
+                r.val = l.max(s).to_string().into_bytes();
             }
             P::Config(r)
         }

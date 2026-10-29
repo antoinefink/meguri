@@ -504,10 +504,11 @@ impl CloudWorkflow {
             .core
             .adapter_complete_identity_read(id, observed.clone())
             .map_err(cloud_error)?;
-        if accepted && !matches!(observed, r::IdentityStatus::ReadFailed) {
-            if let Some(cache) = &self.identity {
-                cache.set(observed);
-            }
+        if accepted
+            && !matches!(observed, r::IdentityStatus::ReadFailed)
+            && let Some(cache) = &self.identity
+        {
+            cache.set(observed);
         }
         Ok(accepted)
     }

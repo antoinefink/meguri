@@ -273,7 +273,7 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
             }
         }
         Event::RootConfirmed { .. } => s.root_confirmed = true,
-        Event::EvidenceCommitted(evidence) => s.evidence = evidence.clone(),
+        Event::EvidenceCommitted(evidence) => s.evidence = evidence.as_ref().clone(),
         _ => {}
     }
     let binding_changed = s.facts.binding != old.facts.binding;
@@ -477,10 +477,8 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
                     resume_media(&s, &mut a);
                 }
             }
-            Event::VisibleMedia { names } => {
-                if s.settings.media {
-                    a.push(ActionKind::PrioritizeMedia { names: names.clone() });
-                }
+            Event::VisibleMedia { names } if s.settings.media => {
+                a.push(ActionKind::PrioritizeMedia { names: names.clone() });
             }
             _ => {}
         }
@@ -607,7 +605,7 @@ fn finish_status(s: &mut State, actions: &mut Vec<Action>) {
         s.last_status = Some(status.clone());
         actions.push(Action {
             guard: s.guard(),
-            kind: ActionKind::StatusChanged(status),
+            kind: ActionKind::StatusChanged(Box::new(status)),
         });
     }
 }

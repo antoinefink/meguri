@@ -396,7 +396,7 @@ pub enum Event {
         names: Vec<String>,
     },
     /// Core-only acknowledgement of a successful evidence commit.
-    EvidenceCommitted(Evidence),
+    EvidenceCommitted(Box<Evidence>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -447,7 +447,7 @@ pub enum ActionKind {
     RecordExchange(ExchangeRecord),
     RecordQuietPoint { at_ms: i64 },
     ProbeTracking,
-    StatusChanged(Status),
+    StatusChanged(Box<Status>),
 }
 impl ActionKind {
     pub(crate) fn host_only(&self) -> bool {

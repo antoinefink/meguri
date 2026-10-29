@@ -524,8 +524,7 @@ fn confirmed_initial_publication_scans_unacked_rows_saves_real_batches_and_switc
     assert!(complete_request.unwrap() < active_request.unwrap());
     assert_eq!(
         logs.iter()
-            .filter(|r| matches!(r.kind, RequestKind::CreateZone | RequestKind::Modify))
-            .last()
+            .rfind(|r| matches!(r.kind, RequestKind::CreateZone | RequestKind::Modify))
             .unwrap()
             .request_id,
         active_request.unwrap()

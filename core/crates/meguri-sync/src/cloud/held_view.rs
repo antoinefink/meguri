@@ -95,12 +95,11 @@ impl<'a, T: ReadRows + ?Sized> HeldView<'a, T> {
     }
 }
 pub(super) fn compare(table: Table, a: &RowKey, b: &RowKey) -> Ordering {
-    if table == Table::Tags {
-        if let (RowKey::Text(a), RowKey::Text(b)) = (a, b) {
-            if let (Ok(a), Ok(b)) = (std::str::from_utf8(a), std::str::from_utf8(b)) {
-                return meguri_text::fold::compare_folded(a, b);
-            }
-        }
+    if table == Table::Tags
+        && let (RowKey::Text(a), RowKey::Text(b)) = (a, b)
+        && let (Ok(a), Ok(b)) = (std::str::from_utf8(a), std::str::from_utf8(b))
+    {
+        return meguri_text::fold::compare_folded(a, b);
     }
     a.cmp(b)
 }

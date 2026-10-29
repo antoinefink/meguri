@@ -27,3 +27,21 @@ R3 checkpoint:
 
 R3 P1: retain bound ConfigureAutomatic work before SDK registration.
 This remains WIP. No Unit closure.
+
+Checkpoint: base `258f25f4`; R4 source clear. All 124 focused FFI checks pass
+(receipt `20261029T205219Z-72198`). Guards pending.
+
+Fixer base `0f8903aa`: 11 test/FFI Clippy findings addressed in source;
+reviewed seed retained. Compilation, gates and independent review remain external.
+
+Integration at 258f25f4: R4 source review clear.
+
+- core-lint/20261029T210359Z-81367: pass.
+- core-test/20261029T210442Z-82532: 202 pass, none skipped.
+- core-test/20261029T210523Z-82993: 55 pass, none skipped.
+- private/20261029T205954Z-78705: 18 paths pass.
+- private/20261029T210401Z-81625: final eight paths pass.
+- similarity/20261029T210404Z-81881: pass.
+
+Native execution, media bridge, app wiring and original batch gate remain open.
+No Unit closure.

@@ -488,7 +488,7 @@ fn erev_order_ignores_duplicates_and_older_accepted_versions_cannot_clear_newer_
     pair.receiver.hold(Point::ApplyAfterIntent).unwrap();
     pair.receiver
         .driver()
-        .deliver_collection_records(&[first.clone()])
+        .deliver_collection_records(std::slice::from_ref(&first))
         .unwrap();
     pair.receiver.driver().drain_incoming(STEPS).unwrap();
     assert!(pair.receiver.is_held(Point::ApplyAfterIntent));
@@ -580,7 +580,7 @@ fn erev_order_ignores_duplicates_and_older_accepted_versions_cannot_clear_newer_
     };
     pair.receiver
         .driver()
-        .deliver_collection_records(&[repaired.clone()])
+        .deliver_collection_records(std::slice::from_ref(repaired))
         .unwrap();
     pair.receiver.driver().drain_incoming(STEPS).unwrap();
     assert!(pair.receiver.driver().refused_entries(b).unwrap().is_empty());

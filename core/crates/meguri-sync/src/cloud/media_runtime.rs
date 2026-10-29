@@ -8,6 +8,21 @@ use meguri_engine::media::{MediaJobKind, MediaService};
 use meguri_storage::media::{MediaAbsenceCause, MediaFeedId, MediaFileState};
 use std::collections::{BTreeMap, BTreeSet};
 
+type MediaFeedApplyCommit = (
+    Authority,
+    ApplyIntent,
+    Ledger,
+    Vec<(Option<EntityFacts>, EntityFacts)>,
+    bool,
+);
+
+struct PendingMediaApply {
+    incoming: workflow::Saved,
+    inbox: Option<i64>,
+    server: Option<codec::MediaName>,
+    staged: Option<PathBuf>,
+}
+
 fn media_error(_: impl std::fmt::Display) -> RuntimeError {
     Error::Io(std::io::ErrorKind::Other).into()
 }
@@ -141,13 +156,7 @@ impl Runtime {
         &self,
         collection: &Collection,
         media: &MediaService,
-        apply_commit: Option<(
-            Authority,
-            ApplyIntent,
-            Ledger,
-            Vec<(Option<EntityFacts>, EntityFacts)>,
-            bool,
-        )>,
+        apply_commit: Option<MediaFeedApplyCommit>,
         notification: Option<&Authority>,
     ) -> Result<usize, RuntimeError> {
         let a = self.media_authority(collection, false)?;
@@ -810,10 +819,12 @@ impl Runtime {
                 collection,
                 media,
                 a,
-                saved,
-                Some(entry.id),
-                Some(server),
-                Some(staged.clone()),
+                PendingMediaApply {
+                    incoming: saved,
+                    inbox: Some(entry.id),
+                    server: Some(server),
+                    staged: Some(staged.clone()),
+                },
             )?;
             applied = true;
         }
@@ -828,24 +839,25 @@ impl Runtime {
                 }
                 for e in page {
                     after = Some(e.key.clone());
-                    if let codec::Payload::MediaName(p) = e.acked_payload.as_ref().unwrap_or(&e.payload) {
-                        if p.sha256 == b.metadata.sha256
-                            && Self::current_media(media, text(&p.name)?)?.as_ref() != Some(p)
-                        {
-                            self.begin_media_apply(
-                                collection,
-                                media,
-                                a,
-                                workflow::Saved {
+                    if let codec::Payload::MediaName(p) = e.acked_payload.as_ref().unwrap_or(&e.payload)
+                        && p.sha256 == b.metadata.sha256
+                        && Self::current_media(media, text(&p.name)?)?.as_ref() != Some(p)
+                    {
+                        self.begin_media_apply(
+                            collection,
+                            media,
+                            a,
+                            PendingMediaApply {
+                                incoming: workflow::Saved {
                                     name: e.name.clone(),
                                     envelope: e.acked_envelope.0.clone(),
                                     system_fields: e.acked_system_fields.clone(),
                                 },
-                                None,
-                                Some(p.clone()),
-                                Some(staged.clone()),
-                            )?;
-                        }
+                                inbox: None,
+                                server: Some(p.clone()),
+                                staged: Some(staged.clone()),
+                            },
+                        )?;
                     }
                 }
             }
@@ -862,11 +874,14 @@ impl Runtime {
         collection: &Collection,
         media: &MediaService,
         a: &Authority,
-        incoming: workflow::Saved,
-        inbox: Option<i64>,
-        server: Option<codec::MediaName>,
-        staged: Option<PathBuf>,
+        pending: PendingMediaApply,
     ) -> Result<(), RuntimeError> {
+        let PendingMediaApply {
+            incoming,
+            inbox,
+            server,
+            staged,
+        } = pending;
         let received = codec::receive(
             &self.media_record_key(a)?,
             &incoming.name,
@@ -880,7 +895,6 @@ impl Runtime {
             None => text(&received.entity.fields.key)?.to_owned(),
         };
         let before = Self::current_media(media, &name)?;
-        if before.as_ref() == server.as_ref() && server.is_some() {}
         let ledger = self.with_media(a, |s| s.media_ledger(a.binding))?;
         let flags = ledger.names.get(&name.to_lowercase());
         let changed = existing.as_ref().is_some_and(|e| e.mark.is_some())
@@ -1509,69 +1523,69 @@ impl Runtime {
             };
             self.with_media(a, |s| s.store_conflict(a.binding, &copy))?;
         }
-        if let Some(losing) = &apply.before {
-            if apply.server.as_ref().is_none_or(|s| s.sha256 != losing.sha256) && (apply.installed || moved_ran) {
-                let staged_path = if let Some(moved) = &apply.moved {
-                    Some(
-                        media
-                            .store()
-                            .media_dir()
-                            .join(text(&moved.name)?)
-                            .to_string_lossy()
-                            .into_owned(),
-                    )
-                } else {
+        if let Some(losing) = &apply.before
+            && apply.server.as_ref().is_none_or(|s| s.sha256 != losing.sha256)
+            && (apply.installed || moved_ran)
+        {
+            let staged_path = if let Some(moved) = &apply.moved {
+                Some(
                     media
                         .store()
-                        .trash_entries()
-                        .map_err(media_error)?
-                        .into_iter()
-                        .filter(|t| t.sha1 == m::io::sha1_text(&losing.sha1))
-                        .last()
-                        .map(|t| {
-                            media
-                                .store()
-                                .cloud_trash_path(t.id)
-                                .map(|p| p.to_string_lossy().into_owned())
-                                .unwrap_or_default()
-                        })
-                };
-                let payload = codec::Payload::MediaName(losing.clone());
-                let bytes = payload.encode().map_err(|_| Error::InvalidData)?;
-                let envelope = codec::Entity::build(
-                    codec::EntityFields {
-                        kind: codec::Kind::MediaName,
-                        key: received.entity.fields.key.clone(),
-                        origin: existing.as_ref().map_or([0; 16], |e| e.origin),
-                        erev: existing.as_ref().map_or(1, |e| e.server_erev.max(1)),
-                        generation: None,
-                        tombstone: false,
-                        deleted_at_ms: 0,
-                        writer: a.binding.0,
-                        base_sha256: None,
-                    },
-                    &bytes,
+                        .media_dir()
+                        .join(text(&moved.name)?)
+                        .to_string_lossy()
+                        .into_owned(),
                 )
-                .map_err(|_| Error::InvalidData)?
-                .encode()
-                .map_err(|_| Error::InvalidData)?;
-                let copy = ConflictCopy {
-                    id: CopyId(self.publication_random_id()?),
-                    kind: ConflictKind::MediaName,
-                    key: OpaqueBytes(received.entity.fields.key.clone()),
-                    reason: ConflictReason::MediaContent,
-                    losing_envelope: OpaqueBytes(envelope),
-                    losing_payload_digest: PayloadDigest(codec::sha256(&bytes)),
-                    winning_payload_digest: PayloadDigest(received.entity.payload_sha256),
-                    field_names: None,
-                    template_names: None,
-                    note_deck: None,
-                    staged_path,
-                    created_at_ms: self.media_now()?,
-                    resolved_at_ms: None,
-                };
-                self.with_media(a, |s| s.store_conflict(a.binding, &copy))?;
-            }
+            } else {
+                media
+                    .store()
+                    .trash_entries()
+                    .map_err(media_error)?
+                    .into_iter()
+                    .rfind(|t| t.sha1 == m::io::sha1_text(&losing.sha1))
+                    .map(|t| {
+                        media
+                            .store()
+                            .cloud_trash_path(t.id)
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    })
+            };
+            let payload = codec::Payload::MediaName(losing.clone());
+            let bytes = payload.encode().map_err(|_| Error::InvalidData)?;
+            let envelope = codec::Entity::build(
+                codec::EntityFields {
+                    kind: codec::Kind::MediaName,
+                    key: received.entity.fields.key.clone(),
+                    origin: existing.as_ref().map_or([0; 16], |e| e.origin),
+                    erev: existing.as_ref().map_or(1, |e| e.server_erev.max(1)),
+                    generation: None,
+                    tombstone: false,
+                    deleted_at_ms: 0,
+                    writer: a.binding.0,
+                    base_sha256: None,
+                },
+                &bytes,
+            )
+            .map_err(|_| Error::InvalidData)?
+            .encode()
+            .map_err(|_| Error::InvalidData)?;
+            let copy = ConflictCopy {
+                id: CopyId(self.publication_random_id()?),
+                kind: ConflictKind::MediaName,
+                key: OpaqueBytes(received.entity.fields.key.clone()),
+                reason: ConflictReason::MediaContent,
+                losing_envelope: OpaqueBytes(envelope),
+                losing_payload_digest: PayloadDigest(codec::sha256(&bytes)),
+                winning_payload_digest: PayloadDigest(received.entity.payload_sha256),
+                field_names: None,
+                template_names: None,
+                note_deck: None,
+                staged_path,
+                created_at_ms: self.media_now()?,
+                resolved_at_ms: None,
+            };
+            self.with_media(a, |s| s.store_conflict(a.binding, &copy))?;
         }
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
@@ -1734,13 +1748,33 @@ impl Runtime {
                 {
                     continue;
                 }
-                self.begin_media_apply(collection, media, &a, saved, Some(entry.id), None, None)?;
+                self.begin_media_apply(
+                    collection,
+                    media,
+                    &a,
+                    PendingMediaApply {
+                        incoming: saved,
+                        inbox: Some(entry.id),
+                        server: None,
+                        staged: None,
+                    },
+                )?;
                 count += 1;
-            } else if let Some(codec::Payload::MediaName(server)) = r.payload {
-                if Self::current_media(media, text(&server.name)?)?.as_ref() == Some(&server) {
-                    self.begin_media_apply(collection, media, &a, saved, Some(entry.id), Some(server), None)?;
-                    count += 1;
-                }
+            } else if let Some(codec::Payload::MediaName(server)) = r.payload
+                && Self::current_media(media, text(&server.name)?)?.as_ref() == Some(&server)
+            {
+                self.begin_media_apply(
+                    collection,
+                    media,
+                    &a,
+                    PendingMediaApply {
+                        incoming: saved,
+                        inbox: Some(entry.id),
+                        server: Some(server),
+                        staged: None,
+                    },
+                )?;
+                count += 1;
             }
         }
         Ok(count)

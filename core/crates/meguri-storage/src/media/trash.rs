@@ -3,6 +3,8 @@ use crate::atomic_file::move_new;
 use rusqlite::{Connection, params};
 use std::{fs, io::Write, path::Path};
 
+type TrashVerifier<'a> = &'a (dyn Fn(&Path) -> Result<bool> + 'a);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrashEntry {
     pub id: i64,
@@ -122,7 +124,7 @@ impl MediaStore {
         source: &Path,
         record_deletion: bool,
         moved: &mut bool,
-        verify: Option<&dyn Fn(&Path) -> Result<bool>>,
+        verify: Option<TrashVerifier<'_>>,
     ) -> Result<TrashEntry> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let file = fs::OpenOptions::new()

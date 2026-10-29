@@ -55,10 +55,10 @@ pub(super) fn validate(c: &Connection, required: bool) -> Result<(), Error> {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
-    if let Some((kind, table)) = index {
-        if kind != "index" || table != "cloud_apply_intents" {
-            return Err(Error::InvalidData);
-        }
+    if let Some((kind, table)) = index
+        && (kind != "index" || table != "cloud_apply_intents")
+    {
+        return Err(Error::InvalidData);
     }
     // Check storage ownership only. Do not read another build's runtime
     // payloads, infer server facts, or interpret intentionally refused bytes.
@@ -335,11 +335,9 @@ impl TrackingStore {
         let mut q = self
             .connection
             .prepare("SELECT content FROM cloud_refused WHERE binding=?1 ORDER BY name")?;
-        let entries = q
-            .query_map([b.0.as_slice()], |r| r.get::<_, String>(0))?
+        q.query_map([b.0.as_slice()], |r| r.get::<_, String>(0))?
             .map(|r| decode(&r?))
-            .collect();
-        entries
+            .collect()
     }
     pub(super) fn persist_apply_intent(&mut self, i: &ApplyIntent, replay_of: Option<i64>) -> Result<i64, Error> {
         let tx = self.connection.transaction()?;

@@ -406,6 +406,9 @@ struct State {
     fail_capture_after: Option<usize>,
 }
 
+#[cfg(feature = "test-hooks")]
+type CloudCaptureHook = Box<dyn FnOnce(&Runtime) + Send>;
+
 /// Host-owned ports accept a collection handle for each read call.
 pub struct Runtime {
     directory: PathBuf,
@@ -424,7 +427,7 @@ pub struct Runtime {
     #[cfg(feature = "test-hooks")]
     current_account_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(feature = "test-hooks")]
-    cloud_capture_hook: Mutex<Option<Box<dyn FnOnce(&Runtime) + Send>>>,
+    cloud_capture_hook: Mutex<Option<CloudCaptureHook>>,
 }
 #[derive(Clone)]
 struct ScanGuard {
@@ -496,7 +499,7 @@ impl Runtime {
         *self.cloud_capture_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
     }
     #[cfg(feature = "test-hooks")]
-    fn take_cloud_capture_hook_for_test(&self) -> Option<Box<dyn FnOnce(&Runtime) + Send>> {
+    fn take_cloud_capture_hook_for_test(&self) -> Option<CloudCaptureHook> {
         self.cloud_capture_hook
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

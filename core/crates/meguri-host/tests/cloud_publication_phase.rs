@@ -1059,12 +1059,12 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some((reached, release)) = handshake {
-            if reached.send(()).is_ok() {
-                release
-                    .recv_timeout(Duration::from_secs(30))
-                    .expect("parent must release the actual post-commit worker");
-            }
+        if let Some((reached, release)) = handshake
+            && reached.send(()).is_ok()
+        {
+            release
+                .recv_timeout(Duration::from_secs(30))
+                .expect("parent must release the actual post-commit worker");
         }
     }
 

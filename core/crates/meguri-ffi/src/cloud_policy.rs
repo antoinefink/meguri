@@ -820,7 +820,7 @@ pub enum CloudPolicyAction {
     RecordExchange { record: CloudPolicyExchangeRecord },
     RecordQuietPoint { at_ms: i64 },
     ProbeTracking,
-    StatusChanged { status: CloudPolicyStatus },
+    StatusChanged { status: Box<CloudPolicyStatus> },
 }
 impl From<&p::ActionKind> for CloudPolicyAction {
     fn from(v: &p::ActionKind) -> Self {
@@ -848,7 +848,9 @@ impl From<&p::ActionKind> for CloudPolicyAction {
             p::ActionKind::ApplyReady { retry_failed } => Self::ApplyReady { retry_failed },
             p::ActionKind::RecordExchange(record) => Self::RecordExchange { record: record.into() },
             p::ActionKind::RecordQuietPoint { at_ms } => Self::RecordQuietPoint { at_ms },
-            p::ActionKind::StatusChanged(status) => Self::StatusChanged { status: status.into() },
+            p::ActionKind::StatusChanged(status) => Self::StatusChanged {
+                status: Box::new((*status).into()),
+            },
             p::ActionKind::RetryAssetEntries => Self::RetryAssetEntries,
             p::ActionKind::RunCleanup => Self::RunCleanup,
             p::ActionKind::DeleteZones => Self::DeleteZones,

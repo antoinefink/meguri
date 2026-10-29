@@ -3,6 +3,12 @@ use super::*;
 use crate::cloud::{incoming::*, incoming_merge, row_payload, workflow::Saved};
 use std::collections::{BTreeMap, BTreeSet};
 
+type IntentRows = (
+    BTreeMap<String, Option<codec::Payload>>,
+    Seq,
+    meguri_engine::WalIdentity,
+);
+
 // Ordinary replay can use a recovery row's old owner without selecting it or
 // opening its SDK gate. The scan pins the actual current engine opening.
 #[derive(Clone)]
@@ -481,10 +487,10 @@ impl Runtime {
                 }
             });
             entries.truncate(500);
-            if entries.is_empty() {
-                if let Some(entry) = retry {
-                    entries.push(entry);
-                }
+            if entries.is_empty()
+                && let Some(entry) = retry
+            {
+                entries.push(entry);
             }
             if entries.is_empty() {
                 if replayed > 0 || parked {
@@ -688,15 +694,14 @@ impl Runtime {
         let active = self.active_review();
         self.with_incoming(guard, collection, |s| {
             s.cloud.incoming_seq = result.seq.0;
-            if active.is_some() {
-                if let Some(run) = result.cloud_detached_run {
-                    // Retain the actual op result before any fallible tracking
-                    // write. Only the corresponding real session end releases it.
-                    if run.steps.iter().any(|step| step.session.map(|s| s.0) == active) {
-                        s.last_session = active;
-                        s.cloud.detached.push(run);
-                    }
-                }
+            if active.is_some()
+                && let Some(run) = result.cloud_detached_run
+                && run.steps.iter().any(|step| step.session.map(|s| s.0) == active)
+            {
+                // Retain the actual op result before any fallible tracking
+                // write. Only the corresponding real session end releases it.
+                s.last_session = active;
+                s.cloud.detached.push(run);
             }
             let intent = s
                 .store
@@ -853,18 +858,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn read_intent_rows(
-        &self,
-        collection: &Collection,
-        i: &ApplyIntent,
-    ) -> Result<
-        (
-            BTreeMap<String, Option<codec::Payload>>,
-            Seq,
-            meguri_engine::WalIdentity,
-        ),
-        RuntimeError,
-    > {
+    fn read_intent_rows(&self, collection: &Collection, i: &ApplyIntent) -> Result<IntentRows, RuntimeError> {
         let layouts = {
             let s = self.state();
             with_tracking_access(|| layouts(s.store.as_ref().ok_or(Error::Database)?, i.binding))?
@@ -1100,30 +1094,29 @@ fn apply(
             if *p != server && Some(&*p) != local.as_ref() {
                 incoming_merge::stamp_local(p, ctx.now().0 / 1000);
             }
-            if let codec::Payload::Note(n) = p {
-                if n.flds.as_slice()
+            if let codec::Payload::Note(n) = p
+                && n.flds.as_slice()
                     != match &server {
                         codec::Payload::Note(n) => n.flds.as_slice(),
                         _ => &[],
                     }
-                {
-                    let nt = ctx
-                        .scope()
-                        .notetype(meguri_model::ids::NotetypeId(n.mid))?
-                        .ok_or(Error::InvalidData)?;
-                    let fields: Vec<_> = std::str::from_utf8(&n.flds)
-                        .map_err(|_| Error::InvalidData)?
-                        .split('\u{1f}')
-                        .collect();
-                    n.sfld = codec::Stored::Text(
-                        meguri_text::checksum::sort_text_of(&fields, nt.config.sort_field_idx as usize)
-                            .as_bytes()
-                            .to_vec(),
-                    );
-                    n.csum = i64::from(meguri_text::checksum::note_checksum(
-                        fields.first().copied().unwrap_or(""),
-                    ));
-                }
+            {
+                let nt = ctx
+                    .scope()
+                    .notetype(meguri_model::ids::NotetypeId(n.mid))?
+                    .ok_or(Error::InvalidData)?;
+                let fields: Vec<_> = std::str::from_utf8(&n.flds)
+                    .map_err(|_| Error::InvalidData)?
+                    .split('\u{1f}')
+                    .collect();
+                n.sfld = codec::Stored::Text(
+                    meguri_text::checksum::sort_text_of(&fields, nt.config.sort_field_idx as usize)
+                        .as_bytes()
+                        .to_vec(),
+                );
+                n.csum = i64::from(meguri_text::checksum::note_checksum(
+                    fields.first().copied().unwrap_or(""),
+                ));
             }
         }
         if let Some(losing) = losing {
@@ -1151,7 +1144,15 @@ fn apply(
         };
         if own.is_none() && key.before_digest != key.after_digest {
             if let (Some(codec::Payload::Deck(old)), Some(codec::Payload::Deck(new))) = (&local, &result) {
-                deck_descendants(ctx, store, binding, old, new, &record_key, &layouts, &mut keys)?;
+                deck_descendants(
+                    ctx,
+                    store,
+                    binding,
+                    DeckChange { old, new },
+                    &record_key,
+                    &layouts,
+                    &mut keys,
+                )?;
             }
             for (table, row_key, row) in row_payload::payload_rows(result.as_ref().ok_or(Error::InvalidData)?)? {
                 ctx.scope().restore(table, &row_key, Some(&row))?;
@@ -1224,16 +1225,21 @@ fn same_object(local: Option<&codec::Payload>, server: &codec::Payload) -> bool 
     }
 }
 
+struct DeckChange<'a> {
+    old: &'a codec::Deck,
+    new: &'a codec::Deck,
+}
+
 fn deck_descendants(
     ctx: &mut meguri_engine::OpContext<'_, '_>,
     store: &TrackingStore,
     binding: BindingId,
-    old: &codec::Deck,
-    new: &codec::Deck,
+    change: DeckChange<'_>,
     record_key: &[u8; 32],
     layouts: &BTreeMap<i64, codec::Notetype>,
     keys: &mut Vec<ApplyKey>,
 ) -> Result<(), RuntimeError> {
+    let DeckChange { old, new } = change;
     if old.name == new.name {
         return Ok(());
     }

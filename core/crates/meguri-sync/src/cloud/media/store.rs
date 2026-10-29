@@ -7,6 +7,12 @@ use crate::cloud::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
+type MediaApplyCommit<'a> = (
+    &'a incoming::ApplyIntent,
+    &'a [(Option<workflow::EntityFacts>, workflow::EntityFacts)],
+    bool,
+);
+
 pub(crate) fn install(c: &Connection) -> Result<(), Error> {
     c.execute_batch("CREATE TABLE IF NOT EXISTS cloud_media_state(binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content)));" )?;
     Ok(())
@@ -62,11 +68,7 @@ impl TrackingStore {
         next_ledger: &Ledger,
         file_changes: &[(c::Payload, [u8; 16])],
         observation: (u64, u64, u64),
-        apply_commit: Option<(
-            &incoming::ApplyIntent,
-            &[(Option<workflow::EntityFacts>, workflow::EntityFacts)],
-            bool,
-        )>,
+        apply_commit: Option<MediaApplyCommit<'_>>,
     ) -> Result<bool, Error> {
         let binding = self.binding(binding_id)?.ok_or(Error::BindingNotFound)?;
         let mut runtime = self.runtime_binding(binding_id)?;

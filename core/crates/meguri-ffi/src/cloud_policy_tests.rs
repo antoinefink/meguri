@@ -110,6 +110,86 @@ fn settings(paused: bool) -> CloudPolicyEvent {
         },
     }
 }
+fn automatic_settings(automatic: bool) -> CloudPolicyEvent {
+    CloudPolicyEvent::Settings {
+        settings: CloudPolicyDeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic,
+            media: false,
+        },
+    }
+}
+fn pending_start_fixture() -> (Fixture, Arc<CloudPolicy>, CloudPolicyIssuedCommand) {
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
+    let policy = fixture.workflow.policy().unwrap();
+    drain(&policy, policy.clone().input(settings(false)).unwrap());
+    drain(&policy, policy.clone().refresh_account().unwrap());
+    drain(
+        &policy,
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Network { reachable: true })
+            .unwrap(),
+    );
+    let collection = fixture.workflow.host.collection().unwrap();
+    let media = fixture.workflow.host.media().unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    fixture
+        .workflow
+        .core
+        .prepare_adapter_baseline_for_testing(&collection, fixture.clock.as_ref(), fixture.random.as_ref(), None)
+        .unwrap();
+    fixture
+        .workflow
+        .core
+        .reconcile_binding(&collection, &media, Duration::from_secs(1))
+        .unwrap();
+    let start = select(
+        &policy,
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Refresh {
+                cause: CloudPolicyChangeCause::Cloud,
+            })
+            .unwrap(),
+        |a| matches!(a, CloudPolicyAction::StartEngine { automatic: true, .. }),
+    );
+    let state = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+    assert!(state.gate_open() && state.engine.is_none());
+    assert!(fixture.workflow.core.status().unwrap().binding.is_some());
+    assert!(fixture.workflow.core.incoming_sdk_instance_for_testing().is_none());
+    (fixture, policy, start)
+}
+fn scheduling_commands(
+    policy: &Arc<CloudPolicy>,
+    automatic: bool,
+) -> (CloudPolicyIssuedCommand, CloudPolicyIssuedCommand) {
+    let mut start = None;
+    let mut configure = None;
+    for command in commands(policy.clone().input(automatic_settings(automatic)).unwrap()) {
+        match command.action {
+            CloudPolicyAction::StartEngine { automatic: value, .. } => {
+                assert_eq!(value, automatic);
+                assert!(start.replace(command).is_none());
+            }
+            CloudPolicyAction::ConfigureAutomatic { on } => {
+                assert_eq!(on, automatic);
+                assert!(configure.replace(command).is_none());
+            }
+            _ => drain(
+                policy,
+                CloudPolicyOutput::Commands {
+                    commands: vec![command],
+                },
+            ),
+        }
+    }
+    (
+        start.expect("fresh pending start"),
+        configure.expect("authoritative configuration"),
+    )
+}
 fn commands(output: CloudPolicyOutput) -> Vec<CloudPolicyIssuedCommand> {
     match output {
         CloudPolicyOutput::Commands { commands } => commands,
@@ -207,6 +287,168 @@ impl CloudPolicyQueue for RejectQueue {
 }
 
 #[test]
+fn policy_bound_pending_start_revalidates_automatic_without_invalidating_manual_work() {
+    let (fixture, policy, start_true) = pending_start_fixture();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let runtime = &fixture.workflow.core;
+    let queue = Arc::new(Queue(AtomicUsize::new(0)));
+    assert!(matches!(
+        policy
+            .clone()
+            .submit_native(start_true.handle.clone(), queue.clone())
+            .unwrap(),
+        CloudPolicyAdmission::Admitted { accepted: true }
+    ));
+    let manual = run(&policy);
+    let guard = driver.state().guard();
+    let backend_guard = runtime.adapter_guard();
+    let (start_false, configure_off) = scheduling_commands(&policy, false);
+    assert_eq!(driver.state().guard(), guard);
+    assert_eq!(runtime.adapter_guard(), backend_guard);
+    assert!(driver.state().gate_open() && driver.state().engine.is_none());
+    // Revalidate the already admitted original before async construction can
+    // use its captured true value. Off must remain executable pending intent.
+    failure_is(
+        policy.clone().submit_native(start_true.handle, queue.clone()),
+        CloudPolicyFailure::StaleCommand,
+    );
+    assert_eq!(queue.0.load(Ordering::SeqCst), 1);
+    for command in [configure_off, start_false] {
+        assert!(matches!(
+            policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
+            CloudPolicyAdmission::Admitted { accepted: true }
+        ));
+    }
+    assert_eq!(queue.0.load(Ordering::SeqCst), 3);
+
+    let (queued_start_true, queued_configure_true) = scheduling_commands(&policy, true);
+    for command in [&queued_start_true, &queued_configure_true] {
+        assert!(matches!(
+            policy
+                .clone()
+                .submit_native(command.handle.clone(), queue.clone())
+                .unwrap(),
+            CloudPolicyAdmission::Admitted { accepted: true }
+        ));
+    }
+    let (fresh_start_false, fresh_configure_off) = scheduling_commands(&policy, false);
+    for command in [queued_start_true, queued_configure_true] {
+        failure_is(
+            policy.clone().submit_native(command.handle, queue.clone()),
+            CloudPolicyFailure::StaleCommand,
+        );
+    }
+    assert_eq!(queue.0.load(Ordering::SeqCst), 5);
+    assert_eq!(driver.state().guard(), guard);
+    assert_eq!(runtime.adapter_guard(), backend_guard);
+    for command in [fresh_configure_off, fresh_start_false, manual] {
+        assert!(matches!(
+            policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
+            CloudPolicyAdmission::Admitted { accepted: true }
+        ));
+    }
+    assert_eq!(queue.0.load(Ordering::SeqCst), 8);
+    assert!(!driver.state().automatic());
+    assert!(driver.state().engine.is_none());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn policy_bound_pending_configuration_retains_pause_account_generation_and_close_guards() {
+    for invalidation in 0..4 {
+        let (fixture, policy, _) = pending_start_fixture();
+        let (start, configure) = scheduling_commands(&policy, false);
+        match invalidation {
+            0 => {
+                fixture.workflow.set_paused(true).unwrap();
+                fixture.workflow.set_paused(false).unwrap();
+            }
+            1 => fixture
+                .workflow
+                .core
+                .adapter_account(None, r::IdentityStatus::SignedOut)
+                .unwrap(),
+            2 => {
+                let engine = fixture.workflow.host.engine();
+                let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive
+                    .replace(|path| {
+                        assert!(path.exists());
+                        Ok(())
+                    })
+                    .unwrap();
+                drop(exclusive);
+                drop(slot);
+            }
+            3 => fixture.workflow.host.close().unwrap(),
+            _ => unreachable!(),
+        }
+        let queue = Arc::new(Queue(AtomicUsize::new(0)));
+        for command in [start, configure] {
+            failure_is(
+                policy.clone().submit_native(command.handle, queue.clone()),
+                match invalidation {
+                    0 | 1 => CloudPolicyFailure::StaleCommand,
+                    2 => CloudPolicyFailure::GenerationChanged,
+                    3 => CloudPolicyFailure::Closed,
+                    _ => unreachable!(),
+                },
+            );
+        }
+        assert_eq!(queue.0.load(Ordering::SeqCst), 0);
+        if invalidation != 3 {
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn policy_bound_sdk_registration_refuses_duplicate_and_retains_current_configuration_intent() {
+    let (fixture, policy, start_true) = pending_start_fixture();
+    let (start_false, configure_off) = scheduling_commands(&policy, false);
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let runtime = &fixture.workflow.core;
+    let guard = driver.state().guard();
+    let backend_guard = runtime.adapter_guard();
+    let sdk = fixture.workflow.register_sdk(false).unwrap();
+    fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+    // First registration preserves opening/command guards. A duplicate is
+    // refused by Runtime itself, not by inventing a policy invalidation.
+    assert!(matches!(
+        runtime.register_sdk(true),
+        Err(r::RuntimeError::Tracking(c::Error::InvalidData))
+    ));
+    fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+    assert_eq!(
+        runtime.incoming_sdk_instance_for_testing(),
+        Some(sdk.instance_id.clone())
+    );
+    assert_eq!(runtime.adapter_guard(), backend_guard);
+    assert_eq!(driver.state().guard(), guard);
+    assert!(driver.state().engine.is_none()); // No Driver refresh or fabricated SDK acknowledgement.
+    assert!(!driver.state().automatic());
+
+    let queue = Arc::new(Queue(AtomicUsize::new(0)));
+    failure_is(
+        policy.clone().submit_native(start_true.handle, queue.clone()),
+        CloudPolicyFailure::StaleCommand,
+    );
+    assert_eq!(queue.0.load(Ordering::SeqCst), 0);
+    for command in [start_false, configure_off] {
+        assert!(matches!(
+            policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
+            CloudPolicyAdmission::Admitted { accepted: true }
+        ));
+    }
+    assert_eq!(queue.0.load(Ordering::SeqCst), 2);
+    assert!(!driver.state().automatic());
+    fixture.workflow.validate_sdk(sdk.instance_id).unwrap();
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
 fn policy_unbound_host_controls_keep_settings_without_sdk_or_configuration_queue() {
     let (fixture, _) = unbound_fixture(Arc::new(Account));
     let policy = fixture.workflow.policy().unwrap();
@@ -229,6 +471,18 @@ fn policy_unbound_host_controls_keep_settings_without_sdk_or_configuration_queue
     assert!(runtime.incoming_sdk_instance_for_testing().is_none());
     let state = fixture.workflow.host.cloud_policy_driver().unwrap().state();
     assert!(state.settings.automatic && state.engine.is_none());
+    let configure_off = select(&policy, policy.clone().input(automatic_settings(false)).unwrap(), |a| {
+        matches!(a, CloudPolicyAction::ConfigureAutomatic { on: false })
+    });
+    assert!(matches!(
+        policy
+            .clone()
+            .submit_native(configure_off.handle, queue.clone())
+            .unwrap(),
+        CloudPolicyAdmission::NoOperation
+    ));
+    assert_eq!(queue.0.load(Ordering::SeqCst), 0);
+    assert_eq!(runtime.adapter_guard(), guard);
 
     let quit = select(
         &policy,

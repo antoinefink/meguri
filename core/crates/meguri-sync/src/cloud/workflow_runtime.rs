@@ -869,10 +869,10 @@ impl Runtime {
                             .entity_facts(guard.binding, &name)?)
                     })
                     .map_err(|_| Error::InvalidData)?;
-                if let Some(e) = tracked {
-                    if let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload) {
-                        return Ok(n);
-                    }
+                if let Some(e) = tracked
+                    && let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload)
+                {
+                    return Ok(n);
                 }
                 if publishing {
                     let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
