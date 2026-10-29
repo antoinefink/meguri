@@ -61,7 +61,13 @@ fn remove_op(tx: &Transaction<'_>, scope: &BuildScope, id: [u8; 16]) -> Result<(
 }
 /// Remove work only from an ordinary binding already checked in this scope.
 pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
+    // The recovery workflow must settle these first. Never erase their inbox,
+    // merge base or owner as a substitute for actual collection/WAL replay.
+    if !super::incoming_store::intents(tx, b)?.is_empty() {
+        return Err(Error::RecoveryRefused);
+    }
     for table in [
+        "cloud_refused",
         "engine_state",
         "inbox",
         "cloud_runtime_notes",
@@ -295,6 +301,9 @@ impl TrackingStore {
             envelope: OpaqueBytes(saved.encrypted.clone().ok_or(Error::InvalidData)?),
             system_fields: saved.system_fields.clone(),
         });
+        if let Some(before) = &op.binding_before {
+            self.binding(before.id)?.ok_or(Error::BindingNotFound)?;
+        }
         let tx = self.connection.transaction()?;
         super::runtime_store::put_binding(&tx, id, &state)?;
         // The adapter's durable last applied Active must agree with the same commit.

@@ -339,7 +339,7 @@ impl TrackingStore {
             .collect();
         entries
     }
-    pub(super) fn persist_apply_intent(&mut self, i: &ApplyIntent) -> Result<i64, Error> {
+    pub(super) fn persist_apply_intent(&mut self, i: &ApplyIntent, replay_of: Option<i64>) -> Result<i64, Error> {
         let tx = self.connection.transaction()?;
         for id in &i.inbox_ids {
             let exists: bool = tx.query_row(
@@ -362,6 +362,23 @@ impl TrackingStore {
             "UPDATE cloud_apply_intents SET content=?2 WHERE id=?1",
             params![id, encode(&stored)?],
         )?;
+        if let Some(prior) = replay_of {
+            let old = intents(&tx, i.binding)?
+                .into_iter()
+                .find(|old| old.id == prior)
+                .ok_or(Error::InvalidData)?;
+            if old.inbox_ids.iter().collect::<std::collections::BTreeSet<_>>()
+                != i.inbox_ids.iter().collect::<std::collections::BTreeSet<_>>()
+            {
+                return Err(Error::InvalidData);
+            }
+            // Keep the prior intent across reconcile and collection rollback;
+            // replacement is atomic with persistence of the actual new intent.
+            tx.execute(
+                "DELETE FROM cloud_apply_intents WHERE binding=?1 AND id=?2",
+                params![i.binding.0.as_slice(), prior],
+            )?;
+        }
         meguri_model::faultpoint!("cloud.tracking.commit.intent")?;
         tx.commit()?;
         Ok(id)
@@ -428,6 +445,7 @@ impl TrackingStore {
         seq: u64,
         generation: u64,
         current: &std::collections::BTreeMap<String, Option<entity_codec::Payload>>,
+        current_observer_open: bool,
     ) -> Result<(), Error> {
         let mut state = self.runtime_binding(i.binding)?;
         let tx = self.connection.transaction()?;
@@ -438,7 +456,11 @@ impl TrackingStore {
             let Some(payload) = current.get(&key.name).and_then(Option::as_ref) else {
                 continue;
             };
-            if e.observer_open == open && e.observed_seq > seq {
+            if current_observer_open
+                && e.observer_open == open
+                && e.observed_generation == generation
+                && e.observed_seq > seq
+            {
                 continue;
             }
             let clean = e.mark.is_none();
@@ -456,10 +478,6 @@ impl TrackingStore {
             super::workflow_store::put(&tx, i.binding, &e)?;
         }
         super::runtime_store::put_binding(&tx, i.binding, &state)?;
-        tx.execute(
-            "DELETE FROM cloud_apply_intents WHERE binding=?1 AND id=?2",
-            params![i.binding.0.as_slice(), i.id],
-        )?;
         tx.commit()?;
         Ok(())
     }
@@ -471,6 +489,7 @@ impl TrackingStore {
         seq: u64,
         generation: u64,
         current: &std::collections::BTreeMap<String, Option<entity_codec::Payload>>,
+        current_observer_open: bool,
     ) -> Result<(), Error> {
         let mut state = self.runtime_binding(i.binding)?;
         let tx = self.connection.transaction()?;
@@ -480,7 +499,12 @@ impl TrackingStore {
             // A newer observer may already have run after the covered snapshot.
             let local = prior
                 .as_ref()
-                .filter(|e| e.observer_open == open && e.observed_generation == generation && e.observed_seq > seq)
+                .filter(|e| {
+                    current_observer_open
+                        && e.observer_open == open
+                        && e.observed_generation == generation
+                        && e.observed_seq > seq
+                })
                 .map(|e| Some(e.payload.clone()))
                 .unwrap_or(observed)
                 .ok_or(Error::InvalidData)?;
@@ -583,7 +607,7 @@ impl TrackingStore {
                     payload_digest: e.payload.payload_digest().map_err(|_| Error::InvalidData)?,
                 });
             }
-            if e.observer_open != open || e.observed_seq <= seq {
+            if !current_observer_open || e.observer_open != open || e.observed_seq <= seq {
                 e.observer_open = open;
                 e.observed_seq = seq;
                 e.observed_generation = generation;

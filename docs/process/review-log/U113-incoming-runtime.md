@@ -281,3 +281,40 @@ Independent review is clear of P0-P2 for this narrow correction.
 
 This is noncrash concurrency evidence only. Required crash/power modes, exact
 BeforeScan ordering and all other pending sync checks remain open.
+
+## Scoped old-owner recovery and publication exclusions
+
+Implementation starts at `856623d0`; integration follows the corrected test
+commit `4ff99be1`. Original U113 and batch bases remain unchanged. Fixer export
+`cleanroom/20261029T150052Z-22856` changes six production files and only the
+five reviewed post-deletion test expectations to `Tracking(BindingNotFound)`.
+No production query semantics or other test assertions change.
+
+Confirmation waits for running work without applying queued downloads. An
+existing same-scope recovery row grants the old owner permission to finish its
+intents, without selecting it or making it usable. Account, file, publication,
+open and incarnation checks remain. Actual snapshot WAL coverage precedes ACK
+and intent removal, outside the writer and other guards. Cleanup refuses live
+intents and removes refused rows in the final transaction; conflict owners stay.
+Independent R1 is clear of P0-P2 for the bounded live-transition repair.
+
+- `core-test/20261029T151517Z-29599`: 117 pass, zero skipped. Includes
+  both transition cases, host publication/adoption/backup/SDK guards, complete
+  selected schema recovery, incoming reviews and empty-media adoption.
+- `private/20261029T151529Z-30158`: one diagnostic string is flagged.
+- `similarity/20261029T151527Z-29896`: all seven paths pass.
+- Fixer `cleanroom/20261029T151732Z-31037` changes only that Busy diagnostic
+  to existing text. Independent comparison confirms the other six files and
+  all operands, conditions and tests are identical.
+- `core-format/20261029T151945Z-32499`: pass.
+- `core-test/20261029T152005Z-32871`: final 30 host cases pass, zero skipped,
+  after the diagnostic-only change. The 117-case result above remains the
+  broader pre-wording-change evidence, not a new full run on identical bytes.
+- `private/20261029T152014Z-33170`: all seven final paths pass.
+- `similarity/20261029T152016Z-33444`: the one changed file passes; the
+  other six retain their preceding passing result.
+
+Still required: exact BeforeScan/restart ordering with old intents after the
+new decision, retained conflict owners, all adoption/account/file variants,
+the full incoming safety target, media, native app integration, signed runs and
+the original batch gate. This is no Unit or P24 acceptance.

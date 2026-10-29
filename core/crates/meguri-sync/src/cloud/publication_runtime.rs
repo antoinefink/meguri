@@ -256,7 +256,7 @@ impl Runtime {
         p: &Preview,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
-        self.settle_before_transition(collection, Duration::from_secs(30))?;
+        self.wait_incoming_idle();
         self.check_preview_authority(p, collection)?;
         {
             let s = self.state();
@@ -301,6 +301,9 @@ impl Runtime {
         let mut s = self.state();
         if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
+        }
+        if s.incoming.running {
+            return Err(PublicationError::Busy.into());
         }
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
@@ -655,6 +658,7 @@ impl Runtime {
         }
         match work {
             LocalWork::Bind if op.step == PublishStep::Confirmed && decision == op.fence_before => {
+                self.settle_before_transition(collection, Duration::from_secs(30))?;
                 let id = BindingId(self.publication_random_id()?);
                 let now = self.adapter_now()?;
                 {

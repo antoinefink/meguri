@@ -224,7 +224,7 @@ impl Runtime {
         collection: &Collection,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
-        self.settle_before_transition(collection, Duration::from_secs(30))?;
+        self.wait_incoming_idle();
         self.check_preview_authority(preview, collection)?;
         meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
         if !matches!(
@@ -310,6 +310,9 @@ impl Runtime {
         let mut s = self.state();
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
+        }
+        if s.incoming.running {
+            return Err(PublicationError::Busy.into());
         }
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
@@ -636,6 +639,7 @@ impl Runtime {
         if has_media {
             return Err(PublicationError::MediaApplyUnavailable.into());
         }
+        self.settle_before_transition(collection, Duration::from_secs(30))?;
         let (_media_reader, _media_job) = inventory_empty_media(collection, media)?;
         let clock = self
             .adapter_clock
@@ -720,6 +724,7 @@ impl Runtime {
                 observed_generation: 0,
             })
         });
+        self.check_adoption_before(op, collection)?;
         {
             let mut s = self.state();
             with_tracking_access(|| {
@@ -746,6 +751,7 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         backup: &dyn meguri_engine::ports::BackupService,
     ) -> Result<(), RuntimeError> {
+        self.settle_before_transition(collection, Duration::from_secs(30))?;
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
         let (media_reader, _media_job) = inventory_empty_media(collection, media)?;
         // Replacement closes every reader. Keep media-job exclusion through

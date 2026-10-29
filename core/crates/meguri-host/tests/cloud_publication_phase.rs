@@ -1416,9 +1416,18 @@ fn queued_ready_incoming_is_not_applied_by_republication_and_is_discarded_only_a
             .iter()
             .all(|binding| binding.id != old.id)
     );
-    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
-    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
-    assert!(runtime.binding_entity(old.id, &before.name).unwrap().is_none());
+    assert!(matches!(
+        runtime.inbox_entries(old.id),
+        Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))
+    ));
+    assert!(matches!(
+        runtime.apply_intents(old.id),
+        Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))
+    ));
+    assert!(matches!(
+        runtime.binding_entity(old.id, &before.name),
+        Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))
+    ));
     assert!(runtime.apply_intents(new.id).unwrap().is_empty());
     assert!(runtime.inbox_entries(new.id).unwrap().is_empty());
     assert!(runtime.incoming_runs().is_empty());
@@ -1458,8 +1467,14 @@ fn queued_ready_incoming_is_not_applied_by_republication_and_is_discarded_only_a
     assert_eq!(reopened_note.acked_system_fields, new_note.acked_system_fields);
     assert_eq!(reopened_note.server_erev, new_note.server_erev);
     assert!(reopened_note.mark.is_none());
-    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
-    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(matches!(
+        runtime.inbox_entries(old.id),
+        Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))
+    ));
+    assert!(matches!(
+        runtime.apply_intents(old.id),
+        Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))
+    ));
     assert!(runtime.inbox_entries(new.id).unwrap().is_empty());
     assert!(runtime.apply_intents(new.id).unwrap().is_empty());
     assert!(runtime.incoming_runs().is_empty());

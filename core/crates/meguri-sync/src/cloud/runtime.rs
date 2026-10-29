@@ -416,6 +416,7 @@ pub struct Runtime {
     #[cfg(feature = "test-hooks")]
     current_account_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
+#[derive(Clone)]
 struct ScanGuard {
     invalidation: u64,
     binding: BindingId,

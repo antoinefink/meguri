@@ -3,6 +3,27 @@ use super::*;
 use crate::cloud::{incoming::*, incoming_merge, row_payload, workflow::Saved};
 use std::collections::{BTreeMap, BTreeSet};
 
+// Ordinary replay can use a recovery row's old owner without selecting it or
+// opening its SDK gate. The scan pins the actual current engine opening.
+#[derive(Clone)]
+struct IncomingGuard {
+    scan: ScanGuard,
+    recovery: Option<RecoveryGuard>,
+}
+#[derive(Clone)]
+struct RecoveryGuard {
+    anchor: ScanGuard,
+    owner: Binding,
+    op: crate::cloud::adoption::RecoveryKind,
+    decision: crate::cloud::publication::DecisionSnapshot,
+}
+impl std::ops::Deref for IncomingGuard {
+    type Target = ScanGuard;
+    fn deref(&self) -> &ScanGuard {
+        &self.scan
+    }
+}
+
 struct Running(Arc<Mutex<State>>, Arc<std::sync::Condvar>);
 impl Drop for Running {
     fn drop(&mut self) {
@@ -29,16 +50,218 @@ impl Runtime {
         collection: &Collection,
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
-        let mut s = self.state();
-        while s.incoming.running {
-            s = self.incoming_idle.wait(s).unwrap_or_else(PoisonError::into_inner);
+        self.wait_incoming_idle();
+        let has_work = {
+            let s = self.state();
+            with_tracking_access(|| -> Result<bool, RuntimeError> {
+                let Some(store) = s.store.as_ref() else {
+                    return Ok(false);
+                };
+                let publish = store.publication_op()?;
+                let adopt = store.adoption_op()?;
+                let before = publish
+                    .as_ref()
+                    .and_then(|p| p.binding_before.as_ref())
+                    .or_else(|| adopt.as_ref().and_then(|p| p.binding_before.as_ref()));
+                if let Some(before) = before
+                    && !store.apply_intents(before.id)?.is_empty()
+                {
+                    return Ok(true);
+                }
+                let Some(b) = s.bound.as_ref().filter(|b| b.usable && b.verified) else {
+                    return Ok(false);
+                };
+                Ok(!store.apply_intents(b.binding.id)?.is_empty())
+            })?
+        };
+        if !has_work {
+            return Ok(());
         }
-        let usable = s.bound.as_ref().is_some_and(|b| b.usable && b.verified);
-        drop(s);
-        if usable {
-            self.drain_incoming(collection, timeout)?;
+        // Read providers outside state/tracking guards. An isolated owner is
+        // permitted only by this build's existing durable adopt/publish row.
+        let account = self.publication_account()?;
+        let decision = self.publication_decision()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let guard = {
+            let mut s = self.state();
+            if s.incoming.running {
+                return Err(EngineError::Busy {
+                    running_op: "cloud incoming".into(),
+                }
+                .into());
+            }
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let anchor = ScanGuard {
+                invalidation: s.invalidation,
+                binding: b.binding.id,
+                open: b.open_counter,
+                generation: b.evidence.generation,
+                file: b.file,
+                incarnation: s.incarnation,
+            };
+            let recovery = with_tracking_access(|| -> Result<_, RuntimeError> {
+                use crate::cloud::adoption::RecoveryKind;
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                let publish = store.publication_op()?;
+                let adopt = store.adoption_op()?;
+                if publish.is_some() && adopt.is_some() {
+                    return Err(Error::InvalidData.into());
+                }
+                let op = publish
+                    .map(|p| RecoveryKind::Publish(Box::new(p)))
+                    .or_else(|| adopt.map(|p| RecoveryKind::Adopt(Box::new(p))));
+                let Some(op) = op else { return Ok(None) };
+                let (before, op_account, op_file, publication) = match &op {
+                    RecoveryKind::Publish(p) => {
+                        (&p.binding_before, &p.account, p.confirmed_file, p.confirmed_publication)
+                    }
+                    RecoveryKind::Adopt(p) => (
+                        &p.binding_before,
+                        &p.account,
+                        p.file_before,
+                        p.before.publication.identity,
+                    ),
+                };
+                let Some(before) = before else { return Ok(None) };
+                let owner = store.binding(before.id)?.ok_or(Error::BindingNotFound)?;
+                // No intents means there is nothing to project from the old
+                // file. In particular queued inbox entries are never applied.
+                if store.apply_intents(owner.id)?.is_empty() {
+                    return Ok(None);
+                }
+                if owner.scope != self.inputs.scope
+                    || owner.facts.account != *op_account
+                    || account != *op_account
+                    || owner.facts.publication != publication
+                    || decision.publication.identity != publication
+                    || file != op_file
+                    || store.runtime_binding(owner.id)?.file != Some(file)
+                    || matches!(
+                        owner.facts.state,
+                        BindingState::Isolated(
+                            IsolationReason::FileMismatch
+                                | IsolationReason::ReplacedLocally
+                                | IsolationReason::EncryptedDataReset
+                        )
+                    )
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                Ok(Some(RecoveryGuard {
+                    anchor: anchor.clone(),
+                    owner,
+                    op,
+                    decision: decision.clone(),
+                }))
+            })?;
+            let guard = if let Some(recovery) = recovery {
+                let open = with_tracking_access(|| {
+                    s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .runtime_binding(recovery.owner.id)
+                })?
+                .open_counter;
+                IncomingGuard {
+                    scan: ScanGuard {
+                        binding: recovery.owner.id,
+                        open,
+                        ..anchor
+                    },
+                    recovery: Some(recovery),
+                }
+            } else {
+                // A recovery row with no intents must not grant a full receive.
+                if !b.usable || !b.verified {
+                    return Ok(());
+                }
+                if account != b.binding.facts.account {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                IncomingGuard {
+                    scan: anchor,
+                    recovery: None,
+                }
+            };
+            s.incoming.running = true;
+            guard
+        };
+        let running = Running(self.state.clone(), self.incoming_idle.clone());
+        self.with_incoming(&guard, collection, |_| Ok(()))?;
+        self.replay_ordinary(collection, &guard, timeout)?;
+        drop(running);
+        if guard.recovery.is_some() {
+            // The current usable owner's own crash intents still precede its
+            // scan after the recovery row's old owner has finished.
+            self.settle_before_transition(collection, timeout)?;
         }
         Ok(())
+    }
+
+    fn check_incoming_locked(s: &State, guard: &IncomingGuard) -> Result<(), RuntimeError> {
+        let anchor = guard.recovery.as_ref().map_or(&guard.scan, |r| &r.anchor);
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if s.incarnation != anchor.incarnation
+            || s.invalidation != anchor.invalidation
+            || s.invalidation_exhausted
+            || s.tracking_stopped
+            || (b.binding.id, b.open_counter, b.file, b.evidence.generation)
+                != (anchor.binding, anchor.open, anchor.file, anchor.generation)
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        if let Some(r) = &guard.recovery {
+            use crate::cloud::adoption::RecoveryKind;
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let matches = match &r.op {
+                RecoveryKind::Publish(p) => {
+                    store.publication_op()?.as_ref() == Some(p.as_ref()) && store.adoption_op()?.is_none()
+                }
+                RecoveryKind::Adopt(p) => {
+                    store.adoption_op()?.as_ref() == Some(p.as_ref()) && store.publication_op()?.is_none()
+                }
+            };
+            if !matches
+                || store.binding(r.owner.id)?.as_ref() != Some(&r.owner)
+                || store.runtime_binding(r.owner.id)?.file != Some(guard.file)
+                || store.runtime_binding(r.owner.id)?.open_counter != guard.open
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        } else if !b.usable || !b.verified {
+            return Err(RuntimeError::IdentityUnverified);
+        }
+        Ok(())
+    }
+
+    fn with_incoming<T>(
+        &self,
+        guard: &IncomingGuard,
+        collection: &Collection,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        let Some(r) = &guard.recovery else {
+            return self.with_scan(&guard.scan, collection, work);
+        };
+        // Never call account/file providers under a writer or tracking lock.
+        let account = self.publication_account()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let decision = self.publication_decision()?;
+        if account != r.owner.facts.account
+            || file != guard.file
+            || file.created_nanos >= 1_000_000_000
+            || decision != r.decision
+            || !collection.is_current()
+            || collection.generation() != guard.generation
+            || collection.open_evidence()?.native_file != file.pair()
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let mut s = self.state();
+        with_tracking_access(|| {
+            Self::check_incoming_locked(&s, guard)?;
+            work(&mut s)
+        })
     }
     pub fn apply_intents(&self, binding: BindingId) -> Result<Vec<ApplyIntent>, RuntimeError> {
         let s = self.state();
@@ -119,6 +342,22 @@ impl Runtime {
             if !b.verified || !b.usable {
                 return Err(RuntimeError::IdentityUnverified);
             }
+            let held_for_transition = with_tracking_access(|| -> Result<bool, Error> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                Ok(store
+                    .publication_op()?
+                    .as_ref()
+                    .and_then(|p| p.binding_before.as_ref())
+                    .is_some_and(|p| p.id == b.binding.id)
+                    || store
+                        .adoption_op()?
+                        .as_ref()
+                        .and_then(|p| p.binding_before.as_ref())
+                        .is_some_and(|p| p.id == b.binding.id))
+            })?;
+            if held_for_transition {
+                return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+            }
             let g = ScanGuard {
                 invalidation: s.invalidation,
                 binding: b.binding.id,
@@ -130,10 +369,14 @@ impl Runtime {
             s.incoming.running = true;
             g
         };
+        let guard = IncomingGuard {
+            scan: guard,
+            recovery: None,
+        };
         let _running = Running(self.state.clone(), self.incoming_idle.clone());
-        self.with_scan(&guard, collection, |_| Ok(()))?;
+        self.with_incoming(&guard, collection, |_| Ok(()))?;
         let replayed = self.replay_ordinary(collection, &guard, timeout)?;
-        let (entries, retry_granted, failed_this_open) = self.with_scan(&guard, collection, |s| {
+        let (entries, retry_granted, failed_this_open) = self.with_incoming(&guard, collection, |s| {
             Ok((
                 s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?,
                 s.incoming.retry_granted,
@@ -186,7 +429,7 @@ impl Runtime {
             }
             return Ok(0);
         }
-        self.with_scan(&guard, collection, |s| {
+        self.with_incoming(&guard, collection, |s| {
             s.incoming.retry_granted = false;
             for e in &entries {
                 if matches!(e.entry.reason, InboxReason::ApplyFailed { .. }) {
@@ -199,34 +442,39 @@ impl Runtime {
         // replayed above before a newer version can be considered here.
         let mut names = BTreeSet::new();
         entries.retain(|e| names.insert(e.entry.record_name.clone()));
+        let count = self.apply_ordinary_entries(collection, &guard, entries, None, timeout)?;
+        self.finish_incoming(_running)?;
+        Ok(count)
+    }
+
+    fn apply_ordinary_entries(
+        &self,
+        collection: &Collection,
+        guard: &IncomingGuard,
+        entries: Vec<StoredInboxEntry>,
+        replay_of: Option<i64>,
+        timeout: Duration,
+    ) -> Result<usize, RuntimeError> {
         collection.check_rollover()?;
-        self.with_scan(&guard, collection, |_| Ok(()))?;
+        self.with_incoming(guard, collection, |_| Ok(()))?;
         let shared = self.state.clone();
         let file = guard.file;
         let generation = guard.generation;
         let binding = guard.binding;
-        let incarnation = guard.incarnation;
-        let open = guard.open;
-        let guard_invalidation = guard.invalidation;
+        let writer_guard = guard.clone();
         let attempted: Vec<_> = entries.iter().map(|e| e.id).collect();
         let result = collection.run(
             meguri_engine::OpSpec::named("cloud_incoming_apply", meguri_engine::OpSource::CloudIncoming),
             move |ctx| {
                 let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
-                let b = s.bound.as_ref().ok_or_else(|| engine_error("binding"))?;
-                if s.incarnation != incarnation
-                    || s.invalidation != guard_invalidation
-                    || b.binding.id != binding
-                    || b.open_counter != open
-                    || b.file != file
-                    || !b.usable
-                    || !b.verified
-                    || b.evidence.generation != ctx.generation()
-                    || ctx.generation() != generation
-                {
-                    return Err(engine_error("incoming guard"));
+                if ctx.generation() != generation {
+                    return Err(engine_error("incoming generation"));
                 }
-                with_tracking_access(|| apply(ctx, &mut s, binding, file, generation, entries)).map_err(engine_error)
+                with_tracking_access(|| {
+                    Self::check_incoming_locked(&s, &writer_guard)?;
+                    apply(ctx, &mut s, binding, file, generation, entries, replay_of)
+                })
+                .map_err(engine_error)
             },
         );
         let result = match result {
@@ -242,7 +490,7 @@ impl Runtime {
                     return Err(error.into());
                 }
                 let cancel = matches!(error, EngineError::Cancelled);
-                self.with_scan(&guard, collection, |s| {
+                self.with_incoming(guard, collection, |s| {
                     Ok(s.store
                         .as_mut()
                         .ok_or(Error::Database)?
@@ -252,10 +500,9 @@ impl Runtime {
             }
         };
         let Some(intent_id) = result.value else {
-            self.finish_incoming(_running)?;
             return Ok(0);
         };
-        self.with_scan(&guard, collection, |s| {
+        self.with_incoming(guard, collection, |s| {
             s.store
                 .as_mut()
                 .ok_or(Error::Database)?
@@ -284,37 +531,18 @@ impl Runtime {
             Ok(())
         })?;
         meguri_model::faultpoint!("cloud.apply.after_commit").map_err(Error::from)?;
-        // No writer, Runtime state or tracking gate is held while waiting.
-        let identity = {
-            let lease = collection.reader(ReaderRole::Cloud)?;
-            let snapshot = lease.snapshot()?;
-            snapshot.wal_identity()
-        };
-        let receipt = match collection.wait_wal_covered(identity, result.seq, timeout)? {
-            WalCoverage::Covered(r)
-                if r.identity() == identity
-                    && r.through() >= result.seq
-                    && r.identity().native_file() == file.pair()
-                    && r.identity().generation() == generation =>
-            {
-                r
-            }
-            _ => return Err(engine_error("incoming WAL not covered").into()),
-        };
-        meguri_model::faultpoint!("cloud.apply.after_flush").map_err(Error::from)?;
-        self.settle_ordinary(collection, &guard, intent_id, receipt)?;
-        self.finish_incoming(_running)?;
+        self.settle_ordinary(collection, guard, intent_id, timeout)?;
         Ok(attempted.len())
     }
 
     fn settle_ordinary(
         &self,
         collection: &Collection,
-        guard: &ScanGuard,
+        guard: &IncomingGuard,
         id: i64,
-        receipt: WalReceipt,
+        timeout: Duration,
     ) -> Result<(), RuntimeError> {
-        let i = self.with_scan(guard, collection, |s| {
+        let i = self.with_incoming(guard, collection, |s| {
             s.store
                 .as_ref()
                 .ok_or(Error::Database)?
@@ -323,26 +551,54 @@ impl Runtime {
                 .find(|i| i.id == id)
                 .ok_or(Error::InvalidData.into())
         })?;
-        let (current, seq) = self.read_intent_rows(collection, &i)?;
-        self.with_scan(guard, collection, |s| {
+        let (current, seq, identity) = self.read_intent_rows(collection, &i)?;
+        // The snapshot/read lease has been released; no caller waits under it,
+        // the writer, runtime state or the tracking gate. Seq belongs to this
+        // opening, never the intent's prior-process result counter.
+        let receipt = match collection.wait_wal_covered(identity, seq, timeout)? {
+            WalCoverage::Covered(r)
+                if r.identity() == identity
+                    && r.through() >= seq
+                    && identity.native_file() == guard.file.pair()
+                    && identity.generation() == guard.generation =>
+            {
+                r
+            }
+            _ => return Err(engine_error("incoming WAL not covered").into()),
+        };
+        meguri_model::faultpoint!("cloud.apply.after_flush").map_err(Error::from)?;
+        self.with_incoming(guard, collection, |s| {
+            if collection.last_seq() != seq {
+                return Err(EngineError::Busy {
+                    running_op: "cloud incoming".into(),
+                }
+                .into());
+            }
             s.store.as_mut().ok_or(Error::Database)?.settle_apply(
                 &i,
                 guard.open,
                 seq.0,
                 guard.generation.0,
                 &current,
+                guard.recovery.is_none(),
             )?;
             s.incoming.receipts.push(receipt);
             Ok(())
-        })?;
-        Ok(())
+        })
     }
 
     fn read_intent_rows(
         &self,
         collection: &Collection,
         i: &ApplyIntent,
-    ) -> Result<(BTreeMap<String, Option<codec::Payload>>, Seq), RuntimeError> {
+    ) -> Result<
+        (
+            BTreeMap<String, Option<codec::Payload>>,
+            Seq,
+            meguri_engine::WalIdentity,
+        ),
+        RuntimeError,
+    > {
         let layouts = {
             let s = self.state();
             with_tracking_access(|| layouts(s.store.as_ref().ok_or(Error::Database)?, i.binding))?
@@ -353,16 +609,16 @@ impl Runtime {
         for k in &i.keys {
             current.insert(k.name.clone(), project(&*snapshot, k.kind, &k.key, &layouts)?);
         }
-        Ok((current, snapshot.seq()))
+        Ok((current, snapshot.seq(), snapshot.wal_identity()))
     }
 
     fn replay_ordinary(
         &self,
         collection: &Collection,
-        guard: &ScanGuard,
+        guard: &IncomingGuard,
         timeout: Duration,
     ) -> Result<usize, RuntimeError> {
-        let intents = self.with_scan(guard, collection, |s| {
+        let intents = self.with_incoming(guard, collection, |s| {
             Ok(s.store.as_ref().ok_or(Error::Database)?.apply_intents(guard.binding)?)
         })?;
         let count = intents.len();
@@ -371,36 +627,47 @@ impl Runtime {
             if i.native_file != guard.file {
                 return Err(RuntimeError::FileIdentityUnavailable);
             }
-            let (current, current_seq) = self.read_intent_rows(collection, &i)?;
+            let (current, current_seq, _) = self.read_intent_rows(collection, &i)?;
             let all_after = i
                 .keys
                 .iter()
                 .all(|k| digest(current.get(&k.name).and_then(Option::as_ref)).ok() == Some(k.after_digest));
             if all_after {
-                // Recovery uses a receipt for this opening's actual snapshot,
-                // never compares a prior process's seq with a new counter.
-                let (identity, seq) = {
-                    let lease = collection.reader(ReaderRole::Cloud)?;
-                    let snap = lease.snapshot()?;
-                    (snap.wal_identity(), snap.seq())
-                };
-                let receipt = match collection.wait_wal_covered(identity, seq, timeout)? {
-                    WalCoverage::Covered(r) if r.identity() == identity && r.through() >= seq => r,
-                    _ => return Err(engine_error("replay WAL not covered").into()),
-                };
-                self.settle_ordinary(collection, guard, i.id, receipt)?;
+                self.settle_ordinary(collection, guard, i.id, timeout)?;
             } else {
                 // Retain the original inbox and acknowledged base. The next
                 // writer derives L afresh, so a local edit after a crash wins
                 // only its changed parts rather than being overwritten.
-                self.with_scan(guard, collection, |s| {
+                self.with_incoming(guard, collection, |s| {
                     Ok(s.store.as_mut().ok_or(Error::Database)?.reconcile_apply_keys(
                         &i,
                         guard.open,
                         current_seq.0,
                         guard.generation.0,
                         &current,
+                        guard.recovery.is_none(),
                     )?)
+                })?;
+                let entries = self.with_incoming(guard, collection, |s| {
+                    let entries = s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?;
+                    let mut by_id: BTreeMap<_, _> = entries.into_iter().map(|entry| (entry.id, entry)).collect();
+                    i.inbox_ids
+                        .iter()
+                        .map(|id| by_id.remove(id).ok_or(Error::InvalidData.into()))
+                        .collect()
+                })?;
+                self.apply_ordinary_entries(collection, guard, entries, Some(i.id), timeout)?;
+                self.with_incoming(guard, collection, |s| {
+                    if s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .apply_intents(guard.binding)?
+                        .iter()
+                        .any(|pending| pending.id == i.id)
+                    {
+                        return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+                    }
+                    Ok(())
                 })?;
             }
         }
@@ -449,6 +716,7 @@ fn apply(
     file: NativeFileIdentity,
     generation: Generation,
     entries: Vec<StoredInboxEntry>,
+    replay_of: Option<i64>,
 ) -> Result<Option<i64>, RuntimeError> {
     let store = s.store.as_mut().ok_or(Error::Database)?;
     let layouts = layouts(store, binding)?;
@@ -641,15 +909,18 @@ fn apply(
         key.after_digest = digest(after.as_ref())?;
         key.after_payload = after;
     }
-    let id = match store.persist_apply_intent(&ApplyIntent {
-        id: 0,
-        binding,
-        inbox_ids: ids,
-        keys,
-        result_seq: None,
-        native_file: file,
-        generation: generation.0,
-    }) {
+    let id = match store.persist_apply_intent(
+        &ApplyIntent {
+            id: 0,
+            binding,
+            inbox_ids: ids,
+            keys,
+            result_seq: None,
+            native_file: file,
+            generation: generation.0,
+        },
+        replay_of,
+    ) {
         Ok(id) => id,
         Err(error) => {
             s.tracking_stopped = true;
