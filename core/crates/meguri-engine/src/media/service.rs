@@ -90,6 +90,22 @@ impl MediaService {
         );
         Ok(stored)
     }
+    /// M6 fixed-name write for local ingestion. Replaced bytes go through the
+    /// store's trash/publication journal; attachment collision naming is not used.
+    /// The store returns a present case variant when it already has these bytes.
+    /// Cloud incoming installs additionally need K9.3's case-collision refusal.
+    pub fn write_exact(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
+        let stored = self.state.store.ensure_static_media(name, bytes).map_err(error)?;
+        self.collection.core.exec.stream.publish(
+            self.collection.generation(),
+            None,
+            EventKind::Extension(Arc::new(MediaArrived {
+                names: vec![stored.clone()],
+            })),
+        );
+        Ok(stored)
+    }
     pub fn begin_staging(&self) -> Result<StagedOp, EngineError> {
         let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         self.state.store.begin_staging().map_err(error)

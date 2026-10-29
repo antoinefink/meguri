@@ -188,7 +188,7 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
             meguri_engine::backup_limits::save(&collection, limits)?;
             value(())
         }
-        Input::PutMedia(name, bytes) => value(device.host.media()?.add(&name, &bytes)?),
+        Input::PutMedia(name, bytes) => value(device.host.media()?.write_exact(&name, &bytes)?),
         Input::MediaFiles => {
             let media = device.host.media()?;
             let snapshot = media.tracked_names()?;

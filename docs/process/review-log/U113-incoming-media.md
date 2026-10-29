@@ -42,3 +42,24 @@ The four P24 cases are enabled contracts, not verified recovery. Their items
 remain open. No Unit, P24, delivery or integration acceptance. Next implement
 actual Runtime-owned staging/replacement, then nonempty media and intent replay;
 reuse the working publication and M6 services.
+
+## Fixed-name local write dependency
+
+After the tests-first commit, root applies only the two-file production seam.
+MediaService uses the existing admitted M6 operation and journal, and emits
+MediaArrived after success. The child delegates PutMedia to that service.
+This local-ingestion API is not the K9.3 incoming install or case-collision rule.
+
+- `core-format/20261029T091150Z-44750`: pass.
+- `core-test/20261029T091221Z-45707`: 69 engine library and media cases pass,
+  none skipped. The four new exact-write cases and existing process-crash,
+  journal, publication, rollback and generation checks execute.
+- `private/20261029T091219Z-45231`: both production files pass.
+- `similarity/20261029T091220Z-45469`: two files, no findings or exemptions.
+
+The new child media-write target also shares adoption helpers, so its execution
+still awaits that real API. Adoption, all four replay cases and the original
+full-workflow target remain enabled RED. No lint, gate or P24 pass is claimed.
+Next build the Runtime-owned adoption path against these committed contracts,
+then finish real nonempty-media transfer and replay. Do not add successful
+stubs or replace the existing verified publication path.
