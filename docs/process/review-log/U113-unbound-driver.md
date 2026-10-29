@@ -28,3 +28,34 @@ The original nine publication contracts are unchanged and enabled. Production
 review has identified a held transport/close defect to repair before integration.
 Adoption, nonempty media and intent execution remain missing in the exported
 phase. No delivery, Unit, P24 or integration-gate acceptance is claimed.
+
+## Submission regressions, before the repairs
+
+R1 found two P1 defects: the submission reader stayed held while waiting for a
+reply, blocking Close and Restore; and cleanup used an Active read from before a
+hold. It also found P2 batch semantics: the shared test adapter sent ordinary
+batches atomically, unlike the native adapter.
+
+Fixer `cleanroom/20261029T080643Z-12547` separates queue acceptance from reply
+waiting, moves the cleanup hold before the read, and uses non-atomic ordinary
+batches. Its partial-result regression also exposed a successful ACK lost on an
+early error. The repair persists the actual successful results first.
+
+The new `cloud_publication_submission.rs` is extracted before production.
+Independent review clears its real lost-reply close/restart case, two-device
+late switch and durable partial-result assertions. The ordinary-adapter case
+uses the existing prebound fixture; both publication cases remain unbound.
+
+- `core-format/20261029T081851Z-17027`: pass.
+- `core-test/20261029T081909Z-17375`: expected compile RED on missing Rig and
+  Point, before production. No executed pass is claimed.
+- `private/20261029T081911Z-17856`: first run flags one comment. Fixer
+  `cleanroom/20261029T081952Z-18681` removes that comment only; independent
+  equivalence review is clear.
+- `private/20261029T082138Z-19558`: final file passes.
+- `similarity/20261029T082139Z-19787`: one file, no findings or exemptions.
+
+Production R2 clears the lease, queue, ACK and batch repairs. One P1 remains:
+multiple cleanup targets still share a read across an earlier deletion reply
+wait. A two-zone interleaving and fresh authorization are required before this
+source can be integrated. The previous delivery gaps remain open.
