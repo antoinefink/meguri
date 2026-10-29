@@ -1043,6 +1043,35 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
     use cloud::entity_codec::{self as codec, Payload};
     use meguri_model::faultpoint::{self, Fault};
     use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+    use std::sync::mpsc::{self, Receiver, Sender};
+
+    static AFTER_COMMIT: Mutex<Option<(Sender<()>, Receiver<()>)>> = Mutex::new(None);
+
+    fn pause_after_commit() {
+        let handshake = AFTER_COMMIT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some((reached, release)) = handshake {
+            if reached.send(()).is_ok() {
+                release
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("parent must release the actual post-commit worker");
+            }
+        }
+    }
+
+    struct AfterCommitPause(Sender<()>);
+    impl Drop for AfterCommitPause {
+        fn drop(&mut self) {
+            faultpoint::disarm("cloud.apply.after_commit");
+            AFTER_COMMIT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            let _ = self.0.send(());
+        }
+    }
 
     fn note_row(host: &CoreHost, id: i64, notetype: &codec::Notetype) -> Payload {
         let collection = host.collection().unwrap();
@@ -1101,19 +1130,32 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
     assert_eq!(inbox[0].entry.reason, cloud::InboxReason::Ready);
     assert!(runtime.refused_entries(old.id).unwrap().is_empty());
 
-    // A returned error immediately after COMMIT leaves the real intent/result
-    // seq and inbox intact. Disarm before any assertion or subsequent work.
-    faultpoint::arm("cloud.apply.after_commit", Fault::IoError(std::io::ErrorKind::Other));
-    let applied = runtime.drain_incoming(&collection, Duration::from_secs(30));
-    faultpoint::disarm("cloud.apply.after_commit");
+    // Observe the actual COMMIT outside writer/state/tracking locks, then stop
+    // the binding before this worker can settle its real intent/result seq.
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    *AFTER_COMMIT.lock().unwrap() = Some((reached_tx, release_rx));
+    let (reached, stopped, applied) = std::thread::scope(|scope| {
+        // This local drops before scope joins, including on parent unwind.
+        let pause = AfterCommitPause(release_tx);
+        faultpoint::arm("cloud.apply.after_commit", Fault::Callback(pause_after_commit));
+        let worker_runtime = Arc::clone(runtime);
+        let worker_collection = collection.clone();
+        let worker = scope.spawn(move || worker_runtime.drain_incoming(&worker_collection, Duration::from_secs(30)));
+        let reached = reached_rx.recv_timeout(Duration::from_secs(30));
+        let stopped = reached.as_ref().ok().map(|()| runtime.adapter_stop_syncing());
+        drop(pause);
+        (reached, stopped, worker.join())
+    });
+    // The callback is disarmed and released before any assertion.
+    reached.expect("the actual drain worker must reach after_commit");
+    stopped
+        .expect("stop must follow the actual after_commit callback")
+        .unwrap();
+    let applied = applied.expect("the actual drain worker must not panic");
     assert!(
-        matches!(
-            applied,
-            Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::Io(
-                std::io::ErrorKind::Other
-            )))
-        ),
-        "the post-commit I/O fault must fire"
+        matches!(applied, Err(cloud::runtime::RuntimeError::StaleIncarnation)),
+        "stopping the binding must invalidate the actual post-commit worker"
     );
     assert_eq!(note_row(&host, base.id, &notetype), after);
     let pending = runtime.apply_intents(old.id).unwrap();
@@ -1140,7 +1182,6 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
     assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
     assert!(runtime.binding_entity(old.id, &before.name).unwrap().unwrap() == before);
 
-    runtime.adapter_stop_syncing().unwrap();
     let stopped = runtime.status().unwrap().binding.unwrap();
     assert_eq!(stopped.id, old.id);
     assert_eq!(

@@ -255,3 +255,29 @@ The next source repair must finish existing intents under the recorded owner
 without applying queued old downloads or refusing the required publication.
 Retained-copy, adoption, account/file and full latch cases remain required.
 No acceptance is claimed.
+
+## Corrected noncrash Stop test
+
+Phase start `856623d0`. Root catches a fault-mode mistake in the prior fixture:
+F3 permits error modes only at tracking-commit points, so IoError at
+`cloud.apply.after_commit` is not valid fault-mode evidence. The earlier review
+approval was wrong on that point. Retain those receipts as history; they prove
+no F3/F5 mode pass.
+
+Fixer `cleanroom/20261029T150926Z-26005` changes only the stopped-binding test.
+The existing Callback handshake pauses the real worker after COMMIT, outside
+writer/state/tracking locks. The parent calls actual Stop, then releases and
+joins the worker before asserting `StaleIncarnation`. Both waits are bounded;
+the local guard disarms/releases on normal exit and unwind. All later row,
+intent, inbox, ACK, WAL, publication, cleanup and reopen assertions remain.
+Independent review is clear of P0-P2 for this narrow correction.
+
+- `core-format/20261029T151208Z-27221`: pass.
+- `core-test/20261029T151226Z-27569`: one selected case runs and fails at
+  the actual missing old-intent recovery after the scan. The real Stop and
+  stale-authority checks pass first. Sixteen cases are outside this filter.
+- `private/20261029T151237Z-27893`: pass.
+- `similarity/20261029T151238Z-28134`: pass.
+
+This is noncrash concurrency evidence only. Required crash/power modes, exact
+BeforeScan ordering and all other pending sync checks remain open.
