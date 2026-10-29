@@ -689,29 +689,51 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         assert_eq!(state.change_events, before_apply.change_events);
         assert_eq!(pair.receiver.driver().collection_rows().unwrap(), current_rows);
         let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+        let successful_names: BTreeSet<_> = items
+            .iter()
+            .filter_map(|item| match &item.result {
+                Ok(MutationSuccess::Saved(record)) => Some(record.name.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(
-            intent.keys.len(),
-            1,
-            "action={action}; intent keys (kind, role, is_target, before_digest==after_digest, own_flight_present, in_successful_saved_items)={:?}",
             intent
                 .keys
                 .iter()
-                .map(|intent_key| (
-                    &intent_key.kind,
-                    &intent_key.role,
-                    intent_key.name == key,
-                    intent_key.before_digest == intent_key.after_digest,
-                    intent_key.own_flight.is_some(),
-                    items
-                        .iter()
-                        .any(|item| item.name == intent_key.name
-                            && matches!(&item.result, Ok(MutationSuccess::Saved(_)))),
-                ))
-                .collect::<Vec<_>>()
+                .map(|intent_key| intent_key.name.as_str())
+                .collect::<BTreeSet<_>>(),
+            successful_names,
+            "own_landed_save action={action}: intent keys match actual successful saves"
         );
-        assert_eq!(intent.keys[0].role, ApplyKeyRole::Entry);
-        assert_eq!(intent.keys[0].before_digest, Some(current.row_digest().unwrap()));
-        assert_eq!(intent.keys[0].after_digest, Some(current.row_digest().unwrap()));
+        assert_eq!(
+            intent.keys.len(),
+            successful_names.len(),
+            "own_landed_save action={action}: no duplicate intent keys"
+        );
+        for intent_key in &intent.keys {
+            assert_eq!(intent_key.role, ApplyKeyRole::Entry, "own_landed_save action={action}");
+            assert!(intent_key.before_digest.is_some(), "own_landed_save action={action}");
+            assert_eq!(
+                intent_key.before_digest, intent_key.after_digest,
+                "own_landed_save action={action}"
+            );
+            assert!(intent_key.own_flight.is_some(), "own_landed_save action={action}");
+        }
+        let target_key = intent
+            .keys
+            .iter()
+            .find(|intent_key| intent_key.name == key)
+            .unwrap_or_else(|| panic!("own_landed_save action={action}: missing target Note key"));
+        assert_eq!(
+            target_key.before_digest,
+            Some(current.row_digest().unwrap()),
+            "own_landed_save action={action}"
+        );
+        assert_eq!(
+            target_key.after_digest,
+            Some(current.row_digest().unwrap()),
+            "own_landed_save action={action}"
+        );
         assert_eq!(state.runs.len(), 1);
         assert!(state.runs[0].changed_keys.is_empty());
         assert_eq!(intent.result_seq, Some(state.runs[0].seq));

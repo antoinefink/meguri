@@ -712,3 +712,21 @@ The fixture assumed a single record after submitting the complete batch.
 Next check the exact successful batch membership and each no-op entry, keeping
 the target Note's exact digest assertions. No production grouping change or
 acceptance follows from this diagnostic run.
+
+## Check every actual own-save batch member
+
+Start: `8647b7f4`. Export `cleanroom/20261029T174616Z-41625` checks exact
+successful-save names and cardinality, each Entry's unchanged digest and
+own-flight proof, and the target Note's exact digests. Independent review is
+clear. All surrounding assertions and production behavior remain unchanged.
+
+`core-test/20261029T174936Z-45064` passes the real FFI open/provider test.
+Own-save now passes its batch checks in the first two actions and reaches
+`WorkPaused` in the edit action's explicit second build, before reopen.
+That controlled-build handling still needs diagnosis; the case stays red.
+
+- `core-format/20261029T174840Z-44115`: pass.
+- `private`: `/tmp/meguri-cloud-noop-final-private.log` retains the receipt.
+- `similarity/20261029T174939Z-45325`: pass.
+
+No Unit or integration acceptance is claimed.
