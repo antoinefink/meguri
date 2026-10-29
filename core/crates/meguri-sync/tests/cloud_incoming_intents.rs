@@ -779,6 +779,7 @@ fn another_writer_with_the_same_payload_uses_ordinary_apply_not_own_save_ack() {
     pair.reopen_before_identity();
     pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
     pair.verify_and_drive();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
     assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
     assert_ne!(note(&mut pair.receiver, id), undone);
     assert_eq!(note(&mut pair.receiver, id), note(&mut pair.sender, id));

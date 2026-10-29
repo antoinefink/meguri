@@ -815,7 +815,9 @@ impl Runtime {
         // continues to be read directly from its write scope.
         for (name, e) in &facts {
             if blocked.contains(name)
-                || (e.observed_generation == snapshot.generation().0 && e.observed_seq > snapshot.seq().0)
+                || (e.observer_open == guard.open
+                    && e.observed_generation == snapshot.generation().0
+                    && e.observed_seq > snapshot.seq().0)
             {
                 deferred.insert(name.clone());
                 continue;
@@ -1284,13 +1286,18 @@ impl Runtime {
             .unwrap_or(1);
         let id = s.actions.next.max(next_durable).max(next_closed);
         let names = s.actions.desired.keys().cloned().collect::<BTreeSet<_>>();
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        let b = bound.binding.id;
+        let open = bound.open_counter;
         let revs = with_tracking_access(|| -> Result<BTreeMap<String, u64>, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut revs = BTreeMap::new();
             for name in &names {
                 let e = store.entity_facts(b, name)?.ok_or(Error::InvalidData)?;
-                if e.observed_generation == snapshot.generation().0 && e.observed_seq > boundary {
+                if e.observer_open == open
+                    && e.observed_generation == snapshot.generation().0
+                    && e.observed_seq > boundary
+                {
                     return Err(RuntimeError::StaleIncarnation);
                 }
                 revs.insert(name.clone(), e.local_rev);

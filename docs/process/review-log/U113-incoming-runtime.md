@@ -668,3 +668,28 @@ tracked edits retain their checks. Existing tests are unchanged.
 
 The three incoming workflow failures remain open; full U113/U114 acceptance,
 P24 closure and the original batch gate are still pending.
+
+## Scope sequence ordering to the collection opening
+
+Start: `6b136035`. Export `cleanroom/20261029T173457Z-33915` checks the
+actual opening before comparing persisted observation sequences with the
+current snapshot. It preserves caller, SDK, generation and sequence checks.
+Another-writer's manual-mode fixture now explicitly fetches after reopening.
+Independent review is clear. Existing workflow assertions are unchanged.
+
+Two new real host tests cover old-opening selection after close/reopen and
+a same-opening edit after Cloud capture. The first retains actual observation
+stamps through reconciliation. The second defers the old batch, then sends
+the new payload. Deterministic same-opening Sync Now rejection after pinning
+remains a coverage limit; no new hook or fabricated tracking fact was added.
+
+- `core-format/20261029T173932Z-36381`: pass.
+- `private/20261029T173954Z-37007`: all three paths pass.
+- `similarity/20261029T173955Z-37241`: all three paths pass.
+- `core-test/20261029T173951Z-36740`: 30 execute, 28 pass, two fail.
+  Both new host tests, partial ACK, republication and Stop-gap cases pass.
+  Lost-save merging and another-writer apply now pass. Own-landed progresses
+  beyond stale-incarnation failure but fails an existing intent-key count.
+  Deleted-card side-effect handling still fails reconciliation.
+
+Keep both failures enabled. No Unit, P24 or full-batch acceptance is claimed.

@@ -2339,3 +2339,194 @@ fn new_binding_publication_ack_settles_the_native_step_flagged_by_an_unacked_old
 fn stop_between_cloud_capture_and_registration_rejects_the_old_build_and_new_binding_ack_settles_the_step() {
     republish_pending_native_note(true);
 }
+
+fn edit_workflow_note(collection: &meguri_engine::Collection, note: &cloud::entity_codec::Note, back: &str) {
+    let mut fields: Vec<String> = std::str::from_utf8(&note.flds)
+        .unwrap()
+        .split('\u{1f}')
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(fields.len(), 2);
+    fields[1] = back.into();
+    let edit = meguri_engine::notes::update(
+        collection,
+        meguri_engine::notes::UpdateNote {
+            id: meguri_model::ids::NoteId(note.id),
+            fields,
+            tags: std::str::from_utf8(&note.tags)
+                .unwrap()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(edit.value.written);
+}
+
+#[test]
+fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() {
+    use cloud::entity_codec::{self as codec, Payload};
+    use meguri_storage::ReaderRole;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("observation-restart");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(616)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let collection = host.collection().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = &before.payload else {
+        panic!("native note required");
+    };
+    edit_workflow_note(&collection, note, "pending across restart");
+    let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert!(pending.mark.is_some());
+    assert_eq!(
+        pending.observer_open,
+        runtime.stored_state_for_testing().unwrap().open_counter
+    );
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+
+    let host = open_host(&dir, keys());
+    let collection = host.collection().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
+    assert!(runtime.stored_state_for_testing().unwrap().open_counter > pending.observer_open);
+    {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(pending.observed_generation, snapshot.generation().0);
+        assert!(pending.observed_seq > snapshot.seq().0);
+    }
+    let rescanned = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert_eq!(rescanned.observer_open, pending.observer_open);
+    assert_eq!(rescanned.observed_generation, pending.observed_generation);
+    assert_eq!(rescanned.observed_seq, pending.observed_seq);
+    assert_eq!(rescanned.local_rev, pending.local_rev);
+    assert_eq!(rescanned.payload, pending.payload);
+
+    let instance = runtime.instance().unwrap();
+    runtime.start_sdk_instance(&instance).unwrap();
+    let response = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::FetchZone {
+                zone: "meguri-root".into(),
+                token: None,
+            },
+        )
+        .unwrap();
+    let Ok(Reply::ZoneChanges(page)) = response.result else {
+        panic!("actual root fetch required");
+    };
+    assert!(!page.more, "the small published root must be fully fetched");
+    let active = page
+        .changes
+        .into_iter()
+        .find_map(|change| match change {
+            meguri_testkit::cloud::RecordChange::Saved(record)
+                if record.name == "active" && record.record_type == "MGActive" =>
+            {
+                Some(record)
+            }
+            _ => None,
+        })
+        .expect("actual published root required");
+    let Field::EncryptedBytes(envelope) = &active.fields["e"] else {
+        panic!("root envelope required");
+    };
+    assert!(
+        runtime
+            .accept_root_fetch(
+                &instance,
+                Some(&Saved {
+                    name: active.name.clone(),
+                    envelope: envelope.clone(),
+                    system_fields: active.system_fields.bytes().to_vec(),
+                }),
+                !page.more,
+                response.request_id,
+            )
+            .unwrap()
+    );
+    let exchange = runtime.sync_now(&instance, &collection).unwrap();
+    let selected = runtime.exchange_result(exchange).unwrap();
+    assert!(selected.selected_names.contains(&before.name));
+    assert!(selected.boundary_seq < pending.observed_seq);
+    let batch = runtime
+        .build_collection_batch(&instance, &collection, &BTreeSet::from([before.name.clone()]))
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    assert_eq!(batch.saves[0].name, before.name);
+    let image = codec::receive(
+        &binding.facts.record_key.0,
+        &batch.saves[0].name,
+        &batch.saves[0].envelope,
+        codec::AssetInput::Absent,
+    )
+    .unwrap();
+    assert_eq!(image.payload, Some(pending.payload));
+    host.close().unwrap();
+}
+
+#[test]
+fn same_open_observation_after_cloud_capture_defers_the_old_batch_and_preserves_the_edit() {
+    use cloud::entity_codec::{self as codec, Payload};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("observation-capture");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(617)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let collection = host.collection().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = before.payload else {
+        panic!("native note required");
+    };
+    edit_workflow_note(&collection, &note, "pending before capture");
+    let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
+    let editing = collection.clone();
+    runtime.set_cloud_capture_hook_for_test(move |_| {
+        edit_workflow_note(&editing, &note, "committed after capture");
+    });
+    let instance = runtime.instance().unwrap();
+    let names = BTreeSet::from([before.name.clone()]);
+    let batch = runtime.build_collection_batch(&instance, &collection, &names).unwrap();
+    let newer = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert_eq!(
+        newer.observer_open,
+        runtime.stored_state_for_testing().unwrap().open_counter
+    );
+    assert_eq!(newer.observer_open, pending.observer_open);
+    assert_eq!(newer.observed_generation, pending.observed_generation);
+    assert!(newer.observed_seq > pending.observed_seq);
+    assert_ne!(newer.payload, pending.payload);
+    assert!(newer.mark.is_some());
+    assert!(batch.saves.is_empty());
+    assert!(newer.in_flight.is_empty());
+    let next = runtime.build_collection_batch(&instance, &collection, &names).unwrap();
+    assert_eq!(next.saves.len(), 1);
+    assert_eq!(next.saves[0].name, before.name);
+    let image = codec::receive(
+        &binding.facts.record_key.0,
+        &next.saves[0].name,
+        &next.saves[0].envelope,
+        codec::AssetInput::Absent,
+    )
+    .unwrap();
+    assert_eq!(image.payload, Some(newer.payload));
+    host.close().unwrap();
+}
