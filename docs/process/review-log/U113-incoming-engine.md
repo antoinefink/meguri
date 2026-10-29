@@ -53,3 +53,18 @@ new result field in an FFI test constructor. No other findings in flag ownership
 manual separation, lazy journals, prefix cuts or append-only source ordering.
 The checkpoint is WIP and remains unaccepted. The fixer must keep the committed
 source proof tests unchanged and add queue coverage before its production fix.
+
+## Queue regression before R1 repair
+
+Fixer `cleanroom/20261029T123932Z-51123` adds assertions to the existing queue
+classification test. Independent review clears both CloudKit sources across
+empty, note-only and flag-only changes, with and without explicit ownership.
+The panic callback proves source classification precedes payload access.
+Only the test portion is integrated before the three production repairs.
+
+- `core-test/20261029T124221Z-52575`: one executed failure, expected
+  `Rebuild` but received `None`; five other cases excluded by this exact filter.
+- `private/20261029T124232Z-52980`: pass.
+- `similarity/20261029T124232Z-52901`: pass, no findings or exemptions.
+
+All prior assertions and CloudKit source proof tests stay unchanged.

@@ -204,6 +204,28 @@ fn rebuild_table_uses_payloads_generation_and_explicit_ownership() {
         }]
     }
     assert_eq!(classify(&cards, &images(&before, &after), context), Action::None);
+    for source in [OpSource::CloudIncoming, OpSource::CloudRekey] {
+        let empty = ChangeSet::empty(source);
+        let mut note_only = empty.clone();
+        note_only.notes.push(NoteChange {
+            id: NoteId(2),
+            kind: ChangeKind::Updated,
+        });
+        let mut flag_only = cards.clone();
+        flag_only.source = source;
+        for changes in [&empty, &note_only, &flag_only] {
+            for owned in [None, Some(commit)] {
+                let context = Context { owned, ..context };
+                assert_eq!(classify(changes, &images(&before, &after), context), Action::Rebuild);
+                assert_eq!(
+                    classify_with(changes, context, |_| -> Result<bool, ()> {
+                        panic!("Cloud source must rebuild before reading payloads")
+                    }),
+                    Ok(Action::Rebuild)
+                );
+            }
+        }
+    }
     for column in [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17] {
         let mut row = after.clone();
         row[column] = Cell::Integer(99);
