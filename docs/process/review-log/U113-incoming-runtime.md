@@ -318,3 +318,29 @@ Still required: exact BeforeScan/restart ordering with old intents after the
 new decision, retained conflict owners, all adoption/account/file variants,
 the full incoming safety target, media, native app integration, signed runs and
 the original batch gate. This is no Unit or P24 acceptance.
+
+## Retained conflict owner: required coverage
+
+Phase start `e01d8fca`. Implementer export
+`cleanroom/20261029T152825Z-38754` adds one host case, with all prior tests and
+helpers unchanged. A native local edit and a conditional other-writer Service
+save produce an actual field conflict. Strict K16 checks require the copy-time
+names and deck, then publication cleanup must retain that copy and its isolated
+owner through clean reopen while removing only work rows.
+
+Independent R1 is clear of P0-P2 findings. Generated note times are backdated,
+so the native edit's newer timestamp is a valid, deterministic precondition.
+Direct Store reads occur only after Host/Collection close and drop, inside the
+tracking gate. No conflict row, ACK, baseline or outcome is seeded.
+
+- `core-test/20261029T153508Z-44380`: the one selected case compiles and
+  reaches the actual field-name assertion: None instead of the generated note
+  type's two names. Native edit, conditional save, merge, actual losing copy,
+  digests, envelope and clean-reopen inspection run before this failure.
+  Cleanup and subsequent reopen assertions remain unexecuted.
+- `core-format/20261029T153458Z-44051`: pass.
+- `private/20261029T153522Z-44744`: pass.
+- `similarity/20261029T153523Z-44993`: pass.
+
+Keep the assertions. The next source change must add the missing metadata.
+No acceptance is claimed.

@@ -1756,3 +1756,289 @@ fn cancel_fence_kill_restart_finishes_cancel_without_account_and_preserves_prior
     assert_eq!(decision(&host), op.fence_before);
     host.close().unwrap();
 }
+
+// V17.6 / V15.2 and K13.2 / K15.2 / K16: retain a real conflict's owner,
+// discard its work, and preserve both the chosen row and the losing copy.
+#[test]
+fn actual_field_conflict_retains_isolated_owner_once_after_republication_and_clean_reopen() {
+    use cloud::entity_codec::{self as codec, Payload};
+    use meguri_model::ids::NoteId;
+    use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+
+    fn note_row(host: &CoreHost, id: i64, notetype: &codec::Notetype) -> Payload {
+        let collection = host.collection().unwrap();
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        let row = snapshot.row_image(Table::Notes, &RowKey::Id(id)).unwrap().unwrap();
+        cloud::row_payload::project(
+            &cloud::row_payload::ReadView(&*snapshot),
+            codec::Kind::Note,
+            &row,
+            |mid| {
+                assert_eq!(mid, notetype.id);
+                Ok(notetype.clone())
+            },
+        )
+        .unwrap()
+    }
+
+    // Call only after closing and dropping this test folder's sole CoreHost
+    // and all collection handles. Keep open, reads and drop inside the gate;
+    // no Runtime call or tracking mutation belongs in this closure.
+    fn closed_store<T>(dir: &Path, read: impl FnOnce(&cloud::TrackingStore) -> T) -> T {
+        cloud::runtime::with_tracking_access(|| {
+            let scope = cloud::BuildScope {
+                container: cloud::ContainerId::new(scope().container).unwrap(),
+                environment: cloud::Environment::Development,
+            };
+            let cloud::OpenOutcome::Opened(store) = cloud::TrackingStore::open(dir, scope).unwrap() else {
+                panic!("the actual host's tracking store must exist");
+            };
+            read(&store)
+        })
+    }
+
+    fn retained_copies_without_work(dir: &Path, owner: &cloud::Binding) -> Vec<cloud::StoredConflict> {
+        closed_store(dir, |store| {
+            assert_eq!(store.binding(owner.id).unwrap().as_ref(), Some(owner));
+            assert!(store.engine_state(owner.id).unwrap().is_none());
+            assert!(store.stored_runtime_state(owner.id).unwrap().is_none());
+            assert!(store.inbox(owner.id).unwrap().is_empty());
+            assert!(store.apply_intents(owner.id).unwrap().is_empty());
+            assert!(store.refused_entries(owner.id).unwrap().is_empty());
+            assert!(store.retained_zones(owner.id).unwrap().is_empty());
+            for kind in cloud::row_payload::KINDS {
+                assert!(store.entity_page(owner.id, kind, None).unwrap().is_empty());
+            }
+            store.conflict_copies().unwrap()
+        })
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let keys = keys();
+    let host = open_host(&dir, keys.clone());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    let old = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let instance = runtime.instance().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Some(Payload::Note(base)) = before.acked_payload.clone() else {
+        panic!("actually acknowledged baseline required");
+    };
+    let notetype = runtime
+        .entity_facts_page(codec::Kind::Notetype, None)
+        .unwrap()
+        .into_iter()
+        .find_map(|entity| match entity.acked_payload {
+            Some(Payload::Notetype(n)) if n.id == base.mid => Some(n),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(old.facts.state, cloud::BindingState::Active);
+    assert!(before.mark.is_none() && before.acked_rev > 0 && before.server_erev > 0);
+    assert!(!before.acked_system_fields.is_empty());
+    assert_eq!(
+        before.acked_row_digest,
+        Payload::Note(base.clone()).row_digest().unwrap()
+    );
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+
+    // A normal validated native edit, with its real observer/base and op seq.
+    let deck = {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        lease
+            .cards_of_note(NoteId(base.id))
+            .unwrap()
+            .into_iter()
+            .min_by_key(|card| card.id)
+            .unwrap()
+            .deck_id
+            .0
+    };
+    let mut fields: Vec<String> = std::str::from_utf8(&base.flds)
+        .unwrap()
+        .split('\u{1f}')
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(fields.len(), 2);
+    fields[1] = "native local field retained through republication".into();
+    let edit = meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id: NoteId(base.id),
+            fields,
+            tags: std::str::from_utf8(&base.tags)
+                .unwrap()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(edit.value.written);
+    let chosen = note_row(&host, base.id, &notetype);
+    let pending = runtime.binding_entity(old.id, &before.name).unwrap().unwrap();
+    assert!(pending.mark.is_some());
+    assert_eq!(pending.observed_seq, edit.seq.0);
+    assert_eq!(pending.base_payload, Some(Payload::Note(base.clone())));
+    assert_eq!(pending.acked_payload, before.acked_payload);
+    assert_eq!(pending.payload, chosen);
+
+    let (remote, old_zone, record, saved) = save_other_writer_publication_note(&mut service, &old, &before, &base);
+    let (Payload::Note(local_note), Payload::Note(remote_note)) = (&chosen, &remote) else {
+        panic!("two actual note versions required");
+    };
+    // K15.1/K15.2: both changed field 1 differently; the later native edit
+    // wins. Other parts are unchanged, so the complete expected row is L.
+    assert_ne!(local_note.flds, base.flds);
+    assert_ne!(remote_note.flds, base.flds);
+    assert_ne!(local_note.flds, remote_note.flds);
+    assert!(local_note.modified > remote_note.modified);
+    let codec::DecodeOutcome::Supported(remote_envelope) = codec::Entity::decode(&saved.envelope).unwrap() else {
+        panic!("actual saved envelope required");
+    };
+    assert_ne!(remote_envelope.fields.writer, old.id.0);
+    assert_eq!(remote_envelope.fields.origin, before.origin);
+    assert_eq!(remote_envelope.fields.base_sha256, Some(before.acked_payload_digest));
+    runtime
+        .receive_collection_records(&instance, std::slice::from_ref(&saved))
+        .unwrap();
+    assert_eq!(runtime.inbox_entries(old.id).unwrap().len(), 1);
+    assert_eq!(runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap(), 1);
+    assert_eq!(note_row(&host, base.id, &notetype), chosen);
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+    let merged = runtime.binding_entity(old.id, &before.name).unwrap().unwrap();
+    assert_eq!(merged.payload, chosen);
+    assert_eq!(merged.acked_payload, Some(remote.clone()));
+    assert_eq!(merged.acked_envelope.0, saved.envelope);
+    assert_eq!(merged.acked_system_fields, saved.system_fields);
+    assert_eq!(merged.server_erev, before.server_erev + 1);
+    assert!(merged.mark.is_some());
+    let old_zone_state = service.inspect(&scope()).unwrap().unwrap().zones[&old_zone].clone();
+    assert!(old_zone_state.records[&before.name] == record);
+    let calls = service.request_log().unwrap().len();
+
+    // Clean close provides exclusive inspection; this is no crash/power-loss proof.
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    let copies = closed_store(&dir, |store| {
+        assert_eq!(store.binding(old.id).unwrap(), Some(old.clone()));
+        store.conflict_copies().unwrap()
+    });
+    assert_eq!(copies.len(), 1);
+    let retained = &copies[0];
+    assert_eq!(retained.binding, old.id);
+    assert_eq!(retained.copy.kind, cloud::ConflictKind::Note);
+    assert_eq!(retained.copy.key.0, before.key);
+    assert_eq!(retained.copy.reason, cloud::ConflictReason::FieldConflict);
+    assert_eq!(retained.copy.losing_envelope.0, saved.envelope);
+    assert_eq!(retained.copy.losing_payload_digest.0, remote.payload_digest().unwrap());
+    assert_eq!(retained.copy.winning_payload_digest.0, chosen.payload_digest().unwrap());
+    let names = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).unwrap();
+    assert_eq!(
+        retained.copy.field_names,
+        Some(notetype.fields.iter().map(|f| names(&f.name)).collect())
+    );
+    assert_eq!(
+        retained.copy.template_names,
+        Some(notetype.templates.iter().map(|t| names(&t.name)).collect())
+    );
+    assert_eq!(retained.copy.note_deck, Some(deck));
+    assert!(retained.copy.resolved_at_ms.is_none() && retained.copy.staged_path.is_none());
+
+    let host = open_host(&dir, keys.clone());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), old);
+    assert_eq!(note_row(&host, base.id, &notetype), chosen);
+    let p = actual_preview(&host, &mut service, &scope());
+    assert_eq!(p.active_epoch, Some(old.facts.epoch));
+    runtime.confirm_connection_publication(&p, &collection).unwrap();
+    let request = until_active(&host, &mut service);
+    let new = runtime.status().unwrap().binding.unwrap();
+    assert_ne!(new.id, old.id);
+    let owner = runtime
+        .publication_facts(&collection)
+        .unwrap()
+        .bindings
+        .into_iter()
+        .find(|b| b.id == old.id)
+        .unwrap();
+    let mut isolated = old.clone();
+    isolated.facts.state = cloud::BindingState::Isolated(cloud::IsolationReason::Republished);
+    assert_eq!(owner, isolated);
+    let (result, _) = execute_publication_request(&mut service, &scope(), &request, runtime, &collection).unwrap();
+    assert!(matches!(&result, OwnResult::Saved(_)));
+    runtime.publication_result(&request, result, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(new.facts.state, cloud::BindingState::Active);
+    assert!(
+        runtime
+            .publication_facts(&collection)
+            .unwrap()
+            .bindings
+            .contains(&isolated)
+    );
+    // Retained owner means successful empty reads, never BindingNotFound.
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().is_none());
+    let new_note = runtime
+        .entity_facts_page(codec::Kind::Note, None)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.key == before.key)
+        .unwrap();
+    assert_eq!(new_note.acked_payload, Some(chosen.clone()));
+    assert_eq!(new_note.acked_row_digest, chosen.row_digest().unwrap());
+    assert!(new_note.mark.is_none() && new_note.acked_rev > 0 && new_note.server_erev > 0);
+    assert!(!new_note.acked_system_fields.is_empty());
+    assert_eq!(note_row(&host, base.id, &notetype), chosen);
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    assert_eq!(retained_copies_without_work(&dir, &isolated), copies);
+
+    let reopened = open_host(&dir, keys);
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert!(
+        runtime
+            .publication_facts(&reopened.collection().unwrap())
+            .unwrap()
+            .bindings
+            .contains(&isolated)
+    );
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().is_none());
+    let reopened_note = runtime.binding_entity(new.id, &new_note.name).unwrap().unwrap();
+    assert_eq!(reopened_note.acked_payload, Some(chosen.clone()));
+    assert_eq!(reopened_note.acked_envelope, new_note.acked_envelope);
+    assert_eq!(reopened_note.acked_system_fields, new_note.acked_system_fields);
+    assert_eq!(reopened_note.server_erev, new_note.server_erev);
+    assert!(reopened_note.mark.is_none());
+    assert_eq!(note_row(&reopened, base.id, &notetype), chosen);
+    reopened.close().unwrap();
+    drop(reopened);
+    // Full equality includes CopyId, envelope, names, timestamps and owner.
+    assert_eq!(retained_copies_without_work(&dir, &isolated), copies);
+    assert!(service.inspect(&scope()).unwrap().unwrap().zones[&old_zone] == old_zone_state);
+    assert!(service.request_log().unwrap()[calls..].iter().all(|r| {
+        r.zone.as_deref() != Some(old_zone.as_str())
+            || !matches!(
+                r.kind,
+                meguri_testkit::cloud::RequestKind::Modify | meguri_testkit::cloud::RequestKind::DeleteZone
+            )
+    }));
+}
