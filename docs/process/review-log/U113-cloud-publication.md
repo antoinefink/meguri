@@ -30,3 +30,30 @@ Observed before production application:
 
 The named P24/Q11 checks precede the next production build.
 P24 remains open. No Unit trailer is added.
+
+### Host regressions before the production phase
+
+Phase start: `f94238ea`. Production export
+`cleanroom/20261029T053520Z-6982` is partial and remains unapplied.
+R1 found three P1s: startup account authority, non-atomic parent references and
+an unrestricted engine decision write. Repair `cleanroom/20261029T060815Z-33924`
+closes those in source. R2 still requires Cancel after account/file changes and
+the decision fault-point repair. Production is not accepted or built.
+
+Only the new host test target is applied here. R2 independently clears it as
+enabled regression evidence using real CoreHost, Service results and crash
+workers. It covers full-width key failure, actual initial publication, unfinished
+adoption account checks, decision authority/restart, stale submission, independent
+parent failure and lost Active replies. These tests supplement the original
+nine contracts; they do not replace or disable them.
+
+- `core-format/20261029T062458Z-44066`: pass.
+- `core-test/20261029T062631Z-45013`: expected RED, two missing import groups
+  for production publication APIs and the transport helpers. Zero tests run.
+- `private/20261029T062634Z-45272`: pass.
+- `similarity/20261029T062636Z-45561`: one file, zero findings or exemptions.
+
+The next repair updates the test crash-point names and adds cancellation cases
+before production application. Reset publication stays unavailable before writes
+until its required tests and implementation land. Adoption, media, native SDK
+wiring and the full workflow remain required. The batch retains its original base.
