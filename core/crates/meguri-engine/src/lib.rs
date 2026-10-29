@@ -78,7 +78,7 @@ pub use sched::{DayCache, DayClock, DayQuery, DayReport, day_query};
 pub use schema_gate::{SchemaReason, mark_schema_change};
 pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};
 pub use undo::entry::{EntryId, RestorerState, SessionId, StepInfo, StepKind};
-pub use undo::holdback::{HeldBackRun, HeldRow, SyncHold, SyncMerge};
+pub use undo::holdback::{CloudHold, HeldBackRun, HeldRow, SyncHold, SyncMerge};
 pub use undo::reasons::{ClearCause, DisabledReason, SourceEffect, source_effect};
 pub use undo::restorers::{Direction, RestoredStep, UndoRestorer};
 pub use undo::{UndoScope, UndoStatus};

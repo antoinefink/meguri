@@ -56,6 +56,8 @@ fn diagnostic_only_results_preserve_stamps_history_source_effects_and_one_seq() 
         OpSource::Optimizer,
         OpSource::Rollover,
         OpSource::Maintenance,
+        OpSource::CloudIncoming,
+        OpSource::CloudRekey,
     ] {
         let recorder = Arc::new(Recorder::default());
         let h = Harness::open_with(Ports::default().observer(recorder.clone()));

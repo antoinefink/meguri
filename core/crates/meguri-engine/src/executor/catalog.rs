@@ -118,6 +118,8 @@ pub const CHECK_DATABASE: OpDef = OpDef::long_write("check_database", UndoClass:
 pub const APKG_APPLY: OpDef = OpDef::long_write("apkg_apply", UndoClass::Undoable, false);
 /// A large `SyncIncoming` merge (U107); cancellable between batches.
 pub const SYNC_INCOMING_MERGE: OpDef = OpDef::long_write("sync_incoming_merge", UndoClass::NonDestructive, true);
+/// A large CloudKit structural-generation apply (U114); cancellable between batches.
+pub const CLOUD_INCOMING_APPLY: OpDef = OpDef::long_write("cloud_incoming_apply", UndoClass::NonDestructive, true);
 /// A note type structure change on a large note type (U34): undoable.
 pub const NOTETYPE_STRUCTURE_CHANGE: OpDef = OpDef::long_write("notetype_structure_change", UndoClass::Undoable, false);
 /// A bulk op over a large selection (U86): one undo step named after it.
@@ -147,10 +149,11 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 16] = [
+pub const CATALOG: [OpDef; 17] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
+    CLOUD_INCOMING_APPLY,
     NOTETYPE_STRUCTURE_CHANGE,
     BULK_OP,
     MEMORY_RECOMPUTE,

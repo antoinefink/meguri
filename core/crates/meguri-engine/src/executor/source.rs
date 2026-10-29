@@ -9,13 +9,14 @@ use meguri_storage::StampMode;
 /// write is a local change.
 pub fn default_stamp(source: OpSource) -> StampMode {
     match source {
-        OpSource::SyncIncoming => StampMode::CallerSupplied,
+        OpSource::SyncIncoming | OpSource::CloudIncoming => StampMode::CallerSupplied,
         OpSource::UserUndoable
         | OpSource::UserNonUndoable
         | OpSource::LocalApi
         | OpSource::Optimizer
         | OpSource::Rollover
-        | OpSource::Maintenance => StampMode::Local,
+        | OpSource::Maintenance
+        | OpSource::CloudRekey => StampMode::Local,
     }
 }
 

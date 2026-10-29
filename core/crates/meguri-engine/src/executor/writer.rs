@@ -499,7 +499,7 @@ fn run_op<T>(
             .restore
             .is_some_and(|restore| restore.action.direction() == Direction::Undo);
         crate::schema_gate::guard(context.scope(), restoring_undo)?;
-        let observed_policy = if spec.source == OpSource::SyncIncoming {
+        let observed_policy = if matches!(spec.source, OpSource::SyncIncoming | OpSource::CloudIncoming) {
             Some(meguri_sched::model::sched_config::SchedConfig::new(context.scope()).fsrs()?)
         } else {
             None
@@ -713,6 +713,7 @@ fn run_op<T>(
     if let Some(plan) = spec.plan_time {
         span.record("plan_ms", plan.as_secs_f64() * 1000.0);
     }
+    let mut cloud_detached_run = None;
     let undo = match applied {
         Applied::Recorded(step) => Some(UndoMeta {
             name: step.name,
@@ -727,6 +728,10 @@ fn run_op<T>(
             source: spec.source,
         }),
         Applied::Restored { .. } | Applied::Nothing => None,
+        Applied::CloudDetached(run) => {
+            cloud_detached_run = Some(run);
+            None
+        }
     };
     if !media_failures.is_empty() {
         return Err(EngineError::MediaCommitPending {
@@ -745,6 +750,7 @@ fn run_op<T>(
         seq,
         changes: change_set,
         undo,
+        cloud_detached_run,
         generation,
         past_cancel_point: spec.cancel.as_ref().is_some_and(|token| token.is_cancelled()),
         timing: OpTiming {

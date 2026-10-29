@@ -9,6 +9,8 @@ public enum OpSource: Sendable, Hashable {
     case optimizer
     case rollover
     case maintenance
+    case cloudIncoming
+    case cloudRekey
 
     init(_ source: MeguriCoreBindings.OpSource) {
         switch source {
@@ -19,6 +21,8 @@ public enum OpSource: Sendable, Hashable {
         case .optimizer: self = .optimizer
         case .rollover: self = .rollover
         case .maintenance: self = .maintenance
+        case .cloudIncoming: self = .cloudIncoming
+        case .cloudRekey: self = .cloudRekey
         }
     }
 }

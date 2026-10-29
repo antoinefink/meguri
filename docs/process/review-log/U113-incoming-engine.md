@@ -31,3 +31,25 @@ integration gate, or working-sync claim is made by this tests-first checkpoint.
 Privacy: `private/20261029T122923Z-45792`: pass.
 
 Similarity: `similarity/20261029T122855Z-45126`: pass.
+
+## Engine implementation R1
+
+Producer `cleanroom/20261029T123136Z-46709` adds separate CloudKit sources,
+entry-owned upload key maps, lazy held runs, targeted undo/redo cuts and the
+cancellable catalog operation. It appends source variants after the existing
+seven through the model, FFI and Swift wrapper. Proof tests remain unchanged.
+
+- `core-test/20261029T123638Z-49021`: 79 executed, 78 pass, one failure;
+  one existing test is excluded by the default profile. All 15 undo CloudKit
+  cases, including the 1,376-action property, pass. The failure is the exact
+  collection modification-time assertion in `cloud_op_sources`.
+- `similarity/20261029T123652Z-49424`: 16 files, no findings or exemptions.
+- `private/20261029T123651Z-49337`: one new AGENTS prose line flagged.
+  Only that new prose line is removed; executable source is unchanged.
+
+Independent production R1 requires three fixes: P1 incoming collection-modified
+stamping on real writes; P2 queue rebuilds for both CloudKit sources; P2 the
+new result field in an FFI test constructor. No other findings in flag ownership,
+manual separation, lazy journals, prefix cuts or append-only source ordering.
+The checkpoint is WIP and remains unaccepted. The fixer must keep the committed
+source proof tests unchanged and add queue coverage before its production fix.

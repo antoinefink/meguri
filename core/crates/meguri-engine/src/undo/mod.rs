@@ -17,7 +17,7 @@ pub(crate) mod stack;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meguri_model::changes::{ChangeSet, OpSource};
-use meguri_storage::{Journal, ReadRows, StampMode};
+use meguri_storage::{Journal, ReadRows, RowKey, StampMode, Table};
 
 use crate::changes::stream::Seq;
 use crate::collection::Collection;
@@ -25,7 +25,7 @@ use crate::error::EngineError;
 use crate::executor::catalog;
 use crate::executor::op::{OpContext, OpResult, OpSpec, Pending};
 use entry::{Entry, EntryId, RestorerState, SessionId, StepInfo, StepKind, journal_targets};
-use holdback::{HeldBackRun, SyncHold, SyncMerge};
+use holdback::{CloudHold, HeldBackRun, SyncHold, SyncMerge};
 use reasons::{ClearCause, DisabledReason, SourceEffect, source_effect};
 use restorers::{Direction, RestoredStep, UndoRestorer};
 use stack::{Side, UndoStack};
@@ -183,6 +183,7 @@ pub(crate) struct CommitInfo<'a> {
 pub(crate) enum Applied {
     Nothing,
     Recorded(StepInfo),
+    CloudDetached(HeldBackRun),
     Restored {
         direction: Direction,
         step: StepInfo,
@@ -340,6 +341,11 @@ impl UndoManager {
                 }
                 Applied::Nothing
             }
+            SourceEffect::CloudTargetedDrop => commit
+                .journal
+                .as_deref()
+                .and_then(|journal| stack.cloud_drop(commit.spec.session, &journal_targets(journal)))
+                .map_or(Applied::Nothing, Applied::CloudDetached),
             SourceEffect::SyncMerge => {
                 match commit.notes.merge {
                     Some(merge) => stack.merge(Some(merge.snapshot), &merge.staged),
@@ -411,6 +417,22 @@ impl<'c> OpContext<'_, 'c> {
             snapshot,
             run: holdback::run_value(&run),
         })
+    }
+
+    /// M9.6: a CloudKit barrier flags only named touched keys outside the
+    /// active Cloud run. The snapshot is the last committed op's seq.
+    /// This is a no-row barrier; it shares no manual-transfer capture state.
+    pub fn begin_cloud_hold(
+        &mut self,
+        session: Option<SessionId>,
+        keys: &[(Table, RowKey)],
+    ) -> Result<CloudHold, EngineError> {
+        if self.source != OpSource::CloudIncoming {
+            return Err(EngineError::InvalidArgument {
+                message: format!("a {} op cannot begin a CloudKit hold", self.source),
+            });
+        }
+        Ok(self.undo.lock().begin_cloud(session, self.last_seq, keys))
     }
 
     /// The undo or redo itself (M4, M5), inside the op's transaction, on the
@@ -589,6 +611,20 @@ impl Collection {
     pub fn held_back_run(&self, session: Option<SessionId>) -> Result<HeldBackRun, EngineError> {
         let run = self.undo_manager()?.lock().run(session);
         Ok(holdback::run_value(&run))
+    }
+
+    /// The CloudKit held run, including sessionless edits above the newest
+    /// answer of this session (M8.1). Keeps journals without reading images.
+    pub fn cloud_held_run(&self, session: Option<SessionId>) -> Result<HeldBackRun, EngineError> {
+        let run = self.undo_manager()?.lock().cloud_run(session);
+        Ok(holdback::run_value(&run))
+    }
+
+    /// M9.7: acknowledge named CloudKit Pending steps. Any thread may call
+    /// this after tracking commits its acknowledgement; unknown ids are ignored.
+    pub fn mark_cloud_uploaded(&self, ids: &[EntryId]) -> Result<(), EngineError> {
+        self.undo_manager()?.lock().mark_cloud_uploaded(ids);
+        Ok(())
     }
 
     /// M9.2: the sync sent its `finish` request; pending steps are uploaded

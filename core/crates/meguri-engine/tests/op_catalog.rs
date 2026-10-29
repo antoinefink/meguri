@@ -51,6 +51,9 @@ fn every_catalog_op_declares_an_undo_class_and_destructive_ones_confirmation_and
     assert_eq!(class("enable_fsrs"), Some(UndoClass::NonDestructive));
     assert!(catalog::ENABLE_FSRS.cancellable_write());
     assert_eq!(class("sync_incoming_merge"), Some(UndoClass::NonDestructive));
+    assert_eq!(class("cloud_incoming_apply"), Some(UndoClass::NonDestructive));
+    assert!(catalog::CLOUD_INCOMING_APPLY.may_declare_long_write());
+    assert!(catalog::CLOUD_INCOMING_APPLY.cancellable_write());
     for name in ["undo", "redo", "undo_long_write", "redo_long_write"] {
         assert_eq!(class(name), Some(UndoClass::Undoable), "{name}");
     }
@@ -88,6 +91,8 @@ fn every_op_source_declares_its_undo_effect() {
                 OpSource::Maintenance,
                 SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)
             ),
+            (OpSource::CloudIncoming, SourceEffect::CloudTargetedDrop),
+            (OpSource::CloudRekey, SourceEffect::CloudTargetedDrop),
         ]
     );
 }

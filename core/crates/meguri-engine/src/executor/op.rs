@@ -414,6 +414,8 @@ pub struct OpResult<T> {
     pub seq: Seq,
     pub changes: Arc<ChangeSet>,
     pub undo: Option<UndoMeta>,
+    /// The pre-drop Cloud held run, if incoming/re-key targets hit it (M9.8).
+    pub cloud_detached_run: Option<crate::undo::holdback::HeldBackRun>,
     pub generation: Generation,
     /// Cancel was requested after the write phase started; the op completed
     /// anyway (O5).

@@ -103,6 +103,10 @@ pub(crate) struct Entry {
     /// that put it back (A3).
     pub began: i64,
     pub upload: UploadState,
+    /// Present only for CloudKit flags (M9.6-M9.7). Manual-transfer pending
+    /// state has no map and cannot settle or clear these flags. Owned here
+    /// so eviction, truncation and reset also discard the map.
+    pub cloud_flagged: Option<BTreeSet<(Table, RowKey)>>,
     pub state: Option<RestorerState>,
 }
 
@@ -134,6 +138,7 @@ impl Entry {
             col_mod,
             began,
             upload: UploadState::Local,
+            cloud_flagged: None,
             state,
         }
     }
@@ -159,6 +164,7 @@ impl Entry {
             col_mod: self.col_mod.and(col_mod),
             began,
             upload: UploadState::Local,
+            cloud_flagged: None,
             state: self.state.clone(),
         }
     }

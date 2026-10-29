@@ -26,10 +26,14 @@ pub enum OpSource {
     Rollover,
     /// Check Database, Empty Cards and other maintenance.
     Maintenance,
+    /// A CloudKit incoming apply or barrier; independent of manual transfers.
+    CloudIncoming,
+    /// Re-keying a colliding local CloudKit object.
+    CloudRekey,
 }
 
 impl OpSource {
-    pub const ALL: [OpSource; 7] = [
+    pub const ALL: [OpSource; 9] = [
         OpSource::UserUndoable,
         OpSource::UserNonUndoable,
         OpSource::SyncIncoming,
@@ -37,6 +41,8 @@ impl OpSource {
         OpSource::Optimizer,
         OpSource::Rollover,
         OpSource::Maintenance,
+        OpSource::CloudIncoming,
+        OpSource::CloudRekey,
     ];
 
     /// Whether the op waits in the interactive queue, ahead of background
@@ -57,6 +63,8 @@ impl OpSource {
             OpSource::Optimizer => "optimizer",
             OpSource::Rollover => "rollover",
             OpSource::Maintenance => "maintenance",
+            OpSource::CloudIncoming => "cloud_incoming",
+            OpSource::CloudRekey => "cloud_rekey",
         }
     }
 }
@@ -235,6 +243,8 @@ mod tests {
             OpSource::Optimizer,
             OpSource::Rollover,
             OpSource::Maintenance,
+            OpSource::CloudIncoming,
+            OpSource::CloudRekey,
         ] {
             let mut changes = ChangeSet::empty(source);
             assert!(changes.skipped_incoming_cards.is_empty());

@@ -2,6 +2,7 @@
 //! M9; KTD6, KTD7): what a normal sync keeps local, which steps it flags
 //! upload-pending, and what its merge reports.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -10,7 +11,7 @@ use meguri_storage::{RowImage, RowKey, Table};
 
 use crate::changes::stream::Seq;
 use crate::error::EngineError;
-use crate::undo::entry::{Entry, StepInfo};
+use crate::undo::entry::{Entry, EntryId, StepInfo};
 
 /// The held-back run (M8): its steps and the rows they touched. It keeps the
 /// steps' journals and reads a row's image from before the run only when
@@ -103,6 +104,15 @@ pub struct SyncHold {
     /// The seq of the last op the snapshot sees.
     pub snapshot: Seq,
     pub run: HeldBackRun,
+}
+
+/// A CloudKit barrier's snapshot, lazy held run, and newly flagged keys (M9.6).
+/// The map is a copy; the history retains its own keys with each owning step.
+#[derive(Clone, Debug)]
+pub struct CloudHold {
+    pub snapshot: Seq,
+    pub run: HeldBackRun,
+    pub flagged: BTreeMap<EntryId, BTreeSet<(Table, RowKey)>>,
 }
 
 /// What a `SyncIncoming` merge reports (M9.4): its sync's snapshot and every

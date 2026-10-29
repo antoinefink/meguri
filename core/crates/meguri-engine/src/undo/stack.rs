@@ -2,12 +2,13 @@
 //! (`specs/engine/undo.md` M1 to M3, M6, M7, M9): which step is on top for a
 //! scope, what each committed op does to them, and the sync flags.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use meguri_storage::{RowKey, Table};
 
 use crate::changes::stream::Seq;
 use crate::undo::entry::{Entry, EntryId, SessionId, StepInfo, StepKind, UploadState};
+use crate::undo::holdback::{self, CloudHold, HeldBackRun};
 use crate::undo::reasons::DisabledReason;
 use crate::undo::{UndoScope, UndoStatus};
 
@@ -244,13 +245,125 @@ impl UndoStack {
             .collect()
     }
 
+    /// M8.1: the CloudKit run also includes sessionless edits above the
+    /// newest answer of this session. The manual run above stays unchanged.
+    fn cloud_run_indexes(&self, session: Option<SessionId>) -> Vec<usize> {
+        let Some(session) = session else {
+            return Vec::new();
+        };
+        let mut run = Vec::new();
+        for (at, entry) in self.undo.iter().enumerate().rev() {
+            if entry.upload != UploadState::Local || entry.info.session.is_some_and(|s| s != session) {
+                break;
+            }
+            run.push(at);
+            if entry.info.kind == StepKind::Answer && entry.info.session == Some(session) {
+                return run;
+            }
+        }
+        Vec::new()
+    }
+
+    pub(crate) fn cloud_run(&self, session: Option<SessionId>) -> Vec<Entry> {
+        self.cloud_run_indexes(session)
+            .into_iter()
+            .map(|at| self.undo[at].clone())
+            .collect()
+    }
+
+    /// M9.6: named Local steps only; a later barrier never acknowledges an
+    /// earlier flag. Retain keys with the entry, not the manual sync capture.
+    pub(crate) fn begin_cloud(
+        &mut self,
+        session: Option<SessionId>,
+        snapshot: Seq,
+        keys: &[(Table, RowKey)],
+    ) -> CloudHold {
+        let run = self.cloud_run(session);
+        let held: HashSet<EntryId> = run.iter().map(|entry| entry.info.id).collect();
+        let mut flagged = BTreeMap::new();
+        for entry in &mut self.undo {
+            if entry.info.id.seq() > snapshot || entry.upload != UploadState::Local || held.contains(&entry.info.id) {
+                continue;
+            }
+            let overlap: BTreeSet<_> = keys
+                .iter()
+                .filter(|key| entry.intersects(key, false))
+                .cloned()
+                .collect();
+            if !overlap.is_empty() {
+                entry.upload = UploadState::Pending;
+                entry.cloud_flagged = Some(overlap.clone());
+                flagged.insert(entry.info.id, overlap);
+            }
+        }
+        let before = self.redo.len();
+        self.redo
+            .retain(|entry| entry.info.id.seq() > snapshot || !keys.iter().any(|key| entry.intersects(key, false)));
+        if !flagged.is_empty() || before != self.redo.len() {
+            self.invalidate_safety();
+        }
+        CloudHold {
+            snapshot,
+            run: holdback::run_value(&run),
+            flagged,
+        }
+    }
+
+    /// M9.7: only CloudKit-owned pending flags can be acknowledged here.
+    /// Unknown ids and Local/Uploaded steps have no effect.
+    pub(crate) fn mark_cloud_uploaded(&mut self, ids: &[EntryId]) {
+        for entry in &mut self.undo {
+            if entry.upload == UploadState::Pending && entry.cloud_flagged.is_some() && ids.contains(&entry.info.id) {
+                entry.upload = UploadState::Uploaded;
+            }
+        }
+    }
+
+    /// M9.8: cut the targeted step and its ancestors on each stack. A hit
+    /// anywhere in the pre-drop Cloud run detaches its journals and extends
+    /// the undo cut to the top, including newer sessionless edits.
+    pub(crate) fn cloud_drop(
+        &mut self,
+        session: Option<SessionId>,
+        targets: &[(Table, RowKey)],
+    ) -> Option<HeldBackRun> {
+        if targets.is_empty() {
+            return None;
+        }
+        let reaches = |entry: &Entry| targets.iter().any(|key| entry.intersects(key, false));
+        let run = self.cloud_run_indexes(session);
+        let detach = run.iter().any(|at| reaches(&self.undo[*at]));
+        let detached = detach.then(|| {
+            let entries: Vec<_> = run.iter().map(|at| self.undo[*at].clone()).collect();
+            holdback::run_value(&entries)
+        });
+        let cut = if detach {
+            self.undo.len().checked_sub(1)
+        } else {
+            self.undo.iter().rposition(reaches)
+        };
+        let redo_cut = self.redo.iter().rposition(reaches);
+        if cut.is_some() || redo_cut.is_some() {
+            self.invalidate_safety();
+        }
+        if let Some(at) = cut {
+            self.undo.drain(..=at);
+            self.floor = DisabledReason::ClearedBySync;
+        }
+        if let Some(at) = redo_cut {
+            self.redo.drain(..=at);
+        }
+        detached
+    }
+
     /// M9.1: captures the run and flags every other step up to `snapshot`
     /// upload-pending. Steps a sync left pending (its `finish` may have been
     /// sent) become uploaded first.
     pub(crate) fn begin_sync(&mut self, session: Option<SessionId>, snapshot: Seq) -> Vec<Entry> {
         self.invalidate_safety();
         for entry in &mut self.undo {
-            if entry.upload == UploadState::Pending {
+            if entry.upload == UploadState::Pending && entry.cloud_flagged.is_none() {
                 entry.upload = UploadState::Uploaded;
             }
         }
@@ -269,7 +382,7 @@ impl UndoStack {
     pub(crate) fn finish_sent(&mut self) {
         self.invalidate_safety();
         for entry in &mut self.undo {
-            if entry.upload == UploadState::Pending {
+            if entry.upload == UploadState::Pending && entry.cloud_flagged.is_none() {
                 entry.upload = UploadState::Uploaded;
             }
         }
@@ -281,10 +394,15 @@ impl UndoStack {
 
     /// M9.3: the sync failed before `finish` was sent.
     pub(crate) fn failed_before_finish(&mut self) {
+        let mut changed = false;
         for entry in &mut self.undo {
-            if entry.upload == UploadState::Pending {
+            if entry.upload == UploadState::Pending && entry.cloud_flagged.is_none() {
                 entry.upload = UploadState::Local;
+                changed = true;
             }
+        }
+        if changed {
+            self.invalidate_safety();
         }
         self.sync = None;
     }

@@ -82,6 +82,8 @@ pub enum SourceEffect {
     TruncateIntersecting,
     /// The sync merge rule (M9.4, KTD7).
     SyncMerge,
+    /// CloudKit cuts at the newest targeted step, detaching a hit held run (M9.8).
+    CloudTargetedDrop,
     /// Neither recorded nor clearing: the day clock's writes
     /// (`sched/day-clock` D10). Its rollover op clears the history itself
     /// when the day changes (M6, D9).
@@ -97,6 +99,7 @@ pub fn source_effect(source: OpSource) -> SourceEffect {
         }
         OpSource::LocalApi => SourceEffect::TruncateIntersecting,
         OpSource::SyncIncoming => SourceEffect::SyncMerge,
+        OpSource::CloudIncoming | OpSource::CloudRekey => SourceEffect::CloudTargetedDrop,
         OpSource::Rollover => SourceEffect::Kept,
     }
 }
