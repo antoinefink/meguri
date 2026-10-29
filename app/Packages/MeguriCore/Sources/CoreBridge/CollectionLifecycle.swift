@@ -50,6 +50,7 @@ public enum CollectionFailedReason: Sendable, Hashable {
 }
 public enum CollectionLongOp: Sendable, Hashable {
     case oneWaySync, restore, colpkgImport, apkgApply, checkDatabase, collectionExportHandoff
+    case cloudAdopt
     init(_ raw: MeguriCoreBindings.CollectionLongOp) {
         switch raw {
         case .oneWaySync: self = .oneWaySync
@@ -58,6 +59,7 @@ public enum CollectionLongOp: Sendable, Hashable {
         case .apkgApply: self = .apkgApply
         case .checkDatabase: self = .checkDatabase
         case .collectionExportHandoff: self = .collectionExportHandoff
+        case .cloudAdopt: self = .cloudAdopt
         }
     }
 }

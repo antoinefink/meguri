@@ -378,7 +378,12 @@ impl Engine {
                 config.clock.clone(),
                 config.random.clone(),
             )?;
-            crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
+            // A proven absent old view must stay absent, including its optional
+            // publication record. Let the ordinary open gate report the missing
+            // collection without allocating an identity on a failed open.
+            if path.try_exists().map_err(meguri_storage::StorageError::from)? {
+                crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
+            }
             if !initial_replacement {
                 meguri_storage::leftovers::cleanup(directory)?;
             }

@@ -238,6 +238,7 @@ extension EventTests {
         }
         let operations: [(MeguriCoreBindings.CollectionLongOp, CoreBridge.CollectionLongOp)] = [
             (.oneWaySync, .oneWaySync), (.restore, .restore), (.colpkgImport, .colpkgImport), (.apkgApply, .apkgApply), (.checkDatabase, .checkDatabase),
+            (.collectionExportHandoff, .collectionExportHandoff), (.cloudAdopt, .cloudAdopt),
         ]
         let phases: [(MeguriCoreBindings.CollectionExclusivePhase, CoreBridge.CollectionExclusivePhase)] = [
             (.draining, .draining), (.working, .working), (.replacing, .replacing),
@@ -246,6 +247,9 @@ extension EventTests {
             for (phase, mappedPhase) in phases {
                 for cancellable in [true, false] {
                     #expect(CoreBridge.CollectionLifecycle(.exclusiveBusy(op: op, phase: phase, cancellable: cancellable)) == .exclusiveBusy(op: mappedOp, phase: mappedPhase, cancellable: cancellable))
+                    let event = CoreBridge.CoreEvent(.init(seq: 93, generation: 7, causeSeq: 90, kind: .lifecycle(state: .exclusiveBusy(op: op, phase: phase, cancellable: cancellable))))
+                    #expect(event.seq == 93 && event.generation == 7 && event.causeSeq == 90)
+                    #expect(event.kind == .lifecycle(.exclusiveBusy(op: mappedOp, phase: mappedPhase, cancellable: cancellable)))
                 }
             }
         }

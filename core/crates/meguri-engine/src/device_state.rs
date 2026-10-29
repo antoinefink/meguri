@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AccountBinding {
     LocalOnly,
@@ -24,8 +24,17 @@ pub enum AccountBinding {
     /// A caller with uncertain account state cannot grant publication or recovery.
     Unknown,
 }
+impl std::fmt::Debug for AccountBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::LocalOnly => "LocalOnly",
+            Self::Connected { .. } => "Connected { .. }",
+            Self::Unknown => "Unknown",
+        })
+    }
+}
 impl AccountBinding {
-    fn certain(&self) -> bool {
+    pub(crate) fn certain(&self) -> bool {
         match self {
             Self::LocalOnly => true,
             Self::Connected {
@@ -62,6 +71,42 @@ impl PublicationId {
 pub enum PublicationDecision {
     Clear,
     Pending,
+}
+/// Optional R6.7 reason; a present JSON null is invalid, just like an unknown string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PendingDecisionReason {
+    Restore,
+    ColpkgImport,
+    ManualImport,
+}
+fn pending_reason(extra: &BTreeMap<String, Value>) -> Result<Option<PendingDecisionReason>, StorageError> {
+    extra.get("pendingDecisionReason").map(typed).transpose()
+}
+fn strict_optional_reason<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<PendingDecisionReason>, D::Error> {
+    PendingDecisionReason::deserialize(deserializer).map(Some)
+}
+fn set_pending_reason(state: &mut State, reason: Option<PendingDecisionReason>) -> Result<(), StorageError> {
+    if let Some(reason) = reason {
+        state.extra.insert(
+            "pendingDecisionReason".into(),
+            serde_json::to_value(reason).map_err(failure)?,
+        );
+    } else {
+        state.extra.remove("pendingDecisionReason");
+    }
+    Ok(())
+}
+fn replacement_reason(reason: crate::replace::ReplaceReason) -> Option<PendingDecisionReason> {
+    use crate::replace::ReplaceReason;
+    match reason {
+        ReplaceReason::Restore => Some(PendingDecisionReason::Restore),
+        ReplaceReason::ColpkgImport => Some(PendingDecisionReason::ColpkgImport),
+        ReplaceReason::FullDownload => Some(PendingDecisionReason::ManualImport),
+        ReplaceReason::FullUpload | ReplaceReason::CloudAdopt => None,
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,6 +206,12 @@ struct Intent {
     operation: PublicationId,
     reason: crate::replace::ReplaceReason,
     prior: Publication,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "strict_optional_reason"
+    )]
+    prior_pending_decision_reason: Option<PendingDecisionReason>,
     candidate: Publication,
     old_file: Option<FileIdentity>,
     candidate_file: FileIdentity,
@@ -181,26 +232,6 @@ struct NativeIdentity {
     device: u64,
     inode: u64,
 }
-fn native(path: &Path) -> Result<Option<NativeIdentity>, StorageError> {
-    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-    let file = match std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-    {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
-    let m = file.metadata()?;
-    if !m.is_file() || m.nlink() != 1 {
-        return Err(failure("nonregular or linked database identity"));
-    }
-    Ok(Some(NativeIdentity {
-        device: m.dev(),
-        inode: m.ino(),
-    }))
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct State {
     active: Publication,
@@ -216,32 +247,137 @@ fn failure(message: impl ToString) -> StorageError {
         detail: format!("publication recovery blocked: {}", message.to_string()),
     }
 }
+fn known_publications(value: &mut Value) {
+    if let Some(object) = value.as_object_mut() {
+        for key in ["active", "prior", "candidate"] {
+            if let Some(publication) = object.get_mut(key).and_then(Value::as_object_mut) {
+                publication.retain(|key, _| matches!(key.as_str(), "identity" | "binding" | "decision"));
+            }
+        }
+        for key in ["intent", "lastReplacement", "replacements"] {
+            if let Some(value) = object.get_mut(key) {
+                known_publications(value);
+            }
+        }
+    } else if let Some(array) = value.as_array_mut() {
+        for value in array {
+            known_publications(value);
+        }
+    }
+}
 fn decode(doc: Option<&Map<String, Value>>) -> Result<Option<State>, StorageError> {
     doc.and_then(|doc| doc.get("deviceState"))
-        .map(|value| serde_json::from_value(value.clone()).map_err(|_| failure("unreadable device state")))
+        .map(|value| {
+            let mut checked = value.clone();
+            known_publications(&mut checked);
+            if !checked.as_object().is_some_and(|state| state.contains_key("intent")) {
+                return Err(failure("missing replacement intent field"));
+            }
+            let state: State = serde_json::from_value(checked).map_err(|_| failure("unreadable device state"))?;
+            pending_reason(&state.extra)?;
+            bound(&state, &state.active.binding)?;
+            Ok(state)
+        })
         .transpose()
 }
+fn preserve_neighbors(value: &mut Value, previous: &Value) {
+    if let (Some(current), Some(old)) = (value.as_object_mut(), previous.as_object()) {
+        // Unknown publication/intent members belong to that exact identity.
+        for key in ["identity", "operation"] {
+            if current.get(key) != old.get(key) {
+                return;
+            }
+        }
+        // Replacement witnesses have no top-level identity or operation;
+        // their extensions belong to the exact candidate generation.
+        if current.get("candidate").and_then(|p| p.get("identity"))
+            != old.get("candidate").and_then(|p| p.get("identity"))
+        {
+            return;
+        }
+        for (key, old_value) in old {
+            if let Some(value) = current.get_mut(key) {
+                preserve_neighbors(value, old_value);
+            } else if key != "pendingDecisionReason" && key != "prior_pending_decision_reason" {
+                current.insert(key.clone(), old_value.clone());
+            }
+        }
+    } else if let (Some(current), Some(old)) = (value.as_array_mut(), previous.as_array()) {
+        for value in current {
+            if let Some(previous) = old.iter().find(|prior| {
+                value.get("candidate").and_then(|p| p.get("identity")).is_some()
+                    && value.get("candidate").and_then(|p| p.get("identity"))
+                        == prior.get("candidate").and_then(|p| p.get("identity"))
+            }) {
+                preserve_neighbors(value, previous);
+            }
+        }
+    }
+}
 fn put(doc: &mut Map<String, Value>, state: &State) -> Result<(), StorageError> {
-    doc.insert("deviceState".into(), serde_json::to_value(state).map_err(failure)?);
+    let mut value = serde_json::to_value(state).map_err(failure)?;
+    if let Some(previous) = doc.get("deviceState") {
+        for key in ["active", "intent", "lastReplacement", "replacements"] {
+            if let (Some(current), Some(old)) = (value.get_mut(key), previous.get(key)) {
+                preserve_neighbors(current, old);
+            }
+        }
+        // A legacy single witness becomes a retained link on activation.
+        // Restore its extensions only to the record with that candidate identity.
+        if let (Some(records), Some(old)) = (
+            value.get_mut("replacements").and_then(Value::as_array_mut),
+            previous.get("lastReplacement"),
+        ) {
+            for record in records {
+                preserve_neighbors(record, old);
+            }
+        }
+        // Activation moves the exact candidate publication into active.
+        if let (Some(active), Some(candidate)) = (
+            value.get_mut("active"),
+            previous.get("intent").and_then(|i| i.get("candidate")),
+        ) {
+            preserve_neighbors(active, candidate);
+        }
+    }
+    doc.insert("deviceState".into(), value);
     Ok(())
 }
 fn bound(state: &State, binding: &AccountBinding) -> Result<(), StorageError> {
-    if !binding.certain() || &state.active.binding != binding {
+    let cloud = state
+        .intent
+        .as_ref()
+        .is_some_and(|intent| intent.reason == crate::replace::ReplaceReason::CloudAdopt);
+    if !cloud && (!binding.certain() || &state.active.binding != binding) {
         return Err(failure("publication binding is unavailable or does not match"));
     }
     if let Some(intent) = &state.intent {
-        if &intent.prior.binding != binding || &intent.candidate.binding != binding {
+        if !cloud && (&intent.prior.binding != binding || &intent.candidate.binding != binding) {
             return Err(failure("intent account binding differs"));
         }
         let expected = if intent.reason.requires_publication_decision() {
             PublicationDecision::Pending
+        } else if cloud {
+            PublicationDecision::Clear
         } else {
             intent.prior.decision
         };
-        if intent.candidate.decision != expected
+        let activated_matches = state.active == intent.candidate
+            || (cloud
+                && state.active.identity == intent.candidate.identity
+                && state.active.binding == intent.candidate.binding
+                && state.active.decision == PublicationDecision::Pending);
+        if (cloud
+            && (!intent.prior.binding.certain()
+                || !intent.candidate.binding.certain()
+                || intent.operation == intent.candidate.identity
+                || intent.media.is_some()
+                || intent.candidate_native.is_none()
+                || intent.old_file.is_some() != intent.old_native.is_some()))
+            || intent.candidate.decision != expected
             || intent.prior.identity == intent.candidate.identity
             || (matches!(intent.phase, Phase::Intent | Phase::WalIntent) && state.active != intent.prior)
-            || (matches!(intent.phase, Phase::Activated | Phase::WalActivated) && state.active != intent.candidate)
+            || (matches!(intent.phase, Phase::Activated | Phase::WalActivated) && !activated_matches)
             || (intent.wal.is_some() != matches!(intent.phase, Phase::WalIntent | Phase::WalActivated))
             || (intent.wal.is_some()
                 && (intent.reason != crate::replace::ReplaceReason::Restore || intent.media.is_some()))
@@ -340,6 +476,9 @@ fn maintenance_object(doc: Option<&Map<String, Value>>) -> Result<Option<&Map<St
         return Ok(None);
     };
     let state = value.as_object().ok_or_else(|| failure("invalid device state"))?;
+    if let Some(reason) = state.get("pendingDecisionReason") {
+        typed::<PendingDecisionReason>(reason)?;
+    }
     if ["active", "intent", "replacements", "lastReplacement"]
         .iter()
         .any(|key| state.contains_key(*key))
@@ -644,6 +783,9 @@ impl DeviceState {
             }))
         })
     }
+    pub fn pending_decision_reason(&self) -> Result<Option<PendingDecisionReason>, StorageError> {
+        self.maintenance_read("pendingDecisionReason", typed)
+    }
     pub fn publication(&self) -> Result<Option<Publication>, StorageError> {
         sidecar::read_document(&self.path, |doc| Ok(decode(doc)?.map(|state| state.active)))
     }
@@ -699,11 +841,70 @@ impl DeviceState {
     }
 }
 
+// A different build cannot decide the account of the recorded build. It
+// preserves that decision; token admission still requires an exact binding.
+fn cloud_account_matches(recorded: &AccountBinding, current: &AccountBinding) -> bool {
+    match (recorded, current) {
+        (AccountBinding::LocalOnly, _) => true,
+        (
+            AccountBinding::Connected {
+                account,
+                configuration,
+                environment,
+            },
+            AccountBinding::Connected {
+                account: now,
+                configuration: build,
+                environment: cloud,
+            },
+        ) => configuration != build || environment != cloud || account == now,
+        _ => false,
+    }
+}
+fn activation_decision(intent: &Intent, binding: &AccountBinding) -> Publication {
+    let mut candidate = intent.candidate.clone();
+    if intent.reason == crate::replace::ReplaceReason::CloudAdopt && !cloud_account_matches(&candidate.binding, binding)
+    {
+        candidate.decision = PublicationDecision::Pending;
+    }
+    candidate
+}
+fn cloud_active(state: &State) -> Result<bool, StorageError> {
+    let retained = retained_replacements(state)?;
+    let Some(last) = retained.last() else { return Ok(false) };
+    Ok(last.reason == crate::replace::ReplaceReason::CloudAdopt
+        && last.candidate.decision == PublicationDecision::Clear
+        && last.candidate.binding.certain()
+        && state.active.identity == last.candidate.identity
+        && state.active.binding == last.candidate.binding)
+}
+fn open_bound(state: &State, binding: &AccountBinding) -> Result<(), StorageError> {
+    if state.intent.is_none() && cloud_active(state)? {
+        return Ok(());
+    }
+    bound(state, binding)
+}
+fn reconcile_cloud_active(live: &Path, state: &State, binding: &AccountBinding) -> Result<(), StorageError> {
+    // A previous mismatch stays pending even if that account returns. Only a
+    // new explicit decision may resolve it; the captured binding never moves.
+    sidecar::update_document(&sidecar_path(live), |doc| {
+        let mut current = decode(Some(doc))?.ok_or_else(|| failure("missing adoption state"))?;
+        if current.intent.is_some() || !cloud_active(&current)? || current.active != state.active {
+            return Err(failure("adoption state changed during recovery"));
+        }
+        if !cloud_account_matches(&current.active.binding, binding) {
+            current.active.decision = PublicationDecision::Pending;
+        }
+        set_pending_reason(&mut current, None)?;
+        put(doc, &current)
+    })
+}
+
 pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomSource) -> Result<(), StorageError> {
     let path = sidecar_path(live);
     if sidecar::read_document(&path, |doc| {
         if let Some(state) = decode(doc)? {
-            bound(&state, binding)?;
+            open_bound(&state, binding)?;
             Ok(true)
         } else {
             Ok(false)
@@ -716,7 +917,7 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
     }
     sidecar::update_document(&path, |doc| {
         if let Some(state) = decode(Some(doc))? {
-            return bound(&state, binding);
+            return open_bound(&state, binding);
         }
         put(
             doc,
@@ -760,6 +961,10 @@ pub(crate) fn reconcile_with_media(
             Err(failure("uncertain binding"))
         };
     };
+    if state.intent.is_none() && cloud_active(&state)? {
+        reconcile_cloud_active(live, &state, binding)?;
+        return cleanup_completed_media(live, &state.active.binding);
+    }
     bound(&state, binding)?;
     if state.intent.is_none() {
         return cleanup_completed_media(live, binding);
@@ -768,9 +973,14 @@ pub(crate) fn reconcile_with_media(
         return retained_wal::reconcile_wal(live, state, binding);
     }
     let intent = state.intent.unwrap();
+    let cloud = intent.reason == crate::replace::ReplaceReason::CloudAdopt;
     let decision = match intent.phase {
         Phase::WalIntent | Phase::WalActivated => return Err(failure("WAL intent lacks its authority")),
         Phase::Activated => {
+            if cloud {
+                activate(live, binding)?;
+                return cleanup_completed_media(live, &intent.candidate.binding);
+            }
             let expected = if intent.reason.requires_publication_decision() {
                 PublicationDecision::Pending
             } else {
@@ -787,26 +997,34 @@ pub(crate) fn reconcile_with_media(
             for suffix in ["-wal", "-journal"] {
                 let mut name = live.as_os_str().to_owned();
                 name.push(suffix);
-                match std::fs::metadata(PathBuf::from(name)) {
-                    Ok(m) if m.len() != 0 => return Err(failure("unfinished intent has live journal bytes")),
+                match std::fs::symlink_metadata(PathBuf::from(name)) {
+                    Ok(m) if !m.is_file() || m.len() != 0 => {
+                        return Err(failure("unfinished intent has live journal bytes"));
+                    }
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(e.into()),
                 }
             }
-            let file = fingerprint(live)?;
-            let current_native = native(live)?;
+            let current = fingerprint_native(live)?;
+            let file = current.as_ref().map(|(bytes, _)| bytes.clone());
+            let current_native = current.map(|(_, native)| native);
             let old = file == intent.old_file && (intent.old_native.is_none() || current_native == intent.old_native);
             let candidate = file.as_ref() == Some(&intent.candidate_file)
                 && (intent.candidate_native.is_none() || current_native == intent.candidate_native);
             match (old, candidate) {
-                (true, false) => intent.prior.clone(),
+                (true, false) => {
+                    if cloud && (!binding.certain() || &intent.prior.binding != binding) {
+                        return Err(failure("prior adoption binding no longer matches"));
+                    }
+                    intent.prior.clone()
+                }
                 (false, true) => {
                     // A crash after rename may have preceded directory sync.
                     meguri_storage::atomic_file::sync_directory(live.parent().unwrap_or(Path::new(".")))?;
                     finish_media(live, &intent, true, clock.clone(), random.clone(), shared)?;
                     activate(live, binding)?;
-                    return cleanup_completed_media(live, binding);
+                    return cleanup_completed_media(live, if cloud { &intent.candidate.binding } else { binding });
                 }
                 _ => {
                     return Err(failure(
@@ -836,6 +1054,7 @@ pub(crate) fn reconcile_with_media(
     cleanup_completed_media(live, binding)
 }
 
+#[cfg(test)]
 pub(crate) fn begin(
     paths: (&Path, &Path),
     reason: crate::replace::ReplaceReason,
@@ -848,9 +1067,53 @@ pub(crate) fn begin(
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
+    begin_with_cloud(paths, reason, binding, random, recovery, None, cancel, before_record)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_with_cloud(
+    paths: (&Path, &Path),
+    reason: crate::replace::ReplaceReason,
+    binding: &AccountBinding,
+    random: &dyn RandomSource,
+    recovery: (
+        Option<meguri_storage::media::CollectionMediaIntent>,
+        Option<RawRestoreAuthority>,
+    ),
+    cloud: Option<crate::replace::CloudAdoptInput>,
+    cancel: &dyn Fn() -> bool,
+    before_record: impl FnOnce(),
+) -> Result<(), StorageError> {
+    crate::replace::require_adopt_input(reason, cloud.as_ref()).map_err(|_| failure("invalid adoption input"))?;
     let (live, candidate) = paths;
     let (media, raw) = recovery;
-    ensure(live, binding, random)?;
+    if let Some(input) = &cloud {
+        // With no old file there is no old generation to allocate. The caller
+        // operation names this absent prior view; adoption draws no identities.
+        sidecar::update_document(&sidecar_path(live), |doc| {
+            if let Some(state) = decode(Some(doc))? {
+                return open_bound(&state, binding);
+            }
+            if !binding.certain() {
+                return Err(failure("uncertain prior binding"));
+            }
+            put(
+                doc,
+                &State {
+                    active: Publication {
+                        identity: input.operation,
+                        binding: binding.clone(),
+                        decision: PublicationDecision::Clear,
+                    },
+                    intent: None,
+                    replacements: Vec::new(),
+                    extra: BTreeMap::new(),
+                },
+            )
+        })?;
+    } else {
+        ensure(live, binding, random)?;
+    }
     let old_identity = fingerprint_native_checked(live, cancel, false)?;
     let (candidate_file, candidate_native) =
         fingerprint_native_checked(candidate, cancel, false)?.ok_or_else(|| failure("candidate absent"))?;
@@ -862,23 +1125,38 @@ pub(crate) fn begin(
     before_record();
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing identity"))?;
-        bound(&state, binding)?;
+        if cloud.is_some() {
+            open_bound(&state, binding)?;
+        } else {
+            bound(&state, binding)?;
+        }
         if state.intent.is_some() {
             return Err(failure("unfinished replacement"));
         }
-        let candidate = Publication {
-            identity: PublicationId::successor(random, state.active.identity),
-            binding: binding.clone(),
-            decision: if reason.requires_publication_decision() {
-                PublicationDecision::Pending
-            } else {
-                state.active.decision
-            },
+        let candidate = if let Some(input) = &cloud {
+            input.candidate.clone()
+        } else {
+            Publication {
+                identity: PublicationId::successor(random, state.active.identity),
+                binding: binding.clone(),
+                decision: if reason.requires_publication_decision() {
+                    PublicationDecision::Pending
+                } else {
+                    state.active.decision
+                },
+            }
         };
-        if candidate.identity == state.active.identity {
-            return Err(failure("random source reused publication identity"));
+        if candidate.identity == state.active.identity
+            || retained_replacements(&state)?.iter().any(|record| {
+                record.prior.identity == candidate.identity || record.candidate.identity == candidate.identity
+            })
+        {
+            return Err(failure("publication identity was already used"));
         }
-        let operation = PublicationId::successor(random, candidate.identity);
+        let operation = cloud
+            .as_ref()
+            .map(|input| input.operation)
+            .unwrap_or_else(|| PublicationId::successor(random, candidate.identity));
         let wal = raw
             .map(|raw| {
                 if reason != crate::replace::ReplaceReason::Restore || media.is_some() {
@@ -892,6 +1170,7 @@ pub(crate) fn begin(
             operation,
             reason,
             prior: state.active.clone(),
+            prior_pending_decision_reason: pending_reason(&state.extra)?,
             candidate,
             old_file,
             candidate_file,
@@ -1127,8 +1406,16 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing activation journal"))?;
         bound(&state, binding)?;
         let mut retained = retained_replacements(&state)?;
+        let keep_pending = state.intent.as_ref().is_some_and(|intent| {
+            intent.reason == crate::replace::ReplaceReason::CloudAdopt
+                && intent.phase == Phase::Activated
+                && state.active.decision == PublicationDecision::Pending
+        });
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
-        state.active = intent.candidate.clone();
+        state.active = activation_decision(intent, binding);
+        if keep_pending {
+            state.active.decision = PublicationDecision::Pending;
+        }
         if intent.wal.is_some() {
             intent.phase = Phase::WalActivated;
         } else {
@@ -1144,6 +1431,14 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         if retained.last() != Some(&evidence) {
             retained.push(evidence.clone());
         }
+        let reason = if intent.reason == crate::replace::ReplaceReason::CloudAdopt {
+            None
+        } else if intent.reason.requires_publication_decision() {
+            replacement_reason(intent.reason)
+        } else {
+            intent.prior_pending_decision_reason
+        };
+        set_pending_reason(&mut state, reason)?;
         state.replacements = retained;
         state.extra.insert(
             "lastReplacement".into(),
@@ -1161,7 +1456,14 @@ fn complete(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
         bound(&state, binding)?;
         retained_wal::complete_wal(live, &mut state)?;
         if let Some(intent) = state.intent.as_ref()
-            && state.active == intent.candidate
+            && state.active == intent.prior
+        {
+            let reason = intent.prior_pending_decision_reason;
+            set_pending_reason(&mut state, reason)?;
+        }
+        if let Some(intent) = state.intent.as_ref()
+            && state.active.identity == intent.candidate.identity
+            && state.active.binding == intent.candidate.binding
             && let Some(instant) = intent.verified_at
         {
             let value = serde_json::json!({"instant": instant, "passed": true});

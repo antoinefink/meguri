@@ -16,6 +16,7 @@ pub enum ReplaceReason {
     ColpkgImport,
     FullDownload,
     FullUpload,
+    CloudAdopt,
 }
 impl ReplaceReason {
     pub(crate) fn package(self) -> bool {
@@ -25,14 +26,46 @@ impl ReplaceReason {
         matches!(self, Self::Restore | Self::ColpkgImport | Self::FullDownload)
     }
     pub(crate) fn refuses_active_review(self) -> bool {
-        matches!(self, Self::ColpkgImport | Self::FullDownload | Self::FullUpload)
+        matches!(
+            self,
+            Self::ColpkgImport | Self::FullDownload | Self::FullUpload | Self::CloudAdopt
+        )
     }
     pub(crate) fn long_op(self) -> crate::LongOp {
         match self {
+            Self::CloudAdopt => crate::LongOp::CloudAdopt,
             Self::Restore => crate::LongOp::Restore,
             Self::ColpkgImport => crate::LongOp::ColpkgImport,
             Self::FullDownload | Self::FullUpload => crate::LongOp::OneWaySync,
         }
+    }
+}
+/// Caller-owned adoption identities and the complete explicit cloud/local decision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloudAdoptInput {
+    pub operation: device_state::PublicationId,
+    pub candidate: device_state::Publication,
+}
+impl CloudAdoptInput {
+    pub(crate) fn validate(&self) -> Result<(), EngineError> {
+        if self.candidate.decision != device_state::PublicationDecision::Clear
+            || !self.candidate.binding.certain()
+            || self.operation == self.candidate.identity
+        {
+            return Err(EngineError::InvalidArgument {
+                message: "adoption requires distinct caller identities and an explicit clear decision".into(),
+            });
+        }
+        Ok(())
+    }
+}
+pub(crate) fn require_adopt_input(reason: ReplaceReason, input: Option<&CloudAdoptInput>) -> Result<(), EngineError> {
+    match (reason, input) {
+        (ReplaceReason::CloudAdopt, Some(input)) => input.validate(),
+        (ReplaceReason::CloudAdopt, None) | (_, Some(_)) => Err(EngineError::InvalidArgument {
+            message: "CloudAdopt requires caller operation, candidate identity and decision".into(),
+        }),
+        (_, None) => Ok(()),
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +122,7 @@ impl SlotGuard {
         reason: ReplaceReason,
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
     ) -> Result<Collection, ReplaceError> {
+        require_adopt_input(reason, None)?;
         if self.op() != reason.long_op() {
             return Err(ReplaceError::NotExclusive);
         }
@@ -121,7 +155,7 @@ impl Exclusive<'_> {
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
         before_commit: impl FnOnce() -> Result<(), EngineError>,
     ) -> Result<Collection, ReplaceError> {
-        self.replace_verified_with_raw(stage, reason, change, || before_commit().map(|()| None))
+        self.replace_verified_with_raw(stage, reason, change, || before_commit().map(|()| None), None)
     }
 
     /// A retained corrupt owner consumes the same verified T7 raw-pair
@@ -131,7 +165,16 @@ impl Exclusive<'_> {
         stage: ReplacementStage,
         before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
     ) -> Result<Collection, ReplaceError> {
-        self.replace_verified_with_raw(stage, ReplaceReason::Restore, |_| Ok(()), before_commit)
+        self.replace_verified_with_raw(stage, ReplaceReason::Restore, |_| Ok(()), before_commit, None)
+    }
+
+    /// Adopts the verified staged collection with exactly the caller's decision.
+    pub fn replace_verified_cloud_adopt(
+        &mut self,
+        stage: ReplacementStage,
+        input: CloudAdoptInput,
+    ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_raw(stage, ReplaceReason::CloudAdopt, |_| Ok(()), || Ok(None), Some(input))
     }
 
     fn replace_verified_with_raw(
@@ -140,7 +183,9 @@ impl Exclusive<'_> {
         reason: ReplaceReason,
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
         before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
+        cloud: Option<CloudAdoptInput>,
     ) -> Result<Collection, ReplaceError> {
+        require_adopt_input(reason, cloud.as_ref())?;
         let environment = self.verified_environment(reason)?;
         let live = self.collection().path().to_owned();
         let options = OpenOptions::new(environment.clock.as_ref(), environment.random.as_ref())
@@ -153,7 +198,7 @@ impl Exclusive<'_> {
             reason.package(),
             change,
         )?;
-        self.activate_finalised(stage, reason, before_commit, None)
+        self.activate_finalised(stage, reason, before_commit, None, cloud)
     }
 
     /// Activates an O6.2 artifact after independently verifying its immutable
@@ -171,6 +216,7 @@ impl Exclusive<'_> {
             ReplaceReason::FullUpload,
             || before_commit().map(|()| None),
             Some(artifact.identity),
+            None,
         )
     }
 
@@ -180,6 +226,7 @@ impl Exclusive<'_> {
         reason: ReplaceReason,
         before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
         identity: Option<crate::device_state::FileIdentity>,
+        cloud: Option<CloudAdoptInput>,
     ) -> Result<Collection, ReplaceError> {
         let environment = self.verified_environment(reason)?;
         // Admission is privileged and the writer drained. Recheck under the
@@ -273,6 +320,7 @@ impl Exclusive<'_> {
                     media,
                     threads,
                     raw,
+                    cloud,
                 )
                 .map_err(|e| {
                     *record.lock().unwrap() = Some(e.clone());
@@ -307,6 +355,7 @@ struct SwapContext<'a> {
     binding: &'a AccountBinding,
     random: &'a dyn meguri_model::rng::RandomSource,
     verified_at: i64,
+    cloud: Option<CloudAdoptInput>,
 }
 
 fn swap(
@@ -321,6 +370,7 @@ fn swap(
         binding,
         random,
         verified_at,
+        cloud,
     } = context;
     let (mut media, raw) = recovery;
     use meguri_storage::{atomic_file, verified_replace as storage};
@@ -341,12 +391,13 @@ fn swap(
     // Every replacement retires queued tokens. Manual Import requires a new
     // publication decision; Export preserves the exact prior decision.
     let intent = media.as_ref().map(|m| m.intent.clone());
-    device_state::begin(
+    device_state::begin_with_cloud(
         (live, &stage.path()),
         reason,
         binding,
         random,
         (intent, raw),
+        cloud,
         &cancelled,
         || {
             if let Some(m) = media.as_mut() {
@@ -625,6 +676,7 @@ pub(crate) fn run_swap(
     mut media: Option<PreparedMedia>,
     threads: crate::ThreadRegistry,
     raw: Option<device_state::RawRestoreAuthority>,
+    cloud: Option<CloudAdoptInput>,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
         return swap(
@@ -635,6 +687,7 @@ pub(crate) fn run_swap(
                 binding: &binding,
                 random: random.as_ref(),
                 verified_at: clock.now_ms(),
+                cloud,
             },
             &activated,
             (None, raw),
@@ -661,6 +714,7 @@ pub(crate) fn run_swap(
                             binding: &binding,
                             random: random.as_ref(),
                             verified_at: clock.now_ms(),
+                            cloud,
                         },
                         &activated,
                         (media.as_mut(), raw),

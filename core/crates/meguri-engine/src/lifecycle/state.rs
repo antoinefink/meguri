@@ -83,6 +83,7 @@ pub enum ExclusivePhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LongOp {
     OneWaySync,
+    CloudAdopt,
     Restore,
     ColpkgImport,
     ApkgApply,
@@ -100,6 +101,11 @@ struct LongOpDeclaration {
 impl LongOp {
     fn declaration(self) -> LongOpDeclaration {
         match self {
+            Self::CloudAdopt => LongOpDeclaration {
+                name: "iCloud collection adoption",
+                replaces_collection: true,
+                allowed_when_corrupt: true,
+            },
             Self::OneWaySync => LongOpDeclaration {
                 name: "one-way sync",
                 replaces_collection: true,

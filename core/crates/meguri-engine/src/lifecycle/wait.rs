@@ -108,7 +108,15 @@ impl SlotGuard {
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
         before_commit: impl FnOnce() -> Result<(), EngineError>,
     ) -> Result<Collection, crate::replace::ReplaceError> {
-        self.replace_verified_initial_with_raw(live, config, stage, reason, change, || before_commit().map(|()| None))
+        self.replace_verified_initial_with_raw(
+            live,
+            config,
+            stage,
+            reason,
+            change,
+            || before_commit().map(|()| None),
+            None,
+        )
     }
 
     /// T8 initial entry alone may supply T7 authority after candidate validation.
@@ -126,9 +134,30 @@ impl SlotGuard {
             crate::replace::ReplaceReason::Restore,
             |_| Ok(()),
             before_commit,
+            None,
         )
     }
 
+    /// Initial adoption uses the same ownership, recovery and L2 open path.
+    pub fn replace_verified_cloud_adopt_initial(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        stage: crate::replace::ReplacementStage,
+        input: crate::replace::CloudAdoptInput,
+    ) -> Result<Collection, crate::replace::ReplaceError> {
+        self.replace_verified_initial_with_raw(
+            live,
+            config,
+            stage,
+            crate::replace::ReplaceReason::CloudAdopt,
+            |_| Ok(()),
+            || Ok(None),
+            Some(input),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn replace_verified_initial_with_raw(
         &self,
         live: &std::path::Path,
@@ -137,8 +166,10 @@ impl SlotGuard {
         reason: crate::replace::ReplaceReason,
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
         before_commit: impl FnOnce() -> Result<Option<crate::device_state::RawRestoreAuthority>, EngineError>,
+        cloud: Option<crate::replace::CloudAdoptInput>,
     ) -> Result<Collection, crate::replace::ReplaceError> {
         use crate::replace::ReplaceError;
+        crate::replace::require_adopt_input(reason, cloud.as_ref())?;
         if self.op != reason.long_op() {
             return Err(ReplaceError::NotExclusive);
         }
@@ -237,7 +268,13 @@ impl SlotGuard {
             // Retain the existing identity before beginning the first intent.
             let ensured = meguri_model::faultpoint!("replace.media.initial_before_ensure")
                 .map_err(meguri_storage::StorageError::from)
-                .and_then(|()| crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref()));
+                .and_then(|()| {
+                    if cloud.is_some() {
+                        Ok(())
+                    } else {
+                        crate::device_state::ensure(live, &config.publication_binding, config.random.as_ref())
+                    }
+                });
             if let Err(error) = ensured {
                 let error = EngineError::from(error).into();
                 return Err(match media {
@@ -257,6 +294,7 @@ impl SlotGuard {
                 media,
                 self.engine.threads().clone(),
                 raw,
+                cloud,
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
             if media_recovered
@@ -487,6 +525,6 @@ impl Engine {
 fn available(state: &LcState) -> bool {
     !state.suspended
         && matches!(state.state, LifecycleState::Ready { .. })
-        && state.slot.is_none()
+        && state.slot.is_none_or(|holder| holder.op == LongOp::CloudAdopt)
         && state.current.is_some()
 }

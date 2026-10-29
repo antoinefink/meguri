@@ -904,11 +904,12 @@ fn cloud_adopt_refuses_active_review_at_check_and_typed_exclusive_without_mutati
     let mut h = session_support::Harness::new(3);
     let live = h.dir.path().join("collection.anki2");
     // Seed a real pending Restore decision without losing the review fixture:
-    // only copy its main file after close has checkpointed and closed the WAL.
+    // save closed bytes, then stage them after reopen's sweep.
     h.engine.close().unwrap();
-    let restored = ReplacementStage::new(h.dir.path()).unwrap();
-    fs::copy(&live, restored.path()).unwrap();
+    let saved_bytes = fs::read(&live).unwrap();
     (h.engine, h.collection, h.review) = session_support::open(&live, h.clock.clone());
+    let restored = ReplacementStage::new(h.dir.path()).unwrap();
+    fs::write(restored.path(), saved_bytes).unwrap();
     let restore = h.engine.acquire_slot(LongOp::Restore).unwrap();
     h.collection = restore
         .replace_verified(restored, ReplaceReason::Restore, |_| Ok(()))
