@@ -4,6 +4,7 @@ internal import MeguriCoreBindings
 /// The errors a core call can throw, as Swift sees them (KTD9). Every
 /// CoreBridge call throws only this type.
 public enum BridgeError: Error, Sendable, Hashable {
+    case cloudPolicy(CloudPolicyFailure)
     case cloudConnection(CloudConnectionFailure)
     case maintenance(MaintenanceError)
     case exportSourceChanged
@@ -60,6 +61,7 @@ extension BridgeError {
 
     init(_ error: MeguriCoreBindings.CoreError) {
         switch error {
+        case .CloudPolicy(let failure): self = .cloudPolicy(CloudPolicyFailure(failure))
         case .CloudConnection(let failure): self = .cloudConnection(CloudConnectionFailure(failure))
         case .Maintenance(let cause): self = .maintenance(MaintenanceError(cause))
         case .DeckOptionsInvalid(let issues): self = .deckOptionsInvalid(issues.map(OptionIssue.init))

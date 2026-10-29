@@ -339,6 +339,16 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let manualTransferPreviewRecord = BridgeCall("ManualTransferPreview.record")
     public static let manualTransferHistoryEntryRecord = BridgeCall("ManualTransferHistoryEntry.record")
 
+    public static let cloudWorkflowPolicy = BridgeCall("CloudWorkflow.policy")
+    public static let cloudPolicyInput = BridgeCall("CloudPolicy.input")
+    public static let cloudPolicyRefreshAccount = BridgeCall("CloudPolicy.refresh_account")
+    public static let cloudPolicyStatus = BridgeCall("CloudPolicy.status")
+    public static let cloudPolicyExecuteCore = BridgeCall("CloudPolicy.execute_core")
+    public static let cloudPolicySubmitNative = BridgeCall("CloudPolicy.submit_native")
+    public static let cloudPolicyCaptureExchange = BridgeCall("CloudPolicy.capture_exchange")
+    public static let cloudPolicyCompleteExchange = BridgeCall("CloudPolicy.complete_exchange")
+    public static let cloudPolicyEndBeforeCapture = BridgeCall("CloudPolicy.end_before_capture")
+
     public static let cloudWorkflowConnection = BridgeCall("CloudWorkflow.connection")
     public static let cloudConnectionBeginConnectionPreview = BridgeCall("CloudConnection.begin_connection_preview")
     public static let cloudConnectionConnectionActiveRead = BridgeCall("CloudConnection.connection_active_read")
@@ -404,6 +414,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudWorkflowConnection, cloudConnectionBeginConnectionPreview, cloudConnectionConnectionActiveRead, cloudConnectionConnectionEpochRead, cloudConnectionCancelPreview, cloudConnectionConfirmPublication, cloudConnectionConfirmAdoption, cloudConnectionNextPublicationWork, cloudConnectionPerformLocal, cloudConnectionSubmitPublicationRequest, cloudConnectionPublicationResult, cloudConnectionAdoptionResult, cloudConnectionPerformAdoptionLocal, cloudConnectionCancelOperation, cloudConnectionTrigger, cloudConnectionRecoveryStatus,
         configureCloudPlatform, cloudWorkflowNew, cloudWorkflowInstance, cloudWorkflowCurrentGuard, cloudWorkflowEntityFacts, cloudWorkflowAwaitTracking, cloudWorkflowTrackingSendables, cloudWorkflowPendingTransition, cloudWorkflowEmittedUpdateIds, cloudWorkflowObservations, cloudWorkflowPollReview, cloudWorkflowSetPaused, cloudWorkflowStopSyncing, cloudWorkflowDurableSnapshot, cloudWorkflowFetchDrains, cloudWorkflowDiagnostics, cloudWorkflowStatus, cloudWorkflowExchangeResult, cloudWorkflowBeginIdentityRead, cloudWorkflowCompleteIdentityRead, cloudWorkflowPrepareRuntime, cloudWorkflowRegisterSdk, cloudWorkflowValidateSdk, cloudWorkflowRetireSdk, cloudWorkflowReleaseSdk, cloudWorkflowAccountChanged, cloudWorkflowTakePendingUpdates, cloudWorkflowUpdateApplied, cloudWorkflowBuildBatch, cloudWorkflowSent, cloudWorkflowHandlerReturned, cloudWorkflowTrackingFailure, cloudWorkflowStateUpdate, cloudWorkflowFetched, cloudWorkflowBeginFetch, cloudWorkflowWillFetch, cloudWorkflowFetchZone, cloudWorkflowDidFetch, cloudWorkflowFinishFetch, cloudWorkflowBeginExchange, cloudWorkflowExchangeFetched, cloudWorkflowCompleteExchange, cloudWorkflowSendDue, cloudWorkflowBeginSend, cloudWorkflowFinishSend,
         ManualMediaCalls.preview, ManualMediaCalls.run, ManualMediaCalls.cancelPrepared, ManualMediaCalls.forgetOwner, ManualMediaCalls.readPreview, ManualMediaCalls.readProgress, ManualMediaCalls.stop,

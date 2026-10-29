@@ -449,6 +449,26 @@ pub enum ActionKind {
     ProbeTracking,
     StatusChanged(Status),
 }
+impl ActionKind {
+    pub(crate) fn host_only(&self) -> bool {
+        matches!(
+            self,
+            Self::ConfigureAutomatic { .. }
+                | Self::ArmFlushTimer { .. }
+                | Self::CancelFlushTimer
+                | Self::CancelExchange { .. }
+                | Self::CancelBackgroundFlush
+                | Self::QuitNow
+                | Self::PauseMedia
+                | Self::StatusChanged(_)
+        )
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeDisposition {
+    Enqueue,
+    NoOperation,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Exchange {
     pub id: u64,

@@ -856,3 +856,6 @@ fn foreign_key_failure_on_either_draw_leaves_real_publication_unconfirmed() {
 
 #[path = "cloud_connection_tests.rs"]
 mod connection;
+
+#[path = "cloud_policy_tests.rs"]
+mod policy;

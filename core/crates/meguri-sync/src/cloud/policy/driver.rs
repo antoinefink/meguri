@@ -31,6 +31,10 @@ pub enum DeviceEvent {
         identity: IdentityStatus,
         origin_sdk: Option<String>,
     },
+    IdentityRead {
+        request: u64,
+        identity: IdentityStatus,
+    },
     Network {
         reachable: bool,
     },
@@ -153,6 +157,12 @@ impl Driver {
                 }
                 Event::Account(account(identity))
             }
+            DeviceEvent::IdentityRead { request, identity } => {
+                if !self.runtime.adapter_complete_identity_read(request, identity.clone())? {
+                    return Err(DriverError::StaleCommand);
+                }
+                Event::Account(account(identity))
+            }
             DeviceEvent::Network { reachable } => Event::Network { reachable },
             DeviceEvent::Foreground => Event::Foreground,
             DeviceEvent::Background { deadline_ms } => Event::Background { deadline_ms },
@@ -206,6 +216,18 @@ impl Driver {
         let projection = self
             .runtime
             .policy_projection(lifecycle_kind(&lifecycle), generation.0)?;
+        // ReadFailed preserves Runtime's verified process owner. Project that
+        // accepted effective identity without submitting another account event.
+        let event = match event {
+            Event::Account(Account {
+                status: AccountStatus::Undetermined,
+                ..
+            }) if projection.facts.binding.as_ref().is_some_and(|b| b.verified) => Event::Account(Account {
+                status: AccountStatus::Available,
+                identity: projection.facts.binding.as_ref().map(|b| b.account.clone()),
+            }),
+            event => event,
+        };
         let owner = self.runtime.instance().unwrap_or_default();
         let mut actions = Vec::new();
         let sdk = projection.engine.as_ref().map(|e| e.instance.clone());
@@ -340,13 +362,40 @@ impl Driver {
         let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         self.validate_locked(&owned, command)
     }
+    pub fn native_disposition(&self, command: &Command) -> Result<NativeDisposition, DriverError> {
+        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.validate_locked(&owned, command)?;
+        // Settings are already retained by step. With no engine there is
+        // nothing to reconfigure; native must not turn this into a start.
+        Ok(
+            if matches!(command.action.kind, ActionKind::ConfigureAutomatic { .. })
+                && !self.runtime.policy_has_engine(&command.backend_guard)?
+            {
+                NativeDisposition::NoOperation
+            } else {
+                NativeDisposition::Enqueue
+            },
+        )
+    }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
         let runtime = self.runtime.adapter_guard();
         if owned.state.guard() != command.action.guard
             || command.owner != self.runtime.instance().unwrap_or_default()
             || runtime != command.backend_guard
-            || command.backend_guard.generation != command.action.guard.generation
-            || runtime.binding != command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec())
+        {
+            return Err(DriverError::StaleCommand);
+        }
+        // Unbound Runtime has no collection generation. Only Host control
+        // work may use that issued zero/empty guard; the facade separately
+        // validates its retained Host and current collection generation.
+        let unbound_host = command.action.kind.host_only()
+            && command.action.guard.binding.is_none()
+            && command.owner.is_empty()
+            && runtime.generation == 0
+            && runtime.binding.is_empty();
+        if !unbound_host
+            && (command.backend_guard.generation != command.action.guard.generation
+                || runtime.binding != command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec()))
         {
             return Err(DriverError::StaleCommand);
         }

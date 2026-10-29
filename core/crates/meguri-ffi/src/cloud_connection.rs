@@ -26,7 +26,7 @@ pub enum CloudConnectionFailure {
 fn failure(failure: CloudConnectionFailure) -> CoreError {
     CoreError::CloudConnection { failure }
 }
-fn error(error: r::RuntimeError) -> CoreError {
+pub(crate) fn error(error: r::RuntimeError) -> CoreError {
     use CloudConnectionFailure as F;
     failure(match error {
         r::RuntimeError::Publication(e) => match e {

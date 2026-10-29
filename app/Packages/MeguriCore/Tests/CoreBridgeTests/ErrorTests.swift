@@ -5,6 +5,7 @@ import Testing
 
 @Suite struct ErrorTests {
     static let cases: [(CoreError, BridgeError)] = [
+        (.CloudPolicy(failure: .staleCommand), .cloudPolicy(.staleCommand)),
         (.Stale(table: .notetypes, key: "37"), .stale(table: .notetypes, key: "37")),
         (.StaleGeneration(planned: 37, current: 41), .staleGeneration(planned: 37, current: 41)),
         (.UndoUnavailable(reason: .alreadyUploaded), .undoUnavailable(reason: .alreadyUploaded)),

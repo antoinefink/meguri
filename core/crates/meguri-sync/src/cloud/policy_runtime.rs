@@ -4,6 +4,22 @@ use crate::cloud::policy::*;
 use std::collections::BTreeSet;
 
 impl Runtime {
+    /// Sample this Runtime's original platform provider, never a UI identity or
+    /// the process-global configuration for a later Host. No core lock is held.
+    pub fn policy_account_identity(&self) -> Result<(u64, IdentityStatus), RuntimeError> {
+        let request = self.adapter_begin_identity_read(false, None)?;
+        let identity = self.inputs.identity.read_identity(&self.inputs.scope);
+        Ok((request, identity))
+    }
+
+    pub(crate) fn policy_has_engine(&self, guard: &crate::cloud::adapter::Guard) -> Result<bool, RuntimeError> {
+        let s = self.state();
+        if &Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(s.adapter.sdk.is_some())
+    }
+
     pub fn policy_projection(&self, lifecycle: Lifecycle, generation: u64) -> Result<Projection, RuntimeError> {
         let session = self.active_review();
         // Read the existing sidecar fact, outside Runtime/tracking locks. This grants no authority.

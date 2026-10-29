@@ -9,6 +9,9 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    CloudPolicy {
+        failure: crate::cloud_policy::CloudPolicyFailure,
+    },
     CloudConnection {
         failure: crate::cloud_connection::CloudConnectionFailure,
     },
@@ -103,6 +106,7 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::CloudPolicy { .. } => f.write_str("cloud policy refused"),
             CoreError::CloudConnection { .. } => f.write_str("cloud connection refused"),
             CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
@@ -211,6 +215,9 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::CloudPolicy { .. } => EngineError::CollectionUnavailable {
+                reason: "cloud policy refused".into(),
+            },
             CoreError::CloudConnection { .. } => EngineError::CollectionUnavailable {
                 reason: "cloud connection refused".into(),
             },
