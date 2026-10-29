@@ -446,7 +446,10 @@ fn cloud_publication_crash_worker() {
         faultpoint::arm(&point, Fault::Abort);
         exclusive.replace_verified_cloud_adopt(stage, input).unwrap();
     } else {
-        assert_eq!(mode, "decision");
+        assert!(mode == "decision" || mode == "cancel");
+        if mode == "cancel" {
+            restore_collection(&host, &dir);
+        }
         let mut service = Service::open(dir.parent().unwrap(), Config::default(), SeededRandom::new(44)).unwrap();
         let runtime = host.cloud_runtime().unwrap();
         let collection = host.collection().unwrap();
@@ -455,10 +458,16 @@ fn cloud_publication_crash_worker() {
         runtime
             .perform_publication_local(op, LocalWork::Bind, &collection)
             .unwrap();
-        faultpoint::arm(&point, Fault::Abort);
+        if mode == "decision" {
+            faultpoint::arm(&point, Fault::Abort);
+        }
         runtime
             .perform_publication_local(op, LocalWork::WriteDecision, &collection)
             .unwrap();
+        if mode == "cancel" {
+            faultpoint::arm(&point, Fault::Abort);
+            runtime.cancel_publication(op, &collection).unwrap();
+        }
     }
     panic!("actual crash boundary was not reached");
 }
@@ -480,7 +489,7 @@ fn decision_write_kill_restart_reopens_durable_binding_and_preserves_new_restore
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    crash_worker(&dir, "decision", "publication.after_decision_write");
+    crash_worker(&dir, "decision", "cloud.publish.after_fence_clear");
     let host = open_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let op = runtime.publication_op().unwrap().unwrap();
@@ -871,4 +880,331 @@ fn held_active_is_not_sent_and_actual_lost_reply_retains_submission_evidence_on_
         assert_eq!(db.zones["meguri-root"].records.contains_key("active"), submit);
         reopened.close().unwrap();
     }
+}
+
+fn restore_collection(host: &CoreHost, dir: &Path) {
+    use meguri_engine::{LongOp, replace::ReplaceReason};
+    let source = tempfile::tempdir_in(dir).unwrap();
+    generated(source.path());
+    let stage = meguri_engine::replace::ReplacementStage::new(dir).unwrap();
+    std::fs::copy(source.path().join("collection.anki2"), stage.path()).unwrap();
+    let slot = host.engine().acquire_slot(LongOp::Restore).unwrap();
+    slot.replace_verified(stage, ReplaceReason::Restore, |_| Ok(()))
+        .unwrap();
+}
+
+fn actual_preview(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &Scope) -> Preview {
+    fn read(service: &mut Service<SeededRandom>, scope: &Scope, zone: String, name: &str) -> RecordRead {
+        let response = service
+            .request(
+                scope,
+                Caller::default(),
+                Operation::Read {
+                    zone,
+                    name: name.into(),
+                    fields: RequestedFields::All,
+                },
+            )
+            .unwrap();
+        match response.result {
+            Ok(Reply::Record(record)) => RecordRead::Found(publication_control_record(&record).unwrap()),
+            Err(error) if error.code == meguri_testkit::cloud::ErrorCode::ZoneNotFound => RecordRead::ZoneMissing,
+            Err(error) if error.code == meguri_testkit::cloud::ErrorCode::UnknownItem => RecordRead::Missing,
+            other => panic!("unexpected actual preview read: {}", other.is_ok()),
+        }
+    }
+    let runtime = host.cloud_runtime().unwrap();
+    let PreviewWork::ReadActive { id } = runtime
+        .begin_connection_preview(&host.collection().unwrap(), &host.media().unwrap())
+        .unwrap()
+    else {
+        panic!("active read required");
+    };
+    let work = runtime
+        .connection_active_read(id, read(service, scope, "meguri-root".into(), "active"))
+        .unwrap();
+    match work {
+        PreviewWork::Ready(p) => p,
+        PreviewWork::ReadEpoch { id, epoch } => {
+            let work = runtime
+                .connection_epoch_read(
+                    id,
+                    read(service, scope, cloud::adapter::collection_zone(epoch), "epoch"),
+                )
+                .unwrap();
+            let PreviewWork::Ready(p) = work else {
+                panic!("epoch preview required");
+            };
+            p
+        }
+        _ => panic!("unexpected preview work"),
+    }
+}
+
+fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom>) -> cloud::Binding {
+    host.media().unwrap().store().register_full(|_, _| true).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(host, service, &scope());
+    runtime.confirm_connection_publication(&p, &collection).unwrap();
+    let request = until_active(host, service);
+    let (result, _) = execute_publication_request(service, &scope(), &request, runtime, &collection).unwrap();
+    assert!(matches!(&result, OwnResult::Saved(_)));
+    runtime.publication_result(&request, result, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    runtime.status().unwrap().binding.unwrap()
+}
+
+fn bind_and_write(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &Scope) -> PublishOp {
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(host, service, scope);
+    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    runtime
+        .perform_publication_local(id, LocalWork::Bind, &collection)
+        .unwrap();
+    runtime
+        .perform_publication_local(id, LocalWork::WriteDecision, &collection)
+        .unwrap();
+    runtime.publication_op().unwrap().unwrap()
+}
+
+fn cancel_with_account_status(status: IdentityStatus) {
+    use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+        cloud::OpaqueBytes(scope().account.into_bytes()),
+    ))));
+    let host = open_host_with(&dir, keys(), account.clone(), scope());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    let old = publish_actual_collection(&host, &mut service);
+    restore_collection(&host, &dir);
+    let before = decision(&host);
+    assert_eq!(before.publication.decision, PublicationDecision::Pending);
+    assert_eq!(before.pending_reason, Some(PendingDecisionReason::Restore));
+    let op = bind_and_write(&host, &mut service, &scope());
+    assert_eq!(op.binding_before.as_ref().unwrap().id, old.id);
+    assert_eq!(
+        op.binding_before.as_ref().unwrap().state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ReplacedLocally)
+    );
+    assert_ne!(decision(&host), before);
+    *account.0.lock().unwrap() = status;
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    let calls = service.request_log().unwrap().len();
+    runtime.cancel_publication(op.id, &host.collection().unwrap()).unwrap();
+    assert_eq!(decision(&host), before);
+    assert!(runtime.publication_op().unwrap().is_none());
+    let returned = runtime.status().unwrap().binding.unwrap();
+    assert_eq!(returned.id, old.id);
+    assert_eq!(
+        returned.facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ReplacedLocally)
+    );
+    assert!(runtime.start_sdk_instance(&runtime.instance().unwrap()).is_err());
+    assert_eq!(service.request_log().unwrap().len(), calls, "Cancel needs no network");
+    host.close().unwrap();
+}
+
+#[test]
+fn cancellation_restores_exact_prior_decision_when_account_is_unavailable_or_signed_out() {
+    for status in [
+        IdentityStatus::ReadFailed,
+        IdentityStatus::TemporarilyUnavailable,
+        IdentityStatus::SignedOut,
+    ] {
+        cancel_with_account_status(status);
+    }
+}
+
+#[test]
+fn cancellation_restores_exact_prior_decision_after_account_changes() {
+    cancel_with_account_status(IdentityStatus::Available(cloud::OpaqueBytes(
+        b"changed-account".to_vec(),
+    )));
+}
+
+#[test]
+fn cancellation_after_native_file_mismatch_restores_fence_and_keeps_old_binding_isolated() {
+    for restore in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("device");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+        let old = publish_actual_collection(&host, &mut service);
+        if restore {
+            restore_collection(&host, &dir);
+        }
+        let before = decision(&host);
+        let op = bind_and_write(&host, &mut service, &scope());
+        host.close().unwrap();
+        drop(host);
+        // Change the actual native file, with all writers closed, then open it
+        // through CoreHost so current generation/native evidence is real.
+        let live = dir.join("collection.anki2");
+        let copy = dir.join("replacement-native-file");
+        std::fs::copy(&live, &copy).unwrap();
+        std::fs::rename(copy, &live).unwrap();
+        let host = open_host(&dir, keys());
+        let runtime = host.cloud_runtime().unwrap();
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::FileMismatch)
+        );
+        let calls = service.request_log().unwrap().len();
+        runtime.cancel_publication(op.id, &host.collection().unwrap()).unwrap();
+        assert_eq!(decision(&host), before);
+        assert!(runtime.publication_op().unwrap().is_none());
+        let returned = runtime.status().unwrap().binding.unwrap();
+        assert_eq!(returned.id, old.id);
+        assert_eq!(
+            returned.facts.state,
+            cloud::BindingState::Isolated(if restore {
+                cloud::IsolationReason::ReplacedLocally
+            } else {
+                cloud::IsolationReason::FileMismatch
+            })
+        );
+        assert!(runtime.start_sdk_instance(&runtime.instance().unwrap()).is_err());
+        assert_eq!(service.request_log().unwrap().len(), calls);
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn cancellation_leaves_intervening_restore_or_other_build_decision_and_row_unchanged() {
+    for other_build in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("device");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+        restore_collection(&host, &dir);
+        let op = bind_and_write(&host, &mut service, &scope());
+        let mut other_scope = scope();
+        other_scope.container.push_str(".other");
+        let other_op = if other_build {
+            host.close().unwrap();
+            let other = open_host_with(&dir, keys(), Arc::new(Account), other_scope.clone());
+            let row = bind_and_write(&other, &mut service, &other_scope);
+            other.close().unwrap();
+            Some(row)
+        } else {
+            restore_collection(&host, &dir);
+            host.close().unwrap();
+            None
+        };
+        drop(host);
+        let host = open_host(&dir, keys());
+        let intervening = decision(&host);
+        let calls = service.request_log().unwrap().len();
+        let runtime = host.cloud_runtime().unwrap();
+        runtime.cancel_publication(op.id, &host.collection().unwrap()).unwrap();
+        assert_eq!(decision(&host), intervening);
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert!(runtime.status().unwrap().binding.is_none());
+        assert!(runtime.instance().is_err());
+        assert_eq!(service.request_log().unwrap().len(), calls);
+        host.close().unwrap();
+        drop(host);
+        if let Some(row) = other_op {
+            let other = open_host_with(&dir, keys(), Arc::new(Account), other_scope);
+            assert_eq!(other.cloud_runtime().unwrap().publication_op().unwrap(), Some(row));
+            assert_eq!(decision(&other), intervening);
+            other.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn decision_cas_io_error_keeps_inprocess_reopen_binding_consistent_for_publish_and_cancel() {
+    use meguri_model::faultpoint::{self, Fault};
+    for cancel in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("device");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        restore_collection(&host, &dir);
+        let before = decision(&host);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+        let p = preview(&host, &mut service);
+        let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+        runtime
+            .perform_publication_local(id, LocalWork::Bind, &collection)
+            .unwrap();
+        if cancel {
+            runtime
+                .perform_publication_local(id, LocalWork::WriteDecision, &collection)
+                .unwrap();
+        }
+        let point = if cancel {
+            "cloud.publish.after_cancel_fence"
+        } else {
+            "cloud.publish.after_fence_clear"
+        };
+        // Focused returned-error probe, distinct from F3's conformance modes:
+        // the operation fails after CAS while this engine stays alive.
+        faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+        let result = if cancel {
+            runtime.cancel_publication(id, &collection)
+        } else {
+            runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection)
+        };
+        faultpoint::disarm(point);
+        assert!(result.is_err(), "the post-CAS operation fault must fire");
+        let written = decision(&host);
+        if cancel {
+            assert_eq!(written, before);
+        } else {
+            assert_eq!(written.publication.binding, account_binding(&scope().account));
+        }
+        assert!(matches!(
+            host.engine().suspend(Duration::from_secs(30)).unwrap(),
+            meguri_engine::suspend::SuspendOutcome::Suspended
+        ));
+        host.engine().resume().unwrap();
+        assert_eq!(decision(&host), written);
+        let calls = service.request_log().unwrap().len();
+        runtime.cancel_publication(id, &host.collection().unwrap()).unwrap();
+        assert_eq!(decision(&host), before);
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(service.request_log().unwrap().len(), calls);
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn cancel_fence_kill_restart_finishes_cancel_without_account_and_preserves_prior_restore_reason() {
+    use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    crash_worker(&dir, "cancel", "cloud.publish.after_cancel_fence");
+    let host = open_host_with(
+        &dir,
+        keys(),
+        Arc::new(MutableAccount(Mutex::new(IdentityStatus::ReadFailed))),
+        scope(),
+    );
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.step, PublishStep::Cancelling);
+    assert_eq!(decision(&host), op.fence_before);
+    assert_eq!(decision(&host).publication.decision, PublicationDecision::Pending);
+    assert_eq!(decision(&host).pending_reason, Some(PendingDecisionReason::Restore));
+    assert!(matches!(runtime.next_publication_work(&collection).unwrap(),
+        PublicationWork::Local { op: id, work: LocalWork::Cancel } if id == op.id));
+    runtime
+        .perform_publication_local(op.id, LocalWork::Cancel, &collection)
+        .unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(decision(&host), op.fence_before);
+    host.close().unwrap();
 }

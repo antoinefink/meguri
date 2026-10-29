@@ -57,3 +57,21 @@ The next repair updates the test crash-point names and adds cancellation cases
 before production application. Reset publication stays unavailable before writes
 until its required tests and implementation land. Adoption, media, native SDK
 wiring and the full workflow remain required. The batch retains its original base.
+
+### Cancellation and decision crash regressions
+
+Applied after `d7355b2a`, before production. Filtered repair
+`cleanroom/20261029T063128Z-47883` adds six host cases for unavailable and
+changed accounts, native-file mismatch, intervening decisions, returned I/O
+faults and cancellation crash/restart. It uses the approved fence-clear and
+cancel-fence fault-point names. Independent R3 clears the test delta and finds
+no P0-P1 in the targeted production repair; the prior fault-point P2 is fixed.
+
+- `core-format/20261029T064036Z-57141`: pass.
+- `core-test/20261029T064126Z-57740`: expected RED, the same two missing
+  publication/transport import groups; zero tests run.
+- `private/20261029T064129Z-58002`: pass.
+- `similarity/20261029T064131Z-58276`: one file, zero findings or exemptions.
+
+Production remains unapplied until this test delta is committed. The original
+nine contracts remain enabled. No acceptance or P24 closure is claimed.

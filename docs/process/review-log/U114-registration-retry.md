@@ -21,6 +21,8 @@ registration test; it does not prove first publication.
   pass, none skipped, including the 400-record/eight-call case.
 - `private/20261029T063255Z-49364`: two files pass.
 - `similarity/20261029T063257Z-49612`: two files, zero findings or exemptions.
+- `swift-test/20261029T063634Z-52815`: all 33 Swift CloudKit adapter cases pass
+  against the rebuilt core, none skipped.
 
 Publication targets remain enabled RED pending their production dependencies.
 Full lint/gates, signed SDK checks, adoption, incoming data and media remain open.
