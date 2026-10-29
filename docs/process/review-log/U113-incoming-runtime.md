@@ -210,3 +210,48 @@ The optional follow-up from review is a dedicated migration case with valid
 pending legacy WIP rows. No source defect is reported for that branch.
 Other R1 findings, media, native wiring, signed runs and the batch gate remain
 open. No Unit or P24 acceptance is claimed.
+
+## Recovery-transition regressions before implementation
+
+Phase start `a5081a8b`. Test export `cleanroom/20261029T144103Z-11001`
+uses actual CoreHost and Service operations to leave a real ordinary intent
+after COMMIT, with its seq and original inbox entry. The same-file/account
+binding is stopped, then a new publication must complete with exact old ACK,
+WAL, no-repeat-apply, cleanup and reopen checks.
+
+The first assertion was too early: V17.6 requires finishing old work before the
+new scan, while V2.4 step 8 authorizes an isolated old owner once a recovery row
+names it. `core-test/20261029T144658Z-14978` reaches that earlier assertion but
+does not prove the required timing. Corrected export
+`cleanroom/20261029T144959Z-16546` retains all data assertions after actual
+reconciliation and before sending. Independent R2 is clear for that correction.
+`core-test/20261029T145229Z-17951` then fails because the old intent still exists
+after actual reconciliation. The full existing BeforeScan latch case remains
+required to establish exact internal ordering, beyond this return boundary.
+
+`private/20261029T145241Z-18279` flags two comments and a diagnostic.
+Fixer export `cleanroom/20261029T145403Z-19308` removes those comments and
+changes only the diagnostic text, while extracting the same Service-save code.
+It adds a second regression: V15.2 step 1 excludes queued, unapplied downloads
+from the replacement. Confirmation, publication and reopen must succeed with
+the original row, no incoming apply, no old-zone send and final-only cleanup.
+The Preview API has no queued-work count, so this case cannot prove that UI/API
+requirement; it checks the actual inbox alongside the actual preview.
+
+Independent R3 reports no P0/P1. One P2 fixture mismatch remains in the second
+case's final tail: after proving the old binding was deleted, its query APIs
+return `Tracking(BindingNotFound)`, rather than empty/None. The next fixer must
+assert that exact existing error, keeping all pre-deletion evidence checks.
+Production query semantics must stay unchanged.
+
+- `core-format/20261029T145813Z-20966`: pass.
+- `core-test/20261029T145820Z-21270`: 17 execute, 15 pass and the two new
+  cases fail before that tail: an old intent remains after the scan, and a
+  queued download changes the local row during confirmation.
+- `private/20261029T145831Z-21593`: pass.
+- `similarity/20261029T145833Z-21841`: pass.
+
+The next source repair must finish existing intents under the recorded owner
+without applying queued old downloads or refusing the required publication.
+Retained-copy, adoption, account/file and full latch cases remain required.
+No acceptance is claimed.

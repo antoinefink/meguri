@@ -962,6 +962,470 @@ fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom
     runtime.status().unwrap().binding.unwrap()
 }
 
+fn save_other_writer_publication_note(
+    service: &mut Service<SeededRandom>,
+    old: &cloud::Binding,
+    before: &cloud::workflow::EntityFacts,
+    base: &cloud::entity_codec::Note,
+) -> (
+    cloud::entity_codec::Payload,
+    String,
+    meguri_testkit::cloud::Record,
+    Saved,
+) {
+    use cloud::entity_codec::{self as codec, Payload};
+
+    let mut remote = base.clone();
+    let mut fields: Vec<_> = remote.flds.split(|b| *b == 31).map(Vec::from).collect();
+    assert_eq!(fields.len(), 2);
+    fields[1] = b"remote update committed before republication".to_vec();
+    remote.flds = fields.join(&31);
+    remote.modified += 1;
+    let after = Payload::Note(remote);
+    let writer = old.id.0.map(|b| b ^ 0x80);
+    assert_ne!(writer, old.id.0);
+    let envelope = codec::Entity::build(
+        codec::EntityFields {
+            kind: before.kind,
+            key: before.key.clone(),
+            origin: before.origin,
+            erev: before.server_erev + 1,
+            generation: None,
+            tombstone: false,
+            deleted_at_ms: 0,
+            writer,
+            base_sha256: Some(before.acked_payload_digest),
+        },
+        &after.encode().unwrap(),
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    assert_eq!(
+        codec::entity_name(&old.facts.record_key.0, before.kind, &before.key).unwrap(),
+        before.name
+    );
+    let old_zone = cloud::adapter::collection_zone(old.facts.epoch);
+    let response = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Modify {
+                zone: old_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted(&before.name, "MGEntity", envelope.clone()),
+                    if_unchanged: Some(SystemFields::from_bytes(before.acked_system_fields.clone())),
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Modified(mut items)) = response.result else {
+        panic!("actual remote save required");
+    };
+    assert_eq!(items.len(), 1);
+    let Ok(MutationSuccess::Saved(record)) = items.remove(0).result else {
+        panic!("remote save must use the acknowledged change tag");
+    };
+    assert!(matches!(record.fields.get("e"), Some(Field::EncryptedBytes(bytes)) if bytes == &envelope));
+    let saved = Saved {
+        name: record.name.clone(),
+        envelope,
+        system_fields: record.system_fields.bytes().to_vec(),
+    };
+    (after, old_zone, record, saved)
+}
+
+// V17.6 / V2.4 step 8, K13.2 and K12.1 rule 8: a committed ordinary
+// apply must settle before publication scans or discards its prior binding.
+#[test]
+fn stopped_binding_committed_incoming_settles_before_republication_and_survives_cleanup() {
+    use cloud::entity_codec::{self as codec, Payload};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+
+    fn note_row(host: &CoreHost, id: i64, notetype: &codec::Notetype) -> Payload {
+        let collection = host.collection().unwrap();
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        let row = snapshot.row_image(Table::Notes, &RowKey::Id(id)).unwrap().unwrap();
+        cloud::row_payload::project(
+            &cloud::row_payload::ReadView(&*snapshot),
+            codec::Kind::Note,
+            &row,
+            |mid| {
+                assert_eq!(mid, notetype.id);
+                Ok(notetype.clone())
+            },
+        )
+        .unwrap()
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let keys = keys();
+    let host = open_host(&dir, keys.clone());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    let old = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let instance = runtime.instance().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Some(Payload::Note(base)) = before.acked_payload.clone() else {
+        panic!("actual publication must acknowledge a note");
+    };
+    let notetype = runtime
+        .entity_facts_page(codec::Kind::Notetype, None)
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.acked_payload {
+            Some(Payload::Notetype(n)) if n.id == base.mid => Some(n),
+            _ => None,
+        })
+        .unwrap();
+    assert!(before.mark.is_none() && before.acked_rev > 0 && before.server_erev > 0);
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+
+    // A different writer builds on the actually acknowledged payload and origin,
+    // then saves conditionally to the real Service. This is not a seeded ACK.
+    let (after, old_zone, record, saved) = save_other_writer_publication_note(&mut service, &old, &before, &base);
+    runtime
+        .receive_collection_records(&instance, std::slice::from_ref(&saved))
+        .unwrap();
+    let inbox = runtime.inbox_entries(old.id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].entry.reason, cloud::InboxReason::Ready);
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+
+    // A returned error immediately after COMMIT leaves the real intent/result
+    // seq and inbox intact. Disarm before any assertion or subsequent work.
+    faultpoint::arm("cloud.apply.after_commit", Fault::IoError(std::io::ErrorKind::Other));
+    let applied = runtime.drain_incoming(&collection, Duration::from_secs(30));
+    faultpoint::disarm("cloud.apply.after_commit");
+    assert!(
+        matches!(
+            applied,
+            Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::Io(
+                std::io::ErrorKind::Other
+            )))
+        ),
+        "the post-commit I/O fault must fire"
+    );
+    assert_eq!(note_row(&host, base.id, &notetype), after);
+    let pending = runtime.apply_intents(old.id).unwrap();
+    assert_eq!(pending.len(), 1);
+    let intent = &pending[0];
+    assert_eq!(intent.binding, old.id);
+    assert_eq!(intent.inbox_ids, vec![inbox[0].id]);
+    assert_eq!(intent.keys.len(), 1);
+    assert_eq!(intent.keys[0].name, before.name);
+    assert_eq!(intent.keys[0].role, cloud::incoming::ApplyKeyRole::Entry);
+    assert_eq!(intent.keys[0].before_digest, Some(before.acked_row_digest));
+    assert_eq!(intent.keys[0].after_digest, Some(after.row_digest().unwrap()));
+    assert_ne!(intent.keys[0].before_digest, intent.keys[0].after_digest);
+    let runs = runtime.incoming_runs();
+    assert_eq!(runs.len(), 1);
+    let run = &runs[0];
+    assert_eq!(run.intent_id, intent.id);
+    assert_eq!(intent.result_seq, Some(run.seq));
+    assert_eq!(intent.native_file, run.native_file);
+    assert_eq!(intent.generation, run.generation);
+    assert_eq!(run.entry_ids, intent.inbox_ids);
+    assert_eq!(run.changed_keys, BTreeSet::from([before.name.clone()]));
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().unwrap() == before);
+
+    runtime.adapter_stop_syncing().unwrap();
+    let stopped = runtime.status().unwrap().binding.unwrap();
+    assert_eq!(stopped.id, old.id);
+    assert_eq!(
+        stopped.facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::Stopped)
+    );
+    assert_eq!(runtime.apply_intents(old.id).unwrap(), pending);
+    assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
+    let p = actual_preview(&host, &mut service, &scope());
+    assert_eq!(p.native_file, intent.native_file);
+    let calls = service.request_log().unwrap().len();
+    let op_id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), stopped);
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.id, op_id);
+    assert_eq!(op.step, PublishStep::Confirmed);
+    assert_eq!(op.binding_before.as_ref().unwrap().id, old.id);
+    assert_eq!(op.binding_before.as_ref().unwrap().state, stopped.facts.state);
+    assert!(op.binding_after.is_none());
+    assert_eq!(service.request_log().unwrap().len(), calls);
+    let after_confirm_intents = runtime.apply_intents(old.id).unwrap();
+    if !after_confirm_intents.is_empty() {
+        assert_eq!(after_confirm_intents, pending);
+    }
+    let after_confirm_inbox = runtime.inbox_entries(old.id).unwrap();
+    if !after_confirm_inbox.is_empty() {
+        assert_eq!(after_confirm_inbox, inbox);
+    }
+
+    // Run real binding, decision and control work, then the new binding's scan.
+    own_until_scan(&host, &mut service);
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+
+    assert!(
+        runtime.apply_intents(old.id).unwrap().is_empty(),
+        "pending old intent not settled before the new publication scan"
+    );
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.incoming_wal_receipts().iter().any(|receipt| {
+        receipt.identity().native_file() == (run.native_file.device, run.native_file.inode)
+            && receipt.identity().generation().0 == run.generation
+            && receipt.through().0 >= run.seq
+    }));
+    let settled = runtime.binding_entity(old.id, &before.name).unwrap().unwrap();
+    assert_eq!(settled.server_erev, before.server_erev + 1);
+    assert_eq!(settled.acked_payload, Some(after.clone()));
+    assert_eq!(settled.acked_row_digest, after.row_digest().unwrap());
+    assert_eq!(settled.acked_payload_digest, after.payload_digest().unwrap());
+    assert_eq!(settled.acked_system_fields, saved.system_fields);
+    assert_eq!(settled.acked_envelope.0, saved.envelope);
+    assert!(settled.mark.is_none() && settled.base_payload.is_none());
+    assert_eq!(note_row(&host, base.id, &notetype), after);
+    assert_eq!(runtime.incoming_runs(), runs, "unexpected apply count");
+
+    // Continue with actual SDK batch saves and own-operation acknowledgements.
+    // With no conflict copies the prior binding must be deletable without an FK
+    // error, and no send may escape to its isolated epoch.
+    let request = until_active(&host, &mut service);
+    let new = runtime.status().unwrap().binding.unwrap();
+    assert_ne!(new.id, old.id);
+    let (result, _) = execute_publication_request(&mut service, &scope(), &request, runtime, &collection).unwrap();
+    assert!(matches!(&result, OwnResult::Saved(_)));
+    runtime.publication_result(&request, result, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(new.facts.state, cloud::BindingState::Active);
+    assert!(
+        runtime
+            .publication_facts(&collection)
+            .unwrap()
+            .bindings
+            .iter()
+            .all(|b| b.id != old.id)
+    );
+    let new_note = runtime
+        .entity_facts_page(codec::Kind::Note, None)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.key == before.key)
+        .unwrap();
+    assert_eq!(new_note.acked_payload, Some(after.clone()));
+    assert!(new_note.mark.is_none() && new_note.server_erev > 0);
+    assert!(service.request_log().unwrap()[calls..].iter().all(|r| {
+        r.kind != meguri_testkit::cloud::RequestKind::Modify || r.zone.as_deref() != Some(old_zone.as_str())
+    }));
+    let db = service.inspect(&scope()).unwrap().unwrap();
+    assert!(db.zones[&old_zone].records[&before.name] == record);
+    assert_eq!(note_row(&host, base.id, &notetype), after);
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    let reopened = open_host(&dir, keys);
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert!(
+        runtime
+            .publication_facts(&reopened.collection().unwrap())
+            .unwrap()
+            .bindings
+            .iter()
+            .all(|b| b.id != old.id)
+    );
+    let reopened_note = runtime.binding_entity(new.id, &new_note.name).unwrap().unwrap();
+    assert_eq!(reopened_note.acked_payload, Some(after.clone()));
+    assert_eq!(reopened_note.acked_system_fields, new_note.acked_system_fields);
+    assert_eq!(reopened_note.server_erev, new_note.server_erev);
+    assert!(reopened_note.mark.is_none());
+    assert!(runtime.apply_intents(new.id).unwrap().is_empty());
+    assert!(runtime.inbox_entries(new.id).unwrap().is_empty());
+    assert_eq!(note_row(&reopened, base.id, &notetype), after);
+    reopened.close().unwrap();
+}
+
+// V15.2 step 1 excludes fetched, unapplied changes; V17.6 settles existing intents.
+#[test]
+fn queued_ready_incoming_is_not_applied_by_republication_and_is_discarded_only_at_completion() {
+    use cloud::entity_codec::{self as codec, Payload};
+    use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+
+    fn note_row(host: &CoreHost, id: i64, notetype: &codec::Notetype) -> Payload {
+        let collection = host.collection().unwrap();
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        let row = snapshot.row_image(Table::Notes, &RowKey::Id(id)).unwrap().unwrap();
+        cloud::row_payload::project(
+            &cloud::row_payload::ReadView(&*snapshot),
+            codec::Kind::Note,
+            &row,
+            |mid| {
+                assert_eq!(mid, notetype.id);
+                Ok(notetype.clone())
+            },
+        )
+        .unwrap()
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let keys = keys();
+    let host = open_host(&dir, keys.clone());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    let old = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let instance = runtime.instance().unwrap();
+    let before = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Some(Payload::Note(base)) = before.acked_payload.clone() else {
+        panic!("acknowledged note required");
+    };
+    let notetype = runtime
+        .entity_facts_page(codec::Kind::Notetype, None)
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.acked_payload {
+            Some(Payload::Notetype(n)) if n.id == base.mid => Some(n),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(old.facts.state, cloud::BindingState::Active);
+    assert!(before.mark.is_none() && before.acked_rev > 0 && before.server_erev > 0);
+    assert!(!before.acked_system_fields.is_empty());
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+
+    let (after, old_zone, record, saved) = save_other_writer_publication_note(&mut service, &old, &before, &base);
+    assert_ne!(after, Payload::Note(base.clone()));
+    runtime
+        .receive_collection_records(&instance, std::slice::from_ref(&saved))
+        .unwrap();
+    let inbox = runtime.inbox_entries(old.id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].entry.reason, cloud::InboxReason::Ready);
+    assert!(runtime.refused_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().unwrap() == before);
+
+    let p = actual_preview(&host, &mut service, &scope());
+    assert_eq!(p.active_epoch, Some(old.facts.epoch));
+    assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
+    assert_eq!(
+        runtime
+            .inbox_entries(old.id)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.entry.reason == cloud::InboxReason::Ready)
+            .count(),
+        1
+    );
+    let calls = service.request_log().unwrap().len();
+    let op_id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.id, op_id);
+    assert_eq!(op.step, PublishStep::Confirmed);
+    assert_eq!(op.binding_before.as_ref().unwrap().id, old.id);
+    assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().unwrap() == before);
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    assert_eq!(service.request_log().unwrap().len(), calls);
+
+    let request = until_active(&host, &mut service);
+    let new = runtime.status().unwrap().binding.unwrap();
+    assert_ne!(new.id, old.id);
+    assert!(runtime.publication_op().unwrap().is_some());
+    assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().unwrap() == before);
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    let (result, _) = execute_publication_request(&mut service, &scope(), &request, runtime, &collection).unwrap();
+    assert!(matches!(&result, OwnResult::Saved(_)));
+    runtime.publication_result(&request, result, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(new.facts.state, cloud::BindingState::Active);
+    assert!(
+        runtime
+            .publication_facts(&collection)
+            .unwrap()
+            .bindings
+            .iter()
+            .all(|binding| binding.id != old.id)
+    );
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.binding_entity(old.id, &before.name).unwrap().is_none());
+    assert!(runtime.apply_intents(new.id).unwrap().is_empty());
+    assert!(runtime.inbox_entries(new.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    let new_note = runtime
+        .entity_facts_page(codec::Kind::Note, None)
+        .unwrap()
+        .into_iter()
+        .find(|entity| entity.key == before.key)
+        .unwrap();
+    assert_eq!(new_note.acked_payload, Some(Payload::Note(base.clone())));
+    assert!(new_note.mark.is_none() && new_note.acked_rev > 0 && new_note.server_erev > 0);
+    assert!(!new_note.acked_system_fields.is_empty());
+    assert_eq!(note_row(&host, base.id, &notetype), Payload::Note(base.clone()));
+    assert!(service.request_log().unwrap()[calls..].iter().all(|r| {
+        r.kind != meguri_testkit::cloud::RequestKind::Modify || r.zone.as_deref() != Some(old_zone.as_str())
+    }));
+    let db = service.inspect(&scope()).unwrap().unwrap();
+    assert!(db.zones[&old_zone].records[&before.name] == record);
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    let reopened = open_host(&dir, keys);
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert!(
+        runtime
+            .publication_facts(&reopened.collection().unwrap())
+            .unwrap()
+            .bindings
+            .iter()
+            .all(|binding| binding.id != old.id)
+    );
+    let reopened_note = runtime.binding_entity(new.id, &new_note.name).unwrap().unwrap();
+    assert_eq!(reopened_note.acked_payload, Some(Payload::Note(base.clone())));
+    assert_eq!(reopened_note.acked_system_fields, new_note.acked_system_fields);
+    assert_eq!(reopened_note.server_erev, new_note.server_erev);
+    assert!(reopened_note.mark.is_none());
+    assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+    assert!(runtime.inbox_entries(new.id).unwrap().is_empty());
+    assert!(runtime.apply_intents(new.id).unwrap().is_empty());
+    assert!(runtime.incoming_runs().is_empty());
+    assert_eq!(note_row(&reopened, base.id, &notetype), Payload::Note(base));
+    reopened.close().unwrap();
+}
+
 fn bind_and_write(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &Scope) -> PublishOp {
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
