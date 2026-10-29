@@ -425,7 +425,7 @@ pub struct ChildDriver {
     queued: Option<super::coordinator::HeldRequest>,
     queued_response: Option<super::Response>,
     pending_work: Option<Vec<u8>>,
-    completed_work: Option<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
+    completed_work: Vec<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
     paused_work: Option<IncomingStage>,
 }
 impl ChildDriver {
@@ -507,10 +507,7 @@ impl ChildDriver {
     pub(crate) fn has_incoming_reply(&self, input: &Input) -> Result<bool> {
         let key = serde_json::to_vec(input)?;
         Ok(self.pending_work.as_ref() == Some(&key)
-            || self
-                .completed_work
-                .as_ref()
-                .is_some_and(|(completed, _)| *completed == key))
+            || self.completed_work.iter().any(|(completed, _)| *completed == key))
     }
     pub(crate) fn resume_incoming_work(&mut self) -> Result<()> {
         if self.pending_work.is_none() {
@@ -525,7 +522,7 @@ impl ChildDriver {
             ChildMessage::Reply(reply) => {
                 self.paused_work = None;
                 let key = self.pending_work.take().ok_or_else(failure)?;
-                self.completed_work = Some((key, reply));
+                self.completed_work.push((key, reply));
                 // The retained caller continuation consumes this reply once,
                 // including its original error, through call().
                 Ok(())
@@ -611,7 +608,7 @@ impl ChildDriver {
             queued: None,
             queued_response: None,
             pending_work: None,
-            completed_work: None,
+            completed_work: Vec::new(),
             paused_work: None,
         };
         driver.call::<()>(Input::Boot(boot))?;
@@ -630,15 +627,14 @@ impl ChildDriver {
     }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
         let key = serde_json::to_vec(&input)?;
-        if self.pending_work.as_ref() == Some(&key) {
+        // Consume an older matching reply before advancing a repeated command.
+        if self.pending_work.as_ref() == Some(&key)
+            && !self.completed_work.iter().any(|(completed, _)| *completed == key)
+        {
             self.resume_incoming_work()?;
         }
-        if self
-            .completed_work
-            .as_ref()
-            .is_some_and(|(completed, _)| *completed == key)
-        {
-            let (_, result) = self.completed_work.take().ok_or_else(failure)?;
+        if let Some(index) = self.completed_work.iter().position(|(completed, _)| *completed == key) {
+            let (_, result) = self.completed_work.remove(index);
             return Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?);
         }
         write_frame(&mut self.stream, &input)?;

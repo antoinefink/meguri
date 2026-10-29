@@ -391,3 +391,21 @@ The single reply slot remains deliberately unfixed in this test-first
 checkpoint. The next repair must retain each actual reply until its caller
 consumes it once, without rerunning the completed operation. No incoming
 safety, crash-mode or full-sync acceptance is claimed here.
+
+## Retain every completed worker reply
+
+Repair start: `80f47ea2`. Fixer export
+`cleanroom/20261029T155704Z-60629` replaces the single completed-reply slot
+with retained actual replies. Lookup consumes only the oldest matching
+input once, including its original error. Independent R1 found no P0-P2
+issue. Existing tests remain unchanged.
+
+- `core-format/20261029T155835Z-62449`: pass.
+- `core-test/20261029T155843Z-62756`: all eight cases pass, zero skipped.
+  The three preceding count, Cancel and Error failures now pass, alongside
+  review persistence and explicit-sync tests.
+- `private/20261029T155849Z-63042`: pass.
+- `similarity/20261029T155850Z-63272`: pass.
+
+The broader receive-safety failures remain open. This repair proves reply
+retention in the test driver, not native app integration or full sync.
