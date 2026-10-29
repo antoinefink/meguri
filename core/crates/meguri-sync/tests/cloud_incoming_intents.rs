@@ -941,6 +941,64 @@ fn ordinary_ops_take_at_most_500_actual_entries_without_losing_the_tail() {
     let applied: Vec<_> = runs.iter().flat_map(|r| r.entry_ids.iter().copied()).collect();
     assert_eq!(applied.len(), 502);
     assert_eq!(applied.into_iter().collect::<BTreeSet<_>>(), ids);
+    // Native note creation also changes Config. First prove that the 502
+    // delivered Note/Card records account for every non-Config row exactly.
+    use std::collections::BTreeMap;
+    let record_key = pair.receiver.facts().unwrap().current.unwrap().facts.record_key;
+    let keyed_rows = |rows: Vec<Payload>| {
+        rows.into_iter()
+            .map(|row| {
+                let key = meguri_sync::cloud::row_payload::payload_key(&row).unwrap();
+                let name = codec::entity_name(&record_key.0, row.kind(), &key).unwrap();
+                (name, row)
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let (sender_config, sender_other): (BTreeMap<_, _>, BTreeMap<_, _>) =
+        keyed_rows(pair.sender.driver().collection_rows().unwrap())
+            .into_iter()
+            .partition(|(_, row)| matches!(row, Payload::Config(_)));
+    let (receiver_config, receiver_other): (BTreeMap<_, _>, BTreeMap<_, _>) =
+        keyed_rows(pair.receiver.driver().collection_rows().unwrap())
+            .into_iter()
+            .partition(|(_, row)| matches!(row, Payload::Config(_)));
+    assert!(
+        sender_other == receiver_other,
+        "non-Config row mismatches: {:?}",
+        sender_other
+            .keys()
+            .chain(receiver_other.keys())
+            .filter(|key| sender_other.get(*key) != receiver_other.get(*key))
+            .collect::<BTreeSet<_>>()
+    );
+    let changed_config: BTreeSet<_> = sender_config
+        .keys()
+        .chain(receiver_config.keys())
+        .filter(|key| sender_config.get(*key) != receiver_config.get(*key))
+        .cloned()
+        .collect();
+    assert!(
+        !changed_config.is_empty(),
+        "expected an actual ancillary Config difference"
+    );
+    // Transfer the actual saved Config images from the existing sender sync,
+    // through the same receive/apply boundary, before comparing all rows.
+    let config_records: Vec<_> = changed_config
+        .iter()
+        .map(|key| {
+            let record = saved(&pair, key);
+            assert!(
+                sender_config.get(key) == Some(&body(&record)),
+                "Service Config differs from sender at key {key}"
+            );
+            record
+        })
+        .collect();
+    pair.receiver
+        .driver()
+        .deliver_collection_records(&config_records)
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
     assert_eq!(
         pair.receiver.driver().collection_rows().unwrap(),
         pair.sender.driver().collection_rows().unwrap()

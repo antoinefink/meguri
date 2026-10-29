@@ -473,3 +473,22 @@ Independent R2 has no P0-P2 finding.
   unproven. Preserve the failure and investigate before accepting that case.
 
 This WIP commit does not claim complete incoming-safety verification.
+
+## Complete the batch fixture's actual input
+
+Start: `106e6a50`. Independent diagnosis traced the whole-collection mismatch
+to Config `nextPos`: native note creation changes it, but the fixture
+delivered only Note/Card records. Export `cleanroom/20261029T160338Z-70753`
+preserves every 502-entry, exact-once and per-operation limit assertion.
+It first proves exact non-Config equality, then delivers the actual differing
+Config records from the existing Service save. Final unfiltered equality and
+clean close remain. Independent R1 found no P0-P2 issue.
+
+- `core-format/20261029T160625Z-74560`: pass.
+- `core-test/20261029T160634Z-74914`: the full corrected batch case passes;
+  14 other cases are outside this filter.
+- `private/20261029T160637Z-75251`: pass.
+- `similarity/20261029T160638Z-75474`: pass.
+
+This closes the batch-fixture mismatch without changing product counters or
+weakening the collection comparison. Other incoming failures remain open.
