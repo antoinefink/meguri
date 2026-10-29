@@ -84,3 +84,39 @@ The 18-file production export remains unapplied and under independent R1.
 Known unfinished conditions include nonempty media/feed, assets, tombstones,
 structural generations, previous/initial/damaged adoption and ambiguous R6
 startup cancellation. The new positive slice supplies no waiver for those.
+
+## Adoption guard repairs, tests first
+
+Production R1 identifies two P1 defects: activation recovery could replace its
+recorded native authority with a different current file, and staging did not
+compare note field count with its notetype. Fixer `095549Z-61045` adds typed R6
+activation proof and the field-layout check. The new host guard target uses an
+actual post-activation abort, a cloud-disabled CoreHost journal drain, then a
+byte-identical new-native file. It requires successful Runtime admission before
+checking isolation and retained evidence. Recovery of the original file is also
+tested. Actual Service writes cover field-count errors and valid empty fields.
+
+R2 clears those repairs and identifies two more P1 defects: closing an unowned
+retained recovery incorrectly attempted cancellation, and a valid R6 account
+mismatch decision (Clear to Pending) was classified as FileMismatch. Fixer
+`101853Z-74330` closes only live owned work and accepts only the exact proven
+pending variation, preserving Pending before normal account isolation. It adds
+real account-change, retained-evidence close/reopen, and live-slot cleanup cases.
+Independent R3 finds no remaining P0-P1 or new P2 in this repair.
+
+Root extracts the combined host target before production. Cancel refusal for
+retained uncertain recovery is safety coverage, not implementation of the final
+ambiguous-recovery Cancel requirement.
+
+- `core-format/20261029T102851Z-78841`: pass.
+- `core-test/20261029T102940Z-79925`: expected pre-production compile RED on
+  missing adoption and test IPC APIs. No executed pass is claimed.
+- `private/20261029T102943Z-80199`: flags one comment and a custom test name.
+  Fixer `103119Z-81450` removes three comment lines and renames that test only;
+  independent equivalence review confirms all assertions and inputs unchanged.
+- `private/20261029T103320Z-82960`: final test file passes.
+- `similarity/20261029T103316Z-82691`: one file, no findings or exemptions.
+
+Compilation and focused execution of the 19-file production repair follow this
+tests-first commit. Full incoming media and the previously listed requirements
+remain open; no Unit, P24 or integration acceptance.
