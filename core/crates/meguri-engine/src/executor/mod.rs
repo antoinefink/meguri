@@ -511,9 +511,22 @@ impl ExecShared {
     }
 
     pub(crate) fn control(&self, action: crate::suspend::Control) -> Pending<crate::suspend::ControlReply> {
+        self.control_planned(action, None)
+    }
+
+    pub(crate) fn flush_wal(&self, planned: Generation) -> Pending<crate::suspend::ControlReply> {
+        self.control_planned(crate::suspend::Control::Flush, Some(planned))
+    }
+
+    fn control_planned(
+        &self,
+        action: crate::suspend::Control,
+        planned: Option<Generation>,
+    ) -> Pending<crate::suspend::ControlReply> {
         let (reply, rx) = mpsc::sync_channel(1);
         let mut meta = self.meta("durability_control", meguri_model::changes::OpSource::Maintenance);
         meta.control = true;
+        meta.planned = planned;
         self.submit(Task {
             meta,
             body: Box::new(writer::ControlTask { action, reply }),

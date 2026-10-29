@@ -256,7 +256,8 @@ impl Runtime {
         p: &Preview,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
-        self.wait_incoming_idle();
+        // Confirmed only records authorization. Bind settles old intents and
+        // waits for incoming work before isolating the prior binding (V17.6).
         self.check_preview_authority(p, collection)?;
         {
             let s = self.state();
@@ -301,9 +302,6 @@ impl Runtime {
         let mut s = self.state();
         if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
-        }
-        if s.incoming.running {
-            return Err(PublicationError::Busy.into());
         }
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;

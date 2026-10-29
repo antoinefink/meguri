@@ -451,3 +451,25 @@ input resets the old read-failure flag. Independent R2 has no P0-P2 finding.
 
 No existing Pending decision is cleared and no recorded account is substituted
 for a live read. Remaining receive, media and native integration work is open.
+
+## Flush incoming work and record confirmation before transition
+
+Phase start: `713498fd`; final integration follows `4153c2fd`. Exports
+`cleanroom/20261029T155918Z-63837` and `cleanroom/20261029T160339Z-70974`
+request a real generation-bound writer flush before checking incoming WAL
+coverage. The snapshot and caller locks are released first. Flush and
+coverage share the deadline. Confirmation records authorization without
+waiting for the paused worker; Bind still waits and settles old intents.
+Independent R2 has no P0-P2 finding.
+
+- `core-format/20261029T160446Z-72245`: pass.
+- `private/20261029T160512Z-73191`: pass.
+- `similarity/20261029T160511Z-72960`: pass.
+- `core-test/20261029T160458Z-72625`: 27 pass, one fails; 13 excluded.
+  Actual WAL coverage, all 18 publication cases and all eight reply/review
+  cases pass. The restarted-publication case passes its former blocked
+  confirmation and reaches the later run-count assertion: two instead of
+  one. The observation currently includes every binding; the cause is still
+  unproven. Preserve the failure and investigate before accepting that case.
+
+This WIP commit does not claim complete incoming-safety verification.

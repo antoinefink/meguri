@@ -230,6 +230,29 @@ impl Collection {
         self.core.exec.last_seq()
     }
 
+    /// Flush this generation's WAL on the writer without lifecycle participants.
+    /// Call off the writer, with no reader lease or caller locks held. A timeout
+    /// does not cancel the queued flush; callers still need a matching receipt
+    /// from `wait_wal_covered` before persisting durability-dependent facts.
+    pub fn flush_wal(&self, timeout: Duration) -> Result<(), EngineError> {
+        if crate::executor::writer::on_writer_thread() {
+            return Err(EngineError::InvalidArgument {
+                message: "WAL flush waits must run off the writer".into(),
+            });
+        }
+        self.check_current()?;
+        self.core.exec.require_admission(self.privilege)?;
+        let deadline = crate::monotonic::now().saturating_add(timeout);
+        self.core
+            .exec
+            .flush_wal(self.generation)
+            .wait_timeout(deadline.saturating_sub(crate::monotonic::now()))
+            .ok_or_else(|| EngineError::SuspendDeadline {
+                phase: "collection WAL".into(),
+            })??;
+        self.check_current()
+    }
+
     /// Wait off the writer for actual durable coverage of a snapshot's seq.
     /// Compare the receipt identity with the snapshot before persisting facts.
     /// This observes the existing flush schedule; it queues no writer work.

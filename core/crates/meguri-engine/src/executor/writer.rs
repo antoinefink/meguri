@@ -1182,7 +1182,14 @@ pub(crate) struct ControlTask {
     pub reply: SyncSender<Result<crate::suspend::ControlReply, EngineError>>,
 }
 impl TaskBody for ControlTask {
-    fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
+    fn run(self: Box<Self>, env: &mut WriterEnv<'_>, meta: &TaskMeta) {
+        let current = env.shared.generation();
+        if let Some(planned) = meta.planned
+            && planned != current
+        {
+            let _ = self.reply.send(Err(EngineError::StaleGeneration { planned, current }));
+            return;
+        }
         let result = crate::suspend::control(env, self.action);
         let _ = self.reply.send(result);
     }

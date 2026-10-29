@@ -590,7 +590,13 @@ impl Runtime {
         // The snapshot/read lease has been released; no caller waits under it,
         // the writer, runtime state or the tracking gate. Seq belongs to this
         // opening, never the intent's prior-process result counter.
-        let receipt = match collection.wait_wal_covered(identity, seq, timeout)? {
+        let deadline = meguri_engine::monotonic::now().saturating_add(timeout);
+        collection.flush_wal(deadline.saturating_sub(meguri_engine::monotonic::now()))?;
+        let receipt = match collection.wait_wal_covered(
+            identity,
+            seq,
+            deadline.saturating_sub(meguri_engine::monotonic::now()),
+        )? {
             WalCoverage::Covered(r)
                 if r.identity() == identity
                     && r.through() >= seq
