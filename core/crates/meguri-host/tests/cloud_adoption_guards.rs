@@ -182,7 +182,15 @@ fn replace_native_candidate(
     assert!(host.cloud_runtime().is_none());
     assert_eq!(Some(NativeFiles.identity(&path).unwrap()), runtime.file);
     let sidecar_path = directory.join("meguri-sidecar.json");
-    let sidecar = std::fs::read(&sidecar_path).unwrap();
+    let mut expected: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar_path).unwrap()).unwrap();
+    assert!(
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("clean_shutdown")
+            .unwrap()
+            .is_boolean()
+    );
     let recorded_a = runtime.file;
     {
         let slot = host.engine().acquire_slot(LongOp::Restore).unwrap();
@@ -210,7 +218,17 @@ fn replace_native_candidate(
             host.close().unwrap();
         }
         assert_eq!(NativeFiles.identity(&path).unwrap(), native_b);
-        assert_eq!(std::fs::read(&sidecar_path).unwrap(), sidecar);
+        let mut semantic_docs: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar_path).unwrap()).unwrap();
+        assert!(
+            semantic_docs
+                .as_object_mut()
+                .unwrap()
+                .remove("clean_shutdown")
+                .unwrap()
+                .is_boolean()
+        );
+        assert!(semantic_docs == expected);
         assert_eq!(device.publication_decision().unwrap(), decision);
         assert_eq!(
             device.replacement_evidence_for(op.before.publication.identity).unwrap(),

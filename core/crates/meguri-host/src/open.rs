@@ -438,16 +438,15 @@ impl CoreHost {
                     // that recovery evidence while closing the host normally.
                     if self.engine.slot_holder() == Some(meguri_engine::LongOp::CloudAdopt)
                         && let Some(runtime) = &self.cloud
-                    {
-                        if let Some(op) = runtime.adoption_op().map_err(|_| EngineError::CollectionUnavailable {
+                        && let Some(op) = runtime.adoption_op().map_err(|_| EngineError::CollectionUnavailable {
                             reason: "cloud recovery close failed".into(),
-                        })? {
-                            runtime.cancel_cloud_adoption(op.id, &self.collection()?).map_err(|_| {
-                                EngineError::Busy {
-                                    running_op: "cloud adoption".into(),
-                                }
+                        })?
+                    {
+                        runtime
+                            .cancel_cloud_adoption(op.id, &self.collection()?)
+                            .map_err(|_| EngineError::Busy {
+                                running_op: "cloud adoption".into(),
                             })?;
-                        }
                     }
                     self.engine.close()?;
                 }

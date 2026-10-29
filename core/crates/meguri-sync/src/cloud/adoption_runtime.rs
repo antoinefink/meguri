@@ -106,12 +106,11 @@ fn received(op: &AdoptOp, record: &Saved) -> Result<codec::Received, RuntimeErro
     {
         return Err(refused());
     }
-    if let Some(payload) = &received.payload {
-        if payload.kind() != codec::Kind::MediaName
-            && crate::cloud::row_payload::payload_key(payload)? != received.entity.fields.key
-        {
-            return Err(refused());
-        }
+    if let Some(payload) = &received.payload
+        && payload.kind() != codec::Kind::MediaName
+        && crate::cloud::row_payload::payload_key(payload)? != received.entity.fields.key
+    {
+        return Err(refused());
     }
     Ok(received)
 }
@@ -792,15 +791,30 @@ impl Runtime {
         let evidence = meguri_engine::device_state::DeviceState::for_collection(adopted.path())
             .replacement_evidence_for(op.before.publication.identity)?
             .ok_or_else(refused)?;
-        if decision.publication != op.candidate
+        let file = self.inputs.files.identity(adopted.path())?;
+        let activation = adopted.cloud_adopt_activation()?.ok_or_else(refused)?;
+        // As at startup, R6 may have completed this exact swap with Pending
+        // after the platform account changed. Its typed proof admits only the
+        // original certain bound candidate, with no pending reason. Finish
+        // step 9 before refreshing the actual identity and applying V9.
+        let mut candidate = op.candidate.clone();
+        if candidate.decision == PublicationDecision::Clear
+            && decision.publication.decision == PublicationDecision::Pending
+            && decision.pending_reason.is_none()
+        {
+            candidate.decision = PublicationDecision::Pending;
+        }
+        if decision.publication != candidate
+            || decision.pending_reason.is_some()
+            || evidence.prior != op.before.publication
             || evidence.candidate != op.candidate
             || evidence.reason != ReplaceReason::CloudAdopt
             || evidence.safety_backup.is_none()
+            || !activation.matches(publication_id(op.id), &op.before.publication, &op.candidate)
+            || activation.native_file() != (file.device, file.inode)
         {
             return Err(refused());
         }
-        let file = self.inputs.files.identity(adopted.path())?;
-        let activation = adopted.cloud_adopt_activation()?.ok_or_else(refused)?;
         meguri_model::faultpoint!("cloud.adopt.after_activation").map_err(Error::from)?;
         {
             let mut s = self.state();

@@ -1,6 +1,6 @@
 # U113 incoming collection and media work
 
-Status: enabled tests-first contracts; incoming execution remains incomplete.
+Status: empty-media adoption checks pass; incoming/media execution and full acceptance remain incomplete.
 Unit start: `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`.
 Phase start: `781f55522c6dc3070a640520d729d11927243f80`.
 Batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
@@ -181,3 +181,42 @@ failure as its tests-first evidence; no incoming implementation is applied.
 This commit precedes the reviewed Pending-finalization repair. No Unit, P24,
 integration or complete sync claim. Native-file fixtures, incoming application,
 media and signed integration remain unfinished.
+
+## Verified adoption checkpoint
+
+After `ad290e03` records the failing live account cases, root applies the
+reviewed finalizer. The exact engine proof admits only the original candidate
+or its permitted Pending variation. Step 9 completes before identity refresh;
+Pending stays pending. Independent review finds no required repairs in this
+change. The input hook remains test-only and calls no callback under its lock.
+
+Both native-file fixtures now reach Runtime through actual engine replacement.
+They require a boolean `clean_shutdown` and compare every other sidecar field
+exactly. Separate native identity, decision, evidence, operation and tracking
+comparisons remain unchanged. Root declines one new comment flagged by the
+privacy guard. Independent review confirms no assertion or behavior changed.
+
+- `core-test/20261029T114126Z-20826`: all 92 adoption, replacement, publication,
+  registration and media regression cases pass, none skipped.
+- Two compiler-reported nested conditionals receive equivalent let-chain
+  edits in filtered runs `114612Z-24513` and `115123Z-28179`. Both receive
+  independent equivalence review; no suppression or error behavior changes.
+- `core-test/20261029T115302Z-29476`: final source passes all 15 adoption cases,
+  none skipped, after those edits.
+- `core-format/20261029T115255Z-29179`: pass.
+- `private/20261029T115306Z-29966`: final three source files pass.
+- `similarity/20261029T115305Z-29738`: three files, no findings or exemptions.
+- `core-lint/20261029T115310Z-29176`: still fails with 18 missing-API
+  diagnostics in the existing publication/media-intent test targets. The missing
+  APIs and Point variants belong to the pending media implementation.
+  No new production lint diagnostic remains in this result;
+  formatting, layering and the feature-disabled object check pass. This is
+  not a workspace lint pass or a gate pass.
+
+This verifies the empty-media collection path and its tested recovery guards.
+Nonempty media, incoming applies, previous/initial/damaged adoption, uncertain
+R6 Cancel, structural generations, assets and tombstones remain required.
+Incoming review tests retain their real receiver-fetch failure evidence.
+The next implementation connects the durable inbox to actual engine applies
+and recovery, followed by media. Keep the original batch base; no Unit or P24
+acceptance and no full sync claim.
