@@ -58,6 +58,11 @@ impl Default for UndoStack {
 }
 
 impl UndoStack {
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn depth(&self) -> usize {
+        self.undo.len()
+    }
+
     pub(super) fn invalidate_safety(&mut self) {
         self.safety_revision = self.safety_revision.wrapping_add(1);
         self.safety_backup = None;

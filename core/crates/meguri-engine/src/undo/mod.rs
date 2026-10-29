@@ -475,6 +475,11 @@ impl Collection {
         Ok(&self.core.exec.undo)
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn undo_depth_for_testing(&self) -> Result<usize, EngineError> {
+        Ok(self.undo_manager()?.lock().depth())
+    }
+
     /// The step `undo(scope)` would undo, or why there is none (M3).
     pub fn peek_undo(&self, scope: UndoScope) -> Result<UndoStatus, EngineError> {
         Ok(self.undo_manager()?.peek(Side::Undo, scope))

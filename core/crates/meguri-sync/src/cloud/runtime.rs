@@ -407,6 +407,8 @@ pub struct Runtime {
     adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
     state: Arc<Mutex<State>>,
     incoming_idle: Arc<std::sync::Condvar>,
+    #[cfg(feature = "test-hooks")]
+    incoming_hooks: Arc<super::testing::Hooks>,
     random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
     key_bytes: Mutex<Option<Arc<dyn KeyByteSource>>>,
     adoption: Mutex<Option<Arc<adoption_impl::AdoptionOwner>>>,
@@ -451,6 +453,8 @@ impl Runtime {
             adoption: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
             incoming_idle: Arc::new(std::sync::Condvar::new()),
+            #[cfg(feature = "test-hooks")]
+            incoming_hooks: Arc::new(super::testing::Hooks::default()),
             state: Arc::new(Mutex::new(State {
                 scan_required: true,
                 actions: super::workflow::Actions::new(),
@@ -1332,5 +1336,39 @@ pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note
 impl meguri_engine::session::SessionStartHook for Runtime {
     fn session_starting(&self) {
         self.state().review_blocked = true;
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Runtime {
+    pub fn set_incoming_stage_hook_for_testing(
+        &self,
+        hook: impl Fn(super::testing::IncomingStage) + Send + Sync + 'static,
+    ) {
+        *self.incoming_hooks.stage.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(hook));
+    }
+    pub fn incoming_stage_for_testing(&self, stage: super::testing::IncomingStage) {
+        self.incoming_hooks.hit(stage);
+    }
+    pub fn interrupt_next_incoming_for_testing(&self, interruption: super::testing::ApplyInterruption) {
+        *self
+            .incoming_hooks
+            .interruption
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(interruption);
+    }
+    pub fn incoming_sdk_instance_for_testing(&self) -> Option<String> {
+        self.state().adapter.sdk.as_ref().map(|sdk| sdk.id.clone())
+    }
+    pub fn incoming_engine_state_for_testing(&self, binding: BindingId) -> Result<Option<Vec<u8>>, RuntimeError> {
+        let state = self.state();
+        with_tracking_access(|| {
+            Ok(state
+                .store
+                .as_ref()
+                .ok_or(Error::Database)?
+                .engine_state(binding)?
+                .map(|s| s.serialization.0))
+        })
     }
 }

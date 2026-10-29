@@ -31,6 +31,53 @@ use std::{
 const FRAME: usize = 16 * 1024 * 1024;
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 pub use core::incoming::{ApplyIntent, ApplyKeyRole};
+use core::testing::IncomingStage;
+pub use core::testing::{ApplyInterruption, TrackingFault};
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RolloverObservation {
+    pub seq: u64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IncomingObservation {
+    pub seq: u64,
+    pub native_file: runtime::NativeFileIdentity,
+    pub generation: u64,
+    pub col_mod: i64,
+    pub undo_depth: usize,
+    pub change_events: Vec<u64>,
+    pub engine_instance: Option<String>,
+    pub engine_state: Option<Vec<u8>>,
+    pub last_fetch_engine_state: Option<Vec<u8>>,
+    pub runs: Vec<core::incoming::ApplyRun>,
+    pub wal_receipts: Vec<Receipt>,
+    pub rollovers: Vec<RolloverObservation>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AddedNote {
+    pub note: codec::Note,
+    pub cards: Vec<codec::Card>,
+    pub seq: u64,
+    pub generation: u64,
+    pub native_file: runtime::NativeFileIdentity,
+}
+/// A granted bounded worker can be paused at an observed real boundary.
+#[derive(Clone, Debug)]
+pub enum IncomingProgress {
+    Completed(usize),
+    Paused(IncomingStage),
+}
+#[derive(Debug)]
+struct WorkPaused;
+impl std::fmt::Display for WorkPaused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("cloud child worker paused")
+    }
+}
+impl std::error::Error for WorkPaused {}
+pub(crate) fn is_work_paused(error: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    error.is::<WorkPaused>()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingInboxEntry {
     pub id: i64,
@@ -55,7 +102,7 @@ pub struct Edit {
     pub generation: u64,
     pub native_file: runtime::NativeFileIdentity,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
     pub through: u64,
     pub generation: u64,
@@ -137,6 +184,17 @@ pub(crate) enum Input {
     ArmAdoptionAccountChange(Option<String>),
     AdoptionCompletion(core::adoption::AdoptOp),
     Edit(i64, Vec<String>),
+    Undo,
+    AddNote(i64, i64, Vec<String>),
+    DeleteNote(i64),
+    BuryCard(i64),
+    IncomingObservation(core::BindingId),
+    IncomingSubmission,
+    InterruptIncoming(ApplyInterruption),
+    TrackingFault(String, TrackingFault),
+    LatchHold(IncomingStage),
+    LatchRelease(IncomingStage),
+    ContinueWork,
     Payloads,
     Entity(String),
     AllEntities,
@@ -161,7 +219,7 @@ pub(crate) enum Input {
     SyncNow(String),
     FetchDue,
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
-    Fetched(String, Vec<Saved>),
+    Fetched(String, Vec<Saved>, String, Vec<u8>),
     IncomingIntents(core::BindingId),
     IncomingInbox(core::BindingId),
     IncomingRefused(core::BindingId),
@@ -228,6 +286,7 @@ enum ChildMessage {
     Reply(std::result::Result<serde_json::Value, ChildFailure>),
     DrawKey,
     Submit(super::Caller, super::Operation),
+    Paused(IncomingStage),
 }
 
 // This closed catalog is the entire error channel: no source error or payload
@@ -365,6 +424,9 @@ pub struct ChildDriver {
     keys: Option<Arc<dyn runtime::KeyByteSource>>,
     queued: Option<super::coordinator::HeldRequest>,
     queued_response: Option<super::Response>,
+    pending_work: Option<Vec<u8>>,
+    completed_work: Option<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
+    paused_work: Option<IncomingStage>,
 }
 impl ChildDriver {
     pub fn apply_intents(&mut self, binding: core::BindingId) -> Result<Vec<ApplyIntent>> {
@@ -395,8 +457,81 @@ impl ChildDriver {
             .collect::<Result<Vec<_>>>()?;
         self.call(Input::DeliverCollection(records))
     }
-    pub fn drain_incoming(&mut self, steps: usize) -> Result<usize> {
-        self.call(Input::DrainIncoming(steps))
+    pub fn drain_incoming(&mut self, steps: usize) -> Result<IncomingProgress> {
+        match self.call(Input::DrainIncoming(steps)) {
+            Ok(count) => Ok(IncomingProgress::Completed(count)),
+            Err(error) if is_work_paused(error.as_ref()) => {
+                Ok(IncomingProgress::Paused(self.paused_work.ok_or_else(failure)?))
+            }
+            Err(error) => Err(error),
+        }
+    }
+    pub fn undo(&mut self) -> Result<()> {
+        self.call(Input::Undo)
+    }
+    pub fn add_note(&mut self, mid: i64, did: i64, fields: &[&str]) -> Result<AddedNote> {
+        self.call(Input::AddNote(
+            mid,
+            did,
+            fields.iter().map(|s| (*s).to_owned()).collect(),
+        ))
+    }
+    pub fn delete_note(&mut self, id: i64) -> Result<()> {
+        self.call(Input::DeleteNote(id))
+    }
+    pub fn bury_card(&mut self, id: i64) -> Result<()> {
+        self.call(Input::BuryCard(id))
+    }
+    pub fn incoming_observation(&mut self, binding: core::BindingId) -> Result<IncomingObservation> {
+        self.call(Input::IncomingObservation(binding))
+    }
+    pub fn interrupt_next_incoming(&mut self, interruption: ApplyInterruption) -> Result<()> {
+        self.call(Input::InterruptIncoming(interruption))
+    }
+    pub fn arm_tracking_fault(&mut self, name: &str, fault: TrackingFault) -> Result<()> {
+        self.call(Input::TrackingFault(name.into(), fault))
+    }
+    pub(crate) fn held_incoming_stage(&self) -> Option<IncomingStage> {
+        self.paused_work
+    }
+    pub(crate) fn hold_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
+        self.call(Input::LatchHold(stage))
+    }
+    pub(crate) fn release_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
+        self.call::<()>(Input::LatchRelease(stage))?;
+        if self.paused_work == Some(stage) {
+            self.paused_work = None;
+        }
+        Ok(())
+    }
+    pub(crate) fn has_incoming_reply(&self, input: &Input) -> Result<bool> {
+        let key = serde_json::to_vec(input)?;
+        Ok(self.pending_work.as_ref() == Some(&key)
+            || self
+                .completed_work
+                .as_ref()
+                .is_some_and(|(completed, _)| *completed == key))
+    }
+    pub(crate) fn resume_incoming_work(&mut self) -> Result<()> {
+        if self.pending_work.is_none() {
+            return Ok(());
+        }
+        write_frame(&mut self.stream, &Input::ContinueWork)?;
+        match self.next_message()? {
+            ChildMessage::Paused(stage) => {
+                self.paused_work = Some(stage);
+                Err(Box::new(WorkPaused))
+            }
+            ChildMessage::Reply(reply) => {
+                self.paused_work = None;
+                let key = self.pending_work.take().ok_or_else(failure)?;
+                self.completed_work = Some((key, reply));
+                // The retained caller continuation consumes this reply once,
+                // including its original error, through call().
+                Ok(())
+            }
+            _ => Err(failure()),
+        }
     }
     pub fn pause_automatic_wal_flush_for_testing(&mut self, paused: bool) -> Result<()> {
         self.call(Input::PauseAutomaticWAL(paused))
@@ -475,6 +610,9 @@ impl ChildDriver {
             keys,
             queued: None,
             queued_response: None,
+            pending_work: None,
+            completed_work: None,
+            paused_work: None,
         };
         driver.call::<()>(Input::Boot(boot))?;
         Ok(driver)
@@ -490,15 +628,29 @@ impl ChildDriver {
             }
         }
     }
-    fn reply<T: DeserializeOwned>(&mut self) -> Result<T> {
-        let ChildMessage::Reply(result) = self.next_message()? else {
-            return Err(failure());
-        };
-        Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?)
-    }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
+        let key = serde_json::to_vec(&input)?;
+        if self.pending_work.as_ref() == Some(&key) {
+            self.resume_incoming_work()?;
+        }
+        if self
+            .completed_work
+            .as_ref()
+            .is_some_and(|(completed, _)| *completed == key)
+        {
+            let (_, result) = self.completed_work.take().ok_or_else(failure)?;
+            return Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?);
+        }
         write_frame(&mut self.stream, &input)?;
-        self.reply()
+        match self.next_message()? {
+            ChildMessage::Reply(reply) => Ok(serde_json::from_value(reply.map_err(ChildFailure::into_error)?)?),
+            ChildMessage::Paused(stage) => {
+                self.pending_work = Some(key);
+                self.paused_work = Some(stage);
+                Err(Box::new(WorkPaused))
+            }
+            _ => Err(failure()),
+        }
     }
     /// Enter the real submission guard and enqueue its original request over IPC.
     /// The child waits for the actual reply, servicing inspection commands meanwhile.
@@ -554,6 +706,7 @@ impl ChildDriver {
                     write_frame(&mut self.stream, &Input::TransportResult(response))?;
                 }
                 ChildMessage::DrawKey => unreachable!(),
+                ChildMessage::Paused(_) => return Err(failure()),
             }
         }
     }
@@ -667,6 +820,24 @@ impl ChildDriver {
         if self.child.is_none() {
             return Ok(());
         }
+        if self.pending_work.is_some() {
+            for stage in [
+                IncomingStage::FetchBeforeInbox,
+                IncomingStage::FetchAfterInbox,
+                IncomingStage::FetchAfterCursor,
+                IncomingStage::ApplyAfterIntent,
+                IncomingStage::ApplyAfterCommit,
+                IncomingStage::ApplyAfterFlush,
+                IncomingStage::IncomingRollbackComplete,
+                IncomingStage::BeforeCollectionSave,
+                IncomingStage::IntentSettlementComplete,
+            ] {
+                self.release_incoming_stage(stage)?;
+            }
+            // Consume the original worker reply before the independent Close
+            // reply; a previously failed operation does not skip host cleanup.
+            let _ = self.resume_incoming_work();
+        }
         self.call::<()>(Input::Close)?;
         let mut child = self.child.take().ok_or_else(failure)?;
         let pid = child.id();
@@ -730,6 +901,13 @@ struct Device {
     deletion: Option<core::publication::ZoneDeletionGuard>,
     session_started: BTreeMap<u64, i64>,
     closed: bool,
+    incoming_worker: Option<incoming_driver::Work>,
+    incoming_latches: Arc<incoming_driver::Latches>,
+    incoming_events: meguri_engine::changes::stream::Subscription,
+    change_events: Vec<u64>,
+    rollovers: Vec<RolloverObservation>,
+    last_fetch_engine_state: Arc<Mutex<Option<Vec<u8>>>>,
+    incoming_submission: Arc<Mutex<Option<super::coordinator::HeldRequest>>>,
 }
 impl Device {
     fn new(b: Boot, stream: &UnixStream) -> Result<Self> {
@@ -749,6 +927,12 @@ impl Device {
             options.cloud_key_bytes = Some(Arc::new(ChildKeys(Mutex::new(stream.try_clone()?))));
         }
         let host = meguri_host::CoreHost::open(options.clone())?;
+        let incoming_events = host.engine().stream().subscribe();
+        let incoming_latches = Arc::new(incoming_driver::Latches::default());
+        if let Some(runtime) = host.cloud_runtime() {
+            let latches = incoming_latches.clone();
+            runtime.set_incoming_stage_hook_for_testing(move |stage| latches.hit(stage));
+        }
         Ok(Self {
             host,
             options,
@@ -759,6 +943,13 @@ impl Device {
             deletion: None,
             session_started: BTreeMap::new(),
             closed: false,
+            incoming_worker: None,
+            incoming_latches,
+            incoming_events,
+            change_events: Vec::new(),
+            rollovers: Vec::new(),
+            last_fetch_engine_state: Arc::new(Mutex::new(None)),
+            incoming_submission: Arc::new(Mutex::new(None)),
         })
     }
     fn runtime(&self) -> Result<&runtime::Runtime> {
@@ -820,17 +1011,22 @@ impl Device {
     }
     fn receipt(&self) -> Result<Receipt> {
         let c = self.host.collection()?;
-        let lease = c.reader(ReaderRole::Cloud)?;
-        let snap = lease.snapshot()?;
-        let native = runtime::FileIdentityProvider::identity(&devices::NativeFiles, c.path())?;
-        match c.wait_wal_covered(snap.wal_identity(), snap.seq(), IPC_TIMEOUT)? {
-            WalCoverage::Covered(r) if r.identity() == snap.wal_identity() && r.through() >= snap.seq() => {
-                Ok(Receipt {
-                    through: r.through().0,
-                    generation: snap.generation().0,
-                    native_file: native,
-                })
-            }
+        let (identity, seq, generation, native) = {
+            let lease = c.reader(ReaderRole::Cloud)?;
+            let snap = lease.snapshot()?;
+            (
+                snap.wal_identity(),
+                snap.seq(),
+                snap.generation(),
+                runtime::FileIdentityProvider::identity(&devices::NativeFiles, c.path())?,
+            )
+        };
+        match c.wait_wal_covered(identity, seq, IPC_TIMEOUT)? {
+            WalCoverage::Covered(r) if r.identity() == identity && r.through() >= seq => Ok(Receipt {
+                through: r.through().0,
+                generation: generation.0,
+                native_file: native,
+            }),
             _ => Err(failure()),
         }
     }
@@ -873,6 +1069,85 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::Undo => {
+                self.host.review().restore_controlled(
+                    meguri_engine::undo::UndoScope::Global,
+                    false,
+                    meguri_engine::CancelToken::new(),
+                    meguri_engine::ProgressSink::new(),
+                )?;
+                value(())
+            }
+            Input::AddNote(mid, did, fields) => {
+                let c = self.host.collection()?;
+                let added = meguri_engine::notes::add(
+                    &c,
+                    meguri_engine::notes::AddNote {
+                        notetype_id: meguri_model::ids::NotetypeId(mid),
+                        deck_id: DeckId(did),
+                        fields,
+                        tags: Vec::new(),
+                        guid: None,
+                        update_add_defaults: false,
+                    },
+                    OpSource::UserUndoable,
+                )?;
+                let rows = self.collection_rows()?;
+                let note = rows
+                    .iter()
+                    .find_map(|p| match p {
+                        codec::Payload::Note(n) if n.id == added.value.id.0 => Some(n.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(failure)?;
+                let cards = rows
+                    .into_iter()
+                    .filter_map(|p| match p {
+                        codec::Payload::Card(c) if added.value.cards.iter().any(|id| id.0 == c.id) => Some(c),
+                        _ => None,
+                    })
+                    .collect();
+                value(AddedNote {
+                    note,
+                    cards,
+                    seq: added.seq.0,
+                    generation: added.generation.0,
+                    native_file: runtime::FileIdentityProvider::identity(&devices::NativeFiles, c.path())?,
+                })
+            }
+            Input::DeleteNote(id) => {
+                meguri_engine::notes::delete(&self.host.collection()?, vec![NoteId(id)], OpSource::UserUndoable)?;
+                value(())
+            }
+            Input::BuryCard(id) => {
+                meguri_engine::sched::ops::run(
+                    &self.host.collection()?,
+                    meguri_engine::sched::ops::Request::Bury(meguri_engine::sched::ops::Targets::Cards(vec![CardId(
+                        id,
+                    )])),
+                    &meguri_engine::tags::RunOptions::default(),
+                )?;
+                value(())
+            }
+            Input::IncomingObservation(binding) => value(incoming_driver::observe(self, binding)?),
+            Input::IncomingSubmission => value(self.incoming_submission.lock().unwrap().clone().ok_or_else(failure)?),
+            Input::InterruptIncoming(interruption) => {
+                self.runtime()?.interrupt_next_incoming_for_testing(interruption);
+                value(())
+            }
+            Input::TrackingFault(name, fault) => {
+                core::testing::arm_tracking_fault(&name, fault)?;
+                value(())
+            }
+            Input::LatchHold(stage) => {
+                self.incoming_latches.hold(stage);
+                value(())
+            }
+            Input::LatchRelease(stage) => {
+                self.incoming_latches.release(stage);
+                value(())
+            }
+            Input::ContinueWork => Err(failure()),
             Input::ArmAdoptionAccountChange(account) => {
                 let op = self.runtime()?.adoption_op()?.ok_or_else(failure)?;
                 if !matches!(&*self.account.0.lock().unwrap(), IdentityStatus::Available(current) if current == &op.account)
@@ -937,6 +1212,10 @@ impl Device {
             Input::Reopen => {
                 self.host.close()?;
                 self.host = meguri_host::CoreHost::open(self.options.clone())?;
+                self.incoming_events = self.host.engine().stream().subscribe();
+                let latches = self.incoming_latches.clone();
+                self.runtime()?
+                    .set_incoming_stage_hook_for_testing(move |stage| latches.hit(stage));
                 self.runtime()?.refresh_identity()?;
                 value(self.runtime()?.instance()?)
             }
@@ -1138,10 +1417,7 @@ impl Device {
                 self.host.collection()?.pause_automatic_wal_flush_for_testing(paused);
                 value(())
             }
-            Input::Fetched(i, records) => {
-                self.host.receive_cloud_collection_records(&i, &records, IPC_TIMEOUT)?;
-                value(())
-            }
+            Input::Fetched(..) => Err(failure()),
             Input::SendsFinished(i) => {
                 self.runtime()?.exchange_sends_finished(&i)?;
                 value(())
@@ -1364,6 +1640,9 @@ pub fn child_entry() -> Result<()> {
     // Each command completes synchronously; EOF/timeouts unwind and close the host.
     for _ in 0..100_000 {
         let input: Input = read_frame(&mut stream)?;
+        let Some(input) = incoming_driver::dispatch(&mut device, input, &mut stream)? else {
+            continue;
+        };
         let close = matches!(input, Input::Close);
         let response = handle_transport_command(&mut device, input, &mut stream).map_err(ChildFailure::classify);
         // A Close served during a reply wait has already sent its own reply.
@@ -1471,3 +1750,6 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
 }
 #[path = "publication_driver.rs"]
 mod publication_driver;
+
+#[path = "incoming_driver.rs"]
+mod incoming_driver;

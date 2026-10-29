@@ -364,3 +364,30 @@ no P0-P2 issue in this scope.
 
 This closes the observed missing-metadata failure. Incoming safety, media,
 native integration and the original full batch gate remain open.
+
+## Incoming worker evidence and reply-retention regression
+
+Harness integration start: `3395fa4c`; the original unit and batch bases
+remain unchanged. Source exports `cleanroom/20261029T152542Z-37511` and
+`cleanroom/20261029T154847Z-52428` add actual worker pauses, typed
+observations, fixed tracking faults and native writer interruptions.
+No existing incoming test is changed. Independent review confirmed the
+final mechanical corrections and three real reply-retention regressions.
+
+- `core-format/20261029T155459Z-58332`: pass.
+- `private/20261029T155526Z-58983`: pass for all 14 source paths.
+- `core-test/20261029T155506Z-58640`: eight tests execute; five pass and
+  three fail. All review-sync cases pass. The new count, Cancel and Error
+  cases reach the intended failure: a later automatic Build overwrites the
+  first operation's unconsumed reply. Subsequent calls return Completed(0).
+- `similarity/20261029T155543Z-59349`: all 14 source paths pass.
+- `core-test/20261029T155552Z-59744`: all 15 cases compile and execute;
+  the child entry passes and all 14 safety cases fail. Failures include
+  identity recovery, held review publication, tracking validation, writer
+  interruption and observation during pauses. These are recorded failures,
+  not accepted coverage. Diagnose with focused cases before another full run.
+
+The single reply slot remains deliberately unfixed in this test-first
+checkpoint. The next repair must retain each actual reply until its caller
+consumes it once, without rerunning the completed operation. No incoming
+safety, crash-mode or full-sync acceptance is claimed here.

@@ -29,6 +29,32 @@ pub enum Point {
     ZoneDeletionReply,
     ResolutionMoveBeforeRewrite,
     MediaTrashBeforeInstall,
+    FetchBeforeInbox,
+    FetchAfterInbox,
+    FetchAfterCursor,
+    ApplyAfterIntent,
+    ApplyAfterCommit,
+    ApplyAfterFlush,
+    IncomingRollbackComplete,
+    BeforeCollectionSave,
+    IntentSettlementComplete,
+}
+impl Point {
+    fn incoming_stage(self) -> Option<cloud::testing::IncomingStage> {
+        use cloud::testing::IncomingStage as Stage;
+        Some(match self {
+            Self::FetchBeforeInbox => Stage::FetchBeforeInbox,
+            Self::FetchAfterInbox => Stage::FetchAfterInbox,
+            Self::FetchAfterCursor => Stage::FetchAfterCursor,
+            Self::ApplyAfterIntent => Stage::ApplyAfterIntent,
+            Self::ApplyAfterCommit => Stage::ApplyAfterCommit,
+            Self::ApplyAfterFlush => Stage::ApplyAfterFlush,
+            Self::IncomingRollbackComplete => Stage::IncomingRollbackComplete,
+            Self::BeforeCollectionSave => Stage::BeforeCollectionSave,
+            Self::IntentSettlementComplete => Stage::IntentSettlementComplete,
+            _ => return None,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackupNotice {
@@ -209,13 +235,22 @@ impl PublicationRig {
         self.sdk.borrow().database_pending()
     }
     pub fn hold(&mut self, point: Point) -> Result<()> {
+        if let Some(stage) = point.incoming_stage() {
+            return self.sdk.get_mut().driver.hold_incoming_stage(stage);
+        }
         self.holds.insert(point);
         Ok(())
     }
     pub fn is_held(&self, point: Point) -> bool {
+        if let Some(stage) = point.incoming_stage() {
+            return self.sdk.borrow().driver.held_incoming_stage() == Some(stage);
+        }
         self.held == Some(point)
     }
     pub fn release(&mut self, point: Point) -> Result<()> {
+        if let Some(stage) = point.incoming_stage() {
+            return self.sdk.get_mut().driver.release_incoming_stage(stage);
+        }
         self.holds.remove(&point);
         if self.held == Some(point) {
             self.held = None;
@@ -434,7 +469,7 @@ impl PublicationRig {
             return Ok(false);
         }
         let scan: super::super::child_driver::ScanState = self.sdk.get_mut().driver.call(Input::ScanState)?;
-        if scan.scan_required {
+        if scan.scan_required || self.sdk.get_mut().driver.has_incoming_reply(&Input::Reconcile)? {
             *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
             if self.gate(Point::BeforeScan) {
                 return Ok(false);
@@ -488,6 +523,9 @@ impl PublicationRig {
             .unwrap_or_else(|| self.sdk.borrow().sent_request(id))
     }
     pub fn held_request(&mut self) -> Result<HeldRequest> {
+        if self.is_held(Point::BeforeCollectionSave) {
+            return self.sdk.get_mut().driver.call(Input::IncomingSubmission);
+        }
         if self.held == Some(Point::ZoneDeletionReply) {
             return self.sdk.get_mut().driver.queued_request();
         }
@@ -509,13 +547,23 @@ impl PublicationRig {
         Ok(queued)
     }
     pub fn drive_ready(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
-        let mut remaining = steps;
-        let resuming_explicit = self.explicit_sync_pending;
-        self.drive_budget(service, &mut remaining)?;
-        if resuming_explicit && !self.explicit_sync_pending {
-            self.finish_collection_drain(service, &mut remaining)?;
+        let result = (|| {
+            self.sdk.get_mut().driver.resume_incoming_work()?;
+            let mut remaining = steps;
+            let resuming_explicit = self.explicit_sync_pending;
+            self.drive_budget(service, &mut remaining)?;
+            if resuming_explicit && !self.explicit_sync_pending {
+                self.finish_collection_drain(service, &mut remaining)?;
+            }
+            Ok(())
+        })();
+        self.finish_worker_drive(result)
+    }
+    fn finish_worker_drive(&mut self, result: Result<()>) -> Result<()> {
+        match result {
+            Err(error) if super::super::child_driver::is_work_paused(error.as_ref()) => self.refresh(),
+            result => result,
         }
-        Ok(())
     }
     fn drive_budget(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         while *remaining > 0 {
@@ -668,18 +716,21 @@ impl PublicationRig {
         Err(failure())
     }
     pub fn sync_now_and_drain(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
-        self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
-        let mut remaining = steps;
-        if self.facts()?.recovery_ops.is_empty() {
-            // One explicit request survives startup holds, including automatic=false.
-            self.explicit_sync_pending = true;
-            if !self.prepare_sdk(service, &mut remaining)? {
-                return self.refresh();
+        let result = (|| {
+            self.sdk.get_mut().driver.resume_incoming_work()?;
+            self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
+            let mut remaining = steps;
+            if self.facts()?.recovery_ops.is_empty() {
+                self.explicit_sync_pending = true;
+                if !self.prepare_sdk(service, &mut remaining)? {
+                    return self.refresh();
+                }
+                self.submit_explicit_sync()?;
             }
-            self.submit_explicit_sync()?;
-        }
-        self.drive_budget(service, &mut remaining)?;
-        self.finish_collection_drain(service, &mut remaining)
+            self.drive_budget(service, &mut remaining)?;
+            self.finish_collection_drain(service, &mut remaining)
+        })();
+        self.finish_worker_drive(result)
     }
     fn finish_collection_drain(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         if self.held.is_some() {

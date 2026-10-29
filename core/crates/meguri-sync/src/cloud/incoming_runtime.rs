@@ -307,14 +307,20 @@ impl Runtime {
         let entities: Vec<_> = records.iter().filter(|r| r.name != "epoch").cloned().collect();
         let (entries, refused) = classify(&key, &entities, at);
         meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| {
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .receive_records(b, &entries, &refused)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .receive_records(b, &entries, &refused)
+            }))
+            .unwrap_or(Err(Error::Database))
         });
         if result.is_err() {
             Self::invalidate_locked(&mut s);
@@ -323,6 +329,9 @@ impl Runtime {
         s.incoming.retry_granted = true;
         drop(s);
         meguri_model::faultpoint!("cloud.fetch.after_inbox").map_err(Error::from)?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::FetchAfterInbox);
         Ok(())
     }
 
@@ -458,6 +467,8 @@ impl Runtime {
         collection.check_rollover()?;
         self.with_incoming(guard, collection, |_| Ok(()))?;
         let shared = self.state.clone();
+        #[cfg(feature = "test-hooks")]
+        let hooks = self.incoming_hooks.clone();
         let file = guard.file;
         let generation = guard.generation;
         let binding = guard.binding;
@@ -466,15 +477,33 @@ impl Runtime {
         let result = collection.run(
             meguri_engine::OpSpec::named("cloud_incoming_apply", meguri_engine::OpSource::CloudIncoming),
             move |ctx| {
-                let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                 if ctx.generation() != generation {
                     return Err(engine_error("incoming generation"));
                 }
-                with_tracking_access(|| {
-                    Self::check_incoming_locked(&s, &writer_guard)?;
-                    apply(ctx, &mut s, binding, file, generation, entries, replay_of)
-                })
-                .map_err(engine_error)
+                let applied = {
+                    let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    with_tracking_access(|| {
+                        Self::check_incoming_locked(&s, &writer_guard)?;
+                        apply(ctx, &mut s, binding, file, generation, entries, replay_of)
+                    })
+                    .map_err(engine_error)?
+                };
+                // Still inside the journalled writer, before collection COMMIT,
+                // but neither runtime state nor TRACKING_ACCESS is held.
+                if applied.is_some() {
+                    meguri_model::faultpoint!("cloud.apply.after_intent")
+                        .map_err(Error::from)
+                        .map_err(engine_error)?;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        hooks.hit(super::super::testing::IncomingStage::ApplyAfterIntent);
+                        hooks.interrupt(ctx)?;
+                    }
+                }
+                // A callback may have invalidated the opening while paused.
+                let s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(engine_error)?;
+                Ok(applied)
             },
         );
         let result = match result {
@@ -496,6 +525,9 @@ impl Runtime {
                         .ok_or(Error::Database)?
                         .rollback_apply(binding, &attempted, cancel)?)
                 })?;
+                #[cfg(feature = "test-hooks")]
+                self.incoming_hooks
+                    .hit(super::super::testing::IncomingStage::IncomingRollbackComplete);
                 return Err(error.into());
             }
         };
@@ -531,6 +563,9 @@ impl Runtime {
             Ok(())
         })?;
         meguri_model::faultpoint!("cloud.apply.after_commit").map_err(Error::from)?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::ApplyAfterCommit);
         self.settle_ordinary(collection, guard, intent_id, timeout)?;
         Ok(attempted.len())
     }
@@ -566,7 +601,14 @@ impl Runtime {
             }
             _ => return Err(engine_error("incoming WAL not covered").into()),
         };
+        self.with_incoming(guard, collection, |s| {
+            s.incoming.receipts.push(receipt);
+            Ok(())
+        })?;
         meguri_model::faultpoint!("cloud.apply.after_flush").map_err(Error::from)?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::ApplyAfterFlush);
         self.with_incoming(guard, collection, |s| {
             if collection.last_seq() != seq {
                 return Err(EngineError::Busy {
@@ -582,9 +624,12 @@ impl Runtime {
                 &current,
                 guard.recovery.is_none(),
             )?;
-            s.incoming.receipts.push(receipt);
             Ok(())
-        })
+        })?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::IntentSettlementComplete);
+        Ok(())
     }
 
     fn read_intent_rows(
@@ -910,18 +955,22 @@ fn apply(
         key.after_digest = digest(after.as_ref())?;
         key.after_payload = after;
     }
-    let id = match store.persist_apply_intent(
-        &ApplyIntent {
-            id: 0,
-            binding,
-            inbox_ids: ids,
-            keys,
-            result_seq: None,
-            native_file: file,
-            generation: generation.0,
-        },
-        replay_of,
-    ) {
+    let id = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.persist_apply_intent(
+            &ApplyIntent {
+                id: 0,
+                binding,
+                inbox_ids: ids,
+                keys,
+                result_seq: None,
+                native_file: file,
+                generation: generation.0,
+            },
+            replay_of,
+        )
+    }))
+    .unwrap_or(Err(Error::Database))
+    {
         Ok(id) => id,
         Err(error) => {
             s.tracking_stopped = true;
@@ -929,7 +978,6 @@ fn apply(
             return Err(error.into());
         }
     };
-    meguri_model::faultpoint!("cloud.apply.after_intent").map_err(Error::from)?;
     Ok(Some(id))
 }
 

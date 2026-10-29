@@ -320,6 +320,8 @@ impl TrackingStore {
         }
         let tx = self.connection.transaction()?;
         receive(&tx, b, entries, refused)?;
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
         meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;
         tx.commit()?;
         Ok(())
@@ -379,6 +381,8 @@ impl TrackingStore {
                 params![i.binding.0.as_slice(), prior],
             )?;
         }
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&tx, "cloud.tracking.commit.intent")?;
         meguri_model::faultpoint!("cloud.tracking.commit.intent")?;
         tx.commit()?;
         Ok(id)

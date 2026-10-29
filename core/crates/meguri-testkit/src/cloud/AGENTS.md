@@ -13,3 +13,6 @@
 - Guard synchronous transport enqueue only. Release its reader lease before waiting for a reply or handling nested Close/Restore. A held reply is the original Service response, delivered once without resubmission.
 - After a hold or a prior zone-deletion reply, read and check Active before the next enqueue.
 - Ordinary SDK batches are non-atomic. Persist all successful record results before returning an unsupported sibling-result error.
+
+- Incoming latches own child workers, not parent stages. A Paused frame is separate from the one deferred command reply; consume each stage event before reporting it, and resume the original callback/page without fetching again. Queries run on the IPC thread with independent reader leases. Release all stages before a clean close. Never move a ReaderLease or guard to a worker.
+- `cloud.apply.after_intent` stays before collection COMMIT, after state/tracking guards are dropped. After its callback, revalidate cached authority before allowing COMMIT. Do not observe through cached expected rows or hold a reader across WAL coverage waits.

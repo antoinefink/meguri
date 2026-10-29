@@ -57,6 +57,8 @@ impl TrackingStore {
         }
         super::incoming_store::receive(&tx, binding, entries, refused)?;
         if !entries.is_empty() || !refused.is_empty() {
+            #[cfg(feature = "test-hooks")]
+            super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
             meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;
         }
         if let Some(state) = state {
@@ -69,6 +71,8 @@ impl TrackingStore {
             return Err(Error::Io(std::io::ErrorKind::Other));
         }
         if state.is_some() {
+            #[cfg(feature = "test-hooks")]
+            super::testing::tracking_commit(&tx, "cloud.tracking.commit.engine_state")?;
             meguri_model::faultpoint!("cloud.tracking.commit.engine_state")?;
         }
         meguri_model::faultpoint!("cloud.adapter.before_commit")?;

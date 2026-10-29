@@ -247,15 +247,18 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| {
-            s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
-                b,
-                entries,
-                refused,
-                serialization,
-                &s.adapter.durable,
-                at_ms,
-                fail,
-            )
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
+                    b,
+                    entries,
+                    refused,
+                    serialization,
+                    &s.adapter.durable,
+                    at_ms,
+                    fail,
+                )
+            }))
+            .unwrap_or(Err(Error::Database))
         });
         if result.is_err() {
             Self::invalidate_locked(s);
@@ -318,6 +321,12 @@ impl Runtime {
                 });
             }
         }
+        if zone != "meguri-root" {
+            meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
+        }
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
         #[cfg(feature = "test-hooks")]
@@ -350,6 +359,13 @@ impl Runtime {
                 b.usable = false;
                 b.binding.facts.state = BindingState::Isolated(IsolationReason::ActiveMissing);
             }
+        }
+        drop(s);
+        if zone != "meguri-root" {
+            meguri_model::faultpoint!("cloud.fetch.after_inbox").map_err(Error::from)?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::FetchAfterInbox);
         }
         Ok(())
     }

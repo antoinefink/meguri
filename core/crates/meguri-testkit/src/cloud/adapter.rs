@@ -9,7 +9,38 @@ use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::workflow::{
     self, BuiltBatch, EntityFacts, ExchangeResult, FetchPhase, Saved, SendCall, SendError,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+// This is the fake SDK's own serialization of actual Service page progress.
+// Full-fetch fixtures intentionally redeliver from None each exchange; saved
+// tokens are observations, never a claim of native CloudKit resume coverage.
+#[derive(Serialize, Deserialize)]
+struct SDKSerialization {
+    collection_zone: String,
+    collection_cursor: Token,
+}
+pub(crate) fn collection_cursor_projection(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
+    let state: SDKSerialization = serde_json::from_slice(bytes)?;
+    Ok(Some(serde_json::to_vec(&(
+        state.collection_zone,
+        state.collection_cursor,
+    ))?))
+}
+struct FetchWork {
+    phase: FetchPhase,
+    root_zone: bool,
+    token: Option<Token>,
+    seen: BTreeSet<String>,
+    active: Option<Saved>,
+    page: Option<FetchPage>,
+}
+struct FetchPage {
+    entities: Vec<Saved>,
+    token: Token,
+    more: bool,
+    request_id: u64,
+}
+
 pub use workflow::{Observation, PendingChange, PendingSnapshot, PendingUpdate, UpdateKind};
 #[derive(Clone, Debug)]
 pub struct BatchAttempt {
@@ -49,6 +80,8 @@ pub struct SDKRig {
     waiting: Option<u64>,
     handler: Option<u64>,
     pub(crate) root: Option<RootReadProof>,
+    fetch: Option<FetchWork>,
+    building: Option<BTreeSet<String>>,
 }
 impl SDKRig {
     pub fn open(files: &PreboundDevice, automatic: bool, now: i64, seed: u64) -> Result<Self> {
@@ -91,6 +124,8 @@ impl SDKRig {
             waiting: None,
             handler: None,
             root: None,
+            fetch: None,
+            building: None,
         }
     }
     pub(crate) fn install_instance(&mut self, instance: String, zone: String) {
@@ -101,6 +136,8 @@ impl SDKRig {
         self.waiting = None;
         self.handler = None;
         self.root = None;
+        self.fetch = None;
+        self.building = None;
     }
     pub(crate) fn database_pending(&self) -> BTreeMap<String, PendingChange> {
         self.database_pending.clone()
@@ -202,25 +239,47 @@ impl SDKRig {
         Err(failure())
     }
     fn fetch_exchange(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
-        let phase: Option<FetchPhase> = self.driver.call(Input::FetchDue)?;
-        let Some(phase) = phase else { return Ok(()) };
-        let mut seen = BTreeSet::new();
-        for root_zone in [true, false] {
-            let zone = if root_zone {
+        let mut fetch = match self.fetch.take() {
+            Some(fetch) => fetch,
+            None => {
+                let phase: Option<FetchPhase> = self.driver.call(Input::FetchDue)?;
+                let Some(phase) = phase else { return Ok(()) };
+                FetchWork {
+                    phase,
+                    root_zone: true,
+                    token: None,
+                    seen: BTreeSet::new(),
+                    active: None,
+                    page: None,
+                }
+            }
+        };
+        let result = self.fetch_pages(service, remaining, &mut fetch);
+        if result.is_err() {
+            self.fetch = Some(fetch);
+        }
+        result
+    }
+    fn fetch_pages(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        remaining: &mut usize,
+        fetch: &mut FetchWork,
+    ) -> Result<()> {
+        loop {
+            let zone = if fetch.root_zone {
                 "meguri-root".to_owned()
             } else {
                 self.files.collection_zone.clone()
             };
-            let mut token = None;
-            let mut active = None;
-            loop {
+            if fetch.page.is_none() {
                 *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
                 let response = service.request(
                     &self.files.scope,
                     self.caller(),
                     Operation::FetchZone {
                         zone: zone.clone(),
-                        token,
+                        token: fetch.token.clone(),
                     },
                 )?;
                 let Ok(Reply::ZoneChanges(page)) = response.result else {
@@ -230,54 +289,80 @@ impl SDKRig {
                 for change in page.changes {
                     match change {
                         RecordChange::Saved(record)
-                            if root_zone && record.name == "active" && record.record_type == "MGActive" =>
+                            if fetch.root_zone && record.name == "active" && record.record_type == "MGActive" =>
                         {
                             let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
                                 return Err(failure());
                             };
-                            active = Some(Saved {
+                            fetch.active = Some(Saved {
                                 name: record.name.clone(),
                                 envelope: e.clone(),
                                 system_fields: record.system_fields.bytes().to_vec(),
                             });
                         }
-                        RecordChange::Saved(record) if !root_zone && record.record_type == "MGEntity" => {
+                        RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEntity" => {
                             let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
                                 return Err(failure());
                             };
-                            seen.insert(record.name.clone());
+                            fetch.seen.insert(record.name.clone());
                             entities.push(Saved {
                                 name: record.name.clone(),
                                 envelope: e.clone(),
                                 system_fields: record.system_fields.bytes().to_vec(),
                             });
                         }
-                        RecordChange::Saved(record) if !root_zone && record.record_type == "MGEpoch" => {}
+                        RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {}
                         _ => return Err(failure()),
                     }
                 }
-                if !entities.is_empty() {
-                    self.driver
-                        .call::<()>(Input::Fetched(self.instance.clone(), entities))?;
-                }
-                if !page.more {
-                    if root_zone {
-                        let active = active.ok_or_else(failure)?;
-                        self.driver.call::<bool>(Input::RootFetch(
-                            self.instance.clone(),
-                            Some(active),
-                            true,
-                            response.request_id,
-                        ))?;
-                    }
-                    break;
-                }
-                token = Some(page.token);
+                // Retain the original page and callback command across a child
+                // pause. Neither Service nor the receive handler is resubmitted.
+                fetch.page = Some(FetchPage {
+                    entities,
+                    token: page.token,
+                    more: page.more,
+                    request_id: response.request_id,
+                });
             }
+            let page = fetch.page.as_ref().ok_or_else(failure)?;
+            if fetch.root_zone {
+                if !page.more {
+                    self.driver.call::<bool>(Input::RootFetch(
+                        self.instance.clone(),
+                        Some(fetch.active.clone().ok_or_else(failure)?),
+                        true,
+                        page.request_id,
+                    ))?;
+                }
+            } else {
+                let serialization = serde_json::to_vec(&SDKSerialization {
+                    collection_zone: zone.clone(),
+                    collection_cursor: page.token.clone(),
+                })?;
+                self.driver.call::<()>(Input::Fetched(
+                    self.instance.clone(),
+                    page.entities.clone(),
+                    zone,
+                    serialization,
+                ))?;
+            }
+            let page = fetch.page.take().ok_or_else(failure)?;
+            if page.more {
+                fetch.token = Some(page.token);
+                continue;
+            }
+            if fetch.root_zone {
+                fetch.root_zone = false;
+                fetch.token = None;
+                continue;
+            }
+            self.driver.call::<()>(Input::FetchCompleted(
+                self.instance.clone(),
+                fetch.phase,
+                fetch.seen.clone(),
+            ))?;
+            return self.refresh();
         }
-        self.driver
-            .call::<()>(Input::FetchCompleted(self.instance.clone(), phase, seen))?;
-        self.refresh()
     }
     pub fn reconcile_and_confirm_root(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         if steps < 4 {
@@ -341,12 +426,17 @@ impl SDKRig {
         self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
         self.updates()?;
         let requested = self
-            .pending
-            .iter()
-            .filter(|(_, v)| **v == PendingChange::Save)
-            .map(|(n, _)| n.clone())
-            .collect();
+            .building
+            .get_or_insert_with(|| {
+                self.pending
+                    .iter()
+                    .filter(|(_, change)| **change == PendingChange::Save)
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            })
+            .clone();
         let b: BuiltBatch = self.driver.call(Input::Build(self.instance.clone(), requested))?;
+        self.building = None;
         let mutations = b
             .saves
             .iter()

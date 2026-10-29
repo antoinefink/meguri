@@ -25,6 +25,8 @@ mod open;
 mod recovery;
 mod runtime_store;
 mod store;
+#[cfg(feature = "test-hooks")]
+pub mod testing;
 mod types;
 
 pub use open::{OpenOutcome, TRACKING_FILE};
