@@ -107,7 +107,6 @@ struct CollectionExportContent: View {
                             .accessibilityIdentifier("settings.importExport.discard")
                     }
                 }
-                .foregroundStyle(.token(.textPrimary))
                 .padding(Spacing.large)
                 .frame(maxWidth: ContentWidth.readable, alignment: .leading)
                 .frame(maxWidth: .infinity)
@@ -131,8 +130,6 @@ struct CollectionExportContent: View {
             .buttonStyle(.bordered)
             #if os(macOS)
             .controlSize(.regular)
-            #else
-            .tint(ColorToken.textPrimary.color)
             #endif
             .navigationTitle(Text("Export Collection", bundle: .module))
             #if os(iOS)
