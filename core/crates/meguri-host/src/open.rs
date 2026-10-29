@@ -362,6 +362,30 @@ impl CoreHost {
     pub fn cloud_runtime(&self) -> Option<&Arc<meguri_sync::cloud::runtime::Runtime>> {
         self.cloud.as_ref()
     }
+
+    /// Ordinary incoming transport and native callers share the production
+    /// Runtime's durable queue and engine operation path.
+    pub fn receive_cloud_collection_records(
+        &self,
+        instance: &str,
+        records: &[meguri_sync::cloud::workflow::Saved],
+        timeout: Duration,
+    ) -> Result<usize, meguri_sync::cloud::runtime::RuntimeError> {
+        let runtime = self
+            .cloud
+            .as_ref()
+            .ok_or(meguri_sync::cloud::runtime::RuntimeError::IdentityUnverified)?;
+        runtime.receive_collection_records(instance, records)?;
+        runtime.drain_incoming(&self.collection()?, timeout)
+    }
+
+    pub fn apply_cloud_incoming(&self, timeout: Duration) -> Result<usize, meguri_sync::cloud::runtime::RuntimeError> {
+        let runtime = self
+            .cloud
+            .as_ref()
+            .ok_or(meguri_sync::cloud::runtime::RuntimeError::IdentityUnverified)?;
+        runtime.drain_incoming(&self.collection()?, timeout)
+    }
     pub fn derived(&self) -> &DerivedHost {
         &self.derived
     }

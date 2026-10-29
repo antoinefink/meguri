@@ -52,3 +52,45 @@ behavior, native integration, signed exchanges and the full batch gate remain
 open. No Unit, P24 closure or working-sync acceptance is claimed.
 
 Final similarity: `similarity/20261029T131939Z-73046`: pass.
+
+## Shared incoming implementation WIP
+
+Producer `cleanroom/20261029T132315Z-74623` adds shared Runtime/CoreHost
+receive and apply code. It uses the engine writer, persists typed intents,
+records actual operation results and waits for matching WAL coverage before
+updating tracking. Child transport forwards real core operations and queries.
+The source explicitly leaves major workflows incomplete.
+
+Full production R1 requires two P1 repairs: the new persistent tables need an
+atomic versioned migration that older readers reject; transitions must settle
+or preserve outstanding old work before removing inbox/base facts, and include
+the new tables in correctly scoped cleanup. Automatic active-review sending
+still lacks the Cloud barrier, held before-images and ACK ownership wiring.
+Deletion and reference handling, restart with mixed row state or an isolated
+binding, test latches and complete state queries still need implementation.
+The review remains open.
+
+- `core-test/20261029T135027Z-83874`: library compilation fails with E0596
+  in Runtime Drop after state changes from Mutex to Arc<Mutex>; zero executed.
+- Fixer `cleanroom/20261029T135658Z-86638` repairs Drop with state-before-
+  tracking locking, renames only two custom digest locals, and removes one new
+  AGENTS paragraph flagged by privacy. Independent narrow review confirms all
+  other seeded files are unchanged; hash inputs/order and copy fields stay.
+- `core-test/20261029T140024Z-88458`: all dependencies build; three cases run.
+  The child helper and full incoming note-edit/reopen test pass. The Good review
+  case reaches matching actual Card/Revlog/full rows and preserves them across
+  reopen, then fails at its second sync (line 110). This case remains failed.
+- `core-test/20261029T140527Z-90810`: the complete incoming-safety target still
+  fails compilation with 84 missing API/type/Point diagnostics; zero execute.
+  Real source-process holds, faults and complete observations must be wired.
+- `private/20261029T140530Z-91073`: all 18 final WIP paths pass.
+- `similarity/20261029T140533Z-91370`: 18 paths, no findings or exemptions.
+
+The review resync failure currently arrives through a generic child error.
+Diagnose it with safe type-only context; never expose record bodies, private
+connection values or credentials. Keep all tests enabled and repair the actual
+path. Native app lifecycle/capability integration, media, signed exchanges,
+power-loss and remaining Q11 matrices, and the full batch gate remain open.
+This checkpoint is WIP, without Unit, P24 or delivery acceptance.
+
+WIP formatting: `core-format/20261029T140011Z-88120`: pass.

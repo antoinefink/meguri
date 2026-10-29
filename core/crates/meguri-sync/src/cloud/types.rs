@@ -161,8 +161,8 @@ impl std::fmt::Debug for InboxValue {
     }
 }
 
-/// Storage input, not a decoded/validated CloudKit record. Control-record
-/// handling and stale-version/replacement rules are not implemented here.
+/// Durable classified input. The receive boundary owns body validation;
+/// tracking owns origin/revision ordering and protects intent-named entries.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxEntry {
     pub record_type: RecordType,

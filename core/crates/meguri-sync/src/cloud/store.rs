@@ -167,8 +167,8 @@ impl TrackingStore {
     /// together. There is no independent cursor-write API. This is a storage
     /// primitive, not an engine event handler: the future coordinator must
     /// enforce account/instance guards and stop after any prior commit failure.
-    /// Exact repeated entries are idempotent; semantic revision ordering and
-    /// replacement of entries belong to the later incoming-record slice.
+    /// Exact repeated entries are idempotent; readable entity versions share
+    /// the ordinary incoming origin/revision ordering and intent protection.
     pub fn commit_fetched(
         &mut self,
         binding: BindingId,
@@ -194,13 +194,7 @@ impl TrackingStore {
         if facts.state != BindingState::Active {
             return Err(Error::IsolatedBinding);
         }
-        for entry in entries {
-            validate_entry(entry)?;
-            transaction.execute(
-                "INSERT INTO inbox(binding,entry) VALUES (?1,?2) ON CONFLICT(binding,entry) DO NOTHING",
-                params![binding.0.as_slice(), encode(entry)?],
-            )?;
-        }
+        super::incoming_store::receive(&transaction, binding, entries, &[])?;
         transaction.execute(
             "INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3)
              ON CONFLICT(binding) DO UPDATE SET serialization=excluded.serialization,saved_at_ms=excluded.saved_at_ms",
@@ -306,7 +300,7 @@ impl TrackingStore {
         rows.map(|row| decode(&row?)).collect()
     }
 
-    fn require_binding(&self, binding: BindingId) -> Result<(), Error> {
+    pub(super) fn require_binding(&self, binding: BindingId) -> Result<(), Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound).map(|_| ())
     }
 }
@@ -331,7 +325,11 @@ pub(super) fn validate_entry(entry: &InboxEntry) -> Result<(), Error> {
             InboxValue::Deletion,
             InboxReason::Ready | InboxReason::ApplyFailed { .. }
         ) | (RecordType::Entity, InboxValue::Record { .. }, _)
-            | (RecordType::Generation, InboxValue::Record { .. }, InboxReason::Asset)
+            | (
+                RecordType::Generation,
+                InboxValue::Record { .. },
+                InboxReason::Asset | InboxReason::Generation
+            )
     );
     if valid { Ok(()) } else { Err(Error::InvalidData) }
 }

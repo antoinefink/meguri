@@ -18,6 +18,9 @@ pub mod runtime;
 pub mod workflow;
 mod workflow_store;
 
+pub mod incoming;
+mod incoming_merge;
+mod incoming_store;
 mod open;
 mod recovery;
 mod runtime_store;

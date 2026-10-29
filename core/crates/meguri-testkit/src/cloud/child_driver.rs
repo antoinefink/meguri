@@ -30,6 +30,24 @@ use std::{
 };
 const FRAME: usize = 16 * 1024 * 1024;
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub use core::incoming::{ApplyIntent, ApplyKeyRole};
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingInboxEntry {
+    pub id: i64,
+    pub record_name: String,
+    /// Zero only for a deletion or an envelope with no readable revision.
+    pub erev: u64,
+    pub reason: core::InboxReason,
+    pub retry_count: u32,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingRefusedEntry {
+    pub record_name: String,
+    pub erev: u64,
+    pub version_known: bool,
+    pub origin: Option<[u8; 16]>,
+    pub reason: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Edit {
     pub note: codec::Note,
@@ -144,6 +162,14 @@ pub(crate) enum Input {
     FetchDue,
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
     Fetched(String, Vec<Saved>),
+    IncomingIntents(core::BindingId),
+    IncomingInbox(core::BindingId),
+    IncomingRefused(core::BindingId),
+    BindingEntity(core::BindingId, String),
+    DeliverCollection(Vec<Saved>),
+    DrainIncoming(usize),
+    PauseAutomaticWAL(bool),
+    CloudHold(u64),
     SendsFinished(String),
     WantsSend,
     StartCall(String),
@@ -232,6 +258,43 @@ pub struct ChildDriver {
     queued_response: Option<super::Response>,
 }
 impl ChildDriver {
+    pub fn apply_intents(&mut self, binding: core::BindingId) -> Result<Vec<ApplyIntent>> {
+        self.call(Input::IncomingIntents(binding))
+    }
+    pub fn inbox_entries(&mut self, binding: core::BindingId) -> Result<Vec<IncomingInboxEntry>> {
+        self.call(Input::IncomingInbox(binding))
+    }
+    pub fn refused_entries(&mut self, binding: core::BindingId) -> Result<Vec<IncomingRefusedEntry>> {
+        self.call(Input::IncomingRefused(binding))
+    }
+    pub fn binding_entity(&mut self, binding: core::BindingId, name: &str) -> Result<Option<EntityFacts>> {
+        self.call(Input::BindingEntity(binding, name.into()))
+    }
+    pub fn deliver_collection_records(&mut self, records: &[super::Record]) -> Result<()> {
+        let records = records
+            .iter()
+            .map(|r| {
+                let Some(super::Field::EncryptedBytes(bytes)) = r.fields.get("e") else {
+                    return Err(failure());
+                };
+                Ok(Saved {
+                    name: r.name.clone(),
+                    envelope: bytes.clone(),
+                    system_fields: r.system_fields.bytes().to_vec(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.call(Input::DeliverCollection(records))
+    }
+    pub fn drain_incoming(&mut self, steps: usize) -> Result<usize> {
+        self.call(Input::DrainIncoming(steps))
+    }
+    pub fn pause_automatic_wal_flush_for_testing(&mut self, paused: bool) -> Result<()> {
+        self.call(Input::PauseAutomaticWAL(paused))
+    }
+    pub fn read_cloud_review_hold(&mut self, session: u64) -> Result<ReviewHold> {
+        self.call(Input::CloudHold(session))
+    }
     pub(crate) fn spawn(
         files: &PreboundDevice,
         identity: IdentityReads,
@@ -917,8 +980,55 @@ impl Device {
                 self.runtime()?.exchange_fetch_completed(&i, phase, &seen)?;
                 value(())
             }
+            Input::IncomingIntents(b) => value(self.runtime()?.apply_intents(b)?),
+            Input::IncomingInbox(b) => value(
+                self.runtime()?
+                    .inbox_entries(b)?
+                    .into_iter()
+                    .map(|stored| IncomingInboxEntry {
+                        id: stored.id,
+                        record_name: stored.entry.record_name,
+                        erev: match stored.entry.value {
+                            core::InboxValue::Record { erev, .. } => erev,
+                            core::InboxValue::Deletion => 0,
+                        },
+                        reason: stored.entry.reason,
+                        retry_count: stored.entry.retry_count,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            Input::IncomingRefused(b) => value(
+                self.runtime()?
+                    .refused_entries(b)?
+                    .into_iter()
+                    .map(|e| IncomingRefusedEntry {
+                        record_name: e.record_name,
+                        erev: e.erev.unwrap_or(0),
+                        version_known: e.erev.is_some(),
+                        origin: e.origin,
+                        reason: e.reason,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            Input::BindingEntity(b, name) => value(self.runtime()?.binding_entity(b, &name)?),
+            Input::DeliverCollection(records) => {
+                self.runtime()?
+                    .receive_collection_records(&self.runtime()?.instance()?, &records)?;
+                value(())
+            }
+            Input::DrainIncoming(steps) => {
+                if steps == 0 {
+                    value(0usize)
+                } else {
+                    value(self.host.apply_cloud_incoming(IPC_TIMEOUT)?)
+                }
+            }
+            Input::PauseAutomaticWAL(paused) => {
+                self.host.collection()?.pause_automatic_wal_flush_for_testing(paused);
+                value(())
+            }
             Input::Fetched(i, records) => {
-                self.runtime()?.accept_fetched_baseline(&i, &records)?;
+                self.host.receive_cloud_collection_records(&i, &records, IPC_TIMEOUT)?;
                 value(())
             }
             Input::SendsFinished(i) => {
@@ -1025,6 +1135,30 @@ impl Device {
             Input::Hold(s) => {
                 let c = self.host.collection()?;
                 let hold = c.held_back_run(Some(SessionId(s)))?;
+                let key = self.runtime()?.status()?.binding.ok_or_else(failure)?.facts.record_key;
+                let mut entity_names = BTreeSet::new();
+                for row in hold.rows() {
+                    let row = row?;
+                    if let Some(kind) = core::row_payload::KINDS
+                        .into_iter()
+                        .find(|k| core::row_payload::table(*k) == Some(row.table))
+                    {
+                        let k = match row.key {
+                            RowKey::Id(id) => codec::id_key(id).to_vec(),
+                            RowKey::Text(t) => t,
+                            _ => continue,
+                        };
+                        entity_names.insert(codec::entity_name(&key.0, kind, &k)?);
+                    }
+                }
+                value(ReviewHold {
+                    op_ids: hold.steps.iter().map(|s| s.id.0).collect(),
+                    entity_names,
+                })
+            }
+            Input::CloudHold(s) => {
+                let c = self.host.collection()?;
+                let hold = c.cloud_held_run(Some(SessionId(s)))?;
                 let key = self.runtime()?.status()?.binding.ok_or_else(failure)?.facts.record_key;
                 let mut entity_names = BTreeSet::new();
                 for row in hold.rows() {

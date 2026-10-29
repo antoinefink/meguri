@@ -299,6 +299,14 @@ pub fn payload_key(payload: &c::Payload) -> Result<Vec<u8>, Error> {
 /// Reverse the wire projection only into a caller-owned unpublished schema-18
 /// stage. The storage scope owns SQL and preserves each SQLite storage class.
 pub(super) fn stage_payload(scope: &mut meguri_storage::WriteScope<'_>, payload: &c::Payload) -> Result<(), Error> {
+    for (table, key, row) in payload_rows(payload)? {
+        scope.restore(table, &key, Some(&row))?;
+    }
+    Ok(())
+}
+
+/// Pure reverse projection shared by unpublished staging and journalled incoming ops.
+pub(super) fn payload_rows(payload: &c::Payload) -> Result<Vec<(Table, RowKey, RowImage)>, Error> {
     use Cell::{Blob as B, Integer as I, Text as T};
     use c::{Payload as P, Stored as S};
     let stored = |s: &S| match s {
@@ -307,9 +315,10 @@ pub(super) fn stage_payload(scope: &mut meguri_storage::WriteScope<'_>, payload:
         S::Text(v) => T(v.clone()),
         S::Blob(v) => B(v.clone()),
     };
+    let mut images = Vec::new();
     let mut put = |table, row: Vec<Cell>| -> Result<(), Error> {
         let key = RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?;
-        scope.restore(table, &key, Some(&row))?;
+        images.push((table, key, row));
         Ok(())
     };
     match payload {
@@ -421,5 +430,5 @@ pub(super) fn stage_payload(scope: &mut meguri_storage::WriteScope<'_>, payload:
         )?,
         P::MediaName(_) => return Err(Error::InvalidData),
     }
-    Ok(())
+    Ok(images)
 }

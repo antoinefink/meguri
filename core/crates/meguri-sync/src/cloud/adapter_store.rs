@@ -1,7 +1,7 @@
 //! Adapter state shares the tracking connection, transaction and access gate.
 use super::{
     adapter::Durable,
-    store::{decode, encode, validate_entry},
+    store::{decode, encode},
     *,
 };
 use rusqlite::{OptionalExtension, params};
@@ -25,6 +25,7 @@ impl TrackingStore {
         &mut self,
         binding: BindingId,
         entries: &[InboxEntry],
+        refused: &[super::incoming::RefusedEntry],
         state: Option<&[u8]>,
         durable: &Durable,
         at_ms: i64,
@@ -54,12 +55,9 @@ impl TrackingStore {
                 )?;
             }
         }
-        for entry in entries {
-            validate_entry(entry)?;
-            tx.execute(
-                "INSERT INTO inbox(binding,entry) VALUES (?1,?2) ON CONFLICT(binding,entry) DO NOTHING",
-                params![binding.0.as_slice(), encode(entry)?],
-            )?;
+        super::incoming_store::receive(&tx, binding, entries, refused)?;
+        if !entries.is_empty() || !refused.is_empty() {
+            meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;
         }
         if let Some(state) = state {
             tx.execute("INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3) ON CONFLICT(binding) DO UPDATE SET serialization=excluded.serialization,saved_at_ms=excluded.saved_at_ms",params![binding.0.as_slice(),state,at_ms])?;
@@ -69,6 +67,9 @@ impl TrackingStore {
         // fail this same transaction before commit, rolling every write back.
         if fail {
             return Err(Error::Io(std::io::ErrorKind::Other));
+        }
+        if state.is_some() {
+            meguri_model::faultpoint!("cloud.tracking.commit.engine_state")?;
         }
         meguri_model::faultpoint!("cloud.adapter.before_commit")?;
         tx.commit()?;

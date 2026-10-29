@@ -135,6 +135,7 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_account(&self, sdk: Option<&str>, identity: IdentityStatus) -> Result<(), RuntimeError> {
+        self.wait_incoming_idle();
         let mut s = self.state();
         if let Some(sdk) = sdk {
             Self::sdk_locked(&s, sdk)?;
@@ -239,6 +240,7 @@ impl Runtime {
     fn adapter_commit_locked(
         s: &mut State,
         entries: &[InboxEntry],
+        refused: &[super::super::incoming::RefusedEntry],
         serialization: Option<&[u8]>,
         at_ms: i64,
         fail: bool,
@@ -248,6 +250,7 @@ impl Runtime {
             s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
                 b,
                 entries,
+                refused,
                 serialization,
                 &s.adapter.durable,
                 at_ms,
@@ -267,7 +270,7 @@ impl Runtime {
         let fail = std::mem::take(&mut s.adapter.fail_state);
         #[cfg(not(feature = "test-hooks"))]
         let fail = false;
-        Self::adapter_commit_locked(&mut s, &[], Some(serialization), at_ms, fail)
+        Self::adapter_commit_locked(&mut s, &[], &[], Some(serialization), at_ms, fail)
     }
     pub fn adapter_fetched(
         &self,
@@ -294,27 +297,14 @@ impl Runtime {
         } else if zone != collection_zone(EpochId(epoch)) {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
         }
-        let mut entries = Vec::new();
+        let (mut entries, refused) = if zone != "meguri-root" {
+            // The collection's epoch header is a control record, never an entity.
+            let entities: Vec<_> = records.iter().filter(|r| r.name != "epoch").cloned().collect();
+            super::super::incoming::classify(&key, &entities, at_ms)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         if zone != "meguri-root" {
-            for record in records {
-                let r = codec::receive(&key, &record.name, &record.envelope, codec::AssetInput::Absent)
-                    .map_err(|_| Error::InvalidData)?;
-                entries.push(InboxEntry {
-                    record_type: RecordType::Entity,
-                    record_name: record.name.clone(),
-                    value: InboxValue::Record {
-                        erev: r.entity.fields.erev,
-                        system_fields: OpaqueBytes(record.system_fields.clone()),
-                        envelope: OpaqueBytes(record.envelope.clone()),
-                        staged_asset: None,
-                    },
-                    reason: InboxReason::Ready,
-                    source: InboxSource::Fetch,
-                    absence_pass: None,
-                    retry_count: 0,
-                    fetched_at_ms: at_ms,
-                });
-            }
             for name in deleted {
                 entries.push(InboxEntry {
                     record_type: RecordType::Entity,
@@ -345,9 +335,12 @@ impl Runtime {
                 s.adapter.durable.active = Some(record.clone());
             }
         }
-        if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, None, at_ms, fail) {
+        if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, &refused, None, at_ms, fail) {
             s.adapter.durable = previous;
             return Err(error);
+        }
+        if zone != "meguri-root" {
+            s.incoming.retry_granted = true;
         }
         if s.adapter.durable.active_deleted {
             s.root_confirmed = false;
@@ -468,7 +461,7 @@ impl Runtime {
         }
         let old = s.adapter.durable.clone();
         s.adapter.durable.drains.extend(drains.clone());
-        if let Err(e) = Self::adapter_commit_locked(&mut s, &[], None, at_ms, false) {
+        if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false) {
             s.adapter.durable = old;
             return Err(e);
         }
@@ -758,6 +751,7 @@ impl Runtime {
                 store.adapter_install()?;
                 store.adapter_commit(
                     binding.id,
+                    &[],
                     &[],
                     saved_state.as_deref(),
                     &Durable::default(),

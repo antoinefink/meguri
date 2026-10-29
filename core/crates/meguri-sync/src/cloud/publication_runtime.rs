@@ -256,6 +256,7 @@ impl Runtime {
         p: &Preview,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
+        self.settle_before_transition(collection, Duration::from_secs(30))?;
         self.check_preview_authority(p, collection)?;
         {
             let s = self.state();

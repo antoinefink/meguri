@@ -59,7 +59,7 @@ pub(super) fn row_key(kind: codec::Kind, key: &[u8]) -> Result<RowKey, Error> {
         RowKey::text(std::str::from_utf8(key).map_err(|_| Error::InvalidData)?)
     })
 }
-fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
+pub(super) fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
     #[cfg(feature = "test-hooks")]
     body_read();
     let p = codec::Payload::decode(codec::Kind::Note, &n.local_payload.0).map_err(|_| Error::InvalidData)?;
@@ -246,6 +246,17 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND (kind IN (2,3,4,8) OR ?2) AND json_extract(content,'$.mark') IS NOT NULL")?;
         for name in entities.query_map(params![b.0.as_slice(), publishing], |r| r.get::<_, String>(0))? {
             names.insert(name?, PendingChange::Save);
+        }
+        let blocked: Vec<_> = names
+            .keys()
+            .filter_map(|name| match self.incoming_blocks_name(b, name) {
+                Ok(true) => Some(Ok(name.clone())),
+                Ok(false) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<_, Error>>()?;
+        for name in blocked {
+            names.remove(&name);
         }
         Ok(PendingSnapshot(names))
     }
@@ -541,6 +552,18 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             return Err(Error::InvalidData.into());
         }
         let tx = self.connection.transaction().map_err(Error::from)?;
+        let incoming = super::incoming_store::intents(&tx, b)?;
+        let applying = commit.changes.source == meguri_model::changes::OpSource::CloudIncoming;
+        if applying {
+            for mut intent in incoming.iter().filter(|i| i.result_seq.is_none()).cloned() {
+                intent.result_seq = Some(commit.seq.0);
+                tx.execute(
+                    "UPDATE cloud_apply_intents SET content=?2 WHERE id=?1",
+                    params![intent.id, encode(&intent)?],
+                )
+                .map_err(Error::from)?;
+            }
+        }
         let mut written = 0;
         for kind in row_payload::KINDS {
             let Some(table) = row_payload::table(kind) else {
@@ -553,6 +576,13 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     Some(r) => row_payload::key(kind, r)?,
                     None => return Err(Error::InvalidData.into()),
                 };
+                let protected = incoming
+                    .iter()
+                    .flat_map(|i| &i.keys)
+                    .find(|k| k.kind == kind && k.key == key);
+                if applying && protected.is_some() {
+                    continue;
+                }
                 let existing = entity(&tx, b, kind, &key)?;
                 if raw.is_none() {
                     let e = existing.ok_or(Error::InvalidData)?;
@@ -571,7 +601,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 let mut e = if let Some(e) = existing {
                     e
                 } else {
-                    if kind != codec::Kind::Revlog {
+                    if kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
                     }
                     let mut origin = [0; 16];
@@ -620,6 +650,11 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     && (old.kind != new.kind || old.parent_id != new.parent_id)
                 {
                     return Err(Error::InvalidData.into());
+                }
+                if let Some(expected) = protected.and_then(|k| k.after_payload.as_ref()) {
+                    // Capture later edits against the incoming after-image,
+                    // including an undo that restored the old tracked payload.
+                    e.payload = expected.clone();
                 }
                 e.observe(p, DirtySource::Observer, &mut state.change_counter)?;
                 e.observer_open = open;

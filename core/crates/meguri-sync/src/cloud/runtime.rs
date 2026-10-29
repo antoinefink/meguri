@@ -21,6 +21,8 @@ use super::{entity_codec as codec, *};
 mod adapter_impl;
 #[path = "adoption_runtime.rs"]
 mod adoption_impl;
+#[path = "incoming_runtime.rs"]
+mod incoming_impl;
 #[path = "publication_runtime.rs"]
 mod publication_impl;
 #[path = "workflow_runtime.rs"]
@@ -389,6 +391,7 @@ struct State {
     review_blocked: bool,
     adapter: super::adapter::AdapterState,
     publication: super::publication::ProcessState,
+    incoming: super::incoming::ProcessState,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
@@ -402,7 +405,8 @@ pub struct Runtime {
     directory: PathBuf,
     inputs: CloudInputs,
     adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
+    incoming_idle: Arc<std::sync::Condvar>,
     random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
     key_bytes: Mutex<Option<Arc<dyn KeyByteSource>>>,
     adoption: Mutex<Option<Arc<adoption_impl::AdoptionOwner>>>,
@@ -445,11 +449,12 @@ impl Runtime {
             key_bytes: Mutex::new(None),
             adoption: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
-            state: Mutex::new(State {
+            incoming_idle: Arc::new(std::sync::Condvar::new()),
+            state: Arc::new(Mutex::new(State {
                 scan_required: true,
                 actions: super::workflow::Actions::new(),
                 ..State::default()
-            }),
+            })),
             #[cfg(feature = "test-hooks")]
             scan_pause: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -517,6 +522,8 @@ impl Runtime {
         state.publication.zones_created = false;
         state.publication.own_epoch_read = false;
         state.actions = super::workflow::Actions::new();
+        state.incoming.failed_this_open.clear();
+        state.incoming.retry_granted = false;
         with_tracking_access(|| -> Result<(), RuntimeError> {
             if state.store.is_none() {
                 let outcome = TrackingStore::open(&self.directory, self.inputs.scope.clone())?;
@@ -633,6 +640,7 @@ impl Runtime {
     /// An actor/host calls this off the writer at an actual account read point.
     /// An old result cannot verify a replacement or resumed incarnation.
     pub fn refresh_identity(&self) -> Result<(), RuntimeError> {
+        self.wait_incoming_idle();
         let guard = {
             let state = self.state();
             state.bound.as_ref().map(|b| {
@@ -1276,7 +1284,8 @@ impl SuspendParticipant for Runtime {
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
-        let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
+        // Incoming writer closures share state; take its lock before the tracking gate.
+        let mut state = self.state();
         with_tracking_access(|| {
             state.store.take();
         });

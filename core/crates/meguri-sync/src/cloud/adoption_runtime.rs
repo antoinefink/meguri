@@ -224,6 +224,7 @@ impl Runtime {
         collection: &Collection,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
+        self.settle_before_transition(collection, Duration::from_secs(30))?;
         self.check_preview_authority(preview, collection)?;
         meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
         if !matches!(

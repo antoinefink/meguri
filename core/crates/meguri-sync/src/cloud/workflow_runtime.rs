@@ -133,6 +133,7 @@ impl Runtime {
             || s.last_session.is_some()
             || s.review_blocked
             || s.adapter.paused
+            || s.incoming.running
         {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
@@ -270,6 +271,7 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         timeout: Duration,
     ) -> Result<NoteScanProof, RuntimeError> {
+        self.settle_before_transition(collection, timeout)?;
         #[cfg(feature = "test-hooks")]
         let mut scan_pause = self.scan_pause.lock().unwrap_or_else(PoisonError::into_inner).take();
         let guard = {
@@ -705,6 +707,7 @@ impl Runtime {
                 });
             }
         }
+        self.drain_incoming(collection, Duration::from_secs(30))?;
         self.poll_review(instance)?;
         if self.workflow_gate().is_err() {
             return Ok(BuiltBatch {
@@ -737,6 +740,9 @@ impl Runtime {
                 let publishing = Self::publication_allows_send_locked(s);
                 let store = s.store.as_mut().ok_or(Error::Database)?;
                 for name in requested {
+                    if store.incoming_blocks_name(b.id, name)? {
+                        continue;
+                    }
                     if saves.len() >= limit {
                         break;
                     }
@@ -1004,32 +1010,6 @@ impl Runtime {
     }
     pub fn exchange_fetch_due(&self) -> Option<FetchPhase> {
         self.state().actions.exchange_phase
-    }
-    pub fn accept_fetched_baseline(&self, instance: &str, records: &[Saved]) -> Result<(), RuntimeError> {
-        let decoded = self.decode_saved(instance, records);
-        let mut s = self.state();
-        Self::caller_locked(&s, instance)?;
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
-        let result = with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_ref().ok_or(Error::Database)?;
-            for (record, received) in records.iter().zip(decoded?) {
-                let e = store
-                    .entity_facts(b.id, &record.name)?
-                    .ok_or(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation))?;
-                if received.entity.fields.origin != e.origin
-                    || received.entity.fields.erev != e.server_erev
-                    || received.entity.payload_sha256 != e.acked_payload_digest
-                    || record.system_fields != e.acked_system_fields
-                {
-                    return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-                }
-            }
-            Ok(())
-        });
-        if result.is_err() {
-            Self::invalidate_locked(&mut s);
-        }
-        result
     }
     pub fn exchange_fetch_completed(
         &self,

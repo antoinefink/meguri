@@ -71,6 +71,7 @@ pub(super) fn open_current(directory: &Path, scope: BuildScope) -> Result<OpenOu
             transaction.commit()?;
         }
     }
+    super::incoming_store::install(&connection)?;
     let store = TrackingStore {
         connection,
         scope,
