@@ -194,19 +194,19 @@ fn newer_schema_committed_only_in_wal_preserves_every_original_byte_and_sidecar(
     drop(store);
     let database = rusqlite::Connection::open(directory.path().join(TRACKING_FILE)).unwrap();
     database
-        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA user_version=3;")
+        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA user_version=4;")
         .unwrap();
     let main = fs::read(directory.path().join(TRACKING_FILE)).unwrap();
     // The old version is still in the main file; only a private WAL-aware
     // probe can see that this is a newer database.
-    assert_eq!(&main[60..64], &2_u32.to_be_bytes());
+    assert_eq!(&main[60..64], &3_u32.to_be_bytes());
     assert!(directory.path().join("meguri-cloud.db-wal").exists());
     assert!(directory.path().join("meguri-cloud.db-shm").exists());
     let before = files(directory.path());
     for _ in 0..2 {
         assert!(matches!(
             TrackingStore::open(directory.path(), scope()).unwrap(),
-            OpenOutcome::NewerSchema { found: 3 }
+            OpenOutcome::NewerSchema { found: 4 }
         ));
         assert_eq!(files(directory.path()), before);
     }
@@ -242,6 +242,80 @@ fn unreadable_required_table_is_damaged_and_original_stays_untouched() {
         OpenOutcome::Damaged
     ));
     assert_eq!(files(directory.path()), before);
+}
+
+fn assert_current_incoming_damage_stays_untouched(table: &str, unreadable_content: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = open(directory.path());
+    let binding = binding(&mut store);
+    drop(store);
+    let database = rusqlite::Connection::open(directory.path().join(TRACKING_FILE)).unwrap();
+    // Explicit target-version fixture, including while the pre-migration
+    // implementation still writes version 2. Keep all corruption in the WAL.
+    database
+        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA user_version=3;")
+        .unwrap();
+    if unreadable_content {
+        let sql = match table {
+            "cloud_apply_intents" => "INSERT INTO cloud_apply_intents(binding,content) VALUES(?1,'{}')",
+            "cloud_refused" => "INSERT INTO cloud_refused(binding,name,content) VALUES(?1,'corrupt-entry','{}')",
+            _ => panic!("unexpected incoming table"),
+        };
+        // Valid SQLite/JSON, but not a readable intent/refusal. These rows are
+        // deliberate corruption, never fixtures for proving incoming applies.
+        database.execute(sql, [binding.id.0.as_slice()]).unwrap();
+    } else {
+        database.execute_batch(&format!("DROP TABLE {table}")).unwrap();
+    }
+    assert!(directory.path().join("meguri-cloud.db-wal").exists());
+    assert!(directory.path().join("meguri-cloud.db-shm").exists());
+    let tables: i64 = database
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(tables, if unreadable_content { 1 } else { 0 });
+    if unreadable_content {
+        let content: String = database
+            .query_row(&format!("SELECT content FROM {table}"), [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(content, "{}");
+    }
+    let before = files(directory.path());
+    for _ in 0..2 {
+        assert!(matches!(
+            TrackingStore::open(directory.path(), scope()).unwrap(),
+            OpenOutcome::Damaged
+        ));
+        // Byte identity also proves missing tables were not recreated and
+        // malformed rows were not repaired. Avoid source reads here: even a
+        // SELECT on this live connection can update its WAL-index read marks.
+        assert_eq!(files(directory.path()), before);
+    }
+    // Closing this connection can checkpoint; compare before its own close.
+    drop(database);
+}
+
+#[test]
+fn current_schema_missing_apply_intents_is_damaged_without_recreating_or_changing_bytes() {
+    assert_current_incoming_damage_stays_untouched("cloud_apply_intents", false);
+}
+
+#[test]
+fn current_schema_missing_refused_is_damaged_without_recreating_or_changing_bytes() {
+    assert_current_incoming_damage_stays_untouched("cloud_refused", false);
+}
+
+#[test]
+fn current_schema_unreadable_apply_intents_is_damaged_without_changing_bytes() {
+    assert_current_incoming_damage_stays_untouched("cloud_apply_intents", true);
+}
+
+#[test]
+fn current_schema_unreadable_refused_is_damaged_without_changing_bytes() {
+    assert_current_incoming_damage_stays_untouched("cloud_refused", true);
 }
 
 // V8.1 storage-only recovery. These tests exercise actual SQLite files and
@@ -450,33 +524,6 @@ fn destination_commit_failure_preserves_source_and_rolls_back_groups() {
 }
 
 #[test]
-fn v1_migration_preserves_original_binding_inbox_and_engine_serialization() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut store = open(dir.path());
-    let old = binding(&mut store);
-    store
-        .commit_fetched(old.id, &[record("old-inbox")], &OpaqueBytes(vec![6, 7]), &clock(88))
-        .unwrap();
-    let inbox = store.inbox(old.id).unwrap();
-    let state = store.engine_state(old.id).unwrap();
-    drop(store);
-    let db = rusqlite::Connection::open(dir.path().join(TRACKING_FILE)).unwrap();
-    // The v2 migration is additive; these are exactly the original v1 tables.
-    db.execute_batch("DROP TABLE conflicts; DROP TABLE salvage_bindings; PRAGMA user_version=1;")
-        .unwrap();
-    drop(db);
-    let store = open(dir.path());
-    assert_eq!(store.binding(old.id).unwrap(), Some(old));
-    assert_eq!(store.inbox(inbox_binding(&store)).unwrap(), inbox);
-    assert_eq!(store.engine_state(inbox_binding(&store)).unwrap(), state);
-    assert!(store.conflict_copies().unwrap().is_empty());
-}
-
-fn inbox_binding(store: &TrackingStore) -> BindingId {
-    store.selected_binding().unwrap().unwrap().id
-}
-
-#[test]
 fn oldest_source_wins_global_id_dedup_and_empty_sources_make_no_groups() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = tempfile::tempdir().unwrap();
@@ -623,14 +670,14 @@ fn recovery_preserves_newer_original_main_wal_and_shm_bytes() {
     let dir = tempfile::tempdir().unwrap();
     drop(open(dir.path()));
     let db = rusqlite::Connection::open(dir.path().join(TRACKING_FILE)).unwrap();
-    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA user_version=3;")
+    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA user_version=4;")
         .unwrap();
     let before = files(dir.path());
     let random = SeededRandom::new(99);
     for _ in 0..2 {
         assert!(matches!(
             TrackingStore::recover(dir.path(), scope(), &clock(0), &random).unwrap(),
-            OpenOutcome::NewerSchema { found: 3 }
+            OpenOutcome::NewerSchema { found: 4 }
         ));
         assert_eq!(files(dir.path()), before);
     }

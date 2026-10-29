@@ -156,3 +156,29 @@ Independent R2 is clear of P0-P2 findings for this bounded change.
 The bounded startup findings are resolved. All other R1 findings, remaining
 Q11 cases, media handling, app wiring, signed device evidence and the full
 batch gate still await work. No Unit or P24 acceptance is claimed.
+
+## Versioned tracking migration: tests first
+
+Phase start `3644983a`; U113 and the original batch base remain unchanged.
+Implementer export `cleanroom/20261029T143126Z-4023` was prepared from
+`63f85286`; its two owned paths had no intervening changes. Tests only.
+Historical fixtures use the actual V1/V2 table definitions without today's
+opener, preserving binding, inbox, engine serialization and conflict facts.
+The prior V1 check moves to this stronger fixture. Current-format expectations
+are version 3; existing future-format tests advance to 4, keeping their
+original-byte and sidecar checks.
+
+Independent R1 is clear of P0-P2 findings. Atomic migration is checked through
+a real second-table DDL failure. Four current-format damage cases require
+private-copy probing to preserve every original main/WAL/SHM byte.
+
+- `core-format/20261029T143632Z-8118`: pass.
+- `core-test/20261029T143700Z-8517`: 76 execute, 67 pass and nine fail as
+  expected before implementation. Three find persisted version 2 instead of 3;
+  one detects leaked DDL after migration fails; four receive NewerSchema rather
+  than Damaged for the explicit version-3 corrupt fixtures; one finds version 2
+  still in the main file before the future-version WAL probe.
+- `private/20261029T143739Z-8970`: both owned paths pass.
+- `similarity/20261029T143741Z-9214`: both owned paths pass.
+
+Repair remains required. No acceptance is claimed.

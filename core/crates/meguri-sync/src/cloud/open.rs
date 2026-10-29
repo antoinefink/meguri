@@ -127,8 +127,14 @@ pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildScope, OpenOutcome, TrackingStore};
-    use crate::cloud::{ContainerId, Environment};
+    use super::{OpenOutcome, TRACKING_FILE};
+    use crate::cloud::{store, *};
+    use meguri_model::{
+        clock::{FixedClock, UtcOffset},
+        rng::SeededRandom,
+    };
+    use rusqlite::{Connection, params};
+    use std::path::Path;
 
     fn scope() -> BuildScope {
         BuildScope {
@@ -154,6 +160,239 @@ mod tests {
             let enabled: i64 = connection.pragma_query_value(None, pragma, |row| row.get(0)).unwrap();
             assert_eq!(enabled, 1, "{pragma} must flush the device cache");
         }
+    }
+
+    struct LegacyFacts {
+        binding: Binding,
+        inbox: Vec<StoredInboxEntry>,
+        state: Option<EngineState>,
+        conflicts: Vec<StoredConflict>,
+    }
+
+    fn historical_store(directory: &Path, version: i64) -> (TrackingStore, LegacyFacts) {
+        assert!(matches!(version, 1 | 2));
+        let mut connection = Connection::open(directory.join(TRACKING_FILE)).unwrap();
+        let transaction = connection.transaction().unwrap();
+        transaction.execute_batch(store::V1_SCHEMA).unwrap();
+        if version == 2 {
+            transaction.execute_batch(store::V2_SCHEMA).unwrap();
+        }
+        transaction.pragma_update(None, "user_version", version).unwrap();
+        transaction.commit().unwrap();
+        // Construct the historical store directly: opening through today's
+        // entry point would install the very schema this fixture must lack.
+        let mut store = TrackingStore {
+            connection,
+            scope: scope(),
+            directory: directory.to_owned(),
+        };
+        let clock = FixedClock::new(88, UtcOffset::UTC);
+        let binding = store
+            .create_binding(
+                BindingFacts {
+                    account: OpaqueBytes(vec![0, 255, 6]),
+                    epoch: EpochId([13; 16]),
+                    record_key: RecordKey([27; 32]),
+                    publication: serde_json::from_str("[17,29]").unwrap(),
+                    state: BindingState::Active,
+                },
+                &clock,
+                &SeededRandom::new(9),
+            )
+            .unwrap();
+        let entry = InboxEntry {
+            record_type: RecordType::Entity,
+            record_name: "historical-inbox".into(),
+            value: InboxValue::Record {
+                erev: 4,
+                system_fields: OpaqueBytes(vec![0, 255]),
+                envelope: OpaqueBytes(b"historical-opaque-envelope".to_vec()),
+                staged_asset: Some("cloud-staging/historical".into()),
+            },
+            reason: InboxReason::Ready,
+            source: InboxSource::Fetch,
+            absence_pass: Some([7; 16]),
+            retry_count: 2,
+            fetched_at_ms: 77,
+        };
+        // commit_fetched now reads incoming tables absent in V1/V2. These
+        // inserts are historical storage-fixture facts, not incoming/ACK proof.
+        let transaction = store.connection.transaction().unwrap();
+        transaction
+            .execute(
+                "INSERT INTO inbox(binding,entry) VALUES(?1,?2)",
+                params![binding.id.0.as_slice(), serde_json::to_string(&entry).unwrap()],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES(?1,?2,?3)",
+                params![binding.id.0.as_slice(), [0_u8, 255, 6, 7].as_slice(), 88],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        if version == 2 {
+            store
+                .store_conflict(
+                    binding.id,
+                    &ConflictCopy {
+                        id: CopyId([3; 16]),
+                        kind: ConflictKind::Note,
+                        key: OpaqueBytes(vec![3]),
+                        reason: ConflictReason::FieldConflict,
+                        losing_envelope: OpaqueBytes(vec![0, 255, 3]),
+                        losing_payload_digest: PayloadDigest([3; 32]),
+                        winning_payload_digest: PayloadDigest([99; 32]),
+                        field_names: Some(vec!["Question".into(), "Answer".into()]),
+                        template_names: Some(vec!["Reverse".into()]),
+                        note_deck: Some(77),
+                        staged_path: Some("cloud-staging/conflict".into()),
+                        created_at_ms: 44,
+                        resolved_at_ms: Some(55),
+                    },
+                )
+                .unwrap();
+        }
+        let facts = LegacyFacts {
+            inbox: store.inbox(binding.id).unwrap(),
+            state: store.engine_state(binding.id).unwrap(),
+            conflicts: if version == 2 {
+                store.conflict_copies().unwrap()
+            } else {
+                Vec::new()
+            },
+            binding: store.binding(binding.id).unwrap().unwrap(),
+        };
+        assert_eq!(facts.inbox.len(), 1);
+        assert!(facts.state.is_some());
+        (store, facts)
+    }
+
+    fn assert_legacy_facts(store: &TrackingStore, facts: &LegacyFacts) {
+        assert_eq!(store.binding(facts.binding.id).unwrap().as_ref(), Some(&facts.binding));
+        assert_eq!(store.selected_binding().unwrap().as_ref(), Some(&facts.binding));
+        assert_eq!(store.inbox(facts.binding.id).unwrap(), facts.inbox);
+        assert_eq!(store.engine_state(facts.binding.id).unwrap(), facts.state);
+        assert_eq!(store.conflict_copies().unwrap(), facts.conflicts);
+    }
+
+    fn assert_v3_schema(store: &TrackingStore) {
+        let version: i64 = store
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+        for table in ["cloud_apply_intents", "cloud_refused"] {
+            let count: i64 = store
+                .connection
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    fn assert_historical_migration(version: i64) {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, facts) = historical_store(directory.path(), version);
+        let incoming_tables: i64 = store
+            .connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN ('cloud_apply_intents','cloud_refused')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(incoming_tables, 0);
+        drop(store);
+        for _ in 0..2 {
+            let store = match TrackingStore::open(directory.path(), scope()).unwrap() {
+                OpenOutcome::Opened(store) => store,
+                _ => panic!("expected historical tracking migration"),
+            };
+            assert_legacy_facts(&store, &facts);
+            assert_v3_schema(&store);
+            assert!(store.apply_intents(facts.binding.id).unwrap().is_empty());
+            assert!(store.refused_entries(facts.binding.id).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn v1_migration_preserves_original_binding_inbox_and_engine_serialization() {
+        assert_historical_migration(1);
+    }
+
+    #[test]
+    fn v2_migration_preserves_original_binding_inbox_state_and_conflicts() {
+        assert_historical_migration(2);
+    }
+
+    fn schema_objects(connection: &Connection) -> Vec<(String, String, Option<String>)> {
+        connection
+            .prepare("SELECT type,name,sql FROM sqlite_master ORDER BY type,name")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn directory_bytes(directory: &Path) -> Vec<(std::ffi::OsString, Vec<u8>)> {
+        let mut files: Vec<_> = std::fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (entry.file_name(), std::fs::read(entry.path()).unwrap())
+            })
+            .collect();
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        files
+    }
+
+    #[test]
+    fn incoming_migration_failure_leaves_no_partial_schema_version_or_lost_legacy_facts() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, facts) = historical_store(directory.path(), 2);
+        // SQLite's IF NOT EXISTS suppresses table/view collisions, but an
+        // index with the requested table name still fails CREATE TABLE. This
+        // targets the second incoming table, after the first DDL can succeed.
+        store
+            .connection
+            .execute_batch("CREATE INDEX cloud_refused ON inbox(binding)")
+            .unwrap();
+        let schema_before = schema_objects(&store.connection);
+        drop(store);
+        for _ in 0..2 {
+            let bytes_before = directory_bytes(directory.path());
+            // A stronger private probe may reject this malformed old schema
+            // before migration; that is valid too, provided it stays untouched.
+            match TrackingStore::open(directory.path(), scope()) {
+                Ok(OpenOutcome::Damaged) => assert_eq!(directory_bytes(directory.path()), bytes_before),
+                Err(_) => {}
+                _ => panic!("schema collision must not yield a usable tracking store"),
+            }
+            let store = TrackingStore {
+                connection: Connection::open(directory.path().join(TRACKING_FILE)).unwrap(),
+                scope: scope(),
+                directory: directory.path().to_owned(),
+            };
+            assert_legacy_facts(&store, &facts);
+            let version: i64 = store
+                .connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 2);
+            assert_eq!(schema_objects(&store.connection), schema_before);
+        }
+    }
+
+    #[test]
+    fn newly_created_tracking_store_versions_required_incoming_tables() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = match TrackingStore::open(directory.path(), scope()).unwrap() {
+            OpenOutcome::Missing(store) => store,
+            _ => panic!("expected missing tracking file"),
+        };
+        assert_v3_schema(&store);
     }
 
     #[test]
