@@ -81,6 +81,8 @@ pub struct SDKRig {
     handler: Option<u64>,
     pub(crate) root: Option<RootReadProof>,
     fetch: Option<FetchWork>,
+    exchange: Option<u64>,
+    fetch_errors: Vec<Box<dyn std::error::Error + Send + Sync>>,
     building: Option<BTreeSet<String>>,
 }
 impl SDKRig {
@@ -125,6 +127,8 @@ impl SDKRig {
             handler: None,
             root: None,
             fetch: None,
+            exchange: None,
+            fetch_errors: Vec::new(),
             building: None,
         }
     }
@@ -137,6 +141,7 @@ impl SDKRig {
         self.handler = None;
         self.root = None;
         self.fetch = None;
+        self.exchange = None;
         self.building = None;
     }
     pub(crate) fn database_pending(&self) -> BTreeMap<String, PendingChange> {
@@ -255,10 +260,78 @@ impl SDKRig {
             }
         };
         let result = self.fetch_pages(service, remaining, &mut fetch);
-        if result.is_err() {
+        if result
+            .as_ref()
+            .is_err_and(|error| super::child_driver::is_work_paused(error.as_ref()))
+        {
             self.fetch = Some(fetch);
+        } else if result.is_err() {
+            self.exchange = None;
         }
         result
+    }
+    fn fetched_input(&self, page: &FetchPage) -> Result<Input> {
+        let zone = self.files.collection_zone.clone();
+        let serialization = serde_json::to_vec(&SDKSerialization {
+            collection_zone: zone.clone(),
+            collection_cursor: page.token.clone(),
+        })?;
+        Ok(Input::Fetched(
+            self.instance.clone(),
+            page.entities.clone(),
+            zone,
+            serialization,
+            self.exchange,
+        ))
+    }
+    /// Finish only this SDK's original callback before any new trigger. Direct
+    /// grants keep their replies in ChildDriver for their own callers.
+    pub(crate) fn resume_fetch_callback(&mut self) -> Result<()> {
+        let Some(mut fetch) = self.fetch.take() else {
+            return Ok(());
+        };
+        let Some(page) = fetch.page.as_ref().filter(|_| !fetch.root_zone) else {
+            self.fetch = Some(fetch);
+            return Ok(());
+        };
+        let input = self.fetched_input(page)?;
+        if !self.driver.has_incoming_reply(&input)? {
+            self.fetch = Some(fetch);
+            return Ok(());
+        }
+        match self.driver.call::<()>(input) {
+            Err(error) if super::child_driver::is_work_paused(error.as_ref()) => {
+                self.fetch = Some(fetch);
+                Err(error)
+            }
+            Err(error) => {
+                // The worker reported its terminal outcome through Runtime's
+                // exchange API. Retain the original callback error for inspection.
+                self.fetch_errors.push(error);
+                self.exchange = None;
+                Ok(())
+            }
+            Ok(()) => {
+                let page = fetch.page.take().ok_or_else(failure)?;
+                if page.more {
+                    fetch.token = Some(page.token);
+                    self.fetch = Some(fetch);
+                    Ok(())
+                } else {
+                    let after_send = fetch.phase == FetchPhase::AfterSend;
+                    self.driver
+                        .call::<()>(Input::FetchCompleted(self.instance.clone(), fetch.phase, fetch.seen))?;
+                    if after_send {
+                        self.exchange = None;
+                    }
+                    self.refresh()
+                }
+            }
+        }
+    }
+    /// Original asynchronous SDK callback errors, consumed once by the caller.
+    pub fn take_fetch_errors(&mut self) -> Vec<Box<dyn std::error::Error + Send + Sync>> {
+        std::mem::take(&mut self.fetch_errors)
     }
     fn fetch_pages(
         &mut self,
@@ -335,16 +408,8 @@ impl SDKRig {
                     ))?;
                 }
             } else {
-                let serialization = serde_json::to_vec(&SDKSerialization {
-                    collection_zone: zone.clone(),
-                    collection_cursor: page.token.clone(),
-                })?;
-                self.driver.call::<()>(Input::Fetched(
-                    self.instance.clone(),
-                    page.entities.clone(),
-                    zone,
-                    serialization,
-                ))?;
+                let input = self.fetched_input(page)?;
+                self.driver.call::<()>(input)?;
             }
             let page = fetch.page.take().ok_or_else(failure)?;
             if page.more {
@@ -361,6 +426,9 @@ impl SDKRig {
                 fetch.phase,
                 fetch.seen.clone(),
             ))?;
+            if fetch.phase == FetchPhase::AfterSend {
+                self.exchange = None;
+            }
             return self.refresh();
         }
     }
@@ -676,6 +744,7 @@ impl SDKRig {
     }
     pub fn sync_now(&mut self) -> Result<u64> {
         let id = self.driver.call(Input::SyncNow(self.instance.clone()))?;
+        self.exchange = Some(id);
         self.updates()?;
         Ok(id)
     }

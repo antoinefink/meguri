@@ -128,6 +128,7 @@ pub struct ScanState {
     pub scan_required: bool,
     pub scan_running: bool,
     pub scan_completed_this_open: bool,
+    pub tracking_stopped: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReviewAnswer {
@@ -219,7 +220,7 @@ pub(crate) enum Input {
     SyncNow(String),
     FetchDue,
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
-    Fetched(String, Vec<Saved>, String, Vec<u8>),
+    Fetched(String, Vec<Saved>, String, Vec<u8>, Option<u64>),
     IncomingIntents(core::BindingId),
     IncomingInbox(core::BindingId),
     IncomingRefused(core::BindingId),
@@ -291,9 +292,10 @@ enum ChildMessage {
 
 // This closed catalog is the entire error channel: no source error or payload
 // is serialized. Nested categories also contain only fieldless fixed tags.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum ChildFailure {
     Unknown,
+    FetchCompletion(Box<ChildFailure>, Box<ChildFailure>),
     RuntimeTracking(StoreFailure),
     RuntimeEngine(EngineFailure),
     RuntimeStaleIncarnation,
@@ -332,6 +334,9 @@ enum StoreFailure {
 }
 impl ChildFailure {
     fn classify(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        if let Some(error) = error.downcast_ref::<Self>() {
+            return error.clone();
+        }
         if let Some(error) = error.downcast_ref::<runtime::RuntimeError>() {
             use runtime::{Incomplete, RuntimeError};
             return match error {
@@ -367,6 +372,12 @@ impl ChildFailure {
         )))
     }
 }
+impl std::fmt::Display for ChildFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cloud device operation failed: {self:?}")
+    }
+}
+impl std::error::Error for ChildFailure {}
 impl EngineFailure {
     fn classify(error: &meguri_engine::EngineError) -> Self {
         use meguri_engine::EngineError;
@@ -425,6 +436,7 @@ pub struct ChildDriver {
     queued: Option<super::coordinator::HeldRequest>,
     queued_response: Option<super::Response>,
     pending_work: Option<Vec<u8>>,
+    suspended_work: Vec<(Vec<u8>, Option<IncomingStage>)>,
     completed_work: Vec<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
     paused_work: Option<IncomingStage>,
 }
@@ -491,8 +503,8 @@ impl ChildDriver {
     pub fn arm_tracking_fault(&mut self, name: &str, fault: TrackingFault) -> Result<()> {
         self.call(Input::TrackingFault(name.into(), fault))
     }
-    pub(crate) fn held_incoming_stage(&self) -> Option<IncomingStage> {
-        self.paused_work
+    pub(crate) fn is_incoming_stage_held(&self, stage: IncomingStage) -> bool {
+        self.paused_work == Some(stage) || self.suspended_work.iter().any(|(_, paused)| *paused == Some(stage))
     }
     pub(crate) fn hold_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
         self.call(Input::LatchHold(stage))
@@ -502,11 +514,17 @@ impl ChildDriver {
         if self.paused_work == Some(stage) {
             self.paused_work = None;
         }
+        for (_, paused) in &mut self.suspended_work {
+            if *paused == Some(stage) {
+                *paused = None;
+            }
+        }
         Ok(())
     }
     pub(crate) fn has_incoming_reply(&self, input: &Input) -> Result<bool> {
         let key = serde_json::to_vec(input)?;
         Ok(self.pending_work.as_ref() == Some(&key)
+            || self.suspended_work.iter().any(|(pending, _)| *pending == key)
             || self.completed_work.iter().any(|(completed, _)| *completed == key))
     }
     pub(crate) fn resume_incoming_work(&mut self) -> Result<()> {
@@ -523,6 +541,10 @@ impl ChildDriver {
                 self.paused_work = None;
                 let key = self.pending_work.take().ok_or_else(failure)?;
                 self.completed_work.push((key, reply));
+                if let Some((key, paused)) = self.suspended_work.pop() {
+                    self.pending_work = Some(key);
+                    self.paused_work = paused;
+                }
                 // The retained caller continuation consumes this reply once,
                 // including its original error, through call().
                 Ok(())
@@ -608,6 +630,7 @@ impl ChildDriver {
             queued: None,
             queued_response: None,
             pending_work: None,
+            suspended_work: Vec::new(),
             completed_work: Vec::new(),
             paused_work: None,
         };
@@ -627,6 +650,21 @@ impl ChildDriver {
     }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
         let key = serde_json::to_vec(&input)?;
+        // Reap a released worker before admitting another incoming command.
+        // Keep its reply under its original key; queries never advance it.
+        if matches!(
+            input,
+            Input::Fetched(..)
+                | Input::DeliverCollection(..)
+                | Input::DrainIncoming(..)
+                | Input::Reconcile
+                | Input::Build(..)
+        ) {
+            while self.pending_work.is_some() && self.pending_work.as_ref() != Some(&key) && self.paused_work.is_none()
+            {
+                self.resume_incoming_work()?;
+            }
+        }
         // Consume an older matching reply before advancing a repeated command.
         if self.pending_work.as_ref() == Some(&key)
             && !self.completed_work.iter().any(|(completed, _)| *completed == key)
@@ -637,10 +675,16 @@ impl ChildDriver {
             let (_, result) = self.completed_work.remove(index);
             return Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?);
         }
+        if self.suspended_work.iter().any(|(pending, _)| *pending == key) {
+            return Err(Box::new(WorkPaused));
+        }
         write_frame(&mut self.stream, &input)?;
         match self.next_message()? {
             ChildMessage::Reply(reply) => Ok(serde_json::from_value(reply.map_err(ChildFailure::into_error)?)?),
             ChildMessage::Paused(stage) => {
+                if let Some(pending) = self.pending_work.take() {
+                    self.suspended_work.push((pending, self.paused_work));
+                }
                 self.pending_work = Some(key);
                 self.paused_work = Some(stage);
                 Err(Box::new(WorkPaused))
@@ -832,7 +876,9 @@ impl ChildDriver {
             }
             // Consume the original worker reply before the independent Close
             // reply; a previously failed operation does not skip host cleanup.
-            let _ = self.resume_incoming_work();
+            while self.pending_work.is_some() {
+                self.resume_incoming_work()?;
+            }
         }
         self.call::<()>(Input::Close)?;
         let mut child = self.child.take().ok_or_else(failure)?;
@@ -1246,6 +1292,7 @@ impl Device {
                     scan_required: s.scan_required,
                     scan_running: s.scan_running,
                     scan_completed_this_open: s.scan_completed_this_open,
+                    tracking_stopped: s.tracking_stopped,
                 })
             }
             Input::ScanProof => {

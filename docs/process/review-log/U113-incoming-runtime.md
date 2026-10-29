@@ -531,3 +531,26 @@ revision ordering under an overlapping apply, own-landed save handling,
 deletion side-effect base capture, two held-review send cases and the
 remaining fetch-crash case. The original full batch base remains
 `1416a520542a8c5daa38a23bfe398da704c3d6c9`; no Unit or P24 acceptance is claimed.
+
+## Receive while paused and finish terminal callbacks
+
+Start: `c938c195`. Export `cleanroom/20261029T161146Z-81591` adds separate
+receive-only pause ownership while preserving the held apply and its reply.
+Only an actual WorkPaused retains the SDK page. Terminal callback outcomes
+reach Runtime; original asynchronous errors remain available once through
+the driver. Automatic driving respects the real stopped state.
+
+Independent R1 found no new P0/P1. P2 remains: Runtime maps Failed to
+Cancelled when SDK authority is invalidated. Fault coverage remains open.
+Tests and limits are unchanged.
+
+- `core-format/20261029T162309Z-87130`: pass.
+- `private/20261029T162329Z-88172`: pass.
+- `similarity/20261029T162327Z-87931`: pass.
+- `core-test/20261029T162324Z-87663`: 10 pass, one fails; 12 excluded.
+  Revision ordering, all interruption cases and all reply/review cases pass.
+  Failed-inbox now passes stop, cursor and no-timer-retry assertions, but its
+  post-restart note comparison fails with automatic sync disabled. The
+  required initial-fetch behavior needs diagnosis before acceptance.
+
+This is a WIP checkpoint; native delivery and full incoming safety remain open.

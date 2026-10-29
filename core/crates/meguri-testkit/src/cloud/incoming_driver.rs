@@ -5,8 +5,9 @@ use std::sync::{Condvar, PoisonError, mpsc};
 #[derive(Default)]
 struct LatchState {
     armed: BTreeSet<IncomingStage>,
-    held: Option<IncomingStage>,
+    held: BTreeSet<IncomingStage>,
     events: Option<mpsc::Sender<WorkEvent>>,
+    receive_events: Option<mpsc::Sender<WorkEvent>>,
 }
 #[derive(Default)]
 pub(super) struct Latches {
@@ -24,9 +25,7 @@ impl Latches {
     pub(super) fn release(&self, stage: IncomingStage) {
         let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         s.armed.remove(&stage);
-        if s.held == Some(stage) {
-            s.held = None;
-        }
+        s.held.remove(&stage);
         self.released.notify_all();
     }
     pub(super) fn hit(&self, stage: IncomingStage) {
@@ -34,11 +33,16 @@ impl Latches {
         if !s.armed.contains(&stage) {
             return;
         }
-        s.held = Some(stage);
-        if let Some(events) = &s.events {
+        s.held.insert(stage);
+        let events = if matches!(stage, IncomingStage::FetchBeforeInbox | IncomingStage::FetchAfterInbox) {
+            s.receive_events.as_ref().or(s.events.as_ref())
+        } else {
+            s.events.as_ref()
+        };
+        if let Some(events) = events {
             let _ = events.send(WorkEvent::Paused(stage));
         }
-        while s.held == Some(stage) && s.armed.contains(&stage) {
+        while s.held.contains(&stage) && s.armed.contains(&stage) {
             s = self.released.wait(s).unwrap_or_else(PoisonError::into_inner);
         }
     }
@@ -51,22 +55,19 @@ pub(super) struct Work {
     events: mpsc::Receiver<WorkEvent>,
     thread: std::thread::JoinHandle<()>,
     notified_pause: Option<IncomingStage>,
+    previous: Option<Box<Work>>,
 }
 fn advance(device: &mut Device, stream: &mut UnixStream) -> Result<()> {
-    let held = device
+    let latches = device
         .incoming_latches
         .state
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .held;
-    if let Some(stage) = held
-        && device
-            .incoming_worker
-            .as_ref()
-            .is_some_and(|work| work.notified_pause == Some(stage))
-    {
+        .unwrap_or_else(PoisonError::into_inner);
+    let paused = device.incoming_worker.as_ref().and_then(|work| work.notified_pause);
+    if let Some(stage) = paused.filter(|stage| latches.held.contains(stage)) {
         return write_frame(stream, &ChildMessage::Paused(stage));
     }
+    drop(latches);
     let event = device
         .incoming_worker
         .as_ref()
@@ -79,14 +80,20 @@ fn advance(device: &mut Device, stream: &mut UnixStream) -> Result<()> {
             write_frame(stream, &ChildMessage::Paused(stage))
         }
         WorkEvent::Completed(reply) => {
-            let work = device.incoming_worker.take().ok_or_else(failure)?;
+            let mut work = device.incoming_worker.take().ok_or_else(failure)?;
             work.thread.join().map_err(|_| failure())?;
-            device
+            let mut latches = device
                 .incoming_latches
                 .state
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .events = None;
+                .unwrap_or_else(PoisonError::into_inner);
+            device.incoming_worker = work.previous.take().map(|work| *work);
+            if device.incoming_worker.is_some() {
+                latches.receive_events = None;
+            } else {
+                latches.events = None;
+            }
+            drop(latches);
             write_frame(stream, &ChildMessage::Reply(reply))
         }
     }
@@ -108,7 +115,13 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     ) {
         return Ok(Some(input));
     }
-    if device.incoming_worker.is_some() {
+    // Receive-only work cannot grant a second writer. The journalled apply's
+    // AfterIntent hook holds neither runtime nor tracking locks.
+    let nested_receive = matches!(input, Input::DeliverCollection(..))
+        && device.incoming_worker.as_ref().is_some_and(|work| {
+            work.previous.is_none() && work.notified_pause == Some(IncomingStage::ApplyAfterIntent)
+        });
+    if device.incoming_worker.is_some() && !nested_receive {
         write_frame(
             stream,
             &ChildMessage::Reply(Err(ChildFailure::Engine(EngineFailure::Busy))),
@@ -122,31 +135,61 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     let last_fetch = device.last_fetch_engine_state.clone();
     let submission = device.incoming_submission.clone();
     let (events, receiver) = mpsc::channel();
-    device
+    let mut latches = device
         .incoming_latches
         .state
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .events = Some(events.clone());
+        .unwrap_or_else(PoisonError::into_inner);
+    if nested_receive {
+        latches.receive_events = Some(events.clone());
+    } else {
+        latches.events = Some(events.clone());
+    }
+    drop(latches);
     let thread = std::thread::spawn(move || {
         let run = || -> Result<serde_json::Value> {
             match input {
-                Input::Fetched(instance, records, zone, serialization) => {
-                    if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
-                        let projection = super::super::adapter::collection_cursor_projection(&serialization)?;
-                        *last_fetch.lock().unwrap_or_else(PoisonError::into_inner) = projection;
-                        runtime.adapter_fetched(&instance, &zone, &records, &[])?;
-                        // The state event follows the durable inbox handler and
-                        // precedes any writer grant. Store exactly SDK bytes.
-                        runtime.adapter_state_update(&instance, &serialization)?;
-                        meguri_model::faultpoint!("cloud.fetch.after_cursor")?;
-                        runtime.incoming_stage_for_testing(IncomingStage::FetchAfterCursor);
-                    } else {
-                        // Legacy explicit full-fetch proof fixtures have no SDK
-                        // authority and make no native cursor-resume claim.
-                        runtime.receive_collection_records(&instance, &records)?;
+                Input::Fetched(instance, records, zone, serialization, exchange) => {
+                    let callback = || -> Result<()> {
+                        if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
+                            let projection = super::super::adapter::collection_cursor_projection(&serialization)?;
+                            *last_fetch.lock().unwrap_or_else(PoisonError::into_inner) = projection;
+                            runtime.adapter_fetched(&instance, &zone, &records, &[])?;
+                            // The state event follows the durable inbox handler and
+                            // precedes any writer grant. Store exactly SDK bytes.
+                            runtime.adapter_state_update(&instance, &serialization)?;
+                            meguri_model::faultpoint!("cloud.fetch.after_cursor")?;
+                            runtime.incoming_stage_for_testing(IncomingStage::FetchAfterCursor);
+                        } else {
+                            // Legacy explicit full-fetch proof fixtures have no SDK
+                            // authority and make no native cursor-resume claim.
+                            runtime.receive_collection_records(&instance, &records)?;
+                        }
+                        runtime.drain_incoming(&collection, IPC_TIMEOUT)?;
+                        Ok(())
+                    };
+                    if let Err(error) = callback() {
+                        if let Some(id) = exchange {
+                            let cancelled = matches!(
+                                error.downcast_ref::<runtime::RuntimeError>(),
+                                Some(runtime::RuntimeError::Engine(meguri_engine::EngineError::Cancelled))
+                            );
+                            let outcome = if cancelled {
+                                core::adapter::CollectionOutcome::Cancelled
+                            } else {
+                                core::adapter::CollectionOutcome::Failed
+                            };
+                            if let Err(completion) =
+                                runtime.adapter_complete_exchange(&instance, id, false, Some(outcome))
+                            {
+                                return Err(Box::new(ChildFailure::FetchCompletion(
+                                    Box::new(ChildFailure::classify(error)),
+                                    Box::new(ChildFailure::classify(Box::new(completion))),
+                                )));
+                            }
+                        }
+                        return Err(error);
                     }
-                    runtime.drain_incoming(&collection, IPC_TIMEOUT)?;
                     Ok(serde_json::Value::Null)
                 }
                 Input::DeliverCollection(records) => {
@@ -217,10 +260,12 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
             .map_err(ChildFailure::classify);
         let _ = events.send(WorkEvent::Completed(result));
     });
+    let previous = device.incoming_worker.take().map(Box::new);
     device.incoming_worker = Some(Work {
         events: receiver,
         thread,
         notified_pause: None,
+        previous,
     });
     advance(device, stream)?;
     Ok(None)

@@ -211,6 +211,9 @@ impl PublicationRig {
     pub fn send_changes_calls(&mut self) -> Result<Vec<cloud::workflow::SendCall>> {
         self.sdk.get_mut().driver.send_changes_calls()
     }
+    pub fn take_fetch_errors(&mut self) -> Vec<Box<dyn std::error::Error + Send + Sync>> {
+        self.sdk.get_mut().take_fetch_errors()
+    }
     pub fn facts(&self) -> Result<PublicationFacts> {
         self.sdk.borrow_mut().driver.call(Input::PublicationFacts)
     }
@@ -243,7 +246,7 @@ impl PublicationRig {
     }
     pub fn is_held(&self, point: Point) -> bool {
         if let Some(stage) = point.incoming_stage() {
-            return self.sdk.borrow().driver.held_incoming_stage() == Some(stage);
+            return self.sdk.borrow().driver.is_incoming_stage_held(stage);
         }
         self.held == Some(point)
     }
@@ -469,6 +472,9 @@ impl PublicationRig {
             return Ok(false);
         }
         let scan: super::super::child_driver::ScanState = self.sdk.get_mut().driver.call(Input::ScanState)?;
+        if scan.tracking_stopped && !self.explicit_sync_pending {
+            return Ok(false);
+        }
         if scan.scan_required || self.sdk.get_mut().driver.has_incoming_reply(&Input::Reconcile)? {
             *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
             if self.gate(Point::BeforeScan) {
@@ -549,6 +555,11 @@ impl PublicationRig {
     pub fn drive_ready(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let result = (|| {
             self.sdk.get_mut().driver.resume_incoming_work()?;
+            self.sdk.get_mut().resume_fetch_callback()?;
+            let scan: super::super::child_driver::ScanState = self.sdk.get_mut().driver.call(Input::ScanState)?;
+            if scan.tracking_stopped {
+                return self.refresh();
+            }
             let mut remaining = steps;
             let resuming_explicit = self.explicit_sync_pending;
             self.drive_budget(service, &mut remaining)?;
@@ -718,6 +729,7 @@ impl PublicationRig {
     pub fn sync_now_and_drain(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let result = (|| {
             self.sdk.get_mut().driver.resume_incoming_work()?;
+            self.sdk.get_mut().resume_fetch_callback()?;
             self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
             let mut remaining = steps;
             if self.facts()?.recovery_ops.is_empty() {
