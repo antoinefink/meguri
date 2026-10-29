@@ -59,6 +59,7 @@ mod tests {
             generation: meguri_engine::Generation(7),
             changes: std::sync::Arc::new(changes),
             undo: None,
+            cloud_detached_run: None,
             past_cancel_point: false,
             timing: Default::default(),
         };

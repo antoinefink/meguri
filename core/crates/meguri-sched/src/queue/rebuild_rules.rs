@@ -63,7 +63,10 @@ pub fn classify_with<E>(
 ) -> Result<Action, E> {
     if context.day_changed
         || changes.whole_collection
-        || changes.source == OpSource::SyncIncoming
+        || matches!(
+            changes.source,
+            OpSource::SyncIncoming | OpSource::CloudIncoming | OpSource::CloudRekey
+        )
         || context.built.generation != context.commit.generation
     {
         return Ok(Action::Rebuild);

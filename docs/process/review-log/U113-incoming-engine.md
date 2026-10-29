@@ -68,3 +68,39 @@ Only the test portion is integrated before the three production repairs.
 - `similarity/20261029T124232Z-52901`: pass, no findings or exemptions.
 
 All prior assertions and CloudKit source proof tests stay unchanged.
+
+## Verified R2 repair
+
+Independent production R2 is clear of P0-P2 findings. The changed incoming
+scope now advances `col.mod` through the normal rollback boundary only when
+it made a real change. Compact modification tracking includes a same-clock
+stamp. Supplied payload stamps and other collection sync stamps stay intact.
+Both CloudKit sources rebuild the review queue before ownership and payload
+shortcuts; the FFI test constructor carries the new optional result field.
+
+- `core-test/20261029T124328Z-54151`: 108 focused engine/scheduler cases
+  pass, one existing default-profile exclusion. Includes the failed timestamp
+  case, queue regression, seeded CloudKit history and executor ordering.
+- `core-test/20261029T124418Z-55194`: all 128 selected model, scheduler,
+  engine and FFI library cases pass, no exclusions.
+- `swift-test/20261029T124444Z-55580`: all 81 selected Swift cases pass.
+  Debug Mac and simulator core slices build; bindings are regenerated. The
+  generated source retains tags 1-7 and appends CloudIncoming/CloudRekey as
+  8/9 for both encoding and decoding. No generated file is edited manually.
+- `private/20261029T124343Z-54462`: all three repair paths pass.
+- `similarity/20261029T124344Z-54645`: three paths, no findings or exemptions.
+- `core-lint/20261029T124445Z-55996`: fails on the 18 existing missing-method
+  and missing-Point diagnostics in incoming/media contract tests. No new
+  engine/queue/FFI Clippy diagnostics; formatting, 17-crate layering and the
+  feature-disabled object check pass. Missing behavior stays enabled and open.
+- `doctor/20261029T124720Z-58183`: VM answers; host free space remains over
+  the required floor. Manual account/device/reference evidence is still final.
+
+This completes the focused engine prerequisite, not U113/U114 or working sync.
+Actual inbox processing is next. It must persist apply intents and use the
+operation result's seq. WAL coverage and restart recovery remain required.
+The existing review, edit and media contracts stay enabled. Media, conflicts,
+structural changes, deletions, native integration, signed exchanges and full
+batch gates remain required. The original batch base is unchanged.
+
+Final repair formatting: `core-format/20261029T124258Z-53624`: pass.

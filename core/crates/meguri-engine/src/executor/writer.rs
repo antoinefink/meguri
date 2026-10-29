@@ -507,10 +507,17 @@ fn run_op<T>(
         for action in context.before_commit.drain(..) {
             action()?;
         }
-        Ok((result, observed_policy))
+        // Cloud payload rows keep their supplied stamps, but a real write
+        // still moves col.mod (O1.1). Barriers and equal writes leave it alone.
+        let cloud_modification = spec.source == OpSource::CloudIncoming && context.scope.has_changes();
+        if cloud_modification {
+            let now = context.scope.now();
+            context.scope.set_col_mod(now)?;
+        }
+        Ok((result, observed_policy, cloud_modification))
     }))
     .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
-    let (value, seen_fsrs) = match prepared {
+    let (value, seen_fsrs, cloud_modification) = match prepared {
         Ok(values) => values,
         Err(error) => {
             drop(context);
@@ -550,7 +557,9 @@ fn run_op<T>(
         shared.coverage.commit_started();
         let committed = scope.commit_with(|journal, col_mod| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                changes::prepare(journal, spec.source, media, col_mod.is_some())
+                // A requested Cloud stamp counts even if the clock has not
+                // advanced and col.mod's bytes already equal the instant.
+                changes::prepare(journal, spec.source, media, col_mod.is_some() || cloud_modification)
             }))
             .map_err(|payload| EngineError::from_panic(payload.as_ref()))?
             .map_err(EngineError::from)
