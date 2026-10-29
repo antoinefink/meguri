@@ -390,6 +390,7 @@ pub(super) fn validate(connection: &Connection, version: i64) -> Result<(), Erro
             }
         }
     }
+    super::incoming_store::validate(connection, version >= 3)?;
     let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
     if foreign_keys.query([])?.next()?.is_some() {
         return Err(Error::InvalidData);

@@ -1,5 +1,5 @@
-//! Versioned additive runtime tables inside the V2 tracking file. The legacy
-//! recovery format remains V2; this extension never reconstructs server facts.
+//! Versioned additive runtime tables inside the V3 tracking file. This
+//! extension never reconstructs server facts.
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::runtime::{DirtyMark, DirtySource, NativeFileIdentity, NoteTracking, RuntimeError, StoredRuntimeState};
@@ -22,7 +22,7 @@ CREATE TABLE cloud_runtime_notes(
 );
 ";
 
-/// The outer recovery schema remains V2. Refuse a newer runtime extension in
+/// The outer recovery schema is V3. Refuse a newer runtime extension in
 /// the private WAL-aware probe, before SQLite opens the original path.
 pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, Error> {
     super::workflow_store::check_version(connection)?;

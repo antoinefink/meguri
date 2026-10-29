@@ -182,3 +182,31 @@ private-copy probing to preserve every original main/WAL/SHM byte.
 - `similarity/20261029T143741Z-9214`: both owned paths pass.
 
 Repair remains required. No acceptance is claimed.
+
+## Tracking format 3 repair
+
+Phase start `f50cd7a9`. Fixer export
+`cleanroom/20261029T143942Z-10277` changes three production files and updates
+the runtime-store comments. All tests from the preceding commit stay unchanged.
+Creation and V1/V2 migration now install the incoming tables, set version 3 and
+validate in one transaction. Current-format tables and typed rows are checked
+in the private WAL-aware probe before the original opens. Existing valid WIP
+rows remain; new intents store their assigned row id in the same transaction.
+Pending legacy id-zero rows remain readable. Independent R1 is clear of P0-P2.
+
+- `core-format/20261029T144350Z-12585`: pass.
+- `core-test/20261029T144358Z-12890`: 82 pass, zero skipped. Covers the full
+  76-case schema/recovery selection, incoming reviews, held startup and actual
+  empty-media adoption. All nine pre-implementation failures are repaired.
+- `private/20261029T144417Z-13224`: four owned files pass.
+- `similarity/20261029T144419Z-13473`: four owned files pass.
+- `core-test/20261029T144208Z-11617`: the actual prior reader from commit
+  `63f85286`, copied under `build/compat/cloud-tracking-v2-63f85286` without Git
+  metadata, passes its existing format-3 WAL refusal test. One selected test
+  executes; 22 are outside the filter. This proves that reader's version guard,
+  not the complete cross-build exchange matrix or the signed CloudKit lane.
+
+The optional follow-up from review is a dedicated migration case with valid
+pending legacy WIP rows. No source defect is reported for that branch.
+Other R1 findings, media, native wiring, signed runs and the batch gate remain
+open. No Unit or P24 acceptance is claimed.

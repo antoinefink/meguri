@@ -5,7 +5,7 @@ use rusqlite::{Connection, OpenFlags};
 use super::{BuildScope, Error, TrackingStore, store};
 
 pub const TRACKING_FILE: &str = "meguri-cloud.db";
-pub(super) const SCHEMA_VERSION: i64 = 2;
+pub(super) const SCHEMA_VERSION: i64 = 3;
 
 /// Plain open refuses damage; explicit recovery must finish before use.
 /// Missing creates an empty store, without inferring any server facts.
@@ -59,19 +59,24 @@ pub(super) fn open_current(directory: &Path, scope: BuildScope) -> Result<OpenOu
         let transaction = connection.transaction()?;
         transaction.execute_batch(store::V1_SCHEMA)?;
         transaction.execute_batch(store::V2_SCHEMA)?;
+        super::incoming_store::install(&transaction)?;
         transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        store::validate(&transaction, SCHEMA_VERSION)?;
         transaction.commit()?;
     }
     if exists {
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version == 1 {
+        if version < SCHEMA_VERSION {
             let transaction = connection.transaction()?;
-            transaction.execute_batch(store::V2_SCHEMA)?;
+            if version == 1 {
+                transaction.execute_batch(store::V2_SCHEMA)?;
+            }
+            super::incoming_store::install(&transaction)?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            store::validate(&transaction, SCHEMA_VERSION)?;
             transaction.commit()?;
         }
     }
-    super::incoming_store::install(&connection)?;
     let store = TrackingStore {
         connection,
         scope,

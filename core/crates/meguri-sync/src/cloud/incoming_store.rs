@@ -7,7 +7,8 @@ use super::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-pub(super) fn install(c: &Connection) -> Result<(), Error> {
+/// Base-format DDL belongs to the caller's creation/migration transaction.
+pub(super) fn install(c: &Transaction<'_>) -> Result<(), Error> {
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS cloud_apply_intents(
         id INTEGER PRIMARY KEY AUTOINCREMENT, binding BLOB NOT NULL REFERENCES bindings(id),
@@ -16,6 +17,90 @@ pub(super) fn install(c: &Connection) -> Result<(), Error> {
         CREATE TABLE IF NOT EXISTS cloud_refused(binding BLOB NOT NULL REFERENCES bindings(id),
         name TEXT NOT NULL, content TEXT NOT NULL CHECK(json_valid(content)), PRIMARY KEY(binding,name));",
     )?;
+    Ok(())
+}
+
+fn table_present(c: &Connection, name: &str, required: bool) -> Result<bool, Error> {
+    let kind: Option<String> = c
+        .query_row("SELECT type FROM sqlite_master WHERE name=?1", [name], |r| r.get(0))
+        .optional()?;
+    match kind.as_deref() {
+        Some("table") => Ok(true),
+        None if !required => Ok(false),
+        _ => Err(Error::InvalidData),
+    }
+}
+
+fn decode_intent(id: i64, binding: BindingId, text: &str) -> Result<ApplyIntent, Error> {
+    let mut intent: ApplyIntent = decode(text)?;
+    // The pre-V3 writer serialized zero before SQLite assigned the row id.
+    // Only an intent still awaiting its result sequence may use that form.
+    let pending_legacy_id = intent.id == 0 && intent.result_seq.is_none();
+    if id <= 0 || intent.binding != binding || (intent.id != id && !pending_legacy_id) {
+        return Err(Error::InvalidData);
+    }
+    intent.id = id;
+    Ok(intent)
+}
+
+/// V3 requires both tables. Older bases may lack either table, but any WIP
+/// incoming facts already present must be readable before the source opens.
+pub(super) fn validate(c: &Connection, required: bool) -> Result<(), Error> {
+    let has_intents = table_present(c, "cloud_apply_intents", required)?;
+    let has_refused = table_present(c, "cloud_refused", required)?;
+    let index: Option<(String, String)> = c
+        .query_row(
+            "SELECT type,tbl_name FROM sqlite_master WHERE name='cloud_apply_by_binding'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    if let Some((kind, table)) = index {
+        if kind != "index" || table != "cloud_apply_intents" {
+            return Err(Error::InvalidData);
+        }
+    }
+    // Check storage ownership only. Do not read another build's runtime
+    // payloads, infer server facts, or interpret intentionally refused bytes.
+    let require_owner = |binding: BindingId| -> Result<(), Error> {
+        let exists: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM bindings WHERE id=?1)",
+            [binding.0.as_slice()],
+            |r| r.get(0),
+        )?;
+        if exists { Ok(()) } else { Err(Error::InvalidData) }
+    };
+    if has_intents {
+        let mut q = c.prepare("SELECT id,binding,content FROM cloud_apply_intents")?;
+        let mut rows = q.query([])?;
+        while let Some(row) = rows.next()? {
+            let binding = store::binding_id(row.get(1)?)?;
+            require_owner(binding)?;
+            let intent = decode_intent(row.get(0)?, binding, &row.get::<_, String>(2)?)?;
+            for id in &intent.inbox_ids {
+                let exists: bool = c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM inbox WHERE id=?1 AND binding=?2)",
+                    params![id, binding.0.as_slice()],
+                    |r| r.get(0),
+                )?;
+                if !exists {
+                    return Err(Error::InvalidData);
+                }
+            }
+        }
+    }
+    if has_refused {
+        let mut q = c.prepare("SELECT binding,name,content FROM cloud_refused")?;
+        let mut rows = q.query([])?;
+        while let Some(row) = rows.next()? {
+            require_owner(store::binding_id(row.get(0)?)?)?;
+            let name: String = row.get(1)?;
+            let refusal: RefusedEntry = decode(&row.get::<_, String>(2)?)?;
+            if name != refusal.record_name {
+                return Err(Error::InvalidData);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -59,9 +144,7 @@ pub(super) fn intents(c: &Connection, b: BindingId) -> Result<Vec<ApplyIntent>, 
     let rows = q.query_map([b.0.as_slice()], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
         let (id, text) = r?;
-        let mut i: ApplyIntent = decode(&text)?;
-        i.id = id;
-        Ok(i)
+        decode_intent(id, b, &text)
     })
     .collect()
 }
@@ -273,6 +356,12 @@ impl TrackingStore {
             params![i.binding.0.as_slice(), encode(i)?],
         )?;
         let id = tx.last_insert_rowid();
+        let mut stored = i.clone();
+        stored.id = id;
+        tx.execute(
+            "UPDATE cloud_apply_intents SET content=?2 WHERE id=?1",
+            params![id, encode(&stored)?],
+        )?;
         meguri_model::faultpoint!("cloud.tracking.commit.intent")?;
         tx.commit()?;
         Ok(id)
