@@ -25,3 +25,11 @@ correctly compares equal. Secure-key composition has no review finding.
 Next add real regressions and repair typed apply outcomes and continuation.
 Swift compilation and execution remain unrun. No native app, Unit, P24,
 batch or milestone acceptance is claimed.
+
+## Swift checkpoint
+
+`swift-test/20261029T175311Z-47516` builds the updated bindings and CoreBridge
+and passes all 68 selected EventTests and CloudKeyByteProviderTests. This
+includes actual native receive and Security provider checks. The two R1 P1
+cases and queued-content coverage are not accepted by this passing subset;
+their fixer export and targeted regressions remain pending.

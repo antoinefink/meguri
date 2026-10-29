@@ -805,6 +805,21 @@ impl ChildDriver {
     pub fn build_for_instance(&mut self, instance: String, names: BTreeSet<String>) -> Result<BuiltBatch> {
         self.call(Input::Build(instance, names))
     }
+    /// Consume the retained builder reply without starting a build or transport.
+    pub fn complete_pending_build(&mut self) -> Result<BuiltBatch> {
+        let key = self.pending_work.clone().ok_or_else(failure)?;
+        if !matches!(serde_json::from_slice::<Input>(&key)?, Input::Build(..)) {
+            return Err(failure());
+        }
+        self.resume_incoming_work()?;
+        let index = self
+            .completed_work
+            .iter()
+            .position(|(completed, _)| *completed == key)
+            .ok_or_else(failure)?;
+        let (_, result) = self.completed_work.remove(index);
+        Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?)
+    }
     pub fn accept_root_for_instance(
         &mut self,
         instance: String,

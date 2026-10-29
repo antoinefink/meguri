@@ -612,7 +612,7 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         let submitted = pair.receiver.facts().unwrap().entities[&key].clone();
         let response = pair
             .service
-            .request(&scope(), request.caller, request.operation)
+            .request(&scope(), request.caller, request.operation.clone())
             .unwrap();
         let Ok(Reply::Modified(items)) = &response.result else {
             panic!("actual Service reply")
@@ -657,6 +657,25 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         // Exercise the actual batch builder to persist a newer unsaved flight;
         // no made-up sent/acked rows and no fabricated Service response.
         if action == "edit" {
+            // The original builder persisted its flight before this latch, but
+            // still owns its reply. Consume it without driving SDK transport.
+            pair.receiver.release(Point::BeforeCollectionSave).unwrap();
+            let original = pair.receiver.driver().complete_pending_build().unwrap();
+            let original_save = original.saves.iter().find(|save| save.name == key).unwrap();
+            let meguri_testkit::cloud::Operation::Modify { changes, .. } = &request.operation else {
+                panic!("original collection save request")
+            };
+            let requested_envelope = changes
+                .iter()
+                .find_map(|change| match change {
+                    meguri_testkit::cloud::Mutation::Save { record, .. } if record.name == key => {
+                        Some(&record.fields["e"])
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert!(matches!(requested_envelope, Field::EncryptedBytes(bytes) if *bytes == original_save.envelope));
+            assert!(matches!(&landed.fields["e"], Field::EncryptedBytes(bytes) if *bytes == original_save.envelope));
             let state = pair.receiver.driver().incoming_observation(b).unwrap();
             let batch = pair
                 .receiver
@@ -664,6 +683,22 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
                 .build_for_instance(state.engine_instance.unwrap(), BTreeSet::from([key.clone()]))
                 .unwrap();
             assert!(batch.saves.iter().any(|s| s.name == key));
+            let save = batch.saves.iter().find(|save| save.name == key).unwrap();
+            let codec::DecodeOutcome::Supported(newer) = codec::Entity::decode(&save.envelope).unwrap() else {
+                panic!("supported newer save")
+            };
+            assert_eq!(
+                Payload::decode(newer.fields.kind, newer.payload.as_deref().unwrap()).unwrap(),
+                current
+            );
+            assert_eq!(newer.payload_sha256, current.payload_digest().unwrap());
+            let persisted = pair.receiver.facts().unwrap().entities[&key].clone();
+            assert!(persisted.in_flight.iter().any(|flight| {
+                flight.local_rev > landed_revision
+                    && flight.erev == newer.fields.erev
+                    && flight.payload_digest == newer.payload_sha256
+                    && flight.payload == current
+            }));
         }
         let flights = pair.receiver.facts().unwrap().entities[&key].in_flight.clone();
         pair.receiver.kill().unwrap(); // real lost reply

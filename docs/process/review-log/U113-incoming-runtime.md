@@ -730,3 +730,21 @@ That controlled-build handling still needs diagnosis; the case stays red.
 - `similarity/20261029T174939Z-45325`: pass.
 
 No Unit or integration acceptance is claimed.
+
+## Resume the original build before starting another
+
+Start: `3945833c`. Export `cleanroom/20261029T175424Z-49549` releases
+only the child build latch, consumes its original keyed reply once without
+transport, and compares its envelope with the actual landed save. A fresh
+build then proves the current payload and a newer persisted flight before
+the child dies. Independent review is clear. Production is unchanged.
+
+- `core-format/20261029T175636Z-50707`: pass.
+- `private/20261029T175656Z-51306`: both paths pass.
+- `similarity/20261029T175657Z-51506`: both paths pass.
+- `core-test/20261029T175653Z-51044`: 30 execute, 29 pass, one fails.
+  All three own-save actions now pass with exact batch membership and every
+  prior no-op, flight, row, undo and WAL assertion. Restart and review tests
+  pass. Deleted-card side-effect reconciliation remains red and enabled.
+
+No Unit, P24 or original batch acceptance is claimed.
