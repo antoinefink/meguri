@@ -1,6 +1,7 @@
 //! Tests FIRST: real Service/Runtime adoption, public synthetic collections only.
-//! Extract this target and the fixed child fault-arm seam before production fixes.
+//! Extract this target and the child account-input hook before production fixes.
 use meguri_engine::{
+    EngineError, LongOp,
     device_state::{AccountBinding, DeviceState},
     replace::ReplaceReason,
 };
@@ -109,6 +110,16 @@ fn store(directory: &Path) -> cloud::TrackingStore {
         _ => panic!("actual tracking store required"),
     }
 }
+fn cloud_disabled_config(directory: &Path, op: &cloud::adoption::AdoptOp) -> meguri_host::HostConfig {
+    let mut config = options(directory, NOW, 819);
+    assert!(config.cloud.is_none());
+    config.clock = Arc::new(FixedClock::new(NOW, UtcOffset::UTC));
+    config.publication_binding = match &op.candidate.binding {
+        AccountBinding::Connected { .. } => op.candidate.binding.clone(),
+        _ => panic!("actual bound candidate required"),
+    };
+    config
+}
 
 // The process aborts inside the actual Runtime, after R6 reopen and before step 9.
 // A cloud-disabled CoreHost then owns journal recovery and a clean close of A.
@@ -144,14 +155,8 @@ fn crash_and_drain(pair: &mut Pair) -> (cloud::adoption::AdoptOp, cloud::runtime
     assert_eq!(evidence.prior, op.before.publication);
     assert_eq!(evidence.candidate, op.candidate);
     assert!(evidence.safety_backup.is_some());
-    let mut config = options(&pair.directory, NOW, 819);
-    assert!(config.cloud.is_none());
-    config.clock = Arc::new(FixedClock::new(NOW, UtcOffset::UTC));
-    config.publication_binding = match &op.candidate.binding {
-        AccountBinding::Connected { .. } => op.candidate.binding.clone(),
-        _ => panic!("actual bound candidate required"),
-    };
-    let host = meguri_host::CoreHost::open(config).expect("A must recover its own journals through CoreHost");
+    let host = meguri_host::CoreHost::open(cloud_disabled_config(&pair.directory, &op))
+        .expect("A must recover its own journals through CoreHost");
     assert!(host.cloud_runtime().is_none());
     host.close().unwrap();
     assert_eq!(NativeFiles.identity(&path).unwrap(), native);
@@ -164,6 +169,63 @@ fn crash_and_drain(pair: &mut Pair) -> (cloud::adoption::AdoptOp, cloud::runtime
     (op, runtime)
 }
 
+fn replace_native_candidate(
+    directory: &Path,
+    op: &cloud::adoption::AdoptOp,
+    runtime: &cloud::runtime::StoredRuntimeState,
+) -> cloud::runtime::NativeFileIdentity {
+    let path = directory.join("collection.anki2");
+    let device = DeviceState::for_collection(&path);
+    let decision = device.publication_decision().unwrap();
+    let evidence = device.replacement_evidence_for(op.before.publication.identity).unwrap();
+    let host = meguri_host::CoreHost::open(cloud_disabled_config(directory, op)).unwrap();
+    assert!(host.cloud_runtime().is_none());
+    assert_eq!(Some(NativeFiles.identity(&path).unwrap()), runtime.file);
+    let sidecar_path = directory.join("meguri-sidecar.json");
+    let sidecar = std::fs::read(&sidecar_path).unwrap();
+    let recorded_a = runtime.file;
+    {
+        let slot = host.engine().acquire_slot(LongOp::Restore).unwrap();
+        let mut exclusive = slot.enter_exclusive(true).unwrap();
+        // ReplaceTask retires witnesses and A's incarnation before closing
+        // its writer; only then may byte-identical B replace the native file.
+        exclusive
+            .replace(move |live| {
+                let replacement = live.with_file_name("closed-candidate-b.anki2");
+                std::fs::copy(live, &replacement).map_err(|e| EngineError::Storage(e.into()))?;
+                assert_eq!(std::fs::read(live).unwrap(), std::fs::read(&replacement).unwrap());
+                let native_b = NativeFiles.identity(&replacement).unwrap();
+                assert_ne!(Some(native_b), recorded_a);
+                std::fs::rename(&replacement, live).map_err(|e| EngineError::Storage(e.into()))?;
+                assert_eq!(NativeFiles.identity(live).unwrap(), native_b);
+                Ok(())
+            })
+            .unwrap();
+    }
+    let native_b = NativeFiles.identity(&path).unwrap();
+    assert_ne!(Some(native_b), runtime.file);
+    // The local fixture swap grants no new cloud authority, before or after close.
+    for after_close in [false, true] {
+        if after_close {
+            host.close().unwrap();
+        }
+        assert_eq!(NativeFiles.identity(&path).unwrap(), native_b);
+        assert_eq!(std::fs::read(&sidecar_path).unwrap(), sidecar);
+        assert_eq!(device.publication_decision().unwrap(), decision);
+        assert_eq!(
+            device.replacement_evidence_for(op.before.publication.identity).unwrap(),
+            evidence
+        );
+        let tracking = store(directory);
+        assert_eq!(tracking.adoption_op().unwrap().as_ref(), Some(op));
+        assert_eq!(
+            tracking.stored_runtime_state(op.binding_after).unwrap().as_ref(),
+            Some(runtime)
+        );
+    }
+    native_b
+}
+
 #[test]
 fn crash_after_r6_activation_then_different_native_file_cannot_rebase_adoption_authority() {
     let mut pair = Pair::published();
@@ -172,12 +234,7 @@ fn crash_after_r6_activation_then_different_native_file_cannot_rebase_adoption_a
     let device = DeviceState::for_collection(&path);
     let decision = device.publication_decision().unwrap();
     let evidence = device.replacement_evidence_for(op.before.publication.identity).unwrap();
-    // Independent byte-identical B isolates native identity from row/hash equality.
-    let replacement = pair.directory.join("closed-candidate-b.anki2");
-    std::fs::copy(&path, &replacement).unwrap();
-    let native_b = NativeFiles.identity(&replacement).unwrap();
-    assert_ne!(Some(native_b), runtime.file);
-    std::fs::rename(&replacement, &path).unwrap();
+    let native_b = replace_native_candidate(&pair.directory, &op, &runtime);
     pair.receiver = online(&pair.directory); // must reach Runtime, not journal admission
     let facts = pair.receiver.facts().unwrap();
     assert_eq!(facts.native_file, native_b);
@@ -393,6 +450,138 @@ fn online_as(directory: &Path, account: &str) -> PublicationRig {
     .unwrap()
 }
 
+// No R6 result is supplied by this test: the boundary callback mutates only
+// Account's external identity input, then the real Runtime port reads it.
+fn live_adoption_account_capture(account: Option<String>, isolation: Option<cloud::IsolationReason>) {
+    use meguri_engine::device_state::PublicationDecision;
+    let mut pair = Pair::published();
+    let local_rows = pair.receiver.driver().collection_rows().unwrap();
+    let expected_rows = pair.sender.driver().collection_rows().unwrap();
+    assert_ne!(local_rows, expected_rows);
+    let before = pair.receiver.facts().unwrap();
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    let op = pair.receiver.driver().arm_adoption_account_change(account).unwrap();
+    assert_eq!(op.before, before.decision);
+    assert_eq!(op.account.0.as_slice(), scope().account.as_bytes());
+    let requests = pair.service.request_log().unwrap().len();
+
+    // On the unfixed source R6 activates Pending, but live finalization returns
+    // an error before step 9, leaving Ready and the claimed slot in memory.
+    let result = pair.receiver.drive_ready(&mut pair.service, STEPS);
+    let completed = pair.receiver.driver().adoption_completion(&op).unwrap();
+    assert_eq!(completed.identity_changes, 1);
+    assert!(completed.proof_matches);
+    let facts = pair.receiver.facts().unwrap();
+    assert_ne!(facts.native_file, before.native_file);
+    assert_eq!(facts.decision.publication.identity, op.candidate.identity);
+    assert_eq!(facts.decision.publication.binding, op.candidate.binding);
+    assert_eq!(facts.decision.pending_reason, None);
+    let expected_decision = if isolation.is_some() {
+        PublicationDecision::Pending
+    } else {
+        PublicationDecision::Clear
+    };
+    assert_eq!(facts.decision.publication.decision, expected_decision);
+    let binding = facts.current.as_ref().unwrap();
+    assert_eq!(binding.id, op.binding_after);
+    assert_eq!(binding.facts.account, op.account);
+    assert_eq!(binding.facts.publication, op.candidate.identity);
+    let expected_state = isolation
+        .map(cloud::BindingState::Isolated)
+        .unwrap_or(cloud::BindingState::Active);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), expected_rows);
+    let path = pair.directory.join("collection.anki2");
+    let device = DeviceState::for_collection(&path);
+    let evidence = device
+        .replacement_evidence_for(op.before.publication.identity)
+        .unwrap()
+        .unwrap();
+    assert_eq!(evidence.reason, ReplaceReason::CloudAdopt);
+    assert_eq!(evidence.prior, op.before.publication);
+    assert_eq!(evidence.candidate, op.candidate);
+    let backup = evidence.safety_backup.as_ref().expect("actual package safety backup");
+    assert!(pair.receiver.driver().backup_path(&backup.name).unwrap().is_file());
+    assert_eq!(
+        pair.receiver.driver().backup_collection_rows(&backup.name).unwrap(),
+        local_rows
+    );
+    // Establish the real swap and backup first, so a baseline failure reports
+    // the live-finalization boundary rather than an unrelated setup error.
+    assert!(facts.recovery_ops.is_empty());
+    assert!(completed.slot_available);
+    assert_eq!(binding.facts.state, expected_state);
+    assert_eq!(completed.stored_usable, isolation.is_none());
+    assert_eq!(completed.identity_verified, isolation.is_none());
+    assert!(result.is_ok(), "live adoption must finalize after R6 activation");
+    if isolation.is_some() {
+        assert!(!pair.receiver.wants_send().unwrap());
+        assert!(pair.receiver.send_changes_calls().unwrap().is_empty());
+        assert!(
+            pair.service.request_log().unwrap()[requests..]
+                .iter()
+                .all(|request| { request.kind != RequestKind::Modify })
+        );
+        let after = pair.service.request_log().unwrap().len();
+        pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        assert_eq!(pair.service.request_log().unwrap().len(), after);
+    }
+    pair.receiver.close_clean().unwrap();
+    {
+        let tracking = store(&pair.directory);
+        assert!(tracking.adoption_op().unwrap().is_none());
+        assert_eq!(
+            tracking.stored_runtime_state(op.binding_after).unwrap().unwrap().file,
+            Some(facts.native_file)
+        );
+    }
+    // Reopen with A: neither the retained Pending decision nor V9 isolation
+    // may be cleared just because this process sees the original identity.
+    pair.receiver = online(&pair.directory);
+    let reopened = pair.receiver.facts().unwrap();
+    assert_eq!(reopened.native_file, facts.native_file);
+    assert_eq!(reopened.decision, facts.decision);
+    assert!(reopened.recovery_ops.is_empty());
+    assert_eq!(reopened.current.as_ref().unwrap().id, op.binding_after);
+    assert_eq!(reopened.current.as_ref().unwrap().facts.state, expected_state);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), expected_rows);
+    let reopened_proof = pair.receiver.driver().adoption_completion(&op).unwrap();
+    assert!(reopened_proof.proof_matches);
+    assert!(reopened_proof.slot_available);
+    if isolation.is_some() {
+        assert!(!reopened_proof.stored_usable);
+        assert!(!reopened_proof.identity_verified);
+        let after = pair.service.request_log().unwrap().len();
+        pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        assert!(!pair.receiver.wants_send().unwrap());
+        assert!(pair.receiver.send_changes_calls().unwrap().is_empty());
+        assert_eq!(pair.service.request_log().unwrap().len(), after);
+    }
+    assert_eq!(
+        device.replacement_evidence_for(op.before.publication.identity).unwrap(),
+        Some(evidence)
+    );
+    pair.close();
+}
+
+#[test]
+fn live_account_change_after_safety_check_finishes_step9_before_v9_isolation() {
+    live_adoption_account_capture(
+        Some("different-synthetic-account".into()),
+        Some(cloud::IsolationReason::AccountChanged),
+    );
+}
+
+#[test]
+fn live_sign_out_after_safety_check_captures_unknown_and_finishes_step9() {
+    live_adoption_account_capture(None, Some(cloud::IsolationReason::SignedOut));
+}
+
+#[test]
+fn live_same_account_after_safety_check_retains_clear_through_actual_port() {
+    live_adoption_account_capture(Some(scope().account), None);
+}
+
 #[test]
 fn r6_post_activation_account_mismatch_finishes_step9_then_isolates_without_sending() {
     use meguri_engine::device_state::{PublicationDecision, PublicationId};
@@ -534,11 +723,7 @@ fn unresolved_adoption_preserves_evidence_after_cancel_error_and_reopen() {
     let device = DeviceState::for_collection(&path);
     let decision = device.publication_decision().unwrap();
     let evidence = device.replacement_evidence_for(op.before.publication.identity).unwrap();
-    let replacement = pair.directory.join("closed-candidate-b.anki2");
-    std::fs::copy(&path, &replacement).unwrap();
-    let native_b = NativeFiles.identity(&replacement).unwrap();
-    assert_ne!(Some(native_b), runtime.file);
-    std::fs::rename(&replacement, &path).unwrap();
+    let native_b = replace_native_candidate(&pair.directory, &op, &runtime);
     for _ in 0..2 {
         pair.receiver = online(&pair.directory);
         let facts = pair.receiver.facts().unwrap();

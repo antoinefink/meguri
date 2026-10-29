@@ -74,6 +74,14 @@ pub struct ReviewHold {
     pub op_ids: BTreeSet<u64>,
     pub entity_names: BTreeSet<String>,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AdoptionCompletion {
+    pub identity_changes: usize,
+    pub slot_available: bool,
+    pub stored_usable: bool,
+    pub identity_verified: bool,
+    pub proof_matches: bool,
+}
 #[derive(Clone, Debug)]
 pub struct Killed {
     pub signal: Option<i32>,
@@ -108,6 +116,8 @@ pub(crate) enum Input {
     Wal(u64),
     ArmLoss(i64),
     ArmAdoptionActivationCrash,
+    ArmAdoptionAccountChange(Option<String>),
+    AdoptionCompletion(core::adoption::AdoptOp),
     Edit(i64, Vec<String>),
     Payloads,
     Entity(String),
@@ -399,6 +409,14 @@ impl ChildDriver {
     pub fn arm_adoption_activation_crash(&mut self) -> Result<()> {
         self.call(Input::ArmAdoptionActivationCrash)
     }
+    /// Change only the platform identity input after the last safety check.
+    /// None represents sign-out; the real production port must return Unknown.
+    pub fn arm_adoption_account_change(&mut self, account: Option<String>) -> Result<core::adoption::AdoptOp> {
+        self.call(Input::ArmAdoptionAccountChange(account))
+    }
+    pub fn adoption_completion(&mut self, op: &core::adoption::AdoptOp) -> Result<AdoptionCompletion> {
+        self.call(Input::AdoptionCompletion(op.clone()))
+    }
     /// Called after the command's EOF. Require a real abort, never a rig hold.
     pub fn reap_adoption_activation_crash(&mut self) -> Result<()> {
         let mut child = self.child.take().ok_or_else(failure)?;
@@ -522,6 +540,7 @@ impl Drop for ChildDriver {
     }
 }
 struct Account(Mutex<IdentityStatus>);
+static ADOPTION_IDENTITY_CHANGES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl IdentityProvider for Account {
     fn read_identity(&self, _: &core::BuildScope) -> IdentityStatus {
         self.0.lock().unwrap().clone()
@@ -680,6 +699,48 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::ArmAdoptionAccountChange(account) => {
+                let op = self.runtime()?.adoption_op()?.ok_or_else(failure)?;
+                if !matches!(&*self.account.0.lock().unwrap(), IdentityStatus::Available(current) if current == &op.account)
+                {
+                    return Err(failure());
+                }
+                let next = match account {
+                    Some(account) => IdentityStatus::Available(core::OpaqueBytes(account.into_bytes())),
+                    None => IdentityStatus::SignedOut,
+                };
+                let account = self.account.clone();
+                ADOPTION_IDENTITY_CHANGES.store(0, std::sync::atomic::Ordering::SeqCst);
+                self.runtime()?.set_current_account_hook_for_test(move || {
+                    *account.0.lock().unwrap() = next;
+                    ADOPTION_IDENTITY_CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                });
+                value(op)
+            }
+            Input::AdoptionCompletion(op) => {
+                let status = self.runtime()?.status()?;
+                let collection = self.host.collection()?;
+                let file = runtime::FileIdentityProvider::identity(&devices::NativeFiles, collection.path())?;
+                let proof_matches = collection.cloud_adopt_activation()?.is_some_and(|proof| {
+                    proof.matches(
+                        meguri_engine::device_state::PublicationId::from_bytes(op.id),
+                        &op.before.publication,
+                        &op.candidate,
+                    ) && proof.native_file() == (file.device, file.inode)
+                });
+                let slot_available = self
+                    .host
+                    .engine()
+                    .acquire_slot(meguri_engine::LongOp::CloudAdopt)
+                    .is_ok();
+                value(AdoptionCompletion {
+                    identity_changes: ADOPTION_IDENTITY_CHANGES.load(std::sync::atomic::Ordering::SeqCst),
+                    slot_available,
+                    stored_usable: status.stored_usable,
+                    identity_verified: status.identity_verified,
+                    proof_matches,
+                })
+            }
             Input::ArmAdoptionActivationCrash => {
                 self.runtime()?.arm_adoption_activation_crash_for_testing();
                 value(())

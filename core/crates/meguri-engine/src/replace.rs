@@ -356,6 +356,22 @@ impl Exclusive<'_> {
             }
         };
         let RestorePreparation { raw, safety_backup } = preparation;
+        // Keep the old file's reopen ownership through begin_with_cloud. The
+        // current account is separate authority for candidate activation only.
+        // The safety hook has returned; no lifecycle/provider/writer lock is held.
+        let cloud_account = if reason == ReplaceReason::CloudAdopt {
+            let account = self
+                .collection()
+                .core
+                .cloud_publication_authority
+                .as_ref()
+                .map(|p| p.current_account());
+            self.verified_environment(reason)?;
+            account
+        } else {
+            None
+        };
+        let activation_account = cloud_account.clone();
         let media_cleanup = media.as_ref().map(|m| m.cleanup_error.clone());
         let media_recovered = media.as_ref().map(|m| m.recovered.clone());
         let threads = self.replacement_threads();
@@ -398,6 +414,7 @@ impl Exclusive<'_> {
                     threads,
                     raw,
                     cloud,
+                    activation_account,
                     safety_backup,
                 )
                 .map_err(|e| {
@@ -407,6 +424,7 @@ impl Exclusive<'_> {
             },
             activated,
             media_recovered,
+            cloud_account,
         );
         if let Some(error) = media_cleanup.and_then(|e| e.lock().unwrap().take()) {
             return Err(error);
@@ -431,6 +449,7 @@ impl Exclusive<'_> {
 
 struct SwapContext<'a> {
     binding: &'a AccountBinding,
+    cloud_account: Option<&'a AccountBinding>,
     random: &'a dyn meguri_model::rng::RandomSource,
     verified_at: i64,
     cloud: Option<CloudAdoptInput>,
@@ -447,6 +466,7 @@ fn swap(
 ) -> Result<(), ReplaceError> {
     let SwapContext {
         binding,
+        cloud_account,
         random,
         verified_at,
         cloud,
@@ -543,7 +563,7 @@ fn swap(
         if retained_wal {
             device_state::finish_restore_wal(live, binding)?;
         } else {
-            device_state::activate(live, binding)?;
+            device_state::activate(live, cloud_account.unwrap_or(binding))?;
         }
     }
     // TempDir removes only the operation-owned directory, best effort.
@@ -758,6 +778,7 @@ pub(crate) fn run_swap(
     threads: crate::ThreadRegistry,
     raw: Option<device_state::RawRestoreAuthority>,
     cloud: Option<CloudAdoptInput>,
+    cloud_account: Option<AccountBinding>,
     safety_backup: Option<device_state::ReplacementBackup>,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
@@ -767,6 +788,7 @@ pub(crate) fn run_swap(
             reason,
             SwapContext {
                 binding: &binding,
+                cloud_account: cloud_account.as_ref(),
                 random: random.as_ref(),
                 verified_at: clock.now_ms(),
                 cloud,
@@ -795,6 +817,7 @@ pub(crate) fn run_swap(
                         reason,
                         SwapContext {
                             binding: &binding,
+                            cloud_account: cloud_account.as_ref(),
                             random: random.as_ref(),
                             verified_at: clock.now_ms(),
                             cloud,

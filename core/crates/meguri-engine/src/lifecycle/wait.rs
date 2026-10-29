@@ -161,7 +161,7 @@ impl SlotGuard {
     fn replace_verified_initial_with_raw(
         &self,
         live: &std::path::Path,
-        config: crate::OpenConfig,
+        mut config: crate::OpenConfig,
         mut stage: crate::replace::ReplacementStage,
         reason: crate::replace::ReplaceReason,
         change: impl FnOnce(&mut meguri_storage::WriteScope<'_>) -> Result<(), meguri_storage::StorageError>,
@@ -283,6 +283,15 @@ impl SlotGuard {
                 });
             }
             self.engine.lock_state().recovery_ownership = Some(ownership.clone());
+            let cloud_account = if reason == crate::replace::ReplaceReason::CloudAdopt {
+                config
+                    .ports
+                    .cloud_publication_authority
+                    .as_ref()
+                    .map(|p| p.current_account())
+            } else {
+                None
+            };
             let swapped = crate::replace::run_swap(
                 live,
                 stage,
@@ -295,6 +304,7 @@ impl SlotGuard {
                 self.engine.threads().clone(),
                 raw,
                 cloud,
+                cloud_account.clone(),
                 None,
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
@@ -308,11 +318,18 @@ impl SlotGuard {
             }
             crate::device_state::reconcile(
                 live,
-                &config.publication_binding,
+                if changed {
+                    cloud_account.as_ref().unwrap_or(&config.publication_binding)
+                } else {
+                    &config.publication_binding
+                },
                 config.clock.clone(),
                 config.random.clone(),
             )
             .map_err(EngineError::from)?;
+            if changed && cloud_account.is_some() {
+                config.startup_publication_binding = cloud_account;
+            }
             match swapped {
                 Err(error) if !changed => Err(error),
                 outcome => Ok::<_, ReplaceError>((ownership, outcome.err())),

@@ -409,6 +409,8 @@ pub struct Runtime {
     review: Mutex<std::sync::Weak<meguri_engine::session::ReviewService>>,
     #[cfg(feature = "test-hooks")]
     scan_pause: Mutex<Option<ScanPause>>,
+    #[cfg(feature = "test-hooks")]
+    current_account_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 struct ScanGuard {
     invalidation: u64,
@@ -450,7 +452,21 @@ impl Runtime {
             }),
             #[cfg(feature = "test-hooks")]
             scan_pause: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            current_account_hook: Mutex::new(None),
         }
+    }
+    /// Change external test inputs immediately before the fresh account read.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_current_account_hook_for_test(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.current_account_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+    #[cfg(feature = "test-hooks")]
+    fn take_current_account_hook_for_test(&self) -> Option<Box<dyn FnOnce() + Send>> {
+        self.current_account_hook
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)

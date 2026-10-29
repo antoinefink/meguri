@@ -1138,6 +1138,31 @@ impl Runtime {
 }
 
 impl meguri_engine::ports::CloudPublicationAuthority for Runtime {
+    fn current_account(&self) -> meguri_engine::device_state::AccountBinding {
+        use meguri_engine::device_state::AccountBinding;
+        // Read the platform directly: neither local ownership nor a recovery
+        // row is evidence of the current account. No Runtime/tracking guard.
+        #[cfg(feature = "test-hooks")]
+        if let Some(hook) = self.take_current_account_hook_for_test() {
+            hook();
+        }
+        match self.inputs.identity.read_identity(&self.inputs.scope) {
+            IdentityStatus::Available(account) => match String::from_utf8(account.0) {
+                Ok(account) if !account.is_empty() => AccountBinding::Connected {
+                    account,
+                    configuration: self.inputs.scope.container.as_str().to_owned(),
+                    environment: match self.inputs.scope.environment {
+                        Environment::Development => "development",
+                        Environment::Production => "production",
+                    }
+                    .into(),
+                },
+                _ => AccountBinding::Unknown,
+            },
+            _ => AccountBinding::Unknown,
+        }
+    }
+
     fn with_resolution(
         &self,
         collection: &Collection,

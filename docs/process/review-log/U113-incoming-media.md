@@ -139,3 +139,45 @@ It changes no test assertion or safety condition.
 This is retained WIP, not a verified adoption path. Next diagnose the positive
 case before running the wider target again. Incoming changes, media, final
 recovery and signed integration remain required. No acceptance trailer.
+
+## Account authority and live finalization: tests first
+
+Two runtime defects were identified: a fresh media inventory had not registered,
+and R6 used old local ownership as its current account input. The reviewed
+repair inventories actual files and reads the registered platform provider
+outside locks, carrying account authority separately from file ownership.
+
+- `core-test/20261029T112214Z-10908`: both focused cases pass, including actual
+  adoption, retained safety-package rows and reopen persistence.
+- `core-test/20261029T112247Z-11675`: 65 of 67 surrounding cases pass. Two
+  native-file fixtures fail before Runtime admission; normal close had not
+  retired their review-journal incarnation.
+
+Review finds a further live account-change defect: R6 correctly keeps Pending,
+but the old finalizer refuses it before step 9. Source repairs
+`112134Z-10409` and `113109Z-15020` pass independent R3/R4 source review. A
+non-crash test hook changes only the external identity input at the actual
+account read. Its lock is released before calling it. No fault catalog changes.
+Both fixtures replace the file through Engine.
+
+Root applies the tests and input seams with the older finalizer first:
+
+- `core-format/20261029T113546Z-16899`: pass.
+- `core-test/20261029T113553Z-16896`: 13 execute, nine pass, four fail. Both
+  new changed-account/sign-out cases reproduce the live finalization defect;
+  the same-account case passes. Both native-file fixtures additionally compare
+  the entire sidecar and fail because its lifecycle `clean_shutdown` flag
+  changes. A data-free comparison confirms this is the sole changed key.
+  Cloud authority comparisons remain required; fixture repair follows.
+- `private/20261029T113601Z-17712`: all 11 paths pass.
+- `similarity/20261029T113600Z-17482`: 11 paths, no findings or exemptions.
+
+The new incoming review target passes independent source review. After normal
+adoption passes, `core-test/20261029T112446Z-12731` reaches the actual receiver
+fetch and fails for both real Good-review/history and note-edit cases. Sender
+review and publication succeed first. This replaces the earlier setup-only
+failure as its tests-first evidence; no incoming implementation is applied.
+
+This commit precedes the reviewed Pending-finalization repair. No Unit, P24,
+integration or complete sync claim. Native-file fixtures, incoming application,
+media and signed integration remain unfinished.

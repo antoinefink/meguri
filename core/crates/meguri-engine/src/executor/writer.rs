@@ -855,6 +855,9 @@ pub(crate) struct Swap {
     /// legacy closure keeps L8's file-change detection for arbitrary restores.
     pub activated: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub media_recovered: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Actual platform authority captured before dispatch, never local reopen
+    /// ownership. Used only after a CloudAdopt has replaced the old file.
+    pub cloud_account: Option<crate::device_state::AccountBinding>,
 }
 
 /// Closes the collection, swaps the file, reopens it through the open gate
@@ -911,6 +914,7 @@ impl TaskBody for ReplaceTask {
             run: swap,
             activated,
             media_recovered,
+            cloud_account,
         } = swap;
         let swapped = match closed {
             Ok(outcome) if outcome.flatten().is_none_or(|o| o.succeeded()) => {
@@ -933,6 +937,14 @@ impl TaskBody for ReplaceTask {
             shared.undo.reset(DisabledReason::ClearedByOneWay);
         }
         let reopen = env.reopen;
+        let local_binding = reopen.binding();
+        // Before rename, recovery must still prove the old local ownership.
+        // After rename, R6.6 checks the captured actual platform account.
+        let recovery_binding = if replacing {
+            cloud_account.as_ref().unwrap_or(&local_binding)
+        } else {
+            &local_binding
+        };
         let options = OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref())
             .initializers(reopen.initializers.clone())
             .managed();
@@ -945,7 +957,7 @@ impl TaskBody for ReplaceTask {
         } else {
             crate::device_state::reconcile(
                 &shared.path,
-                &reopen.binding(),
+                recovery_binding,
                 reopen.clock.clone(),
                 reopen.random.clone(),
             )
@@ -958,6 +970,28 @@ impl TaskBody for ReplaceTask {
                 factory: None,
             });
             return;
+        }
+        if replacing && cloud_account.is_some() {
+            // Ownership follows the proven replacement only after R6 settles.
+            // This durable binding is never used as current-account authority.
+            match crate::device_state::DeviceState::for_collection(&shared.path).publication() {
+                Ok(Some(publication)) => {
+                    *reopen.binding.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = publication.binding;
+                }
+                outcome => {
+                    let error = outcome
+                        .err()
+                        .map(EngineError::from)
+                        .unwrap_or_else(|| EngineError::internal("replacement publication ownership is missing"));
+                    let _ = reply.send(Replaced {
+                        reopened: false,
+                        error: Some(error),
+                        generation: None,
+                        factory: None,
+                    });
+                    return;
+                }
+            }
         }
         if let Some(journal) = recovery_journal
             && let Err(error) = journal.finish(replacing)

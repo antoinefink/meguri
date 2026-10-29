@@ -8,8 +8,9 @@ use crate::cloud::{
     workflow::{EntityFacts, Saved},
 };
 use meguri_engine::{
-    Engine, LongOp, SlotGuard,
+    Engine, LongOp, ReaderLease, SlotGuard,
     device_state::{AccountBinding, Publication, PublicationDecision, PublicationId},
+    media::{MediaJobKind, MediaJobLease, MediaService},
     replace::{CloudAdoptInput, ReplaceReason, ReplacementStage},
 };
 use meguri_model::{
@@ -163,6 +164,20 @@ fn require_empty_media(media: &meguri_engine::media::MediaService) -> Result<(),
         return Err(PublicationError::MediaApplyUnavailable.into());
     }
     Ok(())
+}
+fn inventory_empty_media<'a>(
+    collection: &'a Collection,
+    media: &MediaService,
+) -> Result<(ReaderLease<'a>, MediaJobLease), RuntimeError> {
+    // Pin the collection while admitting the media job and inventorying its
+    // actual folder. Neither Runtime state nor tracking access is held here.
+    let reader = collection.reader(ReaderRole::Cloud)?;
+    let job = media.try_job(MediaJobKind::CheckMedia)?;
+    media.check_generation(collection.generation().0)?;
+    media.store().check_changes().map_err(|_| refused())?;
+    require_empty_media(media)?;
+    media.check_generation(collection.generation().0)?;
+    Ok((reader, job))
 }
 impl Runtime {
     /// Fixed catalog boundary for the child crash harness only.
@@ -621,7 +636,7 @@ impl Runtime {
         if has_media {
             return Err(PublicationError::MediaApplyUnavailable.into());
         }
-        require_empty_media(media)?;
+        let (_media_reader, _media_job) = inventory_empty_media(collection, media)?;
         let clock = self
             .adapter_clock
             .lock()
@@ -727,11 +742,15 @@ impl Runtime {
         &self,
         owner: &AdoptionOwner,
         op: &AdoptOp,
-        _collection: &Collection,
+        collection: &Collection,
         media: &meguri_engine::media::MediaService,
         backup: &dyn meguri_engine::ports::BackupService,
     ) -> Result<(), RuntimeError> {
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
+        let (media_reader, _media_job) = inventory_empty_media(collection, media)?;
+        // Replacement closes every reader. Keep media-job exclusion through
+        // activation, but release this generation pin before entering it.
+        drop(media_reader);
         let mut exclusive = owner.slot.enter_exclusive(true)?;
         let working = exclusive.collection().clone();
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
@@ -761,6 +780,7 @@ impl Runtime {
                         .ok_or_else(|| engine_error("adoption safety backup unavailable"))?;
                     pin = Some(guarded);
                     self.check_adoption_before(op, &working).map_err(engine_error)?;
+                    require_empty_media(media).map_err(engine_error)?;
                     Ok(receipt)
                 },
             )

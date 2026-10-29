@@ -101,6 +101,11 @@ pub trait OpenStep: Send + Sync {
 /// the local reopen-binding/sidecar locks. Never submit writer work or reenter
 /// Runtime or the resolver from that callback.
 pub trait CloudPublicationAuthority: Send + Sync {
+    /// Read the actual platform account for CloudAdopt activation (R6.6).
+    /// Called on the requesting worker before swap dispatch, outside lifecycle,
+    /// Runtime, tracking, binding and writer locks. Unverified means Unknown.
+    fn current_account(&self) -> crate::device_state::AccountBinding;
+
     fn with_resolution(
         &self,
         collection: &Collection,

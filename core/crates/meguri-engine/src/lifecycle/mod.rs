@@ -942,6 +942,7 @@ impl<'s> Exclusive<'s> {
             run: Box::new(swap),
             activated: None,
             media_recovered: None,
+            cloud_account: None,
         })
     }
 
@@ -950,11 +951,13 @@ impl<'s> Exclusive<'s> {
         swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
         activated: Arc<std::sync::atomic::AtomicBool>,
         media_recovered: Option<Arc<std::sync::atomic::AtomicBool>>,
+        cloud_account: Option<crate::device_state::AccountBinding>,
     ) -> Result<Collection, EngineError> {
         self.replace_inner(crate::executor::writer::Swap {
             run: Box::new(swap),
             activated: Some(activated),
             media_recovered,
+            cloud_account,
         })
     }
 
