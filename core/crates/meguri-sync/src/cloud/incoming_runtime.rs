@@ -854,14 +854,15 @@ fn apply(
             }
         }
         if let Some(losing) = losing {
+            let at = ctx.now().0;
             preserve_conflict(
                 store,
                 binding,
-                &entry.entry,
+                ctx.scope(),
                 &remote.fields,
                 &losing,
                 result.as_ref().ok_or(Error::InvalidData)?,
-                ctx.now().0,
+                at,
             )?;
         }
         let key = ApplyKey {
@@ -1052,7 +1053,7 @@ fn references(
 fn preserve_conflict(
     store: &mut TrackingStore,
     binding: BindingId,
-    entry: &InboxEntry,
+    rows: &impl ReadRows,
     fields: &codec::EntityFields,
     losing: &codec::Payload,
     winning: &codec::Payload,
@@ -1076,7 +1077,23 @@ fn preserve_conflict(
         codec::Payload::Preset(_) => (ConflictKind::Preset, ConflictReason::BlobConflict),
         _ => return Err(Error::InvalidData.into()),
     };
-    let _ = entry;
+    // Capture K10.3 names and placement from the writer before replacing rows.
+    let (field_names, template_names, note_deck) = if let codec::Payload::Note(note) = losing {
+        let (field_names, template_names) = match rows.notetype(meguri_model::ids::NotetypeId(note.mid))? {
+            Some(notetype) => (
+                Some(notetype.fields.into_iter().map(|field| field.name).collect()),
+                Some(notetype.templates.into_iter().map(|template| template.name).collect()),
+            ),
+            None => (None, None),
+        };
+        let note_deck = rows
+            .cards_of_note(meguri_model::ids::NoteId(note.id))?
+            .first()
+            .map(|card| card.deck_id.0);
+        (field_names, template_names, note_deck)
+    } else {
+        (None, None, None)
+    };
     store.store_conflict(
         binding,
         &ConflictCopy {
@@ -1087,9 +1104,9 @@ fn preserve_conflict(
             losing_envelope: OpaqueBytes(envelope),
             losing_payload_digest: PayloadDigest(discarded_digest),
             winning_payload_digest: PayloadDigest(retained_digest),
-            field_names: None,
-            template_names: None,
-            note_deck: None,
+            field_names,
+            template_names,
+            note_deck,
             staged_path: None,
             created_at_ms: at,
             resolved_at_ms: None,

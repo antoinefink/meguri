@@ -344,3 +344,23 @@ tracking gate. No conflict row, ACK, baseline or outcome is seeded.
 
 Keep the assertions. The next source change must add the missing metadata.
 No acceptance is claimed.
+
+## Retained conflict metadata repair
+
+Repair start: `78dbd2c7`. Fixer export
+`cleanroom/20261029T154945Z-53451` captures names and deck placement through
+typed reads in the current writer transaction, before replacing rows.
+The first card by ID supplies the deck. Existing copies, IDs, payloads,
+digests, winners and deduplication remain unchanged. Independent R1 found
+no P0-P2 issue in this scope.
+
+- `core-format/20261029T155305Z-55564`: pass.
+- `core-test/20261029T155317Z-55914`: retained-conflict case passes, including
+  cleanup and both clean reopens; 17 unrelated cases excluded.
+- `core-test/20261029T155432Z-57727`: all 18 publication cases pass,
+  zero skipped.
+- `private/20261029T155401Z-56572`: pass.
+- `similarity/20261029T155401Z-56761`: pass.
+
+This closes the observed missing-metadata failure. Incoming safety, media,
+native integration and the original full batch gate remain open.
