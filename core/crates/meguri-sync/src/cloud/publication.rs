@@ -198,7 +198,14 @@ pub enum OwnResult {
     Saved(ControlRecord),
     Conflict(ControlRecord),
     Read(RecordRead),
-    Failed { retry_after_ms: Option<i64> },
+    /// An absolute core-clock deadline, retained for existing Rust callers.
+    Failed {
+        retry_after_ms: Option<i64>,
+    },
+    /// A server duration; Runtime converts it only after accepting this reply.
+    RetryAfter {
+        duration_ms: u64,
+    },
     NotStarted,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -109,6 +109,8 @@ public enum CloudOwnOperation: Sendable {
 public enum CloudPublicationResult: Sendable {
     case zonesCreated, saved(CloudControlRecord), conflict(CloudControlRecord)
     case read(CloudControlRead), failed(retryAfterMilliseconds: Int64?), notStarted
+    /// Server duration only. Rust validates the reply and persists its deadline.
+    case retryAfter(durationMilliseconds: UInt64)
     var raw: MeguriCoreBindings.CloudPublicationResult {
         switch self {
         case .zonesCreated: .zonesCreated
@@ -116,6 +118,7 @@ public enum CloudPublicationResult: Sendable {
         case .conflict(let r): .conflict(record: r.raw)
         case .read(let r): .read(read: r.raw)
         case .failed(let t): .failed(retryAfterMs: t)
+        case .retryAfter(let duration): .retryAfter(durationMs: duration)
         case .notStarted: .notStarted
         }
     }
@@ -146,11 +149,13 @@ public enum CloudPublicationWork: Sendable {
     case adoption(CloudAdoptionWork, CloudAdoptionAction, CloudRecoveryOperation)
     case scan(CloudPublicationLocal), sendEntities, idle
     init(_ v: MeguriCoreBindings.CloudPublicationWork) {
-        self = switch v {
-        case .local(let h, let k, let o): .local(.init(raw: h), switch k { case .bind: .bind; case .writeDecision: .writeDecision; case .cancel: .cancel }, .init(raw: o))
-        case .own(let r, let c, let o, let m): .own(.init(raw: r), .init(c), .init(raw: o), .init(m))
-        case .adoption(let h, let a, let o): .adoption(.init(raw: h), .init(a), .init(raw: o))
-        case .scan(let h): .scan(.init(raw: h)); case .sendEntities: .sendEntities; case .idle: .idle
+        switch v {
+        case .local(let h, let k, let o):
+            let kind: CloudPublicationLocalKind = switch k { case .bind: .bind; case .writeDecision: .writeDecision; case .cancel: .cancel }
+            self = .local(.init(raw: h), kind, .init(raw: o))
+        case .own(let r, let c, let o, let m): self = .own(.init(raw: r), .init(c), .init(raw: o), .init(m))
+        case .adoption(let h, let a, let o): self = .adoption(.init(raw: h), .init(a), .init(raw: o))
+        case .scan(let h): self = .scan(.init(raw: h)); case .sendEntities: self = .sendEntities; case .idle: self = .idle
         }
     }
 }

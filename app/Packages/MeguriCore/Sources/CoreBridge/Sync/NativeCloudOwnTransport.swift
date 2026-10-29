@@ -44,6 +44,35 @@ enum NativeCloudOwnRecords {
         record.encryptedValues["e"] = encrypted as CKRecordValue
         return record
     }
+    /// CKError reports seconds. Preserve a duration only; Rust owns the clock,
+    /// persisted deadline and later trigger admission. Partial errors can carry
+    /// a longer delay than their enclosing operation.
+    static func retryDuration(_ error: any Error) -> UInt64? {
+        guard let error = error as? CKError else { return nil }
+        var duration: UInt64?
+        if let seconds = error.retryAfterSeconds, seconds.isFinite, seconds >= 0 {
+            let milliseconds = (seconds * 1_000).rounded(.up)
+            duration = milliseconds >= Double(UInt64.max) ? UInt64.max : UInt64(milliseconds)
+        }
+        if let partials = error.partialErrorsByItemID {
+            for partial in partials.values {
+                if let delay = retryDuration(partial) { duration = max(duration ?? 0, delay) }
+            }
+        }
+        return duration
+    }
+    static func retryDuration(_ result: Result<Void, any Error>) -> UInt64? {
+        if case .failure(let error) = result { return retryDuration(error) }
+        return nil
+    }
+    static func retryDuration(_ result: Result<CKRecord, any Error>?) -> UInt64? {
+        guard let result else { return nil }
+        if case .failure(let error) = result { return retryDuration(error) }
+        return nil
+    }
+    static func maximumDelay(_ first: UInt64?, _ second: UInt64?) -> UInt64? {
+        switch (first, second) { case (nil, nil): nil; default: max(first ?? 0, second ?? 0) }
+    }
     static func readError(_ error: any Error) -> CloudControlRead {
         guard let error = error as? CKError else { return .failed }
         switch error.code { case .unknownItem: return .missing; case .zoneNotFound: return .zoneMissing; default: return .failed }
@@ -58,8 +87,7 @@ enum NativeCloudOwnRecords {
             if let error = e as? CKError, error.code == .serverRecordChanged, let record = error.serverRecord {
                 return .conflict(try control(record, target: target))
             }
-            // No wall-clock retry deadline is invented in Swift. Rust owns the
-            // trigger/retry policy; the original typed failure remains failed.
+            if let duration = retryDuration(e) { return .retryAfter(durationMilliseconds: duration) }
             return .failed(retryAfterMilliseconds: nil)
         }
     }
@@ -142,8 +170,14 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         operation.fetchRecordsResultBlock = { [weak prepared] result in
             guard let prepared else { return }
             do {
+                let received = record.withLock { $0 }
+                let duration = NativeCloudOwnRecords.maximumDelay(NativeCloudOwnRecords.retryDuration(received), NativeCloudOwnRecords.retryDuration(result))
+                if publication, let duration {
+                    prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
+                    return
+                }
                 let read: CloudControlRead
-                if let received = record.withLock({ $0 }) { read = try NativeCloudOwnRecords.readResult(received, target: target) }
+                if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
                 else if case .failure(let error) = result { read = NativeCloudOwnRecords.readError(error) }
                 else { throw CloudOwnTransportFailure.missingReply }
                 prepared.finish(.success(publication ? .publication(.read(read)) : .read(read)))
@@ -155,7 +189,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         let ids = Set(names.map(NativeCloudOwnRecords.zone))
         let operation = CKModifyRecordZonesOperation(recordZonesToSave: names.map { CKRecordZone(zoneID: NativeCloudOwnRecords.zone($0)) }, recordZoneIDsToDelete: nil)
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
-        struct State { var saved: Set<CKRecordZone.ID> = []; var failed = false }
+        struct State { var saved: Set<CKRecordZone.ID> = []; var failed = false; var retryDuration: UInt64? }
         let state = Mutex(State())
         operation.perRecordZoneSaveBlock = { id, result in
             state.withLock { value in
@@ -163,15 +197,19 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 case .success(let zone):
                     if ids.contains(id), zone.zoneID == id, id.ownerName == CKCurrentUserDefaultName { value.saved.insert(id) }
                     else { value.failed = true }
-                case .failure: value.failed = true
+                case .failure(let error):
+                    value.failed = true
+                    value.retryDuration = NativeCloudOwnRecords.maximumDelay(value.retryDuration, NativeCloudOwnRecords.retryDuration(error))
                 }
             }
         }
         operation.modifyRecordZonesResultBlock = { [weak prepared] result in
             guard let prepared else { return }
-            let succeeded = state.withLock { !$0.failed && $0.saved == ids }
-            if case .success = result, succeeded { prepared.finish(.success(.publication(.zonesCreated))) }
-            else { prepared.finish(.success(.publication(.failed(retryAfterMilliseconds: nil)))) }
+            let outcome = state.withLock { $0 }
+            if case .success = result, !outcome.failed, outcome.saved == ids { prepared.finish(.success(.publication(.zonesCreated))) }
+            else if let duration = NativeCloudOwnRecords.maximumDelay(outcome.retryDuration, NativeCloudOwnRecords.retryDuration(result)) {
+                prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
+            } else { prepared.finish(.success(.publication(.failed(retryAfterMilliseconds: nil)))) }
         }
         return prepared
     }
@@ -187,8 +225,11 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         operation.modifyRecordsResultBlock = { [weak prepared] result in
             guard let prepared else { return }
             do {
-                if let record = record.withLock({ $0 }) {
-                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(record, target: target))))
+                let received = record.withLock { $0 }
+                if let duration = NativeCloudOwnRecords.maximumDelay(NativeCloudOwnRecords.retryDuration(received), NativeCloudOwnRecords.retryDuration(result)) {
+                    prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
+                } else if let received {
+                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(received, target: target))))
                 } else if case .failure(let error) = result {
                     prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(.failure(error), target: target))))
                 } else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)) }

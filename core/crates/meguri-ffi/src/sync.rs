@@ -555,9 +555,6 @@ impl CloudWorkflow {
         value: Option<Vec<u8>>,
     ) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.account_changed");
-        if let Some(cache) = &self.identity {
-            cache.clear();
-        }
         let observed = identity(status, value);
         self.core
             .adapter_account(sdk.as_deref(), observed.clone())
@@ -809,9 +806,6 @@ impl CloudWorkflow {
 
 struct CachedIdentity(Mutex<Option<r::IdentityStatus>>);
 impl CachedIdentity {
-    fn clear(&self) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
-    }
     fn set(&self, value: r::IdentityStatus) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
     }

@@ -3,7 +3,7 @@
 use super::*;
 use meguri_host::{CoreHost, HostConfig};
 use meguri_model::{
-    clock::{FixedClock, UtcOffset},
+    clock::{StepClock, UtcOffset},
     rng::SeededRandom,
 };
 use meguri_storage::{ConfigValue, ReadRows, ReaderRole};
@@ -49,17 +49,20 @@ impl CloudKeyByteProvider for Keys {
 struct Fixture {
     _directory: tempfile::TempDir,
     workflow: CloudWorkflow,
-    clock: Arc<FixedClock>,
+    clock: Arc<StepClock>,
     random: Arc<SeededRandom>,
 }
 impl Fixture {
     fn new(keys: Arc<Keys>) -> Self {
+        Self::with_identity(keys, None)
+    }
+    fn with_identity(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
         let backups = directory.path().join("backups");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::create_dir_all(&backups).unwrap();
-        let clock = Arc::new(FixedClock::new(NOW, UtcOffset::UTC));
+        let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
         let random = Arc::new(SeededRandom::new(114));
         meguri_engine::bootstrap::create(&data.join("collection.anki2"), clock.as_ref(), random.as_ref()).unwrap();
         let mut config = HostConfig::new(
@@ -75,7 +78,10 @@ impl Fixture {
                 container: c::ContainerId::new("synthetic-u114").unwrap(),
                 environment: c::Environment::Development,
             },
-            identity: Arc::new(Account),
+            identity: identity.clone().map_or_else(
+                || Arc::new(Account) as Arc<dyn r::IdentityProvider>,
+                |cache| cache as Arc<dyn r::IdentityProvider>,
+            ),
             files: Arc::new(NativeFiles),
         });
         config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys)));
@@ -84,11 +90,7 @@ impl Fixture {
         core.retain_adapter_inspection();
         Self {
             _directory: directory,
-            workflow: CloudWorkflow {
-                host,
-                core,
-                identity: None,
-            },
+            workflow: CloudWorkflow { host, core, identity },
             clock,
             random,
         }

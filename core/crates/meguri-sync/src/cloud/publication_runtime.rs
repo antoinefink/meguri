@@ -703,10 +703,30 @@ impl Runtime {
         collection: &Collection,
         submit: impl FnOnce() -> T,
     ) -> Result<T, RuntimeError> {
+        self.submit_publication_acknowledged(request, collection, submit, |_| true)
+    }
+    /// Native queues report synchronous admission separately from their later
+    /// reply. False proves this operation was never added to the queue.
+    pub fn submit_publication_queue(
+        &self,
+        request: &OwnRequest,
+        collection: &Collection,
+        submit: impl FnOnce() -> bool,
+    ) -> Result<bool, RuntimeError> {
+        self.submit_publication_acknowledged(request, collection, submit, |accepted| *accepted)
+    }
+    fn submit_publication_acknowledged<T>(
+        &self,
+        request: &OwnRequest,
+        collection: &Collection,
+        submit: impl FnOnce() -> T,
+        accepted: impl FnOnce(&T) -> bool,
+    ) -> Result<T, RuntimeError> {
         let _lease = collection.reader(ReaderRole::Cloud)?;
         let account = self.publication_account()?;
         let file = self.inputs.files.identity(collection.path())?;
         let decision = self.publication_decision()?;
+        let mut prior_active = None;
         {
             let mut s = self.state();
             if s.publication.running.as_ref() != Some(request)
@@ -744,6 +764,7 @@ impl Runtime {
                     let OwnOperation::Save { encrypted, .. } = &request.operation else {
                         return Err(Error::InvalidData.into());
                     };
+                    prior_active = Some((op.switch_sent, op.active_attempt.clone()));
                     op.switch_sent = true;
                     op.active_attempt = Some(OpaqueBytes(encrypted.clone()));
                     s.store.as_mut().ok_or(Error::Database)?.write_publication_op(&op)?;
@@ -754,7 +775,33 @@ impl Runtime {
         }
         // A submitted mutation whose reply is lost remains durably distinct
         // from a request rejected above, which never calls the transport.
-        Ok(submit())
+        let result = submit();
+        if !accepted(&result) {
+            let mut s = self.state();
+            // Never overwrite a successor's evidence if lifecycle invalidation
+            // raced this acknowledgment. Such an operation remains recoverable.
+            if s.publication.running.as_ref() != Some(request) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            // Restore only the evidence provisionally changed for this exact
+            // enqueue. Earlier accepted attempts must remain uncertain.
+            if let Some((switch_sent, active_attempt)) = prior_active {
+                with_tracking_access(|| -> Result<(), RuntimeError> {
+                    if let Some(store) = s.store.as_mut()
+                        && let Some(mut op) = store.publication_op()?.filter(|op| op.id == request.op)
+                    {
+                        op.switch_sent = switch_sent;
+                        op.active_attempt = active_attempt;
+                        store.write_publication_op(&op)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            s.publication.submitted = false;
+            s.publication.running = None;
+            s.publication.waiting = true;
+        }
+        Ok(result)
     }
     pub fn publication_result(
         &self,
@@ -770,6 +817,20 @@ impl Runtime {
             s.publication.running = None;
             s.publication.waiting = true;
             return Ok(());
+        }
+        // Reject stale replies before consulting the host clock. Recheck after
+        // provider reads, since they run outside Runtime/tracking locks.
+        {
+            let s = self.state();
+            if s.publication.running.as_ref() != Some(request)
+                || !s.publication.submitted
+                || s.incarnation != request.incarnation
+                || Self::instance_locked(&s)? != request.instance
+                || collection.generation().0 != request.generation
+                || !collection.is_current()
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
         }
         // Provider/sidecar access occurs before acquiring either writer-shared lock.
         let account = self.publication_account()?;
@@ -800,8 +861,14 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        if let OwnResult::Failed { retry_after_ms } = result {
-            op.retry_after_ms = retry_after_ms;
+        if let OwnResult::Failed { .. } | OwnResult::RetryAfter { .. } = result {
+            op.retry_after_ms = match result {
+                OwnResult::Failed { retry_after_ms } => retry_after_ms,
+                OwnResult::RetryAfter { duration_ms } => {
+                    Some(i64::try_from(duration_ms).map_or(i64::MAX, |duration| now.saturating_add(duration)))
+                }
+                _ => unreachable!(),
+            };
             with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.write_publication_op(&op))?;
             s.publication.waiting = true;
             return Ok(());

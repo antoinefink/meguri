@@ -129,9 +129,8 @@ public actor CloudOwnExecutor {
             }
             guard accepted else {
                 prepared = nil
-                // A synchronous queue refusal is an actual failed admission,
-                // not a fabricated CK reply or a lost accepted server write.
-                try await core.publicationResult(request, result: .failed(retryAfterMilliseconds: nil))
+                // Runtime consumed the actual synchronous refusal and restored
+                // any prior durable evidence. There is no native reply to drain.
                 throw CloudOwnTransportFailure.queueRejected
             }
             do {

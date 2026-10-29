@@ -68,6 +68,7 @@ fn result(v: p::OwnResult) -> CloudPublicationResult {
             },
         },
         p::OwnResult::Failed { retry_after_ms } => CloudPublicationResult::Failed { retry_after_ms },
+        p::OwnResult::RetryAfter { duration_ms } => CloudPublicationResult::RetryAfter { duration_ms },
         p::OwnResult::NotStarted => CloudPublicationResult::NotStarted,
     }
 }
@@ -162,103 +163,7 @@ fn bridge_close_rejects_held_confirmation_before_entropy_or_successor_host_acces
 #[test]
 fn bridge_accepted_active_with_lost_reply_retains_actual_durable_switch_attempt() {
     let fixture = Fixture::new(keys());
-    fixture
-        .workflow
-        .host
-        .media()
-        .unwrap()
-        .store()
-        .register_full(|_, _| true)
-        .unwrap();
-    let connection = fixture.workflow.connection().unwrap();
-    connection.confirm_publication(ready(&connection)).unwrap();
-    let scope = Scope {
-        container: "synthetic-u114".into(),
-        environment: "development".into(),
-        account: "synthetic-account-A".into(),
-    };
-    let run = tempfile::tempdir().unwrap();
-    let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(801)).unwrap();
-    let mut sdk: Option<CloudEngineRegistration> = None;
-    let mut held = None;
-    for _ in 0..64 {
-        match connection.next_publication_work().unwrap() {
-            CloudPublicationWork::Local { handle, .. } | CloudPublicationWork::Scan { handle } => {
-                connection.perform_local(handle).unwrap()
-            }
-            CloudPublicationWork::Own { request, .. } => {
-                if request.retained_for_test().kind == p::OwnKind::SaveActive {
-                    held = Some(request);
-                    break;
-                }
-                let (reply, _) = execute_publication_request(
-                    &mut service,
-                    &scope,
-                    request.retained_for_test(),
-                    &fixture.workflow.core,
-                    &fixture.workflow.host.collection().unwrap(),
-                )
-                .unwrap();
-                connection.publication_result(request, result(reply)).unwrap();
-            }
-            CloudPublicationWork::SendEntities => {
-                if sdk.is_none() {
-                    sdk = Some(fixture.workflow.register_sdk(false).unwrap());
-                }
-                let sdk = sdk.as_ref().unwrap();
-                let pending = fixture.workflow.tracking_sendables().unwrap();
-                let batch = fixture
-                    .workflow
-                    .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), pending)
-                    .unwrap()
-                    .expect("actual entity batch");
-                let count = batch.saves.len() as u32;
-                let changes = batch
-                    .saves
-                    .into_iter()
-                    .map(|r| Mutation::Save {
-                        record: RecordInput::encrypted(&r.name, "MGEntity", r.envelope),
-                        if_unchanged: r.system_fields.map(SystemFields::from_bytes),
-                    })
-                    .collect();
-                let response = service
-                    .request(
-                        &scope,
-                        Caller::default(),
-                        Operation::Modify {
-                            zone: sdk.collection_zone.clone(),
-                            atomic: false,
-                            changes,
-                        },
-                    )
-                    .unwrap();
-                let Reply::Modified(items) = response.result.unwrap() else {
-                    panic!("actual service save")
-                };
-                let saved = items
-                    .into_iter()
-                    .map(|item| {
-                        let MutationSuccess::Saved(record) = item.result.unwrap() else {
-                            panic!("actual saved entity")
-                        };
-                        let r = publication_control_record(&record).unwrap();
-                        CloudRecord {
-                            name: record.name,
-                            envelope: r.encrypted.unwrap(),
-                            system_fields: Some(r.system_fields.0),
-                        }
-                    })
-                    .collect();
-                fixture
-                    .workflow
-                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], count)
-                    .unwrap();
-                fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
-            }
-            _ => panic!("publication failed before active"),
-        }
-    }
-    let request = held.expect("real complete epoch must yield an active save");
+    let (connection, request) = active_request(&fixture);
     let before = fixture.workflow.core.publication_op().unwrap().unwrap();
     assert!(!before.switch_sent && before.active_attempt.is_none());
     let queue = Arc::new(Queue(AtomicUsize::new(0)));
@@ -562,4 +467,322 @@ fn retained_cancel_id_cannot_cancel_the_next_actual_publication() {
     assert!(connection.recovery_status().unwrap().is_some());
     connection.cancel_operation(current).unwrap();
     assert!(connection.recovery_status().unwrap().is_none());
+}
+
+fn active_request(fixture: &Fixture) -> (Arc<CloudConnection>, Arc<CloudPublicationRequest>) {
+    let (connection, request, _) = active_request_with_epoch(fixture);
+    (connection, request)
+}
+fn active_request_with_epoch(
+    fixture: &Fixture,
+) -> (Arc<CloudConnection>, Arc<CloudPublicationRequest>, CloudControlRecord) {
+    fixture
+        .workflow
+        .host
+        .media()
+        .unwrap()
+        .store()
+        .register_full(|_, _| true)
+        .unwrap();
+    let connection = fixture.workflow.connection().unwrap();
+    connection.confirm_publication(ready(&connection)).unwrap();
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    let run = tempfile::tempdir().unwrap();
+    let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(801)).unwrap();
+    let mut sdk: Option<CloudEngineRegistration> = None;
+    let mut held = None;
+    for _ in 0..64 {
+        match connection.next_publication_work().unwrap() {
+            CloudPublicationWork::Local { handle, .. } | CloudPublicationWork::Scan { handle } => {
+                connection.perform_local(handle).unwrap()
+            }
+            CloudPublicationWork::Own { request, .. } => {
+                if request.retained_for_test().kind == p::OwnKind::SaveActive {
+                    held = Some(request);
+                    break;
+                }
+                let (reply, _) = execute_publication_request(
+                    &mut service,
+                    &scope,
+                    request.retained_for_test(),
+                    &fixture.workflow.core,
+                    &fixture.workflow.host.collection().unwrap(),
+                )
+                .unwrap();
+                connection.publication_result(request, result(reply)).unwrap();
+            }
+            CloudPublicationWork::SendEntities => {
+                if sdk.is_none() {
+                    sdk = Some(fixture.workflow.register_sdk(false).unwrap());
+                }
+                let sdk = sdk.as_ref().unwrap();
+                let pending = fixture.workflow.tracking_sendables().unwrap();
+                let batch = fixture
+                    .workflow
+                    .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), pending)
+                    .unwrap()
+                    .expect("actual entity batch");
+                let count = batch.saves.len() as u32;
+                let changes = batch
+                    .saves
+                    .into_iter()
+                    .map(|r| Mutation::Save {
+                        record: RecordInput::encrypted(&r.name, "MGEntity", r.envelope),
+                        if_unchanged: r.system_fields.map(SystemFields::from_bytes),
+                    })
+                    .collect();
+                let response = service
+                    .request(
+                        &scope,
+                        Caller::default(),
+                        Operation::Modify {
+                            zone: sdk.collection_zone.clone(),
+                            atomic: false,
+                            changes,
+                        },
+                    )
+                    .unwrap();
+                let Reply::Modified(items) = response.result.unwrap() else {
+                    panic!("actual service save")
+                };
+                let saved = items
+                    .into_iter()
+                    .map(|item| {
+                        let MutationSuccess::Saved(record) = item.result.unwrap() else {
+                            panic!("actual saved entity")
+                        };
+                        let r = publication_control_record(&record).unwrap();
+                        CloudRecord {
+                            name: record.name,
+                            envelope: r.encrypted.unwrap(),
+                            system_fields: Some(r.system_fields.0),
+                        }
+                    })
+                    .collect();
+                fixture
+                    .workflow
+                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], count)
+                    .unwrap();
+                fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+            }
+            _ => panic!("publication failed before active"),
+        }
+    }
+    let request = held.expect("real complete epoch must yield an active save");
+    let op = fixture.workflow.core.publication_op().unwrap().unwrap();
+    let zone = meguri_sync::cloud::adapter::collection_zone(op.epoch);
+    let inventory = service.inspect(&scope).unwrap().unwrap();
+    let epoch = publication_control_record(&inventory.zones[&zone].records["epoch"]).unwrap();
+    (
+        connection,
+        request,
+        CloudControlRecord {
+            encrypted: epoch.encrypted,
+            system_fields: epoch.system_fields.0,
+        },
+    )
+}
+
+struct RefusingQueue;
+impl CloudPublicationQueue for RefusingQueue {
+    fn enqueue(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn rejected_retired_sdk_account_events_preserve_actual_owner_preview_and_admission() {
+    for rejected_status in [CloudAccountStatus::NoAccount, CloudAccountStatus::CouldNotDetermine] {
+        let cache = Arc::new(CachedIdentity(Mutex::new(None)));
+        let fixture = Fixture::with_identity(keys(), Some(cache));
+        fixture
+            .workflow
+            .account_changed(
+                None,
+                CloudAccountStatus::Available,
+                Some(b"synthetic-account-A".to_vec()),
+            )
+            .unwrap();
+        let (retired, _, _) = fixture.baseline();
+        fixture.workflow.retire_sdk(retired.instance_id.clone(), false).unwrap();
+        fixture.workflow.release_sdk(retired.instance_id.clone()).unwrap();
+        let current = fixture.workflow.register_sdk(false).unwrap();
+        fixture
+            .workflow
+            .account_changed(
+                Some(current.instance_id.clone()),
+                CloudAccountStatus::Available,
+                Some(b"synthetic-account-A".to_vec()),
+            )
+            .unwrap();
+        assert!(
+            fixture
+                .workflow
+                .account_changed(Some(retired.instance_id), rejected_status, None)
+                .is_err()
+        );
+        fixture.workflow.validate_sdk(current.instance_id).unwrap();
+        // Uses the very cache installed in CoreHost, through publication_account.
+        let connection = fixture.workflow.connection().unwrap();
+        connection.confirm_publication(ready(&connection)).unwrap();
+        let (request, _) = own(&connection);
+        assert!(
+            connection
+                .submit_publication_request(request, Arc::new(Queue(AtomicUsize::new(0))))
+                .unwrap()
+        );
+    }
+}
+
+#[test]
+fn false_queue_at_actual_active_save_restores_never_submitted_evidence() {
+    let fixture = Fixture::new(keys());
+    let (connection, request) = active_request(&fixture);
+    let before = fixture.workflow.core.publication_op().unwrap().unwrap();
+    assert!(!before.switch_sent && before.active_attempt.is_none());
+    assert!(
+        !connection
+            .submit_publication_request(request.clone(), Arc::new(RefusingQueue))
+            .unwrap()
+    );
+    assert!(fixture.workflow.core.publication_op().unwrap().unwrap() == before);
+    // No reply is fabricated for a queue that refused the operation.
+    connection.trigger().unwrap();
+    let (next, _) = own(&connection); // Fresh epoch read, then another save is allowed.
+    assert!(
+        connection
+            .submit_publication_request(next, Arc::new(Queue(AtomicUsize::new(0))))
+            .unwrap()
+    );
+    assert!(
+        connection
+            .publication_result(request, CloudPublicationResult::NotStarted)
+            .is_err()
+    );
+}
+
+#[test]
+fn queue_refusal_retains_pending_attempt() {
+    let fixture = Fixture::new(keys());
+    let (connection, request, epoch) = active_request_with_epoch(&fixture);
+    assert!(
+        connection
+            .submit_publication_request(request.clone(), Arc::new(Queue(AtomicUsize::new(0))))
+            .unwrap()
+    );
+    let uncertain = fixture.workflow.core.publication_op().unwrap().unwrap();
+    assert!(uncertain.switch_sent && uncertain.active_attempt.is_some());
+    // A failed terminal reply cannot prove the server did not accept it.
+    connection
+        .publication_result(request, CloudPublicationResult::Failed { retry_after_ms: None })
+        .unwrap();
+    fixture.clock.step_ms(5_000);
+    connection.trigger().unwrap();
+    let (read, command) = own(&connection);
+    assert!(matches!(command, CloudOwnOperation::Read { .. }));
+    // Deliver the actual complete epoch saved by this fixture's Service prefix.
+    assert!(
+        connection
+            .submit_publication_request(read.clone(), Arc::new(Queue(AtomicUsize::new(0))))
+            .unwrap()
+    );
+    connection
+        .publication_result(
+            read,
+            CloudPublicationResult::Read {
+                read: CloudControlRead::Found { record: epoch },
+            },
+        )
+        .unwrap();
+    let (retry, command) = own(&connection);
+    assert!(matches!(command, CloudOwnOperation::Save { .. }));
+    assert!(
+        !connection
+            .submit_publication_request(retry, Arc::new(RefusingQueue))
+            .unwrap()
+    );
+    assert!(fixture.workflow.core.publication_op().unwrap().unwrap() == uncertain);
+}
+
+#[test]
+fn server_retry_duration_uses_reply_clock_and_survives_actual_host_restart() {
+    let fixture = Fixture::new(keys());
+    let connection = fixture.workflow.connection().unwrap();
+    connection.confirm_publication(ready(&connection)).unwrap();
+    let (request, _) = own(&connection);
+    assert!(
+        connection
+            .submit_publication_request(request.clone(), Arc::new(Queue(AtomicUsize::new(0))))
+            .unwrap()
+    );
+    fixture.clock.step_ms(3_000);
+    connection
+        .publication_result(
+            request.clone(),
+            CloudPublicationResult::RetryAfter { duration_ms: 120_000 },
+        )
+        .unwrap();
+    let deadline = NOW + 123_000;
+    assert_eq!(
+        connection.recovery_status().unwrap().unwrap().retry_after_ms,
+        Some(deadline)
+    );
+    fixture.clock.step_ms(5_000);
+    connection.trigger().unwrap();
+    assert!(matches!(
+        connection.next_publication_work().unwrap(),
+        CloudPublicationWork::Idle
+    ));
+    // Replaying the old reply must not extend the accepted deadline.
+    assert!(
+        connection
+            .publication_result(request, CloudPublicationResult::RetryAfter { duration_ms: 120_000 })
+            .is_err()
+    );
+    fixture.workflow.host.close().unwrap();
+    let mut config = HostConfig::new(
+        fixture._directory.path().join("collection"),
+        fixture._directory.path().join("backups"),
+        fixture._directory.path().join("widget"),
+        fixture.clock.clone(),
+        fixture.random.clone(),
+        Arc::new(meguri_storage::space::StatvfsSpace),
+    );
+    config.cloud = Some(r::CloudInputs {
+        scope: c::BuildScope {
+            container: c::ContainerId::new("synthetic-u114").unwrap(),
+            environment: c::Environment::Development,
+        },
+        identity: Arc::new(Account),
+        files: Arc::new(NativeFiles),
+    });
+    let host = Arc::new(CoreHost::open(config).unwrap());
+    let workflow = CloudWorkflow {
+        core: host.cloud_runtime().unwrap().clone(),
+        host: host.clone(),
+        identity: None,
+    };
+    let reopened = workflow.connection().unwrap();
+    assert_eq!(
+        reopened.recovery_status().unwrap().unwrap().retry_after_ms,
+        Some(deadline)
+    );
+    reopened.trigger().unwrap();
+    assert!(matches!(
+        reopened.next_publication_work().unwrap(),
+        CloudPublicationWork::Idle
+    ));
+    fixture.clock.step_ms(115_001);
+    reopened.trigger().unwrap();
+    let (request, _) = own(&reopened);
+    assert!(
+        reopened
+            .submit_publication_request(request, Arc::new(Queue(AtomicUsize::new(0))))
+            .unwrap()
+    );
+    host.close().unwrap();
 }

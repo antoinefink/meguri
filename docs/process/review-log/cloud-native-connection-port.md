@@ -81,3 +81,82 @@ earlier submission. Both require real regressions before acceptance.
 
 This is compiled Rust WIP. Native Swift execution and the review repairs are
 pending. P24, app connection, media and the original gate remain open.
+
+## R1 source repair export (2026-10-29)
+
+Fixer starting base: `0677c9af`. Original unit/phase base `40dc9650` and
+original integration/batch base `1416a520542a8c5daa38a23bfe398da704c3d6c9`
+remain unchanged. Earlier 106-test Rust pass, privacy/similarity passes and
+Swift compile failure above remain the integration evidence; none is replaced
+by this source export.
+
+Repairs:
+
+- Bind the local-kind switch to a typed local before constructing Swift's
+  publication-work case; no switch expression remains in argument position.
+- Update the accepted identity cache only after adapter_account succeeds.
+  Regression installs that same cache in the actual CoreHost, accepts the
+  current owner, rejects retired SDK SignedOut/ReadFailed events, and exercises
+  current-owner preview, confirmation and guarded own-operation admission.
+- Route native synchronous Boolean queue acknowledgment through a separate
+  Runtime entry point, preserving the existing generic Rust transport API.
+  Reserve durable evidence before enqueue; on actual false restore the prior
+  switch_sent/active_attempt, release the exact running request, and wait for
+  a new trigger. Swift sends no fabricated Failed reply on queue refusal.
+  Never overwrite a successor if lifecycle invalidation raced acknowledgment;
+  that stale case retains conservative recovery evidence. No lock crosses the
+  foreign enqueue callback. Real Service publication prefixes feed SaveActive
+  refusal and prior-uncertain-attempt controls; the original lost-reply test's
+  assertions and 64-step prefix bound remain.
+- Add an explicit RetryAfter duration variant through Swift/FFI/OwnResult.
+  Existing Failed.retry_after_ms remains an absolute deadline. Native
+  publication reads, saves and zone creation extract CKError seconds, round
+  upward to milliseconds, and retain the longest reported partial/operation
+  delay. Runtime rejects stale replies before reading its actual Host clock,
+  rechecks all authority, and persists the absolute deadline after validation.
+  No Swift date, timer, retry loop or constructed DTO authority is introduced.
+
+Test source was started before production edits. Four Rust regressions and two
+Swift test declarations were added; parameterization covers both documented
+CloudKit retry error codes and original per-item, terminal and partial-error
+callbacks for publication reads/saves/zones. The retry regression delivers a
+120-second duration at the reply clock, proves +5 seconds is Idle, restarts the
+actual Host and checks its durable deadline, rejects the stale reply, and admits
+the first actual trigger after 120 seconds. Existing tests remain enabled.
+
+Shared-file hunks are limited to sync.rs account/cache handling; sync_tests.rs
+fixture identity injection and an explicitly stepped Host clock (unchanged until
+stepped); publication.rs's additive duration variant; and publication_runtime.rs
+submission acknowledgment and validated duration conversion. No media,
+incoming-runtime, general Host-open, policy, UI, entitlements or server module
+was edited. No new FFI method export or BridgeCall was needed; existing export
+and exact registry counts remain unchanged. Generated bindings must be rebuilt
+for the additive result enum variant.
+
+One scoped source consistency pass was made. No build, test, formatter,
+network/credentials, forbidden source/history access or commit was performed.
+Compilation, actual test results (including all original 106 Rust/16 Swift
+cases), MG guards, independent R2 and commits belong to the integrator. Native
+SDK signatures and generated enum spelling remain unverified here. Ordinary
+preview/adoption read failures still follow their existing failed-read path;
+this persisted V26.1 retry repair concerns publication own-operation replies.
+No acceptance or P24/app/milestone closure is claimed.
+
+## R2/R3 integration checkpoint (2026-10-29)
+
+Independent R2 closed the identity-cache, rejected-enqueue and persisted retry
+findings, requiring only two enum spelling corrections. R3 cleared the narrow
+Swift actor-capture repair; all 15 calls retain the same immutable raw handle
+before the MaintenanceLane crossing. No new behavior finding in that delta.
+
+- Rust FFI library: core-test/20261029T191345Z-92404, all 110 pass.
+- Rust format: core-format/20261029T191334Z-92066, pass.
+- Privacy: private/20261029T191825Z-97382, all 12 paths pass after rewriting
+  the flagged test name and removing one comment.
+- Similarity: similarity/20261029T191828Z-97738, pass.
+- Swift: swift-test/20261029T191823Z-96650 builds successfully but fails its
+  95 cases (62 pass, 33 fail) with 48 issues: two parameterized native retry cases and
+  46 EventTests account-verification issues. This is an unaccepted WIP
+  checkpoint. Next: repair the failed cases.
+
+No Unit closure. U113/U114 and the batch gate remain pending.

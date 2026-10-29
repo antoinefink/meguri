@@ -15,6 +15,49 @@ struct NativeCloudOwnTransportTests {
     let active = CloudControlTarget(zone: "meguri-root", name: "active", recordType: "MGActive")
     let root = CloudControlTarget(zone: "meguri-media", name: "root", recordType: "MGMediaRoot")
 
+    @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
+    func publicationReadsSavesAndZonesForwardActualServerDuration(code: CKError.Code) async throws {
+        let retry = CKError(code, userInfo: [CKErrorRetryAfterKey: 120.0])
+        let partial = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.id(root): retry]])
+        // Exercise per-item metadata, operation metadata, and nested partial
+        // operation metadata through the original CK completion handlers.
+        for source in 0..<3 {
+            for kind in 0..<3 {
+                let queue = NativeOwnCapturingQueue()
+                let command: CloudOwnOperation
+                switch kind {
+                case 0: command = .read(root)
+                case 1: command = .save(root, encrypted: Data([2]), systemFields: nil)
+                default: command = .createZones(["meguri-root", "meguri-media", "c-synthetic"])
+                }
+                let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.publication(command))
+                #expect(prepared.enqueue())
+                let operation = try #require(queue.operations.withLock { $0.first })
+                let itemError = source == 0 ? retry : CKError(.networkFailure)
+                let terminalError = source == 1 ? retry : (source == 2 ? partial : CKError(.partialFailure))
+                if let fetch = operation as? CKFetchRecordsOperation {
+                    fetch.perRecordResultBlock?(NativeCloudOwnRecords.id(root), .failure(itemError))
+                    fetch.fetchRecordsResultBlock?(.failure(terminalError))
+                } else if let save = operation as? CKModifyRecordsOperation {
+                    save.perRecordSaveBlock?(NativeCloudOwnRecords.id(root), .failure(itemError))
+                    save.modifyRecordsResultBlock?(.failure(terminalError))
+                } else if let zones = operation as? CKModifyRecordZonesOperation {
+                    let zone = try #require(zones.recordZonesToSave?.first)
+                    zones.perRecordZoneSaveBlock?(zone.zoneID, .failure(itemError))
+                    zones.modifyRecordZonesResultBlock?(.failure(terminalError))
+                } else { throw CloudOwnTransportFailure.unexpectedReply }
+                guard case .publication(.retryAfter(let milliseconds)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+                #expect(milliseconds == 120_000)
+            }
+        }
+    }
+    @Test func retryMetadataUsesLongestPartialDelayAndRoundsFractionalMillisecondsUp() throws {
+        let retry = CKError(.requestRateLimited, userInfo: [CKErrorRetryAfterKey: 120.0001])
+        let partial = CKError(.partialFailure, userInfo: [CKErrorRetryAfterKey: 5.0, CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.id(root): retry]])
+        #expect(NativeCloudOwnRecords.retryDuration(partial) == 120_001)
+        guard case .retryAfter(let milliseconds) = try NativeCloudOwnRecords.saveResult(.failure(partial), target: root) else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(milliseconds == 120_001)
+    }
     @Test func recordIDReadIncludesAllFieldsAndPreservesFoundWithoutE() async throws {
         let queue = NativeOwnCapturingQueue()
         let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.read(root))

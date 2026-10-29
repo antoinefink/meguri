@@ -355,6 +355,7 @@ pub enum CloudPublicationResult {
     Conflict { record: CloudControlRecord },
     Read { read: CloudControlRead },
     Failed { retry_after_ms: Option<i64> },
+    RetryAfter { duration_ms: u64 },
     NotStarted,
 }
 impl From<CloudPublicationResult> for p::OwnResult {
@@ -365,6 +366,7 @@ impl From<CloudPublicationResult> for p::OwnResult {
             CloudPublicationResult::Conflict { record } => Self::Conflict(record.into()),
             CloudPublicationResult::Read { read } => Self::Read(read.into()),
             CloudPublicationResult::Failed { retry_after_ms } => Self::Failed { retry_after_ms },
+            CloudPublicationResult::RetryAfter { duration_ms } => Self::RetryAfter { duration_ms },
             CloudPublicationResult::NotStarted => Self::NotStarted,
         }
     }
@@ -672,7 +674,7 @@ impl CloudConnection {
         let collection = self.owner.collection()?;
         self.owner
             .core
-            .submit_publication_request(&request.request, &collection, || {
+            .submit_publication_queue(&request.request, &collection, || {
                 callback::invoke("CloudPublicationQueue.enqueue", || queue.enqueue())
             })
             .map_err(error)
