@@ -351,7 +351,7 @@ impl CloudWorkflow {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .as_ref()
-                .map(|(_, identity)| identity.clone()),
+                .map(|platform| platform.identity.clone()),
         }))
     }
     pub fn instance(&self) -> Result<String, CoreError> {
@@ -687,7 +687,16 @@ impl CloudWorkflow {
                 &records.into_iter().map(CloudRecord::saved).collect::<Vec<_>>(),
                 &deleted,
             )
-            .map_err(cloud_error)
+            .map_err(cloud_error)?;
+        // adapter_fetched has validated the SDK and exact zone and committed
+        // the inbox. Its guards are gone before the host admits a writer/WAL
+        // wait. The serialized native event completes before later cursor events.
+        if zone != "meguri-root" {
+            self.host
+                .apply_cloud_incoming(std::time::Duration::from_secs(1))
+                .map_err(cloud_error)?;
+        }
+        Ok(())
     }
     pub fn begin_fetch(&self, sdk: String, zones: Vec<String>) -> Result<u64, CoreError> {
         callback::enter("CloudWorkflow.begin_fetch");
@@ -817,7 +826,28 @@ impl r::FileIdentityProvider for NativeFiles {
         }
     }
 }
-static PLATFORM: Mutex<Option<(r::CloudInputs, Arc<CachedIdentity>)>> = Mutex::new(None);
+/// Returns exactly one full-width key, or no value on OS failure. No core
+/// reentry, UI or async work; unlike clock/capacity reads this runs without locks.
+#[uniffi::export(foreign)]
+pub trait CloudKeyByteProvider: Send + Sync {
+    fn draw_key(&self) -> Option<Vec<u8>>;
+}
+
+struct ForeignKeyBytes(Arc<dyn CloudKeyByteProvider>);
+impl r::KeyByteSource for ForeignKeyBytes {
+    fn draw_key(&self) -> Result<[u8; 32], r::KeySourceError> {
+        callback::invoke("CloudKeyByteProvider.draw_key", || self.0.draw_key())
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or(r::KeySourceError::Unavailable)
+    }
+}
+
+struct CloudPlatform {
+    inputs: r::CloudInputs,
+    identity: Arc<CachedIdentity>,
+    key_bytes: Arc<dyn r::KeyByteSource>,
+}
+static PLATFORM: Mutex<Option<CloudPlatform>> = Mutex::new(None);
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CloudEnvironment {
     Development,
@@ -829,6 +859,7 @@ pub fn configure_cloud_platform(
     environment: CloudEnvironment,
     status: CloudAccountStatus,
     value: Option<Vec<u8>>,
+    key_bytes: Arc<dyn CloudKeyByteProvider>,
 ) -> Result<(), CoreError> {
     callback::enter("configure_cloud_platform");
     if runtime::host().is_ok() {
@@ -837,8 +868,8 @@ pub fn configure_cloud_platform(
         });
     }
     let completed = Arc::new(CachedIdentity(Mutex::new(Some(identity(status, value)))));
-    *PLATFORM.lock().unwrap_or_else(PoisonError::into_inner) = Some((
-        r::CloudInputs {
+    let platform = CloudPlatform {
+        inputs: r::CloudInputs {
             scope: c::BuildScope {
                 container: c::ContainerId::new(container).map_err(cloud_error)?,
                 environment: match environment {
@@ -849,27 +880,32 @@ pub fn configure_cloud_platform(
             identity: completed.clone(),
             files: Arc::new(NativeFiles),
         },
-        completed,
-    ));
+        identity: completed,
+        key_bytes: Arc::new(ForeignKeyBytes(key_bytes)),
+    };
+    *PLATFORM.lock().unwrap_or_else(PoisonError::into_inner) = Some(platform);
     Ok(())
 }
-pub(crate) fn platform_inputs() -> Option<r::CloudInputs> {
+pub(crate) fn platform_inputs() -> Option<(r::CloudInputs, Option<Arc<dyn r::KeyByteSource>>)> {
     let configured = PLATFORM
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .map(|(inputs, _)| inputs.clone());
+        .map(|platform| (platform.inputs.clone(), Some(platform.key_bytes.clone())));
     #[cfg(feature = "test-hooks")]
     {
         configured.or_else(|| {
-            Some(r::CloudInputs {
-                scope: c::BuildScope {
-                    container: c::ContainerId::new("synthetic-u114").expect("literal"),
-                    environment: c::Environment::Development,
+            Some((
+                r::CloudInputs {
+                    scope: c::BuildScope {
+                        container: c::ContainerId::new("synthetic-u114").expect("literal"),
+                        environment: c::Environment::Development,
+                    },
+                    identity: Arc::new(CachedIdentity(Mutex::new(None))),
+                    files: Arc::new(NativeFiles),
                 },
-                identity: Arc::new(CachedIdentity(Mutex::new(None))),
-                files: Arc::new(NativeFiles),
-            })
+                None,
+            ))
         })
     }
     #[cfg(not(feature = "test-hooks"))]
@@ -877,3 +913,7 @@ pub(crate) fn platform_inputs() -> Option<r::CloudInputs> {
         configured
     }
 }
+
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod tests;

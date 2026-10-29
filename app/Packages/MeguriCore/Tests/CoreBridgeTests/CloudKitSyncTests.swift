@@ -168,11 +168,11 @@ extension EventTests {
                 try await gate.waitForArrival()
                 try await f.core.validateSDK(engine.instanceID)
                 await engine.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "recordsDuringNotificationLookup")
-                let records = try await f.core.durableSnapshot()
-                #expect(records.inboxNames.contains(f.incoming.name))
+                try await expectAppliedCloudIncoming(f)
                 await engine.emitRetained(.stateUpdate(cursor), label: "cursorDuringNotificationLookup")
                 let advanced = try await f.core.durableSnapshot()
-                #expect(advanced.inboxNames.contains(f.incoming.name) && advanced.serialization == cursor)
+                #expect(advanced.serialization == cursor)
+                try await expectAppliedCloudIncoming(f)
                 await gate.open()
             })
             #expect(try await f.core.currentGuard() == guardBefore)
@@ -581,7 +581,7 @@ extension EventTests {
                 await engine.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "fetched")
             }, whileRunning: {
                 try await gate.waitForArrival()
-                #expect(try await f.core.durableSnapshot().inboxNames.contains(f.incoming.name))
+                try await expectAppliedCloudIncoming(f)
                 try await withCloudTask(gates: [gate], operation: {
                     await engine.emitRetained(.stateUpdate(state), label: "state")
                 }, whileRunning: {
@@ -593,7 +593,7 @@ extension EventTests {
             })
             let committed = try await f.core.durableSnapshot()
             #expect(committed.serialization == state)
-            #expect(committed.inboxNames.contains(f.incoming.name))
+            try await expectAppliedCloudIncoming(f)
             let trace = await engine.recordedTrace()
             let inboxReturn = try #require(trace.firstIndex(of: .eventReturned("fetched")))
             let stateEnter = try #require(trace.firstIndex(of: .eventEntered("state")))
@@ -618,7 +618,12 @@ extension EventTests {
             let after = try await f.core.durableSnapshot()
             #expect(after.serialization == before.serialization)
             #expect(after.trackingStopped)
-            #expect(after.inboxNames.contains(f.incoming.name) == !failInbox)
+            #expect(!after.inboxNames.contains(f.incoming.name))
+            if failInbox {
+                #expect(try await f.core.entityFacts(name: f.incoming.name) == nil)
+            } else {
+                try await expectAppliedCloudIncoming(f)
+            }
             #expect(await f.adapter.retainedInstanceIDs().isEmpty)
             #expect(await f.factory.engines().count == 1)
             let trace = await engine.recordedTrace()
@@ -939,7 +944,10 @@ extension EventTests {
             await old.emitRetained(.fetched(zone: f.zone, records: [different], deleted: []), label: "sameNameDifferentInbox")
             let second = try await f.core.durableSnapshot()
             #expect(first.inboxNames == second.inboxNames)
-            #expect(first.trackingContent != second.trackingContent && first != second)
+            // The already-applied erev is stale, including different system
+            // fields. Redelivery cannot replace its acknowledged version.
+            #expect(first == second)
+            try await expectAppliedCloudIncoming(f)
             let root = CloudRecord(name: f.root.name, envelope: f.root.envelope, systemFields: Data([0x72, 0x33, 0x02]))
             await old.emitRetained(.fetched(zone: "meguri-root", records: [root], deleted: []), label: "pendingRoot")
             let third = try await f.core.durableSnapshot()

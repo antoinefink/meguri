@@ -199,7 +199,7 @@ extension CoreCloudWorkflowService {
     /// Call before collection open, after resolving the account asynchronously.
     public static func configurePlatform(container: String, environment: CloudPlatformEnvironment, status: CloudAccountStatus, identity: Data?) async throws {
         try await MaintenanceLane.shared.call(.configureCloudPlatform) {
-            try MeguriCoreBindings.configureCloudPlatform(container: container, environment: environment == .development ? .development : .production, status: status.raw, value: identity)
+            try MeguriCoreBindings.configureCloudPlatform(container: container, environment: environment == .development ? .development : .production, status: status.raw, value: identity, keyBytes: SystemCloudKeyByteProvider())
         }
     }
 }

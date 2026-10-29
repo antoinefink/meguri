@@ -94,7 +94,10 @@ pub fn start_open(
         Arc::new(ForeignSpace(disk_space)),
     );
     config.manual_transfer_directory = manual_transfer_directory.into();
-    config.cloud = crate::sync::platform_inputs();
+    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
+        config.cloud = Some(inputs);
+        config.cloud_key_bytes = key_bytes;
+    }
     jobs::start("open collection", runtime::engine()?.generation().0, move |job| {
         job.cancel.check()?;
         reservation.open(config)?;
