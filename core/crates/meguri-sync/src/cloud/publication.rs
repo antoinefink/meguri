@@ -262,3 +262,22 @@ impl std::fmt::Debug for ZoneDeletionGuard {
         f.write_str("ZoneDeletionGuard")
     }
 }
+
+/// Read-only projection of the actual scoped runtime/store and local authority.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PublicationFacts {
+    pub current: Option<Binding>,
+    pub bindings: Vec<Binding>,
+    pub recovery_ops: Vec<PublishOp>,
+    pub entities: BTreeMap<String, super::workflow::EntityFacts>,
+    pub zones: BTreeMap<String, RetainedZone>,
+    pub decision: DecisionSnapshot,
+    pub native_file: NativeFileIdentity,
+    pub media_key: Option<RecordKey>,
+    pub root_acked: bool,
+}
+impl std::fmt::Debug for PublicationFacts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PublicationFacts")
+    }
+}

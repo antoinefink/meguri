@@ -582,6 +582,14 @@ impl Runtime {
             let latest_mod = evidence.opened_mod;
             let latest_scm = evidence.opened_scm;
             state.publication.restarted_confirmed = restarted_confirmed;
+            // This is a real binding input, emitted only after installation. A
+            // confirmed row has no new binding and is never its publish step.
+            state.trace.push(super::workflow::TraceEvent::PublicationBinding {
+                binding: binding.id,
+                publish_step: publication_op
+                    .as_ref()
+                    .and_then(|op| (op.step != super::publication::PublishStep::Confirmed).then_some(op.step)),
+            });
             state.bound = Some(Bound {
                 binding,
                 evidence,

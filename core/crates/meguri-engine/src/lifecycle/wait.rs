@@ -295,6 +295,7 @@ impl SlotGuard {
                 self.engine.threads().clone(),
                 raw,
                 cloud,
+                None,
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
             if media_recovered

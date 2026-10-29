@@ -83,3 +83,39 @@ including reopen. Actual Service logs and outcomes constrain the hold.
 The reviewer also clears a behavior-RED stage with only the fresh-read additions
 removed, keeping the actual reply hold and all test assertions. That stage still
 needs compilation and execution. Full delivery and integration remain open.
+
+## Integrated source checkpoint
+
+Root applied the R3-cleared production export after the tests-first commits.
+The first focused compile (`core-test/20261029T083126Z-24842`) found one Rust
+closure type error. Fixer `cleanroom/20261029T083247Z-26205` extracts the same
+already-required stable pair outside that closure. It also removes flagged
+comments and renames one private local and parameter. Independent exact-delta
+review is clear; no test or behavior changes.
+
+- `core-format/20261029T083602Z-27570`: pass.
+- `core-test/20261029T083631Z-27974`: 30 focused cases pass, none skipped.
+  These cover real unbound publication, secure key requests, actual SDK saves,
+  lost replies, clean shutdown, backup receipts and partial results.
+- `core-test/20261029T083808Z-29368`: actual behavior RED with only the reviewed
+  fresh-authorization additions removed. The two-zone case fails its assertion
+  that the second zone receives no DeleteZone request. The helper case passes.
+- The exact source hash is restored automatically and checked. With that fix,
+  `core-test/20261029T083908Z-29914` passes both cases, none skipped.
+- `core-test/20261029T084000Z-30411`: 215 surrounding engine, lifecycle,
+  backup, host and CloudKit adapter cases pass, none skipped. The existing
+  400-record limitExceeded case keeps its eight-call bound.
+- `private/20261029T083634Z-28487`: all 16 production files pass.
+- `similarity/20261029T083633Z-28222`: 16 files, no findings or exemptions.
+
+`core-lint/20261029T084119Z-31038` remains RED on seven errors in the original
+full-workflow target: missing adoption, intent observation and held-I/O APIs,
+and two expected-value enum types. It reports no new production lint finding;
+layering and the disabled-service build pass. This is not a lint or gate pass.
+Independent review confirms that the two assertions should use the existing
+PendingDecisionReason::Restore type. Their meaning must stay unchanged.
+
+Nonempty media, incoming adoption, raw/initial backup provenance, complete
+binding-step traces, reset recovery, remaining P24 coverage, native wiring,
+signed runs and budgets remain required. This checkpoint is WIP. No Unit
+trailer, P24 closure, delivery or integration acceptance.

@@ -275,21 +275,51 @@ pub fn execute_publication_request(
     runtime: &production::runtime::Runtime,
     collection: &meguri_engine::Collection,
 ) -> Result<(production::publication::OwnResult, Vec<Response>)> {
+    struct Direct<'a> {
+        service: &'a mut Service<SeededRandom>,
+        scope: &'a Scope,
+    }
+    impl PublicationTransport for Direct<'_> {
+        type Enqueued = Response;
+        fn enqueue(&mut self, caller: Caller, operation: Operation) -> Result<Response> {
+            Ok(self.service.request(self.scope, caller, operation)?)
+        }
+        fn reply(&mut self, response: Response) -> Result<Response> {
+            Ok(response)
+        }
+    }
+    execute_publication_transport(request, runtime, collection, &mut Direct { service, scope })
+}
+pub(crate) trait PublicationTransport {
+    type Enqueued;
+    fn enqueue(&mut self, caller: Caller, operation: Operation) -> Result<Self::Enqueued>;
+    fn reply(&mut self, enqueued: Self::Enqueued) -> Result<Response>;
+}
+/// Only synchronous enqueue retains collection authority. Reply waits and nested
+/// lifecycle commands run after the guard has released all leases and locks.
+pub(crate) fn execute_publication_transport(
+    request: &production::publication::OwnRequest,
+    runtime: &production::runtime::Runtime,
+    collection: &meguri_engine::Collection,
+    transport: &mut impl PublicationTransport,
+) -> Result<(production::publication::OwnResult, Vec<Response>)> {
     use production::publication::{OwnOperation, OwnResult, RecordRead};
     let caller = Caller {
         own_operation: Some(format!("publication-{:02x?}-{}", request.op, request.attempt)),
         ..Caller::default()
     };
     let mut replies = Vec::new();
+    let mut submit = |caller, operation| -> Result<Response> {
+        let enqueued = runtime
+            .submit_publication_request(request, collection, || transport.enqueue(caller, operation))
+            .map_err(|_| failure())??;
+        transport.reply(enqueued)
+    };
     let result = match &request.operation {
         OwnOperation::CreateZones(zones) => {
             let mut succeeded = true;
             for zone in zones {
-                let response = runtime
-                    .submit_publication_request(request, collection, || {
-                        service.request(scope, caller.clone(), Operation::CreateZone { zone: zone.clone() })
-                    })
-                    .map_err(|_| failure())??;
+                let response = submit(caller.clone(), Operation::CreateZone { zone: zone.clone() })?;
                 succeeded &= response.result.is_ok();
                 replies.push(response);
             }
@@ -300,19 +330,14 @@ pub fn execute_publication_request(
             }
         }
         OwnOperation::Read { zone, name } => {
-            let response = runtime
-                .submit_publication_request(request, collection, || {
-                    service.request(
-                        scope,
-                        caller,
-                        Operation::Read {
-                            zone: zone.clone(),
-                            name: name.clone(),
-                            fields: RequestedFields::All,
-                        },
-                    )
-                })
-                .map_err(|_| failure())??;
+            let response = submit(
+                caller,
+                Operation::Read {
+                    zone: zone.clone(),
+                    name: name.clone(),
+                    fields: RequestedFields::All,
+                },
+            )?;
             let read = match &response.result {
                 Ok(Reply::Record(record)) => RecordRead::Found(publication_control_record(record)?),
                 Err(error) if error.code == ErrorCode::UnknownItem => RecordRead::Missing,
@@ -329,22 +354,17 @@ pub fn execute_publication_request(
             encrypted,
             if_unchanged,
         } => {
-            let response = runtime
-                .submit_publication_request(request, collection, || {
-                    service.request(
-                        scope,
-                        caller,
-                        Operation::Modify {
-                            zone: zone.clone(),
-                            atomic: false,
-                            changes: vec![Mutation::Save {
-                                record: RecordInput::encrypted(name, record_type, encrypted.clone()),
-                                if_unchanged: if_unchanged.as_ref().map(|s| SystemFields::from_bytes(s.0.clone())),
-                            }],
-                        },
-                    )
-                })
-                .map_err(|_| failure())??;
+            let response = submit(
+                caller,
+                Operation::Modify {
+                    zone: zone.clone(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: RecordInput::encrypted(name, record_type, encrypted.clone()),
+                        if_unchanged: if_unchanged.as_ref().map(|s| SystemFields::from_bytes(s.0.clone())),
+                    }],
+                },
+            )?;
             let result = match &response.result {
                 Ok(Reply::Modified(items)) if items.len() == 1 => match &items[0].result {
                     Ok(MutationSuccess::Saved(record)) => OwnResult::Saved(publication_control_record(record)?),
@@ -373,3 +393,7 @@ pub fn publication_control_record(record: &Record) -> Result<production::publica
         system_fields: production::OpaqueBytes(record.system_fields.bytes().to_vec()),
     })
 }
+
+#[path = "publication_rig.rs"]
+mod publication_rig;
+pub use publication_rig::*;

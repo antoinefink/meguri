@@ -301,6 +301,10 @@ impl Actions {
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraceEvent {
+    PublicationBinding {
+        binding: super::BindingId,
+        publish_step: Option<super::publication::PublishStep>,
+    },
     IdentityVerified {
         instance: String,
         account: String,

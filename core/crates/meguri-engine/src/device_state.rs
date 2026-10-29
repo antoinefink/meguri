@@ -237,6 +237,8 @@ struct Intent {
     candidate_native: Option<NativeIdentity>,
     #[serde(default)]
     media: Option<meguri_storage::media::CollectionMediaIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    safety_backup: Option<ReplacementBackup>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct NativeIdentity {
@@ -583,6 +585,23 @@ pub struct MaintenanceRecords {
     pub quick_check: Result<Option<LastQuickCheck>, StorageError>,
 }
 
+/// Provenance supplied by the actual forced provider before R6's intent write.
+/// Absence on legacy/foreign witnesses stays unknown; lastBackup is unrelated.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplacementBackup {
+    pub name: String,
+    pub snapshot_modified: i64,
+    pub instant: i64,
+}
+impl From<crate::ports::BackupReceipt> for ReplacementBackup {
+    fn from(receipt: crate::ports::BackupReceipt) -> Self {
+        Self {
+            name: receipt.name,
+            snapshot_modified: receipt.snapshot_modified.0,
+            instant: receipt.instant.0,
+        }
+    }
+}
 /// Durable local-activation evidence, retained after R6 intent cleanup. This
 /// proves a local replacement only, never remote upload acceptance/equality.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -592,6 +611,8 @@ pub struct ReplacementEvidence {
     pub candidate: Publication,
     pub candidate_file: FileIdentity,
     pub old_file: Option<FileIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_backup: Option<ReplacementBackup>,
 }
 
 /// Constructible only by checking the durable R6 chain against its active record.
@@ -745,6 +766,14 @@ impl DeviceState {
                 .and_then(|s| s.extra.get("lastReplacement").cloned())
                 .map(|v| serde_json::from_value(v).map_err(|_| failure("unreadable activation evidence")))
                 .transpose()
+        })
+    }
+    pub fn replacement_evidence_for(&self, prior: PublicationId) -> Result<Option<ReplacementEvidence>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            let Some(state) = decode(doc)? else { return Ok(None) };
+            Ok(retained_replacements(&state)?
+                .into_iter()
+                .find(|e| e.prior.identity == prior))
         })
     }
     /// Offline proof, never inferred from process generation or collection absence.
@@ -1153,7 +1182,17 @@ pub(crate) fn begin(
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
-    begin_with_cloud(paths, reason, binding, random, recovery, None, cancel, before_record)
+    begin_with_cloud(
+        paths,
+        reason,
+        binding,
+        random,
+        recovery,
+        None,
+        None,
+        cancel,
+        before_record,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1167,6 +1206,7 @@ pub(crate) fn begin_with_cloud(
         Option<RawRestoreAuthority>,
     ),
     cloud: Option<crate::replace::CloudAdoptInput>,
+    safety_backup: Option<ReplacementBackup>,
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
@@ -1266,6 +1306,7 @@ pub(crate) fn begin_with_cloud(
             old_native,
             candidate_native,
             media,
+            safety_backup,
         });
         put(doc, &state)
     })
@@ -1513,6 +1554,7 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
             candidate: intent.candidate.clone(),
             candidate_file: intent.candidate_file.clone(),
             old_file: intent.old_file.clone(),
+            safety_backup: intent.safety_backup.clone(),
         };
         if retained.last() != Some(&evidence) {
             retained.push(evidence.clone());

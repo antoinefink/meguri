@@ -881,13 +881,6 @@ impl Runtime {
         if s.actions.handler != Some(request_id) {
             return Err(Error::InvalidData.into());
         }
-        if failed
-            .iter()
-            .any(|(_, error)| matches!(error, SendError::ZoneMissing | SendError::Other))
-        {
-            Self::invalidate_locked(&mut s);
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let mut force = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
@@ -930,6 +923,16 @@ impl Runtime {
         s.actions
             .saved_callbacks
             .insert(request_id, saved.iter().map(|s| s.name.clone()).collect());
+        // Non-atomic batches can contain both Saved and an unsupported failure.
+        // Preserve real acknowledgements, exchange accounting and handler
+        // receipts before stopping. Failed records remain durably pending.
+        if failed
+            .iter()
+            .any(|(_, error)| matches!(error, SendError::ZoneMissing | SendError::Other))
+        {
+            Self::invalidate_locked(&mut s);
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         if !saved.is_empty() || !failed.is_empty() {
             self.emit_pending_locked(&mut s, UpdateKind::Changes, force)?;
         }
@@ -1103,7 +1106,7 @@ impl Runtime {
     }
     pub fn wants_send(&self) -> bool {
         let s = self.state();
-        s.actions.automatic || s.actions.exchange.is_some()
+        s.actions.automatic || s.actions.exchange.is_some() || Self::publication_automatic_locked(&s)
     }
     pub fn start_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
         self.start_send_call_mode(instance, false)
@@ -1116,7 +1119,10 @@ impl Runtime {
         Self::caller_locked(&s, instance)?;
         if s.actions.exchange_phase.is_some()
             || s.actions.handler.is_some()
-            || (!manual && !s.actions.automatic && s.actions.exchange.is_none())
+            || (!manual
+                && !s.actions.automatic
+                && s.actions.exchange.is_none()
+                && !Self::publication_automatic_locked(&s))
         {
             return Ok(None);
         }

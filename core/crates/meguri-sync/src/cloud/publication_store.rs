@@ -99,6 +99,24 @@ impl TrackingStore {
         }
         Ok(())
     }
+    /// Scoped ordinary owners only. This read does not select or mutate an owner.
+    pub(super) fn publication_bindings(&self) -> Result<Vec<Binding>, Error> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id FROM bindings WHERE container=?1 AND environment=?2 AND salvage=0 ORDER BY id")?;
+        let ids = statement
+            .query_map(
+                params![self.scope.container.as_str(), self.scope.environment.code()],
+                |r| r.get::<_, Vec<u8>>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| {
+                self.binding(super::store::binding_id(id)?)?
+                    .ok_or(Error::BindingNotFound)
+            })
+            .collect()
+    }
     pub fn publication_op(&self) -> Result<Option<PublishOp>, Error> {
         let text: Option<String> = self
             .connection

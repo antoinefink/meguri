@@ -195,10 +195,14 @@ pub fn restore_backup(
         safety = Some(backup.before_restore(Some(exclusive.collection()), damaged, cancel)?);
         let safety_backup = safety.as_ref().and_then(|s| safety_name(&s.backup));
         exclusive
-            .restore_verified_before_commit(stage, || {
+            .restore_verified_with_backup_before_commit(stage, || {
                 cancel.check()?;
                 progress.set_phase(ProgressPhase::Committing);
-                Ok(safety.as_mut().and_then(|s| s.raw_restore.take()))
+                let receipt = safety.as_ref().and_then(|s| match &s.backup {
+                    TransferBackup::Collection(receipt) => Some(receipt.clone()),
+                    TransferBackup::Raw { .. } | TransferBackup::Absent => None,
+                });
+                Ok((safety.as_mut().and_then(|s| s.raw_restore.take()), receipt))
             })
             .map_err(|error| RestoreError::Replacement { error, safety_backup })
     } else {

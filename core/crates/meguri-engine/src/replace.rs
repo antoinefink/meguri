@@ -40,6 +40,11 @@ impl ReplaceReason {
         }
     }
 }
+#[derive(Default)]
+struct RestorePreparation {
+    raw: Option<device_state::RawRestoreAuthority>,
+    safety_backup: Option<device_state::ReplacementBackup>,
+}
 /// Caller-owned adoption identities and the complete explicit cloud/local decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CloudAdoptInput {
@@ -168,6 +173,34 @@ impl Exclusive<'_> {
         self.replace_verified_with_raw(stage, ReplaceReason::Restore, |_| Ok(()), before_commit, None)
     }
 
+    /// T8 carries its actual forced-provider receipt through the R6 intent and
+    /// activation. Unknown/raw witnesses are not assigned a collection receipt.
+    pub fn restore_verified_with_backup_before_commit(
+        &mut self,
+        stage: ReplacementStage,
+        before_commit: impl FnOnce() -> Result<
+            (
+                Option<device_state::RawRestoreAuthority>,
+                Option<crate::ports::BackupReceipt>,
+            ),
+            EngineError,
+        >,
+    ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_preparation(
+            stage,
+            ReplaceReason::Restore,
+            |_| Ok(()),
+            || {
+                let (raw, receipt) = before_commit()?;
+                Ok(RestorePreparation {
+                    raw,
+                    safety_backup: receipt.map(Into::into),
+                })
+            },
+            None,
+        )
+    }
+
     /// Adopts the verified staged collection with exactly the caller's decision.
     pub fn replace_verified_cloud_adopt(
         &mut self,
@@ -183,6 +216,27 @@ impl Exclusive<'_> {
         reason: ReplaceReason,
         change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
         before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
+        cloud: Option<CloudAdoptInput>,
+    ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_preparation(
+            stage,
+            reason,
+            change,
+            || {
+                before_commit().map(|raw| RestorePreparation {
+                    raw,
+                    safety_backup: None,
+                })
+            },
+            cloud,
+        )
+    }
+    fn replace_verified_with_preparation(
+        &mut self,
+        stage: ReplacementStage,
+        reason: ReplaceReason,
+        change: impl FnOnce(&mut WriteScope<'_>) -> Result<(), StorageError>,
+        before_commit: impl FnOnce() -> Result<RestorePreparation, EngineError>,
         cloud: Option<CloudAdoptInput>,
     ) -> Result<Collection, ReplaceError> {
         require_adopt_input(reason, cloud.as_ref())?;
@@ -214,7 +268,7 @@ impl Exclusive<'_> {
         self.activate_finalised(
             artifact.stage,
             ReplaceReason::FullUpload,
-            || before_commit().map(|()| None),
+            || before_commit().map(|()| RestorePreparation::default()),
             Some(artifact.identity),
             None,
         )
@@ -224,7 +278,7 @@ impl Exclusive<'_> {
         &mut self,
         mut stage: ReplacementStage,
         reason: ReplaceReason,
-        before_commit: impl FnOnce() -> Result<Option<device_state::RawRestoreAuthority>, EngineError>,
+        before_commit: impl FnOnce() -> Result<RestorePreparation, EngineError>,
         identity: Option<crate::device_state::FileIdentity>,
         cloud: Option<CloudAdoptInput>,
     ) -> Result<Collection, ReplaceError> {
@@ -256,7 +310,8 @@ impl Exclusive<'_> {
         } else {
             None
         };
-        let raw = match before_commit().map_err(ReplaceError::from).and_then(|raw| {
+        let preparation = match before_commit().map_err(ReplaceError::from).and_then(|preparation| {
+            let raw = &preparation.raw;
             self.verified_environment(reason)?;
             if raw.is_some()
                 && (reason != ReplaceReason::Restore
@@ -269,9 +324,9 @@ impl Exclusive<'_> {
             {
                 return Err(EngineError::unavailable("retained WAL authority requires a corrupt Restore owner").into());
             }
-            Ok(raw)
+            Ok(preparation)
         }) {
-            Ok(raw) => raw,
+            Ok(preparation) => preparation,
             Err(error) => {
                 return Err(match media {
                     Some(media) => media.abort(error),
@@ -279,6 +334,7 @@ impl Exclusive<'_> {
                 });
             }
         };
+        let RestorePreparation { raw, safety_backup } = preparation;
         let media_cleanup = media.as_ref().map(|m| m.cleanup_error.clone());
         let media_recovered = media.as_ref().map(|m| m.recovered.clone());
         let threads = self.replacement_threads();
@@ -321,6 +377,7 @@ impl Exclusive<'_> {
                     threads,
                     raw,
                     cloud,
+                    safety_backup,
                 )
                 .map_err(|e| {
                     *record.lock().unwrap() = Some(e.clone());
@@ -356,6 +413,7 @@ struct SwapContext<'a> {
     random: &'a dyn meguri_model::rng::RandomSource,
     verified_at: i64,
     cloud: Option<CloudAdoptInput>,
+    safety_backup: Option<device_state::ReplacementBackup>,
 }
 
 fn swap(
@@ -371,6 +429,7 @@ fn swap(
         random,
         verified_at,
         cloud,
+        safety_backup,
     } = context;
     let (mut media, raw) = recovery;
     use meguri_storage::{atomic_file, verified_replace as storage};
@@ -398,6 +457,7 @@ fn swap(
         random,
         (intent, raw),
         cloud,
+        safety_backup,
         &cancelled,
         || {
             if let Some(m) = media.as_mut() {
@@ -677,6 +737,7 @@ pub(crate) fn run_swap(
     threads: crate::ThreadRegistry,
     raw: Option<device_state::RawRestoreAuthority>,
     cloud: Option<CloudAdoptInput>,
+    safety_backup: Option<device_state::ReplacementBackup>,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
         return swap(
@@ -688,6 +749,7 @@ pub(crate) fn run_swap(
                 random: random.as_ref(),
                 verified_at: clock.now_ms(),
                 cloud,
+                safety_backup,
             },
             &activated,
             (None, raw),
@@ -715,6 +777,7 @@ pub(crate) fn run_swap(
                             random: random.as_ref(),
                             verified_at: clock.now_ms(),
                             cloud,
+                            safety_backup,
                         },
                         &activated,
                         (media.as_mut(), raw),

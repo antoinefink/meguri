@@ -672,9 +672,10 @@ impl Runtime {
         }
         Ok(())
     }
-    /// The executor must invoke this at EACH actual transport submission, after
-    /// any suspension. No provider runs under Runtime/tracking locks and the
-    /// transport callback runs only after those locks have been released.
+    /// The executor invokes this at EACH synchronous transport enqueue, after
+    /// any suspension. The callback must return acknowledged queue acceptance,
+    /// never a deferred operation. Wait for replies after this method returns.
+    /// No provider or transport callback runs under Runtime/tracking locks.
     pub fn submit_publication_request<T>(
         &self,
         request: &OwnRequest,
@@ -1196,6 +1197,78 @@ impl meguri_engine::ports::CloudPublicationAuthority for Runtime {
             // Serialize the actual durable row through the sidecar CAS. No
             // writer work or Runtime method is invoked by the engine callback.
             apply(&replacement)
+        })
+    }
+}
+
+impl Runtime {
+    pub fn publication_facts(&self, collection: &Collection) -> Result<PublicationFacts, RuntimeError> {
+        // Provider reads precede locks; a snapshot is observational, never authority
+        // for a later write (the mutating APIs revalidate independently).
+        let decision = self.publication_decision()?;
+        let native_file = self.inputs.files.identity(collection.path())?;
+        let s = self.state();
+        with_tracking_access(|| -> Result<_, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let current = s.bound.as_ref().map(|b| b.binding.clone());
+            let mut entities = BTreeMap::new();
+            let mut zones = BTreeMap::new();
+            let mut media_key = None;
+            let mut root_acked = false;
+            if let Some(binding) = &current {
+                for kind in row_payload::KINDS {
+                    let mut after = None;
+                    loop {
+                        let page = store.entity_page(binding.id, kind, after.as_deref())?;
+                        if page.is_empty() {
+                            break;
+                        }
+                        for entity in page {
+                            after = Some(entity.key.clone());
+                            entities.insert(entity.name.clone(), entity);
+                        }
+                    }
+                }
+                zones = store.retained_zones(binding.id)?;
+                if let Some((key, acked, _)) = store.publication_media(binding.id)? {
+                    media_key = Some(key);
+                    root_acked = acked;
+                }
+            }
+            Ok(PublicationFacts {
+                current,
+                bindings: store.publication_bindings()?,
+                recovery_ops: store.publication_op()?.into_iter().collect(),
+                entities,
+                zones,
+                decision,
+                native_file,
+                media_key,
+                root_acked,
+            })
+        })
+    }
+    /// Submit/enqueue while the deletion guard is current, after any platform hold.
+    pub fn submit_zone_deletion<T>(
+        &self,
+        guard: &ZoneDeletionGuard,
+        collection: &Collection,
+        submit: impl FnOnce() -> T,
+    ) -> Result<T, RuntimeError> {
+        let _lease = collection.reader(ReaderRole::Cloud)?;
+        self.validate_zone_deletion_guard(guard, collection)?;
+        Ok(submit())
+    }
+    pub(super) fn publication_automatic_locked(s: &State) -> bool {
+        // The saved user preference is unchanged; only zones temporarily forces
+        // automatic scheduling (P6/V15.2). No transport fixture grants permission.
+        with_tracking_access(|| {
+            s.store
+                .as_ref()
+                .and_then(|store| store.publication_op().ok().flatten())
+                .is_some_and(|op| {
+                    op.step == PublishStep::Zones && op.binding_after == s.bound.as_ref().map(|b| b.binding.id)
+                })
         })
     }
 }

@@ -36,7 +36,7 @@ impl Environment {
 }
 
 /// A build is scoped by its container and environment, not an executable id.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildScope {
     pub container: ContainerId,
     pub environment: Environment,
@@ -100,7 +100,7 @@ pub struct BindingFacts {
     pub state: BindingState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
     pub id: BindingId,
     pub created_at_ms: i64,

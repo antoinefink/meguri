@@ -83,8 +83,7 @@ pub struct Killed {
 pub(crate) struct Boot {
     directory: std::path::PathBuf,
     scope: Scope,
-    note_id: i64,
-    binding: core::BindingId,
+    stable: Option<(i64, core::BindingId)>,
     identity: IdentityReads,
     automatic: bool,
     now: i64,
@@ -151,7 +150,46 @@ pub(crate) enum Input {
     Revlog(i64),
     Advance(i64),
     Close,
+    BackupPath(String),
+    BackupNotices,
+    RegisterSDK(Option<String>),
+    RootConfirmed,
+    PreviewBegin,
+    PreviewActive(u64, core::publication::RecordRead),
+    PreviewEpoch(u64, core::publication::RecordRead),
+    PreviewCancel,
+    PublicationConfirm(core::publication::Preview),
+    PublicationNext,
+    PublicationLocal([u8; 16], core::publication::LocalWork),
+    PublicationExecute(core::publication::OwnRequest),
+    PublicationCancel([u8; 16]),
+    PublicationTrigger,
+    PublicationFacts,
+    CollectionRows,
+    CollectionHeader,
+    BackupNow,
+    RestoreBackup(String),
+    BackupRows(String),
+    BackupRetention(u32, u32, u32),
+    PutMedia(String, Vec<u8>),
+    MediaFiles,
+    RecoveryState,
+    ZonesSeen(Vec<String>),
+    CollectionDrained,
+    DeletionGuard,
+    DeletionCheck(core::publication::RecordRead),
+    DeleteZone(String),
+    KeyResult(std::result::Result<[u8; 32], core::runtime::KeySourceError>),
+    TransportAccepted,
+    TransportResult(super::Response),
 }
+#[derive(Serialize, Deserialize)]
+enum ChildMessage {
+    Reply(std::result::Result<serde_json::Value, String>),
+    DrawKey,
+    Submit(super::Caller, super::Operation),
+}
+
 fn write_frame<T: Serialize>(s: &mut UnixStream, value: &T) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
     if bytes.len() > FRAME {
@@ -175,6 +213,9 @@ fn read_frame<T: DeserializeOwned>(s: &mut UnixStream) -> Result<T> {
 pub struct ChildDriver {
     child: Option<Child>,
     stream: UnixStream,
+    keys: Option<Arc<dyn runtime::KeyByteSource>>,
+    queued: Option<super::coordinator::HeldRequest>,
+    queued_response: Option<super::Response>,
 }
 impl ChildDriver {
     pub(crate) fn spawn(
@@ -184,6 +225,42 @@ impl ChildDriver {
         now: i64,
         seed: u64,
     ) -> Result<Self> {
+        Self::spawn_boot(
+            Boot {
+                directory: files.directory.clone(),
+                scope: files.scope.clone(),
+                stable: Some((files.note.id, files.binding.id)),
+                identity,
+                automatic,
+                now,
+                seed,
+            },
+            None,
+        )
+    }
+    pub(crate) fn spawn_unbound(
+        directory: &std::path::Path,
+        scope: &Scope,
+        identity: IdentityReads,
+        automatic: bool,
+        now: i64,
+        seed: u64,
+        keys: Arc<dyn runtime::KeyByteSource>,
+    ) -> Result<Self> {
+        Self::spawn_boot(
+            Boot {
+                directory: directory.to_owned(),
+                scope: scope.clone(),
+                stable: None,
+                identity,
+                automatic,
+                now,
+                seed,
+            },
+            Some(keys),
+        )
+    }
+    fn spawn_boot(boot: Boot, keys: Option<Arc<dyn runtime::KeyByteSource>>) -> Result<Self> {
         let (parent, child_socket) = UnixStream::pair()?;
         parent.set_read_timeout(Some(IPC_TIMEOUT))?;
         parent.set_write_timeout(Some(IPC_TIMEOUT))?;
@@ -209,23 +286,101 @@ impl ChildDriver {
         let mut driver = Self {
             child: Some(child),
             stream: parent,
+            keys,
+            queued: None,
+            queued_response: None,
         };
-        driver.call::<()>(Input::Boot(Boot {
-            directory: files.directory.clone(),
-            scope: files.scope.clone(),
-            note_id: files.note.id,
-            binding: files.binding.id,
-            identity,
-            automatic,
-            now,
-            seed,
-        }))?;
+        driver.call::<()>(Input::Boot(boot))?;
         Ok(driver)
+    }
+    fn next_message(&mut self) -> Result<ChildMessage> {
+        loop {
+            match read_frame(&mut self.stream)? {
+                ChildMessage::DrawKey => {
+                    let draw = self.keys.as_ref().ok_or_else(failure)?.draw_key();
+                    write_frame(&mut self.stream, &Input::KeyResult(draw))?;
+                }
+                message => return Ok(message),
+            }
+        }
+    }
+    fn reply<T: DeserializeOwned>(&mut self) -> Result<T> {
+        let ChildMessage::Reply(result) = self.next_message()? else {
+            return Err(failure());
+        };
+        Ok(serde_json::from_value(result.map_err(|_| failure())?)?)
     }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
         write_frame(&mut self.stream, &input)?;
-        let result: std::result::Result<serde_json::Value, String> = read_frame(&mut self.stream)?;
-        Ok(serde_json::from_value(result.map_err(|_| failure())?)?)
+        self.reply()
+    }
+    /// Enter the real submission guard and enqueue its original request over IPC.
+    /// The child waits for the actual reply, servicing inspection commands meanwhile.
+    pub(crate) fn queued_request(&self) -> Result<super::coordinator::HeldRequest> {
+        self.queued.clone().ok_or_else(failure)
+    }
+    pub(crate) fn enqueue(&mut self, input: Input) -> Result<super::coordinator::HeldRequest> {
+        if self.queued.is_some() {
+            return Err(failure());
+        }
+        write_frame(&mut self.stream, &input)?;
+        let ChildMessage::Submit(caller, operation) = self.next_message()? else {
+            return Err(failure());
+        };
+        let request = super::coordinator::HeldRequest { caller, operation };
+        self.queued = Some(request.clone());
+        write_frame(&mut self.stream, &Input::TransportAccepted)?;
+        Ok(request)
+    }
+    pub(crate) fn execute<T: DeserializeOwned>(
+        &mut self,
+        input: Input,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+    ) -> Result<T> {
+        write_frame(&mut self.stream, &input)?;
+        self.transport_replies(service, scope)
+    }
+    /// Hold only delivery: the original guarded request has already reached Service.
+    pub(crate) fn hold_reply(
+        &mut self,
+        input: Input,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+    ) -> Result<()> {
+        let request = self.enqueue(input)?;
+        self.queued_response = Some(service.request(scope, request.caller, request.operation)?);
+        Ok(())
+    }
+    fn transport_replies<T: DeserializeOwned>(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+    ) -> Result<T> {
+        loop {
+            match self.next_message()? {
+                ChildMessage::Reply(result) => return Ok(serde_json::from_value(result.map_err(|_| failure())?)?),
+                ChildMessage::Submit(caller, operation) => {
+                    write_frame(&mut self.stream, &Input::TransportAccepted)?;
+                    let response = service.request(scope, caller, operation)?;
+                    write_frame(&mut self.stream, &Input::TransportResult(response))?;
+                }
+                ChildMessage::DrawKey => unreachable!(),
+            }
+        }
+    }
+    pub(crate) fn resume<T: DeserializeOwned>(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+    ) -> Result<T> {
+        let request = self.queued.take().ok_or_else(failure)?;
+        let response = match self.queued_response.take() {
+            Some(response) => response,
+            None => service.request(scope, request.caller, request.operation)?,
+        };
+        write_frame(&mut self.stream, &Input::TransportResult(response))?;
+        self.transport_replies(service, scope)
     }
     pub fn reconcile_binding(&mut self) -> Result<()> {
         self.call(Input::Reconcile)
@@ -361,12 +516,13 @@ struct Device {
     automatic: bool,
     account: Arc<Account>,
     clock: Arc<StepClock>,
-    binding: core::BindingId,
-    note: i64,
+    stable: Option<(i64, core::BindingId)>,
+    deletion: Option<core::publication::ZoneDeletionGuard>,
     session_started: BTreeMap<u64, i64>,
+    closed: bool,
 }
 impl Device {
-    fn new(b: Boot) -> Result<Self> {
+    fn new(b: Boot, stream: &UnixStream) -> Result<Self> {
         let clock = Arc::new(StepClock::new(b.now, UtcOffset::UTC, "UTC"));
         let account = Arc::new(Account(Mutex::new(match b.identity {
             IdentityReads::Available(a) => IdentityStatus::Available(core::OpaqueBytes(a.into_bytes())),
@@ -379,6 +535,9 @@ impl Device {
             identity: account.clone(),
             files: Arc::new(devices::NativeFiles),
         });
+        if b.stable.is_none() {
+            options.cloud_key_bytes = Some(Arc::new(ChildKeys(Mutex::new(stream.try_clone()?))));
+        }
         let host = meguri_host::CoreHost::open(options.clone())?;
         Ok(Self {
             host,
@@ -386,9 +545,10 @@ impl Device {
             automatic: b.automatic,
             account,
             clock,
-            binding: b.binding,
-            note: b.note_id,
+            stable: b.stable,
+            deletion: None,
             session_started: BTreeMap::new(),
+            closed: false,
         })
     }
     fn runtime(&self) -> Result<&runtime::Runtime> {
@@ -468,11 +628,8 @@ impl Device {
         let r = self.runtime()?;
         let status = r.status()?;
         let binding = status.binding.ok_or_else(failure)?;
-        let name = codec::entity_name(
-            &binding.facts.record_key.0,
-            codec::Kind::Note,
-            &codec::id_key(self.note),
-        )?;
+        let (id, stable_binding) = self.stable.ok_or_else(failure)?;
+        let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))?;
         let e = r.entity_facts(&name)?.ok_or_else(failure)?;
         let payloads = self.payloads()?;
         let Some(codec::Payload::Note(note)) = payloads.get(&name) else {
@@ -490,7 +647,7 @@ impl Device {
             change_counter: status.change_counter,
             last_observed_digest: Some(e.payload.row_digest()?),
             mark: e.mark.map(|m| devices::DirtyMark {
-                binding: self.binding,
+                binding: stable_binding,
                 source: m.source,
                 change_seq: m.change_seq,
                 payload_digest: m.payload_digest,
@@ -506,7 +663,12 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
-            Input::Boot(_) => Err(failure()),
+            Input::Boot(_)
+            | Input::KeyResult(_)
+            | Input::TransportAccepted
+            | Input::TransportResult(_)
+            | Input::PublicationExecute(_)
+            | Input::DeleteZone(_) => Err(failure()),
             Input::Validate(i) => {
                 self.runtime()?.validate_caller(&i)?;
                 value(())
@@ -534,8 +696,11 @@ impl Device {
             }
             Input::Reconcile => {
                 let c = self.host.collection()?;
-                self.runtime()?
-                    .reconcile_binding(&c, &self.host.media()?, IPC_TIMEOUT)?;
+                let media = self.host.media()?;
+                if self.stable.is_none() {
+                    media.store().register_full(|_, _| true).map_err(|_| failure())?;
+                }
+                self.runtime()?.reconcile_binding(&c, &media, IPC_TIMEOUT)?;
                 value(())
             }
             Input::StartSDK(i) => {
@@ -605,8 +770,8 @@ impl Device {
                     OpSource::UserUndoable,
                 )?;
                 let note = self
-                    .payloads()?
-                    .into_values()
+                    .collection_rows()?
+                    .into_iter()
                     .find_map(|p| match p {
                         codec::Payload::Note(n) if n.id == id => Some(n),
                         _ => None,
@@ -805,8 +970,36 @@ impl Device {
                 self.clock.step_ms(ms);
                 value(())
             }
+            input @ (Input::BackupPath(..)
+            | Input::BackupNotices
+            | Input::RegisterSDK(..)
+            | Input::RootConfirmed
+            | Input::PreviewBegin
+            | Input::PreviewActive(..)
+            | Input::PreviewEpoch(..)
+            | Input::PreviewCancel
+            | Input::PublicationConfirm(..)
+            | Input::PublicationNext
+            | Input::PublicationLocal(..)
+            | Input::PublicationCancel(..)
+            | Input::PublicationTrigger
+            | Input::PublicationFacts
+            | Input::CollectionRows
+            | Input::CollectionHeader
+            | Input::BackupNow
+            | Input::RestoreBackup(..)
+            | Input::BackupRows(..)
+            | Input::BackupRetention(..)
+            | Input::PutMedia(..)
+            | Input::MediaFiles
+            | Input::RecoveryState
+            | Input::ZonesSeen(..)
+            | Input::CollectionDrained
+            | Input::DeletionGuard
+            | Input::DeletionCheck(..)) => publication_driver::handle(self, input),
             Input::Close => {
                 self.host.close()?;
+                self.closed = true;
                 value(())
             }
         }
@@ -828,16 +1021,13 @@ pub fn child_entry() -> Result<()> {
     let Input::Boot(boot) = read_frame(&mut stream)? else {
         return Err(failure());
     };
-    let mut device = match Device::new(boot) {
+    let mut device = match Device::new(boot, &stream) {
         Ok(d) => {
-            write_frame(&mut stream, &Ok::<_, String>(serde_json::Value::Null))?;
+            write_frame(&mut stream, &ChildMessage::Reply(Ok(serde_json::Value::Null)))?;
             d
         }
         Err(_) => {
-            write_frame(
-                &mut stream,
-                &Err::<serde_json::Value, _>("child open failed".to_owned()),
-            )?;
+            write_frame(&mut stream, &ChildMessage::Reply(Err("child open failed".to_owned())))?;
             return Err(failure());
         }
     };
@@ -845,11 +1035,110 @@ pub fn child_entry() -> Result<()> {
     for _ in 0..100_000 {
         let input: Input = read_frame(&mut stream)?;
         let close = matches!(input, Input::Close);
-        let response = device.handle(input).map_err(|_| "child operation failed".to_owned());
-        write_frame(&mut stream, &response)?;
+        let response =
+            handle_transport_command(&mut device, input, &mut stream).map_err(|_| "child operation failed".to_owned());
+        // A Close served during a reply wait has already sent its own reply.
+        // Do not send a second reply for the abandoned transport command.
+        if device.closed && !close {
+            return Ok(());
+        }
+        write_frame(&mut stream, &ChildMessage::Reply(response))?;
         if close {
             return Ok(());
         }
     }
     Err(failure())
 }
+
+// Key IPC is driven by the production provider call, never by Boot/preview.
+struct ChildKeys(Mutex<UnixStream>);
+impl runtime::KeyByteSource for ChildKeys {
+    fn draw_key(&self) -> std::result::Result<[u8; 32], runtime::KeySourceError> {
+        let mut stream = self.0.lock().map_err(|_| runtime::KeySourceError::Unavailable)?;
+        let mut exchange = || -> Result<_> {
+            write_frame(&mut stream, &ChildMessage::DrawKey)?;
+            match read_frame(&mut stream)? {
+                Input::KeyResult(result) => Ok(result),
+                _ => Err(failure()),
+            }
+        };
+        exchange().unwrap_or(Err(runtime::KeySourceError::Unavailable))
+    }
+}
+fn transport_enqueue(stream: &mut UnixStream, caller: super::Caller, operation: super::Operation) -> Result<()> {
+    write_frame(stream, &ChildMessage::Submit(caller, operation))?;
+    match read_frame(stream)? {
+        Input::TransportAccepted => Ok(()),
+        _ => Err(failure()),
+    }
+}
+fn transport_reply(device: &mut Device, stream: &mut UnixStream) -> Result<super::Response> {
+    loop {
+        match read_frame(stream)? {
+            Input::TransportResult(response) => return Ok(response),
+            input => {
+                let close = matches!(input, Input::Close);
+                let response = device.handle(input).map_err(|_| "child operation failed".to_owned());
+                write_frame(stream, &ChildMessage::Reply(response))?;
+                if close {
+                    return Err(failure());
+                }
+            }
+        }
+    }
+}
+struct ChildTransport<'a> {
+    device: &'a mut Device,
+    stream: &'a mut UnixStream,
+}
+impl super::coordinator::PublicationTransport for ChildTransport<'_> {
+    type Enqueued = ();
+    fn enqueue(&mut self, caller: super::Caller, operation: super::Operation) -> Result<()> {
+        transport_enqueue(self.stream, caller, operation)
+    }
+    fn reply(&mut self, (): ()) -> Result<super::Response> {
+        transport_reply(self.device, self.stream)
+    }
+}
+fn handle_transport_command(device: &mut Device, input: Input, stream: &mut UnixStream) -> Result<serde_json::Value> {
+    match input {
+        Input::PublicationExecute(request) => {
+            let runtime = device.host.cloud_runtime().cloned().ok_or_else(failure)?;
+            let collection = device.host.collection()?;
+            let (result, responses) = super::coordinator::execute_publication_transport(
+                &request,
+                &runtime,
+                &collection,
+                &mut ChildTransport { device, stream },
+            )?;
+            runtime.publication_result(&request, result, &collection)?;
+            Ok(serde_json::to_value(responses)?)
+        }
+        Input::DeleteZone(zone) => {
+            let runtime = device.host.cloud_runtime().cloned().ok_or_else(failure)?;
+            let collection = device.host.collection()?;
+            let guard = device.deletion.clone().ok_or_else(failure)?;
+            runtime.submit_zone_deletion(&guard, &collection, || {
+                transport_enqueue(
+                    stream,
+                    super::Caller {
+                        own_operation: Some("publication-cleanup".into()),
+                        ..Default::default()
+                    },
+                    super::Operation::DeleteZone {
+                        zone: zone.clone(),
+                        cause: super::RemovalCause::Deleted,
+                    },
+                )
+            })??;
+            let response = transport_reply(device, stream)?;
+            let deleted = response.result.is_ok()
+                || matches!(&response.result, Err(e) if e.code == super::ErrorCode::ZoneNotFound);
+            runtime.zone_deletion_result(&guard, &zone, deleted, &collection)?;
+            Ok(serde_json::to_value(response)?)
+        }
+        input => device.handle(input),
+    }
+}
+#[path = "publication_driver.rs"]
+mod publication_driver;

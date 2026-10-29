@@ -31,11 +31,16 @@ pub struct RootReadProof {
 }
 /// SDK pending changes deduplicate by name, including save/delete replacement.
 /// The SDK retains successful names until the complete sent handler returns.
+pub(crate) struct SDKFiles {
+    pub scope: Scope,
+    pub collection_zone: String,
+}
 pub struct SDKRig {
     pub(crate) driver: ChildDriver,
-    pub(crate) files: PreboundDevice,
+    pub(crate) files: SDKFiles,
     pub(crate) instance: String,
     pending: BTreeMap<String, PendingChange>,
+    database_pending: BTreeMap<String, PendingChange>,
     applied: Vec<PendingUpdate>,
     observations: Vec<Observation>,
     emitted: Vec<u64>,
@@ -64,11 +69,20 @@ impl SDKRig {
     ) -> Result<Self> {
         let mut driver = ChildDriver::spawn(files, identity, automatic, now, seed)?;
         let instance = driver.call(Input::Instance)?;
-        Ok(Self {
+        Ok(Self::from_driver(
             driver,
-            files: files.clone(),
+            files.scope.clone(),
+            instance,
+            files.collection_zone.clone(),
+        ))
+    }
+    pub(crate) fn from_driver(driver: ChildDriver, scope: Scope, instance: String, collection_zone: String) -> Self {
+        Self {
+            driver,
+            files: SDKFiles { scope, collection_zone },
             instance,
             pending: BTreeMap::new(),
+            database_pending: BTreeMap::new(),
             applied: Vec::new(),
             observations: Vec::new(),
             emitted: Vec::new(),
@@ -77,7 +91,19 @@ impl SDKRig {
             waiting: None,
             handler: None,
             root: None,
-        })
+        }
+    }
+    pub(crate) fn install_instance(&mut self, instance: String, zone: String) {
+        self.instance = instance;
+        self.files.collection_zone = zone;
+        self.pending.clear();
+        self.database_pending.clear();
+        self.waiting = None;
+        self.handler = None;
+        self.root = None;
+    }
+    pub(crate) fn database_pending(&self) -> BTreeMap<String, PendingChange> {
+        self.database_pending.clone()
     }
     pub fn driver(&mut self) -> &mut ChildDriver {
         &mut self.driver
@@ -147,12 +173,26 @@ impl SDKRig {
         }
     }
     pub(crate) fn qualify_no_state(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
+        let mut remaining = steps;
+        self.qualify_budget(service, &mut remaining)
+    }
+    pub(crate) fn qualify_budget(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         let mut token = None;
-        for _ in 0..steps {
+        while *remaining > 0 {
+            *remaining -= 1;
             let r = service.request(&self.files.scope, self.caller(), Operation::FetchDatabase { token })?;
             let Ok(Reply::DatabaseChanges(page)) = r.result else {
                 return Err(failure());
             };
+            // Persist actual zone announcements through the runtime, independently
+            // of root facts or the Service inspection API.
+            let zones = page
+                .changes
+                .iter()
+                .filter(|change| change.removed.is_none())
+                .map(|change| change.zone.clone())
+                .collect();
+            self.driver.call::<()>(Input::ZonesSeen(zones))?;
             if !page.more {
                 self.driver.call::<()>(Input::Qualify(self.instance.clone()))?;
                 return Ok(());
@@ -246,7 +286,15 @@ impl SDKRig {
         self.driver.call::<()>(Input::Identity(None))?;
         self.driver.call::<()>(Input::Reconcile)?;
         self.driver.call::<()>(Input::StartSDK(self.instance.clone()))?;
-        self.qualify_no_state(service, steps - 3)?;
+        self.confirm_root_read(service, &mut (steps - 3))
+    }
+    pub(crate) fn confirm_root_read(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        remaining: &mut usize,
+    ) -> Result<()> {
+        self.qualify_budget(service, remaining)?;
+        *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
         let due: bool = self.driver.call(Input::ReadDue)?;
         if !due {
             return Err(failure());
@@ -316,7 +364,7 @@ impl SDKRig {
             self.caller(),
             Operation::Modify {
                 zone: self.files.collection_zone.clone(),
-                atomic: true,
+                atomic: false,
                 changes: mutations.clone(),
             },
         )?;
@@ -368,8 +416,11 @@ impl SDKRig {
     }
     pub fn drive_ready(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let mut remaining = steps;
-        while remaining > 0 {
-            remaining -= 1;
+        self.drive_budget(service, &mut remaining)
+    }
+    pub(crate) fn drive_budget(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
+        while *remaining > 0 {
+            *remaining -= 1;
             if self.handler.is_some() {
                 self.refresh()?;
                 return Ok(());
@@ -380,7 +431,7 @@ impl SDKRig {
                 self.return_sent_handler()?;
                 continue;
             }
-            self.fetch_exchange(service, &mut remaining)?;
+            self.fetch_exchange(service, remaining)?;
             self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
             self.updates()?;
             let wants_send: bool = self.driver.call(Input::WantsSend)?;
@@ -391,7 +442,7 @@ impl SDKRig {
             let (_, mutations) = self.build()?;
             if mutations.is_empty() {
                 self.driver.call::<()>(Input::SendsFinished(self.instance.clone()))?;
-                self.fetch_exchange(service, &mut remaining)?;
+                self.fetch_exchange(service, remaining)?;
                 self.refresh()?;
                 return Ok(());
             }
