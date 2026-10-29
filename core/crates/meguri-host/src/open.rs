@@ -293,6 +293,7 @@ impl CoreHost {
         options.publication_binding = config.publication_binding.clone();
         // The platform provider is the sole current-account authority. Call it
         // before engine ownership/recovery and outside Runtime/tracking locks.
+        let mut startup_identity_read_failed = false;
         options.startup_publication_binding = config.cloud.as_ref().map(|inputs| {
             use meguri_engine::device_state::AccountBinding;
             use meguri_sync::cloud::runtime::IdentityStatus;
@@ -309,9 +310,14 @@ impl CoreHost {
                     },
                     _ => AccountBinding::Unknown,
                 },
+                IdentityStatus::ReadFailed => {
+                    startup_identity_read_failed = true;
+                    AccountBinding::Unknown
+                }
                 _ => AccountBinding::Unknown,
             }
         });
+        options.startup_identity_read_failed = startup_identity_read_failed;
         options.backup_entry_times = config.backup_entry_times.clone();
         options.maintenance_status = Some(Arc::new(MaintenanceStatusSource {
             backups: paths.backups.clone(),

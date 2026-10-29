@@ -429,3 +429,25 @@ remain. Independent R1 found no P0-P2 source issue.
   fails its final whole-collection row comparison. That mismatch remains open.
 
 This is a WIP repair, not acceptance of the full batching case or unit.
+
+## Wait for identity after a failed initial account read
+
+Phase start: `713498fd`; final integration follows `b2bd47cc` without
+overlapping its files. Exports `cleanroom/20261029T155737Z-61172` and
+`cleanroom/20261029T160109Z-65462` distinguish an initial failed account read
+from a confirmed mismatch. A completed adoption keeps its existing decision
+and waits for actual identity verification. Unfinished adoption and known
+account changes keep their existing protections. Fresh replacement account
+input resets the old read-failure flag. Independent R2 has no P0-P2 finding.
+
+- `core-test/20261029T160030Z-65007`: 14 pass, one fails. All adoption
+  guards and rollover pass; fetch-crash progresses past its identity failure
+  to the separate missing BeforeSave pause.
+- `core-format/20261029T160238Z-68934`: pass.
+- `core-test/20261029T160250Z-69403`: final 16 selected tests pass; 53 are
+  outside the filter. Includes native-proof and account-change safeguards.
+- `private/20261029T160255Z-69898`: pass.
+- `similarity/20261029T160253Z-69667`: pass.
+
+No existing Pending decision is cleared and no recorded account is substituted
+for a live read. Remaining receive, media and native integration work is open.

@@ -57,6 +57,9 @@ pub struct OpenConfig {
     /// Actual account for startup R6.6 recovery, distinct from local reopen
     /// ownership. Unknown stays Unknown; it is never reconstructed from disk.
     pub startup_publication_binding: Option<crate::device_state::AccountBinding>,
+    /// The provider failed to read the initial identity. This grants no account
+    /// authority; only a finished adoption may preserve its decision while waiting.
+    pub startup_identity_read_failed: bool,
     /// The SQL functions every connection of the collection registers
     /// (`storage/open-and-connections` C5).
     pub initializers: Initializers,
@@ -83,6 +86,7 @@ impl OpenConfig {
             random,
             publication_binding: crate::device_state::AccountBinding::LocalOnly,
             startup_publication_binding: None,
+            startup_identity_read_failed: false,
             initializers: Initializers::default(),
             ports: Ports::default(),
             backups_directory: None,
@@ -380,6 +384,7 @@ impl Engine {
                 path,
                 &config.publication_binding,
                 config.startup_publication_binding.as_ref(),
+                config.startup_identity_read_failed,
                 config.clock.clone(),
                 config.random.clone(),
             )?;
@@ -387,8 +392,9 @@ impl Engine {
             // publication record. Let the ordinary open gate report the missing
             // collection without allocating an identity on a failed open.
             if path.try_exists().map_err(meguri_storage::StorageError::from)? {
-                // Startup recovery has already compared the actual account. Local
-                // reopen ownership follows the resulting durable decision only.
+                // Startup recovery has compared the actual account or retained
+                // an unverified finished adoption. Local reopen ownership follows
+                // the durable decision; it grants no live account authority.
                 let binding = if config.startup_publication_binding.is_some() {
                     crate::device_state::DeviceState::for_collection(path)
                         .publication()?

@@ -329,6 +329,7 @@ impl SlotGuard {
             .map_err(EngineError::from)?;
             if changed && cloud_account.is_some() {
                 config.startup_publication_binding = cloud_account;
+                config.startup_identity_read_failed = false;
             }
             match swapped {
                 Err(error) if !changed => Err(error),

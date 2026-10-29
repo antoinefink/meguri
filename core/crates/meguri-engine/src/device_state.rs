@@ -1105,14 +1105,28 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
 /// records deliberately do not compare hashes: local review may have committed.
 /// Startup account authority is used only for CloudAdopt R6.6. Other local
 /// lifecycle recovery keeps the recorded binding without treating it as a live
-/// account. The actual account (including Unknown) is never replaced for adoption.
+/// account. A failed initial read preserves a finished adoption's decision only;
+/// unfinished adoption still receives Unknown for R6.6's mandatory account check.
 pub(crate) fn reconcile_startup(
     live: &Path,
     fallback: &AccountBinding,
     actual: Option<&AccountBinding>,
+    identity_read_failed: bool,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
     random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
 ) -> Result<(), StorageError> {
+    if identity_read_failed && matches!(actual, Some(AccountBinding::Unknown)) {
+        let state = sidecar::read_document(&sidecar_path(live), decode)?;
+        if let Some(state) = state
+            && state.intent.is_none()
+            && cloud_active(&state)?
+        {
+            // V9.1: no fresh account fact exists. Preserve Clear or Pending
+            // without presenting the recorded binding as a provider read.
+            // Runtime still requires a successful read before any cloud work.
+            return cleanup_completed_media(live, &state.active.binding);
+        }
+    }
     let binding = if let Some(actual) = actual {
         sidecar::read_document(&sidecar_path(live), |doc| {
             let Some(state) = decode(doc)? else {
