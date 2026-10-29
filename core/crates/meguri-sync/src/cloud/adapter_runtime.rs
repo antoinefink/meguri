@@ -5,7 +5,7 @@ impl Runtime {
     pub fn attach_adapter_clock(&self, clock: Arc<dyn meguri_model::clock::Clock>) {
         *self.adapter_clock.lock().unwrap_or_else(PoisonError::into_inner) = Some(clock);
     }
-    fn adapter_now(&self) -> Result<i64, RuntimeError> {
+    pub(super) fn adapter_now(&self) -> Result<i64, RuntimeError> {
         let clock = self
             .adapter_clock
             .lock()

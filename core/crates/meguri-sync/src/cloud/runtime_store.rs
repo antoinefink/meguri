@@ -9,10 +9,10 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
-INSERT INTO cloud_runtime_schema VALUES (1);
+INSERT INTO cloud_runtime_schema VALUES (2);
 CREATE TABLE cloud_runtime_bindings(
  binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content))
 );
@@ -26,6 +26,7 @@ CREATE TABLE cloud_runtime_notes(
 /// the private WAL-aware probe, before SQLite opens the original path.
 pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, Error> {
     super::workflow_store::check_version(connection)?;
+    super::publication_store::check_version(connection)?;
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_runtime_schema')",
         [],
@@ -36,7 +37,7 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         let versions = statement
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [VERSION] {
+        if versions != [1] && versions != [VERSION] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
     } else {
@@ -63,7 +64,11 @@ impl TrackingStore {
             transaction.execute_batch(SCHEMA)?;
             transaction.commit()?;
         }
+        // V2 permits genuinely unacknowledged notes; V1 readers must refuse it.
+        self.connection
+            .execute("UPDATE cloud_runtime_schema SET version=?1 WHERE version=1", [VERSION])?;
         self.install_workflow()?;
+        self.install_publication()?;
         // Ordinary payloads belong to their container/environment only.
         let mut statement = self.connection.prepare(
             "SELECT r.binding,r.content FROM cloud_runtime_bindings r JOIN bindings b ON b.id=r.binding
@@ -347,7 +352,7 @@ impl TrackingStore {
     pub fn future_runtime_version_for_testing(&mut self) -> Result<(), Error> {
         let changed = self
             .connection
-            .execute("UPDATE cloud_runtime_schema SET version=2", [])?;
+            .execute("UPDATE cloud_runtime_schema SET version=?1", [VERSION + 1])?;
         if changed != 1 {
             return Err(Error::InvalidData);
         }

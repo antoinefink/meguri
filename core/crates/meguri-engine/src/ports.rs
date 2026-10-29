@@ -95,6 +95,21 @@ pub trait OpenStep: Send + Sync {
     fn run(&self, collection: &Collection) -> Result<(), EngineError>;
 }
 
+/// Trusted composition supplies the durable recovery-row reader. Called on the
+/// requesting worker with a generation lease, before any binding/sidecar lock.
+/// Hold durable operation serialization through `apply`; the callback only takes
+/// the local reopen-binding/sidecar locks. Never submit writer work or reenter
+/// Runtime or the resolver from that callback.
+pub trait CloudPublicationAuthority: Send + Sync {
+    fn with_resolution(
+        &self,
+        collection: &Collection,
+        operation: [u8; 16],
+        expected: &crate::device_state::PublicationDecisionState,
+        apply: &mut dyn FnMut(&crate::device_state::PublicationDecisionState) -> Result<bool, EngineError>,
+    ) -> Result<bool, EngineError>;
+}
+
 /// The engine's port catalog: U38's `ports.rs` checks each has its provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PortKind {
@@ -118,6 +133,7 @@ impl PortKind {
 pub struct Ports {
     pub observers: Vec<Arc<dyn ChangeObserver>>,
     pub backup_service: Option<Arc<dyn BackupService>>,
+    pub cloud_publication_authority: Option<Arc<dyn CloudPublicationAuthority>>,
     pub generation_listeners: Vec<Arc<dyn GenerationListener>>,
     pub suspend_participants: Vec<Arc<dyn SuspendParticipant>>,
     pub open_steps: Vec<Arc<dyn OpenStep>>,
@@ -168,6 +184,11 @@ impl Ports {
 
     pub fn backup_service(mut self, provider: Arc<dyn BackupService>) -> Self {
         self.backup_service = Some(provider);
+        self
+    }
+
+    pub fn cloud_publication_authority(mut self, provider: Arc<dyn CloudPublicationAuthority>) -> Self {
+        self.cloud_publication_authority = Some(provider);
         self
     }
 

@@ -20,6 +20,7 @@ pub struct HostConfig {
     pub engine: EngineConfig,
     /// Optional bounded capture; platform providers supply real account facts.
     pub cloud: Option<meguri_sync::cloud::runtime::CloudInputs>,
+    pub cloud_key_bytes: Option<Arc<dyn meguri_sync::cloud::runtime::KeyByteSource>>,
     pub backup_entry_times: Arc<dyn meguri_engine::maintenance::BackupEntryTimes>,
     #[cfg(feature = "test-hooks")]
     pub(crate) test_backup: Option<Arc<dyn meguri_engine::ports::BackupService>>,
@@ -49,6 +50,7 @@ impl HostConfig {
             disk_space_provider,
             engine: EngineConfig::default(),
             cloud: None,
+            cloud_key_bytes: None,
             backup_entry_times: Arc::new(meguri_engine::maintenance::OsBackupEntryTimes),
             #[cfg(feature = "test-hooks")]
             test_backup: None,

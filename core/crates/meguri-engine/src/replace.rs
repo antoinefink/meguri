@@ -313,7 +313,7 @@ impl Exclusive<'_> {
                     live,
                     stage,
                     reason,
-                    environment.binding,
+                    environment.binding(),
                     environment.random,
                     environment.clock,
                     tracked,

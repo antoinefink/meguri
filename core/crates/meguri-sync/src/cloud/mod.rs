@@ -1,13 +1,16 @@
 //! Cloud tracking and the host-wired stable prebound workflow.
 //!
 //! Whole scans, conditional saves and acknowledgements require current account,
-//! file, publication and root proofs. Publication/adoption, incoming merge,
-//! structural generations and nonempty media remain unavailable.
+//! file, publication and root proofs. Explicit publication uses the durable
+//! recovery protocol; incoming staging/adoption, structural generations and
+//! nonempty media still require their production paths.
 
 pub mod adapter;
 mod adapter_store;
 pub mod control_codec;
 pub mod entity_codec;
+pub mod publication;
+mod publication_store;
 pub mod row_payload;
 pub mod runtime;
 pub mod workflow;

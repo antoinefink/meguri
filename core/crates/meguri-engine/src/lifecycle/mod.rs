@@ -54,6 +54,9 @@ pub struct OpenConfig {
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn RandomSource>,
     pub publication_binding: crate::device_state::AccountBinding,
+    /// Actual account for startup R6.6 recovery, distinct from local reopen
+    /// ownership. Unknown stays Unknown; it is never reconstructed from disk.
+    pub startup_publication_binding: Option<crate::device_state::AccountBinding>,
     /// The SQL functions every connection of the collection registers
     /// (`storage/open-and-connections` C5).
     pub initializers: Initializers,
@@ -79,6 +82,7 @@ impl OpenConfig {
             clock,
             random,
             publication_binding: crate::device_state::AccountBinding::LocalOnly,
+            startup_publication_binding: None,
             initializers: Initializers::default(),
             ports: Ports::default(),
             backups_directory: None,
@@ -372,9 +376,10 @@ impl Engine {
                 Some(ownership) => ownership,
                 None => Arc::new(meguri_storage::lockfile::CollectionLock::acquire(directory)?),
             };
-            crate::device_state::reconcile(
+            crate::device_state::reconcile_startup(
                 path,
                 &config.publication_binding,
+                config.startup_publication_binding.as_ref(),
                 config.clock.clone(),
                 config.random.clone(),
             )?;
@@ -382,7 +387,18 @@ impl Engine {
             // publication record. Let the ordinary open gate report the missing
             // collection without allocating an identity on a failed open.
             if path.try_exists().map_err(meguri_storage::StorageError::from)? {
-                crate::device_state::ensure(path, &config.publication_binding, config.random.as_ref())?;
+                // Startup recovery has already compared the actual account. Local
+                // reopen ownership follows the resulting durable decision only.
+                let binding = if config.startup_publication_binding.is_some() {
+                    crate::device_state::DeviceState::for_collection(path)
+                        .publication()?
+                        .map(|p| p.binding)
+                        .unwrap_or_else(|| config.publication_binding.clone())
+                } else {
+                    config.publication_binding.clone()
+                };
+                crate::device_state::ensure(path, &binding, config.random.as_ref())?;
+                config.publication_binding = binding;
             }
             if !initial_replacement {
                 meguri_storage::leftovers::cleanup(directory)?;
@@ -488,19 +504,22 @@ impl Engine {
             }
         }
         let _ = exec.maintenance.set(Arc::downgrade(self.maintenance()));
+        let publication_binding = Arc::new(Mutex::new(config.publication_binding.clone()));
         let core = Arc::new(CollectionCore {
             backup: config.ports.backup_service.clone(),
             exec: Arc::clone(&exec),
             readers: Readers::new(factory),
             derived: std::sync::OnceLock::new(),
             media: std::sync::Mutex::new(None),
+            publication_binding: publication_binding.clone(),
+            cloud_publication_authority: config.ports.cloud_publication_authority.clone(),
             random: config.random.clone(),
             render_cache: Default::default(),
             space: config.disk_space_provider,
         });
         exec.undo.add_restorer(Arc::new(crate::sched::answer::AnswerRestorer));
         let reopen = Reopen {
-            binding: config.publication_binding.clone(),
+            binding: publication_binding,
             clock: Arc::clone(&config.clock),
             random: Arc::clone(&config.random),
             initializers: config.initializers.clone(),

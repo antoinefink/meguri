@@ -310,7 +310,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
         Control::Resume => {
             crate::device_state::reconcile(
                 &env.shared.path,
-                &env.reopen.binding,
+                &env.reopen.binding(),
                 env.reopen.clock.clone(),
                 env.reopen.random.clone(),
             )?;

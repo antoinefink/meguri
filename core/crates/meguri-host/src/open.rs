@@ -236,6 +236,9 @@ impl CoreHost {
         if let Some(cloud) = &cloud {
             cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
             cloud.attach_adapter_clock(config.clock.clone());
+            if let Some(keys) = &config.cloud_key_bytes {
+                cloud.attach_key_bytes(keys.clone());
+            }
             review.add_session_start_hook(cloud.clone());
         }
         let mut ports = derived
@@ -250,6 +253,7 @@ impl CoreHost {
             .suspend_participant(review.clone());
         if let Some(cloud) = &cloud {
             ports = ports
+                .cloud_publication_authority(cloud.clone())
                 .open_step(cloud.clone())
                 .observer(cloud.clone())
                 .generation_listener(cloud.clone())
@@ -284,6 +288,27 @@ impl CoreHost {
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();
+        // The platform provider is the sole current-account authority. Call it
+        // before engine ownership/recovery and outside Runtime/tracking locks.
+        options.startup_publication_binding = config.cloud.as_ref().map(|inputs| {
+            use meguri_engine::device_state::AccountBinding;
+            use meguri_sync::cloud::runtime::IdentityStatus;
+            match inputs.identity.read_identity(&inputs.scope) {
+                IdentityStatus::Available(account) => match String::from_utf8(account.0) {
+                    Ok(account) if !account.is_empty() => AccountBinding::Connected {
+                        account,
+                        configuration: inputs.scope.container.as_str().to_owned(),
+                        environment: match inputs.scope.environment {
+                            meguri_sync::cloud::Environment::Development => "development",
+                            meguri_sync::cloud::Environment::Production => "production",
+                        }
+                        .into(),
+                    },
+                    _ => AccountBinding::Unknown,
+                },
+                _ => AccountBinding::Unknown,
+            }
+        });
         options.backup_entry_times = config.backup_entry_times.clone();
         options.maintenance_status = Some(Arc::new(MaintenanceStatusSource {
             backups: paths.backups.clone(),

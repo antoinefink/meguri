@@ -115,6 +115,17 @@ pub struct Publication {
     pub binding: AccountBinding,
     pub decision: PublicationDecision,
 }
+/// Complete R6 decision, including the optional replacement reason.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationDecisionState {
+    pub publication: Publication,
+    pub pending_reason: Option<PendingDecisionReason>,
+}
+impl std::fmt::Debug for PublicationDecisionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PublicationDecisionState")
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicationToken {
     identity: PublicationId,
@@ -789,6 +800,50 @@ impl DeviceState {
     pub fn publication(&self) -> Result<Option<Publication>, StorageError> {
         sidecar::read_document(&self.path, |doc| Ok(decode(doc)?.map(|state| state.active)))
     }
+    /// Read the decision and its reason under one sidecar lock.
+    pub fn publication_decision(&self) -> Result<Option<PublicationDecisionState>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            decode(doc)?
+                .map(|state| {
+                    Ok(PublicationDecisionState {
+                        pending_reason: pending_reason(&state.extra)?,
+                        publication: state.active,
+                    })
+                })
+                .transpose()
+        })
+    }
+    /// V15.2/V15.3 resolver: the caller owns a durable confirmed recovery row.
+    /// This is a comparison of the complete prior decision, never an unconditional
+    /// fence clear. An intervening replacement/decision or unfinished R6 intent
+    /// refuses the write. Publication identity and replacement evidence stay intact.
+    pub(crate) fn compare_exchange_publication_decision(
+        &self,
+        expected: &PublicationDecisionState,
+        replacement: &PublicationDecisionState,
+    ) -> Result<bool, StorageError> {
+        if replacement.publication.identity != expected.publication.identity
+            || (replacement.publication.decision == PublicationDecision::Clear && replacement.pending_reason.is_some())
+        {
+            return Err(failure("invalid publication decision resolution"));
+        }
+        // Only the registered durable authority calls this CAS. A new decision
+        // supplies its verified binding; cancellation restores the exact prior
+        // decision, including an uncertain binding, without granting a token.
+        sidecar::update_document(&self.path, |doc| {
+            let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing publication decision"))?;
+            if state.intent.is_some()
+                || state.active != expected.publication
+                || pending_reason(&state.extra)? != expected.pending_reason
+            {
+                return Ok(false);
+            }
+            state.active = replacement.publication.clone();
+            set_pending_reason(&mut state, replacement.pending_reason)?;
+            put(doc, &state)?;
+            Ok(true)
+        })
+    }
     /// Local-only never grants a sending token. Pending and unfinished intents
     /// block both identities. There is deliberately no public clear setter.
     pub fn publication_token(&self, binding: &AccountBinding) -> Result<PublicationToken, StorageError> {
@@ -937,6 +992,37 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
 
 /// Called under the collection lock, before sweep/open/day writes. Activated
 /// records deliberately do not compare hashes: local review may have committed.
+/// Startup account authority is used only for CloudAdopt R6.6. Other local
+/// lifecycle recovery keeps the recorded binding without treating it as a live
+/// account. The actual account (including Unknown) is never replaced for adoption.
+pub(crate) fn reconcile_startup(
+    live: &Path,
+    fallback: &AccountBinding,
+    actual: Option<&AccountBinding>,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
+) -> Result<(), StorageError> {
+    let binding = if let Some(actual) = actual {
+        sidecar::read_document(&sidecar_path(live), |doc| {
+            let Some(state) = decode(doc)? else {
+                return Ok(fallback.clone());
+            };
+            if state
+                .intent
+                .as_ref()
+                .is_some_and(|i| i.reason == crate::replace::ReplaceReason::CloudAdopt)
+                || cloud_active(&state)?
+            {
+                Ok(actual.clone())
+            } else {
+                Ok(state.active.binding)
+            }
+        })?
+    } else {
+        fallback.clone()
+    };
+    reconcile(live, &binding, clock, random)
+}
 pub(crate) fn reconcile(
     live: &Path,
     binding: &AccountBinding,

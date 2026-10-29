@@ -74,10 +74,19 @@ pub(crate) struct WriterEnv<'w> {
 /// What reopening the file after a swap needs (`engine/lifecycle` L8).
 #[derive(Clone)]
 pub(crate) struct Reopen {
-    pub binding: crate::device_state::AccountBinding,
+    pub binding: Arc<std::sync::Mutex<crate::device_state::AccountBinding>>,
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn RandomSource>,
     pub initializers: Initializers,
+}
+
+impl Reopen {
+    pub(crate) fn binding(&self) -> crate::device_state::AccountBinding {
+        self.binding
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 thread_local! {
@@ -936,7 +945,7 @@ impl TaskBody for ReplaceTask {
         } else {
             crate::device_state::reconcile(
                 &shared.path,
-                &reopen.binding,
+                &reopen.binding(),
                 reopen.clock.clone(),
                 reopen.random.clone(),
             )

@@ -63,7 +63,11 @@ fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
     #[cfg(feature = "test-hooks")]
     body_read();
     let p = codec::Payload::decode(codec::Kind::Note, &n.local_payload.0).map_err(|_| Error::InvalidData)?;
-    let ack = codec::Payload::decode(codec::Kind::Note, &n.acknowledged.payload.0).map_err(|_| Error::InvalidData)?;
+    let ack = if n.acknowledged.erev == 0 {
+        None
+    } else {
+        Some(codec::Payload::decode(codec::Kind::Note, &n.acknowledged.payload.0).map_err(|_| Error::InvalidData)?)
+    };
     Ok(EntityFacts {
         name: n.name,
         kind: codec::Kind::Note,
@@ -81,7 +85,7 @@ fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
         acked_system_fields: n.acknowledged.system_fields.0,
         acked_row_digest: n.acknowledged.row_digest,
         acked_payload_digest: n.acknowledged.payload_digest,
-        acked_payload: Some(ack),
+        acked_payload: ack,
         acked_envelope: n.acked_envelope,
         in_flight: n.in_flight,
         observer_open: n.observer_open,
@@ -116,7 +120,7 @@ pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) 
         let codec::Payload::Note(p) = &e.payload else {
             return Err(Error::InvalidData);
         };
-        let ack = e.acked_payload.as_ref().ok_or(Error::InvalidData)?;
+        let ack = e.acked_payload.as_ref();
         let n = NoteTracking {
             id: p.id,
             name: e.name.clone(),
@@ -133,7 +137,11 @@ pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) 
             acknowledged: NoteAcknowledgement {
                 erev: e.server_erev,
                 system_fields: OpaqueBytes(e.acked_system_fields.clone()),
-                payload: OpaqueBytes(ack.encode().map_err(|_| Error::InvalidData)?),
+                payload: OpaqueBytes(
+                    ack.map(|p| p.encode().map_err(|_| Error::InvalidData))
+                        .transpose()?
+                        .unwrap_or_default(),
+                ),
                 row_digest: e.acked_row_digest,
                 payload_digest: e.acked_payload_digest,
             },
@@ -226,8 +234,17 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         for name in notes.query_map([b.0.as_slice()], |r| r.get::<_, String>(0))? {
             names.insert(name?, PendingChange::Save);
         }
-        let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND kind IN (2,3,4,8) AND json_extract(content,'$.mark') IS NOT NULL")?;
-        for name in entities.query_map([b.0.as_slice()], |r| r.get::<_, String>(0))? {
+        let publishing = self.publication_op()?.is_some_and(|op| {
+            op.binding_after == Some(b)
+                && matches!(
+                    op.step,
+                    super::publication::PublishStep::Zones
+                        | super::publication::PublishStep::Sent
+                        | super::publication::PublishStep::Complete
+                )
+        });
+        let mut entities = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_entities INDEXED BY cloud_dirty_entities WHERE binding=?1 AND (kind IN (2,3,4,8) OR ?2) AND json_extract(content,'$.mark') IS NOT NULL")?;
+        for name in entities.query_map(params![b.0.as_slice(), publishing], |r| r.get::<_, String>(0))? {
             names.insert(name?, PendingChange::Save);
         }
         Ok(PendingSnapshot(names))
@@ -378,6 +395,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         let pending = e.mark.is_some();
         let tx = self.connection.transaction()?;
         put(&tx, b, &e)?;
+        super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
         Ok(pending)
     }
@@ -390,6 +408,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         s.coverage = Some(ledger);
         let tx = self.connection.transaction()?;
         put_binding(&tx, b, &s)?;
+        super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
         Ok(())
     }
@@ -617,7 +636,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
     }
 }
 fn layout(c: &Connection, b: BindingId, id: i64) -> Result<codec::Notetype, Error> {
-    match entity(c, b, codec::Kind::Notetype, &codec::id_key(id))?.and_then(|e| e.acked_payload) {
+    match entity(c, b, codec::Kind::Notetype, &codec::id_key(id))?.map(|e| e.acked_payload.unwrap_or(e.payload)) {
         Some(codec::Payload::Notetype(n)) if n.struct_gen > 0 => Ok(n),
         _ => Err(Error::InvalidData),
     }

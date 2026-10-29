@@ -716,7 +716,14 @@ fn non_atomic_parent_failure_never_submits_children_before_persisted_parent_ackn
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    // Fixed public key vector: draw 19 puts this Notetype before its new Note.
+    let host = open_host(
+        &dir,
+        Arc::new(Keys {
+            calls: Mutex::new(19),
+            fail: None,
+        }),
+    );
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
@@ -1029,6 +1036,7 @@ fn cancellation_restores_exact_prior_decision_after_account_changes() {
 
 #[test]
 fn cancellation_after_native_file_mismatch_restores_fence_and_keeps_old_binding_isolated() {
+    use meguri_engine::{EngineError, LongOp};
     for restore in [false, true] {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
@@ -1041,16 +1049,36 @@ fn cancellation_after_native_file_mismatch_restores_fence_and_keeps_old_binding_
         }
         let before = decision(&host);
         let op = bind_and_write(&host, &mut service, &scope());
+        let written = decision(&host);
+        let native_before = host.collection().unwrap().open_evidence().unwrap().native_file;
+        assert!(host.review().active_session().is_none());
+        {
+            let slot = host.engine().acquire_slot(LongOp::Restore).unwrap();
+            let mut exclusive = slot.enter_exclusive(true).unwrap();
+            // ReplaceTask closes/checkpoints the writer and retires its journal
+            // before this closure copies the MAIN file to a different inode.
+            exclusive
+                .replace(|live| {
+                    let copy = live.with_file_name("replacement-native-file");
+                    std::fs::copy(live, &copy).map_err(|e| EngineError::Storage(e.into()))?;
+                    std::fs::rename(copy, live).map_err(|e| EngineError::Storage(e.into()))
+                })
+                .unwrap();
+        }
+        assert_eq!(decision(&host), written);
+        let native_after = host.collection().unwrap().open_evidence().unwrap().native_file;
+        assert_ne!(native_after, native_before);
+        assert!(host.review().active_session().is_none());
         host.close().unwrap();
         drop(host);
-        // Change the actual native file, with all writers closed, then open it
-        // through CoreHost so current generation/native evidence is real.
-        let live = dir.join("collection.anki2");
-        let copy = dir.join("replacement-native-file");
-        std::fs::copy(&live, &copy).unwrap();
-        std::fs::rename(copy, &live).unwrap();
         let host = open_host(&dir, keys());
+        assert_eq!(decision(&host), written);
+        assert_eq!(
+            host.collection().unwrap().open_evidence().unwrap().native_file,
+            native_after
+        );
         let runtime = host.cloud_runtime().unwrap();
+        assert_eq!(Some(runtime.status().unwrap().binding.unwrap().id), op.binding_after);
         assert_eq!(
             runtime.status().unwrap().binding.unwrap().facts.state,
             cloud::BindingState::Isolated(cloud::IsolationReason::FileMismatch)

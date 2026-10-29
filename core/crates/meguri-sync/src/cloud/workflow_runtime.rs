@@ -122,11 +122,14 @@ impl Runtime {
         if !b.usable || !b.verified {
             return Err(RuntimeError::IdentityUnverified);
         }
+        if Self::publication_holds_binding_locked(s) {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         if !s.whole_complete
             || s.scan_required
             || s.scan_running
             || s.tracking_stopped
-            || !s.root_confirmed
+            || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
             || s.last_session.is_some()
             || s.review_blocked
             || s.adapter.paused
@@ -290,6 +293,9 @@ impl Runtime {
             s.whole_complete = false;
             g
         };
+        let publishing = self.publication_op()?.is_some_and(|op| {
+            op.binding_after == Some(guard.binding) && op.step == crate::cloud::publication::PublishStep::Zones
+        });
         let instance = self.instance()?;
         let result = (|| {
             self.with_scan(&guard, collection, |s| {
@@ -362,27 +368,54 @@ impl Runtime {
                             Ok(s.store
                                 .as_ref()
                                 .ok_or(Error::Database)?
-                                .entity_content(guard.binding, kind, &key)?
-                                .ok_or(Error::InvalidData)?)
+                                .entity_content(guard.binding, kind, &key)?)
                         })?;
-                        let mut e = super::super::workflow_store::decode_entity(kind, &content)?;
+                        let mut existing = content
+                            .as_deref()
+                            .map(|content| super::super::workflow_store::decode_entity(kind, content))
+                            .transpose()?;
+                        if existing.is_none() && !publishing {
+                            return Err(Error::InvalidData.into());
+                        }
                         let p = row_payload::project(&view, kind, &row, |id| {
-                            let content = {
+                            let tracked = {
                                 let s = self.state();
                                 with_tracking_access(|| {
-                                    s.store
-                                        .as_ref()
-                                        .ok_or(Error::Database)?
-                                        .entity_content(guard.binding, codec::Kind::Notetype, &codec::id_key(id))?
-                                        .ok_or(Error::InvalidData)
+                                    s.store.as_ref().ok_or(Error::Database)?.entity_content(
+                                        guard.binding,
+                                        codec::Kind::Notetype,
+                                        &codec::id_key(id),
+                                    )
                                 })
                             }?;
-                            let e = super::super::workflow_store::decode_entity(codec::Kind::Notetype, &content)?;
-                            match e.acked_payload {
-                                Some(codec::Payload::Notetype(n)) => Ok(n),
-                                _ => Err(Error::InvalidData),
+                            if let Some(content) = tracked {
+                                let e = super::super::workflow_store::decode_entity(codec::Kind::Notetype, &content)?;
+                                match e.acked_payload.unwrap_or(e.payload) {
+                                    codec::Payload::Notetype(n) => Ok(n),
+                                    _ => Err(Error::InvalidData),
+                                }
+                            } else if publishing {
+                                let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                                row_payload::notetype(&view, &raw, 1)
+                            } else {
+                                Err(Error::InvalidData)
                             }
                         })?;
+                        let mut e = if let Some(e) = existing.take() {
+                            e
+                        } else {
+                            let origin = self.publication_random_id()?;
+                            self.with_scan(&guard, collection, |s| {
+                                Ok(s.store.as_mut().ok_or(Error::Database)?.insert_publication_entity(
+                                    guard.binding,
+                                    p.clone(),
+                                    origin,
+                                    guard.open,
+                                    snapshot.seq().0,
+                                    snapshot.generation().0,
+                                )?)
+                            })?
+                        };
                         if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
                             && (old.kind != new.kind || old.parent_id != new.parent_id)
                         {
@@ -395,7 +428,7 @@ impl Runtime {
                                 | codec::Kind::Revlog
                                 | codec::Kind::Deck
                                 | codec::Kind::Config
-                        ) && e.acked_payload.as_ref() != Some(&p)
+                        ) && e.payload != p
                         {
                             return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
                         }
@@ -540,7 +573,10 @@ impl Runtime {
     }
     pub fn root_read_due(&self) -> Result<bool, RuntimeError> {
         let s = self.state();
-        Ok(s.root_fetch_qualified && s.whole_complete && s.bound.as_ref().is_some_and(|b| b.verified && b.usable))
+        Ok(!Self::publication_allows_send_locked(&s)
+            && s.root_fetch_qualified
+            && s.whole_complete
+            && s.bound.as_ref().is_some_and(|b| b.verified && b.usable))
     }
     pub fn accept_root_read(
         &self,
@@ -574,6 +610,9 @@ impl Runtime {
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let id = b.binding.id;
+        if Self::publication_allows_send_locked(&s) {
+            return Ok(false);
+        }
         if !b.verified
             || !b.usable
             || !s.whole_complete
@@ -695,6 +734,7 @@ impl Runtime {
             let limit = s.actions.record_limit;
             let byte_limit = s.actions.byte_limit;
             (|| -> Result<(), RuntimeError> {
+                let publishing = Self::publication_allows_send_locked(s);
                 let store = s.store.as_mut().ok_or(Error::Database)?;
                 for name in requested {
                     if saves.len() >= limit {
@@ -704,16 +744,35 @@ impl Runtime {
                         continue;
                     };
                     if e.mark.is_none()
-                        || !matches!(
-                            e.kind,
-                            codec::Kind::Note
-                                | codec::Kind::Card
-                                | codec::Kind::Revlog
-                                | codec::Kind::Deck
-                                | codec::Kind::Config
-                        )
+                        || (!publishing
+                            && !matches!(
+                                e.kind,
+                                codec::Kind::Note
+                                    | codec::Kind::Card
+                                    | codec::Kind::Revlog
+                                    | codec::Kind::Deck
+                                    | codec::Kind::Config
+                            ))
                     {
                         continue;
+                    }
+                    if publishing {
+                        let references = super::super::publication_store::references(&e.payload)?;
+                        let mut ready = true;
+                        for (kind, key) in references {
+                            let name = codec::entity_name(&b.facts.record_key.0, kind, &key)
+                                .map_err(|_| Error::InvalidData)?;
+                            if !store
+                                .entity_facts(b.id, &name)?
+                                .is_some_and(|entity| entity.server_erev > 0)
+                            {
+                                ready = false;
+                                break;
+                            }
+                        }
+                        if !ready {
+                            continue;
+                        }
                     }
                     let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
                     let payload = e.payload.encode().map_err(|_| Error::InvalidData)?;

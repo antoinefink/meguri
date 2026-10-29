@@ -264,3 +264,112 @@ impl Coordinator {
         self.rig.get_mut().driver.kill_sigkill()
     }
 }
+
+/// Transport one Runtime-owned request. The three zone saves are one own
+/// modify-zones operation attribution, and never SDK database pending changes.
+/// Returned responses are the actual Service replies, including save conflicts.
+pub fn execute_publication_request(
+    service: &mut Service<SeededRandom>,
+    scope: &Scope,
+    request: &production::publication::OwnRequest,
+    runtime: &production::runtime::Runtime,
+    collection: &meguri_engine::Collection,
+) -> Result<(production::publication::OwnResult, Vec<Response>)> {
+    use production::publication::{OwnOperation, OwnResult, RecordRead};
+    let caller = Caller {
+        own_operation: Some(format!("publication-{:02x?}-{}", request.op, request.attempt)),
+        ..Caller::default()
+    };
+    let mut replies = Vec::new();
+    let result = match &request.operation {
+        OwnOperation::CreateZones(zones) => {
+            let mut succeeded = true;
+            for zone in zones {
+                let response = runtime
+                    .submit_publication_request(request, collection, || {
+                        service.request(scope, caller.clone(), Operation::CreateZone { zone: zone.clone() })
+                    })
+                    .map_err(|_| failure())??;
+                succeeded &= response.result.is_ok();
+                replies.push(response);
+            }
+            if succeeded {
+                OwnResult::ZonesCreated
+            } else {
+                OwnResult::Failed { retry_after_ms: None }
+            }
+        }
+        OwnOperation::Read { zone, name } => {
+            let response = runtime
+                .submit_publication_request(request, collection, || {
+                    service.request(
+                        scope,
+                        caller,
+                        Operation::Read {
+                            zone: zone.clone(),
+                            name: name.clone(),
+                            fields: RequestedFields::All,
+                        },
+                    )
+                })
+                .map_err(|_| failure())??;
+            let read = match &response.result {
+                Ok(Reply::Record(record)) => RecordRead::Found(publication_control_record(record)?),
+                Err(error) if error.code == ErrorCode::UnknownItem => RecordRead::Missing,
+                Err(error) if error.code == ErrorCode::ZoneNotFound => RecordRead::ZoneMissing,
+                _ => RecordRead::Failed,
+            };
+            replies.push(response);
+            OwnResult::Read(read)
+        }
+        OwnOperation::Save {
+            zone,
+            name,
+            record_type,
+            encrypted,
+            if_unchanged,
+        } => {
+            let response = runtime
+                .submit_publication_request(request, collection, || {
+                    service.request(
+                        scope,
+                        caller,
+                        Operation::Modify {
+                            zone: zone.clone(),
+                            atomic: false,
+                            changes: vec![Mutation::Save {
+                                record: RecordInput::encrypted(name, record_type, encrypted.clone()),
+                                if_unchanged: if_unchanged.as_ref().map(|s| SystemFields::from_bytes(s.0.clone())),
+                            }],
+                        },
+                    )
+                })
+                .map_err(|_| failure())??;
+            let result = match &response.result {
+                Ok(Reply::Modified(items)) if items.len() == 1 => match &items[0].result {
+                    Ok(MutationSuccess::Saved(record)) => OwnResult::Saved(publication_control_record(record)?),
+                    Err(error) if error.code == ErrorCode::ServerRecordChanged => match &error.server_record {
+                        Some(record) => OwnResult::Conflict(publication_control_record(record)?),
+                        None => OwnResult::Failed { retry_after_ms: None },
+                    },
+                    _ => OwnResult::Failed { retry_after_ms: None },
+                },
+                _ => OwnResult::Failed { retry_after_ms: None },
+            };
+            replies.push(response);
+            result
+        }
+    };
+    Ok((result, replies))
+}
+/// Preserve the platform's absent encrypted field independently of missing rows.
+pub fn publication_control_record(record: &Record) -> Result<production::publication::ControlRecord> {
+    Ok(production::publication::ControlRecord {
+        encrypted: match record.fields.get("e") {
+            Some(Field::EncryptedBytes(bytes)) => Some(bytes.clone()),
+            None => None,
+            _ => return Err(failure()),
+        },
+        system_fields: production::OpaqueBytes(record.system_fields.bytes().to_vec()),
+    })
+}

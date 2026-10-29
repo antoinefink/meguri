@@ -19,8 +19,11 @@ use serde::{Deserialize, Serialize};
 use super::{entity_codec as codec, *};
 #[path = "adapter_runtime.rs"]
 mod adapter_impl;
+#[path = "publication_runtime.rs"]
+mod publication_impl;
 #[path = "workflow_runtime.rs"]
 mod workflow_impl;
+pub use super::publication::{KeyByteSource, KeySourceError};
 
 // Serialize probes, writes and connection drops across runtime owners.
 // Foundational store callers must also enter this gate.
@@ -89,6 +92,7 @@ pub enum RuntimeError {
     IdentityUnverified,
     Incomplete(Incomplete),
     FileIdentityUnavailable,
+    Publication(super::publication::PublicationError),
 }
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -99,6 +103,7 @@ impl std::fmt::Display for RuntimeError {
             Self::IdentityUnverified => "cloud runtime account is unverified",
             Self::Incomplete(_) => "cloud runtime component is incomplete",
             Self::FileIdentityUnavailable => "cloud runtime file identity is unavailable",
+            Self::Publication(_) => "cloud publication could not proceed",
         })
     }
 }
@@ -166,8 +171,15 @@ pub struct NoteTracking {
 }
 impl NoteTracking {
     pub(super) fn layout_generation(&self) -> Result<u64, Error> {
-        let codec::Payload::Note(image) =
-            codec::Payload::decode(codec::Kind::Note, &self.acknowledged.payload.0).map_err(|_| Error::InvalidData)?
+        let codec::Payload::Note(image) = codec::Payload::decode(
+            codec::Kind::Note,
+            if self.acknowledged.erev == 0 {
+                &self.local_payload.0
+            } else {
+                &self.acknowledged.payload.0
+            },
+        )
+        .map_err(|_| Error::InvalidData)?
         else {
             return Err(Error::InvalidData);
         };
@@ -178,8 +190,15 @@ impl NoteTracking {
         before: Option<&codec::Note>,
         after: Option<&codec::Note>,
     ) -> Result<(), Error> {
-        let codec::Payload::Note(acked) =
-            codec::Payload::decode(codec::Kind::Note, &self.acknowledged.payload.0).map_err(|_| Error::InvalidData)?
+        let codec::Payload::Note(acked) = codec::Payload::decode(
+            codec::Kind::Note,
+            if self.acknowledged.erev == 0 {
+                &self.local_payload.0
+            } else {
+                &self.acknowledged.payload.0
+            },
+        )
+        .map_err(|_| Error::InvalidData)?
         else {
             return Err(Error::InvalidData);
         };
@@ -205,14 +224,29 @@ impl NoteTracking {
         ] {
             checked(value)?;
         }
-        let acked =
-            codec::Payload::decode(codec::Kind::Note, &self.acknowledged.payload.0).map_err(|_| Error::InvalidData)?;
+        let acked = codec::Payload::decode(
+            codec::Kind::Note,
+            if self.acknowledged.erev == 0 {
+                &self.local_payload.0
+            } else {
+                &self.acknowledged.payload.0
+            },
+        )
+        .map_err(|_| Error::InvalidData)?;
         let local = codec::Payload::decode(codec::Kind::Note, &self.local_payload.0).map_err(|_| Error::InvalidData)?;
-        if self.acknowledged.erev == 0
+        let valid_ack = if self.acknowledged.erev == 0 {
+            self.acked_rev == 0
+                && self.acknowledged.payload.0.is_empty()
+                && self.acknowledged.system_fields.0.is_empty()
+                && self.acknowledged.row_digest == [0; 32]
+                && self.acknowledged.payload_digest == [0; 32]
+        } else {
+            !self.acknowledged.system_fields.0.is_empty()
+                && acked.row_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.row_digest
+                && acked.payload_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.payload_digest
+        };
+        if !valid_ack
             || self.layout_generation()? == 0
-            || self.acknowledged.system_fields.0.is_empty()
-            || acked.row_digest().map_err(|_| Error::InvalidData)? != self.acknowledged.row_digest
-            || acked.payload_digest().map_err(|_| Error::InvalidData)? != self.acknowledged.payload_digest
             || Some(local.row_digest().map_err(|_| Error::InvalidData)?) != self.last_observed_digest
         {
             return Err(Error::InvalidData);
@@ -352,6 +386,7 @@ struct State {
     trace: Vec<super::workflow::TraceEvent>,
     review_blocked: bool,
     adapter: super::adapter::AdapterState,
+    publication: super::publication::ProcessState,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
     #[cfg(feature = "test-hooks")]
@@ -367,6 +402,7 @@ pub struct Runtime {
     adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
     state: Mutex<State>,
     random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
+    key_bytes: Mutex<Option<Arc<dyn KeyByteSource>>>,
     review: Mutex<std::sync::Weak<meguri_engine::session::ReviewService>>,
     #[cfg(feature = "test-hooks")]
     scan_pause: Mutex<Option<ScanPause>>,
@@ -401,6 +437,7 @@ impl Runtime {
             inputs,
             adapter_clock: Mutex::new(None),
             random: Mutex::new(None),
+            key_bytes: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
             state: Mutex::new(State {
                 scan_required: true,
@@ -453,6 +490,9 @@ impl Runtime {
         state.root_confirmed = false;
         state.root_fetch_qualified = false;
         state.root_reads.clear();
+        state.publication.running = None;
+        state.publication.zones_created = false;
+        state.publication.own_epoch_read = false;
         state.actions = super::workflow::Actions::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             if state.store.is_none() {
@@ -465,7 +505,31 @@ impl Runtime {
             }
             let store = state.store.as_mut().ok_or(Error::Database)?;
             store.install_runtime()?;
-            let Some(mut binding) = store.selected_binding()? else {
+            store.adapter_install()?;
+            let publication_op = store.publication_op()?;
+            let restarted_confirmed = publication_op
+                .as_ref()
+                .is_some_and(|op| op.step == super::publication::PublishStep::Confirmed);
+            let selected = if let Some(op) = publication_op.as_ref()
+                && let Some(id) = op.binding_after
+            {
+                let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;
+                if restarted_confirmed
+                    || op.binding_before.as_ref().is_some_and(|before| before.id == id)
+                    || binding.scope != self.inputs.scope
+                    || binding.facts.account != op.account
+                    || binding.facts.epoch != op.epoch
+                    || binding.facts.record_key != op.record_key
+                    || binding.facts.publication != op.confirmed_publication
+                {
+                    return Err(Error::InvalidData.into());
+                }
+                Some(binding)
+            } else {
+                store.selected_binding()?
+            };
+            let Some(mut binding) = selected else {
+                state.publication.restarted_confirmed = restarted_confirmed;
                 return Ok(());
             };
             let previous = store.runtime_binding(binding.id)?;
@@ -494,9 +558,30 @@ impl Runtime {
                     binding = store.binding(binding.id)?.ok_or(Error::BindingNotFound)?;
                 }
             }
-            let usable = binding.facts.state == BindingState::Active && publication_matches && publication_clear;
+            let decision_matches = publication.as_ref().is_some_and(|p| match &p.binding {
+                meguri_engine::device_state::AccountBinding::LocalOnly => true,
+                meguri_engine::device_state::AccountBinding::Connected {
+                    account,
+                    configuration,
+                    environment,
+                } => {
+                    account.as_bytes() == binding.facts.account.0.as_slice()
+                        && configuration == self.inputs.scope.container.as_str()
+                        && environment
+                            == match self.inputs.scope.environment {
+                                Environment::Development => "development",
+                                Environment::Production => "production",
+                            }
+                }
+                meguri_engine::device_state::AccountBinding::Unknown => false,
+            });
+            let usable = binding.facts.state == BindingState::Active
+                && publication_matches
+                && publication_clear
+                && decision_matches;
             let latest_mod = evidence.opened_mod;
             let latest_scm = evidence.opened_scm;
+            state.publication.restarted_confirmed = restarted_confirmed;
             state.bound = Some(Bound {
                 binding,
                 evidence,
@@ -577,6 +662,10 @@ impl Runtime {
             state
                 .trace
                 .push(super::workflow::TraceEvent::IdentityVerified { instance, account });
+        }
+        if !state.bound.as_ref().is_some_and(|bound| bound.verified) {
+            state.publication.running = None;
+            state.publication.own_epoch_read = false;
         }
         if result.is_err() {
             state.tracking_stopped = true;
@@ -936,6 +1025,26 @@ impl ChangeObserver for Runtime {
                 .as_ref()
                 .is_some_and(|s| s.workflow_has_layouts(binding).unwrap_or(false))
         });
+        let awaiting_initial_scan = with_tracking_access(|| {
+            state
+                .store
+                .as_ref()
+                .and_then(|store| store.publication_op().ok().flatten())
+                .is_some_and(|op| {
+                    op.binding_after == Some(binding)
+                        && matches!(
+                            op.step,
+                            super::publication::PublishStep::Bound | super::publication::PublishStep::Zones
+                        )
+                })
+        }) && !generic;
+        if awaiting_initial_scan {
+            // No baseline exists yet. The required held-snapshot scan captures
+            // these committed rows before this binding can hand an entity out.
+            Self::invalidate_locked(&mut state);
+            state.tracking_stopped = state.invalidation_exhausted;
+            return Ok(());
+        }
         let unsupported = changes.whole_collection
             || !changes.cards.is_empty()
             || !changes.notetypes.is_empty()

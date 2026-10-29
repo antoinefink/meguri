@@ -31,6 +31,8 @@ pub(crate) struct CollectionCore {
     pub(crate) render_cache: crate::rendering::ParseCache,
     pub(crate) random: Arc<dyn meguri_model::rng::RandomSource>,
     pub(crate) media: std::sync::Mutex<Option<Arc<crate::media::MediaState>>>,
+    pub(crate) cloud_publication_authority: Option<Arc<dyn crate::ports::CloudPublicationAuthority>>,
+    pub(crate) publication_binding: Arc<std::sync::Mutex<crate::device_state::AccountBinding>>,
 }
 
 /// A handle to the open collection, for one generation. Cheap to clone.
@@ -450,5 +452,37 @@ mod tests {
                 current: Generation(2)
             })
         );
+    }
+}
+
+impl Collection {
+    pub fn resolve_cloud_publication_decision(
+        &self,
+        operation: [u8; 16],
+        expected: &crate::device_state::PublicationDecisionState,
+    ) -> Result<bool, EngineError> {
+        let _lease = self.reader(ReaderRole::Cloud)?;
+        let provider =
+            self.core
+                .cloud_publication_authority
+                .as_ref()
+                .ok_or_else(|| EngineError::CollectionUnavailable {
+                    reason: "durable cloud publication authority is unavailable".into(),
+                })?;
+        // Providers read platform inputs before their locks. Their apply callback
+        // holds the durable row stable and never calls Runtime or the writer.
+        provider.with_resolution(self, operation, expected, &mut |replacement| {
+            let mut binding = self
+                .core
+                .publication_binding
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let changed = crate::device_state::DeviceState::for_collection(self.path())
+                .compare_exchange_publication_decision(expected, replacement)?;
+            if changed {
+                *binding = replacement.publication.binding.clone();
+            }
+            Ok(changed)
+        })
     }
 }
