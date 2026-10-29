@@ -3,6 +3,36 @@ import Testing
 @testable import CoreBridge
 
 extension EventTests {
+    @Test func cloudFixturesSupplyTheirOwnPlatformAcrossHostLifetimes() async throws {
+        try await withCloudConnection(status: .temporarilyUnavailable, identity: nil) { f in
+            await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { try await f.connection.beginConnectionPreview() }
+        }
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            try await f.core.validateSDK(engine.instanceID)
+            #expect(await f.adapter.lastFailure == nil)
+            try await f.adapter.accountChanged(status: .temporarilyUnavailable, identity: nil)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+        }
+        try await withCloudConnection { f in
+            _ = try await f.ready()
+        }
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            try await f.core.validateSDK(engine.instanceID)
+            #expect(await f.adapter.lastFailure == nil)
+        }
+    }
+
+    @Test(arguments: [CloudAccountStatus.noAccount, .temporarilyUnavailable, .restricted, .couldNotDetermine, .available])
+    func connectionPreviewRejectsUnavailableOrUnverifiedPlatform(status: CloudAccountStatus) async throws {
+        try await withCloudConnection(status: status, identity: nil) { f in
+            await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { try await f.connection.beginConnectionPreview() }
+            let recovery = try await f.connection.recoveryStatus()
+            #expect(recovery == nil)
+        }
+    }
+
     @Test func connectionPreviewAndConfirmationUseTheActualHostAndConsumeTheRetainedPreview() async throws {
         try await withCloudConnection { f in
             let preview = try await f.ready()

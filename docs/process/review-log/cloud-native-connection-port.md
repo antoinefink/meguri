@@ -160,3 +160,21 @@ before the MaintenanceLane crossing. No new behavior finding in that delta.
   checkpoint. Next: repair the failed cases.
 
 No Unit closure. U113/U114 and the batch gate remain pending.
+
+## Native callback checkpoint
+
+- swift-test/20261029T192751Z-8067: EventTests pass; retry test fails.
+- swift-test/20261029T193806Z-16771: callback diagnostics fail.
+- swift-test/20261029T194523Z-23237: all 17 selected checks pass.
+- private/20261029T194527Z-24039: all five source paths pass.
+- similarity/20261029T194529Z-24374: pass.
+
+Each fixture now configures its platform before open. Negative account tests
+remain enabled. The retry matrix retains both codes and every 120000-ms check.
+Per-item failures and aggregate success now follow the modern SDK contract;
+direct nested NSError checks remain separate. Authority and Rust deadlines
+are unchanged. Independent review is clear for the final source delta.
+
+The callback correction follows [Apple WWDC21, 6:35](https://developer.apple.com/videos/play/wwdc2021/10086/).
+The earlier EventTests evidence covers unchanged cases; the full batch gate
+still needs its final integrated run. No Unit closure.

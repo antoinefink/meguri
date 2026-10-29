@@ -148,6 +148,9 @@ struct CloudKitBridgeFixture: Sendable {
                                                      appGroupSnapshot: directory.appending(path: "widget.snapshot"))
         let collection = CoreCollectionService(clock: CloudFixtureClock())
         do {
+            // Each host clones the process-wide platform. Supply the provider
+            // matching this baseline, regardless of the preceding fixture.
+            try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: .available, identity: Data("synthetic-account-A".utf8))
             try await MaintenanceLane.shared.bootstrapCollection(location)
             try await collection.open(location, randomSeed: 114)
             let baseline = try await MaintenanceLane.shared.prepareCloudAdapterBaseline(

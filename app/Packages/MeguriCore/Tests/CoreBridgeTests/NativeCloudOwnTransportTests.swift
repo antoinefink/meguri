@@ -18,9 +18,6 @@ struct NativeCloudOwnTransportTests {
     @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
     func publicationReadsSavesAndZonesForwardActualServerDuration(code: CKError.Code) async throws {
         let retry = CKError(code, userInfo: [CKErrorRetryAfterKey: 120.0])
-        let partial = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.id(root): retry]])
-        // Exercise per-item metadata, operation metadata, and nested partial
-        // operation metadata through the original CK completion handlers.
         for source in 0..<3 {
             for kind in 0..<3 {
                 let queue = NativeOwnCapturingQueue()
@@ -33,20 +30,46 @@ struct NativeCloudOwnTransportTests {
                 let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.publication(command))
                 #expect(prepared.enqueue())
                 let operation = try #require(queue.operations.withLock { $0.first })
-                let itemError = source == 0 ? retry : CKError(.networkFailure)
-                let terminalError = source == 1 ? retry : (source == 2 ? partial : CKError(.partialFailure))
+                let itemID: AnyHashable
+                if let zones = operation as? CKModifyRecordZonesOperation {
+                    itemID = try #require(zones.recordZonesToSave?.first).zoneID
+                } else { itemID = NativeCloudOwnRecords.id(root) }
+                let partial = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [itemID: retry]])
+                let terminal: Result<Void, any Error> = source == 0 ? .success(()) : .failure(source == 1 ? retry : partial)
+                let observed = Mutex<Bool?>(nil)
                 if let fetch = operation as? CKFetchRecordsOperation {
-                    fetch.perRecordResultBlock?(NativeCloudOwnRecords.id(root), .failure(itemError))
-                    fetch.fetchRecordsResultBlock?(.failure(terminalError))
+                    let original = try #require(fetch.fetchRecordsResultBlock)
+                    fetch.fetchRecordsResultBlock = { result in
+                        observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                        original(result)
+                    }
+                    if source != 1 { fetch.perRecordResultBlock?(NativeCloudOwnRecords.id(root), .failure(retry)) }
+                    fetch.fetchRecordsResultBlock?(terminal)
                 } else if let save = operation as? CKModifyRecordsOperation {
-                    save.perRecordSaveBlock?(NativeCloudOwnRecords.id(root), .failure(itemError))
-                    save.modifyRecordsResultBlock?(.failure(terminalError))
+                    let original = try #require(save.modifyRecordsResultBlock)
+                    save.modifyRecordsResultBlock = { result in
+                        observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                        original(result)
+                    }
+                    if source != 1 { save.perRecordSaveBlock?(NativeCloudOwnRecords.id(root), .failure(retry)) }
+                    save.modifyRecordsResultBlock?(terminal)
                 } else if let zones = operation as? CKModifyRecordZonesOperation {
+                    let original = try #require(zones.modifyRecordZonesResultBlock)
+                    zones.modifyRecordZonesResultBlock = { result in
+                        observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                        original(result)
+                    }
                     let zone = try #require(zones.recordZonesToSave?.first)
-                    zones.perRecordZoneSaveBlock?(zone.zoneID, .failure(itemError))
-                    zones.modifyRecordZonesResultBlock?(.failure(terminalError))
+                    if source != 1 { zones.perRecordZoneSaveBlock?(zone.zoneID, .failure(retry)) }
+                    zones.modifyRecordZonesResultBlock?(terminal)
                 } else { throw CloudOwnTransportFailure.unexpectedReply }
-                guard case .publication(.retryAfter(let milliseconds)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+                let aggregateSucceeded = observed.withLock { $0 }
+                #expect(aggregateSucceeded == (source != 1))
+                let reply = try await prepared.reply()
+                guard case .publication(.retryAfter(let milliseconds)) = reply else {
+                    Issue.record()
+                    continue
+                }
                 #expect(milliseconds == 120_000)
             }
         }
@@ -57,6 +80,95 @@ struct NativeCloudOwnTransportTests {
         #expect(NativeCloudOwnRecords.retryDuration(partial) == 120_001)
         guard case .retryAfter(let milliseconds) = try NativeCloudOwnRecords.saveResult(.failure(partial), target: root) else { throw CloudOwnTransportFailure.unexpectedReply }
         #expect(milliseconds == 120_001)
+    }
+    @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited], [0, 1])
+    func nestedNSErrorDictionariesPreserveMetadataAndSelectLongestDelay(code: CKError.Code, representation: Int) throws {
+        let id = NativeCloudOwnRecords.id(root)
+        let retry = NSError(domain: CKErrorDomain, code: code.rawValue, userInfo: [CKErrorRetryAfterKey: NSNumber(value: 120.0001)])
+        let nested = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue, userInfo: [CKErrorRetryAfterKey: 10.0, CKPartialErrorsByItemIDKey: [id: retry]])
+        let dictionary: Any
+        if representation == 0 { dictionary = [id: nested] }
+        else { dictionary = NSDictionary(dictionary: [id: nested]) }
+        let terminal = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue, userInfo: [CKErrorRetryAfterKey: 5.0, CKPartialErrorsByItemIDKey: dictionary])
+        #expect(terminal.domain == CKErrorDomain && terminal.code == CKError.Code.partialFailure.rawValue)
+        let partials = try #require(terminal.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any])
+        #expect(partials.count == 1)
+        let inner = try #require(partials[id] as? NSError)
+        let leaves = try #require(inner.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any])
+        #expect(leaves.count == 1)
+        let leaf = try #require(leaves[id] as? NSError)
+        #expect(leaf.domain == CKErrorDomain && leaf.code == code.rawValue)
+        #expect((leaf.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue == 120.0001)
+        #expect(NativeCloudOwnRecords.retryDuration(terminal) == 120_001)
+        guard case .retryAfter(let milliseconds) = try NativeCloudOwnRecords.saveResult(.failure(terminal), target: root) else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(milliseconds == 120_001)
+        let longer = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue, userInfo: [CKErrorRetryAfterKey: 180.0, CKPartialErrorsByItemIDKey: dictionary])
+        #expect(NativeCloudOwnRecords.retryDuration(longer) == 180_000)
+        let foreign = NSError(domain: "synthetic-other", code: code.rawValue, userInfo: terminal.userInfo)
+        #expect(NativeCloudOwnRecords.retryDuration(foreign) == nil)
+        let foreignLeaf = NSError(domain: "synthetic-other", code: code.rawValue, userInfo: retry.userInfo)
+        let rejected = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue, userInfo: [CKPartialErrorsByItemIDKey: [id: foreignLeaf]])
+        #expect(NativeCloudOwnRecords.retryDuration(rejected) == nil)
+    }
+    @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
+    func perItemNSErrorRetryIsForwardedWithSuccessfulAggregate(code: CKError.Code) async throws {
+        let id = NativeCloudOwnRecords.id(root)
+        let retry = NSError(domain: CKErrorDomain, code: code.rawValue, userInfo: [CKErrorRetryAfterKey: NSNumber(value: 120.0)])
+        for kind in 0..<4 {
+            let queue = NativeOwnCapturingQueue()
+            let command: CloudOwnTransportCommand
+            switch kind {
+            case 0: command = .publication(.read(root))
+            case 1: command = .publication(.save(root, encrypted: Data([2]), systemFields: nil))
+            case 2: command = .publication(.createZones(["meguri-root", "meguri-media", "c-synthetic"]))
+            default: command = .read(root)
+            }
+            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(command)
+            #expect(prepared.enqueue())
+            let operation = try #require(queue.operations.withLock { $0.first })
+            let observed = Mutex<Bool?>(nil)
+            if let fetch = operation as? CKFetchRecordsOperation {
+                let original = try #require(fetch.fetchRecordsResultBlock)
+                fetch.fetchRecordsResultBlock = { result in
+                    observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                    original(result)
+                }
+                fetch.perRecordResultBlock?(id, .failure(retry))
+                fetch.fetchRecordsResultBlock?(.success(()))
+            } else if let save = operation as? CKModifyRecordsOperation {
+                let original = try #require(save.modifyRecordsResultBlock)
+                save.modifyRecordsResultBlock = { result in
+                    observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                    original(result)
+                }
+                save.perRecordSaveBlock?(id, .failure(retry))
+                save.modifyRecordsResultBlock?(.success(()))
+            } else if let zones = operation as? CKModifyRecordZonesOperation {
+                let original = try #require(zones.modifyRecordZonesResultBlock)
+                zones.modifyRecordZonesResultBlock = { result in
+                    observed.withLock { if case .success = result { $0 = true } else { $0 = false } }
+                    original(result)
+                }
+                let zone = try #require(zones.recordZonesToSave?.first)
+                zones.perRecordZoneSaveBlock?(zone.zoneID, .failure(retry))
+                zones.modifyRecordZonesResultBlock?(.success(()))
+            } else { throw CloudOwnTransportFailure.unexpectedReply }
+            let aggregateSucceeded = observed.withLock { $0 }
+            #expect(aggregateSucceeded == true)
+            let reply = try await prepared.reply()
+            if kind == 3 {
+                guard case .read(.failed) = reply else {
+                    Issue.record()
+                    continue
+                }
+            } else {
+                guard case .publication(.retryAfter(let milliseconds)) = reply else {
+                    Issue.record()
+                    continue
+                }
+                #expect(milliseconds == 120_000)
+            }
+        }
     }
     @Test func recordIDReadIncludesAllFieldsAndPreservesFoundWithoutE() async throws {
         let queue = NativeOwnCapturingQueue()

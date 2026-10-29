@@ -10,16 +10,16 @@ struct CloudConnectionFixture: Sendable {
     let collection: CoreCollectionService
     let workflow: CoreCloudWorkflowService
     let connection: CoreCloudConnectionService
-    static func open() async throws -> Self {
+    static func open(status: CloudAccountStatus = .available, identity: Data? = Data("synthetic-account-A".utf8)) async throws -> Self {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let data = directory.appending(path: "collection")
         let backups = directory.appending(path: "backups")
         try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-        try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: .available, identity: Data("synthetic-account-A".utf8))
         let location = CollectionLocation(collectionDirectory: data, backupsDirectory: backups, appGroupSnapshot: directory.appending(path: "widget"))
         let collection = CoreCollectionService()
         do {
+            try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: status, identity: identity)
             try await MaintenanceLane.shared.bootstrapCollection(location)
             try await collection.open(location, randomSeed: 114)
             let workflow = CoreCloudWorkflowService()
@@ -53,8 +53,11 @@ struct CloudConnectionFixture: Sendable {
         try? FileManager.default.removeItem(at: directory)
     }
 }
-func withCloudConnection(_ body: (CloudConnectionFixture) async throws -> Void) async throws {
-    let fixture = try await CloudConnectionFixture.open()
+func withCloudConnection(
+    status: CloudAccountStatus = .available, identity: Data? = Data("synthetic-account-A".utf8),
+    _ body: (CloudConnectionFixture) async throws -> Void
+) async throws {
+    let fixture = try await CloudConnectionFixture.open(status: status, identity: identity)
     do { try await body(fixture) } catch { await fixture.close(); throw error }
     await fixture.close()
 }

@@ -48,25 +48,25 @@ enum NativeCloudOwnRecords {
     /// persisted deadline and later trigger admission. Partial errors can carry
     /// a longer delay than their enclosing operation.
     static func retryDuration(_ error: any Error) -> UInt64? {
-        guard let error = error as? CKError else { return nil }
+        let error = error as NSError
+        guard error.domain == CKErrorDomain else { return nil }
         var duration: UInt64?
-        if let seconds = error.retryAfterSeconds, seconds.isFinite, seconds >= 0 {
+        if let seconds = (error.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue, seconds.isFinite, seconds >= 0 {
             let milliseconds = (seconds * 1_000).rounded(.up)
             duration = milliseconds >= Double(UInt64.max) ? UInt64.max : UInt64(milliseconds)
         }
-        if let partials = error.partialErrorsByItemID {
+        // SDK callbacks bridge errors through NSError. Read the documented
+        // dictionary without requiring its values to retain a Swift CKError
+        // dictionary type; each nested error still needs the CloudKit domain.
+        if let partials = error.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any] {
             for partial in partials.values {
+                guard let partial = partial as? any Error else { continue }
                 if let delay = retryDuration(partial) { duration = max(duration ?? 0, delay) }
             }
         }
         return duration
     }
-    static func retryDuration(_ result: Result<Void, any Error>) -> UInt64? {
-        if case .failure(let error) = result { return retryDuration(error) }
-        return nil
-    }
-    static func retryDuration(_ result: Result<CKRecord, any Error>?) -> UInt64? {
-        guard let result else { return nil }
+    static func retryDuration<Success, Failure: Error>(from result: Result<Success, Failure>) -> UInt64? {
         if case .failure(let error) = result { return retryDuration(error) }
         return nil
     }
@@ -171,7 +171,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let prepared else { return }
             do {
                 let received = record.withLock { $0 }
-                let duration = NativeCloudOwnRecords.maximumDelay(NativeCloudOwnRecords.retryDuration(received), NativeCloudOwnRecords.retryDuration(result))
+                let duration = NativeCloudOwnRecords.maximumDelay(received.flatMap { NativeCloudOwnRecords.retryDuration(from: $0) }, NativeCloudOwnRecords.retryDuration(from: result))
                 if publication, let duration {
                     prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
                     return
@@ -207,7 +207,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let prepared else { return }
             let outcome = state.withLock { $0 }
             if case .success = result, !outcome.failed, outcome.saved == ids { prepared.finish(.success(.publication(.zonesCreated))) }
-            else if let duration = NativeCloudOwnRecords.maximumDelay(outcome.retryDuration, NativeCloudOwnRecords.retryDuration(result)) {
+            else if let duration = NativeCloudOwnRecords.maximumDelay(outcome.retryDuration, NativeCloudOwnRecords.retryDuration(from: result)) {
                 prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
             } else { prepared.finish(.success(.publication(.failed(retryAfterMilliseconds: nil)))) }
         }
@@ -226,7 +226,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let prepared else { return }
             do {
                 let received = record.withLock { $0 }
-                if let duration = NativeCloudOwnRecords.maximumDelay(NativeCloudOwnRecords.retryDuration(received), NativeCloudOwnRecords.retryDuration(result)) {
+                if let duration = NativeCloudOwnRecords.maximumDelay(received.flatMap { NativeCloudOwnRecords.retryDuration(from: $0) }, NativeCloudOwnRecords.retryDuration(from: result)) {
                     prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
                 } else if let received {
                     prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(received, target: target))))
