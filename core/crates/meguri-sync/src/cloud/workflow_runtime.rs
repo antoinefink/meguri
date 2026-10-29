@@ -763,16 +763,9 @@ impl Runtime {
             hook(self);
         }
         let (mut runs, facts, blocked, publishing, ready, binding) = self.with_scan(&guard, collection, |s| {
-            // Keep the actual EntryId -> named keys map even on a missed flush
-            // or a no-record result. Later barriers never acknowledge it.
-            for (id, keys) in &hold.flagged {
-                let names = s.cloud.flagged.entry(*id).or_default();
-                for key in keys {
-                    if let Some(named) = named.get(key) {
-                        names.extend(named.iter().cloned());
-                    }
-                }
-            }
+            // Recover every retained Pending overlap, including a capture
+            // whose fallible handoff never registered in this runtime.
+            Self::rebuild_cloud_associations_locked(s, collection)?;
             let mut facts = BTreeMap::new();
             let mut blocked = s.cloud.incoming_held.clone();
             let store = s.store.as_ref().ok_or(Error::Database)?;
@@ -1073,18 +1066,73 @@ impl Runtime {
             })
             .collect()
     }
-    /// Called only after a durable ACK/settle, while tracking access is held.
-    /// Each named key must independently be acked through this step, or clean.
-    pub(super) fn settle_cloud_uploaded_locked(s: &mut State, collection: &Collection) -> Result<(), RuntimeError> {
+    /// Resolve Engine's retained overlap against the current binding, never
+    /// cached record names or the rest of a step's touched rows. No journals
+    /// or collection images are read here; callers hold tracking access.
+    fn rebuild_cloud_associations_locked(s: &mut State, collection: &Collection) -> Result<(), RuntimeError> {
         if !collection.is_current() || s.cloud.generation != Some(collection.generation()) {
             return Err(RuntimeError::StaleIncarnation);
         }
+        let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let store = s.store.as_ref().ok_or(Error::Database)?;
+        let mut associations = BTreeMap::new();
+        for (id, keys) in collection.cloud_pending_keys()? {
+            let mut named = BTreeMap::new();
+            for (table, key) in keys {
+                let kind = if matches!(table, Table::Fields | Table::Templates) {
+                    Some(codec::Kind::Notetype)
+                } else {
+                    row_payload::KINDS
+                        .into_iter()
+                        .find(|kind| row_payload::table(*kind) == Some(table))
+                };
+                let mut name = None;
+                if let Some(kind) = kind {
+                    let entity_key = match &key {
+                        RowKey::Id(id) => Some(codec::id_key(*id).to_vec()),
+                        RowKey::Pair(id, _) if matches!(table, Table::Fields | Table::Templates) => {
+                            Some(codec::id_key(*id).to_vec())
+                        }
+                        RowKey::Text(text) if table == Table::Tags => Some(
+                            meguri_text::fold::folded(std::str::from_utf8(text).map_err(|_| Error::InvalidData)?)
+                                .into_bytes(),
+                        ),
+                        RowKey::Text(text) => Some(text.clone()),
+                        _ => None,
+                    };
+                    if let Some(entity_key) = entity_key
+                        && let Some(content) = store.entity_content(binding, kind, &entity_key)?
+                    {
+                        let entity = super::super::workflow_store::decode_entity(kind, &content)?;
+                        if row_payload::payload_rows(&entity.payload)?
+                            .iter()
+                            .any(|(t, k, _)| *t == table && super::super::held_view::compare(table, &key, k).is_eq())
+                        {
+                            name = Some(entity.name);
+                        }
+                    }
+                }
+                named.insert((table, key), name);
+            }
+            associations.insert(id, named);
+        }
+        s.cloud.flagged = associations;
+        Ok(())
+    }
+    /// Called only after a durable ACK/settle, while tracking access is held.
+    /// Each named key must independently be acked through this step, or clean.
+    pub(super) fn settle_cloud_uploaded_locked(s: &mut State, collection: &Collection) -> Result<(), RuntimeError> {
+        Self::rebuild_cloud_associations_locked(s, collection)?;
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let mut uploaded = Vec::new();
-        for (id, names) in &s.cloud.flagged {
-            let mut complete = !names.is_empty();
-            for name in names {
+        for (id, keys) in &s.cloud.flagged {
+            let mut complete = !keys.is_empty();
+            for name in keys.values() {
+                let Some(name) = name else {
+                    complete = false;
+                    continue;
+                };
                 let e = store.entity_facts(b, name)?;
                 let acked = s.cloud.acked_images.get(name).is_some_and(|seq| *seq >= id.0);
                 let clean = e.is_some_and(|e| e.server_erev > 0 && e.mark.is_none());

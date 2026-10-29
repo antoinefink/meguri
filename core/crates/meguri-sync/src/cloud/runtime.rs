@@ -539,6 +539,9 @@ impl Runtime {
             };
             state.last_session = None;
         }
+        state.cloud.flagged.clear();
+        state.cloud.acked_images.clear();
+        state.cloud.handed_images.clear();
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;

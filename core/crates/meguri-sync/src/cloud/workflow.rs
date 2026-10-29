@@ -220,7 +220,10 @@ pub(crate) struct CloudFrontier {
     pub detached: Vec<meguri_engine::undo::holdback::HeldBackRun>,
     pub incoming_held: BTreeSet<String>,
     pub deferred: BTreeSet<String>,
-    pub flagged: BTreeMap<meguri_engine::EntryId, BTreeSet<String>>,
+    // Rebuilt from Engine's Pending keys and this binding's real entities.
+    // None preserves an unresolved key; it must never satisfy a step.
+    pub flagged:
+        BTreeMap<meguri_engine::EntryId, BTreeMap<(meguri_storage::Table, meguri_storage::RowKey), Option<String>>>,
     pub acked_images: BTreeMap<String, u64>,
     // A persisted flight from an earlier process has no authority over this
     // opening's undo ids, even if its numeric image seq happens to match.

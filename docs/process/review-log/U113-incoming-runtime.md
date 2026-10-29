@@ -647,3 +647,24 @@ Independent review is clear for this fixture-only correction.
 This preserves the failed checks for the next product repair. The authority
 fix exported by `cleanroom/20261029T172016Z-23144` is separate and awaits
 independent review and integration. No acceptance is claimed.
+
+## Retain pending row authority across binding changes
+
+Start: `536414e3`. Export `cleanroom/20261029T172016Z-23144` repairs both
+Pending cases below. Original unit and batch bases remain unchanged.
+
+Independent R2 is clear: both P1 cases are repaired, including the rejected
+capture handoff. Composite notetype rows, folded tags, partial ACKs and newer
+tracked edits retain their checks. Existing tests are unchanged.
+
+- `core-format/20261029T173036Z-28996`: pass.
+- `core-test/20261029T173055Z-29877`: all 20 selected tests pass, including
+  both previously red native-step regressions, partial ACK, initial
+  publication, all 15 Engine Cloud undo cases and the Cloud reader check.
+- `similarity/20261029T173059Z-30143`: all six paths pass.
+- `private/20261029T173100Z-30371`: flags only a new nonessential comment.
+  Export `cleanroom/20261029T173202Z-31298` deletes that entire comment.
+  Exact patch comparison confirms every other source byte is unchanged.
+
+The three incoming workflow failures remain open; full U113/U114 acceptance,
+P24 closure and the original batch gate are still pending.

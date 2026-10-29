@@ -14,7 +14,10 @@ pub mod reasons;
 pub mod restorers;
 pub(crate) mod stack;
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
+};
 
 use meguri_model::changes::{ChangeSet, OpSource};
 use meguri_storage::{Journal, ReadRows, RowKey, StampMode, Table};
@@ -623,6 +626,12 @@ impl Collection {
     pub fn cloud_held_run(&self, session: Option<SessionId>) -> Result<HeldBackRun, EngineError> {
         let run = self.undo_manager()?.lock().cloud_run(session);
         Ok(holdback::run_value(&run))
+    }
+
+    /// M9.7: clone only CloudKit-owned Pending steps' originally named keys.
+    /// Manual flags, uploaded steps and dropped history are excluded.
+    pub fn cloud_pending_keys(&self) -> Result<BTreeMap<EntryId, BTreeSet<(Table, RowKey)>>, EngineError> {
+        Ok(self.undo_manager()?.lock().cloud_pending_keys())
     }
 
     /// M9.7: acknowledge named CloudKit Pending steps. Any thread may call

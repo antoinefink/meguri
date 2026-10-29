@@ -315,6 +315,15 @@ impl UndoStack {
         }
     }
 
+    /// M9.7: the retained named overlap, without journal image reads.
+    pub(crate) fn cloud_pending_keys(&self) -> BTreeMap<EntryId, BTreeSet<(Table, RowKey)>> {
+        self.undo
+            .iter()
+            .filter(|entry| entry.upload == UploadState::Pending)
+            .filter_map(|entry| entry.cloud_flagged.clone().map(|keys| (entry.info.id, keys)))
+            .collect()
+    }
+
     /// M9.7: only CloudKit-owned pending flags can be acknowledged here.
     /// Unknown ids and Local/Uploaded steps have no effect.
     pub(crate) fn mark_cloud_uploaded(&mut self, ids: &[EntryId]) {
