@@ -113,7 +113,7 @@ fn preview(host: &CoreHost, service: &mut Service<SeededRandom>) -> Preview {
     let PreviewWork::Ready(p) = runtime.connection_active_read(id, read).unwrap() else {
         panic!("empty cloud expected");
     };
-    p
+    *p
 }
 fn own_until_scan(host: &CoreHost, service: &mut Service<SeededRandom>) {
     let runtime = host.cloud_runtime().unwrap();
@@ -349,7 +349,7 @@ fn next_own(host: &CoreHost) -> OwnRequest {
     for _ in 0..4 {
         match runtime.next_publication_work(&collection).unwrap() {
             PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
-            PublicationWork::Own(request) => return request,
+            PublicationWork::Own(request) => return *request,
             other => panic!("own request required: {other:?}"),
         }
     }
@@ -812,7 +812,7 @@ fn until_active(host: &CoreHost, service: &mut Service<SeededRandom>) -> OwnRequ
     for _ in 0..32 {
         match runtime.next_publication_work(&collection).unwrap() {
             PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
-            PublicationWork::Own(request) if request.kind == OwnKind::SaveActive => return request,
+            PublicationWork::Own(request) if request.kind == OwnKind::SaveActive => return *request,
             PublicationWork::Own(request) => {
                 let (result, _) =
                     execute_publication_request(service, &scope(), &request, runtime, &collection).unwrap();
@@ -931,7 +931,7 @@ fn actual_preview(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &
         .connection_active_read(id, read(service, scope, "meguri-root".into(), "active"))
         .unwrap();
     match work {
-        PreviewWork::Ready(p) => p,
+        PreviewWork::Ready(p) => *p,
         PreviewWork::ReadEpoch { id, epoch } => {
             let work = runtime
                 .connection_epoch_read(
@@ -942,7 +942,7 @@ fn actual_preview(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &
             let PreviewWork::Ready(p) = work else {
                 panic!("epoch preview required");
             };
-            p
+            *p
         }
         _ => panic!("unexpected preview work"),
     }

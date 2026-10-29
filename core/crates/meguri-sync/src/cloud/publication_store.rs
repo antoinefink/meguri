@@ -191,14 +191,14 @@ impl TrackingStore {
             },
         };
         let tx = self.connection.transaction()?;
-        if let Some(mut before) = before {
-            if before.facts.state == BindingState::Active {
-                before.facts.state = BindingState::Isolated(IsolationReason::Republished);
-                tx.execute(
-                    "UPDATE bindings SET facts=?2 WHERE id=?1",
-                    params![before.id.0.as_slice(), encode(&before.facts)?],
-                )?;
-            }
+        if let Some(mut before) = before
+            && before.facts.state == BindingState::Active
+        {
+            before.facts.state = BindingState::Isolated(IsolationReason::Republished);
+            tx.execute(
+                "UPDATE bindings SET facts=?2 WHERE id=?1",
+                params![before.id.0.as_slice(), encode(&before.facts)?],
+            )?;
         }
         tx.execute(
             "INSERT INTO bindings(id,container,environment,created_at_ms,facts) VALUES(?1,?2,?3,?4,?5)",
@@ -341,10 +341,11 @@ impl TrackingStore {
                 super::runtime_store::put_binding(&tx, before.id, &state)?;
             }
         }
-        if !op.switch_sent && returned_state == BindingState::Active {
-            if let Some(before) = &op.binding_before {
-                tx.execute("INSERT INTO cloud_publication_zones(binding,zone,first_seen_ms,deletion_due) VALUES(?1,?2,?3,1) ON CONFLICT(binding,zone) DO UPDATE SET deletion_due=1", params![before.id.0.as_slice(), super::adapter::collection_zone(op.epoch), op.started_at_ms])?;
-            }
+        if !op.switch_sent
+            && returned_state == BindingState::Active
+            && let Some(before) = &op.binding_before
+        {
+            tx.execute("INSERT INTO cloud_publication_zones(binding,zone,first_seen_ms,deletion_due) VALUES(?1,?2,?3,1) ON CONFLICT(binding,zone) DO UPDATE SET deletion_due=1", params![before.id.0.as_slice(), super::adapter::collection_zone(op.epoch), op.started_at_ms])?;
         }
         remove_op(&tx, &self.scope, op.id)?;
         tx.commit()?;

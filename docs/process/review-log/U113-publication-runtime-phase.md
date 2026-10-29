@@ -51,3 +51,22 @@ their missing coordinator dependencies are not counted as passes. Adoption,
 incoming data, media recovery, native SDK wiring,
 preview/backup provenance, reset recovery with its 37-code tests, signed checks
 and full integration remain required. No Unit trailer or P24 closure.
+
+### Lint cleanup
+
+`cleanroom/20261029T071818Z-77065` boxes the two large variants and combines
+the six conditions in the same evaluation order. Owned results and Serde output
+are unchanged. Independent mechanical review is clear. The next lint run reached
+one additional placement rule in the engine test build.
+`cleanroom/20261029T072844Z-82170` moves the unchanged production impl above
+the test module; independent review confirms that its cfg and visibility remain.
+
+- `core-format/20261029T073117Z-83312`: pass.
+- `core-test/20261029T073207Z-83814`: all 64 selected engine-library and host
+  publication cases pass, none skipped.
+- `private/20261029T073212Z-84208`: five files pass.
+- `similarity/20261029T073214Z-84459`: five files, zero findings or exemptions.
+- `core-lint/20261029T073339Z-85316`: the nine new Clippy findings are gone.
+  The job remains RED on the original full-workflow target: missing coordinator
+  imports and three type errors in that target. The tests are unchanged; the
+  real driver must resolve those failures. This is not a lint or gate pass.

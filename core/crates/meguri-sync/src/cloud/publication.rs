@@ -78,7 +78,7 @@ pub struct Preview {
 pub enum PreviewWork {
     ReadActive { id: u64 },
     ReadEpoch { id: u64, epoch: EpochId },
-    Ready(Preview),
+    Ready(Box<Preview>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublishStep {
@@ -210,7 +210,7 @@ pub enum LocalWork {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicationWork {
     Local { op: [u8; 16], work: LocalWork },
-    Own(OwnRequest),
+    Own(Box<OwnRequest>),
     Scan,
     SendEntities,
     Idle,

@@ -363,6 +363,38 @@ impl Collection {
     }
 }
 
+impl Collection {
+    pub fn resolve_cloud_publication_decision(
+        &self,
+        operation: [u8; 16],
+        expected: &crate::device_state::PublicationDecisionState,
+    ) -> Result<bool, EngineError> {
+        let _lease = self.reader(ReaderRole::Cloud)?;
+        let provider =
+            self.core
+                .cloud_publication_authority
+                .as_ref()
+                .ok_or_else(|| EngineError::CollectionUnavailable {
+                    reason: "durable cloud publication authority is unavailable".into(),
+                })?;
+        // Providers read platform inputs before their locks. Their apply callback
+        // holds the durable row stable and never calls Runtime or the writer.
+        provider.with_resolution(self, operation, expected, &mut |replacement| {
+            let mut binding = self
+                .core
+                .publication_binding
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let changed = crate::device_state::DeviceState::for_collection(self.path())
+                .compare_exchange_publication_decision(expected, replacement)?;
+            if changed {
+                *binding = replacement.publication.binding.clone();
+            }
+            Ok(changed)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -452,37 +484,5 @@ mod tests {
                 current: Generation(2)
             })
         );
-    }
-}
-
-impl Collection {
-    pub fn resolve_cloud_publication_decision(
-        &self,
-        operation: [u8; 16],
-        expected: &crate::device_state::PublicationDecisionState,
-    ) -> Result<bool, EngineError> {
-        let _lease = self.reader(ReaderRole::Cloud)?;
-        let provider =
-            self.core
-                .cloud_publication_authority
-                .as_ref()
-                .ok_or_else(|| EngineError::CollectionUnavailable {
-                    reason: "durable cloud publication authority is unavailable".into(),
-                })?;
-        // Providers read platform inputs before their locks. Their apply callback
-        // holds the durable row stable and never calls Runtime or the writer.
-        provider.with_resolution(self, operation, expected, &mut |replacement| {
-            let mut binding = self
-                .core
-                .publication_binding
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let changed = crate::device_state::DeviceState::for_collection(self.path())
-                .compare_exchange_publication_decision(expected, replacement)?;
-            if changed {
-                *binding = replacement.publication.binding.clone();
-            }
-            Ok(changed)
-        })
     }
 }

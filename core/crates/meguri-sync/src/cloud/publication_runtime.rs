@@ -110,23 +110,23 @@ impl Runtime {
             .collect::<BTreeMap<_, _>>();
         with_tracking_access(|| -> Result<(), Error> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
-            if let Some(b) = store.publication_binding_for_account(&account)? {
-                if matches!(
+            if let Some(b) = store.publication_binding_for_account(&account)?
+                && matches!(
                     b.facts.state,
                     BindingState::Isolated(IsolationReason::ReplacedLocally | IsolationReason::FileMismatch)
-                ) {
-                    for kind in row_payload::KINDS {
-                        let mut after = None;
-                        loop {
-                            let page = store.entity_page(b.id, kind, after.as_deref())?;
-                            if page.is_empty() {
-                                break;
-                            }
-                            for entity in page {
-                                after = Some(entity.key.clone());
-                                if entity.mark.is_some() {
-                                    *unpublished_by_kind.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
-                                }
+                )
+            {
+                for kind in row_payload::KINDS {
+                    let mut after = None;
+                    loop {
+                        let page = store.entity_page(b.id, kind, after.as_deref())?;
+                        if page.is_empty() {
+                            break;
+                        }
+                        for entity in page {
+                            after = Some(entity.key.clone());
+                            if entity.mark.is_some() {
+                                *unpublished_by_kind.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
                             }
                         }
                     }
@@ -169,7 +169,7 @@ impl Runtime {
         match read {
             RecordRead::Missing | RecordRead::ZoneMissing => {
                 *ready = true;
-                Ok(PreviewWork::Ready(p.clone()))
+                Ok(PreviewWork::Ready(Box::new(p.clone())))
             }
             RecordRead::Found(record) => {
                 if record.system_fields.0.is_empty() {
@@ -187,7 +187,7 @@ impl Runtime {
                 } else {
                     p.decision = ConnectDecision::CloudUnreadable;
                     *ready = true;
-                    Ok(PreviewWork::Ready(p.clone()))
+                    Ok(PreviewWork::Ready(Box::new(p.clone())))
                 }
             }
             RecordRead::Failed => Err(PublicationError::AccountUnavailable.into()),
@@ -230,7 +230,7 @@ impl Runtime {
             ConnectDecision::ChooseCollection
         };
         *ready = true;
-        Ok(PreviewWork::Ready(p.clone()))
+        Ok(PreviewWork::Ready(Box::new(p.clone())))
     }
     pub fn cancel_connection_preview(&self) {
         self.state().publication.preview = None;
@@ -619,7 +619,7 @@ impl Runtime {
         };
         s.publication.submitted = false;
         s.publication.running = Some(request.clone());
-        Ok(PublicationWork::Own(request))
+        Ok(PublicationWork::Own(Box::new(request)))
     }
     pub fn perform_publication_local(
         &self,
@@ -791,12 +791,11 @@ impl Runtime {
                     .encrypted
                     .as_deref()
                     .and_then(|e| control_codec::MediaRoot::decode(e).ok())
+                    && !record.system_fields.0.is_empty()
                 {
-                    if !record.system_fields.0.is_empty() {
-                        op.media_key = RecordKey(root.media_key);
-                        op.root_acked = true;
-                        accepted = true;
-                    }
+                    op.media_key = RecordKey(root.media_key);
+                    op.root_acked = true;
+                    accepted = true;
                 }
             }
             (
@@ -810,24 +809,22 @@ impl Runtime {
                 };
                 if let Some(DecodeOutcome::Supported(epoch)) =
                     record.encrypted.as_deref().and_then(|e| Epoch::decode(e).ok())
+                    && epoch.epoch_id == op.epoch.0
+                    && epoch.record_key == op.record_key.0
+                    && epoch.state == expected_state
+                    && epoch.crt == op.crt
+                    && !record.system_fields.0.is_empty()
                 {
-                    if epoch.epoch_id == op.epoch.0
-                        && epoch.record_key == op.record_key.0
-                        && epoch.state == expected_state
-                        && epoch.crt == op.crt
-                        && !record.system_fields.0.is_empty()
-                    {
-                        if expected_state == EpochState::Publishing && op.step == PublishStep::Bound {
-                            op.epoch_system_fields = Some(record.system_fields);
-                            if op.root_acked {
-                                op.step = PublishStep::Zones;
-                            }
-                            accepted = true;
-                        } else if expected_state == EpochState::Complete && op.step == PublishStep::Sent {
-                            op.complete_system_fields = Some(record.system_fields);
-                            op.step = PublishStep::Complete;
-                            accepted = true;
+                    if expected_state == EpochState::Publishing && op.step == PublishStep::Bound {
+                        op.epoch_system_fields = Some(record.system_fields);
+                        if op.root_acked {
+                            op.step = PublishStep::Zones;
                         }
+                        accepted = true;
+                    } else if expected_state == EpochState::Complete && op.step == PublishStep::Sent {
+                        op.complete_system_fields = Some(record.system_fields);
+                        op.step = PublishStep::Complete;
+                        accepted = true;
                     }
                 }
             }
@@ -835,14 +832,12 @@ impl Runtime {
                 RecordRead::Found(record) => {
                     if let Some(DecodeOutcome::Supported(epoch)) =
                         record.encrypted.as_deref().and_then(|e| Epoch::decode(e).ok())
+                        && epoch.epoch_id == op.epoch.0
+                        && epoch.record_key == op.record_key.0
+                        && epoch.state == EpochState::Complete
                     {
-                        if epoch.epoch_id == op.epoch.0
-                            && epoch.record_key == op.record_key.0
-                            && epoch.state == EpochState::Complete
-                        {
-                            s.publication.own_epoch_read = true;
-                            accepted = true;
-                        }
+                        s.publication.own_epoch_read = true;
+                        accepted = true;
                     }
                 }
                 RecordRead::Missing | RecordRead::ZoneMissing => {
