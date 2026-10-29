@@ -376,7 +376,8 @@ impl Runtime {
                             .as_deref()
                             .map(|content| super::super::workflow_store::decode_entity(kind, content))
                             .transpose()?;
-                        if existing.is_none() && !publishing {
+                        let newly_observed = existing.is_none();
+                        if newly_observed && !publishing && !matches!(kind, codec::Kind::Note | codec::Kind::Card) {
                             return Err(Error::InvalidData.into());
                         }
                         let p = row_payload::project(&view, kind, &row, |id| {
@@ -408,14 +409,24 @@ impl Runtime {
                         } else {
                             let origin = self.publication_random_id()?;
                             self.with_scan(&guard, collection, |s| {
-                                Ok(s.store.as_mut().ok_or(Error::Database)?.insert_publication_entity(
-                                    guard.binding,
-                                    p.clone(),
-                                    origin,
-                                    guard.open,
-                                    snapshot.seq().0,
-                                    snapshot.generation().0,
-                                )?)
+                                let store = s.store.as_mut().ok_or(Error::Database)?;
+                                Ok(if publishing {
+                                    store.insert_publication_entity(
+                                        guard.binding,
+                                        p.clone(),
+                                        origin,
+                                        guard.open,
+                                        snapshot.seq().0,
+                                        snapshot.generation().0,
+                                    )?
+                                } else {
+                                    store.insert_workflow_entity(
+                                        guard.binding,
+                                        p.clone(),
+                                        origin,
+                                        (guard.open, snapshot.seq().0, snapshot.generation().0),
+                                    )?
+                                })
                             })?
                         };
                         if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
@@ -434,7 +445,7 @@ impl Runtime {
                         {
                             return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
                         }
-                        if e.payload != p {
+                        if e.payload != p || (newly_observed && !publishing) {
                             recovered.push(e.name.clone());
                         }
                         e.payload = p;

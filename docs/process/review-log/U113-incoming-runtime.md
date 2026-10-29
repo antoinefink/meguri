@@ -409,3 +409,23 @@ issue. Existing tests remain unchanged.
 
 The broader receive-safety failures remain open. This repair proves reply
 retention in the test driver, not native app integration or full sync.
+
+## Track new ordinary notes and cards
+
+Integration start: `713498fd`; source export
+`cleanroom/20261029T155814Z-61837` was prepared from `80f47ea2` and applies
+without overlapping the reply repair. Commit capture accepts actual new
+Note/Card insertions. Reconcile can recover those additions with a random
+origin, pending revision and no fabricated acknowledgement or base.
+Both paths share initialization. Incoming protection and structural gates
+remain. Independent R1 found no P0-P2 source issue.
+
+- `core-format/20261029T160116Z-65801`: pass.
+- `private/20261029T160127Z-66453`: pass.
+- `similarity/20261029T160131Z-66698`: pass.
+- `core-test/20261029T160124Z-66147`: six cases execute; five pass.
+  Parent/child delivery now passes, with all four review cases. The 502-entry
+  case passes creation, send, bounded apply and once-only entry checks, then
+  fails its final whole-collection row comparison. That mismatch remains open.
+
+This is a WIP repair, not acceptance of the full batching case or unit.

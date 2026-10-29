@@ -158,6 +158,45 @@ pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) 
     c.execute("INSERT INTO cloud_runtime_entities(binding,kind,key,content) VALUES(?1,?2,?3,?4) ON CONFLICT(binding,kind,key) DO UPDATE SET content=excluded.content",params![b.0.as_slice(),e.kind as i64,&e.key,encode(e)?])?;
     Ok(())
 }
+fn new_pending_entity(
+    record_key: &RecordKey,
+    payload: codec::Payload,
+    origin: [u8; 16],
+    source: DirtySource,
+    counter: &mut u64,
+    observed: (u64, u64, u64),
+) -> Result<EntityFacts, Error> {
+    let kind = payload.kind();
+    let key = row_payload::payload_key(&payload)?;
+    let name = codec::entity_name(&record_key.0, kind, &key).map_err(|_| Error::InvalidData)?;
+    let payload_digest = payload.payload_digest().map_err(|_| Error::InvalidData)?;
+    *counter = next(*counter)?;
+    Ok(EntityFacts {
+        name,
+        kind,
+        key,
+        origin,
+        local_rev: 1,
+        acked_rev: 0,
+        payload,
+        base_payload: None,
+        mark: Some(runtime::DirtyMark {
+            source,
+            change_seq: *counter,
+            payload_digest,
+        }),
+        server_erev: 0,
+        acked_system_fields: Vec::new(),
+        acked_row_digest: [0; 32],
+        acked_payload_digest: [0; 32],
+        acked_payload: None,
+        acked_envelope: OpaqueBytes::default(),
+        in_flight: Vec::new(),
+        observer_open: observed.0,
+        observed_seq: observed.1,
+        observed_generation: observed.2,
+    })
+}
 fn keys(c: &Connection, b: BindingId, kind: codec::Kind, after: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Error> {
     if kind == codec::Kind::Note {
         let after = after.map(|k| i64::from_be_bytes(k.try_into().unwrap_or([0; 8])));
@@ -324,6 +363,41 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         put_binding(&tx, b, &state)?;
         tx.commit()?;
         Ok(())
+    }
+    pub(super) fn insert_workflow_entity(
+        &mut self,
+        b: BindingId,
+        payload: codec::Payload,
+        origin: [u8; 16],
+        observed: (u64, u64, u64),
+    ) -> Result<EntityFacts, Error> {
+        // Ordinary additions may use an existing layout, never introduce one.
+        if !matches!(payload.kind(), codec::Kind::Note | codec::Kind::Card) {
+            return Err(Error::InvalidData);
+        }
+        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let mut state = self.runtime_binding(b)?;
+        if state.open_counter != observed.0 {
+            return Err(Error::InvalidData);
+        }
+        let key = row_payload::payload_key(&payload)?;
+        if let Some(existing) = entity(&self.connection, b, payload.kind(), &key)? {
+            // Capture may have tracked a newer commit since the scan's read.
+            return Ok(existing);
+        }
+        let e = new_pending_entity(
+            &binding.facts.record_key,
+            payload,
+            origin,
+            DirtySource::Snapshot,
+            &mut state.change_counter,
+            observed,
+        )?;
+        let tx = self.connection.transaction()?;
+        put(&tx, b, &e)?;
+        put_binding(&tx, b, &state)?;
+        tx.commit()?;
+        Ok(e)
     }
     pub(super) fn workflow_merge(
         &mut self,
@@ -601,39 +675,22 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 let mut e = if let Some(e) = existing {
                     e
                 } else {
-                    if kind != codec::Kind::Revlog && protected.is_none() {
+                    let ordinary_addition =
+                        matches!(kind, codec::Kind::Note | codec::Kind::Card) && delta.before.is_none();
+                    if !ordinary_addition && kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
                     }
                     let mut origin = [0; 16];
                     origin[..8].copy_from_slice(&random.next_u64().to_le_bytes());
                     origin[8..].copy_from_slice(&random.next_u64().to_le_bytes());
-                    state.change_counter = next(state.change_counter)?;
-                    EntityFacts {
-                        name: codec::entity_name(&binding.facts.record_key.0, kind, &key)
-                            .map_err(|_| Error::InvalidData)?,
-                        kind,
-                        key,
+                    new_pending_entity(
+                        &binding.facts.record_key,
+                        p.clone(),
                         origin,
-                        local_rev: 1,
-                        acked_rev: 0,
-                        payload: p.clone(),
-                        base_payload: None,
-                        mark: Some(runtime::DirtyMark {
-                            source: DirtySource::Observer,
-                            change_seq: state.change_counter,
-                            payload_digest: p.payload_digest().map_err(|_| Error::InvalidData)?,
-                        }),
-                        server_erev: 0,
-                        acked_system_fields: Vec::new(),
-                        acked_row_digest: [0; 32],
-                        acked_payload_digest: [0; 32],
-                        acked_payload: None,
-                        acked_envelope: OpaqueBytes::default(),
-                        in_flight: Vec::new(),
-                        observer_open: open,
-                        observed_seq: commit.seq.0,
-                        observed_generation: commit.generation.0,
-                    }
+                        DirtySource::Observer,
+                        &mut state.change_counter,
+                        (open, commit.seq.0, commit.generation.0),
+                    )?
                 };
                 if !matches!(
                     kind,
