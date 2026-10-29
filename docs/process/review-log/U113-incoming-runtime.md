@@ -94,3 +94,21 @@ power-loss and remaining Q11 matrices, and the full batch gate remain open.
 This checkpoint is WIP, without Unit, P24 or delivery acceptance.
 
 WIP formatting: `core-format/20261029T140011Z-88120`: pass.
+
+## Safe diagnostic context
+
+Fixer `cleanroom/20261029T141021Z-93224` changes only the test transport to
+carry a finite catalog of error categories without payloads. Independent review
+confirms no source error text, paths, keys or arbitrary Debug/Display values
+cross IPC. Boot, normal and nested replies agree; success handling is unchanged.
+
+- `core-format/20261029T141306Z-94409`: pass.
+- `private/20261029T141327Z-95134`: pass.
+- `similarity/20261029T141329Z-95382`: pass, no findings or exemptions.
+- `core-test/20261029T141324Z-94874`: the single failed review case remains
+  failed at line 110, now with `RuntimeIncompleteWholeBindingReconciliation`.
+
+The bounded source trace locates registration before startup reconciliation:
+`sync_now_and_drain` calls `ensure_sdk` before the Idle scan path. Reopen correctly
+requires a new scan, so `register_sdk` refuses it. No fetch has begun; no token
+or seen-set change is justified. Drive the actual scan first; keep the guard.

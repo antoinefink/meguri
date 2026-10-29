@@ -225,9 +225,118 @@ pub(crate) enum Input {
 }
 #[derive(Serialize, Deserialize)]
 enum ChildMessage {
-    Reply(std::result::Result<serde_json::Value, String>),
+    Reply(std::result::Result<serde_json::Value, ChildFailure>),
     DrawKey,
     Submit(super::Caller, super::Operation),
+}
+
+// This closed catalog is the entire error channel: no source error or payload
+// is serialized. Nested categories also contain only fieldless fixed tags.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+enum ChildFailure {
+    Unknown,
+    RuntimeTracking(StoreFailure),
+    RuntimeEngine(EngineFailure),
+    RuntimeStaleIncarnation,
+    RuntimeIdentityUnverified,
+    RuntimeIncompleteWholeBindingReconciliation,
+    RuntimeIncompleteNewOrRemovedNote,
+    RuntimeIncompleteStructuralLayout,
+    RuntimeIncompleteRootConfirmationAndSending,
+    RuntimeFileIdentityUnavailable,
+    RuntimePublication,
+    Engine(EngineFailure),
+    Store(StoreFailure),
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+enum EngineFailure {
+    StaleGeneration,
+    CollectionUnavailable,
+    Busy,
+    Open,
+    Storage,
+    Internal,
+    Other,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+enum StoreFailure {
+    Io,
+    Database,
+    Constraint,
+    InvalidIdentifier,
+    InvalidData,
+    BindingNotFound,
+    IsolatedBinding,
+    RecoveryRequired,
+    RecoveryRefused,
+    RuntimeSchemaUnsupported,
+}
+impl ChildFailure {
+    fn classify(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        if let Some(error) = error.downcast_ref::<runtime::RuntimeError>() {
+            use runtime::{Incomplete, RuntimeError};
+            return match error {
+                RuntimeError::Tracking(error) => Self::RuntimeTracking(StoreFailure::classify(error)),
+                RuntimeError::Engine(error) => Self::RuntimeEngine(EngineFailure::classify(error)),
+                RuntimeError::StaleIncarnation => Self::RuntimeStaleIncarnation,
+                RuntimeError::IdentityUnverified => Self::RuntimeIdentityUnverified,
+                RuntimeError::Incomplete(incomplete) => match incomplete {
+                    Incomplete::WholeBindingReconciliation => Self::RuntimeIncompleteWholeBindingReconciliation,
+                    Incomplete::NewOrRemovedNote => Self::RuntimeIncompleteNewOrRemovedNote,
+                    Incomplete::StructuralLayout => Self::RuntimeIncompleteStructuralLayout,
+                    Incomplete::RootConfirmationAndSending => Self::RuntimeIncompleteRootConfirmationAndSending,
+                },
+                RuntimeError::FileIdentityUnavailable => Self::RuntimeFileIdentityUnavailable,
+                RuntimeError::Publication(_) => Self::RuntimePublication,
+            };
+        }
+        if let Some(error) = error.downcast_ref::<meguri_engine::EngineError>() {
+            return Self::Engine(EngineFailure::classify(error));
+        }
+        if let Some(error) = error.downcast_ref::<core::Error>() {
+            return Self::Store(StoreFailure::classify(error));
+        }
+        Self::Unknown
+    }
+    fn into_error(self) -> Box<dyn std::error::Error + Send + Sync> {
+        if matches!(self, Self::Unknown) {
+            return failure();
+        }
+        // Debug formats only our finite, payload-free catalog, never an error.
+        Box::new(std::io::Error::other(format!(
+            "cloud device operation failed: {self:?}"
+        )))
+    }
+}
+impl EngineFailure {
+    fn classify(error: &meguri_engine::EngineError) -> Self {
+        use meguri_engine::EngineError;
+        match error {
+            EngineError::StaleGeneration { .. } => Self::StaleGeneration,
+            EngineError::CollectionUnavailable { .. } => Self::CollectionUnavailable,
+            EngineError::Busy { .. } => Self::Busy,
+            EngineError::Open(_) => Self::Open,
+            EngineError::Storage(_) => Self::Storage,
+            EngineError::Internal { .. } => Self::Internal,
+            _ => Self::Other,
+        }
+    }
+}
+impl StoreFailure {
+    fn classify(error: &core::Error) -> Self {
+        match error {
+            core::Error::Io(_) => Self::Io,
+            core::Error::Database => Self::Database,
+            core::Error::Constraint => Self::Constraint,
+            core::Error::InvalidIdentifier => Self::InvalidIdentifier,
+            core::Error::InvalidData => Self::InvalidData,
+            core::Error::BindingNotFound => Self::BindingNotFound,
+            core::Error::IsolatedBinding => Self::IsolatedBinding,
+            core::Error::RecoveryRequired => Self::RecoveryRequired,
+            core::Error::RecoveryRefused => Self::RecoveryRefused,
+            core::Error::RuntimeSchemaUnsupported => Self::RuntimeSchemaUnsupported,
+        }
+    }
 }
 
 fn write_frame<T: Serialize>(s: &mut UnixStream, value: &T) -> Result<()> {
@@ -385,7 +494,7 @@ impl ChildDriver {
         let ChildMessage::Reply(result) = self.next_message()? else {
             return Err(failure());
         };
-        Ok(serde_json::from_value(result.map_err(|_| failure())?)?)
+        Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?)
     }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
         write_frame(&mut self.stream, &input)?;
@@ -436,7 +545,9 @@ impl ChildDriver {
     ) -> Result<T> {
         loop {
             match self.next_message()? {
-                ChildMessage::Reply(result) => return Ok(serde_json::from_value(result.map_err(|_| failure())?)?),
+                ChildMessage::Reply(result) => {
+                    return Ok(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?);
+                }
                 ChildMessage::Submit(caller, operation) => {
                     write_frame(&mut self.stream, &Input::TransportAccepted)?;
                     let response = service.request(scope, caller, operation)?;
@@ -1245,8 +1356,8 @@ pub fn child_entry() -> Result<()> {
             write_frame(&mut stream, &ChildMessage::Reply(Ok(serde_json::Value::Null)))?;
             d
         }
-        Err(_) => {
-            write_frame(&mut stream, &ChildMessage::Reply(Err("child open failed".to_owned())))?;
+        Err(error) => {
+            write_frame(&mut stream, &ChildMessage::Reply(Err(ChildFailure::classify(error))))?;
             return Err(failure());
         }
     };
@@ -1254,8 +1365,7 @@ pub fn child_entry() -> Result<()> {
     for _ in 0..100_000 {
         let input: Input = read_frame(&mut stream)?;
         let close = matches!(input, Input::Close);
-        let response =
-            handle_transport_command(&mut device, input, &mut stream).map_err(|_| "child operation failed".to_owned());
+        let response = handle_transport_command(&mut device, input, &mut stream).map_err(ChildFailure::classify);
         // A Close served during a reply wait has already sent its own reply.
         // Do not send a second reply for the abandoned transport command.
         if device.closed && !close {
@@ -1297,7 +1407,7 @@ fn transport_reply(device: &mut Device, stream: &mut UnixStream) -> Result<super
             Input::TransportResult(response) => return Ok(response),
             input => {
                 let close = matches!(input, Input::Close);
-                let response = device.handle(input).map_err(|_| "child operation failed".to_owned());
+                let response = device.handle(input).map_err(ChildFailure::classify);
                 write_frame(stream, &ChildMessage::Reply(response))?;
                 if close {
                     return Err(failure());
