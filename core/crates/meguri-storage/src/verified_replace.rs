@@ -308,3 +308,43 @@ pub fn remove_empty_live_sidecars(live: &Path) -> Result<(), ReplaceError> {
     }
     Ok(())
 }
+
+/// V14's streaming writer, confined to an owned unpublished replacement stage.
+/// It deliberately does not run the gate until the whole remote graph (including
+/// scheduler configuration) has arrived. No live path or create flag is accepted.
+pub fn write_cloud_stage<E: From<StorageError>>(
+    stage: &ReplacementStage,
+    clock: &dyn Clock,
+    write: impl FnOnce(&mut WriteScope<'_>) -> Result<(), E>,
+) -> Result<(), E> {
+    let path = stage.path();
+    let meta = fs::symlink_metadata(&path)
+        .map_err(StorageError::from)
+        .map_err(E::from)?;
+    use std::os::unix::fs::MetadataExt;
+    if !meta.file_type().is_file() || meta.nlink() != 1 || crate::open::is_open(&path) {
+        return Err(StorageError::Io {
+            detail: "cloud stage has no private candidate".into(),
+        }
+        .into());
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(StorageError::from)
+    .map_err(E::from)?;
+    crate::conn_init::probe(&conn).map_err(|detail| E::from(StorageError::ConnectionInit { detail }))?;
+    conn.execute_batch("PRAGMA synchronous=FULL;")
+        .map_err(StorageError::from)
+        .map_err(E::from)?;
+    #[cfg(target_vendor = "apple")]
+    conn.execute_batch("PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")
+        .map_err(StorageError::from)
+        .map_err(E::from)?;
+    let mut scope = WriteScope::begin(&conn, StampMode::CallerSupplied, clock, None).map_err(E::from)?;
+    write(&mut scope)?;
+    scope.commit().map_err(E::from)?;
+    conn.close().map_err(|(_, e)| E::from(StorageError::from(e)))?;
+    crate::atomic_file::full_sync(&fs::File::open(path).map_err(StorageError::from).map_err(E::from)?).map_err(E::from)
+}

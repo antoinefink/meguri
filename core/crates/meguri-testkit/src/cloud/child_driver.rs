@@ -107,6 +107,7 @@ pub(crate) enum Input {
     Capture(u64, u64),
     Wal(u64),
     ArmLoss(i64),
+    ArmAdoptionActivationCrash,
     Edit(i64, Vec<String>),
     Payloads,
     Entity(String),
@@ -159,6 +160,9 @@ pub(crate) enum Input {
     PreviewEpoch(u64, core::publication::RecordRead),
     PreviewCancel,
     PublicationConfirm(core::publication::Preview),
+    AdoptionConfirm(core::publication::Preview),
+    AdoptionReply(core::adoption::AdoptionWork, core::adoption::AdoptionReply),
+    AdoptionLocal(core::adoption::AdoptionWork),
     PublicationNext,
     PublicationLocal([u8; 16], core::publication::LocalWork),
     PublicationExecute(core::publication::OwnRequest),
@@ -390,6 +394,19 @@ impl ChildDriver {
     }
     pub fn stored_runtime_state(&mut self) -> Result<runtime::StoredRuntimeState> {
         self.call(Input::StoredState)
+    }
+    /// Fixed catalog boundary only; this test-only crate cannot arm arbitrary code.
+    pub fn arm_adoption_activation_crash(&mut self) -> Result<()> {
+        self.call(Input::ArmAdoptionActivationCrash)
+    }
+    /// Called after the command's EOF. Require a real abort, never a rig hold.
+    pub fn reap_adoption_activation_crash(&mut self) -> Result<()> {
+        let mut child = self.child.take().ok_or_else(failure)?;
+        let status = child.wait()?;
+        if status.signal() != Some(libc::SIGABRT) {
+            return Err(failure());
+        }
+        Ok(())
     }
     pub fn set_account_for_testing(&mut self, account: String) -> Result<()> {
         self.call(Input::Identity(Some(account)))
@@ -663,6 +680,10 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::ArmAdoptionActivationCrash => {
+                self.runtime()?.arm_adoption_activation_crash_for_testing();
+                value(())
+            }
             Input::Boot(_)
             | Input::KeyResult(_)
             | Input::TransportAccepted
@@ -979,6 +1000,9 @@ impl Device {
             | Input::PreviewEpoch(..)
             | Input::PreviewCancel
             | Input::PublicationConfirm(..)
+            | Input::AdoptionConfirm(..)
+            | Input::AdoptionReply(..)
+            | Input::AdoptionLocal(..)
             | Input::PublicationNext
             | Input::PublicationLocal(..)
             | Input::PublicationCancel(..)

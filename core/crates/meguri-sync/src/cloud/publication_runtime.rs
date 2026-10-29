@@ -22,12 +22,12 @@ impl Runtime {
     pub fn attach_key_bytes(&self, source: Arc<dyn KeyByteSource>) {
         *self.key_bytes.lock().unwrap_or_else(PoisonError::into_inner) = Some(source);
     }
-    fn publication_decision(&self) -> Result<DecisionSnapshot, RuntimeError> {
+    pub(super) fn publication_decision(&self) -> Result<DecisionSnapshot, RuntimeError> {
         DeviceState::for_collection(&self.directory.join("collection.anki2"))
             .publication_decision()?
             .ok_or_else(|| PublicationError::AuthorityChanged.into())
     }
-    fn publication_account(&self) -> Result<OpaqueBytes, RuntimeError> {
+    pub(super) fn publication_account(&self) -> Result<OpaqueBytes, RuntimeError> {
         match self.inputs.identity.read_identity(&self.inputs.scope) {
             IdentityStatus::Available(account) if !account.0.is_empty() => Ok(account),
             _ => Err(PublicationError::AccountUnavailable.into()),
@@ -239,7 +239,7 @@ impl Runtime {
         let s = self.state();
         with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.publication_op()?))
     }
-    fn check_preview_authority(&self, p: &Preview, collection: &Collection) -> Result<(), RuntimeError> {
+    pub(super) fn check_preview_authority(&self, p: &Preview, collection: &Collection) -> Result<(), RuntimeError> {
         if self.publication_account()? != p.account
             || self.publication_decision()? != p.decision_before
             || self.inputs.files.identity(collection.path())? != p.native_file
@@ -262,7 +262,10 @@ impl Runtime {
             if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
                 return Err(PublicationError::AuthorityChanged.into());
             }
-            if with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?.is_some() {
+            if with_tracking_access(|| -> Result<bool, Error> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                Ok(store.publication_op()?.is_some() || store.adoption_op()?.is_some())
+            })? {
                 return Err(PublicationError::Busy.into());
             }
             // The 37-code reset recovery/Q11 phase has not landed. Refuse the
@@ -388,6 +391,9 @@ impl Runtime {
         let Some(store) = &s.store else {
             return false;
         };
+        if store.adoption_op().map_or(true, |op| op.is_some()) {
+            return true;
+        }
         let op = match store.publication_op() {
             Ok(Some(op)) => op,
             Ok(None) => return false,
@@ -400,6 +406,9 @@ impl Runtime {
     /// One actual local transition or one transport request at a time. Returning
     /// Scan/SendEntities grants existing Runtime/SDK work; it does not model it.
     pub fn next_publication_work(&self, collection: &Collection) -> Result<PublicationWork, RuntimeError> {
+        if let Some(work) = self.next_adoption_work(collection)? {
+            return Ok(PublicationWork::Adoption(work));
+        }
         let Some(op) = self.publication_op()? else {
             return Ok(PublicationWork::Idle);
         };
@@ -1238,7 +1247,12 @@ impl Runtime {
             Ok(PublicationFacts {
                 current,
                 bindings: store.publication_bindings()?,
-                recovery_ops: store.publication_op()?.into_iter().collect(),
+                recovery_ops: store
+                    .publication_op()?
+                    .into_iter()
+                    .map(Into::into)
+                    .chain(store.adoption_op()?.into_iter().map(Into::into))
+                    .collect(),
                 entities,
                 zones,
                 decision,

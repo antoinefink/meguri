@@ -211,6 +211,7 @@ pub enum LocalWork {
 pub enum PublicationWork {
     Local { op: [u8; 16], work: LocalWork },
     Own(Box<OwnRequest>),
+    Adoption(super::adoption::AdoptionWork),
     Scan,
     SendEntities,
     Idle,
@@ -268,7 +269,7 @@ impl std::fmt::Debug for ZoneDeletionGuard {
 pub struct PublicationFacts {
     pub current: Option<Binding>,
     pub bindings: Vec<Binding>,
-    pub recovery_ops: Vec<PublishOp>,
+    pub recovery_ops: Vec<super::adoption::RecoveryOpFacts>,
     pub entities: BTreeMap<String, super::workflow::EntityFacts>,
     pub zones: BTreeMap<String, RetainedZone>,
     pub decision: DecisionSnapshot,

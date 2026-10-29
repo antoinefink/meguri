@@ -120,3 +120,22 @@ ambiguous-recovery Cancel requirement.
 Compilation and focused execution of the 19-file production repair follow this
 tests-first commit. Full incoming media and the previously listed requirements
 remain open; no Unit, P24 or integration acceptance.
+
+## Adoption runtime integration
+
+The 19-file production export is applied after `94a75b7b`. Independent R3
+cleared the authority, field-count, close and account repairs. The final narrow
+review of `cleanroom/20261029T103928Z-86642` clears two actual child-observation
+forwarders, an unused private parameter rename and three comment removals.
+It changes no test assertion or safety condition.
+
+- `core-format/20261029T104428Z-89648`: formatting passes.
+- `private/20261029T104505Z-90631`: all 19 production files pass.
+- `similarity/20261029T104504Z-90425`: 19 files, no findings or exemptions.
+- `core-test/20261029T104447Z-90051`: 12 cases execute, five pass and seven
+  fail. Positive adoption fails before activation. Crash cases cannot reach
+  their armed boundary. The IPC error currently hides the underlying failure.
+
+This is retained WIP, not a verified adoption path. Next diagnose the positive
+case before running the wider target again. Incoming changes, media, final
+recovery and signed integration remain required. No acceptance trailer.

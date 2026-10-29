@@ -49,6 +49,15 @@ impl AccountBinding {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PublicationId([u64; 2]);
 impl PublicationId {
+    /// Opaque caller operation/candidate identity; this grants no publication authority.
+    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+        let mut first = [0; 8];
+        let mut second = [0; 8];
+        first.copy_from_slice(&bytes[..8]);
+        second.copy_from_slice(&bytes[8..]);
+        Self([u64::from_be_bytes(first), u64::from_be_bytes(second)])
+    }
+
     fn fresh(random: &dyn RandomSource) -> Self {
         Self([random.next_u64(), random.next_u64()])
     }
@@ -615,6 +624,32 @@ pub struct ReplacementEvidence {
     pub safety_backup: Option<ReplacementBackup>,
 }
 
+/// R6's measured closed-file activation, retained through SQLite reopen. Its
+/// byte witness is checked before any writer opens, not by hashing a live DB.
+/// Only the engine can construct or return this authority.
+#[derive(Clone, Debug)]
+pub struct CloudAdoptActivation {
+    record: CloudAdoptActivationRecord,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct CloudAdoptActivationRecord {
+    operation: PublicationId,
+    replacement: ReplacementEvidence,
+    native: NativeIdentity,
+}
+impl CloudAdoptActivation {
+    pub fn matches(&self, operation: PublicationId, prior: &Publication, candidate: &Publication) -> bool {
+        self.record.operation == operation
+            && self.record.replacement.reason == crate::replace::ReplaceReason::CloudAdopt
+            && &self.record.replacement.prior == prior
+            && &self.record.replacement.candidate == candidate
+            && self.record.replacement.safety_backup.is_some()
+    }
+    pub fn native_file(&self) -> (u64, u64) {
+        (self.record.native.device, self.record.native.inode)
+    }
+}
+
 /// Constructible only by checking the durable R6 chain against its active record.
 /// Consumers must hold the collection's lifecycle slot until their CAS completes.
 #[derive(Clone, Debug)]
@@ -776,6 +811,42 @@ impl DeviceState {
                 .find(|e| e.prior.identity == prior))
         })
     }
+    pub(crate) fn cloud_adopt_activation(
+        &self,
+        native: (u64, u64),
+    ) -> Result<Option<CloudAdoptActivation>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            let Some(state) = decode(doc)? else {
+                return Ok(None);
+            };
+            let Some(value) = state.extra.get("cloudAdoptActivation") else {
+                return Ok(None);
+            };
+            let proof: CloudAdoptActivationRecord = typed(value)?;
+            // R6 account reconciliation may retain Pending on this exact
+            // activated candidate. That decision never changes its swap proof.
+            let mut candidate = proof.replacement.candidate.clone();
+            if candidate.decision == PublicationDecision::Clear
+                && matches!(&candidate.binding, AccountBinding::Connected { .. })
+                && candidate.binding.certain()
+                && state.active.decision == PublicationDecision::Pending
+                && pending_reason(&state.extra)?.is_none()
+            {
+                candidate.decision = PublicationDecision::Pending;
+            }
+            // The retained candidate_file must still be exactly the byte proof
+            // measured at activation. Later local writes need not hash equally.
+            if state.intent.is_some()
+                || state.active != candidate
+                || proof.replacement.reason != crate::replace::ReplaceReason::CloudAdopt
+                || (proof.native.device, proof.native.inode) != native
+                || retained_replacements(&state)?.last() != Some(&proof.replacement)
+            {
+                return Ok(None);
+            }
+            Ok(Some(CloudAdoptActivation { record: proof }))
+        })
+    }
     /// Offline proof, never inferred from process generation or collection absence.
     /// Legacy lastReplacement is the first retained link on the next activation.
     pub fn local_replacement_successor(
@@ -825,6 +896,17 @@ impl DeviceState {
     }
     pub fn pending_decision_reason(&self) -> Result<Option<PendingDecisionReason>, StorageError> {
         self.maintenance_read("pendingDecisionReason", typed)
+    }
+    /// Observation for recovery consumers after R6 startup reconciliation.
+    /// An unfinished intent cannot be interpreted as an old/candidate decision.
+    pub fn settled_publication(&self) -> Result<Option<Publication>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            let state = decode(doc)?;
+            if state.as_ref().is_some_and(|state| state.intent.is_some()) {
+                return Err(failure("replacement intent has not settled"));
+            }
+            Ok(state.map(|state| state.active))
+        })
     }
     pub fn publication(&self) -> Result<Option<Publication>, StorageError> {
         sidecar::read_document(&self.path, |doc| Ok(decode(doc)?.map(|state| state.active)))
@@ -1533,6 +1615,19 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing activation journal"))?;
         bound(&state, binding)?;
         let mut retained = retained_replacements(&state)?;
+        let previous_cloud_proof = if state
+            .intent
+            .as_ref()
+            .is_some_and(|intent| intent.reason == crate::replace::ReplaceReason::CloudAdopt)
+        {
+            state
+                .extra
+                .get("cloudAdoptActivation")
+                .map(typed::<CloudAdoptActivationRecord>)
+                .transpose()?
+        } else {
+            None
+        };
         let keep_pending = state.intent.as_ref().is_some_and(|intent| {
             intent.reason == crate::replace::ReplaceReason::CloudAdopt
                 && intent.phase == Phase::Activated
@@ -1556,6 +1651,29 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
             old_file: intent.old_file.clone(),
             safety_backup: intent.safety_backup.clone(),
         };
+        let cloud_proof = if intent.reason == crate::replace::ReplaceReason::CloudAdopt {
+            let native = intent
+                .candidate_native
+                .clone()
+                .ok_or_else(|| failure("missing candidate native identity"))?;
+            let proof = CloudAdoptActivationRecord {
+                operation: intent.operation,
+                replacement: evidence.clone(),
+                native,
+            };
+            if previous_cloud_proof.as_ref() != Some(&proof) {
+                // R6 owns the closed candidate here. Reuse its descriptor-bound
+                // verifier; never compare the DELETE-mode digest after SQLite
+                // has reopened it in WAL mode or performed a day write.
+                let measured = fingerprint_native(live)?.ok_or_else(|| failure("activated candidate absent"))?;
+                if measured.0 != evidence.candidate_file || measured.1 != proof.native {
+                    return Err(failure("activated candidate differs from R6 proof"));
+                }
+            }
+            Some(proof)
+        } else {
+            None
+        };
         if retained.last() != Some(&evidence) {
             retained.push(evidence.clone());
         }
@@ -1568,6 +1686,12 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
         };
         set_pending_reason(&mut state, reason)?;
         state.replacements = retained;
+        if let Some(proof) = cloud_proof {
+            state.extra.insert(
+                "cloudAdoptActivation".into(),
+                serde_json::to_value(proof).map_err(failure)?,
+            );
+        }
         state.extra.insert(
             "lastReplacement".into(),
             serde_json::to_value(evidence).map_err(failure)?,

@@ -96,6 +96,19 @@ impl fmt::Debug for Collection {
 }
 
 impl Collection {
+    /// R6 activation authority for this actual open native file. The engine
+    /// measured the closed candidate's bytes before admitting its writer.
+    pub fn cloud_adopt_activation(&self) -> Result<Option<crate::device_state::CloudAdoptActivation>, EngineError> {
+        use std::os::unix::fs::MetadataExt;
+        let evidence = self.open_evidence()?;
+        let metadata = std::fs::symlink_metadata(self.path()).map_err(meguri_storage::StorageError::from)?;
+        if !metadata.file_type().is_file() || (metadata.dev(), metadata.ino()) != evidence.native_file {
+            return Ok(None);
+        }
+        Ok(crate::device_state::DeviceState::for_collection(self.path())
+            .cloud_adopt_activation(evidence.native_file)?)
+    }
+
     /// Immutable facts for the current open incarnation, including during an
     /// initial privileged OpenStep. Resume/reopen captures fresh facts.
     /// No writer work is queued, so Rust callbacks may read this directly.

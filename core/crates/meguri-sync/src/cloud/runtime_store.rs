@@ -69,6 +69,7 @@ impl TrackingStore {
             .execute("UPDATE cloud_runtime_schema SET version=?1 WHERE version=1", [VERSION])?;
         self.install_workflow()?;
         self.install_publication()?;
+        self.install_adoption()?;
         // Ordinary payloads belong to their container/environment only.
         let mut statement = self.connection.prepare(
             "SELECT r.binding,r.content FROM cloud_runtime_bindings r JOIN bindings b ON b.id=r.binding

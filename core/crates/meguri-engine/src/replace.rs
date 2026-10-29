@@ -210,6 +210,27 @@ impl Exclusive<'_> {
         self.replace_verified_with_raw(stage, ReplaceReason::CloudAdopt, |_| Ok(()), || Ok(None), Some(input))
     }
 
+    /// V14 carries the real retained safety package into the existing R6 intent.
+    pub fn replace_verified_cloud_adopt_with_backup(
+        &mut self,
+        stage: ReplacementStage,
+        input: CloudAdoptInput,
+        before_commit: impl FnOnce() -> Result<crate::ports::BackupReceipt, EngineError>,
+    ) -> Result<Collection, ReplaceError> {
+        self.replace_verified_with_preparation(
+            stage,
+            ReplaceReason::CloudAdopt,
+            |_| Ok(()),
+            || {
+                Ok(RestorePreparation {
+                    raw: None,
+                    safety_backup: Some(before_commit()?.into()),
+                })
+            },
+            Some(input),
+        )
+    }
+
     fn replace_verified_with_raw(
         &mut self,
         stage: ReplacementStage,

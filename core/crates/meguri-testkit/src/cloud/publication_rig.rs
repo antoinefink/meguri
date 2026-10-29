@@ -18,6 +18,7 @@ use std::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Point {
     Confirmed,
+    AdoptionStagingRecorded,
     BoundBeforeDecision,
     BoundAfterDecision,
     BeforeScan,
@@ -176,6 +177,12 @@ impl PublicationRig {
     pub fn driver(&mut self) -> &mut ChildDriver {
         &mut self.sdk.get_mut().driver
     }
+    pub fn wants_send(&mut self) -> Result<bool> {
+        self.sdk.get_mut().driver.wants_send()
+    }
+    pub fn send_changes_calls(&mut self) -> Result<Vec<cloud::workflow::SendCall>> {
+        self.sdk.get_mut().driver.send_changes_calls()
+    }
     pub fn facts(&self) -> Result<PublicationFacts> {
         self.sdk.borrow_mut().driver.call(Input::PublicationFacts)
     }
@@ -309,6 +316,90 @@ impl PublicationRig {
         self.work = None;
         self.refresh()?;
         Ok(id)
+    }
+    pub fn adopt_cloud(&mut self, preview: &ConnectionPreview) -> Result<[u8; 16]> {
+        let id = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::AdoptionConfirm(preview.production.clone()))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(id)
+    }
+    fn deliver_adoption(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        work: cloud::adoption::AdoptionWork,
+    ) -> Result<()> {
+        use cloud::adoption::{AdoptionReply, AdoptionTask as T, StagingRecord};
+        if matches!(work.task, T::Validate | T::Activate) {
+            return self.sdk.get_mut().driver.call(Input::AdoptionLocal(work));
+        }
+        let epoch = self
+            .facts()?
+            .recovery_ops
+            .into_iter()
+            .find(|p| p.id == work.op)
+            .ok_or_else(failure)?
+            .epoch;
+        let reply = match &work.task {
+            T::ReadActive | T::RecheckActive => {
+                AdoptionReply::Read(self.read(service, "meguri-root".into(), "active", RequestedFields::All)?)
+            }
+            T::ReadEpoch => AdoptionReply::Read(self.read(
+                service,
+                cloud::adapter::collection_zone(epoch),
+                "epoch",
+                RequestedFields::All,
+            )?),
+            T::ReadMediaRoot => {
+                AdoptionReply::Read(self.read(service, "meguri-media".into(), "root", RequestedFields::All)?)
+            }
+            T::Fetch { cursor } => {
+                let token = cursor.as_ref().map(|c| serde_json::from_slice(&c.0)).transpose()?;
+                let response = service.request(
+                    &self.scope,
+                    Caller::default(),
+                    Operation::FetchZone {
+                        zone: cloud::adapter::collection_zone(epoch),
+                        token,
+                    },
+                )?;
+                let Ok(Reply::ZoneChanges(page)) = response.result else {
+                    return Err(failure());
+                };
+                let mut records = Vec::new();
+                let mut deleted = Vec::new();
+                for change in page.changes {
+                    match change {
+                        RecordChange::Saved(record) => {
+                            let encrypted = match record.fields.get("e") {
+                                Some(Field::EncryptedBytes(e)) => Some(e.clone()),
+                                _ => None,
+                            };
+                            records.push(StagingRecord {
+                                name: record.name,
+                                record_type: record.record_type,
+                                record: ControlRecord {
+                                    encrypted,
+                                    system_fields: cloud::OpaqueBytes(record.system_fields.bytes().to_vec()),
+                                },
+                            });
+                        }
+                        RecordChange::Deleted { name, .. } => deleted.push(name),
+                    }
+                }
+                let next = if page.more {
+                    Some(cloud::OpaqueBytes(serde_json::to_vec(&page.token)?))
+                } else {
+                    None
+                };
+                AdoptionReply::Page { records, deleted, next }
+            }
+            _ => return Err(failure()),
+        };
+        self.sdk.get_mut().driver.call(Input::AdoptionReply(work, reply))
     }
     pub fn verify_identity(&mut self, account: String) -> Result<()> {
         self.sdk.get_mut().driver.call::<()>(Input::Identity(Some(account)))?;
@@ -466,6 +557,9 @@ impl PublicationRig {
                     OwnKind::SaveActive => Some(Point::BeforeActiveSave),
                     _ => None,
                 },
+                PublicationWork::Adoption(work) if work.task == cloud::adoption::AdoptionTask::ReadActive => {
+                    Some(Point::AdoptionStagingRecorded)
+                }
                 PublicationWork::Scan => Some(Point::BeforeScan),
                 _ => None,
             };
@@ -475,6 +569,7 @@ impl PublicationRig {
                 return self.refresh();
             }
             match work {
+                PublicationWork::Adoption(work) => self.deliver_adoption(service, work)?,
                 PublicationWork::Local { op, work } => self
                     .sdk
                     .get_mut()

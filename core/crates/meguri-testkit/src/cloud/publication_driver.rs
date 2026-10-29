@@ -138,13 +138,26 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                 .runtime()?
                 .confirm_connection_publication(&preview, &collection)?,
         ),
+        Input::AdoptionConfirm(preview) => value(device.host.confirm_cloud_adoption(&preview)?),
+        Input::AdoptionReply(work, reply) => {
+            device.host.cloud_adoption_reply(&work, reply)?;
+            value(())
+        }
+        Input::AdoptionLocal(work) => {
+            device.host.perform_cloud_adoption_local(&work)?;
+            value(())
+        }
         Input::PublicationNext => value(device.runtime()?.next_publication_work(&collection)?),
         Input::PublicationLocal(id, work) => {
             device.runtime()?.perform_publication_local(id, work, &collection)?;
             value(())
         }
         Input::PublicationCancel(id) => {
-            device.runtime()?.cancel_publication(id, &collection)?;
+            if device.runtime()?.adoption_op()?.is_some_and(|op| op.id == id) {
+                device.runtime()?.cancel_cloud_adoption(id, &collection)?;
+            } else {
+                device.runtime()?.cancel_publication(id, &collection)?;
+            }
             value(())
         }
         Input::PublicationTrigger => {

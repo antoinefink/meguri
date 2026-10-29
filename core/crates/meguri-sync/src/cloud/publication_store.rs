@@ -29,10 +29,10 @@ pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
     )?;
     if exists {
         let mut s = c.prepare("SELECT version FROM cloud_publication_schema")?;
-        if s.query_map([], |r| r.get::<_, i64>(0))?
-            .collect::<Result<Vec<_>, _>>()?
-            != [1]
-        {
+        let versions = s
+            .query_map([], |r| r.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if versions != [1] && versions != [2] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
     } else {
@@ -60,7 +60,7 @@ fn remove_op(tx: &Transaction<'_>, scope: &BuildScope, id: [u8; 16]) -> Result<(
     Ok(())
 }
 /// Remove work only from an ordinary binding already checked in this scope.
-fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
+pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
     for table in [
         "engine_state",
         "inbox",
@@ -69,6 +69,7 @@ fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
         "cloud_runtime_bindings",
         "cloud_adapter_state",
         "cloud_publication_bindings",
+        "cloud_adoption_authority",
         "cloud_publication_zones",
     ] {
         let exists: bool = tx.query_row(

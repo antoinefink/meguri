@@ -295,3 +295,131 @@ pub fn payload_key(payload: &c::Payload) -> Result<Vec<u8>, Error> {
         P::MediaName(_) => return Err(Error::InvalidData),
     })
 }
+
+/// Reverse the wire projection only into a caller-owned unpublished schema-18
+/// stage. The storage scope owns SQL and preserves each SQLite storage class.
+pub(super) fn stage_payload(scope: &mut meguri_storage::WriteScope<'_>, payload: &c::Payload) -> Result<(), Error> {
+    use Cell::{Blob as B, Integer as I, Text as T};
+    use c::{Payload as P, Stored as S};
+    let stored = |s: &S| match s {
+        S::Integer(v) => I(*v),
+        S::Real(v) => Cell::Real(*v),
+        S::Text(v) => T(v.clone()),
+        S::Blob(v) => B(v.clone()),
+    };
+    let mut put = |table, row: Vec<Cell>| -> Result<(), Error> {
+        let key = RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?;
+        scope.restore(table, &key, Some(&row))?;
+        Ok(())
+    };
+    match payload {
+        P::Note(p) => put(
+            Table::Notes,
+            vec![
+                I(p.id),
+                T(p.guid.clone()),
+                I(p.mid),
+                I(p.modified),
+                I(-1),
+                T(p.tags.clone()),
+                T(p.flds.clone()),
+                stored(&p.sfld),
+                I(p.csum),
+                I(p.flags),
+                T(p.data.clone()),
+            ],
+        )?,
+        P::Card(p) => put(
+            Table::Cards,
+            vec![
+                I(p.id),
+                I(p.nid),
+                I(p.did),
+                I(p.ord),
+                I(p.modified),
+                I(-1),
+                I(p.card_type),
+                I(p.queue),
+                stored(&p.due),
+                I(p.ivl),
+                I(p.factor),
+                I(p.reps),
+                I(p.lapses),
+                I(p.left),
+                stored(&p.odue),
+                I(p.odid),
+                I(p.flags),
+                stored(&p.data),
+            ],
+        )?,
+        P::Revlog(p) => put(
+            Table::Revlog,
+            vec![
+                I(p.id),
+                I(p.cid),
+                I(-1),
+                I(p.ease),
+                stored(&p.ivl),
+                stored(&p.last_ivl),
+                I(p.factor),
+                stored(&p.time),
+                I(p.review_type),
+            ],
+        )?,
+        P::Deck(p) => put(
+            Table::Decks,
+            vec![
+                I(p.id),
+                T(p.name.clone()),
+                I(p.mtime_secs),
+                I(-1),
+                B(p.common.clone()),
+                B(p.kind.clone()),
+            ],
+        )?,
+        P::Preset(p) => put(
+            Table::DeckConfig,
+            vec![I(p.id), T(p.name.clone()), I(p.mtime_secs), I(-1), B(p.config.clone())],
+        )?,
+        P::Notetype(p) => {
+            put(
+                Table::Notetypes,
+                vec![I(p.id), T(p.name.clone()), I(p.mtime_secs), I(-1), B(p.config.clone())],
+            )?;
+            for field in &p.fields {
+                put(
+                    Table::Fields,
+                    vec![I(p.id), I(field.ord), T(field.name.clone()), B(field.config.clone())],
+                )?;
+            }
+            for template in &p.templates {
+                put(
+                    Table::Templates,
+                    vec![
+                        I(p.id),
+                        I(template.ord),
+                        T(template.name.clone()),
+                        I(template.mtime_secs),
+                        I(-1),
+                        B(template.config.clone()),
+                    ],
+                )?;
+            }
+        }
+        P::Tag(p) => put(
+            Table::Tags,
+            vec![
+                T(p.tag.clone()),
+                I(-1),
+                I(p.collapsed),
+                p.config.clone().map(B).unwrap_or(Cell::Null),
+            ],
+        )?,
+        P::Config(p) => put(
+            Table::Config,
+            vec![T(p.key.clone()), I(-1), I(p.mtime_secs), B(p.val.clone())],
+        )?,
+        P::MediaName(_) => return Err(Error::InvalidData),
+    }
+    Ok(())
+}

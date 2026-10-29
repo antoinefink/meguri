@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use super::{entity_codec as codec, *};
 #[path = "adapter_runtime.rs"]
 mod adapter_impl;
+#[path = "adoption_runtime.rs"]
+mod adoption_impl;
 #[path = "publication_runtime.rs"]
 mod publication_impl;
 #[path = "workflow_runtime.rs"]
@@ -403,6 +405,7 @@ pub struct Runtime {
     state: Mutex<State>,
     random: Mutex<Option<Arc<dyn meguri_model::rng::RandomSource>>>,
     key_bytes: Mutex<Option<Arc<dyn KeyByteSource>>>,
+    adoption: Mutex<Option<Arc<adoption_impl::AdoptionOwner>>>,
     review: Mutex<std::sync::Weak<meguri_engine::session::ReviewService>>,
     #[cfg(feature = "test-hooks")]
     scan_pause: Mutex<Option<ScanPause>>,
@@ -438,6 +441,7 @@ impl Runtime {
             adapter_clock: Mutex::new(None),
             random: Mutex::new(None),
             key_bytes: Mutex::new(None),
+            adoption: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
             state: Mutex::new(State {
                 scan_required: true,
@@ -476,7 +480,10 @@ impl Runtime {
         if file.pair() != evidence.native_file || file.created_nanos >= 1_000_000_000 {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
-        let publication = meguri_engine::device_state::DeviceState::for_collection(collection.path()).publication()?;
+        let device = meguri_engine::device_state::DeviceState::for_collection(collection.path());
+        let publication = device.settled_publication()?;
+        let activation = collection.cloud_adopt_activation()?;
+        let live_adoption = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_some();
         let mut state = self.state();
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
@@ -506,6 +513,9 @@ impl Runtime {
             let store = state.store.as_mut().ok_or(Error::Database)?;
             store.install_runtime()?;
             store.adapter_install()?;
+            if !live_adoption {
+                store.recover_adoption(publication.as_ref(), activation.as_ref(), file)?;
+            }
             let publication_op = store.publication_op()?;
             let restarted_confirmed = publication_op
                 .as_ref()
