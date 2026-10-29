@@ -112,3 +112,47 @@ The bounded source trace locates registration before startup reconciliation:
 `sync_now_and_drain` calls `ensure_sdk` before the Idle scan path. Reopen correctly
 requires a new scan, so `register_sdk` refuses it. No fetch has begun; no token
 or seen-set change is justified. Drive the actual scan first; keep the guard.
+
+## Startup reconciliation, root confirmation and held explicit requests
+
+Phase base `63f8528618482ab51a1211946a1b086a9c09ba07`; original U113 start
+and batch base remain unchanged. Fixer exports
+`cleanroom/20261029T142153Z-98510` and
+`cleanroom/20261029T142910Z-3093` change only the publication driver and its
+additive regression. Existing review and note-edit tests remain unchanged.
+
+The first repair reaches the next real prerequisite: after reconciliation,
+explicit sync still precedes root confirmation. R1 also finds a P2: a request
+paused before scanning is lost when released through `drive_ready` with
+automatic scheduling disabled. The final repair shares actual reconciliation,
+registration and root reading with Idle, retaining one explicit request until
+the real Sync Now accepts it. Resumed driving preserves the shared step budget
+and collection-drain/cleanup tail. No product guard or readiness flag changes.
+Independent R2 is clear of P0-P2 findings for this bounded change.
+
+- `core-format/20261029T142718Z-912`: environment error, Docker socket not
+  reachable inside the sandbox. Host-authorized MG access resolves placement;
+  `doctor/20261029T142736Z-1445` confirms OrbStack and the dedicated VM answer.
+- `core-format/20261029T142744Z-1954`: first repair formatting passes.
+- `core-test/20261029T142756Z-2274`: four pass; review resync fails with
+  `RuntimeIncompleteRootConfirmationAndSending`.
+- `core-test/20261029T143218Z-4701`: the new hold/release regression fails
+  against the first repair because no collection fetch follows release.
+- `core-format/20261029T143254Z-5135`: final repair formatting passes.
+- `private/20261029T143323Z-5916`: both final paths pass.
+- `similarity/20261029T143322Z-5905`: both final paths pass.
+- `core-test/20261029T143313Z-5614`: broader compilation remains blocked
+  by the existing missing `fail_held_io` driver method; zero tests execute.
+- `core-test/20261029T143347Z-6577`: 19 run, 18 pass, one fails. All four
+  incoming-review target cases pass, including actual Good review Card/Revlog
+  rows, entropy-free reopen, duplicate delivery, note edits and held explicit
+  sync. Publication-driver, cleanup and empty-media adoption checks pass.
+  Nonempty-media publication/adoption fails with `RuntimePublication`.
+- `core-test/20261029T143423Z-7016`: restoring the pre-fix driver reproduces
+  that same media failure at the same assertion. The final driver is restored
+  byte-for-byte afterward. This establishes an existing gap, not a passing
+  media check or an exemption.
+
+The bounded startup findings are resolved. All other R1 findings, remaining
+Q11 cases, media handling, app wiring, signed device evidence and the full
+batch gate still await work. No Unit or P24 acceptance is claimed.

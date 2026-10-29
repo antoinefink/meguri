@@ -129,6 +129,7 @@ pub struct PublicationRig {
     transport_queued: bool,
     started_host_instance: Option<String>,
     needs_no_state_listing: bool,
+    explicit_sync_pending: bool,
     own_sent: BTreeMap<u64, ResponseBatch>,
     trace: Vec<cloud::workflow::TraceEvent>,
     observations: Vec<Observation>,
@@ -158,6 +159,7 @@ impl PublicationRig {
             transport_queued: false,
             started_host_instance: None,
             needs_no_state_listing: false,
+            explicit_sync_pending: false,
             own_sent: BTreeMap::new(),
             trace: Vec::new(),
             observations: Vec::new(),
@@ -427,6 +429,32 @@ impl PublicationRig {
         }
         Ok(())
     }
+    fn prepare_sdk(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<bool> {
+        if self.held.is_some() {
+            return Ok(false);
+        }
+        let scan: super::super::child_driver::ScanState = self.sdk.get_mut().driver.call(Input::ScanState)?;
+        if scan.scan_required {
+            *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
+            if self.gate(Point::BeforeScan) {
+                return Ok(false);
+            }
+            self.sdk.get_mut().driver.call::<()>(Input::Reconcile)?;
+        }
+        self.ensure_sdk()?;
+        if self.sdk.get_mut().root.is_none() && !self.sdk.get_mut().driver.call::<bool>(Input::RootConfirmed)? {
+            self.sdk.get_mut().confirm_root_read(service, remaining)?;
+            self.needs_no_state_listing = false;
+        }
+        Ok(true)
+    }
+    fn submit_explicit_sync(&mut self) -> Result<()> {
+        if self.explicit_sync_pending {
+            self.sdk.get_mut().sync_now()?;
+            self.explicit_sync_pending = false;
+        }
+        Ok(())
+    }
     fn remember_replies(&mut self, request: &OwnRequest, replies: Vec<Response>) {
         for response in replies {
             let mutations = match &request.operation {
@@ -482,7 +510,12 @@ impl PublicationRig {
     }
     pub fn drive_ready(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let mut remaining = steps;
-        self.drive_budget(service, &mut remaining)
+        let resuming_explicit = self.explicit_sync_pending;
+        self.drive_budget(service, &mut remaining)?;
+        if resuming_explicit && !self.explicit_sync_pending {
+            self.finish_collection_drain(service, &mut remaining)?;
+        }
+        Ok(())
     }
     fn drive_budget(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         while *remaining > 0 {
@@ -621,21 +654,10 @@ impl PublicationRig {
                         .as_ref()
                         .is_some_and(|b| b.facts.state == cloud::BindingState::Active)
                     {
-                        let scan: super::super::child_driver::ScanState =
-                            self.sdk.get_mut().driver.call(Input::ScanState)?;
-                        if scan.scan_required {
-                            if self.gate(Point::BeforeScan) {
-                                return self.refresh();
-                            }
-                            self.sdk.get_mut().driver.call::<()>(Input::Reconcile)?;
+                        if !self.prepare_sdk(service, remaining)? {
+                            return self.refresh();
                         }
-                        self.ensure_sdk()?;
-                        if self.sdk.get_mut().root.is_none()
-                            && !self.sdk.get_mut().driver.call::<bool>(Input::RootConfirmed)?
-                        {
-                            self.sdk.get_mut().confirm_root_read(service, remaining)?;
-                            self.needs_no_state_listing = false;
-                        }
+                        self.submit_explicit_sync()?;
                         self.sdk.get_mut().drive_budget(service, remaining)?;
                     }
                     return self.refresh();
@@ -647,12 +669,19 @@ impl PublicationRig {
     }
     pub fn sync_now_and_drain(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
-        if self.facts()?.recovery_ops.is_empty() {
-            self.ensure_sdk()?;
-            self.sdk.get_mut().sync_now()?;
-        }
         let mut remaining = steps;
+        if self.facts()?.recovery_ops.is_empty() {
+            // One explicit request survives startup holds, including automatic=false.
+            self.explicit_sync_pending = true;
+            if !self.prepare_sdk(service, &mut remaining)? {
+                return self.refresh();
+            }
+            self.submit_explicit_sync()?;
+        }
         self.drive_budget(service, &mut remaining)?;
+        self.finish_collection_drain(service, &mut remaining)
+    }
+    fn finish_collection_drain(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         if self.held.is_some() {
             return Ok(());
         }
@@ -666,7 +695,7 @@ impl PublicationRig {
             self.sdk.get_mut().driver.call::<()>(Input::CollectionDrained)?;
             if self.facts()?.zones.values().any(|z| z.deletion_due) {
                 self.cleanup_pending = true;
-                self.drive_budget(service, &mut remaining)?;
+                self.drive_budget(service, remaining)?;
             }
         }
         Ok(())

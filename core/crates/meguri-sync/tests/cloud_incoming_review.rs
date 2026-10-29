@@ -9,7 +9,10 @@
 mod support;
 
 use meguri_sync::cloud::entity_codec::{Payload, Revlog, Stored};
-use meguri_testkit::cloud::{LogOutcome, RequestKind, coordinator::PublicationRig};
+use meguri_testkit::cloud::{
+    LogOutcome, RequestKind,
+    coordinator::{Point, PublicationRig},
+};
 use support::*;
 
 fn history(rig: &mut PublicationRig) -> Vec<Revlog> {
@@ -158,6 +161,57 @@ fn incoming_note_field_edit_updates_actual_rows_and_survives_entropy_free_reopen
     assert_eq!(pair.receiver.driver().collection_rows().unwrap(), sent_rows);
     pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
     assert_eq!(pair.sender.driver().collection_rows().unwrap(), sent_rows);
+    pair.close();
+}
+
+#[test]
+fn explicit_sync_after_reopen_survives_before_scan_hold_with_automatic_disabled() {
+    let mut pair = Pair::adopted();
+    let zone = pair.sender.collection_zone().unwrap();
+    let before = pair.receiver.driver().collection_rows().unwrap();
+    let note = notes(&mut pair.sender).into_iter().next().unwrap();
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(note.id, &["held incoming question", "held incoming answer"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let sent_rows = pair.sender.driver().collection_rows().unwrap();
+    assert_ne!(sent_rows, before);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), before);
+
+    pair.receiver.close_clean().unwrap();
+    // The support rig disables automatic sync and rejects entropy on reopen.
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.receiver.hold(Point::BeforeScan).unwrap();
+    let after = last_request(&pair);
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::BeforeScan));
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), before);
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::BeforeScan));
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), before);
+    assert!(!pair.service.request_log().unwrap().iter().any(|request| {
+        request.request_id > after
+            && request.kind == RequestKind::FetchZone
+            && request.zone.as_deref() == Some(zone.as_str())
+    }));
+
+    pair.receiver.release(Point::BeforeScan).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(!pair.receiver.is_held(Point::BeforeScan));
+    assert_collection_fetched(&pair, after, &zone);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), sent_rows);
+
+    // Driving an idle rig again must not submit the retained request twice.
+    let completed = last_request(&pair);
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(!pair.service.request_log().unwrap().iter().any(|request| {
+        request.request_id > completed
+            && request.kind == RequestKind::FetchZone
+            && request.zone.as_deref() == Some(zone.as_str())
+    }));
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), sent_rows);
     pair.close();
 }
 
