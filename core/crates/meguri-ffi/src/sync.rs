@@ -330,12 +330,16 @@ fn identity(status: CloudAccountStatus, value: Option<Vec<u8>>) -> r::IdentitySt
 }
 #[derive(uniffi::Object)]
 pub struct CloudWorkflow {
-    host: Arc<meguri_host::CoreHost>,
-    core: Arc<r::Runtime>,
+    pub(crate) host: Arc<meguri_host::CoreHost>,
+    pub(crate) core: Arc<r::Runtime>,
     identity: Option<Arc<CachedIdentity>>,
 }
 #[uniffi::export]
 impl CloudWorkflow {
+    pub fn connection(&self) -> Result<Arc<crate::cloud_connection::CloudConnection>, CoreError> {
+        callback::enter("CloudWorkflow.connection");
+        crate::cloud_connection::CloudConnection::for_workflow(self)
+    }
     #[uniffi::constructor]
     pub fn new() -> Result<Arc<Self>, CoreError> {
         callback::enter("CloudWorkflow.new");
@@ -495,12 +499,17 @@ impl CloudWorkflow {
         value: Option<Vec<u8>>,
     ) -> Result<bool, CoreError> {
         callback::enter("CloudWorkflow.complete_identity_read");
-        if let Some(cache) = &self.identity {
-            cache.clear();
+        let observed = identity(status, value);
+        let accepted = self
+            .core
+            .adapter_complete_identity_read(id, observed.clone())
+            .map_err(cloud_error)?;
+        if accepted && !matches!(observed, r::IdentityStatus::ReadFailed) {
+            if let Some(cache) = &self.identity {
+                cache.set(observed);
+            }
         }
-        self.core
-            .adapter_complete_identity_read(id, identity(status, value))
-            .map_err(cloud_error)
+        Ok(accepted)
     }
     pub fn prepare_runtime(&self) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.prepare_runtime");
@@ -549,9 +558,14 @@ impl CloudWorkflow {
         if let Some(cache) = &self.identity {
             cache.clear();
         }
+        let observed = identity(status, value);
         self.core
-            .adapter_account(sdk.as_deref(), identity(status, value))
-            .map_err(cloud_error)
+            .adapter_account(sdk.as_deref(), observed.clone())
+            .map_err(cloud_error)?;
+        if let Some(cache) = &self.identity {
+            cache.set(observed);
+        }
+        Ok(())
     }
     pub fn take_pending_updates(&self, sdk: String) -> Result<Vec<CloudPendingUpdate>, CoreError> {
         callback::enter("CloudWorkflow.take_pending_updates");
@@ -798,13 +812,16 @@ impl CachedIdentity {
     fn clear(&self) {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
     }
+    fn set(&self, value: r::IdentityStatus) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
+    }
 }
 impl r::IdentityProvider for CachedIdentity {
     fn read_identity(&self, _: &c::BuildScope) -> r::IdentityStatus {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .take()
+            .clone()
             .unwrap_or(r::IdentityStatus::ReadFailed)
     }
 }

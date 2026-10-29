@@ -339,6 +339,23 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let manualTransferPreviewRecord = BridgeCall("ManualTransferPreview.record")
     public static let manualTransferHistoryEntryRecord = BridgeCall("ManualTransferHistoryEntry.record")
 
+    public static let cloudWorkflowConnection = BridgeCall("CloudWorkflow.connection")
+    public static let cloudConnectionBeginConnectionPreview = BridgeCall("CloudConnection.begin_connection_preview")
+    public static let cloudConnectionConnectionActiveRead = BridgeCall("CloudConnection.connection_active_read")
+    public static let cloudConnectionConnectionEpochRead = BridgeCall("CloudConnection.connection_epoch_read")
+    public static let cloudConnectionCancelPreview = BridgeCall("CloudConnection.cancel_preview")
+    public static let cloudConnectionConfirmPublication = BridgeCall("CloudConnection.confirm_publication")
+    public static let cloudConnectionConfirmAdoption = BridgeCall("CloudConnection.confirm_adoption")
+    public static let cloudConnectionNextPublicationWork = BridgeCall("CloudConnection.next_publication_work")
+    public static let cloudConnectionPerformLocal = BridgeCall("CloudConnection.perform_local")
+    public static let cloudConnectionSubmitPublicationRequest = BridgeCall("CloudConnection.submit_publication_request")
+    public static let cloudConnectionPublicationResult = BridgeCall("CloudConnection.publication_result")
+    public static let cloudConnectionAdoptionResult = BridgeCall("CloudConnection.adoption_result")
+    public static let cloudConnectionPerformAdoptionLocal = BridgeCall("CloudConnection.perform_adoption_local")
+    public static let cloudConnectionCancelOperation = BridgeCall("CloudConnection.cancel_operation")
+    public static let cloudConnectionTrigger = BridgeCall("CloudConnection.trigger")
+    public static let cloudConnectionRecoveryStatus = BridgeCall("CloudConnection.recovery_status")
+
     public static let configureCloudPlatform = BridgeCall("configure_cloud_platform")
     public static let cloudWorkflowNew = BridgeCall("CloudWorkflow.new")
     public static let cloudWorkflowInstance = BridgeCall("CloudWorkflow.instance")
@@ -387,6 +404,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        cloudWorkflowConnection, cloudConnectionBeginConnectionPreview, cloudConnectionConnectionActiveRead, cloudConnectionConnectionEpochRead, cloudConnectionCancelPreview, cloudConnectionConfirmPublication, cloudConnectionConfirmAdoption, cloudConnectionNextPublicationWork, cloudConnectionPerformLocal, cloudConnectionSubmitPublicationRequest, cloudConnectionPublicationResult, cloudConnectionAdoptionResult, cloudConnectionPerformAdoptionLocal, cloudConnectionCancelOperation, cloudConnectionTrigger, cloudConnectionRecoveryStatus,
         configureCloudPlatform, cloudWorkflowNew, cloudWorkflowInstance, cloudWorkflowCurrentGuard, cloudWorkflowEntityFacts, cloudWorkflowAwaitTracking, cloudWorkflowTrackingSendables, cloudWorkflowPendingTransition, cloudWorkflowEmittedUpdateIds, cloudWorkflowObservations, cloudWorkflowPollReview, cloudWorkflowSetPaused, cloudWorkflowStopSyncing, cloudWorkflowDurableSnapshot, cloudWorkflowFetchDrains, cloudWorkflowDiagnostics, cloudWorkflowStatus, cloudWorkflowExchangeResult, cloudWorkflowBeginIdentityRead, cloudWorkflowCompleteIdentityRead, cloudWorkflowPrepareRuntime, cloudWorkflowRegisterSdk, cloudWorkflowValidateSdk, cloudWorkflowRetireSdk, cloudWorkflowReleaseSdk, cloudWorkflowAccountChanged, cloudWorkflowTakePendingUpdates, cloudWorkflowUpdateApplied, cloudWorkflowBuildBatch, cloudWorkflowSent, cloudWorkflowHandlerReturned, cloudWorkflowTrackingFailure, cloudWorkflowStateUpdate, cloudWorkflowFetched, cloudWorkflowBeginFetch, cloudWorkflowWillFetch, cloudWorkflowFetchZone, cloudWorkflowDidFetch, cloudWorkflowFinishFetch, cloudWorkflowBeginExchange, cloudWorkflowExchangeFetched, cloudWorkflowCompleteExchange, cloudWorkflowSendDue, cloudWorkflowBeginSend, cloudWorkflowFinishSend,
         ManualMediaCalls.preview, ManualMediaCalls.run, ManualMediaCalls.cancelPrepared, ManualMediaCalls.forgetOwner, ManualMediaCalls.readPreview, ManualMediaCalls.readProgress, ManualMediaCalls.stop,
         normalizeManualEndpoint, manualTransferSessionNew, manualTransferSessionStartSetup, manualTransferSessionStartLogin, manualTransferSessionStartHistory, manualTransferSessionStartPrepare, manualTransferSessionStartConfirm, manualTransferSessionStartRecoveryPreview, manualTransferSessionStartCancelHistory, manualTransferSessionStartCancelPreview, manualTransferSessionStartSaveCopy, manualTransferResultOutcome, manualTransferResultOperationID, manualTransferPreviewRecord, manualTransferHistoryEntryRecord,

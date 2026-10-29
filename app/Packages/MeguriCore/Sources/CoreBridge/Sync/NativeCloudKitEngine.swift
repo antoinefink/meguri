@@ -100,7 +100,7 @@ enum NativeCloudKitRecordRouting {
 /// The application supplies its private database and resolves account identity
 /// asynchronously. No account read or foreign callback runs under a core lock.
 public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
-    private let database: CKDatabase
+    let database: CKDatabase
     private let account: @Sendable () async throws -> CloudResolvedAccount
     private var accountObservers: [UUID: any NSObjectProtocol] = [:]
     public init(database: CKDatabase, accountResolver: @escaping @Sendable () async throws -> CloudResolvedAccount) {
@@ -218,9 +218,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     func cancelOperations() async { await sdk?.cancelOperations(); if let returnedWork { await returnedWork.value } }
     func release() { sdk = nil }
     private func fields(_ record: CKRecord) throws -> Data {
-        let archive = NSKeyedArchiver(requiringSecureCoding: true)
-        record.encodeSystemFields(with: archive); archive.finishEncoding()
-        return archive.encodedData
+        try NativeCloudKitSystemFields.encode(record)
     }
     private func decode(_ record: CKRecord) throws -> CloudRecord {
         try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)

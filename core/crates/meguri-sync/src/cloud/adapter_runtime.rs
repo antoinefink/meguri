@@ -148,6 +148,16 @@ impl Runtime {
         identity: IdentityStatus,
         sdk_event: bool,
     ) -> Result<(), RuntimeError> {
+        // Connection discovery has no binding yet. Accepted account events
+        // still invalidate its preview; no account or binding is invented.
+        if s.bound.is_none() {
+            if s.store.is_none() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            s.publication.preview = None;
+            s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            return Ok(());
+        }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let same = matches!(&identity, IdentityStatus::Available(a) if a == &b.binding.facts.account) && b.verified;
         if !same {
@@ -821,7 +831,7 @@ impl Runtime {
         if let Some(sdk) = origin_sdk {
             Self::sdk_locked(&s, sdk)?;
         }
-        if s.bound.is_none() {
+        if s.store.is_none() {
             return Err(RuntimeError::StaleIncarnation);
         }
         if origin_sdk.is_some() {
@@ -850,7 +860,7 @@ impl Runtime {
             return Ok(false);
         }
         s.adapter.identity_read = None;
-        if s.bound.is_none()
+        if s.store.is_none()
             || guard != Self::adapter_guard_locked(&s)
             || incarnation != s.incarnation
             || origin_sdk

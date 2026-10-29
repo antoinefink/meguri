@@ -6,10 +6,23 @@ use meguri_sync::cloud::{
     runtime::RuntimeError,
 };
 impl CoreHost {
+    /// A retained native connection must never follow this process engine into
+    /// a successor host after close. Drop the state guard before any core work.
+    pub fn cloud_connection_collection(&self) -> Result<meguri_engine::Collection, EngineError> {
+        if !matches!(
+            *self.closed.lock().unwrap_or_else(PoisonError::into_inner),
+            CloseState::Active
+        ) {
+            return Err(EngineError::CollectionUnavailable {
+                reason: "cloud connection host closed".into(),
+            });
+        }
+        self.collection()
+    }
     pub fn confirm_cloud_adoption(&self, preview: &Preview) -> Result<[u8; 16], RuntimeError> {
         self.cloud_runtime().ok_or_else(unavailable)?.confirm_cloud_adoption(
             preview,
-            &self.collection()?,
+            &self.cloud_connection_collection()?,
             self.engine(),
         )
     }
@@ -17,7 +30,7 @@ impl CoreHost {
         self.cloud_runtime().ok_or_else(unavailable)?.cloud_adoption_reply(
             work,
             reply,
-            &self.collection()?,
+            &self.cloud_connection_collection()?,
             self.backup_inputs.space.as_ref(),
         )
     }
@@ -26,7 +39,7 @@ impl CoreHost {
             .ok_or_else(unavailable)?
             .perform_cloud_adoption_local(
                 work,
-                &self.collection()?,
+                &self.cloud_connection_collection()?,
                 &self.media()?,
                 self.backup_inputs.space.as_ref(),
                 self.backup.as_ref(),

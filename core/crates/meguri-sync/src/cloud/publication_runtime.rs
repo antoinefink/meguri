@@ -232,6 +232,15 @@ impl Runtime {
         *ready = true;
         Ok(PreviewWork::Ready(Box::new(p.clone())))
     }
+    /// Cancellation of an older native sheet cannot dismiss a newer preview.
+    pub fn cancel_connection_preview_id(&self, id: u64) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        if !s.publication.preview.as_ref().is_some_and(|(p, _)| p.id == id) {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
+        s.publication.preview = None;
+        Ok(())
+    }
     pub fn cancel_connection_preview(&self) {
         self.state().publication.preview = None;
     }
@@ -768,7 +777,13 @@ impl Runtime {
         let decision = self.publication_decision()?;
         let now = self.adapter_now()?;
         let mut s = self.state();
-        if s.publication.running.as_ref() != Some(request) || !s.publication.submitted {
+        if s.publication.running.as_ref() != Some(request)
+            || !s.publication.submitted
+            || s.incarnation != request.incarnation
+            || Self::instance_locked(&s)? != request.instance
+            || collection.generation().0 != request.generation
+            || !collection.is_current()
+        {
             return Err(RuntimeError::StaleIncarnation);
         }
         s.publication.running = None;

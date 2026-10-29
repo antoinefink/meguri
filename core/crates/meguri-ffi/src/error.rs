@@ -9,6 +9,9 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
+    CloudConnection {
+        failure: crate::cloud_connection::CloudConnectionFailure,
+    },
     Maintenance {
         cause: crate::maintenance::MaintenanceError,
     },
@@ -100,6 +103,7 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CoreError::CloudConnection { .. } => f.write_str("cloud connection refused"),
             CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
             CoreError::ExportSourceInvalid => f.write_str("export source item refused"),
@@ -207,6 +211,9 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
+            CoreError::CloudConnection { .. } => EngineError::CollectionUnavailable {
+                reason: "cloud connection refused".into(),
+            },
             CoreError::Maintenance { cause } => EngineError::Internal {
                 message: format!("maintenance: {cause:?}"),
             },

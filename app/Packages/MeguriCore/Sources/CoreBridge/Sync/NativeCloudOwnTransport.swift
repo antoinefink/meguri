@@ -1,0 +1,265 @@
+#if canImport(CloudKit)
+import CloudKit
+import Foundation
+import Synchronization
+
+/// Shared opaque SDK archive conversion. Restoring fields validates the entire
+/// native identity before setting encrypted bytes or admitting an operation.
+enum NativeCloudKitSystemFields {
+    static func encode(_ record: CKRecord) throws -> Data {
+        let archive = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: archive); archive.finishEncoding()
+        return archive.encodedData
+    }
+    static func restore(_ fields: Data, target: CloudControlTarget) throws -> CKRecord {
+        guard !fields.isEmpty else { throw NativeCloudKitFailure.invalidSystemFields }
+        let decoder = try NSKeyedUnarchiver(forReadingFrom: fields)
+        decoder.requiresSecureCoding = true
+        decoder.decodingFailurePolicy = .setErrorAndReturn
+        defer { decoder.finishDecoding() }
+        guard let record = CKRecord(coder: decoder), decoder.error == nil, record.recordID == NativeCloudOwnRecords.id(target), record.recordType == target.recordType else { throw NativeCloudKitFailure.invalidSystemFields }
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
+        return record
+    }
+}
+enum NativeCloudOwnRecords {
+    static func zone(_ name: String) -> CKRecordZone.ID { .init(zoneName: name, ownerName: CKCurrentUserDefaultName) }
+    static func id(_ target: CloudControlTarget) -> CKRecord.ID { .init(recordName: target.name, zoneID: zone(target.zone)) }
+    static func requireNoAssets(_ record: CKRecord) throws {
+        guard record["pa"] == nil, record["ma"] == nil, record["a"] == nil,
+              !record.allKeys().contains(where: { record[$0] is CKAsset }) else { throw NativeCloudKitFailure.unsupportedAsset }
+    }
+    static func control(_ record: CKRecord, target: CloudControlTarget) throws -> CloudControlRecord {
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
+        guard record.recordID == id(target), record.recordType == target.recordType else { throw NativeCloudKitFailure.unsupportedRecord }
+        try requireNoAssets(record)
+        let value = record.encryptedValues["e"]
+        if let value, !(value is Data) { throw NativeCloudKitFailure.unsupportedRecord }
+        return CloudControlRecord(encrypted: value as? Data, systemFields: try NativeCloudKitSystemFields.encode(record))
+    }
+    static func save(target: CloudControlTarget, encrypted: Data, systemFields: Data?) throws -> CKRecord {
+        let record: CKRecord
+        if let systemFields { record = try NativeCloudKitSystemFields.restore(systemFields, target: target) }
+        else { record = CKRecord(recordType: target.recordType, recordID: id(target)) }
+        record.encryptedValues["e"] = encrypted as CKRecordValue
+        return record
+    }
+    static func readError(_ error: any Error) -> CloudControlRead {
+        guard let error = error as? CKError else { return .failed }
+        switch error.code { case .unknownItem: return .missing; case .zoneNotFound: return .zoneMissing; default: return .failed }
+    }
+    static func readResult(_ result: Result<CKRecord, any Error>, target: CloudControlTarget) throws -> CloudControlRead {
+        switch result { case .success(let r): return .found(try control(r, target: target)); case .failure(let e): return readError(e) }
+    }
+    static func saveResult(_ result: Result<CKRecord, any Error>, target: CloudControlTarget) throws -> CloudPublicationResult {
+        switch result {
+        case .success(let r): return .saved(try control(r, target: target))
+        case .failure(let e):
+            if let error = e as? CKError, error.code == .serverRecordChanged, let record = error.serverRecord {
+                return .conflict(try control(record, target: target))
+            }
+            // No wall-clock retry deadline is invented in Swift. Rust owns the
+            // trigger/retry policy; the original typed failure remains failed.
+            return .failed(retryAfterMilliseconds: nil)
+        }
+    }
+}
+
+protocol NativeCloudDatabaseQueue: Sendable { func add(_ operation: CKDatabaseOperation) -> Bool }
+private struct PrivateCloudDatabaseQueue: NativeCloudDatabaseQueue {
+    let database: CKDatabase
+    func add(_ operation: CKDatabaseOperation) -> Bool { database.add(operation); return true }
+}
+
+/// The original CK callback is buffered until the guarded Rust call returns.
+/// A cancelled pre-enqueue operation refuses queue acceptance synchronously.
+final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
+    private struct State { var queued = false; var cancelled = false; var finished = false }
+    private let state = Mutex(State())
+    let operation: CKDatabaseOperation
+    private let queue: any NativeCloudDatabaseQueue
+    private let stream: AsyncStream<Result<CloudOwnTransportReply, any Error>>
+    private let continuation: AsyncStream<Result<CloudOwnTransportReply, any Error>>.Continuation
+    init(operation: CKDatabaseOperation, queue: any NativeCloudDatabaseQueue) {
+        self.operation = operation; self.queue = queue
+        (stream, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+    }
+    func enqueue() -> Bool {
+        let allowed = state.withLock { state in
+            guard !state.queued, !state.cancelled else { return false }
+            state.queued = true
+            return true
+        }
+        guard allowed else { return false }
+        return queue.add(operation)
+    }
+    func cancel() {
+        state.withLock { $0.cancelled = true }
+        operation.cancel()
+    }
+    func finish(_ reply: Result<CloudOwnTransportReply, any Error>) {
+        let first = state.withLock { state in
+            guard !state.finished else { return false }
+            state.finished = true; return true
+        }
+        if first { continuation.yield(reply); continuation.finish() }
+    }
+    func reply() async throws -> CloudOwnTransportReply {
+        var iterator = stream.makeAsyncIterator()
+        guard let reply = await iterator.next() else { throw CloudOwnTransportFailure.missingReply }
+        return try reply.get()
+    }
+}
+
+public struct NativeCloudOwnTransport: CloudOwnTransport {
+    private let queue: any NativeCloudDatabaseQueue
+    public init(database: CKDatabase) throws {
+        guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
+        queue = PrivateCloudDatabaseQueue(database: database)
+    }
+    init(queue: any NativeCloudDatabaseQueue) { self.queue = queue }
+    public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        switch command {
+        case .read(let target): return read(target, publication: false)
+        case .publication(.read(let target)): return read(target, publication: true)
+        case .publication(.createZones(let zones)): return createZones(zones)
+        case .publication(.save(let target, let encrypted, let fields)): return try save(target, encrypted: encrypted, fields: fields)
+        case .adoptionPage(let zone, let cursor): return try page(zone: zone, cursor: cursor)
+        }
+    }
+    private func read(_ target: CloudControlTarget, publication: Bool) -> NativePreparedOwnOperation {
+        let id = NativeCloudOwnRecords.id(target)
+        let operation = CKFetchRecordsOperation(recordIDs: [id])
+        operation.desiredKeys = nil // Include encrypted e and every asset field.
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        let record = Mutex<Result<CKRecord, any Error>?>(nil)
+        operation.perRecordResultBlock = { received, result in
+            record.withLock { value in
+                if received == id { value = result }
+                else { value = .failure(NativeCloudKitFailure.unsupportedRecord) }
+            }
+        }
+        operation.fetchRecordsResultBlock = { [weak prepared] result in
+            guard let prepared else { return }
+            do {
+                let read: CloudControlRead
+                if let received = record.withLock({ $0 }) { read = try NativeCloudOwnRecords.readResult(received, target: target) }
+                else if case .failure(let error) = result { read = NativeCloudOwnRecords.readError(error) }
+                else { throw CloudOwnTransportFailure.missingReply }
+                prepared.finish(.success(publication ? .publication(.read(read)) : .read(read)))
+            } catch { prepared.finish(.failure(error)) }
+        }
+        return prepared
+    }
+    private func createZones(_ names: [String]) -> NativePreparedOwnOperation {
+        let ids = Set(names.map(NativeCloudOwnRecords.zone))
+        let operation = CKModifyRecordZonesOperation(recordZonesToSave: names.map { CKRecordZone(zoneID: NativeCloudOwnRecords.zone($0)) }, recordZoneIDsToDelete: nil)
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        struct State { var saved: Set<CKRecordZone.ID> = []; var failed = false }
+        let state = Mutex(State())
+        operation.perRecordZoneSaveBlock = { id, result in
+            state.withLock { value in
+                switch result {
+                case .success(let zone):
+                    if ids.contains(id), zone.zoneID == id, id.ownerName == CKCurrentUserDefaultName { value.saved.insert(id) }
+                    else { value.failed = true }
+                case .failure: value.failed = true
+                }
+            }
+        }
+        operation.modifyRecordZonesResultBlock = { [weak prepared] result in
+            guard let prepared else { return }
+            let succeeded = state.withLock { !$0.failed && $0.saved == ids }
+            if case .success = result, succeeded { prepared.finish(.success(.publication(.zonesCreated))) }
+            else { prepared.finish(.success(.publication(.failed(retryAfterMilliseconds: nil)))) }
+        }
+        return prepared
+    }
+    private func save(_ target: CloudControlTarget, encrypted: Data, fields: Data?) throws -> NativePreparedOwnOperation {
+        let native = try NativeCloudOwnRecords.save(target: target, encrypted: encrypted, systemFields: fields)
+        let operation = CKModifyRecordsOperation(recordsToSave: [native], recordIDsToDelete: nil)
+        operation.savePolicy = .ifServerRecordUnchanged; operation.isAtomic = true
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        let record = Mutex<Result<CKRecord, any Error>?>(nil)
+        operation.perRecordSaveBlock = { id, result in
+            record.withLock { $0 = id == native.recordID ? result : .failure(NativeCloudKitFailure.unsupportedRecord) }
+        }
+        operation.modifyRecordsResultBlock = { [weak prepared] result in
+            guard let prepared else { return }
+            do {
+                if let record = record.withLock({ $0 }) {
+                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(record, target: target))))
+                } else if case .failure(let error) = result {
+                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(.failure(error), target: target))))
+                } else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)) }
+            } catch { prepared.finish(.failure(error)) }
+        }
+        return prepared
+    }
+    private func page(zone: String, cursor: Data?) throws -> NativePreparedOwnOperation {
+        let id = NativeCloudOwnRecords.zone(zone)
+        let token: CKServerChangeToken?
+        if let cursor {
+            do {
+                guard let decoded = try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: cursor) else { throw CloudOwnTransportFailure.invalidCursor }
+                token = decoded
+            } catch { throw CloudOwnTransportFailure.invalidCursor }
+        } else { token = nil }
+        let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
+        configuration.previousServerChangeToken = token; configuration.desiredKeys = nil
+        configuration.resultsLimit = 200
+        let operation = CKFetchRecordZoneChangesOperation(recordZoneIDs: [id], configurationsByRecordZoneID: [id: configuration])
+        operation.fetchAllChanges = false
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        struct Page {
+            var records: [CloudStagingRecord] = []
+            var deleted: [String] = []
+            var next: Data?
+            var completed = false
+            var failure: (any Error)?
+        }
+        let state = Mutex(Page())
+        operation.recordWasChangedBlock = { recordID, result in
+            do {
+                guard recordID.zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                let record = try result.get()
+                guard record.recordID == recordID else { throw NativeCloudKitFailure.unsupportedRecord }
+                let target = CloudControlTarget(zone: zone, name: recordID.recordName, recordType: record.recordType)
+                let value = try NativeCloudOwnRecords.control(record, target: target)
+                state.withLock { $0.records.append(.init(name: recordID.recordName, recordType: record.recordType, record: value)) }
+            } catch { state.withLock { $0.failure = error } }
+        }
+        operation.recordWithIDWasDeletedBlock = { recordID, _ in
+            state.withLock { value in
+                if recordID.zoneID == id { value.deleted.append(recordID.recordName) }
+                else { value.failure = NativeCloudKitFailure.unsupportedRecord }
+            }
+        }
+        operation.recordZoneFetchResultBlock = { zoneID, result in
+            do {
+                guard zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                let page = try result.get()
+                let next = page.moreComing ? try NSKeyedArchiver.archivedData(withRootObject: page.serverChangeToken, requiringSecureCoding: true) : nil
+                state.withLock { $0.next = next; $0.completed = true }
+            } catch { state.withLock { $0.failure = error } }
+        }
+        operation.fetchRecordZoneChangesResultBlock = { [weak prepared] result in
+            guard let prepared else { return }
+            let page = state.withLock { $0 }
+            if let error = page.failure { prepared.finish(.failure(error)); return }
+            if case .failure(let error) = result { prepared.finish(.failure(error)); return }
+            guard page.completed else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
+            prepared.finish(.success(.page(records: page.records, deleted: page.deleted, next: page.next)))
+        }
+        return prepared
+    }
+}
+
+extension NativeCloudKitEngineFactory {
+    /// Both paths retain exactly this factory's private CKDatabase. This creates
+    /// no CKSyncEngine and adds no pending database changes to an engine.
+    public func makeOwnExecutor(core: CoreCloudConnectionService) throws -> CloudOwnExecutor {
+        CloudOwnExecutor(core: core, transport: try NativeCloudOwnTransport(database: database))
+    }
+}
+#endif

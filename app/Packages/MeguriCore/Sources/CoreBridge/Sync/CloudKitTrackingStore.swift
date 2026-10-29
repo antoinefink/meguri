@@ -20,6 +20,10 @@ public actor CoreCloudWorkflowService {
         creation = task
         return try await task.value
     }
+    public func connection() async throws -> CoreCloudConnectionService {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowConnection) { CoreCloudConnectionService(try raw.connection()) }
+    }
     public func instance() async throws -> String {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowInstance) { try raw.instance() }
