@@ -183,6 +183,7 @@ enum CloseState {
 mod cloud_adoption;
 
 pub struct CoreHost {
+    pub(crate) cloud_policy: Option<meguri_sync::cloud::policy::Driver>,
     cloud: Option<Arc<meguri_sync::cloud::runtime::Runtime>>,
     pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
     pub(crate) export: crate::collection_export::ExportInputs,
@@ -332,7 +333,11 @@ impl CoreHost {
             backup: backup.clone(),
             initial_open: options.clone(),
         });
+        let cloud_policy = cloud
+            .as_ref()
+            .map(|runtime| meguri_sync::cloud::policy::Driver::new(runtime.clone(), config.clock.clone()));
         let host = Self {
+            cloud_policy,
             cloud,
             manual_transfers,
             backup_inputs,

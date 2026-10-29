@@ -53,6 +53,9 @@ impl Runtime {
         s.adapter.no_state_point += 1;
         s.adapter.fetch = None;
         s.adapter.scheduled = None;
+        s.policy.flights.clear();
+        s.policy.parked.clear();
+        s.policy.held_images.clear();
         s.actions.automatic = automatic;
         s.actions.handler = None;
         #[cfg(feature = "test-hooks")]
@@ -94,6 +97,7 @@ impl Runtime {
             .filter(|a| a.id == sdk)
             .ok_or(RuntimeError::StaleIncarnation)?;
         authority.stopping = true;
+        s.policy.flights.retain(|(owner, _), _| owner != sdk);
         if policy_stop {
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         }
@@ -530,6 +534,28 @@ impl Runtime {
         fetched: bool,
         terminal: Option<CollectionOutcome>,
     ) -> Result<CompletedExchange, RuntimeError> {
+        let owner = {
+            let s = self.state();
+            if let Some(completed) = s.adapter.durable.exchanges.get(&id) {
+                return Ok(completed.clone());
+            }
+            if let Some((owner, completed)) = s.adapter.closed_exchanges.get(&id)
+                && owner == sdk
+            {
+                return Ok(completed.clone());
+            }
+            let owner = (id, sdk.to_owned(), s.incarnation);
+            if s.adapter.exchange_owner.as_ref() != Some(&owner) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            if s.actions.exchange.as_ref().map(|(active, _)| *active) != Some(id) {
+                return Err(Error::InvalidData.into());
+            }
+            owner
+        };
+        // The clock is a foreign provider and can reenter or change Runtime.
+        // Read it without either guard; all completion facts are read again below.
+        let ended_ms = self.adapter_now()?;
         let mut s = self.state();
         if let Some(completed) = s.adapter.durable.exchanges.get(&id) {
             return Ok(completed.clone());
@@ -539,7 +565,7 @@ impl Runtime {
         {
             return Ok(completed.clone());
         }
-        if s.adapter.exchange_owner.as_ref() != Some(&(id, sdk.into(), s.incarnation)) {
+        if s.incarnation != owner.2 || s.adapter.exchange_owner.as_ref() != Some(&owner) {
             return Err(RuntimeError::StaleIncarnation);
         }
         let (active_id, result) = s.actions.exchange.clone().ok_or(Error::InvalidData)?;
@@ -573,6 +599,7 @@ impl Runtime {
         };
         let mut durable = s.adapter.durable.clone();
         durable.exchanges.insert(id, completed.clone());
+        durable.exchange_ended_ms.insert(id, ended_ms);
         if let Err(error) = with_tracking_access(|| {
             s.store
                 .as_mut()

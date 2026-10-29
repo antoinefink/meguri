@@ -12,6 +12,8 @@ mod adoption_store;
 pub mod control_codec;
 pub mod entity_codec;
 mod held_view;
+pub mod policy;
+mod policy_store;
 pub mod publication;
 mod publication_store;
 pub mod row_payload;
@@ -78,6 +80,7 @@ impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
         match error.sqlite_error_code() {
             Some(rusqlite::ErrorCode::ConstraintViolation) => Self::Constraint,
+            Some(rusqlite::ErrorCode::DiskFull) => Self::Io(std::io::ErrorKind::StorageFull),
             _ => Self::Database,
         }
     }

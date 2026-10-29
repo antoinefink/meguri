@@ -43,6 +43,7 @@ pub(crate) struct Durable {
     pub absence: Option<AbsenceLedger>,
     pub drains: Vec<FetchDrain>,
     pub exchanges: BTreeMap<u64, CompletedExchange>,
+    pub exchange_ended_ms: BTreeMap<u64, i64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct AbsenceLedger {

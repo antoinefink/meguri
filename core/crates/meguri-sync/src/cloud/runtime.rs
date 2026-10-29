@@ -23,6 +23,8 @@ mod adapter_impl;
 mod adoption_impl;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
+#[path = "policy_runtime.rs"]
+mod policy_impl;
 #[path = "publication_runtime.rs"]
 mod publication_impl;
 #[path = "workflow_runtime.rs"]
@@ -390,6 +392,7 @@ struct State {
     root_reads: std::collections::BTreeSet<u64>,
     trace: Vec<super::workflow::TraceEvent>,
     adapter: super::adapter::AdapterState,
+    policy: super::policy::RuntimeEvidenceState,
     publication: super::publication::ProcessState,
     incoming: super::incoming::ProcessState,
     #[cfg(feature = "test-hooks")]
@@ -539,6 +542,7 @@ impl Runtime {
             };
             state.last_session = None;
         }
+        state.policy = super::policy::RuntimeEvidenceState::default();
         state.cloud.flagged.clear();
         state.cloud.acked_images.clear();
         state.cloud.handed_images.clear();

@@ -99,3 +99,7 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'test(=periodic::quit_expires_while_periodic_owner_is_still_blocked) or test(=quit_expires_before_the_forced_provider_owner_releases_its_copy)'
 threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and test(=completion_clock_reenters_runtime_and_rechecks_live_completion_facts)'
+threads-required = "num-test-threads"

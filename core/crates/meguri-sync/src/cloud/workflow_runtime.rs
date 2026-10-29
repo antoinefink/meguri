@@ -163,9 +163,9 @@ impl Runtime {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let mut pending = store.dirty_names(b.binding.id)?;
-        pending
-            .0
-            .retain(|name, _| !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name));
+        pending.0.retain(|name, _| {
+            !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name) && !s.policy.parked.contains(name)
+        });
         Ok(pending)
     }
     pub(super) fn emit_pending_locked(
@@ -176,6 +176,8 @@ impl Runtime {
     ) -> Result<PendingUpdate, RuntimeError> {
         if kind == UpdateKind::Full {
             s.cloud.deferred.clear();
+            s.policy.parked.clear();
+            s.policy.held_images.clear();
         }
         // Callers with the state guard hold tracking access only for row reads.
         let snapshot = with_tracking_access(|| Self::sendables_locked(s))?;
@@ -1004,12 +1006,18 @@ impl Runtime {
                 bytes += size;
                 let image = (name.clone(), flight.erev, flight.payload_digest);
                 let image_seq = flight.image_seq;
+                let held_image = flight.held;
                 store.persist_flight(b.id, &name, flight)?;
                 s.cloud
                     .handed_images
                     .entry(image)
                     .and_modify(|seq| *seq = (*seq).max(image_seq))
                     .or_insert(image_seq);
+                if held_image {
+                    s.policy.held_images.insert(name.clone());
+                } else {
+                    s.policy.held_images.remove(&name);
+                }
                 saves.push(SaveInput {
                     name,
                     envelope,
@@ -1044,6 +1052,12 @@ impl Runtime {
                     batch_id: id,
                     names: saves.iter().map(|e| e.name.clone()).collect(),
                 });
+            }
+            if !saves.is_empty() {
+                s.policy.flights.insert(
+                    (instance.to_owned(), id),
+                    saves.iter().map(|v| v.name.clone()).collect(),
+                );
             }
             Ok(BuiltBatch { id, saves })
         })
@@ -1204,7 +1218,15 @@ impl Runtime {
             s.actions.record_limit = (s.actions.record_limit / 2).max(1);
             s.actions.byte_limit = (s.actions.byte_limit / 2).max(1);
         }
+        if let Some(names) = s.policy.flights.get_mut(&(instance.to_owned(), request_id)) {
+            for name in saved.iter().map(|v| &v.name).chain(failed.iter().map(|(n, _)| n)) {
+                names.remove(name);
+            }
+        }
         for (name, error) in failed {
+            if *error == SendError::Other || (*error == SendError::LimitExceeded && batch_count <= 1) {
+                s.policy.parked.insert(name.clone());
+            }
             if *error == SendError::BatchRequestFailed || (*error == SendError::LimitExceeded && batch_count > 1) {
                 force.insert(name.clone());
             }
@@ -1455,6 +1477,10 @@ impl Runtime {
             .find(|c| c.id == id)
             .ok_or(Error::InvalidData)?;
         call.returned = true;
+        let requests = call.request_ids.clone();
+        for request in requests {
+            s.policy.flights.remove(&(instance.to_owned(), request));
+        }
         Ok(())
     }
     pub fn send_calls(&self) -> Vec<SendCall> {

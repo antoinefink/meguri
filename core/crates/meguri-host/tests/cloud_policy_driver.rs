@@ -1,0 +1,779 @@
+//! Real Host/Runtime composition. Baseline preparation is the existing test hook;
+//! policy projection, mutations, SDK drains, faults and evidence use production paths.
+#![cfg(feature = "test-hooks")]
+use meguri_host::CoreHost;
+use meguri_model::clock::{Clock, StepClock, UtcOffset};
+use meguri_storage::{Cell, ReadRows, ReaderRole, RowKey, Table};
+use meguri_sync::cloud::{
+    BuildScope, ContainerId, Environment, OpaqueBytes,
+    entity_codec::{self as codec, Payload},
+    policy::{
+        ActionKind, ChangeCause, Command, DeviceEvent, DeviceSettings, DriverError, ExchangeOutcome, OperationError,
+        Source, StatusState,
+    },
+    runtime::{CloudInputs, IdentityProvider, IdentityStatus, RuntimeError},
+    testing::{ApplyInterruption, IncomingStage},
+    workflow::Saved,
+};
+use meguri_testkit::cloud::devices::{NativeFiles, options};
+use std::{sync::Arc, time::Duration};
+
+struct Account;
+impl IdentityProvider for Account {
+    fn read_identity(&self, _: &BuildScope) -> IdentityStatus {
+        IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec()))
+    }
+}
+struct Rig {
+    _root: tempfile::TempDir,
+    host: Arc<CoreHost>,
+    clock: Arc<StepClock>,
+    sdk: String,
+    zone: String,
+    records: Vec<Saved>,
+    baseline_deck: meguri_model::ids::DeckId,
+}
+fn rig() -> Rig {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("collection");
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut config = options(&directory, 1_894_701_600_000, 1914);
+    // HostConfig defaults to LocalOnly, which correctly closes the policy gate.
+    // Arrange the same connected account as the existing synthetic baseline.
+    config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
+        account: "synthetic-account-A".into(),
+        configuration: "synthetic-u114".into(),
+        environment: "development".into(),
+    };
+    let clock = Arc::new(StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC"));
+    config.clock = clock.clone();
+    meguri_engine::bootstrap::create(
+        &directory.join("collection.anki2"),
+        config.clock.as_ref(),
+        config.random.as_ref(),
+    )
+    .unwrap();
+    config.cloud = Some(CloudInputs {
+        scope: BuildScope {
+            container: ContainerId::new("synthetic-u114").unwrap(),
+            environment: Environment::Development,
+        },
+        identity: Arc::new(Account),
+        files: Arc::new(NativeFiles),
+    });
+    let host = Arc::new(CoreHost::open(config.clone()).unwrap());
+    let collection = host.collection().unwrap();
+    let baseline_deck = meguri_engine::decks::add(&collection, "Policy baseline deck".into())
+        .unwrap()
+        .value
+        .id;
+    let media = host.media().unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let (records, active, _) = runtime
+        .prepare_adapter_baseline_for_testing(
+            &collection,
+            config.clock.as_ref(),
+            config.random.as_ref(),
+            Some(b"synthetic-sdk-state".to_vec()),
+        )
+        .unwrap();
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true,
+        paused: false,
+        automatic: false,
+        media: false,
+    }))
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+        origin_sdk: None,
+    })
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Network { reachable: true })
+        .unwrap();
+    runtime
+        .reconcile_binding(&collection, &media, Duration::from_secs(10))
+        .unwrap();
+    assert!(
+        runtime
+            .accept_root_fetch(&runtime.instance().unwrap(), Some(&active), true, 1)
+            .unwrap()
+    );
+    let (sdk, _, zone) = runtime.register_sdk(false).unwrap();
+    host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let state = host.cloud_policy_driver().unwrap().state();
+    assert!(
+        state.gate_open() && state.engine_runs(),
+        "fixture admission: {state:#?}"
+    );
+    assert!(state.root_confirmed, "fixture root confirmation: {state:#?}");
+    Rig {
+        _root: root,
+        host,
+        clock,
+        sdk,
+        zone,
+        records,
+        baseline_deck,
+    }
+}
+#[track_caller]
+fn command(mut commands: Vec<Command>, f: impl Fn(&ActionKind) -> bool) -> Command {
+    let index = commands
+        .iter()
+        .position(|c| f(&c.action.kind))
+        .unwrap_or_else(|| panic!("requested policy action absent; actual commands: {commands:#?}"));
+    commands.remove(index)
+}
+
+fn deck_row(rig: &Rig, id: i64) -> Vec<Cell> {
+    let collection = rig.host.collection().unwrap();
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    reader.row_image(Table::Decks, &RowKey::Id(id)).unwrap().unwrap()
+}
+
+fn incoming_deck(rig: &Rig) -> (i64, Vec<Cell>, Command) {
+    let (saved, entity, mut deck) = rig
+        .records
+        .iter()
+        .find_map(|saved| {
+            let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&saved.envelope).unwrap() else {
+                return None;
+            };
+            if entity.fields.kind != codec::Kind::Deck {
+                return None;
+            }
+            let Payload::Deck(deck) = Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap()
+            else {
+                unreachable!()
+            };
+            (deck.id != 1).then_some((saved, entity, deck))
+        })
+        .unwrap();
+    let before = deck_row(rig, deck.id);
+    let id = deck.id;
+    deck.name = b"Policy remote deck".to_vec();
+    deck.mtime_secs += 1;
+    let mut fields = entity.fields;
+    fields.erev += 1;
+    let remote = Saved {
+        name: saved.name.clone(),
+        envelope: codec::Entity::build(fields, &Payload::Deck(deck).encode().unwrap())
+            .unwrap()
+            .encode()
+            .unwrap(),
+        system_fields: b"synthetic-policy-revision-2".to_vec(),
+    };
+    rig.host
+        .cloud_runtime()
+        .unwrap()
+        .adapter_fetched(&rig.sdk, &rig.zone, &[remote], &[])
+        .unwrap();
+    let apply = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::ApplyReady { .. }),
+    );
+    (id, before, apply)
+}
+
+fn cancelled_exchange(rig: &Rig) -> Command {
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    command(
+        rig.host
+            .cloud_policy_driver()
+            .unwrap()
+            .end_before_capture(
+                exchange,
+                ExchangeOutcome::Cancelled,
+                rig.host.engine().state(),
+                rig.host.engine().generation(),
+            )
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RecordExchange(_)),
+    )
+}
+
+#[test]
+fn native_pause_rejects_issued_apply_without_changing_collection_or_tracking() {
+    let rig = rig();
+    let (id, before, apply) = incoming_deck(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap().id;
+    let inbox = runtime.inbox_entries(binding).unwrap();
+    runtime.adapter_pause(true).unwrap();
+    assert!(matches!(
+        rig.host.execute_cloud_policy_core(&apply, Duration::from_secs(10)),
+        Err(DriverError::StaleCommand)
+    ));
+    assert_eq!(deck_row(&rig, id), before);
+    assert_eq!(runtime.inbox_entries(binding).unwrap(), inbox);
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    assert!(rig.host.cloud_policy_driver().unwrap().state().tracking_stop.is_none());
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn native_pause_rejects_issued_exchange_evidence_without_writing_it() {
+    let rig = rig();
+    let record = cancelled_exchange(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let before = rig.host.cloud_policy_driver().unwrap().status().evidence;
+    runtime.adapter_pause(true).unwrap();
+    assert!(matches!(
+        rig.host.execute_cloud_policy_core(&record, Duration::from_secs(10)),
+        Err(DriverError::StaleCommand)
+    ));
+    let projection = runtime
+        .policy_projection(
+            meguri_sync::cloud::policy::Lifecycle::Ready,
+            rig.host.engine().generation().0,
+        )
+        .unwrap();
+    assert_eq!(projection.evidence, before);
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn actual_apply_rollback_and_cancel_preserve_typed_deferral_without_tracking_stop() {
+    for interruption in [ApplyInterruption::Cancel, ApplyInterruption::Error] {
+        let rig = rig();
+        let (id, before, apply) = incoming_deck(&rig);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let rolled_back = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = rolled_back.clone();
+        runtime.set_incoming_stage_hook_for_testing(move |stage| {
+            if stage == IncomingStage::IncomingRollbackComplete {
+                observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        runtime.interrupt_next_incoming_for_testing(interruption);
+        let result = rig.host.execute_cloud_policy_core(&apply, Duration::from_secs(10));
+        match (interruption, result) {
+            (ApplyInterruption::Cancel, Err(DriverError::ApplyDeferred(meguri_engine::EngineError::Cancelled))) => {}
+            (
+                ApplyInterruption::Error,
+                Err(DriverError::ApplyDeferred(meguri_engine::EngineError::Internal { .. })),
+            ) => {}
+            (_, other) => panic!("expected the actual rolled-back writer error: {other:?}"),
+        }
+        assert!(rolled_back.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(deck_row(&rig, id), before);
+        let binding = runtime.status().unwrap().binding.unwrap().id;
+        assert!(runtime.apply_intents(binding).unwrap().is_empty());
+        assert!(runtime.incoming_runs().is_empty());
+        let inbox = runtime.inbox_entries(binding).unwrap();
+        assert_eq!(inbox.len(), 1);
+        if interruption == ApplyInterruption::Cancel {
+            assert_eq!(inbox[0].entry.reason, meguri_sync::cloud::InboxReason::Ready);
+            assert_eq!(inbox[0].entry.retry_count, 0);
+        } else {
+            assert!(matches!(
+                inbox[0].entry.reason,
+                meguri_sync::cloud::InboxReason::ApplyFailed { .. }
+            ));
+            assert_eq!(inbox[0].entry.retry_count, 1);
+        }
+        assert!(!runtime.status().unwrap().tracking_stopped);
+        assert!(rig.host.cloud_policy_driver().unwrap().state().tracking_stop.is_none());
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn actual_apply_rollback_persistence_failure_stops_tracking() {
+    let rig = rig();
+    let (id, before, apply) = incoming_deck(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    runtime.interrupt_next_incoming_for_testing(ApplyInterruption::Error);
+    meguri_sync::cloud::testing::arm_tracking_fault(
+        "cloud.tracking.commit.rollback",
+        meguri_sync::cloud::testing::TrackingFault::Constraint,
+    )
+    .unwrap();
+    let result = rig.host.execute_cloud_policy_core(&apply, Duration::from_secs(10));
+    assert!(matches!(result, Err(DriverError::CoreActionFailed { .. })));
+    assert_eq!(deck_row(&rig, id), before);
+    assert!(runtime.status().unwrap().tracking_stopped);
+    assert!(rig.host.cloud_policy_driver().unwrap().state().tracking_stop.is_some());
+    assert!(
+        rig.host
+            .cloud_policy_driver()
+            .unwrap()
+            .status()
+            .attention
+            .contains_key(&meguri_sync::cloud::policy::Attention::TrackingError)
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn failed_rollover_does_not_receipt_or_write_evidence_and_explicit_retry_checks_again() {
+    let rig = rig();
+    let collection = rig.host.collection().unwrap();
+    collection.check_rollover().unwrap();
+    let events = rig.host.engine().stream().subscribe();
+    rig.clock.step_ms(86_400_000);
+    let record = cancelled_exchange(&rig);
+    // Calling from the writer makes the actual check_rollover reject its caller.
+    // A second explicit call must fail too, rather than skipping the failed check.
+    for _ in 0..2 {
+        let host = rig.host.clone();
+        let attempt = record.clone();
+        let result = collection
+            .run(
+                meguri_engine::OpSpec::named("policy_rollover_caller", meguri_engine::OpSource::CloudIncoming),
+                move |_| Ok(host.execute_cloud_policy_core(&attempt, Duration::from_secs(10))),
+            )
+            .unwrap()
+            .value;
+        assert!(matches!(
+            result,
+            Err(DriverError::Runtime(RuntimeError::Engine(
+                meguri_engine::EngineError::InvalidArgument { .. }
+            )))
+        ));
+        assert!(
+            rig.host
+                .cloud_policy_driver()
+                .unwrap()
+                .status()
+                .evidence
+                .last_attempt
+                .is_none()
+        );
+        assert!(!rig.host.cloud_runtime().unwrap().status().unwrap().tracking_stopped);
+    }
+    // Authority is still valid; this explicit call runs outside the writer.
+    rig.host.cloud_policy_driver().unwrap().validate(&record).unwrap();
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    let rollovers = std::iter::from_fn(|| events.try_recv())
+        .filter(|event| matches!(event.kind, meguri_engine::changes::stream::EventKind::RolledOver { .. }))
+        .count();
+    assert_eq!(rollovers, 1);
+    assert!(
+        rig.host
+            .cloud_policy_driver()
+            .unwrap()
+            .status()
+            .evidence
+            .last_attempt
+            .is_some()
+    );
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    assert!(
+        std::iter::from_fn(|| events.try_recv())
+            .all(|event| !matches!(event.kind, meguri_engine::changes::stream::EventKind::RolledOver { .. }))
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn real_pending_mutation_and_actual_settings_reach_retained_driver() {
+    let rig = rig();
+    let collection = rig.host.collection().unwrap();
+    // Stable-layout capture supports edits to a tracked deck, not new structural rows.
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Policy pending deck".into()).unwrap();
+    rig.host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Local))
+        .unwrap();
+    let status = rig.host.cloud_policy_driver().unwrap().status();
+    assert!(status.pending > 0);
+    assert!(status.evidence.as_of_ms().is_none());
+    assert_eq!(
+        status.state,
+        StatusState::Paused(meguri_sync::cloud::policy::PausedReason::AutomaticOff)
+    );
+    rig.host
+        .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: true,
+            media: false,
+        }))
+        .unwrap();
+    assert_eq!(
+        rig.host.cloud_policy_driver().unwrap().status().state,
+        StatusState::ChangesPending
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn early_exchange_clock_and_receipt_survive_repeat_and_tracking_failure() {
+    let rig = rig();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Key))
+            .unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    rig.clock.step_ms(31_000);
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let commands = driver
+        .end_before_capture(
+            exchange,
+            ExchangeOutcome::Waiting {
+                class: OperationError::NoAccount,
+                retry_after_ms: None,
+            },
+            rig.host.engine().state(),
+            rig.host.engine().generation(),
+        )
+        .unwrap();
+    let record = command(commands, |k| matches!(k, ActionKind::RecordExchange(_)));
+    let duplicate = driver
+        .end_before_capture(
+            exchange,
+            ExchangeOutcome::Cancelled,
+            rig.host.engine().state(),
+            rig.host.engine().generation(),
+        )
+        .unwrap();
+    assert!(
+        !duplicate
+            .iter()
+            .any(|c| matches!(c.action.kind, ActionKind::RecordExchange(_)))
+    );
+    let runtime = rig.host.cloud_runtime().unwrap();
+    runtime.policy_evidence_constraint_for_testing(true).unwrap();
+    let failed = rig.host.execute_cloud_policy_core(&record, Duration::from_secs(10));
+    runtime.policy_evidence_constraint_for_testing(false).unwrap();
+    assert!(matches!(failed, Err(DriverError::CoreActionFailed { .. })));
+    assert!(runtime.status().unwrap().tracking_stopped);
+    let status = driver.status();
+    assert!(status.evidence.last_attempt.is_none());
+    assert!(
+        status
+            .attention
+            .contains_key(&meguri_sync::cloud::policy::Attention::TrackingError)
+    );
+    // Evidence has not been fabricated by either the early end or the failed write.
+    assert!(status.evidence.last_completed.is_none());
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn early_exchange_is_durable_and_replaying_action_does_not_change_its_clock() {
+    let rig = rig();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    rig.clock.step_ms(30_000);
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let record = command(
+        driver
+            .end_before_capture(
+                exchange,
+                ExchangeOutcome::Cancelled,
+                rig.host.engine().state(),
+                rig.host.engine().generation(),
+            )
+            .unwrap(),
+        |k| matches!(k, ActionKind::RecordExchange(_)),
+    );
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    let first = driver.status().evidence.last_attempt.unwrap();
+    assert_eq!(first.ended_ms, 1_894_701_630_000);
+    rig.clock.step_ms(4_000);
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(driver.status().evidence.last_attempt, Some(first));
+    assert!(driver.status().evidence.last_completed.is_none());
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn actual_sdk_drains_qualify_quiet_only_after_both_zones_and_durable_evidence_write() {
+    let rig = rig();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    rig.host
+        .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: true,
+            media: false,
+        }))
+        .unwrap();
+    let call = runtime
+        .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()])
+        .unwrap();
+    let group = format!("fetch:{call}");
+    // Existing adapter contract uses the call's own group; no policy-created drains.
+    runtime.adapter_will_fetch(&rig.sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, &group, true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, call).unwrap());
+    let commands = rig
+        .host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let quiet = command(commands, |k| matches!(k, ActionKind::RecordQuietPoint { .. }));
+    assert!(
+        rig.host
+            .cloud_policy_driver()
+            .unwrap()
+            .status()
+            .evidence
+            .quiet_ms
+            .is_none()
+    );
+    rig.host
+        .execute_cloud_policy_core(&quiet, Duration::from_secs(10))
+        .unwrap();
+    assert!(
+        rig.host
+            .cloud_policy_driver()
+            .unwrap()
+            .status()
+            .evidence
+            .quiet_ms
+            .is_some()
+    );
+    // Full attention/media projection is explicitly unknown in this baseline Runtime.
+    assert_eq!(
+        rig.host.cloud_policy_driver().unwrap().status().state,
+        StatusState::AwaitingEvidence
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn closed_generation_cannot_write_or_roll_over_an_exchange() {
+    let rig = rig();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let record = command(
+        driver
+            .end_before_capture(
+                exchange,
+                ExchangeOutcome::Cancelled,
+                rig.host.engine().state(),
+                rig.host.engine().generation(),
+            )
+            .unwrap(),
+        |k| matches!(k, ActionKind::RecordExchange(_)),
+    );
+    rig.host.close().unwrap();
+    assert!(
+        rig.host
+            .execute_cloud_policy_core(&record, Duration::from_secs(10))
+            .is_err()
+    );
+    assert!(driver.status().evidence.last_attempt.is_none());
+}
+
+#[test]
+fn completed_runtime_exchange_uses_accepted_end_clock_not_projection_time() {
+    let rig = rig();
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    let native = driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let fetch = runtime
+        .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()])
+        .unwrap();
+    runtime
+        .adapter_will_fetch(&rig.sdk, "policy-exchange".into(), true)
+        .unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, "policy-exchange", true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).unwrap());
+    runtime.adapter_exchange_fetch(&rig.sdk, true).unwrap();
+    rig.clock.step_ms(10_000);
+    let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+    assert_eq!(
+        completed.collection,
+        meguri_sync::cloud::adapter::CollectionOutcome::Succeeded
+    );
+    rig.clock.step_ms(90_000);
+    let record = command(
+        driver
+            .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+            .unwrap(),
+        |k| matches!(k, ActionKind::RecordExchange(_)),
+    );
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    let evidence = driver.status().evidence;
+    assert_eq!(evidence.last_completed.unwrap().ended_ms, 1_894_701_610_000);
+    assert!(evidence.last_attempt.is_none());
+    rig.host.close().unwrap();
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CompletionClockEffect {
+    Read,
+    Pause,
+    Isolate,
+}
+
+#[derive(Debug)]
+struct ReentrantCompletionClock {
+    runtime: std::sync::Weak<meguri_sync::cloud::runtime::Runtime>,
+    clock: Arc<StepClock>,
+    effect: CompletionClockEffect,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl Clock for ReentrantCompletionClock {
+    fn now_ms(&self) -> i64 {
+        let runtime = self.runtime.upgrade().unwrap();
+        // Same-thread provider reentry takes both the state and tracking guards.
+        runtime.status().unwrap();
+        runtime.adapter_guard();
+        match self.effect {
+            CompletionClockEffect::Read => {}
+            CompletionClockEffect::Pause => runtime.adapter_pause(true).unwrap(),
+            CompletionClockEffect::Isolate => runtime.adapter_stop_syncing().unwrap(),
+        }
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.clock.now_ms()
+    }
+    fn utc_offset_at(&self, at_ms: i64) -> UtcOffset {
+        self.clock.utc_offset_at(at_ms)
+    }
+    fn zone_id(&self) -> String {
+        self.clock.zone_id()
+    }
+}
+
+#[test]
+fn completion_clock_reenters_runtime_and_rechecks_live_completion_facts() {
+    const CHILD: &str = "MEGURI_POLICY_COMPLETION_CLOCK_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // A regressed mutex deadlock must fail this test without hanging the suite
+        // or waiting for Runtime/Host destructors on the blocked child thread.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "completion_clock_reenters_runtime_and_rechecks_live_completion_facts",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .spawn()
+            .unwrap();
+        for _ in 0..300 {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "reentrant completion child failed: {status}");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        panic!("reentrant completion child did not finish within the 30-second watchdog");
+    }
+    for effect in [
+        CompletionClockEffect::Read,
+        CompletionClockEffect::Pause,
+        CompletionClockEffect::Isolate,
+    ] {
+        let rig = rig();
+        let driver = rig.host.cloud_policy_driver().unwrap();
+        let run = command(
+            rig.host
+                .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                .unwrap(),
+            |k| matches!(k, ActionKind::RunExchange { .. }),
+        );
+        let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+            unreachable!()
+        };
+        let native = driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let fetch = runtime
+            .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()])
+            .unwrap();
+        runtime
+            .adapter_will_fetch(&rig.sdk, "reentrant-clock".into(), true)
+            .unwrap();
+        runtime.adapter_did_fetch(&rig.sdk, "reentrant-clock", true).unwrap();
+        assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).unwrap());
+        runtime.adapter_exchange_fetch(&rig.sdk, true).unwrap();
+        let clock = Arc::new(ReentrantCompletionClock {
+            runtime: Arc::downgrade(runtime),
+            clock: rig.clock.clone(),
+            effect,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        runtime.attach_adapter_clock(clock.clone());
+        rig.clock.step_ms(10_000);
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+        use meguri_sync::cloud::adapter::CollectionOutcome;
+        assert_eq!(
+            completed.collection,
+            match effect {
+                CompletionClockEffect::Read => CollectionOutcome::Succeeded,
+                CompletionClockEffect::Pause => CollectionOutcome::Cancelled,
+                CompletionClockEffect::Isolate => CollectionOutcome::Failed,
+            }
+        );
+        assert_eq!(runtime.adapter_exchange_result(native), Some(completed.clone()));
+        rig.clock.step_ms(90_000);
+        assert_eq!(
+            runtime
+                .adapter_complete_exchange(&rig.sdk, native, false, Some(CollectionOutcome::Failed))
+                .unwrap(),
+            completed
+        );
+        assert_eq!(clock.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        if matches!(effect, CompletionClockEffect::Read) {
+            let record = command(
+                driver
+                    .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+                    .unwrap(),
+                |k| matches!(k, ActionKind::RecordExchange(_)),
+            );
+            rig.host
+                .execute_cloud_policy_core(&record, Duration::from_secs(10))
+                .unwrap();
+            let evidence = driver.status().evidence;
+            assert_eq!(evidence.last_completed.unwrap().ended_ms, 1_894_701_610_000);
+            assert!(evidence.last_attempt.is_none());
+        }
+        rig.host.close().unwrap();
+    }
+}
