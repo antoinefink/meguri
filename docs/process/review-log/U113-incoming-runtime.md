@@ -554,3 +554,23 @@ Tests and limits are unchanged.
   required initial-fetch behavior needs diagnosis before acceptance.
 
 This is a WIP checkpoint; native delivery and full incoming safety remain open.
+
+## Use explicit fetches in manual-mode restart fixtures
+
+Start: `a6dd7205`. P10.1 and V9.1 do not fetch on identity verification
+when automatic sync is false. Exports `cleanroom/20261029T162452Z-89260`
+and `cleanroom/20261029T162601Z-90183` add explicit SyncNow calls in three
+restart cases. Shared helpers, limits and every existing assertion remain.
+Durable-Ready gate-opening cases are unchanged. Independent R1 is clear.
+
+- `core-format/20261029T162701Z-90935`: pass.
+- `private/20261029T162721Z-91578`: pass.
+- `similarity/20261029T162723Z-91819`: pass.
+- `core-test/20261029T162719Z-91320`: nine pass, two fail; 12 excluded.
+  Failed-inbox recovery and all reply/review cases pass. Own-landed-save
+  passes its first action and reaches the existing held-review send gap in
+  the undo action. Fetch-crash reaches RuntimeTracking(InvalidData) during
+  later identity/recovery work. Both remain enabled and unaccepted.
+
+The correction adds required user intent to the fixtures; it grants no
+automatic fetch permission to the product.

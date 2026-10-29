@@ -210,6 +210,8 @@ fn fetch_crash_cursor_never_outruns_durable_inbox_and_replay_precedes_send() {
             .unwrap();
         pair.receiver.hold(Point::BeforeCollectionSave).unwrap();
         pair.verify_and_drive();
+        // Manual mode requires Sync Now even after fresh account verification.
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
         assert!(pair.receiver.is_held(Point::BeforeCollectionSave));
         assert_eq!(note(&mut pair.receiver, id), after);
         settled(&mut pair, b);
@@ -670,6 +672,8 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         let current_rows = pair.receiver.driver().collection_rows().unwrap();
         pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
         pair.verify_and_drive();
+        // Manual mode needs an explicit fetch of the save whose reply was lost.
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
         assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
         assert_eq!(note(&mut pair.receiver, id), current);
         let state = pair.receiver.driver().incoming_observation(b).unwrap();
@@ -1194,6 +1198,8 @@ fn failed_inbox_commit_keeps_cursor_and_collection_behind_the_batch() {
         pair.reopen_before_identity();
         assert_eq!(note(&mut pair.receiver, id), before);
         pair.verify_and_drive();
+        // With no durable inbox entry, manual mode needs an explicit fetch.
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
         assert_eq!(note(&mut pair.receiver, id), after);
         settled(&mut pair, b);
         pair.close();
