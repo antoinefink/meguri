@@ -501,3 +501,20 @@ The earlier interpretation as two apply operations was incorrect.
 The temporary data-free diagnostic from `cleanroom/20261029T160718Z-76209`
 is preserved under build intake and removed from source. No safety assertion
 was weakened. Confirm the required intent identity before making a repair.
+
+## Match recovered input rather than an internal attempt ID
+
+Start: `72051dbc`. Independent review of K13.2 and V5 confirms an
+all-before replay creates a new apply attempt and can atomically replace
+its SQL intent ID. The required invariant is its original input set.
+Export `cleanroom/20261029T160918Z-78586` replaces only that assertion with
+exact inbox-ID equality. One-run, changed-key, WAL, ACK, backup, publication
+and reopen assertions remain. All-after checks remain unchanged. R1 is clear.
+
+- `core-format/20261029T161004Z-79320`: pass.
+- `core-test/20261029T161012Z-79631`: full selected recovery case passes;
+  14 other cases excluded.
+- `private/20261029T161017Z-79901`: pass.
+- `similarity/20261029T161017Z-80018`: pass.
+
+This closes that recovery-case failure, not the remaining incoming suite.

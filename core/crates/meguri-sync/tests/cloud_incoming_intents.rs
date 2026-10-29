@@ -361,7 +361,8 @@ fn restarted_publication_settles_old_ordinary_intent_before_new_binding_scan() {
     assert_eq!(pair.receiver.driver().collection_rows().unwrap(), expected_rows);
     let replay = pair.receiver.driver().incoming_observation(old_binding).unwrap();
     assert_eq!(replay.runs.len(), 1);
-    assert_eq!(replay.runs[0].intent_id, pending[0].id);
+    // A new apply attempt has a new intent but the same input entries.
+    assert_eq!(replay.runs[0].entry_ids, pending[0].inbox_ids);
     assert_eq!(replay.runs[0].changed_keys, BTreeSet::from([key]));
     assert!(replay.wal_receipts.iter().any(|receipt| {
         receipt.native_file == replay.runs[0].native_file
