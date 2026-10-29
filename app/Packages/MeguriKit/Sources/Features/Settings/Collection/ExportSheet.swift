@@ -124,7 +124,8 @@ struct CollectionExportContent: View {
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("settings.importExport.close")
                     .padding(Spacing.large)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: ContentWidth.readable, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                     .background(.token(.backgroundPrimary))
             }
             .buttonStyle(.bordered)
