@@ -63,3 +63,24 @@ full-workflow target remain enabled RED. No lint, gate or P24 pass is claimed.
 Next build the Runtime-owned adoption path against these committed contracts,
 then finish real nonempty-media transfer and replay. Do not add successful
 stubs or replace the existing verified publication path.
+
+## Collection-adoption implementation, tests first
+
+Producer `cleanroom/20261029T091828Z-48231`, based on `402a9b1c`, exports an
+actual Runtime/CoreHost adoption path and one separate focused target. Root
+extracts that target before production. Independent review clears its declared
+empty-physical-media slice: an actual typed Staging row, real source FetchZone,
+remote rows and crt, source keys without new draws, a new publication identity,
+real CloudAdopt evidence and safety package, and persistence after reopen.
+It does not accept full incoming media or overall review usability.
+
+- `core-format/20261029T094605Z-56718`: pass.
+- `core-test/20261029T094723Z-57342`: expected compile RED on missing adoption,
+  typed facts and real staging gate before production. No executed pass claimed.
+- `private/20261029T094724Z-57565`: one test file passes.
+- `similarity/20261029T094724Z-57576`: one file, no findings or exemptions.
+
+The 18-file production export remains unapplied and under independent R1.
+Known unfinished conditions include nonempty media/feed, assets, tombstones,
+structural generations, previous/initial/damaged adoption and ambiguous R6
+startup cancellation. The new positive slice supplies no waiver for those.
