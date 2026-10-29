@@ -53,13 +53,19 @@ pub fn scope() -> Scope {
     }
 }
 pub fn open(directory: &Path, identity: IdentityReads, fresh: bool) -> PublicationRig {
+    // Stable device streams survive reopen; explicit receiver reopens use 809 too.
+    let seed = match directory.file_name().and_then(|name| name.to_str()) {
+        Some("sender") => 808,
+        Some("receiver") => 809,
+        _ => panic!("expected synthetic sender or receiver fixture"),
+    };
     PublicationRig::open(
         directory,
         &scope(),
         identity,
         false,
         NOW,
-        809,
+        seed,
         Arc::new(Keys {
             calls: AtomicUsize::new(0),
             available: fresh,
@@ -124,6 +130,10 @@ impl Pair {
         let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
         pair.receiver.adopt_cloud(&preview).unwrap();
         pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        assert_ne!(
+            pair.sender.facts().unwrap().current.unwrap().id,
+            pair.receiver.facts().unwrap().current.unwrap().id
+        );
         assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
         pair
     }

@@ -673,7 +673,14 @@ fn own_landed_save_is_noop_even_after_undo_or_edit_and_retains_a_newer_flight() 
         pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
         pair.verify_and_drive();
         // Manual mode needs an explicit fetch of the save whose reply was lost.
-        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        pair.receiver
+            .sync_now_and_drain(&mut pair.service, STEPS)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "own_landed_save action={action} phase={}: {error:?}",
+                    pair.receiver.last_sync_phase()
+                )
+            });
         assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
         assert_eq!(note(&mut pair.receiver, id), current);
         let state = pair.receiver.driver().incoming_observation(b).unwrap();
@@ -841,6 +848,8 @@ fn remote_built_on_a_lost_save_uses_its_flight_as_base_and_keeps_local_undo() {
     pair.reopen_before_identity();
     pair.receiver.hold(Point::IntentSettlementComplete).unwrap();
     pair.verify_and_drive();
+    // Manual mode needs an explicit fetch of the remote built on the lost save.
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
     assert!(pair.receiver.is_held(Point::IntentSettlementComplete));
     let merged = notes(&mut pair.receiver).into_iter().find(|n| n.id == id).unwrap();
     assert_eq!(merged.flds.split(|b| *b == 0x1f).next().unwrap(), original_q);

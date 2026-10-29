@@ -163,6 +163,7 @@ pub struct PublicationRig {
     cleanup_pending: bool,
     cleanup_zones: VecDeque<String>,
     cleanup_reply_pending: bool,
+    last_sync_phase: &'static str,
 }
 impl PublicationRig {
     pub fn open(
@@ -193,6 +194,7 @@ impl PublicationRig {
             cleanup_pending: false,
             cleanup_zones: VecDeque::new(),
             cleanup_reply_pending: false,
+            last_sync_phase: "idle",
         };
         // Refresh only real account/local facts. Unbound discovery registers no SDK.
         rig.sdk.get_mut().driver.call::<()>(Input::Identity(None))?;
@@ -572,7 +574,10 @@ impl PublicationRig {
     }
     fn finish_worker_drive(&mut self, result: Result<()>) -> Result<()> {
         match result {
-            Err(error) if super::super::child_driver::is_work_paused(error.as_ref()) => self.refresh(),
+            Err(error) if super::super::child_driver::is_work_paused(error.as_ref()) => {
+                self.last_sync_phase = "finish_worker_drive_refresh";
+                self.refresh()
+            }
             result => result,
         }
     }
@@ -726,20 +731,32 @@ impl PublicationRig {
         }
         Err(failure())
     }
+    /// Fixed parent phase labels only; leaves the original error available to callers.
+    pub fn last_sync_phase(&self) -> &'static str {
+        self.last_sync_phase
+    }
     pub fn sync_now_and_drain(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let result = (|| {
+            self.last_sync_phase = "resume_incoming_work";
             self.sdk.get_mut().driver.resume_incoming_work()?;
+            self.last_sync_phase = "resume_fetch_callback";
             self.sdk.get_mut().resume_fetch_callback()?;
+            self.last_sync_phase = "publication_trigger";
             self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
             let mut remaining = steps;
+            self.last_sync_phase = "read_publication_facts";
             if self.facts()?.recovery_ops.is_empty() {
                 self.explicit_sync_pending = true;
+                self.last_sync_phase = "prepare_sdk";
                 if !self.prepare_sdk(service, &mut remaining)? {
                     return self.refresh();
                 }
+                self.last_sync_phase = "submit_explicit_sync";
                 self.submit_explicit_sync()?;
             }
+            self.last_sync_phase = "drive_budget";
             self.drive_budget(service, &mut remaining)?;
+            self.last_sync_phase = "finish_collection_drain";
             self.finish_collection_drain(service, &mut remaining)
         })();
         self.finish_worker_drive(result)

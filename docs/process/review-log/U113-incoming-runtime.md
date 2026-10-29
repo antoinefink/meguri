@@ -627,3 +627,23 @@ This is a compiled WIP checkpoint with the two P1 regressions enabled.
 No Unit, P24, milestone or full-batch acceptance is claimed. Implementation
 session is `s-20261025T134357Z-235af9a2`; source corrections and additive
 regressions use fixer session `s-20261025T162405Z-9dc656e4`.
+
+## Distinct device streams and manual fetch diagnostics
+
+Start: `52302641`. Export `cleanroom/20261029T172014Z-22892` gives the
+two fixture devices distinct random streams and asserts distinct bindings.
+It adds the required explicit fetch after a manual-mode restart and fixed
+phase labels to existing errors. Every original merge assertion remains.
+Independent review is clear for this fixture-only correction.
+
+- `core-format/20261029T172330Z-25133`: pass.
+- `private/20261029T172410Z-25971`: pass for all three source paths.
+- `similarity/20261029T172412Z-26227`: pass for all three source paths.
+- `core-test/20261029T172408Z-25711`: 13 execute, ten pass, three fail.
+  The distinct-binding assertion passes. Another-writer handling still fails
+  at its apply interruption. Own-landed and lost-save cases report stale
+  incarnation; own-landed identifies `submit_explicit_sync` after undo.
+
+This preserves the failed checks for the next product repair. The authority
+fix exported by `cleanroom/20261029T172016Z-23144` is separate and awaits
+independent review and integration. No acceptance is claimed.
