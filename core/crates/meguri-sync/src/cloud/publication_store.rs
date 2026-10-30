@@ -68,6 +68,8 @@ pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Erro
     }
     for table in [
         "cloud_refused",
+        "cloud_absence_seen",
+        "cloud_absence_result",
         "engine_state",
         "inbox",
         "cloud_runtime_notes",

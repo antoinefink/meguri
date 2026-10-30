@@ -41,6 +41,7 @@ pub(crate) struct Durable {
     pub active: Option<Saved>,
     pub active_deleted: bool,
     pub absence: Option<AbsenceLedger>,
+    pub absence_sequence: u64,
     pub drains: Vec<FetchDrain>,
     pub exchanges: BTreeMap<u64, CompletedExchange>,
     pub exchange_ended_ms: BTreeMap<u64, i64>,
@@ -49,6 +50,10 @@ pub(crate) struct Durable {
 pub(crate) struct AbsenceLedger {
     pub pass: [u8; 16],
     pub completed: bool,
+    #[serde(default)]
+    pub zone: String,
+    #[serde(default)]
+    pub started_at_ms: i64,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub struct Snapshot {
@@ -91,6 +96,8 @@ pub(crate) struct AdapterState {
     pub next_identity: u64,
     pub identity_read: Option<(u64, Guard, u64, Option<String>, bool)>,
     pub accepted_identity_read: Option<AcceptedIdentityRead>,
+    // Creation fact, consumed only by the first bound collection-zone will event.
+    pub cursorless_first_zone: bool,
     pub no_state: bool,
     pub no_state_point: u64,
     pub missing_did: u64,

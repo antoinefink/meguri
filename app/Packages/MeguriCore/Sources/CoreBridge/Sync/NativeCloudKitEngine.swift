@@ -159,6 +159,26 @@ private final class PreparedNativeMediaBatch: @unchecked Sendable {
     let value: CKSyncEngine.RecordZoneChangeBatch
     init(_ value: CKSyncEngine.RecordZoneChangeBatch) { self.value = value }
 }
+enum NativeCloudKitSendError {
+    static func code(_ error: any Error) -> CloudEngineErrorCode {
+        guard (error as NSError).domain == CKErrorDomain, let error = error as? CKError else { return .other }
+        return switch error.code {
+        case .notAuthenticated: .notAuthenticated
+        case .accountTemporarilyUnavailable: .accountTemporarilyUnavailable
+        case .networkFailure: .networkFailure
+        case .networkUnavailable: .networkUnavailable
+        case .requestRateLimited: .requestRateLimited
+        case .serviceUnavailable: .serviceUnavailable
+        case .zoneBusy: .zoneBusy
+        case .limitExceeded: .limitExceeded
+        case .batchRequestFailed: .batchRequestFailed
+        case .unknownItem: .unknownItem
+        case .zoneNotFound: .zoneNotFound
+        default: .other
+        }
+    }
+}
+
 private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
@@ -321,20 +341,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         try NativeCloudRecordConversion.encode(record, zone: zone)
     }
     private func code(_ error: any Error) -> CloudEngineErrorCode {
-        guard let error = error as? CKError else { return .other }
-        return switch error.code {
-        case .notAuthenticated: .notAuthenticated
-        case .accountTemporarilyUnavailable: .accountTemporarilyUnavailable
-        case .networkFailure: .networkFailure
-        case .networkUnavailable: .networkUnavailable
-        case .requestRateLimited: .requestRateLimited
-        case .serviceUnavailable: .serviceUnavailable
-        case .zoneBusy: .zoneBusy
-        case .limitExceeded: .limitExceeded
-        case .batchRequestFailed: .batchRequestFailed
-        case .zoneNotFound: .zoneNotFound
-        default: .other
-        }
+        NativeCloudKitSendError.code(error)
     }
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }

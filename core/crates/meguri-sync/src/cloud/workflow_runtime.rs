@@ -1073,6 +1073,7 @@ impl Runtime {
                 }
             }
             let mut saves = Vec::new();
+            let mut flights = BTreeMap::new();
             let mut bytes = 0usize;
             for (name, (flight, envelope, size, _)) in prepared {
                 if deferred.contains(&name) || waiting.contains(&name) || store.incoming_blocks_name(b.id, &name)? {
@@ -1101,6 +1102,21 @@ impl Runtime {
                 let image = (name.clone(), flight.erev, flight.payload_digest);
                 let image_seq = flight.image_seq;
                 let held_image = flight.held;
+                let codec::DecodeOutcome::Supported(entity) =
+                    codec::Entity::decode(&envelope).map_err(|_| Error::InvalidData)?
+                else {
+                    return Err(Error::InvalidData.into());
+                };
+                flights.insert(
+                    name.clone(),
+                    HandedSave {
+                        origin: entity.fields.origin,
+                        local_rev: flight.local_rev,
+                        erev: entity.fields.erev,
+                        payload_digest: entity.payload_sha256,
+                        tombstone: entity.fields.tombstone,
+                    },
+                );
                 store.persist_flight(b.id, &name, flight)?;
                 s.cloud
                     .handed_images
@@ -1148,6 +1164,7 @@ impl Runtime {
                 });
             }
             if !saves.is_empty() {
+                s.actions.request_flights.insert((instance.to_owned(), id), flights);
                 s.policy.flights.insert(
                     (instance.to_owned(), id),
                     saves.iter().map(|v| v.name.clone()).collect(),
@@ -1268,6 +1285,7 @@ impl Runtime {
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
         let decoded = self.decode_saved(instance, saved)?;
+        let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
@@ -1283,6 +1301,19 @@ impl Runtime {
             return Err(Error::InvalidData.into());
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        // A missing-record result is authority only for this original handed
+        // request, never a caller-supplied record name or a later incarnation.
+        for (name, error) in failed {
+            if *error == SendError::UnknownItem
+                && !s
+                    .policy
+                    .flights
+                    .get(&(instance.to_owned(), request_id))
+                    .is_some_and(|names| names.contains(name))
+            {
+                return Err(Error::InvalidData.into());
+            }
+        }
         let mut force = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             for (saved, received) in saved.iter().zip(decoded) {
@@ -1310,6 +1341,36 @@ impl Runtime {
             }
             Ok(())
         })?;
+        let mut absent_revisions = BTreeMap::new();
+        let missing_result = with_tracking_access(|| -> Result<(), RuntimeError> {
+            for (name, error) in failed {
+                if *error == SendError::UnknownItem {
+                    let handed = s
+                        .actions
+                        .request_flights
+                        .get(&(instance.to_owned(), request_id))
+                        .and_then(|records| records.get(name))
+                        .copied()
+                        .ok_or(Error::InvalidData)?;
+                    let disposition = s
+                        .store
+                        .as_mut()
+                        .ok_or(Error::Database)?
+                        .record_unknown_item(b, name, &handed, at_ms)?;
+                    match disposition {
+                        MissingSaveDisposition::Outstanding => {}
+                        MissingSaveDisposition::TerminalAbsence { local_rev } => {
+                            absent_revisions.insert(name.clone(), local_rev);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        });
+        if let Err(e) = missing_result {
+            Self::invalidate_locked(&mut s);
+            return Err(e);
+        }
         if failed.iter().any(|(_, e)| *e == SendError::LimitExceeded) && batch_count > 1 {
             s.actions.record_limit = (s.actions.record_limit / 2).max(1);
             s.actions.byte_limit = (s.actions.byte_limit / 2).max(1);
@@ -1319,6 +1380,12 @@ impl Runtime {
                 names.remove(name);
             }
         }
+        if let Some(records) = s.actions.request_flights.get_mut(&(instance.to_owned(), request_id)) {
+            for name in saved.iter().map(|r| &r.name).chain(failed.iter().map(|(n, _)| n)) {
+                records.remove(name);
+            }
+        }
+        s.actions.request_flights.retain(|_, records| !records.is_empty());
         for (name, error) in failed {
             if *error == SendError::Other || (*error == SendError::LimitExceeded && batch_count <= 1) {
                 s.policy.parked.insert(name.clone());
@@ -1340,9 +1407,24 @@ impl Runtime {
             }
             Ok(done)
         })?;
+        let terminal_names = absent_revisions
+            .into_iter()
+            .filter(|(name, revision)| {
+                s.actions
+                    .selected_revs
+                    .get(name)
+                    .is_some_and(|selected| selected <= revision)
+            })
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
         if let Some((_, exchange)) = &mut s.actions.exchange {
             for name in acknowledged {
                 exchange.acked_names.insert(name.clone());
+                exchange.outstanding_names.remove(&name);
+            }
+            // Storage proved absence for this handed revision. Keep it out of
+            // the ACK set and leave every other selected revision outstanding.
+            for name in terminal_names {
                 exchange.outstanding_names.remove(&name);
             }
         }
@@ -1583,6 +1665,7 @@ impl Runtime {
         let requests = call.request_ids.clone();
         for request in requests {
             s.policy.flights.remove(&(instance.to_owned(), request));
+            s.actions.request_flights.remove(&(instance.to_owned(), request));
         }
         Ok(())
     }

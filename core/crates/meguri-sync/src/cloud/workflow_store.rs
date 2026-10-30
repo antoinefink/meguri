@@ -494,6 +494,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         let pending = e.mark.is_some();
         let tx = self.connection.transaction()?;
         put(&tx, b, &e)?;
+        super::adapter_store::mark_ack(&tx, b, &e.name)?;
         super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
         Ok(pending)
@@ -825,5 +826,99 @@ pub(super) fn decode_entity(kind: codec::Kind, content: &str) -> Result<EntityFa
         note_facts(decode(content)?)
     } else {
         generic_facts(content)
+    }
+}
+
+impl TrackingStore {
+    /// K17.4.
+    pub(super) fn record_unknown_item(
+        &mut self,
+        binding: BindingId,
+        record_name: &str,
+        sent: &HandedSave,
+        received_at: i64,
+    ) -> Result<MissingSaveDisposition, Error> {
+        let current = self.entity_facts(binding, record_name)?.ok_or(Error::InvalidData)?;
+        if current.origin != sent.origin {
+            return Err(Error::InvalidData);
+        }
+        if current.server_erev >= sent.erev {
+            return Ok(MissingSaveDisposition::Outstanding);
+        }
+        let flight = current
+            .in_flight
+            .iter()
+            .find(|flight| {
+                flight.local_rev == sent.local_rev
+                    && flight.erev == sent.erev
+                    && flight.payload_digest == sent.payload_digest
+            })
+            .ok_or(Error::InvalidData)?;
+        if current.server_erev == 0 {
+            return Ok(MissingSaveDisposition::Outstanding);
+        }
+        // Existing intake may describe a later server state. Preserve it and
+        // any apply already using it rather than replacing it with this reply.
+        if self.incoming_blocks_name(binding, record_name)?
+            || super::incoming_store::intents(&self.connection, binding)?
+                .iter()
+                .any(|intent| intent.keys.iter().any(|key| key.name == record_name))
+        {
+            return Ok(MissingSaveDisposition::Outstanding);
+        }
+        let mut media_state = self.media_ledger(binding)?;
+        let drop_media = sent.tombstone
+            && current.kind == codec::Kind::MediaName
+            && current.local_rev == flight.local_rev
+            && media_state
+                .names
+                .get(std::str::from_utf8(&current.key).map_err(|_| Error::InvalidData)?)
+                .is_some_and(|entry| entry.tombstone_at.is_some() && entry.local.is_none());
+        let transaction = self.connection.transaction()?;
+        let deletion = InboxEntry {
+            record_type: RecordType::Entity,
+            record_name: record_name.into(),
+            value: InboxValue::Deletion,
+            reason: InboxReason::Ready,
+            source: InboxSource::SaveConflict,
+            absence_pass: None,
+            retry_count: 0,
+            fetched_at_ms: received_at,
+        };
+        super::incoming_store::receive(&transaction, binding, &[deletion], &[])?;
+        let disposition = if drop_media {
+            // J6 has already removed the file. Settle only this unchanged
+            // handed revision; no collection operation or Saved receipt exists.
+            transaction.execute(
+                "DELETE FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
+                params![binding.0.as_slice(), current.kind as i64, current.key],
+            )?;
+            transaction.execute(
+                "DELETE FROM inbox WHERE binding=?1 AND json_extract(entry,'$.record_name')=?2 AND json_extract(entry,'$.value')='Deletion'",
+                params![binding.0.as_slice(), record_name],
+            )?;
+            transaction.execute(
+                "DELETE FROM cloud_absence_seen WHERE binding=?1 AND name=?2",
+                params![binding.0.as_slice(), record_name],
+            )?;
+            media_state
+                .names
+                .remove(std::str::from_utf8(&current.key).map_err(|_| Error::InvalidData)?);
+            media_state.revision = next(media_state.revision)?;
+            transaction.execute(
+                "UPDATE cloud_media_state SET content=?2 WHERE binding=?1",
+                params![binding.0.as_slice(), encode(&media_state)?],
+            )?;
+            MissingSaveDisposition::TerminalAbsence {
+                local_rev: flight.local_rev,
+            }
+        } else {
+            MissingSaveDisposition::Outstanding
+        };
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&transaction, "cloud.tracking.commit.inbox")?;
+        meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;
+        transaction.commit()?;
+        Ok(disposition)
     }
 }

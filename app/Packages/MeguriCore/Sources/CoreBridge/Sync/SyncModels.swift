@@ -39,7 +39,7 @@ public struct CloudEngineBatch: Sendable, Equatable {
 }
 public enum CloudEngineErrorCode: Sendable, Equatable {
     case notAuthenticated, accountTemporarilyUnavailable, networkFailure, networkUnavailable
-    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, zoneNotFound, other
+    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, unknownItem, zoneNotFound, other
 }
 public struct CloudRecordFailure: Sendable, Equatable {
     public let name: String
@@ -179,6 +179,7 @@ extension CloudEngineErrorCode {
         case .zoneBusy: .zoneBusy
         case .limitExceeded: .limitExceeded
         case .batchRequestFailed: .batchRequestFailed
+        case .unknownItem: .unknownItem
         case .zoneNotFound: .zoneNotFound
         case .other: .other
         }

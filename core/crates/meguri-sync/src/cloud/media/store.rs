@@ -148,6 +148,28 @@ impl TrackingStore {
                     }
                 }
                 workflow_store::put(&tx, binding_id, &entity)?;
+                if entity.server_erev > 0 {
+                    for id in &intent.inbox_ids {
+                        let text: Option<String> = tx
+                            .query_row(
+                                "SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                                params![binding_id.0.as_slice(), id],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+                        if let Some(text) = text {
+                            let entry: crate::cloud::InboxEntry = decode(&text)?;
+                            if entry.record_name == entity.name {
+                                crate::cloud::adapter_store::transfer_entry(
+                                    &tx,
+                                    binding_id,
+                                    &entity.name,
+                                    entry.absence_pass,
+                                )?;
+                            }
+                        }
+                    }
+                }
             }
             if remove_inbox {
                 for id in &intent.inbox_ids {
@@ -237,6 +259,7 @@ impl TrackingStore {
         let pending = e.mark.is_some();
         let tx = self.connection.transaction()?;
         workflow_store::put(&tx, b, &e)?;
+        crate::cloud::adapter_store::mark_ack(&tx, b, &e.name)?;
         tx.commit()?;
         Ok(pending)
     }

@@ -156,6 +156,18 @@ pub(super) fn receive(
     entries: &[InboxEntry],
     refused: &[RefusedEntry],
 ) -> Result<(), Error> {
+    let active_pass = super::adapter_store::running_pass(tx, b)?;
+    // K13.1 records all delivered names, including inputs rejected below.
+    // These marks commit with the received entries before cursor persistence.
+    if let Some(pass_id) = active_pass {
+        for record_name in entries
+            .iter()
+            .map(|e| &e.record_name)
+            .chain(refused.iter().map(|e| &e.record_name))
+        {
+            super::adapter_store::mark_seen(tx, b, record_name, pass_id)?;
+        }
+    }
     let protected: std::collections::BTreeSet<i64> = intents(tx, b)?.into_iter().flat_map(|i| i.inbox_ids).collect();
     for refusal in refused {
         let local = facts(tx, b, &refusal.record_name)?;
@@ -209,7 +221,10 @@ pub(super) fn receive(
             params![b.0.as_slice(), refusal.record_name, encode(refusal)?],
         )?;
     }
-    for e in entries {
+    for original in entries {
+        let mut inserted = original.clone();
+        inserted.absence_pass = active_pass;
+        let e = &inserted;
         validate_entry(e)?;
         let local = facts(tx, b, &e.record_name)?;
         let mut q = tx.prepare(
@@ -559,6 +574,7 @@ impl TrackingStore {
                     .ok_or(Error::InvalidData)?;
                 let text: String = tx.query_row("SELECT entry FROM inbox WHERE id=?1", [id], |r| r.get(0))?;
                 let entry: InboxEntry = decode(&text)?;
+                super::adapter_store::transfer_entry(&tx, i.binding, &key.name, entry.absence_pass)?;
                 let InboxValue::Record {
                     envelope,
                     system_fields,

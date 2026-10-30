@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -38,7 +38,7 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         let versions = statement
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [VERSION] {
+        if versions != [1] && versions != [2] && versions != [VERSION] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
     } else {
@@ -65,9 +65,15 @@ impl TrackingStore {
             transaction.execute_batch(SCHEMA)?;
             transaction.commit()?;
         }
-        // V2 permits genuinely unacknowledged notes; V1 readers must refuse it.
-        self.connection
-            .execute("UPDATE cloud_runtime_schema SET version=?1 WHERE version=1", [VERSION])?;
+        // V3 adds durable absence metadata. Earlier readers must refuse it;
+        // upgrade its tables and marker atomically without rewriting payloads.
+        let transaction = self.connection.transaction()?;
+        super::adapter_store::install(&transaction)?;
+        transaction.execute(
+            "UPDATE cloud_runtime_schema SET version=?1 WHERE version IN (1,2)",
+            [VERSION],
+        )?;
+        transaction.commit()?;
         self.install_workflow()?;
         self.install_publication()?;
         self.install_adoption()?;

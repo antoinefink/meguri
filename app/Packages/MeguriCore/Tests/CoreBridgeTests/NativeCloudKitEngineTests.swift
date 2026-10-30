@@ -208,4 +208,12 @@ struct NativeCloudKitEngineTests {
         }
     }
 }
+extension NativeCloudKitEngineTests {
+    @Test func actualUnknownItemRetainsItsSemanticSendFailure() {
+        #expect(NativeCloudKitSendError.code(CKError(.unknownItem)) == .unknownItem)
+        #expect(NativeCloudKitSendError.code(CKError(.zoneNotFound)) == .zoneNotFound)
+        #expect(NativeCloudKitSendError.code(CKError(.networkFailure)) == .networkFailure)
+        #expect(NativeCloudKitSendError.code(NSError(domain: "synthetic", code: CKError.Code.unknownItem.rawValue)) == .other)
+    }
+}
 #endif

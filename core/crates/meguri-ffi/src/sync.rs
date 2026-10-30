@@ -304,6 +304,7 @@ pub enum CloudEngineErrorCode {
     BatchRequestFailed,
     ZoneNotFound,
     Other,
+    UnknownItem,
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudRecordFailure {
@@ -712,6 +713,7 @@ impl CloudWorkflow {
                     f.code,
                     CloudEngineErrorCode::LimitExceeded
                         | CloudEngineErrorCode::BatchRequestFailed
+                        | CloudEngineErrorCode::UnknownItem
                         | CloudEngineErrorCode::ZoneNotFound
                         | CloudEngineErrorCode::Other
                 )
@@ -724,6 +726,7 @@ impl CloudWorkflow {
                 let code = match f.code {
                     CloudEngineErrorCode::LimitExceeded => w::SendError::LimitExceeded,
                     CloudEngineErrorCode::BatchRequestFailed => w::SendError::BatchRequestFailed,
+                    CloudEngineErrorCode::UnknownItem => w::SendError::UnknownItem,
                     CloudEngineErrorCode::ZoneNotFound => w::SendError::ZoneMissing,
                     CloudEngineErrorCode::Other => w::SendError::Other,
                     _ => return None,

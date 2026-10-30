@@ -1915,3 +1915,390 @@ fn failed_metadata_and_download_reads_keep_successes_and_read_error_scope() {
         assert_eq!(facts.download_files, Some(2));
     }
 }
+
+fn fetch_published_collection(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) {
+    let workflow = &fixture.workflow;
+    let fetch = workflow
+        .begin_fetch(sdk.instance_id.clone(), vec![sdk.collection_zone.clone()])
+        .unwrap();
+    let group = format!("media-exchange-{fetch}");
+    workflow
+        .will_fetch(sdk.instance_id.clone(), group.clone(), true)
+        .unwrap();
+    workflow
+        .fetch_zone(sdk.instance_id.clone(), sdk.collection_zone.clone(), true, false)
+        .unwrap();
+    let mut token = None;
+    loop {
+        let reply = fixture
+            .server
+            .lock()
+            .unwrap()
+            .request(
+                &fixture.scope,
+                Caller::default(),
+                Operation::FetchZone {
+                    zone: sdk.collection_zone.clone(),
+                    token,
+                },
+            )
+            .unwrap();
+        let Reply::ZoneChanges(page) = reply.result.unwrap() else {
+            panic!("collection page required")
+        };
+        let mut records = Vec::new();
+        let mut deleted = Vec::new();
+        for change in page.changes {
+            match change {
+                meguri_testkit::cloud::RecordChange::Saved(record) => {
+                    let value = publication_control_record(&record).unwrap();
+                    records.push(CloudRecord {
+                        name: record.name,
+                        envelope: value.encrypted.unwrap(),
+                        system_fields: Some(value.system_fields.0),
+                        ..Default::default()
+                    });
+                }
+                meguri_testkit::cloud::RecordChange::Deleted { name, .. } => deleted.push(name),
+            }
+        }
+        workflow
+            .fetched(sdk.instance_id.clone(), sdk.collection_zone.clone(), records, deleted)
+            .unwrap();
+        if !page.more {
+            break;
+        }
+        token = Some(page.token);
+    }
+    workflow
+        .fetch_zone(sdk.instance_id.clone(), sdk.collection_zone.clone(), false, false)
+        .unwrap();
+    workflow.did_fetch(sdk.instance_id.clone(), group, true).unwrap();
+    assert!(workflow.finish_fetch(sdk.instance_id.clone(), fetch).unwrap());
+    workflow.exchange_fetched(sdk.instance_id.clone(), true).unwrap();
+}
+
+#[test]
+fn actual_unknown_item_send_reply_drops_only_the_handed_media_tombstone() {
+    handed_media_absence(false);
+}
+
+#[test]
+fn actual_unknown_item_reply_settles_newer_identical_content_flight_without_ack() {
+    handed_media_absence(true);
+}
+
+fn handed_media_absence(retain_older_flight: bool) {
+    use meguri_sync::cloud::entity_codec as codec;
+    let (fixture, sdk) = published_with_initial_media(Some(("missing.asset", b"acked synthetic content")));
+    let runtime = &fixture.workflow.core;
+    let name = codec::entity_name(&[31; 32], codec::Kind::MediaName, b"missing.asset").unwrap();
+    let before = runtime.entity_facts(&name).unwrap().unwrap();
+    assert!(before.server_erev > 0 && before.mark.is_none());
+    let media = fixture.workflow.host.media().unwrap();
+    media.store().trash(&["missing.asset".to_owned()]).unwrap();
+    runtime
+        .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &media)
+        .unwrap();
+    let older_flight = if retain_older_flight {
+        let batch = fixture
+            .workflow
+            .build_batch(
+                sdk.instance_id.clone(),
+                sdk.collection_zone.clone(),
+                fixture
+                    .workflow
+                    .tracking_sendables()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|(n, _)| n == &name)
+                    .collect(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch.saves.len(), 1);
+        let facts = runtime.entity_facts(&name).unwrap().unwrap();
+        assert_eq!(facts.in_flight.len(), 1);
+        let flight = facts.in_flight[0].clone();
+        assert_eq!(flight.local_rev, facts.local_rev);
+        media.store().add("missing.asset", b"acked synthetic content").unwrap();
+        runtime
+            .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &media)
+            .unwrap();
+        media.store().trash(&["missing.asset".to_owned()]).unwrap();
+        runtime
+            .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &media)
+            .unwrap();
+        assert!(runtime.entity_facts(&name).unwrap().unwrap().local_rev > flight.local_rev);
+        Some(flight)
+    } else {
+        None
+    };
+    let exchange = fixture.workflow.begin_exchange(sdk.instance_id.clone()).unwrap();
+    let selection = runtime.exchange_result(exchange).unwrap();
+    assert_eq!(
+        selection.selected_names,
+        std::collections::BTreeSet::from([name.clone()])
+    );
+    assert!(selection.acked_names.is_empty());
+    fetch_published_collection(&fixture, &sdk);
+    // A later, unrelated edit is outside the captured selection.
+    media.store().add("later.asset", b"post-capture media").unwrap();
+    runtime
+        .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &media)
+        .unwrap();
+    let later_name = codec::entity_name(&[31; 32], codec::Kind::MediaName, b"later.asset").unwrap();
+    let later = runtime.entity_facts(&later_name).unwrap().unwrap();
+    let send = fixture.workflow.begin_send(sdk.instance_id.clone()).unwrap().unwrap();
+    let batch = fixture
+        .workflow
+        .build_batch(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            fixture
+                .workflow
+                .tracking_sendables()
+                .unwrap()
+                .into_iter()
+                .filter(|(n, _)| n == &name)
+                .collect(),
+        )
+        .unwrap()
+        .unwrap();
+    let record = batch.saves.iter().find(|r| r.name == name).unwrap();
+    assert!(
+        matches!(codec::Entity::decode(&record.envelope).unwrap(), codec::DecodeOutcome::Supported(e) if e.fields.tombstone)
+    );
+    if let Some(older) = &older_flight {
+        let current = runtime.entity_facts(&name).unwrap().unwrap();
+        assert_eq!(current.in_flight.len(), 2);
+        assert_eq!(current.in_flight[0].local_rev, older.local_rev);
+        let handed = &current.in_flight[1];
+        assert_eq!(handed.local_rev, current.local_rev);
+        assert!(handed.local_rev > older.local_rev);
+        assert_eq!(handed.erev, older.erev);
+        assert_eq!(handed.payload_digest, older.payload_digest);
+        assert!(handed.payload == older.payload);
+        assert_eq!(current.acked_rev, before.acked_rev);
+        assert_eq!(current.server_erev, before.server_erev);
+    }
+    let mut server = fixture.server.lock().unwrap();
+    let deleted = server
+        .request(
+            &fixture.scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Delete { name: name.clone() }],
+            },
+        )
+        .unwrap();
+    assert!(matches!(deleted.result, Ok(Reply::Modified(_))));
+    let response = server
+        .request(
+            &fixture.scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted(&name, "MGEntity", record.envelope.clone()),
+                    if_unchanged: record.system_fields.clone().map(SystemFields::from_bytes),
+                }],
+            },
+        )
+        .unwrap();
+    let Reply::Modified(items) = response.result.unwrap() else {
+        panic!("native-style per-record result")
+    };
+    let error = items.into_iter().next().unwrap().result.err().unwrap();
+    assert_eq!(error.code, ErrorCode::UnknownItem);
+    drop(server);
+    assert!(
+        fixture
+            .workflow
+            .sent(
+                "stale-sdk".into(),
+                batch.id,
+                vec![],
+                vec![CloudRecordFailure {
+                    name: name.clone(),
+                    code: CloudEngineErrorCode::UnknownItem
+                }],
+                batch.saves.len() as u32
+            )
+            .is_err()
+    );
+    assert!(runtime.entity_facts(&name).unwrap().is_some());
+    let trace_before = runtime.trace();
+    fixture
+        .workflow
+        .sent(
+            sdk.instance_id.clone(),
+            batch.id,
+            vec![],
+            vec![CloudRecordFailure {
+                name: name.clone(),
+                code: CloudEngineErrorCode::UnknownItem,
+            }],
+            batch.saves.len() as u32,
+        )
+        .unwrap();
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    assert!(runtime.trace() == trace_before);
+    assert!(runtime.entity_facts(&name).unwrap().is_none());
+    assert!(!media.store().media_dir().join("missing.asset").exists());
+    assert!(
+        runtime
+            .inbox_entries(runtime.status().unwrap().binding.unwrap().id)
+            .unwrap()
+            .is_empty()
+    );
+    let pending = fixture.workflow.tracking_sendables().unwrap();
+    fixture
+        .workflow
+        .finish_send(sdk.instance_id.clone(), send, pending)
+        .unwrap();
+    assert!(!fixture.workflow.send_due(sdk.instance_id.clone()).unwrap());
+    let settled = runtime.exchange_result(exchange).unwrap();
+    assert_eq!(settled.selected_names, selection.selected_names);
+    assert!(settled.outstanding_names.is_empty());
+    assert!(settled.acked_names.is_empty());
+    fetch_published_collection(&fixture, &sdk);
+    let completed = fixture
+        .workflow
+        .complete_exchange(sdk.instance_id.clone(), exchange, true, false, false)
+        .unwrap();
+    assert!(matches!(completed.collection, CloudCollectionOutcome::Succeeded));
+    let remaining = runtime.entity_facts(&later_name).unwrap().unwrap();
+    assert_eq!(remaining.local_rev, later.local_rev);
+    assert!(remaining.mark.is_some());
+}
+
+#[test]
+fn missing_save_reply_preserves_recreated_media_and_other_selected_work() {
+    use meguri_sync::cloud::entity_codec as codec;
+    let (fixture, sdk) = published_with_initial_media(Some(("returned.asset", b"initial media")));
+    let runtime = &fixture.workflow.core;
+    let collection = fixture.workflow.host.collection().unwrap();
+    let media = fixture.workflow.host.media().unwrap();
+    let name = codec::entity_name(&[31; 32], codec::Kind::MediaName, b"returned.asset").unwrap();
+    let other_name = codec::entity_name(&[31; 32], codec::Kind::MediaName, b"other.asset").unwrap();
+    media.store().trash(&["returned.asset".to_owned()]).unwrap();
+    media.store().add("other.asset", b"separate selection").unwrap();
+    runtime.consume_media_feed(&collection, &media).unwrap();
+    let exchange = fixture.workflow.begin_exchange(sdk.instance_id.clone()).unwrap();
+    let selection = runtime.exchange_result(exchange).unwrap();
+    assert_eq!(
+        selection.selected_names,
+        std::collections::BTreeSet::from([name.clone(), other_name.clone()])
+    );
+    fetch_published_collection(&fixture, &sdk);
+    let send = fixture.workflow.begin_send(sdk.instance_id.clone()).unwrap().unwrap();
+    let batch = fixture
+        .workflow
+        .build_batch(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            fixture
+                .workflow
+                .tracking_sendables()
+                .unwrap()
+                .into_iter()
+                .filter(|(n, _)| n == &name)
+                .collect(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    let record = &batch.saves[0];
+    assert!(
+        matches!(codec::Entity::decode(&record.envelope).unwrap(), codec::DecodeOutcome::Supported(e) if e.fields.tombstone)
+    );
+    let handed_revision = runtime.entity_facts(&name).unwrap().unwrap().local_rev;
+    media
+        .store()
+        .add("returned.asset", b"new content after handoff")
+        .unwrap();
+    runtime.consume_media_feed(&collection, &media).unwrap();
+    let recreated = runtime.entity_facts(&name).unwrap().unwrap();
+    let other = runtime.entity_facts(&other_name).unwrap().unwrap();
+    assert!(recreated.local_rev > handed_revision);
+    let mut server = fixture.server.lock().unwrap();
+    let removed = server
+        .request(
+            &fixture.scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Delete { name: name.clone() }],
+            },
+        )
+        .unwrap();
+    let Reply::Modified(removals) = removed.result.unwrap() else {
+        panic!("server deletion required")
+    };
+    assert!(removals.into_iter().all(|item| item.result.is_ok()));
+    let reply = server
+        .request(
+            &fixture.scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted(&name, "MGEntity", record.envelope.clone()),
+                    if_unchanged: Some(SystemFields::from_bytes(record.system_fields.clone().unwrap())),
+                }],
+            },
+        )
+        .unwrap();
+    let Reply::Modified(results) = reply.result.unwrap() else {
+        panic!("conditional save response required")
+    };
+    assert_eq!(
+        results.into_iter().next().unwrap().result.err().unwrap().code,
+        ErrorCode::UnknownItem
+    );
+    drop(server);
+    let trace = runtime.trace();
+    fixture
+        .workflow
+        .sent(
+            sdk.instance_id.clone(),
+            batch.id,
+            vec![],
+            vec![CloudRecordFailure {
+                name: name.clone(),
+                code: CloudEngineErrorCode::UnknownItem,
+            }],
+            1,
+        )
+        .unwrap();
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    assert!(runtime.trace() == trace);
+    let retained = runtime.entity_facts(&name).unwrap().unwrap();
+    assert_eq!(retained.local_rev, recreated.local_rev);
+    assert!(retained.payload == recreated.payload);
+    assert!(retained.mark.is_some());
+    assert!(runtime.entity_facts(&other_name).unwrap().unwrap() == other);
+    assert_eq!(
+        std::fs::read(media.store().media_dir().join("returned.asset")).unwrap(),
+        b"new content after handoff"
+    );
+    let pending = fixture.workflow.tracking_sendables().unwrap();
+    fixture
+        .workflow
+        .finish_send(sdk.instance_id.clone(), send, pending)
+        .unwrap();
+    let result = runtime.exchange_result(exchange).unwrap();
+    assert_eq!(result.outstanding_names, selection.selected_names);
+    assert!(result.acked_names.is_empty());
+    let completed = fixture
+        .workflow
+        .complete_exchange(sdk.instance_id, exchange, true, false, false)
+        .unwrap();
+    assert!(matches!(completed.collection, CloudCollectionOutcome::Incomplete));
+}

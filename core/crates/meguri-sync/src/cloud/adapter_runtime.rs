@@ -69,11 +69,13 @@ impl Runtime {
         if s.adapter.next_sdk > 1 {
             s.root_confirmed = false;
         }
+        s.adapter.cursorless_first_zone = serialization.is_none();
         s.adapter.no_state = serialization.is_none();
         s.adapter.no_state_point += 1;
         s.adapter.fetch = None;
         s.adapter.scheduled = None;
         s.policy.flights.clear();
+        s.actions.request_flights.clear();
         s.policy.parked.clear();
         s.policy.held_images.clear();
         s.actions.automatic = automatic;
@@ -296,7 +298,7 @@ impl Runtime {
                 inbox: inbox.into_iter().map(|e| e.entry).collect(),
                 root: runtime.and_then(|v| v.root_ack),
                 tracking_stopped: s.tracking_stopped,
-                absence_pass_completed: durable.absence.as_ref().is_some_and(|a| a.completed),
+                absence_pass_completed: store.absence_completed(b.binding.id, &durable)?,
             })
         })
     }
@@ -313,6 +315,7 @@ impl Runtime {
         serialization: Option<&[u8]>,
         at_ms: i64,
         fail: bool,
+        start_absence: bool,
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| {
@@ -323,7 +326,11 @@ impl Runtime {
                     refused,
                     serialization,
                     &s.adapter.durable,
-                    super::super::adapter_store::AdapterCommitOptions { at_ms, fail },
+                    super::super::adapter_store::AdapterCommitOptions {
+                        at_ms,
+                        fail,
+                        start_absence,
+                    },
                 )
             }))
             .unwrap_or(Err(Error::Database))
@@ -341,7 +348,7 @@ impl Runtime {
         let fail = std::mem::take(&mut s.adapter.fail_state);
         #[cfg(not(feature = "test-hooks"))]
         let fail = false;
-        Self::adapter_commit_locked(&mut s, &[], &[], Some(serialization), at_ms, fail)
+        Self::adapter_commit_locked(&mut s, &[], &[], Some(serialization), at_ms, fail, false)
     }
     pub fn adapter_fetched(
         &self,
@@ -412,7 +419,7 @@ impl Runtime {
                 s.adapter.durable.active = Some(record.clone());
             }
         }
-        if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, &refused, None, at_ms, fail) {
+        if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, &refused, None, at_ms, fail, false) {
             s.adapter.durable = previous;
             return Err(error);
         }
@@ -471,8 +478,54 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_fetch_zone(&self, sdk: &str, zone: String, will: bool, failed: bool) -> Result<(), RuntimeError> {
+        // Foreign clock/random providers may reenter: read them outside both
+        // guards, then recheck the original SDK and creation fact before writing.
+        let starts_pass = {
+            let s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            will && s.adapter.cursorless_first_zone
+                && s.bound
+                    .as_ref()
+                    .is_some_and(|b| collection_zone(b.binding.facts.epoch) == zone)
+                && (s.adapter.fetch.as_ref().is_some_and(|c| c.boundary.is_some()) || s.adapter.scheduled.is_some())
+        };
+        let fresh = if starts_pass {
+            Some((self.adapter_now()?, self.publication_random_id()?))
+        } else {
+            None
+        };
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
+        if s.adapter.cursorless_first_zone
+            && let Some((at_ms, random)) = fresh
+        {
+            use sha2::{Digest, Sha256};
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+            let prior = s.adapter.durable.clone();
+            s.adapter.durable.absence_sequence = s
+                .adapter
+                .durable
+                .absence_sequence
+                .checked_add(1)
+                .ok_or(Error::InvalidData)?;
+            let mut hash = Sha256::new();
+            hash.update(b.0);
+            hash.update(random);
+            hash.update(s.adapter.durable.absence_sequence.to_be_bytes());
+            let mut pass = [0; 16];
+            pass.copy_from_slice(&hash.finalize()[..16]);
+            s.adapter.durable.absence = Some(AbsenceLedger {
+                pass,
+                completed: false,
+                zone: zone.clone(),
+                started_at_ms: at_ms,
+            });
+            if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false, true) {
+                s.adapter.durable = prior;
+                return Err(e);
+            }
+            s.adapter.cursorless_first_zone = false;
+        }
         let point = s.adapter.no_state_point;
         let boundary = if let Some(call) = s.adapter.fetch.as_mut() {
             call.boundary.as_mut()
@@ -506,7 +559,9 @@ impl Runtime {
             scope
                 .into_iter()
                 .filter_map(|zone| match boundary.zones.get(&zone) {
-                    Some((_, true)) => Some(FetchDrain { zone, fetched: true }),
+                    Some((started, true)) if *started == s.adapter.no_state_point => {
+                        Some(FetchDrain { zone, fetched: true })
+                    }
                     None if !s.adapter.no_state => Some(FetchDrain { zone, fetched: false }),
                     _ => None,
                 })
@@ -515,7 +570,9 @@ impl Runtime {
             boundary
                 .zones
                 .into_iter()
-                .filter_map(|(zone, (_, done))| done.then_some(FetchDrain { zone, fetched: true }))
+                .filter_map(|(zone, (started, done))| {
+                    (done && started == s.adapter.no_state_point).then_some(FetchDrain { zone, fetched: true })
+                })
                 .collect()
         };
         if drains.iter().any(|d| d.zone == "meguri-root") {
@@ -545,9 +602,32 @@ impl Runtime {
         }
         let old = s.adapter.durable.clone();
         s.adapter.durable.drains.extend(drains.clone());
-        if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false) {
+        if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false, false) {
             s.adapter.durable = old;
             return Err(e);
+        }
+        if let Some(binding) = s.bound.as_ref().map(|b| b.binding.clone()) {
+            let zone = collection_zone(binding.facts.epoch);
+            if drains.iter().any(|d| d.zone == zone && d.fetched) {
+                let completed = with_tracking_access(|| {
+                    s.store
+                        .as_mut()
+                        .ok_or(Error::Database)?
+                        .complete_absence(binding.id, &zone, at_ms)
+                });
+                match completed {
+                    Ok(Some((durable, event))) => {
+                        s.adapter.durable = durable;
+                        // A trace can describe only a committed receipt.
+                        s.trace.push(event);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        Self::invalidate_locked(&mut s);
+                        return Err(e.into());
+                    }
+                }
+            }
         }
         if let Some(call) = s.adapter.fetch.as_mut() {
             call.completed = true;
@@ -865,6 +945,7 @@ impl Runtime {
                     super::super::adapter_store::AdapterCommitOptions {
                         at_ms: clock.now_ms(),
                         fail: false,
+                        start_absence: false,
                     },
                 )?;
                 Ok(())
@@ -1121,5 +1202,22 @@ impl Runtime {
         }
         s.actions.exchange_phase = None;
         s.actions.selected_revs.clear();
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Runtime {
+    /// Exercise the real engine_state deletion boundary without injecting pass facts.
+    pub fn forget_adapter_state_for_testing(&self, sdk: &str) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        with_tracking_access(|| {
+            s.store
+                .as_mut()
+                .ok_or(Error::Database)?
+                .forget_adapter_state_for_testing(b)
+        })?;
+        Ok(())
     }
 }

@@ -211,6 +211,7 @@ pub struct Saved {
 pub enum SendError {
     LimitExceeded,
     BatchRequestFailed,
+    UnknownItem,
     ZoneMissing,
     Other,
 }
@@ -250,8 +251,21 @@ pub(crate) struct CloudFrontier {
 
 /// Action ordering lives in production. SDK implementations execute complete lists
 /// only after the sent event returns; a later full update cannot overtake one.
+#[derive(Clone, Copy)]
+pub(crate) struct HandedSave {
+    pub origin: [u8; 16],
+    pub local_rev: u64,
+    pub erev: u64,
+    pub payload_digest: [u8; 32],
+    pub tombstone: bool,
+}
+pub(crate) enum MissingSaveDisposition {
+    Outstanding,
+    TerminalAbsence { local_rev: u64 },
+}
 #[derive(Default)]
 pub(crate) struct Actions {
+    pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
     pub media_upload: Option<(String, super::media::Work)>,
     pub media_batches: BTreeMap<(String, u64), super::media::Work>,
     pub desired: BTreeMap<String, PendingChange>,
@@ -346,6 +360,15 @@ impl Actions {
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraceEvent {
+    /// K17.4 diagnostic only while purging is off. Names are record names,
+    /// never collection content. The completing tracking transaction owns it.
+    AbsencePassCompleted {
+        binding: super::BindingId,
+        zone: String,
+        pass: [u8; 16],
+        absent_count: usize,
+        absent_names: BTreeSet<String>,
+    },
     PublicationBinding {
         binding: super::BindingId,
         publish_step: Option<super::publication::PublishStep>,
