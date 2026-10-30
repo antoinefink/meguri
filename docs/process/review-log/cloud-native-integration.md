@@ -220,3 +220,209 @@ Required next work:
 
 The original-base full gate, native Search identifier P2, mobile and signed
 CloudKit evidence remain outstanding. No required verification is waived.
+
+## Initial adoption owned by the app
+
+Continuation start: `318740f20eee8a37c1ffb70d97ad3175bfb7bae3`.
+The original unit starts and integration batch base remain unchanged.
+Status: in progress; no Unit, P24/F5, visual or release acceptance.
+
+The app retains its original NoCollection Host through discovery, adoption and
+callback drain, then attaches the replacement generation. Enabled is written
+only at acceptance and restored to its prior value after a terminal failure or
+cancellation without a usable binding. A transient waiting operation retains
+Enabled. Initial work closes its native enqueue admission on pause/background
+and waits for the original callback before a fresh account proof can resume it.
+
+Independent R1 review found missing preparation before policy could start the
+SDK, incomplete pause drain, and a replaceable activation callback. R2 uses the
+guarded Runtime preparation after actual account verification, closes admission
+before draining, and always executes the real Core activation. R2 source review
+found no P0–P2 remaining in this bounded handoff. Compiler-only follow-ups
+retained that review coverage; runtime verification below remains authoritative.
+
+Source runs: `cleanroom/20261030T061905Z-77932`,
+`20261030T065420Z-99717`, `20261030T082916Z-32523`,
+`20261030T083433Z-36374`, `20261030T083649Z-39878`;
+fixer session `s-20261025T162405Z-9dc656e4`.
+
+The app regression consumes encrypted records exported by a real Rust
+publication. The MG Swift job now creates and validates that run-owned fixture
+before compiling MeguriKit. It rejects a failed, dry-run, skipped or missing
+producer result and nonregular output. No manual environment preparation or
+skipped test stands in for the fixture. The fake SDK does not save records;
+these checks cannot establish successful upload or full sync.
+
+Evidence so far:
+
+- `selftest/20261030T065757Z-1658`: all five fixture orchestration checks pass.
+  Independent infrastructure review is clear after the regular-file guard.
+- `swift-test/20261030T064936Z-95979`,
+  `20261030T071025Z-5558`, `20261030T083339Z-34632` and
+  `20261030T083551Z-37609`: failed compilation receipts retained. The optional
+  readiness guard and the test harness's lazy initializer were repaired.
+- `swift-test/20261030T083803Z-40677`: production and test code compile. The
+  13 selected tests report four issues: successful adoption, pause/background
+  resume and transient-error resume time out. Staging cancellation, corrupt
+  page and acceptance failure cases pass, as do the six existing collection
+  lifecycle/review checks. This is a failed run, not workflow acceptance.
+- `core-lint/20261030T083525Z-37142`: pass for the new Rust fixture producer.
+- `private/20261030T083824Z-42266` and
+  `similarity/20261030T083824Z-42169`: pass for the source at that point.
+- `doctor/20261030T083608Z-39181`: VM running and reachable; 53 GiB free.
+  Reserved account setup remains pending for final acceptance.
+
+Focused diagnosis:
+
+- `cleanroom/20261030T084142Z-44038` adds named bounded waits and synthetic
+  backend observations without changing Core calls or deadlines. Independent
+  review is clear; concurrent commands can overwrite `lastExecute`, so that
+  field is context rather than an execution history.
+- `swift-test/20261030T084347Z-45084`: the timeout is `factory-fetch`.
+- `cleanroom/20261030T084513Z-47012` requires the actual successful StartEngine
+  result before waiting on that dependent fetch; the original checks remain.
+- `swift-test/20261030T084622Z-47901`: StartEngine succeeds, but no fetch is
+  requested with automatic sync off. The test expectation was incorrect.
+  Independent contract review confirms P6, P10.1 and P11.1: adoption starts the
+  cursorless instance but does not override the manual setting. V14.2 step 9
+  describes its first fetch; explicit Sync Now supplies that fetch under P12.3.
+
+Next: verify both automatic modes and rerun the affected cases together. A real
+native download-state fixture is still needed for VM visual evidence; the
+existing setup-needed route cannot render that state.
+
+`cleanroom/20261030T084905Z-50063` corrects the test's scheduling expectation:
+the manual case first proves no automatic fetch, then invokes real Sync Now;
+the automatic case checks its actual startup fetch separately. Independent
+review found no P0–P2 in that correction. No production gate was changed.
+
+`swift-test/20261030T085224Z-51818`: 14 tests run, with two issues remaining.
+Pause/background resume, transient-error resume, original-callback account/close
+drain, the cancellation/failure pairs and the existing six collection checks
+pass together. Manual Sync Now returns before the expected SDK fetch callback.
+Automatic startup fetches the actual records, persists the root and leaves no
+inbox entries, but `absencePassCompleted` remains false. Keep both failures
+open; neither the full fetch workflow nor post-adoption review is accepted.
+
+The next repair is limited to actual native exchange and absence processing.
+No test deadline, success condition or assertion is relaxed.
+
+Independent tracing establishes two concrete missing paths. Manual capture
+uses the send gate, which requires root confirmation before the captured worker
+can fetch that root. Capture must retain its real boundary and selected local
+revisions while leaving physical send admission guarded. Separately,
+`AbsenceLedger` has a snapshot getter but no production pass creation or
+completion path. A completed flag alone cannot supply K17's seen accounting or
+deletion safety. Both remain open until their actual regressions pass.
+
+`private/20261030T085616Z-55766`: 8 diagnostic expressions blocked. Their
+replacement must pass the same check before commit. No private values were read.
+
+### Bounded Saved-receipt repair of recovered preparation
+
+Role: fixer, following implementer instructions. Resume prepared source
+`20261030T085800Z-57176`; starting integration commit remains
+`318740f20eee8a37c1ffb70d97ad3175bfb7bae3`, original integration batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` unchanged. Full recovered source,
+Host/FFI capture tests, private diagnostic rephrasing, tools and docs retained.
+
+Independent review P1: the added full send gate in `Runtime::sent_results`
+rejects an already-landed Saved receipt while unrelated real reconciliation or
+incoming apply temporarily blocks new sends. Removed only that gate, preserving
+the original caller, current binding, native-file, handler/request and persisted
+flight checks. New sends, batch construction and capture keep their respective
+existing gates and real selection boundary. No additional root proof is created.
+
+Added Host regression
+`saved_flight_during_real_reconcile_scan_preserves_newer_edit_and_capture_accounting`:
+real capture/root fetch, prepared batch and registered send request; newer deck
+edit; real `reconcile_binding` held by the existing `BeforeSnapshot` scan seam;
+wrong-request and foreign-writer refusal without tracking/accounting changes;
+original SDK/request Saved accepted while scan admission remains closed. It
+asserts flight acknowledgement fields, removal of the flight, captured boundary
+and selected/acked/outstanding accounting, retained newer pending revision and
+unchanged actual newer collection row after scan completion. No production
+boolean or fabricated root/flight proof was introduced.
+
+Adjusted
+`first_manual_capture_before_root_selects_pending_revisions_without_admitting_sends`
+to reject an actual baseline record with no matching flight and assert unchanged
+facts, selection and absent root proof, replacing the empty zero-count receipt
+expectation. Its no-send-before-root checks remain enabled. The recovered FFI
+`cursorless_auto_off_ffi_capture_maps_before_first_root_fetch` is preserved.
+
+One source consistency pass completed (scoped diff/whitespace inspection and
+source API/type inspection). No builds, tests, formatter, commits, network or
+forbidden-source reads performed. Integrator must run focused Rust Host/FFI and
+Swift checks, independent review, and provenance/privacy/similarity checks after
+export. K17 absence remains genuinely unwired; enabled app assertions and failed
+evidence remain. No protocol-server or reference implementation work. No unit,
+milestone, workflow or final acceptance claimed.
+
+## Resumed manual first-fetch repair
+
+After Antoine resumed the goal and reconnected the drive, the interrupted
+`cleanroom/20261030T085800Z-57176` source was recovered against its exact seed
+and `318740f20eee8a37c1ffb70d97ad3175bfb7bae3`. Permitted regular files passed
+`source_view.validate`; the interrupted run stays error. No old implementation
+was recreated. The original integration batch base remains unchanged.
+
+The final repair separates pre-root exchange capture from physical send
+admission, preserving the actual boundary and selected local revisions.
+Saved replies retain their flight authority while a scan blocks new
+sends. Successful scan completion rebuilds pending work after clearing its
+running flag under the final guarded state lock; stale or failed completion
+keeps admission closed. No root proof, SDK identity or completion is fabricated.
+
+Review found the extra ACK gate in the recovered draft.
+The held-scan regression then exposed the unreachable pending rebuild. Both
+repairs are clear of P0–P2 in their bounded source reviews. Test-only corrections
+keep the observation helper absent from ordinary release builds, use the
+contract's permitted later image, and register the FFI SDK through a real issued
+Start capability after account/settings setup. All original safety assertions
+remain, including wrong-request/foreign-writer refusal and newer-edit retention.
+
+Source fixes: `cleanroom/20261030T122908Z-83877`,
+`20261030T123504Z-88361`, `20261030T123837Z-91698` and
+`20261030T124502Z-96547`, session `s-20261025T162405Z-9dc656e4`.
+
+Evidence:
+
+- Failed receipts remain: `core-test/20261030T122932Z-84587` (default test
+  helper visibility), `20261030T123238Z-86480` (incorrect frozen-image
+  expectation), `20261030T123534Z-89008` (scan completion), and
+  `20261030T123927Z-92469` (FFI setup order).
+- `core-test/20261030T124349Z-95702`: all 18 Host policy-driver tests pass.
+- `core-test/20261030T124722Z-99460`: the corrected default-build FFI
+  cursorless manual-capture regression passes.
+- `core-test/20261030T124857Z-1073`: all 353 affected Rust checks pass,
+  none skipped, covering core libraries, policy-driver execution, adoption and
+  collection replacement.
+- `private/20261030T124724Z-99720`: pass for the final changed runtime and
+  test files. `similarity/20261030T125010Z-2068`: pass against this continuation
+  start. The new fixture orchestration files are byte-identical to their source
+  after the five passing `selftest/20261030T065757Z-1658` cases.
+- `doctor/20261030T124530Z-97219`: the dedicated VM is running, SSH is
+  available and 67 GiB is free after rebuilding Meguri's tooling caches.
+  Reserved account setup remains pending.
+
+Final checks: `core-lint/20261030T125609Z-7244` passes all-target formatting,
+Clippy, layering and feature-free binary checks. The earlier
+`125008Z-1822` lint receipt reports two borrowed-slice changes;
+`125404Z-5512` reports their formatting. Both were corrected without suppressions
+in `cleanroom/20261030T125302Z-4171` and MG formatting. Review is clear for
+those two mechanical test edits; production and all assertions are unchanged
+from the 353-check run. `similarity/20261030T125610Z-7485` passes for final
+source. `private/20261030T125407Z-5789` passes for the app handoff, fixture
+tooling and rephrased review log. Guard refusals remain in their old receipts.
+
+`swift-test/20261030T125729Z-8279`: all six existing real review, preview and
+lifecycle checks pass against the rebuilt native core. The job also regenerates
+the run-owned adoption fixture through the actual Rust producer and validates
+its passing result before compiling. The new absence checks were not selected;
+their known failures remain open and are not counted as passes.
+
+K17's actual absence-pass processing, collection payload assets, shared-build
+recovery, native download-state visual evidence and the original-base full gate
+remain open. The enabled app absence assertions are not passing evidence. No
+Unit, P24/F5, first-delivery or release acceptance is claimed.

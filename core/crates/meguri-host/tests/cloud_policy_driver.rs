@@ -31,9 +31,13 @@ struct Rig {
     sdk: String,
     zone: String,
     records: Vec<Saved>,
+    active: Saved,
     baseline_deck: meguri_model::ids::DeckId,
 }
 fn rig() -> Rig {
+    rig_with_root(true)
+}
+fn rig_with_root(confirm_root: bool) -> Rig {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("collection");
     std::fs::create_dir_all(&directory).unwrap();
@@ -67,6 +71,30 @@ fn rig() -> Rig {
         .unwrap()
         .value
         .id;
+    if !confirm_root {
+        let notetype = meguri_engine::notetypes::add_stock(
+            &collection,
+            meguri_engine::notetypes::StockKind::Basic,
+            Some("First manual review".into()),
+        )
+        .unwrap()
+        .value
+        .id;
+        meguri_engine::notes::add(
+            &collection,
+            meguri_engine::notes::AddNote {
+                notetype_id: notetype,
+                fields: vec!["Public question".into(), "Public answer".into()],
+                tags: Vec::new(),
+                deck_id: baseline_deck,
+                guid: None,
+                update_add_defaults: false,
+            },
+            meguri_engine::OpSource::UserUndoable,
+        )
+        .unwrap();
+        meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default()).unwrap();
+    }
     let media = host.media().unwrap();
     media.store().register_full(|_, _| true).unwrap();
     let runtime = host.cloud_runtime().unwrap();
@@ -75,7 +103,7 @@ fn rig() -> Rig {
             &collection,
             config.clock.as_ref(),
             config.random.as_ref(),
-            Some(b"synthetic-sdk-state".to_vec()),
+            confirm_root.then(|| b"synthetic-sdk-state".to_vec()),
         )
         .unwrap();
     host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
@@ -95,11 +123,13 @@ fn rig() -> Rig {
     runtime
         .reconcile_binding(&collection, &media, Duration::from_secs(10))
         .unwrap();
-    assert!(
-        runtime
-            .accept_root_fetch(&runtime.instance().unwrap(), Some(&active), true, 1)
-            .unwrap()
-    );
+    if confirm_root {
+        assert!(
+            runtime
+                .accept_root_fetch(&runtime.instance().unwrap(), Some(&active), true, 1)
+                .unwrap()
+        );
+    }
     let (sdk, _, zone) = runtime.register_sdk(false).unwrap();
     host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
         .unwrap();
@@ -108,7 +138,10 @@ fn rig() -> Rig {
         state.gate_open() && state.engine_runs(),
         "fixture admission: {state:#?}"
     );
-    assert!(state.root_confirmed, "fixture root confirmation: {state:#?}");
+    assert_eq!(
+        state.root_confirmed, confirm_root,
+        "fixture root confirmation: {state:#?}"
+    );
     Rig {
         _root: root,
         host,
@@ -116,6 +149,7 @@ fn rig() -> Rig {
         sdk,
         zone,
         records,
+        active,
         baseline_deck,
     }
 }
@@ -911,4 +945,389 @@ fn native_capture_uses_committed_sequence_after_apply_finishes() {
     assert_eq!(record.exchange, exchange);
     assert_eq!(record.outcome, ExchangeOutcome::Cancelled);
     rig.host.close().unwrap();
+}
+
+fn first_manual_capture(rig: &Rig) -> u64 {
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    assert_eq!(
+        driver.native_exchange_readiness(&run, false, true).unwrap(),
+        (true, None)
+    );
+    driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap()
+}
+
+fn fetch_first_root(rig: &Rig) {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let fetch = runtime
+        .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into()])
+        .unwrap();
+    runtime
+        .adapter_will_fetch(&rig.sdk, "first-manual".into(), true)
+        .unwrap();
+    runtime
+        .adapter_fetch_zone(&rig.sdk, "meguri-root".into(), true, false)
+        .unwrap();
+    runtime
+        .adapter_fetched(&rig.sdk, "meguri-root", std::slice::from_ref(&rig.active), &[])
+        .unwrap();
+    runtime
+        .adapter_fetch_zone(&rig.sdk, "meguri-root".into(), false, false)
+        .unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, "first-manual", true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).unwrap());
+    runtime.adapter_exchange_fetch(&rig.sdk, true).unwrap();
+}
+
+#[test]
+fn first_manual_capture_before_root_selects_pending_revisions_without_admitting_sends() {
+    let rig = rig_with_root(false);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    assert!(!runtime.sdk_root_confirmed());
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "First manual revision".into()).unwrap();
+    let name = runtime
+        .entity_facts_page(codec::Kind::Deck, None)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.key == codec::id_key(rig.baseline_deck.0))
+        .unwrap()
+        .name;
+    let selected_rev = runtime.entity_facts(&name).unwrap().unwrap().local_rev;
+    let boundary = collection.last_seq().0;
+    let id = first_manual_capture(&rig);
+    let selected = runtime.exchange_result(id).unwrap();
+    assert_eq!(selected.boundary_seq, boundary);
+    assert_eq!(selected.selected_names, [name.clone()].into());
+    assert_eq!(selected.outstanding_names, selected.selected_names);
+    assert!(selected.acked_names.is_empty());
+    assert!(runtime.tracking_sendables().is_empty());
+    assert!(
+        runtime
+            .take_pending_updates(&rig.sdk)
+            .unwrap()
+            .iter()
+            .all(|u| u.adds.is_empty())
+    );
+    assert!(runtime.start_manual_send_call(&rig.sdk).unwrap().is_none());
+    assert!(
+        runtime
+            .build_collection_batch(&rig.sdk, &collection, &selected.selected_names)
+            .unwrap()
+            .saves
+            .is_empty()
+    );
+    runtime.enter_sent_handler(&rig.sdk, 991).unwrap();
+    // A previously saved baseline record has no prepared flight for this edit.
+    // Reject the actual record, rather than treating an empty receipt as an ACK.
+    let no_flight = rig.records.iter().find(|saved| saved.name == name).unwrap();
+    let before_refusal = runtime.entity_facts(&name).unwrap();
+    assert!(
+        runtime
+            .sent_results(&rig.sdk, &collection, 991, std::slice::from_ref(no_flight), &[], 1)
+            .is_err()
+    );
+    assert!(runtime.entity_facts(&name).unwrap() == before_refusal);
+    assert_eq!(runtime.exchange_result(id), Some(selected.clone()));
+    assert!(!runtime.sdk_root_confirmed());
+    runtime.return_sent_handler(&rig.sdk).unwrap();
+
+    // Starting review without an answer leaves no newest answer to hold later edits.
+    let meguri_engine::session::StartResult::Started { session_id, .. } =
+        rig.host.review().start(rig.baseline_deck, None).unwrap()
+    else {
+        panic!("real review must start");
+    };
+    // An active review still cannot create another capture before proof.
+    assert!(runtime.sync_now(&rig.sdk, &collection).is_err());
+    // A later edit keeps the captured membership and boundary while root is absent.
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Later preproof revision".into()).unwrap();
+    assert!(runtime.entity_facts(&name).unwrap().unwrap().local_rev > selected_rev);
+    assert_eq!(runtime.exchange_result(id), Some(selected.clone()));
+    fetch_first_root(&rig);
+    assert!(runtime.sdk_root_confirmed());
+    assert_eq!(runtime.exchange_result(id), Some(selected));
+    assert!(runtime.tracking_sendables().contains_key(&name));
+    assert!(
+        runtime
+            .take_pending_updates(&rig.sdk)
+            .unwrap()
+            .iter()
+            .any(|u| u.adds.contains_key(&name))
+    );
+    let call = runtime.start_manual_send_call(&rig.sdk).unwrap().unwrap();
+    let batch = runtime
+        .build_collection_batch(&rig.sdk, &collection, &[name.clone()].into())
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    let codec::DecodeOutcome::Supported(sent_entity) = codec::Entity::decode(&batch.saves[0].envelope).unwrap() else {
+        panic!("production deck envelope required");
+    };
+    let Payload::Deck(sent_deck) =
+        Payload::decode(sent_entity.fields.kind, sent_entity.payload.as_deref().unwrap()).unwrap()
+    else {
+        panic!("production deck payload required");
+    };
+    assert_eq!(sent_deck.name.as_slice(), b"Later preproof revision");
+    let sent_rev = runtime.entity_facts(&name).unwrap().unwrap().local_rev;
+    assert!(sent_rev >= selected_rev);
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Newer than the captured flight".into()).unwrap();
+    let saved = Saved {
+        name: name.clone(),
+        envelope: batch.saves[0].envelope.clone(),
+        system_fields: b"synthetic-first-manual-save".to_vec(),
+    };
+    runtime.enter_sent_handler(&rig.sdk, batch.id).unwrap();
+    runtime
+        .sent_results(&rig.sdk, &collection, batch.id, &[saved], &[], 1)
+        .unwrap();
+    runtime.return_sent_handler(&rig.sdk).unwrap();
+    runtime.finish_send_call(&rig.sdk, call.id).unwrap();
+    let facts = runtime.entity_facts(&name).unwrap().unwrap();
+    assert_eq!(facts.acked_rev, sent_rev);
+    assert!(facts.local_rev > facts.acked_rev && facts.mark.is_some());
+    let result = runtime.exchange_result(id).unwrap();
+    assert!(result.acked_names.contains(&name) && result.outstanding_names.is_empty());
+    assert!(runtime.tracking_sendables().contains_key(&name));
+    rig.host.review().end(session_id).unwrap();
+    runtime.poll_review(&rig.sdk).unwrap();
+    assert!(runtime.tracking_sendables().contains_key(&name));
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn saved_flight_during_real_reconcile_scan_preserves_newer_edit_and_capture_accounting() {
+    use meguri_sync::cloud::runtime::ScanPausePoint;
+    use std::sync::mpsc;
+
+    let rig = rig_with_root(false);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let media = rig.host.media().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Captured before held scan".into()).unwrap();
+    let id = first_manual_capture(&rig);
+    let selection = runtime.exchange_result(id).unwrap();
+    assert_eq!(selection.selected_names.len(), 1);
+    let name = selection.selected_names.iter().next().unwrap().clone();
+    fetch_first_root(&rig);
+    let call = runtime.start_manual_send_call(&rig.sdk).unwrap().unwrap();
+    let batch = runtime
+        .build_collection_batch(&rig.sdk, &collection, &selection.selected_names)
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    assert_eq!(batch.saves[0].name, name);
+    runtime.send_call_request(&rig.sdk, call.id, batch.id).unwrap();
+    let prepared = runtime.entity_facts(&name).unwrap().unwrap();
+    assert_eq!(prepared.in_flight.len(), 1);
+    let flight = prepared.in_flight[0].clone();
+    assert_eq!(flight.local_rev, prepared.local_rev);
+    let saved = Saved {
+        name: name.clone(),
+        envelope: batch.saves[0].envelope.clone(),
+        system_fields: b"synthetic-held-scan-save".to_vec(),
+    };
+    meguri_engine::decks::rename(
+        &collection,
+        rig.baseline_deck,
+        "Newer local revision during receipt".into(),
+    )
+    .unwrap();
+    let newer = runtime.entity_facts(&name).unwrap().unwrap();
+    let newer_row = deck_row(&rig, rig.baseline_deck.0);
+    assert!(newer.local_rev > flight.local_rev);
+    assert_eq!(runtime.exchange_result(id), Some(selection.clone()));
+
+    std::thread::scope(|threads| {
+        // Keep the resume sender inside the scope body so unwinding disconnects
+        // the existing bounded pause before scoped workers are joined.
+        let (reached, wait) = mpsc::channel();
+        let (resume, go) = mpsc::channel();
+        runtime
+            .arm_note_scan_pause_for_testing(ScanPausePoint::BeforeSnapshot, reached, go)
+            .unwrap();
+        let scanning = &collection;
+        let scanning_media = &media;
+        let scan = threads.spawn(move || runtime.reconcile_binding(scanning, scanning_media, Duration::from_secs(10)));
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        let status = runtime.status().unwrap();
+        assert!(status.scan_running && !status.scan_completed_this_open);
+        runtime.validate_caller(&rig.sdk).unwrap();
+        assert!(runtime.sdk_root_confirmed());
+        assert!(runtime.start_manual_send_call(&rig.sdk).unwrap().is_none());
+        assert!(
+            runtime
+                .build_collection_batch(&rig.sdk, &collection, &selection.selected_names)
+                .unwrap()
+                .saves
+                .is_empty()
+        );
+        runtime.enter_sent_handler(&rig.sdk, batch.id).unwrap();
+        assert!(
+            runtime
+                .sent_results(
+                    &rig.sdk,
+                    &collection,
+                    batch.id + 1,
+                    std::slice::from_ref(&saved),
+                    &[],
+                    1
+                )
+                .is_err()
+        );
+        let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&saved.envelope).unwrap() else {
+            panic!("production flight envelope required");
+        };
+        let mut fields = entity.fields;
+        fields.writer[0] ^= 1;
+        let foreign = Saved {
+            name: name.clone(),
+            envelope: codec::Entity::build(fields, entity.payload.as_deref().unwrap())
+                .unwrap()
+                .encode()
+                .unwrap(),
+            system_fields: saved.system_fields.clone(),
+        };
+        assert!(
+            runtime
+                .sent_results(&rig.sdk, &collection, batch.id, &[foreign], &[], 1)
+                .is_err()
+        );
+        assert!(runtime.entity_facts(&name).unwrap().as_ref() == Some(&newer));
+        assert_eq!(runtime.exchange_result(id), Some(selection.clone()));
+
+        runtime
+            .sent_results(&rig.sdk, &collection, batch.id, std::slice::from_ref(&saved), &[], 1)
+            .unwrap();
+        assert!(runtime.status().unwrap().scan_running);
+        let acked = runtime.entity_facts(&name).unwrap().unwrap();
+        assert_eq!(acked.acked_rev, flight.local_rev);
+        assert_eq!(acked.server_erev, flight.erev);
+        assert_eq!(acked.acked_payload_digest, flight.payload_digest);
+        assert_eq!(acked.acked_system_fields, saved.system_fields);
+        assert!(acked.in_flight.is_empty());
+        assert_eq!(acked.local_rev, newer.local_rev);
+        assert!(acked.payload == newer.payload && acked.mark.is_some());
+        assert!(acked.base_payload.as_ref() == Some(&flight.payload));
+        let result = runtime.exchange_result(id).unwrap();
+        assert_eq!(result.boundary_seq, selection.boundary_seq);
+        assert_eq!(result.selected_names, selection.selected_names);
+        assert_eq!(result.acked_names, [name.clone()].into());
+        assert!(result.outstanding_names.is_empty());
+        runtime.return_sent_handler(&rig.sdk).unwrap();
+        runtime
+            .sdk_saved_removed(&rig.sdk, batch.id, std::slice::from_ref(&name))
+            .unwrap();
+        runtime.finish_send_call(&rig.sdk, call.id).unwrap();
+        runtime.validate_caller(&rig.sdk).unwrap();
+        assert!(runtime.tracking_sendables().is_empty());
+        resume.send(()).unwrap();
+        scan.join().unwrap().unwrap();
+    });
+    assert!(!runtime.status().unwrap().scan_running);
+    assert!(runtime.tracking_sendables().contains_key(&name));
+    let after_scan = runtime.entity_facts(&name).unwrap().unwrap();
+    assert_eq!(after_scan.local_rev, newer.local_rev);
+    assert_eq!(after_scan.acked_rev, flight.local_rev);
+    assert!(after_scan.payload == newer.payload && after_scan.mark.is_some());
+    assert_eq!(deck_row(&rig, rig.baseline_deck.0), newer_row);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn preproof_capture_still_rejects_stale_paused_unverified_and_stopped_tracking() {
+    for transition in 0..5 {
+        let rig = rig_with_root(false);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        let mut caller = rig.sdk.clone();
+        match transition {
+            0 => caller.push_str(":stale"),
+            1 => runtime.adapter_pause(true).unwrap(),
+            2 => runtime.adapter_account(None, IdentityStatus::ReadFailed).unwrap(),
+            3 => runtime.adapter_tracking_failure(&rig.sdk).unwrap(),
+            _ => {
+                let slot = rig.host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive
+                    .replace(|path| {
+                        assert!(path.exists());
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+        }
+        assert!(
+            runtime.sync_now(&caller, &collection).is_err(),
+            "capture crossed transition {transition}"
+        );
+        assert!(!runtime.adapter_exchange_active());
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn first_manual_capture_cannot_send_after_changed_or_deleted_root() {
+    for deleted in [false, true] {
+        let rig = rig_with_root(false);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Pending before root rejection".into()).unwrap();
+        let id = first_manual_capture(&rig);
+        let selection = runtime.exchange_result(id).unwrap();
+        assert!(!selection.selected_names.is_empty());
+        runtime
+            .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into()])
+            .unwrap();
+        runtime
+            .adapter_will_fetch(&rig.sdk, "rejected-root".into(), true)
+            .unwrap();
+        runtime
+            .adapter_fetch_zone(&rig.sdk, "meguri-root".into(), true, false)
+            .unwrap();
+        if deleted {
+            runtime
+                .adapter_fetched(&rig.sdk, "meguri-root", &[], &["active".into()])
+                .unwrap();
+        } else {
+            let mut changed = rig.active.clone();
+            let mut active = meguri_sync::cloud::control_codec::Active::decode(&changed.envelope).unwrap();
+            active.epoch[0] ^= 1;
+            changed.envelope = active.encode().unwrap();
+            runtime
+                .adapter_fetched(&rig.sdk, "meguri-root", &[changed], &[])
+                .unwrap();
+            runtime
+                .adapter_fetch_zone(&rig.sdk, "meguri-root".into(), false, false)
+                .unwrap();
+            assert!(runtime.adapter_did_fetch(&rig.sdk, "rejected-root", true).is_err());
+        }
+        assert!(!runtime.sdk_root_confirmed());
+        let status = runtime.status().unwrap();
+        assert!(!status.stored_usable && !status.identity_verified);
+        let reason = if deleted {
+            meguri_sync::cloud::IsolationReason::ActiveMissing
+        } else {
+            meguri_sync::cloud::IsolationReason::EpochSwitched
+        };
+        assert_eq!(
+            status.binding.unwrap().facts.state,
+            meguri_sync::cloud::BindingState::Isolated(reason)
+        );
+        assert!(runtime.start_manual_send_call(&rig.sdk).is_err());
+        assert!(
+            runtime
+                .build_collection_batch(&rig.sdk, &collection, &selection.selected_names)
+                .unwrap()
+                .saves
+                .is_empty()
+        );
+        assert!(runtime.sync_now(&rig.sdk, &collection).is_err());
+        assert_eq!(runtime.exchange_result(id), Some(selection));
+        rig.host.close().unwrap();
+    }
 }

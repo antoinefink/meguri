@@ -118,6 +118,15 @@ impl Runtime {
         Self::gate_locked(&s)
     }
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
+        Self::capture_gate_locked(s)?;
+        if !s.root_confirmed && !Self::publication_allows_send_locked(s) {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        Ok(())
+    }
+    // A manual exchange must capture before its worker can fetch root proof.
+    // This grants selection only; physical sends still use gate_locked.
+    fn capture_gate_locked(s: &State) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if !b.usable || !b.verified {
             return Err(RuntimeError::IdentityUnverified);
@@ -129,7 +138,6 @@ impl Runtime {
             || s.scan_required
             || s.scan_running
             || s.tracking_stopped
-            || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
             || s.adapter.paused
             || s.incoming.running
         {
@@ -161,6 +169,10 @@ impl Runtime {
         if Self::gate_locked(s).is_err() {
             return Ok(PendingSnapshot::empty());
         }
+        Self::pending_selection_locked(s)
+    }
+    fn pending_selection_locked(s: &State) -> Result<PendingSnapshot, RuntimeError> {
+        Self::capture_gate_locked(s)?;
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let mut pending = store.dirty_names(b.binding.id)?;
@@ -554,11 +566,6 @@ impl Runtime {
                 s.whole_complete = true;
                 s.scan_required = false;
                 s.tracking_stopped = false;
-                if Self::gate_locked(s).is_ok() {
-                    s.cloud.deferred.clear();
-                    let snapshot = Self::sendables_locked(s)?;
-                    s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
-                }
                 for (kind, row_count) in counts {
                     s.actions
                         .observations
@@ -577,15 +584,50 @@ impl Runtime {
             })?;
             Ok(proof)
         })();
+        let result = result.and_then(|proof| {
+            let file = self.inputs.files.identity(collection.path())?;
+            let publication =
+                meguri_engine::device_state::DeviceState::for_collection(collection.path()).publication()?;
+            Ok((proof, file, publication))
+        });
         let mut s = self.state();
         if s.incarnation == guard.incarnation {
             s.scan_running = false;
+            let result = result.and_then(|(proof, file, publication)| {
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                if file != guard.file || file.created_nanos >= 1_000_000_000 {
+                    return Err(RuntimeError::FileIdentityUnavailable);
+                }
+                if (b.binding.id, b.open_counter, b.evidence.generation, b.file)
+                    != (guard.binding, guard.open, guard.generation, guard.file)
+                    || !b.usable
+                    || !b.verified
+                    || s.invalidation != guard.invalidation
+                    || s.invalidation_exhausted
+                    || !collection.is_current()
+                    || collection.generation() != guard.generation
+                    || !publication.as_ref().is_some_and(|p| {
+                        p.identity == b.binding.facts.publication
+                            && p.decision == meguri_engine::device_state::PublicationDecision::Clear
+                    })
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                if Self::gate_locked(&s).is_ok() {
+                    s.cloud.deferred.clear();
+                    let snapshot = with_tracking_access(|| Self::sendables_locked(&s))?;
+                    s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
+                }
+                Ok(proof)
+            });
             if result.is_err() {
                 s.scan_required = true;
                 s.whole_complete = false;
             }
+            result
+        } else {
+            Err(RuntimeError::StaleIncarnation)
         }
-        result
     }
     /// A completed SDK fetch at the current no-state point, with no root-zone
     /// delivery, permits the V26.1 record-ID fallback. It is not confirmation.
@@ -1229,6 +1271,8 @@ impl Runtime {
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
+        // Receipt authority comes from the current caller, file, handler and
+        // persisted flight below. A scan may block new sends after this save landed.
         if s.bound
             .as_ref()
             .is_none_or(|b| b.evidence.generation != evidence.generation || b.file.pair() != evidence.native_file)
@@ -1326,13 +1370,13 @@ impl Runtime {
         if self.active_review().is_some() {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
-        self.workflow_gate()?;
+        Self::capture_gate_locked(&self.state())?;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         let boundary = snapshot.seq().0;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
-        Self::gate_locked(&s)?;
+        Self::capture_gate_locked(&s)?;
         if !collection.is_current()
             || s.bound
                 .as_ref()
@@ -1360,7 +1404,12 @@ impl Runtime {
             .transpose()?
             .unwrap_or(1);
         let id = s.actions.next.max(next_durable).max(next_closed);
-        let names = s.actions.desired.keys().cloned().collect::<BTreeSet<_>>();
+        // Pending updates remain gated by root proof. Capture the durable local
+        // selection independently so the first fetch cannot lose preproof edits.
+        let names = with_tracking_access(|| Self::pending_selection_locked(&s))?
+            .0
+            .into_keys()
+            .collect::<BTreeSet<_>>();
         let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let b = bound.binding.id;
         let open = bound.open_counter;
@@ -1482,7 +1531,8 @@ impl Runtime {
     fn start_send_call_mode(&self, instance: &str, manual: bool) -> Result<Option<SendCall>, RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
-        if s.actions.exchange_phase.is_some()
+        if Self::gate_locked(&s).is_err()
+            || s.actions.exchange_phase.is_some()
             || s.actions.handler.is_some()
             || (!manual
                 && !s.actions.automatic

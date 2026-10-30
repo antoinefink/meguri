@@ -921,7 +921,7 @@ pub struct CloudPolicyCommand {
     // The ORIGINAL command, including its private issued backend_guard.
     command: p::Command,
 }
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 impl CloudPolicyCommand {
     pub(crate) fn exchange_observation_for_testing(&self) -> Result<p::ExchangeObservation, CoreError> {
         self.owner.owns(self)?;

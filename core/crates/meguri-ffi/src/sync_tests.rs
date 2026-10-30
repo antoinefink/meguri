@@ -111,6 +111,9 @@ impl Fixture {
         }
     }
     fn baseline(&self) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
+        self.baseline_with_root(true)
+    }
+    fn baseline_with_root(&self, confirm_root: bool) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
         let collection = self.workflow.host.collection().unwrap();
         let media = self.workflow.host.media().unwrap();
         media.store().register_full(|_, _| true).unwrap();
@@ -121,17 +124,19 @@ impl Fixture {
                 &collection,
                 self.clock.as_ref(),
                 self.random.as_ref(),
-                Some(b"old-cursor".to_vec()),
+                confirm_root.then(|| b"old-cursor".to_vec()),
             )
             .unwrap();
         self.workflow
             .core
             .reconcile_binding(&collection, &media, Duration::from_secs(1))
             .unwrap();
-        self.workflow
-            .core
-            .accept_root_fetch(&self.workflow.core.instance().unwrap(), Some(&root), true, 1)
-            .unwrap();
+        if confirm_root {
+            self.workflow
+                .core
+                .accept_root_fetch(&self.workflow.core.instance().unwrap(), Some(&root), true, 1)
+                .unwrap();
+        }
         let record = |r: w::Saved| CloudRecord {
             name: r.name,
             envelope: r.envelope,

@@ -486,3 +486,112 @@ fn actual_replacement_accepts_successor_facades_and_refuses_original_execution_a
     assert!(execution.validate_execution().is_err());
     fixture.workflow.host.close().unwrap();
 }
+
+#[test]
+fn cursorless_auto_off_ffi_capture_maps_before_first_root_fetch() {
+    let fixture = fixture();
+    let (sdk, root, _) = fixture.baseline_with_root(false);
+    assert!(sdk.needs_root_fetch && sdk.serialization.is_none());
+    let workflow = &fixture.workflow;
+    assert!(!workflow.core.wants_send());
+    workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+    workflow.release_sdk(sdk.instance_id).unwrap();
+    let policy = workflow.policy().unwrap();
+    let mut issued = commands(policy.clone().input(settings(false, false)).unwrap());
+    issued.extend(commands(policy.clone().refresh_account().unwrap()));
+    issued.extend(commands(
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Network { reachable: true })
+            .unwrap(),
+    ));
+    let command = issued
+        .into_iter()
+        .rev()
+        .find(|c| matches!(c.action, CloudPolicyAction::StartEngine { automatic: false }))
+        .expect("real automatic-off StartEngine");
+    let execution = policy.clone().prepare_execution(command.handle).unwrap().unwrap();
+    let sdk = execution.register_sdk().unwrap();
+    assert!(!sdk.needs_root_fetch && sdk.serialization.is_none());
+    policy
+        .clone()
+        .input(CloudPolicyEvent::Refresh {
+            cause: CloudPolicyChangeCause::Cloud,
+        })
+        .unwrap();
+    let collection = workflow.host.collection().unwrap();
+    meguri_engine::decks::add(&collection, "FFI first manual pending".into()).unwrap();
+    let issued = commands(
+        policy
+            .clone()
+            .input(CloudPolicyEvent::SyncNowRequested {
+                source: CloudPolicySource::Command,
+            })
+            .unwrap(),
+    )
+    .into_iter()
+    .find(|c| matches!(c.action, CloudPolicyAction::RunExchange { .. }))
+    .unwrap();
+    assert!(matches!(
+        policy.exchange_readiness(issued.handle.clone(), false, true).unwrap(),
+        CloudPolicyReadiness::Ready
+    ));
+    assert!(!workflow.core.sdk_root_confirmed());
+    assert!(workflow.fetch_drains().unwrap().is_empty());
+    let before = issued.handle.exchange_observation_for_testing().unwrap();
+    assert!(before.captures.is_empty() && before.active_id.is_none());
+    let captured = policy.clone().capture_exchange(issued.handle.clone()).unwrap();
+    assert!(matches!(captured.output, CloudPolicyOutput::Commands { ref commands } if commands.is_empty()));
+    let id = captured
+        .runtime_exchange
+        .expect("capture must install the first fetch worker's Runtime ID");
+    let after = issued.handle.exchange_observation_for_testing().unwrap();
+    assert_eq!(after.captures.get(&before.policy_exchange), Some(&id));
+    assert_eq!(after.active_id, Some(id));
+    let selection = workflow.core.exchange_result(id).unwrap();
+    assert_eq!(selection.boundary_seq, collection.last_seq().0);
+    assert!(!selection.selected_names.is_empty());
+    assert_eq!(selection.outstanding_names, selection.selected_names);
+    assert!(workflow.tracking_sendables().unwrap().is_empty());
+    assert!(workflow.begin_send(sdk.instance_id.clone()).unwrap().is_none());
+    assert!(
+        workflow
+            .core
+            .build_collection_batch(&sdk.instance_id, &collection, &selection.selected_names)
+            .unwrap()
+            .saves
+            .is_empty()
+    );
+    // Use the exported fetch delivery and completion path; capture grants no proof.
+    let fetch = workflow
+        .begin_fetch(sdk.instance_id.clone(), vec!["meguri-root".into()])
+        .unwrap();
+    workflow
+        .will_fetch(sdk.instance_id.clone(), "first-ffi".into(), true)
+        .unwrap();
+    workflow
+        .fetch_zone(sdk.instance_id.clone(), "meguri-root".into(), true, false)
+        .unwrap();
+    workflow
+        .fetched(sdk.instance_id.clone(), "meguri-root".into(), vec![root], vec![])
+        .unwrap();
+    workflow
+        .fetch_zone(sdk.instance_id.clone(), "meguri-root".into(), false, false)
+        .unwrap();
+    workflow
+        .did_fetch(sdk.instance_id.clone(), "first-ffi".into(), true)
+        .unwrap();
+    assert!(workflow.finish_fetch(sdk.instance_id.clone(), fetch).unwrap());
+    workflow.exchange_fetched(sdk.instance_id.clone(), true).unwrap();
+    assert!(workflow.core.sdk_root_confirmed());
+    assert_eq!(workflow.core.exchange_result(id), Some(selection.clone()));
+    let pending = workflow.tracking_sendables().unwrap();
+    assert!(selection.selected_names.iter().all(|name| pending.contains_key(name)));
+    let send = workflow.begin_send(sdk.instance_id.clone()).unwrap().unwrap();
+    workflow.finish_send(sdk.instance_id.clone(), send, pending).unwrap();
+    let cancelled = workflow
+        .complete_exchange(sdk.instance_id, id, true, true, false)
+        .unwrap();
+    assert_eq!(cancelled.id, id);
+    assert!(!workflow.core.adapter_exchange_active());
+}
