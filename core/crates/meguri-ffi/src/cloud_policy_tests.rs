@@ -3,6 +3,552 @@ use super::*;
 use crate::cloud_policy::*;
 use meguri_sync::cloud::testing::ApplyInterruption;
 
+// K6/K11.1/K11.2/K15: these exercise the real Host observer, not seeded
+// tracking rows. The existing prebound fixture supplies only the baseline.
+fn captured_decks(fixture: &Fixture, prefix: &str) -> Vec<w::EntityFacts> {
+    fixture
+        .workflow
+        .core
+        .adapter_snapshot()
+        .unwrap()
+        .entities
+        .into_iter()
+        .filter(|e| matches!(&e.payload, c::entity_codec::Payload::Deck(d) if d.name.starts_with(prefix.as_bytes())))
+        .collect()
+}
+
+fn assert_deck_capture_live(fixture: &Fixture, sdk: &CloudEngineRegistration) {
+    let status = fixture.workflow.core.status().unwrap();
+    assert!(!status.tracking_stopped);
+    assert!(!status.scan_required);
+    assert!(status.identity_verified && status.stored_usable);
+    fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+    assert_eq!(
+        fixture.workflow.core.incoming_sdk_instance_for_testing(),
+        Some(sdk.instance_id.clone())
+    );
+    let engine = fixture
+        .workflow
+        .host
+        .cloud_policy_driver()
+        .unwrap()
+        .state()
+        .engine
+        .unwrap();
+    assert_eq!(engine.instance, sdk.instance_id);
+    assert!(!engine.stopping);
+}
+
+// A real provider call samples first, then waits off every core lock. The
+// release guard also unblocks the worker if an assertion unwinds the test.
+struct ReleaseDeckAccount(std::sync::mpsc::Sender<()>);
+impl Drop for ReleaseDeckAccount {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+fn hold_deck_account(provider: &SamplingAccount) -> (std::sync::mpsc::Receiver<()>, ReleaseDeckAccount) {
+    let (reached, wait) = std::sync::mpsc::channel();
+    let (release, resume) = std::sync::mpsc::channel();
+    *provider.after_sample.lock().unwrap() = Some(Box::new(move || {
+        reached.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(5)).unwrap();
+    }));
+    (wait, ReleaseDeckAccount(release))
+}
+
+fn read_deck_account(provider: &SamplingAccount) -> r::IdentityStatus {
+    <SamplingAccount as r::IdentityProvider>::read_identity(
+        provider,
+        &c::BuildScope {
+            container: c::ContainerId::new("synthetic-u114").unwrap(),
+            environment: c::Environment::Development,
+        },
+    )
+}
+
+fn complete_deck_account(fixture: &Fixture, request: u64, observed: r::IdentityStatus) -> bool {
+    let r::IdentityStatus::Available(account) = observed else {
+        panic!("original provider must return its sampled account")
+    };
+    fixture
+        .workflow
+        .complete_identity_read(request, CloudAccountStatus::Available, Some(account.0))
+        .unwrap()
+}
+
+#[test]
+fn new_deck_and_ancestors_capture_once_during_original_sdk_account_read_and_real_review() {
+    let provider = SamplingAccount::new();
+    let (fixture, review_deck) = unbound_fixture(provider.clone());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let notetype = meguri_engine::notetypes::add(
+        &collection,
+        meguri_engine::notetypes::NewNotetype {
+            name: "Deck capture review".into(),
+            kind: meguri_engine::notetypes::NotetypeKind::Standard,
+            fields: vec!["Front".into(), "Back".into()],
+            templates: vec![meguri_engine::notetypes::NewTemplate {
+                name: "Face".into(),
+                front: "{{Front}}".into(),
+                back: "{{Back}}".into(),
+                ..Default::default()
+            }],
+            css: None,
+        },
+    )
+    .unwrap()
+    .value
+    .id;
+    meguri_engine::notes::add(
+        &collection,
+        meguri_engine::notes::AddNote {
+            notetype_id: notetype,
+            fields: vec!["Question".into(), "Answer".into()],
+            tags: Vec::new(),
+            deck_id: review_deck,
+            guid: None,
+            update_add_defaults: false,
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default()).unwrap();
+    let policy = fixture.workflow.policy().unwrap();
+    drain(&policy, policy.clone().input(settings(false)).unwrap());
+    drain(&policy, policy.clone().refresh_account().unwrap());
+    drain(
+        &policy,
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Network { reachable: true })
+            .unwrap(),
+    );
+    let (sdk, _, _) = fixture.baseline();
+    drain(
+        &policy,
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Refresh {
+                cause: CloudPolicyChangeCause::Cloud,
+            })
+            .unwrap(),
+    );
+    assert_deck_capture_live(&fixture, &sdk);
+    let guard = fixture.workflow.core.adapter_guard();
+    let counter = fixture.workflow.core.status().unwrap().change_counter;
+    let request = fixture
+        .workflow
+        .begin_identity_read(false, Some(sdk.instance_id.clone()))
+        .unwrap();
+    let (reached, release) = hold_deck_account(&provider);
+    std::thread::scope(|scope| {
+        let read = scope.spawn(|| read_deck_account(&provider));
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let added = meguri_engine::decks::add(&collection, "Held account::Ancestor::New deck".into()).unwrap();
+        fixture
+            .workflow
+            .await_tracking(collection.generation().0, added.seq.0)
+            .unwrap();
+        let captured = captured_decks(&fixture, "Held account");
+        assert_eq!(captured.len(), 3);
+        assert_eq!(fixture.workflow.core.status().unwrap().change_counter, counter + 3);
+        let binding = fixture.workflow.core.status().unwrap().binding.unwrap();
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        let native = reader.deck_rows().unwrap();
+        drop(reader);
+        let mut changes = Vec::new();
+        for entity in &captured {
+            let c::entity_codec::Payload::Deck(payload) = &entity.payload else {
+                unreachable!()
+            };
+            let row = native.iter().find(|d| d.id.0 == payload.id).unwrap();
+            assert_eq!(payload.name, row.name.as_bytes());
+            let parent = meguri_engine::decks::names::parent(&row.name)
+                .map(|name| meguri_engine::decks::names::find(&native, name).unwrap().id.0)
+                .unwrap_or(0);
+            assert_eq!(payload.parent_id, parent);
+            assert_eq!(entity.key, c::entity_codec::id_key(row.id.0));
+            assert_eq!(
+                entity.name,
+                c::entity_codec::entity_name(&binding.facts.record_key.0, c::entity_codec::Kind::Deck, &entity.key)
+                    .unwrap()
+            );
+            assert_eq!((entity.local_rev, entity.acked_rev, entity.server_erev), (1, 0, 0));
+            assert!(entity.base_payload.is_none() && entity.acked_payload.is_none());
+            assert_eq!(entity.observed_seq, added.seq.0);
+            assert_eq!(entity.observed_generation, collection.generation().0);
+            let mark = entity.mark.as_ref().unwrap();
+            assert_eq!(mark.source, r::DirtySource::Observer);
+            assert_eq!(mark.payload_digest, entity.payload.payload_digest().unwrap());
+            changes.push(mark.change_seq);
+            assert!(
+                fixture
+                    .workflow
+                    .tracking_sendables()
+                    .unwrap()
+                    .contains_key(&entity.name)
+            );
+        }
+        changes.sort();
+        assert_eq!(changes, vec![counter + 1, counter + 2, counter + 3]);
+        assert!(
+            captured
+                .iter()
+                .enumerate()
+                .all(|(i, e)| captured[..i].iter().all(|p| p.origin != e.origin))
+        );
+        let duplicate = meguri_engine::decks::add(&collection, "HELD ACCOUNT::ANCESTOR::NEW DECK".into()).unwrap();
+        assert_eq!(duplicate.value.id, added.value.id);
+        assert!(captured_decks(&fixture, "Held account") == captured);
+        assert_eq!(fixture.workflow.core.status().unwrap().change_counter, counter + 3);
+
+        let review = fixture.workflow.host.review();
+        let meguri_engine::session::StartResult::Started { session_id, head, .. } =
+            review.start(review_deck, None).unwrap()
+        else {
+            panic!("real review must start")
+        };
+        let card = &head.items[0];
+        assert!(matches!(
+            review
+                .answer(
+                    session_id,
+                    card.card_id,
+                    meguri_sched::answer::Rating::Good,
+                    card.state_token,
+                    meguri_model::time::EpochMillis(NOW),
+                    100,
+                )
+                .unwrap(),
+            meguri_engine::session::AnswerOutcome::Accepted { .. }
+        ));
+        review.end(session_id).unwrap();
+        assert!(review.active_session().is_none());
+        assert_deck_capture_live(&fixture, &sdk);
+        assert_eq!(fixture.workflow.core.adapter_guard(), guard);
+        drop(release);
+        let observed = read.join().unwrap();
+        assert!(complete_deck_account(&fixture, request, observed));
+        drain(&policy, policy.clone().project_identity_read(request).unwrap());
+        assert!(captured_decks(&fixture, "Held account") == captured);
+    });
+    assert_deck_capture_live(&fixture, &sdk);
+    fixture
+        .workflow
+        .state_update(sdk.instance_id, b"original-sdk-after-deck-read".to_vec())
+        .unwrap();
+    assert_eq!(
+        fixture.workflow.core.adapter_snapshot().unwrap().serialization,
+        Some(b"original-sdk-after-deck-read".to_vec())
+    );
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn new_deck_rollback_has_no_capture_or_account_invalidation() {
+    let provider = SamplingAccount::new();
+    let (fixture, sdk, _) = rig_with_provider(provider.clone());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let before = fixture.workflow.core.adapter_snapshot().unwrap();
+    let counter = fixture.workflow.core.status().unwrap().change_counter;
+    let request = fixture
+        .workflow
+        .begin_identity_read(false, Some(sdk.instance_id.clone()))
+        .unwrap();
+    let (reached, release) = hold_deck_account(&provider);
+    std::thread::scope(|scope| {
+        let read = scope.spawn(|| read_deck_account(&provider));
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let failed: Result<meguri_engine::OpResult<()>, _> = collection.run(
+            meguri_engine::OpSpec::named("rolled back deck capture", meguri_engine::OpSource::UserUndoable),
+            |ctx| {
+                meguri_engine::decks::add_in(ctx.scope(), "Rollback root::Child")?;
+                Err(meguri_engine::EngineError::CollectionUnavailable {
+                    reason: "intentional rollback".into(),
+                })
+            },
+        );
+        assert!(failed.is_err());
+        assert!(fixture.workflow.core.adapter_snapshot().unwrap() == before);
+        assert_eq!(fixture.workflow.core.status().unwrap().change_counter, counter);
+        assert!(
+            collection
+                .reader(ReaderRole::Query)
+                .unwrap()
+                .deck_rows()
+                .unwrap()
+                .iter()
+                .all(|d| !d.name.starts_with("Rollback root"))
+        );
+        drop(release);
+        assert!(complete_deck_account(&fixture, request, read.join().unwrap()));
+    });
+    assert_deck_capture_live(&fixture, &sdk);
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn new_deck_capture_failure_keeps_parent_state_atomic() {
+    let provider = SamplingAccount::new();
+    let (fixture, sdk, _) = rig_with_provider(provider.clone());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let before = fixture.workflow.core.adapter_snapshot().unwrap();
+    let counter = fixture.workflow.core.status().unwrap().change_counter;
+    let request = fixture
+        .workflow
+        .begin_identity_read(false, Some(sdk.instance_id.clone()))
+        .unwrap();
+    fixture.workflow.core.arm_capture_failure_for_testing(1).unwrap();
+    let added = meguri_engine::decks::add(&collection, "Capture failure::Ancestor::Child".into()).unwrap();
+    assert!(
+        fixture
+            .workflow
+            .await_tracking(collection.generation().0, added.seq.0)
+            .is_err()
+    );
+    let after = fixture.workflow.core.adapter_snapshot().unwrap();
+    assert!(before.entities == after.entities);
+    assert!(captured_decks(&fixture, "Capture failure").is_empty());
+    let status = fixture.workflow.core.status().unwrap();
+    assert_eq!(status.change_counter, counter);
+    assert!(status.tracking_stopped && status.scan_required);
+    assert_eq!(
+        collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .deck_rows()
+            .unwrap()
+            .iter()
+            .filter(|d| d.name.starts_with("Capture failure"))
+            .count(),
+        3
+    );
+    assert!(!complete_deck_account(&fixture, request, read_deck_account(&provider)));
+    assert!(fixture.workflow.validate_sdk(sdk.instance_id).is_err());
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn successful_new_deck_capture_keeps_real_account_generation_and_suspend_invalidation() {
+    for invalidation in 0..3 {
+        let provider = SamplingAccount::new();
+        let (fixture, sdk, _) = rig_with_provider(provider.clone());
+        let collection = fixture.workflow.host.collection().unwrap();
+        let request = fixture
+            .workflow
+            .begin_identity_read(false, Some(sdk.instance_id.clone()))
+            .unwrap();
+        let (reached, release) = hold_deck_account(&provider);
+        std::thread::scope(|scope| {
+            let read = scope.spawn(|| read_deck_account(&provider));
+            reached.recv_timeout(Duration::from_secs(5)).unwrap();
+            let added = meguri_engine::decks::add(&collection, "Guard check deck".into()).unwrap();
+            fixture
+                .workflow
+                .await_tracking(collection.generation().0, added.seq.0)
+                .unwrap();
+            assert_deck_capture_live(&fixture, &sdk);
+            if invalidation == 1 {
+                let engine = fixture.workflow.host.engine();
+                let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive
+                    .replace(|path| {
+                        assert!(path.exists());
+                        Ok(())
+                    })
+                    .unwrap();
+            } else if invalidation == 0 {
+                fixture
+                    .workflow
+                    .core
+                    .adapter_account(None, r::IdentityStatus::SignedOut)
+                    .unwrap();
+                let isolated = fixture.workflow.core.adapter_snapshot().unwrap();
+                meguri_engine::decks::add(&collection, "While isolated".into()).unwrap();
+                assert!(fixture.workflow.core.adapter_snapshot().unwrap() == isolated);
+                assert!(captured_decks(&fixture, "While isolated").is_empty());
+            } else {
+                assert_eq!(
+                    fixture.workflow.host.engine().suspend(Duration::from_secs(5)).unwrap(),
+                    meguri_engine::SuspendOutcome::Suspended
+                );
+                fixture.workflow.host.engine().resume().unwrap();
+            }
+            drop(release);
+            assert!(!complete_deck_account(&fixture, request, read.join().unwrap()));
+            assert!(fixture.workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+        });
+        fixture.workflow.host.close().unwrap();
+    }
+}
+
+#[test]
+fn new_deck_real_service_saved_ack_and_next_edit_keep_origin_revision_and_base() {
+    use meguri_testkit::cloud::{
+        Caller, Config, Mutation, MutationSuccess, Operation, RecordInput, Reply, Scope, Service, SystemFields,
+        coordinator::publication_control_record,
+    };
+    let (fixture, sdk, _) = rig();
+    let collection = fixture.workflow.host.collection().unwrap();
+    let added = meguri_engine::decks::add(&collection, "Service captured deck".into()).unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, added.seq.0)
+        .unwrap();
+    let initial = captured_decks(&fixture, "Service captured deck").pop().unwrap();
+    assert_eq!((initial.local_rev, initial.acked_rev), (1, 0));
+    assert!(initial.base_payload.is_none());
+    let run = tempfile::tempdir().unwrap();
+    let mut server = Service::open(run.path(), Config::default(), SeededRandom::new(113_114)).unwrap();
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    // This stable-binding fixture's prior epoch is synthetic. Only new deck
+    // saves and their later conditional update are asserted against Service.
+    server
+        .request(
+            &scope,
+            Caller::default(),
+            Operation::CreateZone {
+                zone: sdk.collection_zone.clone(),
+            },
+        )
+        .unwrap()
+        .result
+        .unwrap();
+    let mut last_payload = None;
+    for revision in 1..=2 {
+        if revision == 2 {
+            let changed =
+                meguri_engine::decks::rename(&collection, added.value.id, "Service captured deck edited".into())
+                    .unwrap();
+            fixture
+                .workflow
+                .await_tracking(collection.generation().0, changed.seq.0)
+                .unwrap();
+        }
+        assert_deck_capture_live(&fixture, &sdk);
+        let pending = fixture
+            .workflow
+            .core
+            .adapter_snapshot()
+            .unwrap()
+            .entities
+            .into_iter()
+            .find(|e| e.name == initial.name)
+            .unwrap();
+        assert_eq!(pending.origin, initial.origin);
+        assert_eq!((pending.local_rev, pending.acked_rev), (revision, revision - 1));
+        assert!(pending.base_payload == last_payload);
+        let mark = pending.mark.as_ref().unwrap();
+        assert_eq!(
+            mark.change_seq,
+            initial.mark.as_ref().unwrap().change_seq + revision - 1
+        );
+        let requested = fixture
+            .workflow
+            .tracking_sendables()
+            .unwrap()
+            .into_iter()
+            .filter(|(name, _)| name == &initial.name)
+            .collect();
+        let batch = fixture
+            .workflow
+            .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), requested)
+            .unwrap()
+            .expect("real new deck must be sendable");
+        assert_eq!(batch.saves.len(), 1);
+        assert_eq!(batch.saves[0].name, initial.name);
+        assert_eq!(batch.saves[0].system_fields.is_some(), revision == 2);
+        let changes = batch
+            .saves
+            .into_iter()
+            .map(|record| Mutation::Save {
+                record: RecordInput::encrypted(record.name, "MGEntity", record.envelope),
+                if_unchanged: record.system_fields.map(SystemFields::from_bytes),
+            })
+            .collect();
+        let reply = server
+            .request(
+                &scope,
+                Caller::default(),
+                Operation::Modify {
+                    zone: sdk.collection_zone.clone(),
+                    atomic: false,
+                    changes,
+                },
+            )
+            .unwrap()
+            .result
+            .unwrap();
+        let Reply::Modified(mut results) = reply else {
+            panic!("real Service modify required")
+        };
+        assert_eq!(results.len(), 1);
+        let MutationSuccess::Saved(record) = results.pop().unwrap().result.unwrap() else {
+            panic!("real Service Saved required")
+        };
+        let value = publication_control_record(&record).unwrap();
+        let binding = fixture.workflow.core.status().unwrap().binding.unwrap();
+        let received = c::entity_codec::receive(
+            &binding.facts.record_key.0,
+            &record.name,
+            value.encrypted.as_ref().unwrap(),
+            c::entity_codec::AssetInput::Absent,
+        )
+        .unwrap();
+        assert_eq!(received.entity.fields.origin, initial.origin);
+        assert_eq!(received.entity.fields.erev, revision);
+        assert!(received.payload == Some(pending.payload.clone()));
+        fixture
+            .workflow
+            .sent(
+                sdk.instance_id.clone(),
+                batch.id,
+                vec![CloudRecord {
+                    name: record.name,
+                    envelope: value.encrypted.unwrap(),
+                    system_fields: Some(value.system_fields.0),
+                    ..Default::default()
+                }],
+                vec![],
+                1,
+            )
+            .unwrap();
+        fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+        let clean = fixture
+            .workflow
+            .core
+            .adapter_snapshot()
+            .unwrap()
+            .entities
+            .into_iter()
+            .find(|e| e.name == initial.name)
+            .unwrap();
+        assert_eq!(
+            (clean.local_rev, clean.acked_rev, clean.server_erev),
+            (revision, revision, revision)
+        );
+        assert_eq!(clean.origin, initial.origin);
+        assert!(clean.mark.is_none() && clean.base_payload.is_none() && clean.in_flight.is_empty());
+        assert!(clean.acked_payload == Some(pending.payload.clone()));
+        assert!(
+            !fixture
+                .workflow
+                .tracking_sendables()
+                .unwrap()
+                .contains_key(&initial.name)
+        );
+        last_payload = Some(pending.payload);
+    }
+    assert_deck_capture_live(&fixture, &sdk);
+    fixture.workflow.host.close().unwrap();
+}
+
 fn rig() -> (Fixture, CloudEngineRegistration, CloudRecord) {
     rig_with_provider(Arc::new(Account))
 }

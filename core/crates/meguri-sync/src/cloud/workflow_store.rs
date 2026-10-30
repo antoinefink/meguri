@@ -639,6 +639,19 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if state.open_counter != open {
             return Err(Error::InvalidData.into());
         }
+        // add_deck may create several ancestors, in child-to-parent order.
+        // Resolve their native names against this same committed writer view,
+        // including rows that have not reached tracking yet.
+        let mut added_decks = Vec::new();
+        for change in commit.payload.rows(Table::Decks) {
+            let delta = change?;
+            if delta.before.is_none() && matches!(delta.after, meguri_engine::changes::observers::RowAfter::Row(_)) {
+                let RowKey::Id(id) = delta.key else {
+                    return Err(Error::InvalidData.into());
+                };
+                added_decks.push(codec::id_key(id).to_vec());
+            }
+        }
         let tx = self.connection.transaction().map_err(Error::from)?;
         let incoming = super::incoming_store::intents(&tx, b)?;
         let applying = commit.changes.source == meguri_model::changes::OpSource::CloudIncoming;
@@ -684,13 +697,18 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     .map_err(Error::from)?;
                     continue;
                 }
-                let view = CommitView { c: &tx, b, rows };
+                let view = CommitView {
+                    c: &tx,
+                    b,
+                    rows,
+                    added_decks: &added_decks,
+                };
                 let p = row_payload::project(&view, kind, &raw.ok_or(Error::InvalidData)?, |id| layout(&tx, b, id))?;
                 let mut e = if let Some(e) = existing {
                     e
                 } else {
-                    let ordinary_addition =
-                        matches!(kind, codec::Kind::Note | codec::Kind::Card) && delta.before.is_none();
+                    let ordinary_addition = matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck)
+                        && delta.before.is_none();
                     if !ordinary_addition && kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
                     }
@@ -751,6 +769,7 @@ struct CommitView<'a, 'r> {
     c: &'a Connection,
     b: BindingId,
     rows: &'a meguri_engine::ObserverRows<'r>,
+    added_decks: &'a [Vec<u8>],
 }
 impl View for CommitView<'_, '_> {
     fn row(&self, t: Table, k: &RowKey) -> Result<Option<RowImage>, Error> {
@@ -767,8 +786,19 @@ impl View for CommitView<'_, '_> {
                 _ => Err(Error::InvalidData),
             })
             .transpose()?;
-        keys(self.c, self.b, kind, start.as_deref())?
-            .into_iter()
+        let mut page = keys(self.c, self.b, kind, start.as_deref())?;
+        if kind == codec::Kind::Deck {
+            page.extend(
+                self.added_decks
+                    .iter()
+                    .filter(|key| start.as_ref().is_none_or(|after| *key > after))
+                    .cloned(),
+            );
+            page.sort();
+            page.dedup();
+            page.truncate(250);
+        }
+        page.into_iter()
             .map(|k| self.row(t, &row_key(kind, &k)?)?.ok_or(Error::InvalidData))
             .collect()
     }
