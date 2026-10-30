@@ -65,7 +65,8 @@ extension ReviewCollectionStartupTests {
         let service = CoreCollectionService()
         var configured = false
         let sync = SyncCoordinator(bootstrap: {
-            #expect(try await service.lifecycle() == .noCollection)
+            let phase: CollectionLifecycle = try await service.lifecycle()
+            #expect(phase == .noCollection)
             configured = true
         }, makeBackend: { _ in
             #expect(configured)
@@ -80,7 +81,8 @@ extension ReviewCollectionStartupTests {
         owner.didFlushLocally = { localFlushObserved = true; backend.events.append("local-flush") }
         backend.onClose = {
             // This query still resolves the ORIGINAL Host at native drain.
-            #expect(try await service.lifecycle() == .ready(generation: owner.generation))
+            let phase = try await service.lifecycle()
+            #expect(phase == .ready(generation: owner.generation))
             backend.events.append("native-drained")
         }
         await owner.start()
@@ -112,7 +114,8 @@ extension ReviewCollectionStartupTests {
             #expect(backend.events.filter { $0 == "expired" }.count == expiries)
             #expect(await owner.close())
             #expect(backend.closed && backend.closeCount == 1)
-            #expect(try await service.lifecycle() == .noCollection)
+            let phase: CollectionLifecycle = try await service.lifecycle()
+            #expect(phase == .noCollection)
             #expect(await owner.close())
             #expect(backend.closeCount == 1)
         } catch { _ = await owner.close(); throw error }

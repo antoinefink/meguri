@@ -3,10 +3,10 @@ import CoreBridge
 import Foundation
 import Observation
 
-/// One production collection and event consumer, held above shell layouts.
+/// One production collection, held above shell layouts.
 @Observable
 @MainActor
-public final class ReviewCollection {
+public final class ReviewCollection: ChangeFanoutSink {
     public enum State: Equatable { case unopened, loading, noFile, ready, unavailable, failed(String) }
     public private(set) var state: State = .unopened
     public private(set) var lifecycle: CollectionLifecycle = .noCollection
@@ -379,7 +379,6 @@ public final class ReviewCollection {
     private var pendingStudyCollapse: [Int64: (revision: UInt64, collapsed: Bool)] = [:]
     private let records: ReviewRecordStore
     private var resolver: MediaPathResolver?
-    private var events: Task<Void, Never>?
     private var countsTask: Task<Void, Never>?
     private var countTimer: Timer?
     private var countsRevision: UInt64 = 0
@@ -445,15 +444,7 @@ public final class ReviewCollection {
         }
     }
     private func subscribe() async throws {
-        try await CoreEventStream.shared.start()
-        if events == nil {
-            events = Task { [weak self] in
-                for await event in CoreEventStream.shared.events {
-                    guard let self, !Task.isCancelled else { return }
-                    self.receive(event)
-                }
-            }
-        }
+        try await ChangeFanout.shared.subscribe(self)
     }
     /// Called only after the FFI job retains the host, for open AND first import.
     private func completeOpenedHost(loadRecord: Bool) async throws {
@@ -606,7 +597,7 @@ public final class ReviewCollection {
     }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
-    private func receive(_ event: CoreEvent) {
+    func receive(_ event: CoreEvent) {
         guard !closed else { return }
         // Never drop review commit failures behind a coalesced deck refresh.
         review?.receive(event)
@@ -1113,7 +1104,7 @@ public final class ReviewCollection {
             guard await sync.cancelAndDrain() else { return false }
             do { try await collection.close() }
             catch { self.error = "Couldn’t close the collection. Try again."; return false }
-            closed = true; events?.cancel(); events = nil
+            closed = true; ChangeFanout.shared.unsubscribe(self)
             review?.generationEnded(); review = nil; navigation.endReview()
             invalidateMedia(); await mediaCloseTask?.value
             return true
@@ -1128,8 +1119,9 @@ public final class ReviewCollection {
             }
             guard await sync.cancelAndDrain() else { return false }
             try await collection.close()
+            ChangeFanout.shared.unsubscribe(self)
             try await configuration.nativeReviewInput?.closed()
-            closed = true; events?.cancel(); events = nil; day?.close(); countTimer?.invalidate(); countsTask?.cancel()
+            closed = true; day?.close(); countTimer?.invalidate(); countsTask?.cancel()
             invalidateMedia(); await mediaCloseTask?.value
             state = .unopened; lifecycle = .noCollection
             return true

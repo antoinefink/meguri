@@ -46,6 +46,7 @@
 
 ## Collection entry (RF2)
 
+- `ChangeFanout` alone consumes CoreBridge's process-wide event stream. Collection close detaches its weak sink; cancelling that consumer ends delivery for later owners even though raw job completion still works.
 - ReviewCollection owns the entry coordinator and retained-host completion above the shell switch. Ready/CollectionReplaced can precede FFI host retention; defer policy/count/media refresh until completion.
 - Source scope and synchronous NSFileCoordinator access live on CoordinatedSourceOwner’s GCD worker until Rust terminal delivery, including cancellation and tracking failure. Only Rust copies/inspects packages and creates preflighted backup parents.
 - CollectionEntryJourneyTests uses public app/Fixtures/CollectionEntry inputs and the real system picker. ImportSource installs only its dedicated Documents source; it never imports or selects a route.

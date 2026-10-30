@@ -24,7 +24,8 @@ extension ReviewCollectionStartupTests {
         var retained = false
         let sync = SyncCoordinator(bootstrap: { configured = true }, makeBackend: { _ in
             #expect(configured)
-            #expect(try await CoreCollectionService().lifecycle() != .noCollection)
+            let phase = try await CoreCollectionService().lifecycle()
+            #expect(phase != .noCollection)
             retained = true
             return cloud
         }, defaults: nil)
@@ -57,7 +58,8 @@ extension ReviewCollectionStartupTests {
             #expect(entry.lastActivation?.media == .init(incoming: 0, decodedBytes: 0, reused: 0, added: 0, trashed: 0))
             #expect(entry.lastActivation?.backup == nil)
             #expect(!owner.decks.isEmpty && entry.preview == nil)
-            #expect(try await CoreCollectionService().lifecycle() == .ready(generation: owner.generation))
+            let phase: CollectionLifecycle = try await CoreCollectionService().lifecycle()
+            #expect(phase == .ready(generation: owner.generation))
             if owner.policy != .ok { await owner.enableFsrs() }
             func flattened(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] { nodes.flatMap { [$0] + flattened($0.children) } }
             let deck = try #require(flattened(owner.decks).first { !$0.filtered && ($0.counts.new + $0.counts.review + $0.counts.learning) > 0 })
@@ -266,7 +268,8 @@ extension ReviewCollectionStartupTests {
             let actual = try #require(receipts.withLock { $0.first }, "The injection must follow a REAL successful activation")
             #expect(actual.generation == previousGeneration + 1 && actual.backup != nil)
             #expect(actual.media == .init(incoming: 0, decodedBytes: 0, reused: 0, added: 0, trashed: 0))
-            #expect(try await CoreCollectionService().lifecycle() == .ready(generation: actual.generation))
+            let phase: CollectionLifecycle = try await CoreCollectionService().lifecycle()
+            #expect(phase == .ready(generation: actual.generation))
             let failure = try #require(entry.failure)
             #expect(failure.issue == .nativeActivationUncertain(pending
                 ? .outcomePending : .outcomeReadFailed(.internal("synthetic outcome read failure"))))

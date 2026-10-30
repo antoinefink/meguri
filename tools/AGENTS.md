@@ -3,6 +3,7 @@
 - Antoine's temporary macOS-first pass (2026-10-25) permits direct host Xcode MCP build/run/debug/UI feedback. Keep it scoped to Meguri; defer VM/mobile iterations without counting them as passes. Required integration gates still use MG. A Mac-only Xcode build can extract partial-platform catalog edits: preserve them separately for review rather than committing mobile entries marked stale.
 
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
+- Use `NSUnbufferedIO=YES` for `swift-test` diagnostics so active test cases and failures remain visible during a stalled run.
 
 - APFS directory `st_nlink` changes when entries are added. Pin directory device/inode/mode and nofollow bindings; keep regular-file link limits separate.
 - XCTest: `name=stem_0_UUID_A.colpkg`, `exportedFileName=UUID_B.colpkg`. Check the actual MG manifest; use one test and a `.colpkg` filter, then check the exact run name.

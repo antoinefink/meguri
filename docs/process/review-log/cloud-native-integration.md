@@ -65,6 +65,88 @@ were independently reviewed: no remaining source P0–P2 findings. The runtime
 failures and UI identifier above remain open. No check is treated as passing
 because source review passed.
 
+## Follow-up from c716d9dd
+
+Starting commit: `c716d9dd505dac49de59e5f566a7cba43068c7ca`.
+The original batch base is unchanged. Filtered fixes used session
+`s-20261025T162405Z-9dc656e4`. Independent source reviews found no P0–P2
+in the Deck capture, read-only exchange observations or recovery repairs.
+
+- `f1caa6b6`: new Decks and same-op ancestors use real observer rows and the
+  existing tracking transaction. Five Rust checks pass, including rollback,
+  invalidation and real Service save/ACK/base capture.
+- `52037c95`: SQL-only collection observations remain unchanged. Separate
+  journal/file media observations make the exact server comparison complete.
+  Recovery fixtures use actual cloud-disabled exclusive replacement and prove
+  unchanged cloud authority through close, with identical bytes on a new inode.
+- `04d989b3`: native exchange checks use actual capture mappings and stored
+  results. Test observations never allocate, complete or reset an exchange.
+- `1abd7ac6`: the exhaustive instrumentation expectation retains all 259 names
+  in the existing registry order; the production registry did not change.
+
+Evidence:
+
+- `core-test/20261030T012732Z-51769`: all five new Deck checks pass.
+- `swift-test/20261030T012607Z-49913`: the unchanged suspended-review test passes
+  with actual Deck creation, review and endSession during the held account read.
+- `swift-test/20261030T011958Z-44606`: all six exchange-ID checks pass.
+- `core-test/20261030T013028Z-54607`: both replacement recovery checks pass.
+- `core-test/20261030T013337Z-57045`: all 263 selected FFI, Host policy,
+  publication and adoption checks pass; none skipped.
+- `core-lint/20261030T013242Z-56173`: pass. Later Rust edits removed comments only.
+- `swift-test/20261030T013544Z-58373`: 257 of 258 pass, including every one of
+  the 242 CoreBridge checks. The remaining instrumentation order failure is
+  repaired by `1abd7ac6`; `swift-test/20261030T014543Z-65005` passes all seven
+  focused interval-name checks. Preserve the original full-run failure.
+- `similarity/20261030T013542Z-58000`: pass for these follow-ups.
+- `drive/20261030T014330Z-62503`: both actual VM captures were inspected by the
+  integrator and independent reviewer. No further visible layout findings.
+  Search's native child still lacks its identifier. Preserve this P2 and failed
+  hierarchy result. Three render rounds are complete; no further local UI fixes.
+
+The focused app-model checks first exposed two test macro compile errors.
+Their lifecycle reads now occur in typed locals outside the assertions, within
+the existing throwing callbacks. Assertions and error propagation are unchanged.
+The focused checks now compile and pass as recorded below.
+
+## Collection owner event lifetime
+
+Start: `1abd7ac67aa385eb4123f2cf8015ce0018020ed9`. Filtered source runs:
+`cleanroom/20261030T022937Z-90801`, `20261030T024444Z-99078` and
+`20261030T024620Z-1127`. Fixer session unchanged. Independent code review:
+no P0–P2 findings. Existing S3, L3/L10 and U151 contracts cover this repair.
+
+Closing a collection cancelled the sole app stream consumer. Later owners
+could still complete Core jobs but lost review durability and sync updates.
+The app now retains one process consumer and forwards ordered events to weak
+registered owners. A successful Core close detaches its owner. Failed drain
+or Core close retains the registration. CoreBridge and JobRegistry are unchanged.
+
+Evidence:
+
+- `swift-test/20261030T020140Z-77407` and the later isolated five-check run
+  were cancelled after stalling. They remain incomplete; the isolated run also
+  recorded the missing durable update. Fresh-process passes did not settle it.
+- `swift-test/20261030T024355Z-97679`: two new test comment expressions failed
+  compilation. Explicit interpolation repaired their type without changing
+  either requirement or its error text.
+- `swift-test/20261030T024635Z-1589`: all six real collection checks pass in
+  one process. The five existing preview/review/lifecycle cases and the new
+  real close/reopen regression preserve their assertions. The latter observes
+  actual durable answers, local refresh, increasing sequences, new generation,
+  failed-close retention, detached-owner silence and real job completion.
+- `swift-test/20261030T023136Z-91775`: all 13 model-only coordinator and
+  presentation checks pass separately.
+- `doctor/20261030T024454Z-99442`: Docker and the test VM are available, with
+  53 GiB free. The earlier sandboxed Docker failure was a permission boundary.
+
+The final source-only change removes a redundant test comment flagged by the
+privacy scan. No runtime statements changed after the six-check pass.
+`private/20261030T024741Z-3113` and
+`similarity/20261030T024742Z-3364` pass for the final source repair.
+
+No Unit, P24/F5, UI or release closure. The original-base gate remains required.
+
 ## Open acceptance work
 
 - Original-base full gate, focused checks, privacy and similarity.
