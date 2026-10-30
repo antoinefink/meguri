@@ -1,0 +1,335 @@
+//! Native execution authority stays attached to the issued command and original Host.
+use super::*;
+use crate::sync::CloudEngineRegistration;
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum CloudPolicyReadiness {
+    Ready,
+    Wait,
+    End { outcome: CloudPolicyEarlyEnd },
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudPolicyOperationFacts {
+    pub zones: Vec<CloudPolicyZone>,
+    pub kind: CloudPolicyOperationKind,
+    pub started: bool,
+    pub failed: bool,
+    pub code: Option<i64>,
+    pub retry_after_ms: Option<i64>,
+    pub saved: u64,
+    pub app_cancelled: bool,
+}
+
+#[derive(Default)]
+struct Registration {
+    sdk: Option<String>,
+}
+
+#[derive(uniffi::Object)]
+pub struct CloudPolicyExecution {
+    command: Arc<CloudPolicyCommand>,
+    original_sdk: Option<String>,
+    registration: Mutex<Registration>,
+}
+
+impl CloudPolicyExecution {
+    fn policy(&self) -> &Arc<CloudPolicy> {
+        &self.command.owner
+    }
+    fn check(&self) -> Result<(), CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .validate(&self.command.command)
+            .map_err(execution_error)
+    }
+    fn sdk(&self) -> Result<String, CoreError> {
+        self.registration
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .sdk
+            .clone()
+            .or_else(|| self.original_sdk.clone())
+            .ok_or_else(|| failure(CloudPolicyFailure::StaleCommand))
+    }
+}
+fn execution_error(error: p::DriverError) -> CoreError {
+    match error {
+        p::DriverError::Runtime(error) => crate::cloud_connection::error(error),
+        p::DriverError::NotCoreAction => failure(CloudPolicyFailure::NotNativeAction),
+        p::DriverError::CoreCapabilityUnavailable(_) => failure(CloudPolicyFailure::CoreCapabilityUnavailable),
+        _ => failure(CloudPolicyFailure::StaleCommand),
+    }
+}
+
+#[uniffi::export]
+impl CloudPolicy {
+    pub fn exchange_readiness(
+        &self,
+        command: Arc<CloudPolicyCommand>,
+        expired: bool,
+        native_ready: bool,
+    ) -> Result<CloudPolicyReadiness, CoreError> {
+        callback::enter("CloudPolicy.exchange_readiness");
+        self.owns(&command)?;
+        let (ready, outcome) = self
+            .driver()?
+            .native_exchange_readiness(&command.command, expired, native_ready)
+            .map_err(execution_error)?;
+        Ok(match outcome {
+            Some(p::ExchangeOutcome::Waiting { class, retry_after_ms }) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Waiting {
+                    class: class.into(),
+                    retry_after_ms,
+                },
+            },
+            Some(p::ExchangeOutcome::Failed { class }) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Failed { class: class.into() },
+            },
+            Some(_) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Cancelled,
+            },
+            None if ready => CloudPolicyReadiness::Ready,
+            None => CloudPolicyReadiness::Wait,
+        })
+    }
+
+    pub fn prepare_execution(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+    ) -> Result<Option<Arc<CloudPolicyExecution>>, CoreError> {
+        callback::enter("CloudPolicy.prepare_execution");
+        self.owns(&command)?;
+        match &command.command.action.kind {
+            p::ActionKind::StartEngine { .. }
+            | p::ActionKind::StopEngine { .. }
+            | p::ActionKind::ConfigureAutomatic { .. }
+            | p::ActionKind::RequestFetch { .. }
+            | p::ActionKind::RequestSend { .. }
+            | p::ActionKind::RunExchange { .. }
+            | p::ActionKind::CancelExchange { .. }
+            | p::ActionKind::ResumeMedia
+            | p::ActionKind::PauseMedia
+            | p::ActionKind::ReadBlobs { .. }
+            | p::ActionKind::PrioritizeMedia { .. }
+            | p::ActionKind::BackgroundFlush { .. }
+            | p::ActionKind::QuitFlush { .. }
+            | p::ActionKind::CancelBackgroundFlush
+            | p::ActionKind::ArmFlushTimer { .. }
+            | p::ActionKind::CancelFlushTimer
+            | p::ActionKind::QuitNow => {}
+            _ => return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable)),
+        }
+        if self
+            .driver()?
+            .native_disposition(&command.command)
+            .map_err(execution_error)?
+            == p::NativeDisposition::NoOperation
+        {
+            return Ok(None);
+        }
+        let original_sdk = self
+            .driver()?
+            .native_origin(&command.command)
+            .map_err(execution_error)?;
+        Ok(Some(Arc::new(CloudPolicyExecution {
+            command,
+            original_sdk,
+            registration: Mutex::new(Registration::default()),
+        })))
+    }
+}
+
+#[uniffi::export]
+impl CloudPolicyExecution {
+    /// Metadata of the pinned original, never a fresh-current SDK lookup.
+    pub fn original_sdk(&self) -> Result<Option<String>, CoreError> {
+        callback::enter("CloudPolicyExecution.original_sdk");
+        Ok(self.original_sdk.clone())
+    }
+    pub fn validate_execution(&self) -> Result<(), CoreError> {
+        callback::enter("CloudPolicyExecution.validate_execution");
+        self.check()?;
+        self.policy()
+            .driver()?
+            .validate_native_sdk(&self.command.command, &self.sdk()?)
+            .map_err(execution_error)
+    }
+    pub fn register_sdk(&self) -> Result<CloudEngineRegistration, CoreError> {
+        callback::enter("CloudPolicyExecution.register_sdk");
+        self.policy().owns(&self.command)?;
+        let mut registration = self.registration.lock().unwrap_or_else(PoisonError::into_inner);
+        if registration.sdk.is_some() {
+            return Err(failure(CloudPolicyFailure::StaleCommand));
+        }
+        let (instance_id, serialization, collection_zone) = self
+            .policy()
+            .driver()?
+            .register_native_sdk(&self.command.command)
+            .map_err(execution_error)?;
+        registration.sdk = Some(instance_id.clone());
+        let automatic = match self.command.command.action.kind {
+            p::ActionKind::StartEngine { automatic, .. } => automatic,
+            p::ActionKind::ConfigureAutomatic { on } => on,
+            _ => false,
+        };
+        let runtime = self
+            .policy()
+            .host
+            .cloud_runtime()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?;
+        Ok(CloudEngineRegistration {
+            instance_id,
+            serialization,
+            collection_zone,
+            needs_root_fetch: automatic && !runtime.sdk_root_confirmed(),
+        })
+    }
+    pub fn retire_original(&self) -> Result<(), CoreError> {
+        callback::enter("CloudPolicyExecution.retire_original");
+        self.policy().owns(&self.command)?;
+        if let Some(sdk) = &self.original_sdk {
+            self.policy()
+                .driver()?
+                .retire_native_sdk(&self.command.command, sdk)
+                .map_err(execution_error)?;
+        } else {
+            self.check()?;
+        }
+        Ok(())
+    }
+    /// Actual operation facts only. Error classification is Core-owned P15;
+    /// native supplies the SDK code/retry-after, never a policy outcome.
+    pub fn operation_activity(&self, facts: CloudPolicyOperationFacts) -> Result<CloudPolicyOutput, CoreError> {
+        callback::enter("CloudPolicyExecution.operation_activity");
+        self.check()?;
+        let sdk = self.sdk()?;
+        self.policy()
+            .host
+            .cloud_runtime()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
+            .validate_sdk(&sdk)
+            .map_err(crate::cloud_connection::error)?;
+        let CloudPolicyOperationFacts {
+            zones,
+            kind,
+            started,
+            failed,
+            code,
+            retry_after_ms,
+            saved,
+            app_cancelled,
+        } = facts;
+        let mut commands = Vec::new();
+        for zone in zones {
+            let operation = p::Operation {
+                zone: zone.into(),
+                kind: kind.into(),
+            };
+            if !started && (app_cancelled || code == Some(20)) {
+                self.policy()
+                    .driver()?
+                    .cancel_native_activity(&self.command.command, &sdk, operation)
+                    .map_err(execution_error)?;
+                continue;
+            }
+            if !started && failed {
+                let code = code.unwrap_or(0);
+                let class = match code {
+                    3 | 4 => p::OperationError::Offline,
+                    6 | 7 | 23 => p::OperationError::Throttled,
+                    9 | 36 => p::OperationError::NoAccount,
+                    5 | 8 | 10 | 24 | 32 => p::OperationError::Configuration,
+                    25 => p::OperationError::QuotaFull,
+                    26 | 28 => p::OperationError::ConflictRecovery,
+                    18 => p::OperationError::UnsupportedSchema,
+                    _ => p::OperationError::Other,
+                };
+                let output = self.policy().host.cloud_policy_input(p::DeviceEvent::OperationError {
+                    instance: sdk.clone(),
+                    operation,
+                    class,
+                    code,
+                    retry_after_ms,
+                });
+                match self.policy().output(output)? {
+                    CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
+                    output => return Ok(output),
+                }
+            }
+            let phase = if started {
+                p::Activity::Started
+            } else {
+                p::Activity::Ended {
+                    outcome: if failed { p::Outcome::Failed } else { p::Outcome::Ok },
+                    saved,
+                }
+            };
+            match self
+                .policy()
+                .output(self.policy().host.cloud_policy_input(p::DeviceEvent::Operation {
+                    instance: sdk.clone(),
+                    operation,
+                    phase,
+                }))? {
+                CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
+                output => return Ok(output),
+            }
+        }
+        Ok(CloudPolicyOutput::Commands { commands })
+    }
+
+    pub fn continue_media_after_send(&self, code: Option<i64>) -> Result<bool, CoreError> {
+        callback::enter("CloudPolicyExecution.continue_media_after_send");
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .continue_native_media_after_send(&self.command.command, &self.sdk()?, code)
+            .map_err(execution_error)
+    }
+
+    pub fn begin_media(&self) -> Result<bool, CoreError> {
+        callback::enter("CloudPolicyExecution.begin_media");
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_media(&self.command.command, self.original_sdk.as_deref())
+            .map_err(execution_error)
+    }
+
+    pub fn begin_fetch(&self, zones: Vec<String>) -> Result<u64, CoreError> {
+        callback::enter("CloudPolicyExecution.begin_fetch");
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_fetch(&self.command.command, &self.sdk()?, zones)
+            .map_err(execution_error)
+    }
+    pub fn validate_control(&self) -> Result<(), CoreError> {
+        callback::enter("CloudPolicyExecution.validate_control");
+        self.check()
+    }
+    pub fn prepare_flush(&self) -> Result<CloudPolicyOutput, CoreError> {
+        callback::enter("CloudPolicyExecution.prepare_flush");
+        self.policy().owns(&self.command)?;
+        let collection = self.policy().collection()?;
+        self.policy()
+            .driver()?
+            .prepare_native_flush(&self.command.command, &collection)
+            .map_err(execution_error)?;
+        self.policy().output(
+            self.policy()
+                .host
+                .cloud_policy_input(p::DeviceEvent::Refresh(p::ChangeCause::Cloud)),
+        )
+    }
+    pub fn begin_send(&self) -> Result<Option<u64>, CoreError> {
+        callback::enter("CloudPolicyExecution.begin_send");
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_send(&self.command.command, &self.sdk()?)
+            .map_err(execution_error)
+    }
+}

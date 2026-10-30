@@ -89,7 +89,8 @@ pub(crate) struct AdapterState {
     pub exchange_owner: Option<(u64, String, u64)>,
     pub closed_exchanges: BTreeMap<u64, (String, CompletedExchange)>,
     pub next_identity: u64,
-    pub identity_read: Option<(u64, Guard, u64, Option<String>)>,
+    pub identity_read: Option<(u64, Guard, u64, Option<String>, bool)>,
+    pub accepted_identity_read: Option<AcceptedIdentityRead>,
     pub no_state: bool,
     pub no_state_point: u64,
     pub missing_did: u64,
@@ -99,6 +100,16 @@ pub(crate) struct AdapterState {
     pub fail_inbox: bool,
     #[cfg(feature = "test-hooks")]
     pub fail_state: bool,
+}
+
+/// Core-owned completion evidence. The guard is the result of accepting the
+/// original read, which may itself isolate a binding or invalidate its token.
+pub(crate) struct AcceptedIdentityRead {
+    pub request: u64,
+    pub guard: Guard,
+    pub incarnation: u64,
+    pub no_collection: bool,
+    pub identity: super::runtime::IdentityStatus,
 }
 
 /// K2/K4.1 collection zone, using the epoch bytes without changing identity.

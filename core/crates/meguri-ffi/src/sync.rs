@@ -12,11 +12,14 @@ pub(crate) fn cloud_error(error: impl std::fmt::Display) -> CoreError {
         reason: error.to_string(),
     }
 }
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, Default, uniffi::Record)]
 pub struct CloudRecord {
     pub name: String,
     pub envelope: Vec<u8>,
     pub system_fields: Option<Vec<u8>>,
+    pub record_type: Option<String>,
+    pub zone: Option<String>,
+    pub asset_path: Option<String>,
 }
 impl CloudRecord {
     fn saved(self) -> w::Saved {
@@ -315,6 +318,7 @@ pub enum CloudAccountStatus {
     Restricted,
     CouldNotDetermine,
     SwitchedAccounts,
+    Configuration,
 }
 fn identity(status: CloudAccountStatus, value: Option<Vec<u8>>) -> r::IdentityStatus {
     match status {
@@ -325,6 +329,7 @@ fn identity(status: CloudAccountStatus, value: Option<Vec<u8>>) -> r::IdentitySt
         CloudAccountStatus::TemporarilyUnavailable => r::IdentityStatus::TemporarilyUnavailable,
         CloudAccountStatus::Restricted => r::IdentityStatus::Restricted,
         CloudAccountStatus::CouldNotDetermine => r::IdentityStatus::ReadFailed,
+        CloudAccountStatus::Configuration => r::IdentityStatus::Configuration,
         CloudAccountStatus::SwitchedAccounts => r::IdentityStatus::SwitchedAccounts,
     }
 }
@@ -429,6 +434,7 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.poll_review");
         self.core
             .poll_review(&self.core.instance().map_err(cloud_error)?)
+            .map(|_| ())
             .map_err(cloud_error)
     }
     pub fn set_paused(&self, paused: bool) -> Result<(), CoreError> {
@@ -585,6 +591,40 @@ impl CloudWorkflow {
     ) -> Result<Option<CloudEngineBatch>, CoreError> {
         callback::enter("CloudWorkflow.build_batch");
         self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        if zone == "meguri-media" {
+            if pending
+                .values()
+                .any(|change| matches!(change, CloudPendingChange::Delete))
+            {
+                return Err(cloud_error("cloud media deletion authority port unavailable"));
+            }
+            let requested = pending
+                .into_iter()
+                .filter_map(|(name, change)| matches!(change, CloudPendingChange::Save).then_some(name))
+                .collect();
+            let Some((id, work)) = self
+                .core
+                .build_cloud_media_batch(&sdk, &self.host.collection()?, &requested)
+                .map_err(cloud_error)?
+            else {
+                return Ok(None);
+            };
+            let c::media::Request::Upload { name, envelope, staged } = work.request else {
+                return Err(cloud_error("unsupported media batch"));
+            };
+            return Ok(Some(CloudEngineBatch {
+                id,
+                saves: vec![CloudRecord {
+                    name,
+                    envelope,
+                    system_fields: None,
+                    record_type: Some("MGBlob".into()),
+                    zone: Some(zone),
+                    asset_path: Some(staged.to_string_lossy().into_owned()),
+                }],
+                deletes: Vec::new(),
+            }));
+        }
         let epoch = self
             .core
             .status()
@@ -617,6 +657,7 @@ impl CloudWorkflow {
                     name: r.name,
                     envelope: r.envelope,
                     system_fields: r.system_fields,
+                    ..Default::default()
                 })
                 .collect(),
             deletes: Vec::new(),
@@ -631,6 +672,22 @@ impl CloudWorkflow {
         batch_count: u32,
     ) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.sent");
+        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        // Record metadata cannot turn a collection callback into media work.
+        // The retained backend batch decides the path, below.
+        let media_metadata = saved
+            .iter()
+            .any(|r| r.record_type.as_deref() == Some("MGBlob") || r.zone.as_deref() == Some("meguri-media"));
+        if media_metadata
+            && saved
+                .iter()
+                .any(|r| r.record_type.as_deref() != Some("MGBlob") || r.zone.as_deref() != Some("meguri-media"))
+        {
+            return Err(cloud_error("mixed media Saved callback"));
+        }
+        if !media_metadata && saved.iter().any(|r| r.asset_path.is_some()) {
+            return Err(cloud_error("collection asset support unavailable"));
+        }
         self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
         let sdk_retrying = failed.iter().any(|f| {
             matches!(
@@ -648,6 +705,19 @@ impl CloudWorkflow {
             .adapter_sdk_retrying(&sdk, sdk_retrying)
             .map_err(cloud_error)?;
         let saved = saved.into_iter().map(CloudRecord::saved).collect::<Vec<_>>();
+        let retrying = failed
+            .iter()
+            .filter(|f| {
+                !matches!(
+                    f.code,
+                    CloudEngineErrorCode::LimitExceeded
+                        | CloudEngineErrorCode::BatchRequestFailed
+                        | CloudEngineErrorCode::ZoneNotFound
+                        | CloudEngineErrorCode::Other
+                )
+            })
+            .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
         let failed = failed
             .into_iter()
             .filter_map(|f| {
@@ -661,6 +731,16 @@ impl CloudWorkflow {
                 Some((f.name, code))
             })
             .collect::<Vec<_>>();
+        if self
+            .core
+            .cloud_media_sdk_sent(&sdk, &self.host.collection()?, batch_id, &saved, &failed, &retrying)
+            .map_err(cloud_error)?
+        {
+            return Ok(());
+        }
+        if media_metadata {
+            return Err(cloud_error("media Saved has no original SDK work"));
+        }
         self.core
             .sent_results(
                 &sdk,
@@ -692,6 +772,12 @@ impl CloudWorkflow {
         deleted: Vec<String>,
     ) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.fetched");
+        if records
+            .iter()
+            .any(|r| r.asset_path.is_some() || r.zone.as_ref().is_some_and(|z| z != &zone))
+        {
+            return Err(cloud_error("unsupported fetched record asset or zone"));
+        }
         self.core
             .adapter_fetched(
                 &sdk,

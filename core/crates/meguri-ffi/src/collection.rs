@@ -112,6 +112,44 @@ pub fn start_open(
     })
 }
 
+/// Retain a provider Host on the original process without creating a collection.
+/// Existing owners are reused only for this exact configured directory.
+#[uniffi::export]
+pub fn prepare_cloud_connection_host(
+    location: CollectionLocation,
+    clock: Arc<dyn HostClock>,
+    disk_space: Arc<dyn DiskSpaceProvider>,
+    random_seed: u64,
+) -> Result<u64, CoreError> {
+    callback::enter("prepare_cloud_connection_host");
+    if let Ok(host) = runtime::host() {
+        let generation = host.cloud_connection_generation()?;
+        if host.cloud_connection_directory() != Path::new(&location.collection_directory) {
+            return Err(CoreError::Busy {
+                running_op: "another collection host".into(),
+            });
+        }
+        return Ok(generation.0);
+    }
+    let reservation = runtime::reserve_open()?;
+    let manual_transfer_directory = location.manual_transfer_directory.clone();
+    let mut config = HostConfig::new(
+        location.collection_directory.into(),
+        location.backups_directory.into(),
+        location.app_group_snapshot.into(),
+        Arc::new(ForeignClock(clock)),
+        Arc::new(SeededRandom::new(random_seed)),
+        Arc::new(ForeignSpace(disk_space)),
+    );
+    config.manual_transfer_directory = manual_transfer_directory.into();
+    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
+        config.cloud = Some(inputs);
+        config.cloud_key_bytes = key_bytes;
+    }
+    reservation.prepare_cloud(config)?;
+    Ok(runtime::host()?.cloud_connection_generation()?.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

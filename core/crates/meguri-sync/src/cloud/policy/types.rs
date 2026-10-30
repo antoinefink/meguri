@@ -299,6 +299,28 @@ pub enum StatusState {
     /// No qualified timestamp or an incomplete provider projection. Never display as synced.
     AwaitingEvidence,
 }
+/// Read-only N11.8 controls, independent of the P14 display state. No mutation authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnableControl {
+    ResumePause,
+    DecisionRequired,
+    Connect,
+    Pause,
+    /// A stopped binding needs V9.2 evidence which this provider does not yet expose.
+    AwaitingResumeOffer,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Controls {
+    pub enable: EnableControl,
+    pub binding_usable: bool,
+    pub binding_active: bool,
+    pub binding_stopped: bool,
+    pub decision_required: bool,
+    pub user_paused: bool,
+    /// No V9.2 resume offer provider is currently wired. Never guess from identity alone.
+    pub resume_binding_offered: Option<bool>,
+    pub automatic_eligible: bool,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     pub state: StatusState,
@@ -314,6 +336,7 @@ pub struct Status {
     pub account_matches_binding: bool,
     pub evidence: Evidence,
     pub sync_now: Result<(), Unavailable>,
+    pub controls: Controls,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeCause {

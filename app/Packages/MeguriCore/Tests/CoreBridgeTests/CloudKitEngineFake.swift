@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import CoreBridge
 
@@ -84,6 +85,13 @@ actor CloudCallbackGate {
 /// codes are retained; limitExceeded/batchRequestFailed are dropped. The fake
 /// never re-adds a name, compares against the core, acknowledges, or halves a
 /// batch. The adapter/core must do all of that.
+/// Historical name retained for shared tests; counts actual fake SDK entries, never task admission.
+final class CloudAcceptedNetworkCalls: Sendable {
+    private let count = Mutex(0)
+    func record() { count.withLock { $0 += 1 } }
+    var value: Int { count.withLock { $0 } }
+}
+
 actor CloudKitEngineFake: CloudKitEngine {
     enum SendReply: Sendable {
         case saved
@@ -138,6 +146,12 @@ actor CloudKitEngineFake: CloudKitEngine {
     private var afterSent: CloudCallbackGate?
     private var lateRemoval: CloudCallbackGate?
     private var cancelPause: CloudCallbackGate?
+    private var nativeWorkPause: CloudCallbackGate?
+    private var operationTaskPause: CloudCallbackGate?
+    private var networkEventWaiters: [CheckedContinuation<Void, Never>] = []
+    private var nextOperationError: (any Error)?
+    private let networkLifetime = CloudKitNetworkLifetime()
+    nonisolated let acceptedNetworkCalls = CloudAcceptedNetworkCalls()
 
     init(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate,
          a23: Bool, keepAlive: Bool) {
@@ -187,6 +201,7 @@ actor CloudKitEngineFake: CloudKitEngine {
             await withCheckedContinuation { eventWaiters.append($0) }
         } else {
             eventActive = true
+            networkLifetime.beginEvent()
         }
         trace.append(.eventEntered(label))
         if let delegate { await delegate.eventWillDeliver(engine: self) }
@@ -199,8 +214,11 @@ actor CloudKitEngineFake: CloudKitEngine {
         if let delegate { await delegate.eventHandlerReturned(event, engine: self) }
         // Transfer ownership directly. Clearing eventActive before resuming
         // would let a newly arriving event overtake the oldest queued one.
-        if eventWaiters.isEmpty { eventActive = false }
-        else { eventWaiters.removeFirst().resume() }
+        if eventWaiters.isEmpty {
+            eventActive = false; networkLifetime.endEvent()
+            let pending = networkEventWaiters; networkEventWaiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        } else { eventWaiters.removeFirst().resume() }
     }
 
     private func waitInCall(_ gate: CloudCallbackGate) async {
@@ -209,7 +227,46 @@ actor CloudKitEngineFake: CloudKitEngine {
         callGates.removeAll { $0 === gate }
     }
 
+    func pauseNativeReturnedWork(_ gate: CloudCallbackGate) { nativeWorkPause = gate }
+    func pauseNextOperationTask(_ gate: CloudCallbackGate) { operationTaskPause = gate }
+    func failNextOperation(_ error: any Error) { nextOperationError = error }
+    private func prepareNativeWork() async {
+        while eventActive { await withCheckedContinuation { networkEventWaiters.append($0) } }
+        if let gate = nativeWorkPause { nativeWorkPause = nil; await gate.enter() }
+    }
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
+        await prepareNativeWork()
+        cancelled = false
+        let lifetime = networkLifetime; let generation = lifetime.authority()
+        return CloudKitNetworkEnqueue { validate in
+            try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
+                try await self.invokePreparedSend(zones: zones, generation: generation, validate: validate)
+            }
+        }
+    }
+    private func invokePreparedSend(zones: [String], generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+        if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
+        try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
+        try await sendChanges(zones: zones)
+    }
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
+        await prepareNativeWork()
+        cancelled = false
+        let lifetime = networkLifetime; let generation = lifetime.authority()
+        return CloudKitNetworkEnqueue { validate in
+            try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
+                try await self.invokePreparedFetch(options: options, generation: generation, validate: validate)
+            }
+        }
+    }
+    private func invokePreparedFetch(options: CloudFetchOptions, generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+        if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
+        try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
+        try await fetchChanges(options: options)
+    }
     func sendChanges(zones: [String]) async throws {
+        acceptedNetworkCalls.record()
+        if let error = nextOperationError { nextOperationError = nil; throw error }
         guard networkEntryAllowed(), let delegate else { return }
         sendCount += 1
         let call = sendCount
@@ -220,6 +277,9 @@ actor CloudKitEngineFake: CloudKitEngine {
             guard let batch = await delegate.nextRecordZoneChangeBatch(
                 pending: pending, zone: zone, engine: self
             ) else { continue }
+            if zone == "meguri-media" {
+                guard let admission = batch.mediaAdmission, try await admission.deliver(batch) != nil else { continue }
+            }
             let names = batch.saves.map(\.name) + batch.deletes
             #expect(names.count <= 250)
             trace.append(.handed(batch.id, names))
@@ -235,7 +295,7 @@ actor CloudKitEngineFake: CloudKitEngine {
                 // system fields. No fake record payload or core ack is made.
                 saved = batch.saves.map {
                     CloudRecord(name: $0.name, envelope: $0.envelope,
-                                systemFields: Data("sdk-fields-\(batch.id)-\($0.name)".utf8))
+                                systemFields: Data("sdk-fields-\(batch.id)-\($0.name)".utf8), recordType: $0.recordType, zone: $0.zone)
                 }
                 deleted = batch.deletes
             case .failed(let code):
@@ -272,6 +332,8 @@ actor CloudKitEngineFake: CloudKitEngine {
     }
 
     func fetchChanges(options: CloudFetchOptions) async throws {
+        acceptedNetworkCalls.record()
+        if let error = nextOperationError { nextOperationError = nil; throw error }
         guard networkEntryAllowed(), let delegate else { return }
         trace.append(.fetchEntered(options.groupID))
         let scoped = await delegate.nextFetchChangesOptions(options, engine: self)
@@ -323,10 +385,17 @@ actor CloudKitEngineFake: CloudKitEngine {
     }
 
     func cancelOperations() async {
+        let operations = networkLifetime.beginCancellation()
+        defer { networkLifetime.endCancellation() }
+        await cancelSDKCalls()
+        for operation in operations { await operation.cancelAndDrain() }
+    }
+    private func cancelSDKCalls() async {
         trace.append(.cancelEntered)
         cancelled = true
         // Release in-flight SDK calls even when cancel completion is paused.
         for gate in callGates { await gate.open() }
+        if let gate = operationTaskPause { await gate.open() }
         if let gate = afterSent { await gate.open() }
         if let gate = afterBatch { await gate.open() }
         if let gate = lateRemoval { await gate.open() }
@@ -334,7 +403,9 @@ actor CloudKitEngineFake: CloudKitEngine {
         trace.append(.cancelReturned)
     }
 
-    func release() {
+    func release() async {
+        networkLifetime.retire()
+        await cancelOperations()
         released = true
         trace.append(.released)
         if !keepAlive { delegate = nil }
@@ -357,6 +428,7 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
     let keepAlive: Bool
     private var made: [CloudKitEngineFake] = []
     private var accountReads: [(Result<CloudResolvedAccount?, any Error>, CloudCallbackGate?)] = []
+    private var accountReadCalls = 0
     private var creationPause: CloudCallbackGate?
 
     init(a23: Bool = true, keepAlive: Bool = false) {
@@ -378,6 +450,7 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
     }
 
     func resolveAccount() async throws -> CloudResolvedAccount? {
+        accountReadCalls += 1
         guard !accountReads.isEmpty else { return nil }
         let (result, gate) = accountReads.removeFirst()
         if let gate { await gate.enter() }
@@ -387,4 +460,5 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
     func pauseNextCreation(_ gate: CloudCallbackGate) { creationPause = gate }
 
     func engines() -> [CloudKitEngineFake] { made }
+    func resolvedAccountReadCount() -> Int { accountReadCalls }
 }

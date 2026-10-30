@@ -14,23 +14,46 @@ public struct CloudRecord: Sendable, Equatable {
     /// K5's domain-owned encrypted `e` bytes, never an invented record field.
     public let envelope: Data
     public let systemFields: Data?
-    public init(name: String, envelope: Data, systemFields: Data?) {
+    public let recordType: String
+    public let zone: String?
+    /// Rust owns upload staging through the original SDK Saved/error/cancel.
+    public let assetURL: URL?
+    public init(name: String, envelope: Data, systemFields: Data?, recordType: String = "MGEntity", zone: String? = nil, assetURL: URL? = nil) {
         self.name = name; self.envelope = envelope; self.systemFields = systemFields
+        self.recordType = recordType; self.zone = zone; self.assetURL = assetURL
     }
     init(_ raw: MeguriCoreBindings.CloudRecord) {
-        self.init(name: raw.name, envelope: raw.envelope, systemFields: raw.systemFields)
+        self.init(name: raw.name, envelope: raw.envelope, systemFields: raw.systemFields, recordType: raw.recordType ?? "MGEntity", zone: raw.zone, assetURL: raw.assetPath.map { URL(fileURLWithPath: $0) })
     }
-    var raw: MeguriCoreBindings.CloudRecord { .init(name: name, envelope: envelope, systemFields: systemFields) }
+    var raw: MeguriCoreBindings.CloudRecord { .init(name: name, envelope: envelope, systemFields: systemFields, recordType: recordType, zone: zone, assetPath: assetURL?.path) }
 }
-public struct CloudEngineBatch: Sendable, Equatable { public let id: UInt64; public let saves: [CloudRecord]; public let deletes: [String] }
+public struct CloudEngineBatch: Sendable, Equatable {
+    public let id: UInt64
+    public let saves: [CloudRecord]
+    public let deletes: [String]
+    let mediaAdmission: CloudMediaBatchAdmission?
+    init(id: UInt64, saves: [CloudRecord], deletes: [String], mediaAdmission: CloudMediaBatchAdmission? = nil) {
+        self.id = id; self.saves = saves; self.deletes = deletes; self.mediaAdmission = mediaAdmission
+    }
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.saves == rhs.saves && lhs.deletes == rhs.deletes }
+}
 public enum CloudEngineErrorCode: Sendable, Equatable {
     case notAuthenticated, accountTemporarilyUnavailable, networkFailure, networkUnavailable
     case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, zoneNotFound, other
 }
-public struct CloudRecordFailure: Sendable, Equatable { public let name: String; public let code: CloudEngineErrorCode }
+public struct CloudRecordFailure: Sendable, Equatable {
+    public let name: String
+    public let code: CloudEngineErrorCode
+    public let zone: String?
+    public let nativeCode: Int64?
+    public let retryAfterMilliseconds: Int64?
+    public init(name: String, code: CloudEngineErrorCode, zone: String? = nil, nativeCode: Int64? = nil, retryAfterMilliseconds: Int64? = nil) {
+        self.name = name; self.code = code; self.zone = zone; self.nativeCode = nativeCode; self.retryAfterMilliseconds = retryAfterMilliseconds
+    }
+}
 public enum CloudFetchReason: Sendable, Equatable { case manual, scheduled }
 public enum CloudAccountChange: Sendable, Equatable { case signIn, signOut, switchAccounts }
-public enum CloudAccountStatus: Sendable, Equatable { case available, noAccount, temporarilyUnavailable, restricted, couldNotDetermine, switchedAccounts }
+public enum CloudAccountStatus: Sendable, Equatable { case available, noAccount, temporarilyUnavailable, restricted, couldNotDetermine, switchedAccounts, configuration }
 public struct CloudFetchOptions: Sendable, Equatable {
     public var zones: [String]
     public var priorityZones: [String]
@@ -59,6 +82,8 @@ public protocol CloudKitEngine: Sendable {
     func pendingDatabaseChanges() async -> Set<String>
     func applyPendingUpdate(_ update: CloudPendingUpdate) async throws
     func removePendingDatabaseChanges() async
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue
     func sendChanges(zones: [String]) async throws
     func fetchChanges(options: CloudFetchOptions) async throws
     func cancelOperations() async
@@ -161,7 +186,7 @@ extension CloudEngineErrorCode {
 }
 extension CloudAccountStatus {
     var raw: MeguriCoreBindings.CloudAccountStatus {
-        switch self { case .available: .available; case .noAccount: .noAccount; case .temporarilyUnavailable: .temporarilyUnavailable; case .restricted: .restricted; case .couldNotDetermine: .couldNotDetermine; case .switchedAccounts: .switchedAccounts }
+        switch self { case .available: .available; case .noAccount: .noAccount; case .temporarilyUnavailable: .temporarilyUnavailable; case .restricted: .restricted; case .couldNotDetermine: .couldNotDetermine; case .switchedAccounts: .switchedAccounts; case .configuration: .configuration }
     }
 }
 extension CloudWorkflowObservation {

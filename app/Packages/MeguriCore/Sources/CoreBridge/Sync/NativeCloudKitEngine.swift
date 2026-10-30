@@ -49,6 +49,17 @@ struct NativeCloudKitPendingRecordChanges {
         _ = try NativeCloudKitIdentityValidation.collectionRecordNames(ids, zoneID: zoneID)
         self.changes = changes
     }
+    init(_ changes: [CKSyncEngine.PendingRecordZoneChange], collectionZoneID: CKRecordZone.ID) throws {
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(collectionZoneID)
+        for change in changes {
+            let id: CKRecord.ID
+            switch change { case .saveRecord(let value), .deleteRecord(let value): id = value; @unknown default: throw NativeCloudKitFailure.unsupportedRecord }
+            try NativeCloudKitIdentityValidation.requireCurrentOwner(id.zoneID)
+            let expected = NativeCloudMediaBatch.zone(name: id.recordName, collection: collectionZoneID.zoneName)
+            guard id.zoneID.zoneName == expected else { throw NativeCloudKitFailure.unsupportedRecord }
+        }
+        self.changes = changes
+    }
     var byName: [String: CloudPendingChange] {
         var result: [String: CloudPendingChange] = [:]
         for change in changes {
@@ -85,6 +96,18 @@ enum NativeCloudKitRecordRouting {
         let ids = Set((saved + failed).compactMap { batches[$0.recordName] })
         guard ids.count <= 1, let batch = ids.first ?? pendingBatch else { throw NativeCloudKitFailure.unsupportedRecord }
         return batch
+    }
+    static func sentEngineBatchID(saved: [CKRecord.ID], failed: [CKRecord.ID], deleted: [CKRecord.ID], collectionZoneID: CKRecordZone.ID, batches: [String: UInt64], pendingBatch: UInt64?) throws -> UInt64 {
+        let all = saved + failed + deleted
+        if all.allSatisfy({ $0.zoneID == collectionZoneID }) {
+            return try sentBatchID(saved: saved, failed: failed, deleted: deleted, zoneID: collectionZoneID, batches: batches, pendingBatch: pendingBatch)
+        }
+        let mediaZone = NativeCloudOwnRecords.zone("meguri-media")
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(collectionZoneID)
+        guard !all.isEmpty, all.allSatisfy({ $0.zoneID == mediaZone && NativeCloudMediaRecords.isBlobName($0.recordName) }) else { throw NativeCloudKitFailure.unsupportedRecord }
+        let matched = all.compactMap { batches[$0.recordName] }
+        guard matched.count == all.count, Set(matched).count == 1, let id = matched.first else { throw NativeCloudKitFailure.unsupportedRecord }
+        return id
     }
     static func groups(records: [CKRecord], deleted: [CKRecord.ID]) -> [Group] {
         let recordsByZone = Dictionary(grouping: records, by: { $0.recordID.zoneID })
@@ -132,6 +155,10 @@ public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
 
 /// Owns the actual Apple SDK object and its serial event delivery slot. Each
 /// factory invocation creates a new delegate object with an immutable identity.
+private final class PreparedNativeMediaBatch: @unchecked Sendable {
+    let value: CKSyncEngine.RecordZoneChangeBatch
+    init(_ value: CKSyncEngine.RecordZoneChangeBatch) { self.value = value }
+}
 private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
@@ -139,6 +166,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var activeEvent = false
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
     private var returnedWork: Task<Void, Never>?
+    private let networkLifetime = CloudKitNetworkLifetime()
+    private var networkEventWaiters: [CheckedContinuation<Void, Never>] = []
     private var batches: [String: UInt64] = [:]
     private var pendingBatch: UInt64?
     private var failure: (any Error)?
@@ -155,7 +184,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var collectionZone: String?
     private func validatedPendingRecords() throws -> NativeCloudKitPendingRecordChanges {
         guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
-        return try .init(sdk?.state.pendingRecordZoneChanges ?? [], zoneID: zone(collectionZone))
+        return try .init(sdk?.state.pendingRecordZoneChanges ?? [], collectionZoneID: zone(collectionZone))
     }
     func pendingRecordZoneChanges() -> [String: CloudPendingChange] {
         guard failure == nil else { return [:] }
@@ -175,7 +204,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
             let removes = pending.removals(names: update.removes)
             let adds: [CKSyncEngine.PendingRecordZoneChange] = update.adds.map { name, change in
-                let id = recordID(name, zone: collectionZone)
+                let id = recordID(name, zone: NativeCloudMediaBatch.zone(name: name, collection: collectionZone))
                 return change == .save ? .saveRecord(id) : .deleteRecord(id)
             }
             sdk.state.remove(pendingRecordZoneChanges: removes)
@@ -194,50 +223,102 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             sdk.state.remove(pendingDatabaseChanges: changes)
         } catch { failure = error }
     }
-    func sendChanges(zones: [String]) async throws {
-        guard let sdk else { throw CancellationError() }
-        if let failure { throw failure }
-        if let returnedWork { await returnedWork.value }
-        if let failure { throw failure }
-        try await sdk.sendChanges(.init(scope: .zoneIDs(zones.map(zone))))
+    private nonisolated static func networkFailure(_ error: (any Error)?) -> (any Error)? {
+        guard let error, let sdkError = error as? CKError else { return error }
+        let retry = (sdkError.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue
+        let milliseconds = retry.flatMap { value -> Int64? in
+            guard value.isFinite, value >= 0, value < Double(Int64.max) / 1000 else { return nil }
+            return Int64(value * 1000)
+        }
+        return CloudKitSDKOperationFailure(underlying: error, code: Int64(sdkError.code.rawValue), retryAfterMilliseconds: milliseconds)
+    }
+    private func drainReturnedWork() async throws {
         if let returnedWork { await returnedWork.value }
         if let failure { throw failure }
     }
-    func fetchChanges(options: CloudFetchOptions) async throws {
+    private func prepareNetwork() async throws {
+        while activeEvent { await withCheckedContinuation { networkEventWaiters.append($0) } }
+        try await drainReturnedWork()
+    }
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
+        try await prepareNetwork()
         guard let sdk else { throw CancellationError() }
-        if let failure { throw failure }
-        if let returnedWork { await returnedWork.value }
-        if let failure { throw failure }
+        let options = CKSyncEngine.SendChangesOptions(scope: .zoneIDs(zones.map(zone)))
+        let lifetime = networkLifetime
+        let generation = lifetime.authority()
+        return CloudKitNetworkEnqueue { validate in
+            try lifetime.admit(cancelSDK: {
+                await sdk.cancelOperations()
+                _ = try? await self.drainReturnedWork()
+            }) {
+                var operationError: (any Error)?
+                do {
+                    try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+                    try await sdk.sendChanges(options)
+                } catch { operationError = Self.networkFailure(error) }
+                // Even SDK failure/cancellation must drain returned event work.
+                do { try await self.drainReturnedWork() }
+                catch { if operationError == nil { operationError = error } }
+                if let operationError { throw operationError }
+            }
+        }
+    }
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
+        try await prepareNetwork()
+        guard let sdk else { throw CancellationError() }
         let group = CKOperationGroup(); group.name = options.groupID
         var native = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
         native.prioritizedZoneIDs = options.priorityZones.map(zone)
-        try await sdk.fetchChanges(native)
-        if let returnedWork { await returnedWork.value }
-        if let failure { throw failure }
+        let prepared = native
+        let lifetime = networkLifetime
+        let generation = lifetime.authority()
+        return CloudKitNetworkEnqueue { validate in
+            try lifetime.admit(cancelSDK: {
+                await sdk.cancelOperations()
+                _ = try? await self.drainReturnedWork()
+            }) {
+                var operationError: (any Error)?
+                do {
+                    try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+                    try await sdk.fetchChanges(prepared)
+                } catch { operationError = Self.networkFailure(error) }
+                do { try await self.drainReturnedWork() }
+                catch { if operationError == nil { operationError = error } }
+                if let operationError { throw operationError }
+            }
+        }
     }
-    func cancelOperations() async { await sdk?.cancelOperations(); if let returnedWork { await returnedWork.value } }
-    func release() { sdk = nil }
+    func sendChanges(zones: [String]) async throws {
+        let prepared = try await prepareSend(zones: zones)
+        let operation = try prepared.enqueue(validate: {})
+        try await operation.drain()
+    }
+    func fetchChanges(options: CloudFetchOptions) async throws {
+        let prepared = try await prepareFetch(options: options)
+        let operation = try prepared.enqueue(validate: {})
+        try await operation.drain()
+    }
+    func cancelOperations() async {
+        let original = sdk
+        let operations = networkLifetime.beginCancellation()
+        defer { networkLifetime.endCancellation() }
+        await original?.cancelOperations()
+        for operation in operations { await operation.cancelAndDrain() }
+        if let returnedWork { await returnedWork.value }
+    }
+    func release() async {
+        networkLifetime.retire()
+        await cancelOperations()
+        sdk = nil
+    }
     private func fields(_ record: CKRecord) throws -> Data {
         try NativeCloudKitSystemFields.encode(record)
     }
     private func decode(_ record: CKRecord) throws -> CloudRecord {
-        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
-        guard ["MGEntity", "MGActive", "MGEpoch"].contains(record.recordType) else { throw NativeCloudKitFailure.unsupportedRecord }
-        guard record["pa"] == nil && record["ma"] == nil && record["a"] == nil else { throw NativeCloudKitFailure.unsupportedAsset }
-        guard let bytes = record.encryptedValues["e"] as? Data else { throw NativeCloudKitFailure.unsupportedRecord }
-        return CloudRecord(name: record.recordID.recordName, envelope: bytes, systemFields: try fields(record))
+        try NativeCloudRecordConversion.decode(record)
     }
     private func encode(_ record: CloudRecord, zone: String) throws -> CKRecord {
-        let id = recordID(record.name, zone: zone)
-        let native: CKRecord
-        if let fields = record.systemFields {
-            let decoder = try NSKeyedUnarchiver(forReadingFrom: fields)
-            decoder.requiresSecureCoding = true
-            guard let restored = CKRecord(coder: decoder), restored.recordID == id, restored.recordType == "MGEntity" else { throw NativeCloudKitFailure.invalidSystemFields }
-            decoder.finishDecoding(); native = restored
-        } else { native = CKRecord(recordType: "MGEntity", recordID: id) }
-        native.encryptedValues["e"] = record.envelope as CKRecordValue
-        return native
+        try NativeCloudRecordConversion.encode(record, zone: zone)
     }
     private func code(_ error: any Error) -> CloudEngineErrorCode {
         guard let error = error as? CKError else { return .other }
@@ -257,7 +338,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     }
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }
-        else { activeEvent = true }
+        else { activeEvent = true; networkLifetime.beginEvent() }
         if let returnedWork { await returnedWork.value }
         await delegate.eventWillDeliver(engine: self)
         do {
@@ -279,8 +360,24 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 forwarded = events.last ?? .databaseChanges
             case .sentRecordZoneChanges(let sent):
                 guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
-                let batch = try NativeCloudKitRecordRouting.sentBatchID(saved: sent.savedRecords.map(\.recordID), failed: sent.failedRecordSaves.map { $0.record.recordID }, deleted: sent.deletedRecordIDs, zoneID: zone(collectionZone), batches: batches, pendingBatch: pendingBatch)
-                forwarded = .sent(batchID: batch, saved: try sent.savedRecords.map(decode), failed: sent.failedRecordSaves.map { .init(name: $0.record.recordID.recordName, code: code($0.error)) }, deleted: sent.deletedRecordIDs.map(\.recordName))
+                let batch = try NativeCloudKitRecordRouting.sentEngineBatchID(saved: sent.savedRecords.map(\.recordID), failed: sent.failedRecordSaves.map { $0.record.recordID }, deleted: sent.deletedRecordIDs, collectionZoneID: zone(collectionZone), batches: batches, pendingBatch: pendingBatch)
+                var saved = try sent.savedRecords.map(decode)
+                var failed: [CloudRecordFailure] = []
+                for item in sent.failedRecordSaves {
+                    // K9.3 immutable-blob conflicts count only from the real
+                    // SDK sent callback and its actual server record. Rust
+                    // still checks the original Work and exact blob metadata.
+                    if item.record.recordID.zoneID == zone("meguri-media"),
+                       item.error.code == .serverRecordChanged,
+                       let server = item.error.serverRecord, server.recordID == item.record.recordID {
+                        saved.append(try decode(server))
+                    } else {
+                        failed.append(.init(name: item.record.recordID.recordName, code: code(item.error),
+                            zone: item.record.recordID.zoneID.zoneName, nativeCode: Int64(item.error.code.rawValue),
+                            retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(item.error).flatMap { Int64(exactly: $0) }))
+                    }
+                }
+                forwarded = .sent(batchID: batch, saved: saved, failed: failed, deleted: sent.deletedRecordIDs.map(\.recordName))
             case .willFetchChanges(let will): forwarded = .willFetch(groupID: will.context.options.operationGroup.name ?? "", reason: will.context.reason == .manual ? .manual : .scheduled)
             case .willFetchRecordZoneChanges(let will):
                 forwarded = .willFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(will.zoneID))
@@ -311,30 +408,61 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     }
     private func returned(_ event: CloudEngineEvent) async {
         await delegate.eventHandlerReturned(event, engine: self)
-        if eventWaiters.isEmpty { activeEvent = false }
-        else { eventWaiters.removeFirst().resume() }
+        if eventWaiters.isEmpty {
+            activeEvent = false; networkLifetime.endEvent()
+            let pending = networkEventWaiters; networkEventWaiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        } else { eventWaiters.removeFirst().resume() }
     }
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard failure == nil, let collectionZone else { return nil }
         if let returnedWork { await returnedWork.value }
-        var pending = pendingRecordZoneChanges()
+        let pending = pendingRecordZoneChanges()
         guard failure == nil else { return nil }
-        switch context.options.scope {
-        case .zoneIDs(let ids): guard ids.contains(zone(collectionZone)) else { return nil }
-        case .recordIDs(let ids):
-            let allowed = Set(ids.filter { $0.zoneID == zone(collectionZone) }.map(\.recordName))
-            pending = pending.filter { allowed.contains($0.key) }
-        case .allExcluding(let ids): guard !ids.contains(zone(collectionZone)) else { return nil }
-        case .all: break
-        @unknown default: return nil
+        // Scope each request to one zone, retaining collection-before-media
+        // order whenever the original SDK request permits both zones.
+        let candidates = [collectionZone, "meguri-media"].filter { name in
+            switch context.options.scope {
+            case .zoneIDs(let ids): ids.contains(zone(name))
+            case .recordIDs(let ids): ids.contains { $0.zoneID == zone(name) }
+            case .allExcluding(let ids): !ids.contains(zone(name))
+            case .all: true
+            @unknown default: false
+            }
         }
-        guard let batch = await delegate.nextRecordZoneChangeBatch(pending: pending, zone: collectionZone, engine: self) else { return nil }
+        var selected: (String, CloudEngineBatch)?
+        for candidate in candidates {
+            var scoped = pending.filter { NativeCloudMediaBatch.zone(name: $0.key, collection: collectionZone) == candidate }
+            if case .recordIDs(let ids) = context.options.scope {
+                let names = Set(ids.filter { $0.zoneID == zone(candidate) }.map(\.recordName))
+                scoped = scoped.filter { names.contains($0.key) }
+            }
+            if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: candidate, engine: self) { selected = (candidate, batch); break }
+        }
+        guard let (batchZone, batch) = selected else { return nil }
         guard failure == nil else { return nil }
         do {
-            let saves = try batch.saves.map { try encode($0, zone: collectionZone) }
+            try NativeCloudMediaBatch.validate(batch, zone: batchZone)
+            let saves = try batch.saves.map { try encode($0, zone: batchZone) }
             pendingBatch = batch.id
             for save in saves { batches[save.recordID.recordName] = batch.id }
-            return .init(recordsToSave: saves, recordIDsToDelete: batch.deletes.map { recordID($0, zone: collectionZone) }, atomicByZone: false)
+            for name in batch.deletes { batches[name] = batch.id }
+            let prepared = CKSyncEngine.RecordZoneChangeBatch(recordsToSave: saves, recordIDsToDelete: batch.deletes.map { recordID($0, zone: batchZone) }, atomicByZone: false)
+            if batchZone == "meguri-media" {
+                guard let admission = batch.mediaAdmission else { throw NativeCloudKitFailure.unsupportedRecord }
+                let lifetime = networkLifetime
+                let generation = lifetime.authority()
+                do {
+                    return try await admission.deliver(PreparedNativeMediaBatch(prepared)) { deliver in
+                        var delivered = false
+                        try lifetime.enqueue(generation: generation, validate: {}) { delivered = deliver() }
+                        return delivered
+                    }?.value
+                } catch {
+                    return nil
+                }
+            }
+            return prepared
         } catch {
             failure = error
             await delegate.eventWillDeliver(engine: self)

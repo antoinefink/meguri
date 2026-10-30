@@ -718,6 +718,133 @@ fn policy_delayed_provider_sample_cannot_cross_pause_account_generation_or_close
     }
 }
 
+struct ProjectionCountingAccount(AtomicUsize);
+impl r::IdentityProvider for ProjectionCountingAccount {
+    fn read_identity(&self, scope: &c::BuildScope) -> r::IdentityStatus {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        <Account as r::IdentityProvider>::read_identity(&Account, scope)
+    }
+}
+
+#[test]
+fn accepted_policy_projection_never_resamples_or_consumes_the_next_actual_read() {
+    let provider = Arc::new(ProjectionCountingAccount(AtomicUsize::new(0)));
+    let (fixture, sdk, _) = rig_with_provider(provider.clone());
+    let policy = fixture.workflow.policy().unwrap();
+    let samples = provider.0.load(Ordering::SeqCst);
+    let before = fixture.workflow.core.adapter_snapshot().unwrap();
+    let a = fixture.workflow.begin_identity_read(false, None).unwrap();
+    assert!(
+        fixture
+            .workflow
+            .complete_identity_read(a, CloudAccountStatus::Available, Some(b"synthetic-account-A".to_vec()),)
+            .unwrap()
+    );
+    let original = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+    let b = fixture.workflow.begin_identity_read(true, None).unwrap();
+    assert_eq!(b, a + 1);
+    failure_is(
+        policy.clone().project_identity_read(a),
+        CloudPolicyFailure::StaleCommand,
+    );
+    let current = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+    assert_eq!(current.guard(), original.guard());
+    assert_eq!(current.account, original.account);
+    assert!(
+        fixture
+            .workflow
+            .complete_identity_read(b, CloudAccountStatus::Available, Some(b"synthetic-account-B".to_vec()),)
+            .unwrap()
+    );
+    let output = policy.clone().project_identity_read(b).unwrap();
+    assert_eq!(
+        provider.0.load(Ordering::SeqCst),
+        samples,
+        "projection sampled cached account A"
+    );
+    let binding = fixture.workflow.core.status().unwrap().binding.unwrap();
+    assert_eq!(
+        binding.facts.state,
+        c::BindingState::Isolated(c::IsolationReason::AccountChanged)
+    );
+    assert!(!fixture.workflow.core.status().unwrap().identity_verified);
+    assert!(fixture.workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+    assert_eq!(
+        fixture.workflow.core.adapter_snapshot().unwrap().serialization,
+        before.serialization
+    );
+    let status = policy.status().unwrap();
+    assert!(matches!(status.account_status, CloudPolicyAccountStatus::Available));
+    assert!(!status.account_matches_binding);
+    assert!(
+        commands(output)
+            .iter()
+            .any(|c| matches!(c.action, CloudPolicyAction::StopEngine { .. }))
+    );
+    let next = fixture.workflow.begin_identity_read(false, None).unwrap();
+    assert_eq!(next, b + 1);
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn accepted_policy_projection_preserves_closed_generation_and_stale_precedence() {
+    for invalidation in 0..3 {
+        let provider = Arc::new(ProjectionCountingAccount(AtomicUsize::new(0)));
+        let (fixture, _, _) = rig_with_provider(provider.clone());
+        let policy = fixture.workflow.policy().unwrap();
+        let request = fixture.workflow.begin_identity_read(false, None).unwrap();
+        assert!(
+            fixture
+                .workflow
+                .complete_identity_read(
+                    request,
+                    CloudAccountStatus::Available,
+                    Some(b"synthetic-account-A".to_vec()),
+                )
+                .unwrap()
+        );
+        let samples = provider.0.load(Ordering::SeqCst);
+        let original = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+        match invalidation {
+            0 => {
+                fixture.workflow.core.adapter_pause(true).unwrap();
+                fixture.workflow.core.adapter_pause(false).unwrap();
+            }
+            1 => {
+                let engine = fixture.workflow.host.engine();
+                let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive
+                    .replace(|path| {
+                        assert!(path.exists());
+                        Ok(())
+                    })
+                    .unwrap();
+                drop(exclusive);
+                drop(slot);
+            }
+            2 => fixture.workflow.host.close().unwrap(),
+            _ => unreachable!(),
+        }
+        failure_is(
+            policy.clone().project_identity_read(request),
+            match invalidation {
+                0 => CloudPolicyFailure::StaleCommand,
+                1 => CloudPolicyFailure::GenerationChanged,
+                2 => CloudPolicyFailure::Closed,
+                _ => unreachable!(),
+            },
+        );
+        assert_eq!(provider.0.load(Ordering::SeqCst), samples);
+        let current = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+        assert_eq!(current.guard(), original.guard());
+        assert_eq!(current.account, original.account);
+        if invalidation != 2 {
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
 #[test]
 fn policy_is_one_original_host_handle_and_real_pause_invalidates_issued_native_work() {
     let (fixture, _, _) = rig();
@@ -958,7 +1085,7 @@ fn actual_apply_rollback_is_deferred_and_keeps_incoming_without_tracking_stop() 
 }
 
 #[test]
-fn policy_unknown_projection_and_unqualified_completion_never_claim_success() {
+fn policy_empty_media_ledger_and_unqualified_completion_never_claim_success() {
     let (fixture, _, _) = rig();
     let policy = fixture.workflow.policy().unwrap();
     policy
@@ -969,7 +1096,14 @@ fn policy_unknown_projection_and_unqualified_completion_never_claim_success() {
         .unwrap();
     let status = policy.status().unwrap();
     assert!(status.as_of_ms.is_none());
-    assert!(status.media.upload_files.is_none() && status.media.download_files.is_none());
+    assert_eq!(status.media.upload_files, Some(0));
+    assert_eq!(status.media.upload_bytes, Some(0));
+    assert_eq!(status.media.download_files, Some(0));
+    assert_eq!(status.media.download_bytes, Some(0));
+    assert_eq!(status.media.unknown_blobs, Some(0));
+    assert_eq!(status.media.missing_names, Some(0));
+    assert!(status.media.uploads_running.is_none() && status.media.downloads_running.is_none());
+    assert!(status.media.remaining_download_ms.is_none());
     assert!(!matches!(status.state, CloudPolicyStatusState::UpToDate { .. }));
     assert!(matches!(status.sync_now, CloudPolicySyncNowAvailability::Available));
     failure_is(
@@ -996,5 +1130,29 @@ fn policy_unknown_projection_and_unqualified_completion_never_claim_success() {
             reason: CloudPolicyUnavailable::Paused
         }
     ));
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn policy_without_binding_has_unknown_media_counts() {
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
+    let policy = fixture.workflow.policy().unwrap();
+    policy
+        .clone()
+        .input(CloudPolicyEvent::Refresh {
+            cause: CloudPolicyChangeCause::Cloud,
+        })
+        .unwrap();
+    let status = policy.status().unwrap();
+    assert!(fixture.workflow.core.status().unwrap().binding.is_none());
+    assert!(status.media.upload_files.is_none() && status.media.upload_bytes.is_none());
+    assert!(status.media.download_files.is_none() && status.media.download_bytes.is_none());
+    assert!(status.media.unknown_blobs.is_none() && status.media.missing_names.is_none());
+    assert!(status.as_of_ms.is_none());
+    assert!(!matches!(status.state, CloudPolicyStatusState::UpToDate { .. }));
+    failure_is(
+        policy.clone().complete_exchange(9_999),
+        CloudPolicyFailure::UnqualifiedCompletion,
+    );
     fixture.workflow.host.close().unwrap();
 }

@@ -35,6 +35,7 @@ public actor CloudOwnExecutor {
     private let transport: any CloudOwnTransport
     private var active: (id: UUID, task: Task<CloudConnectionProgress, any Error>)?
     private var prepared: (any CloudPreparedOwnOperation)?
+    private var previewTask: Task<CloudConnectionPreviewWork, any Error>?
     private var stopping = false
     private var closed = false
     public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport) { self.core = core; self.transport = transport }
@@ -50,11 +51,37 @@ public actor CloudOwnExecutor {
         // Use the same active task slot as recovery operations. The separate
         // result task retains its typed preview while cancel/close join it.
         let result = Task { try await self.executePreview() }
+        previewTask = result
         let id = UUID()
         let join = Task<CloudConnectionProgress, any Error> { _ = try await result.value; return .progressed }
         active = (id, join)
-        defer { if active?.id == id { active = nil; prepared = nil } }
-        return try await result.value
+        defer { if active?.id == id { active = nil; prepared = nil; previewTask = nil } }
+        return try await withTaskCancellationHandler { try await result.value }
+            onCancel: { Task { await self.cancelPreview(id: id) } }
+    }
+    public func interruptAndDrain() async {
+        guard !closed else { return }
+        stopping = true
+        previewTask?.cancel()
+        active?.task.cancel()
+        prepared?.cancel()
+        if let active { _ = await active.task.result }
+        if !closed { stopping = false }
+    }
+    public func cancelPreview() async {
+        guard let id = active?.id else { return }
+        await cancelPreview(id: id)
+    }
+    private func cancelPreview(id: UUID) async {
+        guard active?.id == id, let original = previewTask else { return }
+        let originalJoin = active?.task
+        stopping = true
+        original.cancel()
+        prepared?.cancel()
+        _ = await original.result
+        _ = await originalJoin?.result
+        if active?.id == id { previewTask = nil }
+        if !closed { stopping = false }
     }
     private func requireIdle() throws {
         if closed || stopping { throw CloudOwnTransportFailure.closed }
@@ -87,9 +114,11 @@ public actor CloudOwnExecutor {
                 switch work {
                 case .readActive(let p, let target):
                     let reply = try await read(target)
+                    try checkStopping()
                     work = try await core.connectionActiveRead(p, read: reply)
                 case .readEpoch(let p, let target):
                     let reply = try await read(target)
+                    try checkStopping()
                     work = try await core.connectionEpochRead(p, read: reply)
                 case .ready:
                     try checkStopping()
@@ -189,6 +218,7 @@ public actor CloudOwnExecutor {
     /// lost by the SDK remains a durable recovery question in Rust.
     public func close() async {
         closed = true; stopping = true
+        previewTask?.cancel()
         prepared?.cancel()
         if let active { _ = await active.task.result }
     }

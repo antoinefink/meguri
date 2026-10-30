@@ -106,6 +106,7 @@ pub enum CloudConnectionDecision {
     ConfirmAdoption,
     ChooseCollection,
     CloudUnreadable,
+    NoCollection,
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CloudCountKind {
@@ -150,6 +151,7 @@ fn counts(v: &std::collections::BTreeMap<c::entity_codec::Kind, u64>) -> Vec<Clo
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudConnectionSummary {
+    pub local_collection_present: bool,
     pub local_counts: Vec<CloudKindCount>,
     pub local_empty: bool,
     /// Manifest estimates only. The native caller must show this date.
@@ -161,11 +163,13 @@ pub struct CloudConnectionSummary {
 impl From<&p::Preview> for CloudConnectionSummary {
     fn from(v: &p::Preview) -> Self {
         Self {
+            local_collection_present: v.native_file.is_some(),
             local_counts: counts(&v.local.counts),
             local_empty: v.local.empty,
             manifest_counts: v.cloud.as_ref().map(|v| counts(&v.counts)),
             published_at_ms: v.published_at_ms,
             decision: match v.decision {
+                p::ConnectDecision::NoCollection => CloudConnectionDecision::NoCollection,
                 p::ConnectDecision::ConfirmUpload => CloudConnectionDecision::ConfirmUpload,
                 p::ConnectDecision::ConfirmAdoption => CloudConnectionDecision::ConfirmAdoption,
                 p::ConnectDecision::ChooseCollection => CloudConnectionDecision::ChooseCollection,
@@ -180,10 +184,26 @@ struct Owner {
     core: Arc<r::Runtime>,
 }
 impl Owner {
+    fn current_generation(&self) -> Result<u64, CoreError> {
+        Ok(self
+            .host
+            .cloud_connection_generation()
+            .map_err(|_| failure(CloudConnectionFailure::Closed))?
+            .0)
+    }
+    fn check_generation(&self, generation: u64) -> Result<(), CoreError> {
+        if self.current_generation()? != generation {
+            return Err(failure(CloudConnectionFailure::AuthorityChanged));
+        }
+        Ok(())
+    }
     fn collection(&self) -> Result<meguri_engine::Collection, CoreError> {
         self.host
-            .cloud_connection_collection()
-            .map_err(|_| failure(CloudConnectionFailure::Closed))
+            .cloud_connection_generation()
+            .map_err(|_| failure(CloudConnectionFailure::Closed))?;
+        self.host
+            .collection()
+            .map_err(|_| failure(CloudConnectionFailure::NotOffered))
     }
     fn generation(&self, generation: u64) -> Result<meguri_engine::Collection, CoreError> {
         let c = self.collection()?;
@@ -199,7 +219,7 @@ pub struct CloudConnection {
 }
 impl CloudConnection {
     pub(crate) fn for_workflow(v: &CloudWorkflow) -> Result<Arc<Self>, CoreError> {
-        v.host.cloud_connection_collection()?;
+        v.host.cloud_connection_generation()?;
         Ok(Arc::new(Self {
             owner: Arc::new(Owner {
                 host: v.host.clone(),
@@ -456,13 +476,10 @@ pub struct CloudRecoveryStatus {
 impl CloudConnection {
     pub fn begin_connection_preview(&self) -> Result<CloudConnectionPreviewWork, CoreError> {
         callback::enter("CloudConnection.begin_connection_preview");
-        let collection = self.owner.collection()?;
-        let work = self
-            .owner
-            .core
-            .begin_connection_preview(&collection, &self.owner.host.media()?)
-            .map_err(error)?;
-        Ok(self.preview_work(work, collection.generation().0))
+        let generation = self.owner.current_generation()?;
+        let work = self.owner.host.begin_cloud_connection_preview().map_err(error)?;
+        self.owner.check_generation(generation)?;
+        Ok(self.preview_work(work, generation))
     }
     pub fn connection_active_read(
         &self,
@@ -471,7 +488,7 @@ impl CloudConnection {
     ) -> Result<CloudConnectionPreviewWork, CoreError> {
         callback::enter("CloudConnection.connection_active_read");
         self.owns(&preview.owner)?;
-        self.owner.generation(preview.generation)?;
+        self.owner.check_generation(preview.generation)?;
         let p::PreviewWork::ReadActive { id } = preview.take()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
@@ -487,7 +504,7 @@ impl CloudConnection {
     ) -> Result<CloudConnectionPreviewWork, CoreError> {
         callback::enter("CloudConnection.connection_epoch_read");
         self.owns(&preview.owner)?;
-        self.owner.generation(preview.generation)?;
+        self.owner.check_generation(preview.generation)?;
         let p::PreviewWork::ReadEpoch { id, .. } = preview.take()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
@@ -499,7 +516,7 @@ impl CloudConnection {
     pub fn cancel_preview(&self, preview: Arc<CloudConnectionPreview>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.cancel_preview");
         self.owns(&preview.owner)?;
-        self.owner.generation(preview.generation)?;
+        self.owner.check_generation(preview.generation)?;
         let id = match preview.take()? {
             p::PreviewWork::ReadActive { id } | p::PreviewWork::ReadEpoch { id, .. } => id,
             p::PreviewWork::Ready(p) => p.id,

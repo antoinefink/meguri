@@ -1,4 +1,5 @@
 import Foundation
+import Instrumentation
 import Testing
 import MeguriCoreBindings
 @testable import CoreBridge
@@ -138,7 +139,10 @@ struct CloudKitBridgeFixture: Sendable {
 
     static func open(count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
                      savedState: Data? = Data([0x73, 0x64, 0x6b]),
-                     failInbox: Bool = false, failState: Bool = false) async throws -> Self {
+                     failInbox: Bool = false, failState: Bool = false, startAdapter: Bool = true,
+                     connectedPolicyOpening: Bool = false) async throws -> Self {
+        try #require(!connectedPolicyOpening || !startAdapter,
+                     "Connected policy fixtures must start only through policy Start actions")
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let data = directory.appending(path: "collection")
         let backups = directory.appending(path: "backups")
@@ -152,7 +156,18 @@ struct CloudKitBridgeFixture: Sendable {
             // matching this baseline, regardless of the preceding fixture.
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: .available, identity: Data("synthetic-account-A".utf8))
             try await MaintenanceLane.shared.bootstrapCollection(location)
-            try await collection.open(location, randomSeed: 114)
+            if connectedPolicyOpening {
+                let clock = CollectionClockRelay(CloudFixtureClock())
+                let diskSpace = DiskSpaceRelay(CoreBridge.DiskSpaceProvider())
+                let job = try await Jobs.start(.testCloudStartNativePolicyOpen) {
+                    try MeguriCoreBindings.testCloudStartNativePolicyOpen(
+                        location: location.raw, clock: clock, diskSpace: diskSpace, randomSeed: 114
+                    )
+                }
+                try await job.value()
+            } else {
+                try await collection.open(location, randomSeed: 114)
+            }
             let baseline = try await MaintenanceLane.shared.prepareCloudAdapterBaseline(
                 count: count, savedState: savedState, failInbox: failInbox, failState: failState
             )
@@ -161,8 +176,10 @@ struct CloudKitBridgeFixture: Sendable {
             let probe = CloudPersistedEventProbe()
             let adapter = CloudKitSyncAdapter(core: core, engineFactory: factory,
                                              eventDidPersist: { await probe.didPersist($0) })
-            try await adapter.start(automaticallySync: false)
-            try await adapter.waitForIdle()
+            if startAdapter {
+                try await adapter.start(automaticallySync: false)
+                try await adapter.waitForIdle()
+            }
             return Self(directory: directory, collection: collection, core: core,
                         adapter: adapter, factory: factory, probe: probe,
                         names: baseline.names, decks: baseline.decks,
@@ -173,6 +190,12 @@ struct CloudKitBridgeFixture: Sendable {
             try? await collection.close()
             try? FileManager.default.removeItem(at: directory)
             throw error
+        }
+    }
+
+    func requireNativePolicyBaseline() async throws {
+        try await MaintenanceLane.shared.call(.testCloudRequireNativePolicyBaseline) {
+            try MeguriCoreBindings.testCloudRequireNativePolicyBaseline()
         }
     }
 
@@ -192,12 +215,23 @@ struct CloudKitBridgeFixture: Sendable {
 func withCloudKitFixture(
     count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
     savedState: Data? = Data([0x73, 0x64, 0x6b]), failInbox: Bool = false, failState: Bool = false,
+    startAdapter: Bool = true,
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
     let fixture = try await CloudKitBridgeFixture.open(
         count: count, a23: a23, keepAlive: keepAlive, savedState: savedState,
-        failInbox: failInbox, failState: failState
+        failInbox: failInbox, failState: failState, startAdapter: startAdapter
     )
+    do { try await body(fixture) }
+    catch { await fixture.close(); throw error }
+    await fixture.close()
+}
+
+/// The native policy owns SDK startup; pure adapter fixtures keep their defaults.
+func withNativePolicyFixture(
+    _ body: (CloudKitBridgeFixture) async throws -> Void
+) async throws {
+    let fixture = try await CloudKitBridgeFixture.open(startAdapter: false, connectedPolicyOpening: true)
     do { try await body(fixture) }
     catch { await fixture.close(); throw error }
     await fixture.close()

@@ -26,11 +26,31 @@ impl Runtime {
     }
     pub fn register_sdk(&self, automatic: bool) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         let mut s = self.state();
+        self.register_sdk_locked(&mut s, automatic)
+    }
+    /// Registration is the linearization point, after all native preparation awaits.
+    /// The issued guard is compared in the same critical section as installation.
+    pub fn register_sdk_guarded(
+        &self,
+        guard: &Guard,
+        automatic: bool,
+    ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
+        let mut s = self.state();
+        if &Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.register_sdk_locked(&mut s, automatic)
+    }
+    fn register_sdk_locked(
+        &self,
+        s: &mut State,
+        automatic: bool,
+    ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         if s.adapter.sdk.is_some() {
             return Err(Error::InvalidData.into());
         }
-        let host = Self::instance_locked(&s)?;
-        Self::caller_locked(&s, &host)?;
+        let host = Self::instance_locked(s)?;
+        Self::caller_locked(s, &host)?;
         if !s.whole_complete || s.scan_required || s.tracking_stopped || s.adapter.paused {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
         }
@@ -60,14 +80,40 @@ impl Runtime {
         s.actions.handler = None;
         #[cfg(feature = "test-hooks")]
         meguri_model::faultpoint!("cloud.adapter.register_sdk.before_pending").map_err(Error::from)?;
-        self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
+        self.emit_pending_locked(s, UpdateKind::Full, BTreeSet::new())?;
         // Failed pending discovery must leave the SDK slot available for retry.
         s.adapter.sdk = Some(SDKAuthority {
             id: id.clone(),
-            guard: Self::adapter_guard_locked(&s),
+            guard: Self::adapter_guard_locked(s),
             stopping: false,
         });
         Ok((id, serialization, collection_zone(b.facts.epoch)))
+    }
+    pub(crate) fn policy_sdk_origin(&self, guard: &Guard) -> Result<Option<String>, RuntimeError> {
+        let s = self.state();
+        if &Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(s.adapter.sdk.as_ref().map(|sdk| sdk.id.clone()))
+    }
+    pub(crate) fn policy_fetch_scope(
+        &self,
+        guard: &Guard,
+        zones: &[crate::cloud::policy::Zone],
+    ) -> Result<Vec<String>, RuntimeError> {
+        let s = self.state();
+        if &Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
+        zones
+            .iter()
+            .map(|zone| match zone {
+                crate::cloud::policy::Zone::Root => Ok("meguri-root".to_owned()),
+                crate::cloud::policy::Zone::Collection => Ok(collection_zone(binding.facts.epoch)),
+                crate::cloud::policy::Zone::Media => Err(Error::InvalidData.into()),
+            })
+            .collect()
     }
     pub fn sdk_root_confirmed(&self) -> bool {
         self.state().root_confirmed
@@ -144,18 +190,19 @@ impl Runtime {
         if let Some(sdk) = sdk {
             Self::sdk_locked(&s, sdk)?;
         }
-        Self::adapter_account_locked(self, &mut s, identity, sdk.is_some())
+        Self::adapter_account_locked(self, &mut s, identity, sdk.is_some(), false)
     }
     fn adapter_account_locked(
         &self,
         s: &mut State,
         identity: IdentityStatus,
         sdk_event: bool,
+        no_collection_authorized: bool,
     ) -> Result<(), RuntimeError> {
         // Connection discovery has no binding yet. Accepted account events
         // still invalidate its preview; no account or binding is invented.
         if s.bound.is_none() {
-            if s.store.is_none() {
+            if s.store.is_none() && !no_collection_authorized {
                 return Err(RuntimeError::StaleIncarnation);
             }
             s.publication.preview = None;
@@ -163,7 +210,15 @@ impl Runtime {
             return Ok(());
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        let same = matches!(&identity, IdentityStatus::Available(a) if a == &b.binding.facts.account) && b.verified;
+        // A local resume rebinds this same owner as unverified. An actual
+        // same-account proof restores verification without revoking the SDK
+        // guard whose original serial callback is held across suspension.
+        let same = matches!(&identity, IdentityStatus::Available(a) if a == &b.binding.facts.account)
+            && (b.verified
+                || s.adapter
+                    .sdk
+                    .as_ref()
+                    .is_some_and(|sdk| !sdk.stopping && sdk.guard == Self::adapter_guard_locked(s)));
         if !same {
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         }
@@ -850,58 +905,199 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Only composition of a real retained NoCollection Host issues this lease.
+    /// It names this Runtime incarnation and never opens tracking or a collection.
+    pub fn attach_no_collection_identity_owner(
+        &self,
+        live: std::sync::Weak<Mutex<bool>>,
+        engine: meguri_engine::WeakEngine,
+        generation: Generation,
+    ) {
+        let mut owner = self
+            .no_collection_identity_owner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if owner.is_none() {
+            *owner = Some(NoCollectionIdentityOwner {
+                live,
+                engine,
+                generation,
+                incarnation: self.state().incarnation,
+            });
+        }
+    }
+
+    fn with_identity_read_state<T>(
+        &self,
+        no_collection: bool,
+        apply: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        if !no_collection {
+            let mut s = self.state();
+            if s.store.is_none() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            return apply(&mut s);
+        }
+        let owner = self
+            .no_collection_identity_owner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        let live = owner.live.upgrade().ok_or(RuntimeError::StaleIncarnation)?;
+        // Same ordering as Host close: original-owner lease before Runtime state.
+        // No platform provider is ever called while either lock is held.
+        let live = live.lock().unwrap_or_else(PoisonError::into_inner);
+        let engine = owner.engine.upgrade().ok_or(RuntimeError::StaleIncarnation)?;
+        if !*live
+            || engine.generation() != owner.generation
+            || !matches!(engine.state(), meguri_engine::LifecycleState::NoCollection)
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let mut s = self.state();
+        if s.store.is_some()
+            || s.bound.is_some()
+            || s.cloud.generation.is_some()
+            || s.incarnation != owner.incarnation
+            || engine.generation() != owner.generation
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        match self.directory.join("collection.anki2").symlink_metadata() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+            Ok(_) => return Err(RuntimeError::StaleIncarnation),
+        }
+        apply(&mut s)
+    }
+
+    fn identity_read_current_locked(s: &State, id: u64) -> bool {
+        s.adapter
+            .identity_read
+            .as_ref()
+            .is_some_and(|(request, guard, incarnation, origin_sdk, _)| {
+                *request == id
+                    && *guard == Self::adapter_guard_locked(s)
+                    && *incarnation == s.incarnation
+                    && !origin_sdk
+                        .as_deref()
+                        .is_some_and(|sdk| Self::sdk_locked(s, sdk).is_err())
+            })
+    }
+    /// Recheck the original authority after the provider returns, without
+    /// consuming it. Completion repeats the check at its mutation boundary.
+    pub(super) fn adapter_validate_identity_read(&self, id: u64) -> Result<(), RuntimeError> {
+        let no_collection = self
+            .state()
+            .adapter
+            .identity_read
+            .as_ref()
+            .filter(|(request, ..)| *request == id)
+            .map(|v| v.4)
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        self.with_identity_read_state(no_collection, |s| {
+            if !Self::identity_read_current_locked(s, id) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            Ok(())
+        })
+    }
     pub fn adapter_begin_identity_read(
         &self,
         _transition: bool,
         origin_sdk: Option<&str>,
     ) -> Result<u64, RuntimeError> {
-        let mut s = self.state();
-        if let Some(sdk) = origin_sdk {
-            Self::sdk_locked(&s, sdk)?;
-        }
-        if s.store.is_none() {
-            return Err(RuntimeError::StaleIncarnation);
-        }
-        if origin_sdk.is_some() {
-            s.adapter.no_state = true;
-            s.adapter.no_state_point += 1;
-            self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
-        }
-        s.adapter.next_identity = s.adapter.next_identity.checked_add(1).ok_or(Error::InvalidData)?;
-        let id = s.adapter.next_identity;
-        // A pending lookup is not evidence of a different account. Keep the
-        // verified owner accepting records and their following cursor (V9.1).
-        s.adapter.identity_read = Some((
-            id,
-            Self::adapter_guard_locked(&s),
-            s.incarnation,
-            origin_sdk.map(str::to_owned),
-        ));
-        Ok(id)
+        let no_collection = self.state().store.is_none();
+        self.with_identity_read_state(no_collection, |s| {
+            if let Some(sdk) = origin_sdk {
+                Self::sdk_locked(s, sdk)?;
+            }
+            if origin_sdk.is_some() {
+                s.adapter.no_state = true;
+                s.adapter.no_state_point += 1;
+                self.emit_pending_locked(s, UpdateKind::Full, BTreeSet::new())?;
+            }
+            s.adapter.next_identity = s.adapter.next_identity.checked_add(1).ok_or(Error::InvalidData)?;
+            let id = s.adapter.next_identity;
+            s.adapter.accepted_identity_read = None;
+            // A pending lookup is not evidence of a different account. Keep the
+            // verified owner accepting records and their following cursor (V9.1).
+            s.adapter.identity_read = Some((
+                id,
+                Self::adapter_guard_locked(s),
+                s.incarnation,
+                origin_sdk.map(str::to_owned),
+                no_collection,
+            ));
+            Ok(id)
+        })
     }
     pub fn adapter_complete_identity_read(&self, id: u64, identity: IdentityStatus) -> Result<bool, RuntimeError> {
-        let mut s = self.state();
-        let Some((request, guard, incarnation, origin_sdk)) = s.adapter.identity_read.clone() else {
+        let Some(no_collection) = self
+            .state()
+            .adapter
+            .identity_read
+            .as_ref()
+            .filter(|(request, ..)| *request == id)
+            .map(|v| v.4)
+        else {
             return Ok(false);
         };
-        if request != id {
-            return Ok(false);
+        let result = self.with_identity_read_state(no_collection, |s| {
+            if !Self::identity_read_current_locked(s, id) {
+                return Ok(false);
+            }
+            s.adapter.identity_read = None;
+            // A failed later read preserves an already verified process owner (V9.1).
+            if !matches!(identity, IdentityStatus::ReadFailed) {
+                self.adapter_account_locked(s, identity.clone(), false, no_collection)?;
+            }
+            s.adapter.accepted_identity_read = Some(crate::cloud::adapter::AcceptedIdentityRead {
+                request: id,
+                guard: Self::adapter_guard_locked(s),
+                incarnation: s.incarnation,
+                no_collection,
+                identity,
+            });
+            Ok(true)
+        });
+        match result {
+            Err(RuntimeError::StaleIncarnation) => Ok(false),
+            result => result,
         }
-        s.adapter.identity_read = None;
-        if s.store.is_none()
-            || guard != Self::adapter_guard_locked(&s)
-            || incarnation != s.incarnation
-            || origin_sdk
-                .as_deref()
-                .is_some_and(|sdk| Self::sdk_locked(&s, sdk).is_err())
-        {
-            return Ok(false);
-        }
-        // A failed later read preserves an already verified process owner (V9.1).
-        if !matches!(identity, IdentityStatus::ReadFailed) {
-            self.adapter_account_locked(&mut s, identity, false)?;
-        }
-        Ok(true)
+    }
+
+    pub(crate) fn with_accepted_identity_read<T>(
+        &self,
+        request: u64,
+        commit: impl FnOnce(&IdentityStatus) -> T,
+    ) -> Result<T, RuntimeError> {
+        let no_collection = self
+            .state()
+            .adapter
+            .accepted_identity_read
+            .as_ref()
+            .filter(|proof| proof.request == request)
+            .map(|proof| proof.no_collection)
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        self.with_identity_read_state(no_collection, |s| {
+            let proof = s
+                .adapter
+                .accepted_identity_read
+                .as_ref()
+                .ok_or(RuntimeError::StaleIncarnation)?;
+            if proof.request != request
+                || s.adapter.next_identity != request
+                || s.adapter.identity_read.is_some()
+                || proof.incarnation != s.incarnation
+                || proof.guard != Self::adapter_guard_locked(s)
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            Ok(commit(&proof.identity))
+        })
     }
 }
 

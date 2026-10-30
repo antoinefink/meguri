@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import CoreBridge
 
@@ -114,6 +115,45 @@ extension EventTests {
             await closing.value
             do { _ = try await executor.runNext(); Issue.record("closed executor resumed") }
             catch { #expect(error is CloudOwnTransportFailure) }
+        }
+    }
+}
+
+private final class PreviewReadSequence: CloudOwnTransport, Sendable {
+    private let operations: Synchronization.Mutex<[HeldOwnOperation]>
+    init(_ operations: [HeldOwnOperation]) { self.operations = .init(operations) }
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        try operations.withLock {
+            guard !$0.isEmpty else { throw CloudOwnTransportFailure.unexpectedReply }
+            return $0.removeFirst()
+        }
+    }
+}
+
+extension EventTests {
+    @Test func previewCancellationJoinsOriginalReplyAndTheSameExecutorCanPreviewAgain() async throws {
+        try await withCloudConnection { f in
+            let first = HeldOwnOperation(), second = HeldOwnOperation()
+            let executor = CloudOwnExecutor(core: f.connection, transport: PreviewReadSequence([first, second]))
+            let pending = Task { try await executor.preview() }
+            try await first.waitUntilQueued()
+            let cancellation = Task { await executor.cancelPreview() }
+            try await first.waitUntilCancelled()
+            #expect(first.count.withLock { $0 } == 1)
+            first.finish(.read(.zoneMissing))
+            do { _ = try await pending.value; Issue.record("Cancelled original preview returned authority") } catch { }
+            await cancellation.value
+            let next = Task { try await executor.preview() }
+            try await second.waitUntilQueued()
+            second.finish(.read(.zoneMissing))
+            guard case .ready(let handle, let summary) = try await next.value else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(summary.decision == .confirmUpload)
+            #expect(second.count.withLock { $0 } == 1)
+            #expect(try await f.connection.recoveryStatus() == nil)
+            try await f.connection.cancelPreview(handle)
+            await executor.close()
         }
     }
 }

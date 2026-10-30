@@ -8,8 +8,20 @@ use meguri_engine::media::{MediaJobKind, MediaService};
 use meguri_storage::media::{MediaAbsenceCause, MediaFeedId, MediaFileState};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "media_sdk.rs"]
+mod sdk;
+
+#[derive(Clone)]
+struct MediaRecoveryAuthority(Authority);
+impl std::ops::Deref for MediaRecoveryAuthority {
+    type Target = Authority;
+    fn deref(&self) -> &Authority {
+        &self.0
+    }
+}
+
 type MediaFeedApplyCommit = (
-    Authority,
+    MediaRecoveryAuthority,
     ApplyIntent,
     Ledger,
     Vec<(Option<EntityFacts>, EntityFacts)>,
@@ -94,9 +106,9 @@ impl Runtime {
             || b.binding.facts.state != BindingState::Active
             || s.invalidation_exhausted
             || Self::adapter_guard_locked(s).token != a.adapter_token
-            || s.media.epoch != a.media_epoch
+            || s.media.epoch != a.media_epoch && !Self::retained_upload_authority(s, a)
             || s.adapter.paused
-            || s.media.paused
+            || s.media.paused && !Self::retained_upload_authority(s, a)
             || s.tracking_stopped
             || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping)
         {
@@ -112,6 +124,50 @@ impl Runtime {
         let mut s = self.state();
         Self::check_media_locked(&s, a)?;
         with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
+    }
+    fn check_media_recovery_locked(s: &State, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if b.binding.id != a.binding
+            || b.open_counter != a.open
+            || s.incarnation != a.incarnation
+            || b.evidence.generation.0 != a.generation
+            || b.file != a.file
+            || b.binding.facts.account != a.account
+            || !b.usable
+            || !b.verified
+            || b.binding.facts.state != BindingState::Active
+            || s.invalidation_exhausted
+            || Self::adapter_guard_locked(s).token != a.adapter_token
+            || s.media.epoch != a.media_epoch
+            || s.adapter.paused
+            || s.tracking_stopped
+            || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping)
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(())
+    }
+    fn with_media_recovery<T>(
+        &self,
+        a: &MediaRecoveryAuthority,
+        work: impl FnOnce(&mut TrackingStore) -> Result<T, Error>,
+    ) -> Result<T, RuntimeError> {
+        let mut s = self.state();
+        Self::check_media_recovery_locked(&s, a)?;
+        with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
+    }
+    fn media_recovery_io<T>(
+        &self,
+        collection: &Collection,
+        a: &MediaRecoveryAuthority,
+        work: impl FnOnce() -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        if self.media_authority(collection, true)? != a.0 {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let s = self.state();
+        Self::check_media_recovery_locked(&s, a)?;
+        work()
     }
     fn put_media_state(&self, a: &Authority, ledger: &Ledger) -> Result<(), RuntimeError> {
         let mut s = self.state();
@@ -142,7 +198,11 @@ impl Runtime {
         a: &Authority,
         work: impl FnOnce() -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        if self.media_authority(collection, true)? != *a {
+        let mut current = self.media_authority(collection, true)?;
+        if Self::retained_upload_authority(&self.state(), a) {
+            current.media_epoch = a.media_epoch;
+        }
+        if current != *a {
             return Err(RuntimeError::StaleIncarnation);
         }
         let s = self.state();
@@ -173,7 +233,7 @@ impl Runtime {
             })?
         };
         if let Some((authority, _, proposed_ledger, _, _)) = &apply_commit {
-            if authority != &a || feed_state.revision != proposed_ledger.revision {
+            if authority.0 != a || feed_state.revision != proposed_ledger.revision {
                 return Err(Error::RecoveryRequired.into());
             }
             feed_state = proposed_ledger.clone();
@@ -348,8 +408,8 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        if apply_commit.is_some() {
-            Self::check_media_locked(&state, &a)?;
+        if let Some((authority, ..)) = &apply_commit {
+            Self::check_media_recovery_locked(&state, authority)?;
         }
         let (changed_work, retained_floor) = with_tracking_access(|| -> Result<_, Error> {
             let store = state.store.as_mut().ok_or(Error::Database)?;
@@ -389,12 +449,16 @@ impl Runtime {
         s.media.root_checked = false;
         s.media.recovered = false;
         s.media.attempted.clear();
+        s.media.round_reads.clear();
+        s.media.selection = Selection::Resume;
+        s.media.due_loaded = false;
     }
     pub fn pause_cloud_media(&self) {
         let mut s = self.state();
         s.media.paused = true;
         s.media.epoch = s.media.epoch.saturating_add(1);
         s.media.pending = None;
+        s.media.metadata_pending = None;
     }
     pub fn cloud_media_work(
         &self,
@@ -405,7 +469,8 @@ impl Runtime {
         let a = self.media_authority(collection, true)?;
         {
             let mut s = self.state();
-            if s.media.paused
+            if s.media.enabled == Some(false)
+                || s.media.paused
                 || s.adapter.paused
                 || s.scan_running
                 || s.tracking_stopped
@@ -418,7 +483,16 @@ impl Runtime {
                 s.media.pending = None;
                 s.media.recovered = false;
             }
-            if let Some(w) = &s.media.pending {
+            if s.media.metadata_pending.as_ref().is_some_and(|w| w.authority != a) {
+                s.media.metadata_pending = None;
+            }
+            if let Some(w) = &s.media.metadata_pending {
+                return Ok(Some(w.clone()));
+            }
+            if s.media.selection == Selection::Resume
+                && s.media.root_checked
+                && let Some(w) = &s.media.pending
+            {
                 return Ok(Some(w.clone()));
             }
         }
@@ -428,22 +502,23 @@ impl Runtime {
         if ledger.zone_missing {
             return Ok(None);
         }
-        let Some((key, true, _)) = key else { return Ok(None) };
-        if !self.state().media.recovered {
+        let key = key.map(|(key, _, _)| key).unwrap_or(RecordKey([0; 32]));
+        if self.state().media.selection == Selection::Resume && !self.state().media.recovered {
             for blob in ledger.blobs.values_mut() {
                 if blob.download == Transfer::Running {
                     blob.download = Transfer::Queued;
                 }
                 if blob.upload == Transfer::Running {
                     blob.upload = Transfer::None;
-                    blob.staged = None;
+                    // The ledger retains this file until a new original SDK
+                    // adopts it or a real Saved callback releases it.
                 }
             }
             self.put_media_state(&a, &ledger)?;
             ledger = self.with_media(&a, |s| s.media_ledger(a.binding))?;
             self.state().media.recovered = true;
         }
-        if self.state().media.root_checked {
+        if self.state().media.selection == Selection::Resume && self.state().media.root_checked {
             let staged: Vec<_> = ledger
                 .blobs
                 .iter()
@@ -477,9 +552,39 @@ impl Runtime {
                 }
             }
         }
+        let load_due = {
+            let s = self.state();
+            s.media.root_checked && !s.media.due_loaded
+        };
+        if load_due {
+            let due = Self::cloud_due_media_names(collection)?;
+            let mut s = self.state();
+            Self::check_media_locked(&s, &a)?;
+            s.media.due = due;
+            s.media.due_loaded = true;
+        }
         let request = if !self.state().media.root_checked {
             Some(Request::Root)
         } else {
+            let mut live_blobs = BTreeSet::new();
+            for flags in ledger.names.values() {
+                if let Some(local) = &flags.local {
+                    if flags.sendable() {
+                        live_blobs.insert(blob::Blob::from(local).name(&key.0));
+                    }
+                    let metadata = blob::Blob::from(local);
+                    ledger.blobs.entry(metadata.name(&key.0)).or_insert_with(|| BlobState {
+                        metadata,
+                        ..Default::default()
+                    });
+                }
+            }
+            let (visible, due) = {
+                let s = self.state();
+                (s.media.visible.clone(), s.media.due.clone())
+            };
+            let mut visible_blobs = BTreeSet::new();
+            let mut due_content = BTreeSet::new();
             let entries = self.with_media(&a, |store| store.inbox(a.binding))?;
             for entry in entries {
                 let InboxValue::Record { envelope, .. } = &entry.entry.value else {
@@ -498,62 +603,169 @@ impl Runtime {
                     if let Some(codec::Payload::MediaName(p)) = r.payload {
                         let metadata = blob::Blob::from(&p);
                         let name = metadata.name(&key.0);
-                        ledger.blobs.entry(name).or_insert_with(|| BlobState {
-                            metadata,
-                            download: Transfer::Queued,
-                            ..Default::default()
-                        });
+                        live_blobs.insert(name.clone());
+                        if visible.contains(&text(&p.name)?.to_lowercase()) {
+                            visible_blobs.insert(name.clone());
+                        }
+                        if due.contains(&text(&p.name)?.to_lowercase()) {
+                            due_content.insert(name.clone());
+                        }
+                        ledger
+                            .blobs
+                            .entry(name)
+                            .and_modify(|b| {
+                                if matches!(b.download, Transfer::None | Transfer::Complete) {
+                                    b.download = Transfer::Queued;
+                                }
+                            })
+                            .or_insert_with(|| BlobState {
+                                metadata,
+                                download: Transfer::Queued,
+                                ..Default::default()
+                            });
                     }
                 }
             }
-            for e in self.with_media(&a, |store| store.entity_page(a.binding, codec::Kind::MediaName, None))? {
+            for e in self.with_media(&a, |store| Self::cloud_media_entities(store, a.binding))? {
                 if e.acked_media_tombstone() {
                     continue;
                 }
                 if let codec::Payload::MediaName(p) = e.payload {
                     let flags = ledger.names.get(&text(&p.name)?.to_lowercase());
+                    if flags.is_none_or(|f| !f.removal_held && f.tombstone_at.is_none() && f.withheld.is_none()) {
+                        live_blobs.insert(blob::Blob::from(&p).name(&key.0));
+                    }
                     if e.mark.is_none() && flags.is_none_or(|f| f.local.as_ref().is_none_or(|l| l.sha256 != p.sha256)) {
                         let metadata = blob::Blob::from(&p);
                         let name = metadata.name(&key.0);
-                        ledger.blobs.entry(name).or_insert_with(|| BlobState {
-                            metadata,
-                            download: Transfer::Queued,
-                            ..Default::default()
-                        });
+                        live_blobs.insert(name.clone());
+                        if visible.contains(&text(&p.name)?.to_lowercase()) {
+                            visible_blobs.insert(name.clone());
+                        }
+                        if due.contains(&text(&p.name)?.to_lowercase()) {
+                            due_content.insert(name.clone());
+                        }
+                        ledger
+                            .blobs
+                            .entry(name)
+                            .and_modify(|b| {
+                                if matches!(b.download, Transfer::None | Transfer::Complete) {
+                                    b.download = Transfer::Queued;
+                                }
+                            })
+                            .or_insert_with(|| BlobState {
+                                metadata,
+                                download: Transfer::Queued,
+                                ..Default::default()
+                            });
                     }
                 }
             }
-            let attempted = self.state().media.attempted.clone();
-            let mut request = None;
-            for (name, b) in &mut ledger.blobs {
+            let (attempted, round_reads, selection, visible) = {
+                let s = self.state();
+                (
+                    s.media.attempted.clone(),
+                    s.media.round_reads.clone(),
+                    s.media.selection,
+                    s.media.visible.clone(),
+                )
+            };
+            visible_blobs.extend(
+                ledger
+                    .names
+                    .iter()
+                    .filter(|(name, _)| visible.contains(*name))
+                    .filter_map(|(_, f)| f.local.as_ref().map(|p| blob::Blob::from(p).name(&key.0))),
+            );
+            let mut ordered: Vec<_> = ledger
+                .blobs
+                .keys()
+                .filter(|name| live_blobs.contains(*name))
+                .cloned()
+                .collect();
+            for (filename, state) in &ledger.names {
+                if due.contains(filename)
+                    && let Some(payload) = &state.local
+                {
+                    due_content.insert(blob::Blob::from(payload).name(&key.0));
+                }
+            }
+            ordered.sort_by_key(|name| (!visible_blobs.contains(name), !due_content.contains(name), name.clone()));
+            let include_missing = !matches!(selection, Selection::Read { include_missing: false });
+            let reads: Vec<_> = ordered
+                .iter()
+                .filter(|name| {
+                    let b = &ledger.blobs[*name];
+                    !round_reads.contains(*name)
+                        && (b.server == ServerState::Unknown
+                            || include_missing && b.server == ServerState::Deleted && b.download == Transfer::Queued)
+                })
+                .take(if self.state().media.batch_reads { 200 } else { 1 })
+                .cloned()
+                .collect();
+            let mut request = if reads.is_empty() {
+                None
+            } else if self.state().media.batch_reads {
+                Some(Request::Reads { names: reads })
+            } else {
+                Some(Request::Read { name: reads[0].clone() })
+            };
+            if request.is_none() && selection == Selection::Resume {
+                let original = self.state().actions.media_upload.as_ref().map(|(_, work)| work.clone());
+                if let Some(original) = original.filter(|work| {
+                    let s = self.state();
+                    !s.media.suppress_uploads
+                        && !matches!(&work.request, Request::Upload { name, .. } if s.policy.parked.contains(name))
+                }) {
+                    self.validate_cloud_media_work(collection, &original)?;
+                    self.put_media_state(&a, &ledger)?;
+                    return Ok(Some(original));
+                }
+            }
+            for name in &ordered {
+                if selection != Selection::Resume
+                    || matches!(request, Some(Request::Read { .. } | Request::Reads { .. }))
+                {
+                    break;
+                }
+                let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
                 if attempted.contains(name) {
                     continue;
                 }
-                if b.server == ServerState::Unknown
-                    || b.server == ServerState::Deleted && b.download == Transfer::Queued
+                if selection == Selection::Resume
+                    && b.server == ServerState::Present
+                    && b.download == Transfer::Queued
+                    && !self.cloud_media_downloads_blocked()
                 {
-                    request = Some(Request::Read { name: name.clone() });
-                    break;
+                    if request.is_none() {
+                        request = Some(Request::Download { name: name.clone() });
+                    }
+                    continue;
                 }
-                if b.server == ServerState::Present && b.download == Transfer::Queued {
-                    b.download = Transfer::Running;
-                    request = Some(Request::Download { name: name.clone() });
-                    break;
-                }
-                if b.server == ServerState::Deleted && b.upload != Transfer::Complete {
+                if b.server == ServerState::Deleted
+                    && b.upload != Transfer::Complete
+                    && !self.state().media.suppress_uploads
+                {
                     let candidate = ledger
                         .names
                         .values()
                         .find(|f| f.sendable() && f.local.as_ref().is_some_and(|p| p.sha256 == b.metadata.sha256))
                         .and_then(|f| f.local.clone());
                     if let Some(local) = candidate {
-                        let file = media
-                            .store()
-                            .open_file(text(&local.name)?)
-                            .map_err(media_error)?
-                            .ok_or(Error::InvalidData)?;
-                        let (staged, actual) =
-                            self.media_io(collection, &a, || Ok(m::io::stage(file, &self.cloud_staging())?))?;
+                        let (staged, actual) = if let Some(path) = b.staged.as_ref().filter(|p| {
+                            m::io::open(p)
+                                .and_then(m::io::hash)
+                                .is_ok_and(|found| found == b.metadata)
+                        }) {
+                            (path.clone(), b.metadata.clone())
+                        } else {
+                            let file = media
+                                .store()
+                                .open_file(text(&local.name)?)
+                                .map_err(media_error)?
+                                .ok_or(Error::InvalidData)?;
+                            self.media_io(collection, &a, || Ok(m::io::stage(file, &self.cloud_staging())?))?
+                        };
                         if actual != b.metadata {
                             let _ = std::fs::remove_file(&staged);
                             if let Some(flags) = ledger.names.get_mut(&text(&local.name)?.to_lowercase()) {
@@ -572,6 +784,9 @@ impl Runtime {
                     }
                 }
             }
+            if let Some(Request::Download { name }) = &request {
+                ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?.download = Transfer::Running;
+            }
             request
         };
         self.put_media_state(&a, &ledger)?;
@@ -584,11 +799,28 @@ impl Runtime {
             authority: a,
             request,
         };
-        s.media.pending = Some(work.clone());
+        if matches!(
+            work.request,
+            Request::Root | Request::Read { .. } | Request::Reads { .. }
+        ) {
+            s.media.metadata_pending = Some(work.clone());
+        } else {
+            s.media.pending = Some(work.clone());
+        }
         Ok(Some(work))
     }
     fn media_record_key(&self, a: &Authority) -> Result<[u8; 32], RuntimeError> {
         self.with_media(a, |store| {
+            Ok(store
+                .binding(a.binding)?
+                .ok_or(Error::BindingNotFound)?
+                .facts
+                .record_key
+                .0)
+        })
+    }
+    fn media_recovery_record_key(&self, a: &MediaRecoveryAuthority) -> Result<[u8; 32], RuntimeError> {
+        self.with_media_recovery(a, |store| {
             Ok(store
                 .binding(a.binding)?
                 .ok_or(Error::BindingNotFound)?
@@ -614,24 +846,65 @@ impl Runtime {
         if self.publication_account()? != a.account {
             return Err(RuntimeError::IdentityUnverified);
         }
-        if self.media_authority(collection, true)? != *a {
+        let mut current_authority = self.media_authority(collection, true)?;
+        if matches!(work.request, Request::Upload { .. }) {
+            current_authority.media_epoch = a.media_epoch;
+        }
+        if current_authority != *a {
             return Err(RuntimeError::StaleIncarnation);
         }
         {
             let s = self.state();
-            if s.media.pending.as_ref() != Some(work) {
+            if s.media.pending.as_ref() != Some(work)
+                && s.media.metadata_pending.as_ref() != Some(work)
+                && !s
+                    .actions
+                    .media_upload
+                    .as_ref()
+                    .is_some_and(|(_, original)| original == work)
+            {
                 return Err(RuntimeError::StaleIncarnation);
             }
         }
         let (mut ledger, key) = self.with_media(a, |store| {
-            Ok((
-                store.media_ledger(a.binding)?,
-                store.publication_media(a.binding)?.ok_or(Error::InvalidData)?.0,
-            ))
+            Ok((store.media_ledger(a.binding)?, store.publication_media(a.binding)?))
         })?;
-        let failed = matches!(&reply, Reply::Failed { .. });
+        let failed = matches!(&reply, Reply::Failed { .. })
+            || matches!(&reply, Reply::BlobReads { results } if results.iter().any(|r| matches!(r.result, BlobReadResult::Failed { .. })));
         let mut staged_download = None;
         match (&work.request, reply) {
+            (Request::Reads { names }, Reply::BlobReads { results }) => {
+                let expected: BTreeSet<_> = names.iter().cloned().collect();
+                if names.is_empty()
+                    || names.len() > 200
+                    || expected.len() != names.len()
+                    || results.len() != names.len()
+                    || results.iter().map(|r| r.name.clone()).collect::<BTreeSet<_>>() != expected
+                {
+                    return Err(Error::InvalidData.into());
+                }
+                let key = key.as_ref().ok_or(Error::InvalidData)?.0.0;
+                for read in results {
+                    let b = ledger.blobs.get_mut(&read.name).ok_or(Error::InvalidData)?;
+                    match read.result {
+                        BlobReadResult::Present { envelope } => {
+                            let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
+                            if metadata != b.metadata || metadata.name(&key) != read.name {
+                                return Err(Error::InvalidData.into());
+                            }
+                            b.server = ServerState::Present;
+                        }
+                        BlobReadResult::UnknownItem => {
+                            b.server = ServerState::Deleted;
+                            if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
+                                b.upload = Transfer::None;
+                            }
+                        }
+                        BlobReadResult::ZoneMissing => ledger.zone_missing = true,
+                        BlobReadResult::Failed { .. } => {}
+                    }
+                }
+            }
             (_, Reply::ZoneMissing) => ledger.zone_missing = true,
             (Request::Root, Reply::UnknownItem) => ledger.zone_missing = true,
             (
@@ -648,13 +921,22 @@ impl Runtime {
                 else {
                     return Err(Error::InvalidData.into());
                 };
-                if root.media_key != key.0 {
+                if key
+                    .as_ref()
+                    .is_some_and(|(key, acked, _)| *acked && root.media_key != key.0)
+                {
                     ledger.zone_missing = true;
+                } else if key.as_ref().is_none_or(|(_, acked, _)| !acked) {
+                    let crt = collection.reader(ReaderRole::Cloud)?.col()?.created.0;
+                    self.with_media(a, |store| store.accept_media_root(a.binding, root.media_key, crt))?;
                 }
             }
             (Request::Read { name } | Request::Download { name }, Reply::UnknownItem) => {
                 let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
                 b.server = ServerState::Deleted;
+                if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
+                    b.upload = Transfer::None;
+                }
                 if b.download == Transfer::Running {
                     b.download = Transfer::Queued;
                 }
@@ -673,7 +955,7 @@ impl Runtime {
                 }
                 let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
                 let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
-                if metadata != b.metadata || metadata.name(&key.0) != *name {
+                if metadata != b.metadata || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name {
                     return Err(Error::InvalidData.into());
                 }
                 b.server = ServerState::Present;
@@ -696,7 +978,10 @@ impl Runtime {
             (Request::Upload { name, .. }, Reply::Saved { name: actual, envelope }) => {
                 let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
                 let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
-                if *name != actual || metadata != b.metadata || metadata.name(&key.0) != *name {
+                if *name != actual
+                    || metadata != b.metadata
+                    || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name
+                {
                     return Err(Error::InvalidData.into());
                 }
                 b.server = ServerState::Present;
@@ -714,7 +999,18 @@ impl Runtime {
         {
             let mut s = self.state();
             Self::check_media_locked(&s, a)?;
-            s.media.pending = None;
+            if s.media.pending.as_ref() == Some(work) {
+                s.media.pending = None;
+            }
+            if s.media.metadata_pending.as_ref() == Some(work) {
+                s.media.metadata_pending = None;
+            }
+            if let Request::Read { name } = &work.request {
+                s.media.round_reads.insert(name.clone());
+            }
+            if let Request::Reads { names } = &work.request {
+                s.media.round_reads.extend(names.iter().cloned());
+            }
             if matches!(work.request, Request::Root) && !failed {
                 s.media.root_checked = true;
             }
@@ -723,14 +1019,6 @@ impl Runtime {
             }
             match &work.request {
                 Request::Download { name } | Request::Upload { name, .. } => {
-                    s.media.attempted.insert(name.clone());
-                }
-                Request::Read { name }
-                    if ledger
-                        .blobs
-                        .get(name)
-                        .is_some_and(|b| b.server == ServerState::Deleted && b.download == Transfer::Queued) =>
-                {
                     s.media.attempted.insert(name.clone());
                 }
                 _ => {}
@@ -863,10 +1151,27 @@ impl Runtime {
             }
         }
         let mut ledger = self.with_media(a, |s| s.media_ledger(a.binding))?;
+        let retained = self.with_media(a, |store| {
+            Ok(store.apply_intents(a.binding)?.iter().any(|intent| {
+                intent
+                    .media
+                    .as_ref()
+                    .is_some_and(|apply| apply.staged.as_ref() == Some(&staged))
+            }) || store
+                .conflict_copies()?
+                .iter()
+                .any(|copy| copy.copy.staged_path.as_deref() == staged.to_str()))
+        })?;
         if let Some(b) = ledger.blobs.get_mut(blob_name) {
             b.download = Transfer::Complete;
+            if !retained {
+                b.staged = None;
+            }
         }
         self.put_media_state(a, &ledger)?;
+        if !retained {
+            let _ = std::fs::remove_file(staged);
+        }
         Ok(())
     }
     fn begin_media_apply(
@@ -876,6 +1181,17 @@ impl Runtime {
         a: &Authority,
         pending: PendingMediaApply,
     ) -> Result<(), RuntimeError> {
+        self.with_media(a, |_| Ok(()))?;
+        self.begin_local_media_apply(collection, media, &MediaRecoveryAuthority(a.clone()), pending)
+    }
+    fn begin_local_media_apply(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        a: &MediaRecoveryAuthority,
+        pending: PendingMediaApply,
+    ) -> Result<(), RuntimeError> {
+        self.media_recovery_io(collection, a, || Ok(()))?;
         let PendingMediaApply {
             incoming,
             inbox,
@@ -883,19 +1199,19 @@ impl Runtime {
             staged,
         } = pending;
         let received = codec::receive(
-            &self.media_record_key(a)?,
+            &self.media_recovery_record_key(a)?,
             &incoming.name,
             &incoming.envelope,
             codec::AssetInput::Absent,
         )
         .map_err(|_| Error::InvalidData)?;
-        let existing = self.with_media(a, |s| s.entity_facts(a.binding, &incoming.name))?;
+        let existing = self.with_media_recovery(a, |s| s.entity_facts(a.binding, &incoming.name))?;
         let name = match server.as_ref() {
             Some(p) => text(&p.name)?.to_owned(),
             None => text(&received.entity.fields.key)?.to_owned(),
         };
         let before = Self::current_media(media, &name)?;
-        let ledger = self.with_media(a, |s| s.media_ledger(a.binding))?;
+        let ledger = self.with_media_recovery(a, |s| s.media_ledger(a.binding))?;
         let flags = ledger.names.get(&name.to_lowercase());
         let changed = existing.as_ref().is_some_and(|e| e.mark.is_some())
             && flags.is_none_or(|f| f.withheld.is_none() && f.superseded.is_none() && !f.file_missing);
@@ -966,13 +1282,13 @@ impl Runtime {
         if intent.media.as_ref().is_some_and(|i| i.moved.is_some()) {
             self.plan_media_rewrite(collection, a, &mut intent)?;
         }
-        intent.id = self.with_media(a, |s| s.persist_apply_intent(&intent, None))?;
+        intent.id = self.with_media_recovery(a, |s| s.persist_apply_intent(&intent, None))?;
         self.execute_media_apply(collection, media, a, intent)
     }
     fn plan_media_rewrite(
         &self,
         collection: &Collection,
-        a: &Authority,
+        a: &MediaRecoveryAuthority,
         intent: &mut ApplyIntent,
     ) -> Result<(), RuntimeError> {
         let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
@@ -999,10 +1315,14 @@ impl Runtime {
                 let RowKey::Id(id) = key else {
                     return Err(Error::InvalidData.into());
                 };
-                let name = codec::entity_name(&self.media_record_key(a)?, codec::Kind::Note, &codec::id_key(id))
-                    .map_err(|_| Error::InvalidData)?;
+                let name = codec::entity_name(
+                    &self.media_recovery_record_key(a)?,
+                    codec::Kind::Note,
+                    &codec::id_key(id),
+                )
+                .map_err(|_| Error::InvalidData)?;
                 let e = self
-                    .with_media(a, |s| s.entity_facts(a.binding, &name))?
+                    .with_media_recovery(a, |s| s.entity_facts(a.binding, &name))?
                     .ok_or(Error::InvalidData)?;
                 let codec::Payload::Note(n) = &e.payload else {
                     return Err(Error::InvalidData.into());
@@ -1038,7 +1358,7 @@ impl Runtime {
     fn rewrite_media_notes(
         &self,
         collection: &Collection,
-        a: &Authority,
+        a: &MediaRecoveryAuthority,
         intent: &mut ApplyIntent,
     ) -> Result<(), RuntimeError> {
         let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
@@ -1129,7 +1449,7 @@ impl Runtime {
                     crate::cloud::row_payload::stage_payload(ctx.scope(), &after).map_err(engine_error)?;
                 }
                 let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
-                Self::check_media_locked(&s, &authority).map_err(engine_error)?;
+                Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
                 with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.update_media_intent(&planned))
                     .map_err(engine_error)?;
                 Ok(planned)
@@ -1137,7 +1457,7 @@ impl Runtime {
         )?;
         *intent = result.value;
         intent.result_seq = Some(result.seq.0);
-        self.with_media(a, |s| s.update_media_intent(intent))?;
+        self.with_media_recovery(a, |s| s.update_media_intent(intent))?;
         meguri_model::faultpoint!("cloud.media.rewrite_after_commit").map_err(Error::from)?;
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
@@ -1148,9 +1468,12 @@ impl Runtime {
         &self,
         collection: &Collection,
         media: &MediaService,
-        a: &Authority,
+        a: &MediaRecoveryAuthority,
         mut intent: ApplyIntent,
     ) -> Result<(), RuntimeError> {
+        if intent.binding != a.binding {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         if intent.native_file != a.file {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
@@ -1182,7 +1505,7 @@ impl Runtime {
                     self.incoming_hooks
                         .hit(crate::cloud::testing::IncomingStage::ResolutionBeforeMove);
                     if apply.move_evidence.is_none() {
-                        apply.move_evidence = self.media_io(collection, a, || {
+                        apply.move_evidence = self.media_recovery_io(collection, a, || {
                             media
                                 .store()
                                 .cloud_move_evidence(
@@ -1193,10 +1516,10 @@ impl Runtime {
                                 .map_err(media_error)
                         })?;
                         intent.media = Some(apply.clone());
-                        self.with_media(a, |s| s.update_media_intent(&intent))?;
+                        self.with_media_recovery(a, |s| s.update_media_intent(&intent))?;
                     }
                     moved_ran = if let Some(proof) = &apply.move_evidence {
-                        self.media_io(collection, a, || {
+                        self.media_recovery_io(collection, a, || {
                             media
                                 .store()
                                 .cloud_move_guarded(
@@ -1242,7 +1565,7 @@ impl Runtime {
             } else if !same(current.as_ref(), expected) && current.is_some() {
                 apply.abandoned = true;
             } else {
-                self.with_media(a, |_| Ok(()))?;
+                self.with_media_recovery(a, |_| Ok(()))?;
                 media.check_generation(a.generation)?;
                 if let Some(server) = &apply.server {
                     let staged = apply.staged.as_ref().ok_or(Error::InvalidData)?;
@@ -1252,9 +1575,9 @@ impl Runtime {
                     if current.is_some() {
                         apply.install_absent = true;
                         intent.media = Some(apply.clone());
-                        self.with_media(a, |s| s.update_media_intent(&intent))?;
+                        self.with_media_recovery(a, |s| s.update_media_intent(&intent))?;
                         let before = current.as_ref().ok_or(Error::InvalidData)?;
-                        let removed = self.media_io(collection, a, || {
+                        let removed = self.media_recovery_io(collection, a, || {
                             media
                                 .store()
                                 .cloud_trash(
@@ -1280,7 +1603,7 @@ impl Runtime {
                             return Err(Error::InvalidData.into());
                         }
                         meguri_model::faultpoint!("cloud.media.during_install").map_err(Error::from)?;
-                        match self.media_io(collection, a, || {
+                        match self.media_recovery_io(collection, a, || {
                             media
                                 .store()
                                 .cloud_install(text(&server.name)?, staged, None)
@@ -1298,7 +1621,7 @@ impl Runtime {
                     }
                 } else {
                     apply.installed = if let Some(before) = current.as_ref() {
-                        self.media_io(collection, a, || {
+                        self.media_recovery_io(collection, a, || {
                             media
                                 .store()
                                 .cloud_trash(
@@ -1317,7 +1640,7 @@ impl Runtime {
             }
         }
         intent.media = Some(apply.clone());
-        self.with_media(a, |s| s.update_media_intent(&intent))?;
+        self.with_media_recovery(a, |s| s.update_media_intent(&intent))?;
         if apply.installed {
             meguri_model::faultpoint!("cloud.media.after_resolution_install").map_err(Error::from)?;
         }
@@ -1342,22 +1665,24 @@ impl Runtime {
         &self,
         collection: &Collection,
         media: &MediaService,
-        a: &Authority,
+        a: &MediaRecoveryAuthority,
         intent: &ApplyIntent,
         moved_ran: bool,
         snapshot: &meguri_engine::Snapshot<'_>,
     ) -> Result<(), RuntimeError> {
         let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
         let received = codec::receive(
-            &self.media_record_key(a)?,
+            &self.with_media_recovery(a, |s| {
+                Ok(s.binding(a.binding)?.ok_or(Error::BindingNotFound)?.facts.record_key.0)
+            })?,
             &apply.incoming.name,
             &apply.incoming.envelope,
             codec::AssetInput::Absent,
         )
         .map_err(|_| Error::InvalidData)?;
-        let mut ledger = self.with_media(a, |s| s.media_ledger(a.binding))?;
+        let mut ledger = self.with_media_recovery(a, |s| s.media_ledger(a.binding))?;
         let mut updates = Vec::new();
-        let existing = self.with_media(a, |s| s.entity_facts(a.binding, &apply.incoming.name))?;
+        let existing = self.with_media_recovery(a, |s| s.entity_facts(a.binding, &apply.incoming.name))?;
         if apply.installed || apply.local_wins {
             if let Some(server) = &apply.server {
                 let payload = codec::Payload::MediaName(server.clone());
@@ -1443,9 +1768,11 @@ impl Runtime {
             let moved = apply.moved.as_ref().ok_or(Error::InvalidData)?;
             let payload = codec::Payload::MediaName(moved.clone());
             let key = crate::cloud::row_payload::payload_key(&payload)?;
-            let name = codec::entity_name(&self.media_record_key(a)?, codec::Kind::MediaName, &key)
-                .map_err(|_| Error::InvalidData)?;
-            let old = self.with_media(a, |s| s.entity_facts(a.binding, &name))?;
+            let record_key = self.with_media_recovery(a, |s| {
+                Ok(s.binding(a.binding)?.ok_or(Error::BindingNotFound)?.facts.record_key.0)
+            })?;
+            let name = codec::entity_name(&record_key, codec::Kind::MediaName, &key).map_err(|_| Error::InvalidData)?;
+            let old = self.with_media_recovery(a, |s| s.entity_facts(a.binding, &name))?;
             let mut e = old
                 .clone()
                 .unwrap_or_else(|| fresh_media_entity(&name, key, [0; 16], payload.clone(), a));
@@ -1474,7 +1801,7 @@ impl Runtime {
                     continue;
                 };
                 let mut e = self
-                    .with_media(a, |s| s.entity_facts(a.binding, &key.name))?
+                    .with_media_recovery(a, |s| s.entity_facts(a.binding, &key.name))?
                     .ok_or(Error::InvalidData)?;
                 if e.observer_open == a.open && e.observed_seq > snapshot.seq().0 {
                     return Err(Error::RecoveryRequired.into());
@@ -1491,7 +1818,7 @@ impl Runtime {
         if apply.local_wins && !apply.abandoned {
             let server = apply.server.as_ref().ok_or(Error::InvalidData)?;
             let path = apply.staged.as_ref().ok_or(Error::InvalidData)?;
-            let (owned, found) = self.media_io(collection, a, || {
+            let (owned, found) = self.media_recovery_io(collection, a, || {
                 Ok(m::io::stage(m::io::open(path)?, &self.cloud_staging())?)
             })?;
             if found != blob::Blob::from(server) {
@@ -1521,7 +1848,7 @@ impl Runtime {
                 created_at_ms: self.media_now()?,
                 resolved_at_ms: None,
             };
-            self.with_media(a, |s| s.store_conflict(a.binding, &copy))?;
+            self.with_media_recovery(a, |s| s.store_conflict(a.binding, &copy))?;
         }
         if let Some(losing) = &apply.before
             && apply.server.as_ref().is_none_or(|s| s.sha256 != losing.sha256)
@@ -1585,7 +1912,7 @@ impl Runtime {
                 created_at_ms: self.media_now()?,
                 resolved_at_ms: None,
             };
-            self.with_media(a, |s| s.store_conflict(a.binding, &copy))?;
+            self.with_media_recovery(a, |s| s.store_conflict(a.binding, &copy))?;
         }
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
@@ -1612,8 +1939,11 @@ impl Runtime {
         collection: &Collection,
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
-        let a = self.media_authority(collection, true)?;
-        let intents = self.with_media(&a, |s| s.apply_intents(a.binding))?;
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
+        let intents = self.with_media_recovery(&a, |s| s.apply_intents(a.binding))?;
+        if intents.iter().all(|intent| intent.media.is_none()) {
+            return Ok(0);
+        }
         let mut count = 0;
         for intent in intents.into_iter().filter(|i| i.media.is_some()) {
             self.execute_media_apply(collection, media, &a, intent)?;
@@ -1689,14 +2019,23 @@ fn rewrite_note(
 }
 impl Runtime {
     pub fn validate_cloud_media_work(&self, collection: &Collection, work: &Work) -> Result<(), RuntimeError> {
-        if self.publication_account()? != work.authority.account
-            || self.media_authority(collection, true)? != work.authority
-        {
+        let mut current = self.media_authority(collection, true)?;
+        if matches!(work.request, Request::Upload { .. }) {
+            current.media_epoch = work.authority.media_epoch;
+        }
+        if self.publication_account()? != work.authority.account || current != work.authority {
             return Err(RuntimeError::IdentityUnverified);
         }
         let s = self.state();
         Self::check_media_locked(&s, &work.authority)?;
-        if s.media.pending.as_ref() != Some(work) || s.media.paused {
+        if s.media.pending.as_ref() != Some(work)
+            && s.media.metadata_pending.as_ref() != Some(work)
+            && !s
+                .actions
+                .media_upload
+                .as_ref()
+                .is_some_and(|(_, original)| original == work)
+        {
             return Err(RuntimeError::StaleIncarnation);
         }
         Ok(())
@@ -1709,8 +2048,9 @@ impl Runtime {
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
         self.consume_media_feed(collection, media)?;
-        let a = self.media_authority(collection, true)?;
-        let entries = self.with_media(&a, |s| s.inbox(a.binding))?;
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
+        self.media_recovery_io(collection, &a, || Ok(()))?;
+        let entries = self.with_media_recovery(&a, |s| s.inbox(a.binding))?;
         let mut count = 0;
         for entry in entries {
             if entry.entry.reason != InboxReason::Ready {
@@ -1724,8 +2064,13 @@ impl Runtime {
             else {
                 continue;
             };
+            if !matches!(codec::Entity::decode(&envelope.0),
+                Ok(codec::DecodeOutcome::Supported(entity)) if entity.fields.kind == codec::Kind::MediaName)
+            {
+                continue;
+            }
             let r = codec::receive(
-                &self.media_record_key(&a)?,
+                &self.media_recovery_record_key(&a)?,
                 &entry.entry.record_name,
                 &envelope.0,
                 codec::AssetInput::Absent,
@@ -1740,7 +2085,7 @@ impl Runtime {
                 system_fields: system_fields.0.clone(),
             };
             if r.entity.fields.tombstone {
-                let ledger = self.with_media(&a, |s| s.media_ledger(a.binding))?;
+                let ledger = self.with_media_recovery(&a, |s| s.media_ledger(a.binding))?;
                 if ledger
                     .names
                     .get(text(&r.entity.fields.key)?)
@@ -1748,7 +2093,7 @@ impl Runtime {
                 {
                     continue;
                 }
-                self.begin_media_apply(
+                self.begin_local_media_apply(
                     collection,
                     media,
                     &a,
@@ -1763,7 +2108,7 @@ impl Runtime {
             } else if let Some(codec::Payload::MediaName(server)) = r.payload
                 && Self::current_media(media, text(&server.name)?)?.as_ref() == Some(&server)
             {
-                self.begin_media_apply(
+                self.begin_local_media_apply(
                     collection,
                     media,
                     &a,
@@ -1850,5 +2195,244 @@ impl Runtime {
             self.state().media.no_space = false;
         }
         Ok(work)
+    }
+}
+
+impl Runtime {
+    pub(super) fn policy_media_facts_locked(
+        s: &State,
+        store: &TrackingStore,
+        binding: BindingId,
+    ) -> Result<crate::cloud::policy::MediaFacts, RuntimeError> {
+        let ledger = store.media_ledger(binding)?;
+        let key = store.publication_media(binding)?;
+        let mut live = BTreeMap::new();
+        for entity in Self::cloud_media_entities(store, binding)? {
+            if !entity.acked_media_tombstone()
+                && let codec::Payload::MediaName(p) = entity.payload
+            {
+                live.insert(text(&p.name)?.to_lowercase(), p);
+            }
+        }
+        let record_key = store.binding(binding)?.ok_or(Error::BindingNotFound)?.facts.record_key;
+        for entry in store.inbox(binding)? {
+            if let InboxValue::Record { envelope, .. } = &entry.entry.value
+                && let Ok(record) = codec::receive(
+                    &record_key.0,
+                    &entry.entry.record_name,
+                    &envelope.0,
+                    codec::AssetInput::Absent,
+                )
+                && !record.entity.fields.tombstone
+                && let Some(codec::Payload::MediaName(p)) = record.payload
+            {
+                live.insert(text(&p.name)?.to_lowercase(), p);
+            }
+        }
+        let mut uploads = BTreeMap::new();
+        let mut downloads = BTreeMap::new();
+        let mut unknown = BTreeSet::new();
+        let mut missing = 0u64;
+        for (name, payload) in &live {
+            let metadata = blob::Blob::from(payload);
+            let tracked = ledger.blobs.values().find(|b| b.metadata == metadata);
+            let flags = ledger.names.get(name);
+            if flags.is_some_and(|f| f.removal_held || f.withheld.is_some() || f.tombstone_at.is_some()) {
+                continue;
+            }
+            if tracked.is_none_or(|b| b.server == ServerState::Unknown) {
+                unknown.insert(metadata.sha256);
+            }
+            let local_matches = flags
+                .and_then(|f| f.local.as_ref())
+                .is_some_and(|p| p.sha256 == metadata.sha256);
+            if !local_matches || flags.is_some_and(|f| f.file_missing || f.superseded.is_some()) {
+                downloads.insert(metadata.sha256, metadata.size);
+                if tracked.is_some_and(|b| b.server == ServerState::Deleted) {
+                    missing += 1;
+                }
+            }
+        }
+        for flags in ledger.names.values().filter(|f| f.sendable()) {
+            if let Some(local) = &flags.local {
+                let metadata = blob::Blob::from(local);
+                let tracked = ledger.blobs.values().find(|b| b.metadata == metadata);
+                if tracked.is_none_or(|b| b.server != ServerState::Present && b.upload != Transfer::Complete) {
+                    uploads.insert(metadata.sha256, metadata.size);
+                }
+                if tracked.is_none_or(|b| b.server == ServerState::Unknown) {
+                    unknown.insert(metadata.sha256);
+                }
+            }
+        }
+        let bytes = |files: &BTreeMap<[u8; 32], u64>| -> Result<u64, RuntimeError> {
+            files.values().try_fold(0u64, |total, size| {
+                total.checked_add(*size).ok_or(Error::InvalidData.into())
+            })
+        };
+        Ok(crate::cloud::policy::MediaFacts {
+            upload_files: Some(uploads.len() as u64),
+            upload_bytes: Some(bytes(&uploads)?),
+            download_files: Some(downloads.len() as u64),
+            download_bytes: Some(bytes(&downloads)?),
+            unknown_blobs: Some(unknown.len() as u64),
+            missing_names: Some(missing),
+            root_acked: Some(key.is_some_and(|(_, acked, _)| acked)),
+            zone_missing: Some(ledger.zone_missing),
+            no_space: Some(s.media.no_space),
+            // Durable Running includes prepared and interrupted work. It is
+            // insufficient evidence for a live native transfer or an estimate.
+            uploads_running: None,
+            downloads_running: None,
+            remaining_download_ms: None,
+        })
+    }
+}
+
+impl Runtime {
+    fn cloud_due_media_names(collection: &Collection) -> Result<BTreeSet<String>, RuntimeError> {
+        let day = collection.check_rollover()?;
+        let lease = collection.reader(ReaderRole::Cloud)?;
+        let snapshot = lease.snapshot()?;
+        let mut notes = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        for row in snapshot.cards_in_queues(&[1, 2, 3, 4])? {
+            let due = match row.queue {
+                1 | 4 => row.due < day.next_day_at,
+                2 | 3 => row.due <= i64::from(day.today),
+                _ => false,
+            };
+            if due && let Some(card) = snapshot.card(row.id)? {
+                notes.insert(card.note_id);
+            }
+        }
+        for note in notes {
+            if let Some(note) = snapshot.note(note)? {
+                names.extend(
+                    meguri_text::media_refs::local_references(&note.fields)
+                        .into_iter()
+                        .map(|name| name.to_lowercase()),
+                );
+            }
+        }
+        Ok(names)
+    }
+}
+
+impl Runtime {
+    fn cloud_media_entities(store: &TrackingStore, binding: BindingId) -> Result<Vec<EntityFacts>, Error> {
+        let mut after = None;
+        let mut entities = Vec::new();
+        loop {
+            let page = store.entity_page(binding, codec::Kind::MediaName, after.as_deref())?;
+            let Some(last) = page.last() else { return Ok(entities) };
+            after = Some(last.key.clone());
+            entities.extend(page);
+        }
+    }
+}
+
+#[cfg(test)]
+mod recovery_authority_tests {
+    use super::*;
+
+    fn paused_owner() -> (State, MediaRecoveryAuthority) {
+        let authority = Authority {
+            binding: BindingId([1; 16]),
+            open: 2,
+            incarnation: 3,
+            generation: 4,
+            file: NativeFileIdentity {
+                device: 5,
+                inode: 6,
+                created_seconds: 7,
+                created_nanos: 8,
+            },
+            account: OpaqueBytes(b"synthetic-local-recovery".to_vec()),
+            adapter_token: 0,
+            media_epoch: 0,
+        };
+        let mut state = State {
+            incarnation: authority.incarnation,
+            bound: Some(Bound {
+                binding: Binding {
+                    id: authority.binding,
+                    created_at_ms: 0,
+                    scope: BuildScope {
+                        container: ContainerId::new("synthetic-recovery").unwrap(),
+                        environment: Environment::Development,
+                    },
+                    facts: BindingFacts {
+                        account: authority.account.clone(),
+                        epoch: EpochId([2; 16]),
+                        record_key: RecordKey([3; 32]),
+                        publication: meguri_engine::device_state::PublicationId::from_bytes([4; 16]),
+                        state: BindingState::Active,
+                    },
+                },
+                evidence: OpenEvidence {
+                    generation: Generation(authority.generation),
+                    previous_clean_shutdown: false,
+                    opened_mod: 0,
+                    opened_scm: 0,
+                    native_file: authority.file.pair(),
+                },
+                file: authority.file,
+                open_counter: authority.open,
+                usable: true,
+                verified: true,
+                latest_mod: 0,
+                latest_scm: 0,
+            }),
+            ..State::default()
+        };
+        state.media.paused = true;
+        state.media.enabled = Some(false);
+        (state, MediaRecoveryAuthority(authority))
+    }
+
+    #[test]
+    fn local_recovery_keeps_exact_authority_and_does_not_open_network_gate() {
+        let (state, original) = paused_owner();
+        assert!(Runtime::check_media_recovery_locked(&state, &original).is_ok());
+        assert!(Runtime::check_media_locked(&state, &original).is_err());
+        let mutations: [fn(&mut Authority); 8] = [
+            |a| a.binding.0[0] ^= 1,
+            |a| a.open += 1,
+            |a| a.incarnation += 1,
+            |a| a.generation += 1,
+            |a| a.file.created_nanos += 1,
+            |a| a.account.0.push(0),
+            |a| a.adapter_token += 1,
+            |a| a.media_epoch += 1,
+        ];
+        for mutate in mutations {
+            let mut stale = original.clone();
+            mutate(&mut stale.0);
+            assert!(matches!(
+                Runtime::check_media_recovery_locked(&state, &stale),
+                Err(RuntimeError::StaleIncarnation)
+            ));
+        }
+        let refusals: [fn(&mut State); 7] = [
+            |s| s.bound.as_mut().unwrap().usable = false,
+            |s| s.bound.as_mut().unwrap().verified = false,
+            |s| s.bound.as_mut().unwrap().binding.facts.state = BindingState::Isolated(IsolationReason::FileMismatch),
+            |s| s.invalidation_exhausted = true,
+            |s| s.tracking_stopped = true,
+            |s| s.adapter.paused = true,
+            |s| {
+                s.adapter.sdk = Some(crate::cloud::adapter::SDKAuthority {
+                    id: "synthetic-stopping-sdk".into(),
+                    guard: Runtime::adapter_guard_locked(s),
+                    stopping: true,
+                })
+            },
+        ];
+        for refuse in refusals {
+            let (mut state, original) = paused_owner();
+            refuse(&mut state);
+            assert!(Runtime::check_media_recovery_locked(&state, &original).is_err());
+        }
     }
 }

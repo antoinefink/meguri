@@ -431,6 +431,13 @@ public enum CloudPolicyEarlyEnd: Sendable {
     case waiting(CloudPolicyOperationError, retryAfterMilliseconds: Int64?)
     case failed(CloudPolicyOperationError)
     case cancelled
+    init(_ raw: MeguriCoreBindings.CloudPolicyEarlyEnd) {
+        switch raw {
+        case .waiting(let kind, let retry): self = .waiting(.init(kind), retryAfterMilliseconds: retry)
+        case .failed(let kind): self = .failed(.init(kind))
+        case .cancelled: self = .cancelled
+        }
+    }
     var raw: MeguriCoreBindings.CloudPolicyEarlyEnd {
         switch self {
         case .waiting(let error, let retry): .waiting(class: error.raw, retryAfterMs: retry)
@@ -482,6 +489,42 @@ public struct CloudPolicyErrorDetail: Sendable {
         error = .init(v.`class`); code = v.code; retryAfterMilliseconds = v.retryAfterMs; operation = .init(v.operation)
     }
 }
+public enum CloudPolicyEnableControl: Sendable, Equatable {
+    case resumePause, decisionRequired, connect, pause, awaitingResumeOffer
+    init(_ value: MeguriCoreBindings.CloudPolicyEnableControl) {
+        switch value {
+        case .resumePause: self = .resumePause
+        case .decisionRequired: self = .decisionRequired
+        case .connect: self = .connect
+        case .pause: self = .pause
+        case .awaitingResumeOffer: self = .awaitingResumeOffer
+        }
+    }
+}
+/// Read-only Core facts. Nil means the provider has supplied no answer.
+public struct CloudPolicyControls: Sendable {
+    public let enable: CloudPolicyEnableControl?
+    public let bindingUsable: Bool?
+    public let bindingActive: Bool?
+    public let bindingStopped: Bool?
+    public let decisionRequired: Bool?
+    public let userPaused: Bool?
+    public let resumeBindingOffered: Bool?
+    public let automaticEligible: Bool?
+    public static let unknown = Self()
+    public init(enable: CloudPolicyEnableControl? = nil, bindingUsable: Bool? = nil,
+                bindingActive: Bool? = nil, bindingStopped: Bool? = nil, decisionRequired: Bool? = nil,
+                userPaused: Bool? = nil, resumeBindingOffered: Bool? = nil, automaticEligible: Bool? = nil) {
+        self.enable = enable; self.bindingUsable = bindingUsable; self.bindingActive = bindingActive
+        self.bindingStopped = bindingStopped; self.decisionRequired = decisionRequired; self.userPaused = userPaused
+        self.resumeBindingOffered = resumeBindingOffered; self.automaticEligible = automaticEligible
+    }
+    init(_ value: MeguriCoreBindings.CloudPolicyControls) {
+        self.init(enable: .init(value.enable), bindingUsable: value.bindingUsable, bindingActive: value.bindingActive,
+            bindingStopped: value.bindingStopped, decisionRequired: value.decisionRequired, userPaused: value.userPaused,
+            resumeBindingOffered: value.resumeBindingOffered, automaticEligible: value.automaticEligible)
+    }
+}
 public struct CloudPolicyStatus: Sendable {
     public let state: CloudPolicyStatusState
     public let pending: UInt64
@@ -499,7 +542,9 @@ public struct CloudPolicyStatus: Sendable {
     public let lastCompleted: CloudPolicyExchangeRecord?
     public let lastAttempt: CloudPolicyExchangeRecord?
     public let syncNow: CloudPolicySyncNowAvailability
+    public private(set) var controls: CloudPolicyControls = .unknown
     init(_ v: MeguriCoreBindings.CloudPolicyStatus) {
+        controls = .init(v.controls)
         state = .init(v.state); pending = v.pending; heldBack = v.heldBack; inFlight = v.inFlight; incomingWaiting = v.incomingWaiting
         attention = Dictionary(uniqueKeysWithValues: v.attention.map { (CloudPolicyAttention($0.kind), $0.count) })
         media = .init(v.media); mediaPaused = v.mediaPaused; error = v.error.map(CloudPolicyErrorDetail.init)

@@ -409,11 +409,20 @@ struct State {
 #[cfg(feature = "test-hooks")]
 type CloudCaptureHook = Box<dyn FnOnce(&Runtime) + Send>;
 
+#[derive(Clone)]
+struct NoCollectionIdentityOwner {
+    live: std::sync::Weak<Mutex<bool>>,
+    engine: meguri_engine::WeakEngine,
+    generation: Generation,
+    incarnation: u64,
+}
+
 /// Host-owned ports accept a collection handle for each read call.
 pub struct Runtime {
     directory: PathBuf,
     inputs: CloudInputs,
     adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
+    no_collection_identity_owner: Mutex<Option<NoCollectionIdentityOwner>>,
     state: Arc<Mutex<State>>,
     incoming_idle: Arc<std::sync::Condvar>,
     #[cfg(feature = "test-hooks")]
@@ -459,6 +468,7 @@ impl Runtime {
             directory,
             inputs,
             adapter_clock: Mutex::new(None),
+            no_collection_identity_owner: Mutex::new(None),
             random: Mutex::new(None),
             key_bytes: Mutex::new(None),
             adoption: Mutex::new(None),

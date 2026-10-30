@@ -9,6 +9,63 @@ use meguri_engine::device_state::{DeviceState, PendingDecisionReason};
 use std::collections::BTreeMap;
 
 impl Runtime {
+    fn check_absent_preview_file(&self, id: u64) -> Result<(), RuntimeError> {
+        let absent = self
+            .state()
+            .publication
+            .preview
+            .as_ref()
+            .is_some_and(|(preview, _)| preview.id == id && preview.native_file.is_none());
+        if absent {
+            match self.directory.join("collection.anki2").symlink_metadata() {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+                Ok(_) => return Err(PublicationError::AuthorityChanged.into()),
+            }
+        }
+        Ok(())
+    }
+    /// V13 discovery never bootstraps a file, sidecar publication or binding.
+    /// The Host checks NoCollection and retains its real generation authority.
+    pub fn begin_connection_without_collection(&self) -> Result<PreviewWork, RuntimeError> {
+        let path = self.directory.join("collection.anki2");
+        let absent = || -> Result<(), RuntimeError> {
+            match path.symlink_metadata() {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(meguri_storage::StorageError::from(error).into()),
+                Ok(_) => Err(PublicationError::AuthorityChanged.into()),
+            }
+        };
+        absent()?;
+        let account = self.publication_account()?;
+        absent()?;
+        let mut s = self.state();
+        if s.bound.is_some() || s.cloud.generation.is_some() {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
+        s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
+        let id = s.publication.next_preview;
+        s.publication.preview = Some((
+            Preview {
+                id,
+                local: Counts {
+                    counts: BTreeMap::new(),
+                    empty: false,
+                },
+                cloud: None,
+                published_at_ms: None,
+                decision: ConnectDecision::NoCollection,
+                account,
+                native_file: None,
+                decision_before: None,
+                active: None,
+                active_epoch: None,
+                unpublished_by_kind: BTreeMap::new(),
+            },
+            false,
+        ));
+        Ok(PreviewWork::ReadActive { id })
+    }
     fn require_supported_publication(op: &PublishOp) -> Result<(), RuntimeError> {
         if op
             .binding_before
@@ -142,8 +199,8 @@ impl Runtime {
                 published_at_ms: None,
                 decision: ConnectDecision::ConfirmUpload,
                 account,
-                native_file: file,
-                decision_before: decision,
+                native_file: Some(file),
+                decision_before: Some(decision),
                 active: None,
                 active_epoch: None,
                 unpublished_by_kind,
@@ -156,6 +213,7 @@ impl Runtime {
     /// distinct; unreadable Active retains its conditional-save system fields.
     pub fn connection_active_read(&self, id: u64, read: RecordRead) -> Result<PreviewWork, RuntimeError> {
         let account = self.publication_account()?;
+        self.check_absent_preview_file(id)?;
         let mut s = self.state();
         let (p, ready) = s
             .publication
@@ -195,6 +253,7 @@ impl Runtime {
     }
     pub fn connection_epoch_read(&self, id: u64, read: RecordRead) -> Result<PreviewWork, RuntimeError> {
         let account = self.publication_account()?;
+        self.check_absent_preview_file(id)?;
         let mut s = self.state();
         let (p, ready) = s
             .publication
@@ -224,7 +283,9 @@ impl Runtime {
         }
         p.cloud = Some(Counts { counts, empty: false });
         p.published_at_ms = Some(epoch.published_at_ms);
-        p.decision = if p.local.empty {
+        p.decision = if p.native_file.is_none() {
+            ConnectDecision::NoCollection
+        } else if p.local.empty {
             ConnectDecision::ConfirmAdoption
         } else {
             ConnectDecision::ChooseCollection
@@ -250,8 +311,8 @@ impl Runtime {
     }
     pub(super) fn check_preview_authority(&self, p: &Preview, collection: &Collection) -> Result<(), RuntimeError> {
         if self.publication_account()? != p.account
-            || self.publication_decision()? != p.decision_before
-            || self.inputs.files.identity(collection.path())? != p.native_file
+            || Some(self.publication_decision()?) != p.decision_before
+            || Some(self.inputs.files.identity(collection.path())?) != p.native_file
             || !collection.is_current()
         {
             return Err(PublicationError::AuthorityChanged.into());
@@ -268,6 +329,8 @@ impl Runtime {
         // Confirmed only records authorization. Bind settles old intents and
         // waits for incoming work before isolating the prior binding (V17.6).
         self.check_preview_authority(p, collection)?;
+        let decision_before = p.decision_before.as_ref().ok_or(PublicationError::NotOffered)?;
+        let native_file = p.native_file.ok_or(PublicationError::NotOffered)?;
         {
             let s = self.state();
             if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
@@ -323,7 +386,7 @@ impl Runtime {
             {
                 return Err(PublicationError::ResetRecoveryUnavailable.into());
             }
-            let reason = match p.decision_before.pending_reason {
+            let reason = match decision_before.pending_reason {
                 Some(PendingDecisionReason::Restore) => EpochReason::Restore,
                 Some(PendingDecisionReason::ColpkgImport) => EpochReason::CollectionPackageImport,
                 Some(PendingDecisionReason::ManualImport) => EpochReason::ManualAnkiImport,
@@ -339,9 +402,9 @@ impl Runtime {
                 }),
                 binding_after: None,
                 account: p.account.clone(),
-                confirmed_publication: p.decision_before.publication.identity,
-                confirmed_file: p.native_file,
-                fence_before: p.decision_before.clone(),
+                confirmed_publication: decision_before.publication.identity,
+                confirmed_file: native_file,
+                fence_before: decision_before.clone(),
                 epoch,
                 record_key: RecordKey(record_key),
                 media_key: RecordKey(media_key),

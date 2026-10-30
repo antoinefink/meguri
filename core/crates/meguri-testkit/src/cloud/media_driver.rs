@@ -27,6 +27,56 @@ impl SDKRig {
             *remaining -= 1;
             self.driver.call::<()>(Input::MediaValidate(work.clone()))?;
             let operation = match &work.request {
+                MediaRequest::Reads { names } => {
+                    if names.is_empty() || names.len() > 200 {
+                        return Err(failure());
+                    }
+                    let mut results = Vec::new();
+                    for name in names {
+                        self.driver.call::<()>(Input::MediaValidate(work.clone()))?;
+                        let response = service.request(
+                            &self.files.scope,
+                            Caller::default(),
+                            Operation::Read {
+                                zone: "meguri-media".into(),
+                                name: name.clone(),
+                                fields: RequestedFields::Named(vec!["e".into()]),
+                            },
+                        )?;
+                        let result = match response.result {
+                            Ok(Reply::Record(record)) => {
+                                let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                                    return Err(failure());
+                                };
+                                if record.name != *name
+                                    || record.record_type != "MGBlob"
+                                    || record.fields.contains_key("a")
+                                {
+                                    return Err(failure());
+                                }
+                                cloud::media::BlobReadResult::Present {
+                                    envelope: envelope.clone(),
+                                }
+                            }
+                            Err(error) => match error.code {
+                                ErrorCode::UnknownItem => cloud::media::BlobReadResult::UnknownItem,
+                                ErrorCode::ZoneNotFound => cloud::media::BlobReadResult::ZoneMissing,
+                                code => cloud::media::BlobReadResult::Failed { code: code as i64 },
+                            },
+                            _ => return Err(failure()),
+                        };
+                        results.push(cloud::media::BlobRead {
+                            name: name.clone(),
+                            result,
+                        });
+                    }
+                    self.driver
+                        .call::<()>(Input::MediaReply(work.clone(), MediaReply::BlobReads { results }))?;
+                    if self.updates()? {
+                        return Ok(true);
+                    }
+                    continue;
+                }
                 MediaRequest::Root => Operation::Read {
                     zone: "meguri-media".into(),
                     name: "root".into(),

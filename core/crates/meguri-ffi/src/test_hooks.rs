@@ -316,6 +316,119 @@ pub fn test_maintenance_notes_page_offset() -> Result<u64, CoreError> {
     Ok(offset)
 }
 
+/// Synthetic policy fixtures must declare their publication binding before the
+/// first Host open, just like cloud_policy_tests::unbound_fixture. Production
+/// start_open deliberately keeps HostConfig's LocalOnly default.
+#[uniffi::export]
+pub fn test_cloud_start_native_policy_open(
+    location: crate::collection::CollectionLocation,
+    clock: Arc<dyn crate::collection::HostClock>,
+    disk_space: Arc<dyn crate::collection::DiskSpaceProvider>,
+    random_seed: u64,
+) -> Result<JobHandle, CoreError> {
+    callback::enter("test_cloud_start_native_policy_open");
+    use crate::collection::{ForeignClock, ForeignSpace};
+    use meguri_model::rng::SeededRandom;
+    use meguri_sync::cloud::Environment;
+
+    let (inputs, key_bytes) = crate::sync::platform_inputs()
+        .ok_or_else(|| crate::sync::cloud_error("native policy fixture requires its synthetic platform"))?;
+    if inputs.scope.container.as_str() != "synthetic-u114" || inputs.scope.environment != Environment::Development {
+        return Err(CoreError::InvalidArgument {
+            message: "native policy fixture requires synthetic-u114 development".into(),
+        });
+    }
+    let reservation = runtime::reserve_open()?;
+    let mut config = meguri_host::HostConfig::new(
+        location.collection_directory.into(),
+        location.backups_directory.into(),
+        location.app_group_snapshot.into(),
+        Arc::new(ForeignClock(clock)),
+        Arc::new(SeededRandom::new(random_seed)),
+        Arc::new(ForeignSpace(disk_space)),
+    );
+    config.manual_transfer_directory = location.manual_transfer_directory.into();
+    config.publication_binding = native_policy_fixture_binding();
+    config.cloud = Some(inputs);
+    config.cloud_key_bytes = key_bytes;
+    jobs::start(
+        "open native policy fixture",
+        runtime::engine()?.generation().0,
+        move |job| {
+            job.cancel.check()?;
+            reservation.open(config)?;
+            if job.cancel.is_cancelled()? {
+                return Err(CoreError::Unavailable {
+                    reason: "open completed after cancellation; collection remains open; close it explicitly".into(),
+                });
+            }
+            Ok(())
+        },
+    )
+}
+
+fn native_policy_fixture_binding() -> meguri_engine::device_state::AccountBinding {
+    meguri_engine::device_state::AccountBinding::Connected {
+        account: "synthetic-account-A".into(),
+        configuration: "synthetic-u114".into(),
+        environment: "development".into(),
+    }
+}
+
+/// Read-only setup assertions over the real publication sidecar and runtime
+/// projection. This grants no authority and never repairs an invalid fixture.
+#[uniffi::export]
+pub fn test_cloud_require_native_policy_baseline() -> Result<(), CoreError> {
+    callback::enter("test_cloud_require_native_policy_baseline");
+    use meguri_engine::{LifecycleState, device_state::DeviceState};
+    use meguri_sync::cloud::{
+        BindingState,
+        policy::{Fence, Lifecycle, Scan},
+    };
+
+    let host = runtime::host()?;
+    let collection = host.collection()?;
+    if !matches!(host.engine().state(), LifecycleState::Ready { .. }) {
+        return Err(crate::sync::cloud_error("native policy fixture must be Ready"));
+    }
+    let publication = DeviceState::for_collection(collection.path()).publication()?;
+    if !publication.is_some_and(|p| p.binding == native_policy_fixture_binding()) {
+        return Err(crate::sync::cloud_error(
+            "native policy fixture opening binding does not match",
+        ));
+    }
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("native policy fixture has no cloud runtime"))?;
+    let projection = core
+        .policy_projection(Lifecycle::Ready, collection.generation().0)
+        .map_err(crate::sync::cloud_error)?;
+    let facts = &projection.facts;
+    if facts.fence != Fence::Clear || facts.summary.scan != Scan::None {
+        return Err(crate::sync::cloud_error(format!(
+            "native policy fixture requires Clear fence and no scan: {:?}, {:?}",
+            facts.fence, facts.summary.scan
+        )));
+    }
+    if !facts.binding.as_ref().is_some_and(|b| {
+        b.verified
+            && b.usable
+            && b.state == BindingState::Active
+            && b.account.0.as_slice() == b"synthetic-account-A"
+            && b.id.0.as_slice() == projection.backend_guard.binding.as_slice()
+    }) {
+        return Err(crate::sync::cloud_error(
+            "native policy fixture requires its matching verified active binding",
+        ));
+    }
+    if projection.engine.is_some() || projection.tracking_stopped || !projection.root_confirmed {
+        return Err(crate::sync::cloud_error(
+            "native policy fixture requires confirmed baseline before SDK start",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudAdapterBaseline {
     pub record_names: Vec<String>,
@@ -473,6 +586,7 @@ pub fn test_cloud_prepare_adapter_baseline(
         name: r.name,
         envelope: r.envelope,
         system_fields: Some(r.system_fields),
+        ..Default::default()
     };
     Ok(CloudAdapterBaseline {
         record_names: names,
@@ -540,5 +654,6 @@ pub fn test_cloud_reference_wait_record(erev: u64) -> Result<crate::sync::CloudR
         .encode()
         .map_err(crate::sync::cloud_error)?,
         system_fields: Some(erev.to_be_bytes().to_vec()),
+        ..Default::default()
     })
 }

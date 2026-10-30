@@ -92,11 +92,11 @@ impl Runtime {
             .map(|s| s.0)
     }
     /// Called off the writer after real ReviewService inputs complete.
-    pub fn poll_review(&self, instance: &str) -> Result<(), RuntimeError> {
+    pub fn poll_review(&self, instance: &str) -> Result<Option<u64>, RuntimeError> {
         let active = self.active_review();
         let mut s = self.state();
         if Self::caller_locked(&s, instance).is_err() {
-            return Ok(());
+            return Ok(None);
         }
         if let Some(old) = s.last_session {
             if active != Some(old) {
@@ -106,11 +106,12 @@ impl Runtime {
                 s.cloud.incoming_held.clear();
                 s.cloud.deferred.clear();
                 self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
+                return Ok(Some(old));
             }
         } else {
             s.last_session = active;
         }
-        Ok(())
+        Ok(None)
     }
     pub(super) fn workflow_gate(&self) -> Result<(), RuntimeError> {
         let s = self.state();
@@ -156,7 +157,7 @@ impl Runtime {
                 .entity_page(b.binding.id, kind, after)?)
         })
     }
-    fn sendables_locked(s: &State) -> Result<PendingSnapshot, RuntimeError> {
+    pub(super) fn sendables_locked(s: &State) -> Result<PendingSnapshot, RuntimeError> {
         if Self::gate_locked(s).is_err() {
             return Ok(PendingSnapshot::empty());
         }
@@ -166,6 +167,18 @@ impl Runtime {
         pending.0.retain(|name, _| {
             !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name) && !s.policy.parked.contains(name)
         });
+        if !s.media.paused
+            && !s.adapter.paused
+            && let Some((sdk, work)) = &s.actions.media_upload
+            && s.adapter
+                .sdk
+                .as_ref()
+                .is_some_and(|current| current.id == *sdk && !current.stopping)
+            && let super::super::media::Request::Upload { name, .. } = &work.request
+            && !s.policy.parked.contains(name)
+        {
+            pending.0.insert(name.clone(), PendingChange::Save);
+        }
         Ok(pending)
     }
     pub(super) fn emit_pending_locked(

@@ -167,7 +167,10 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let collectionActivationResultOutcome = BridgeCall("CollectionActivationResult.outcome")
     public static let jobProgressSetListener = BridgeCall("JobProgress.setListener")
 
+    public static let testCloudStartNativePolicyOpen = BridgeCall("test_cloud_start_native_policy_open")
+    public static let testCloudRequireNativePolicyBaseline = BridgeCall("test_cloud_require_native_policy_baseline")
     public static let startOpen = BridgeCall("start_open")
+    public static let prepareCloudConnectionHost = BridgeCall("prepare_cloud_connection_host")
     public static let closeCollection = BridgeCall("close_collection")
     public static let collectionLifecycle = BridgeCall("collection_lifecycle")
     public static let waitCollectionAvailable = BridgeCall("wait_collection_available")
@@ -342,14 +345,35 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudWorkflowPolicy = BridgeCall("CloudWorkflow.policy")
     public static let cloudPolicyInput = BridgeCall("CloudPolicy.input")
     public static let cloudPolicyRefreshAccount = BridgeCall("CloudPolicy.refresh_account")
+    public static let cloudPolicyProjectIdentityRead = BridgeCall("CloudPolicy.project_identity_read")
     public static let cloudPolicyStatus = BridgeCall("CloudPolicy.status")
     public static let cloudPolicyExecuteCore = BridgeCall("CloudPolicy.execute_core")
     public static let cloudPolicySubmitNative = BridgeCall("CloudPolicy.submit_native")
     public static let cloudPolicyCaptureExchange = BridgeCall("CloudPolicy.capture_exchange")
     public static let cloudPolicyCompleteExchange = BridgeCall("CloudPolicy.complete_exchange")
     public static let cloudPolicyEndBeforeCapture = BridgeCall("CloudPolicy.end_before_capture")
+    public static let cloudPolicyExchangeReadiness = BridgeCall("CloudPolicy.exchange_readiness")
+    public static let cloudPolicyPrepareExecution = BridgeCall("CloudPolicy.prepare_execution")
+    public static let cloudPolicyExecutionOriginalSdk = BridgeCall("CloudPolicyExecution.original_sdk")
+    public static let cloudPolicyExecutionValidateExecution = BridgeCall("CloudPolicyExecution.validate_execution")
+    public static let cloudPolicyExecutionRegisterSdk = BridgeCall("CloudPolicyExecution.register_sdk")
+    public static let cloudPolicyExecutionRetireOriginal = BridgeCall("CloudPolicyExecution.retire_original")
+    public static let cloudPolicyExecutionOperationActivity = BridgeCall("CloudPolicyExecution.operation_activity")
+    public static let cloudPolicyExecutionBeginFetch = BridgeCall("CloudPolicyExecution.begin_fetch")
+    public static let cloudPolicyExecutionValidateControl = BridgeCall("CloudPolicyExecution.validate_control")
+    public static let cloudPolicyExecutionPrepareFlush = BridgeCall("CloudPolicyExecution.prepare_flush")
+    public static let cloudPolicyExecutionBeginSend = BridgeCall("CloudPolicyExecution.begin_send")
 
     public static let cloudWorkflowConnection = BridgeCall("CloudWorkflow.connection")
+    public static let cloudWorkflowMedia = BridgeCall("CloudWorkflow.media")
+    public static let cloudWorkflowSubmitMediaBatch = BridgeCall("CloudWorkflow.submit_media_batch")
+    public static let cloudMediaDownloadsBlocked = BridgeCall("CloudMedia.downloads_blocked")
+    public static let cloudPolicyExecutionContinueMediaAfterSend = BridgeCall("CloudPolicyExecution.continue_media_after_send")
+    public static let cloudPolicyExecutionBeginMedia = BridgeCall("CloudPolicyExecution.begin_media")
+    public static let cloudMediaNextWork = BridgeCall("CloudMedia.next_work")
+    public static let cloudMediaSubmitRead = BridgeCall("CloudMedia.submit_read")
+    public static let cloudMediaQueueUpload = BridgeCall("CloudMedia.queue_upload")
+    public static let cloudMediaReply = BridgeCall("CloudMedia.reply")
     public static let cloudConnectionBeginConnectionPreview = BridgeCall("CloudConnection.begin_connection_preview")
     public static let cloudConnectionConnectionActiveRead = BridgeCall("CloudConnection.connection_active_read")
     public static let cloudConnectionConnectionEpochRead = BridgeCall("CloudConnection.connection_epoch_read")
@@ -414,7 +438,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
-        cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
+        cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
+        cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
+        cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,
         cloudWorkflowConnection, cloudConnectionBeginConnectionPreview, cloudConnectionConnectionActiveRead, cloudConnectionConnectionEpochRead, cloudConnectionCancelPreview, cloudConnectionConfirmPublication, cloudConnectionConfirmAdoption, cloudConnectionNextPublicationWork, cloudConnectionPerformLocal, cloudConnectionSubmitPublicationRequest, cloudConnectionPublicationResult, cloudConnectionAdoptionResult, cloudConnectionPerformAdoptionLocal, cloudConnectionCancelOperation, cloudConnectionTrigger, cloudConnectionRecoveryStatus,
         configureCloudPlatform, cloudWorkflowNew, cloudWorkflowInstance, cloudWorkflowCurrentGuard, cloudWorkflowEntityFacts, cloudWorkflowAwaitTracking, cloudWorkflowTrackingSendables, cloudWorkflowPendingTransition, cloudWorkflowEmittedUpdateIds, cloudWorkflowObservations, cloudWorkflowPollReview, cloudWorkflowSetPaused, cloudWorkflowStopSyncing, cloudWorkflowDurableSnapshot, cloudWorkflowFetchDrains, cloudWorkflowDiagnostics, cloudWorkflowStatus, cloudWorkflowExchangeResult, cloudWorkflowBeginIdentityRead, cloudWorkflowCompleteIdentityRead, cloudWorkflowPrepareRuntime, cloudWorkflowRegisterSdk, cloudWorkflowValidateSdk, cloudWorkflowRetireSdk, cloudWorkflowReleaseSdk, cloudWorkflowAccountChanged, cloudWorkflowTakePendingUpdates, cloudWorkflowUpdateApplied, cloudWorkflowBuildBatch, cloudWorkflowSent, cloudWorkflowHandlerReturned, cloudWorkflowTrackingFailure, cloudWorkflowStateUpdate, cloudWorkflowFetched, cloudWorkflowBeginFetch, cloudWorkflowWillFetch, cloudWorkflowFetchZone, cloudWorkflowDidFetch, cloudWorkflowFinishFetch, cloudWorkflowBeginExchange, cloudWorkflowExchangeFetched, cloudWorkflowCompleteExchange, cloudWorkflowSendDue, cloudWorkflowBeginSend, cloudWorkflowFinishSend,
         ManualMediaCalls.preview, ManualMediaCalls.run, ManualMediaCalls.cancelPrepared, ManualMediaCalls.forgetOwner, ManualMediaCalls.readPreview, ManualMediaCalls.readProgress, ManualMediaCalls.stop,
@@ -422,7 +448,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startCreateBackup, createBackupResultOutcome, startRestoreBackup, restoreBackupResultOutcome, startRunDueMaintenance, dueMaintenanceResultOutcome, listBackups, backupLimits, setBackupLimits, maintenanceStatus,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
-        startOpen, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
+        testCloudStartNativePolicyOpen, testCloudRequireNativePolicyBaseline, startOpen, prepareCloudConnectionHost, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,

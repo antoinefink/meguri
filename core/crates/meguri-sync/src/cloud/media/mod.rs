@@ -81,6 +81,9 @@ pub enum Request {
     Read {
         name: String,
     },
+    Reads {
+        names: Vec<String>,
+    },
     Upload {
         name: String,
         envelope: Vec<u8>,
@@ -97,7 +100,22 @@ pub struct Work {
     pub request: Request,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlobReadResult {
+    Present { envelope: Vec<u8> },
+    UnknownItem,
+    ZoneMissing,
+    Failed { code: i64 },
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobRead {
+    pub name: String,
+    pub result: BlobReadResult,
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reply {
+    BlobReads {
+        results: Vec<BlobRead>,
+    },
     Record {
         name: String,
         record_type: String,
@@ -114,10 +132,19 @@ pub enum Reply {
         code: i64,
     },
 }
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Selection {
+    #[default]
+    Resume,
+    Read {
+        include_missing: bool,
+    },
+}
 #[derive(Default)]
 pub(crate) struct Process {
     pub epoch: u64,
     pub pending: Option<Work>,
+    pub metadata_pending: Option<Work>,
     pub next: u64,
     pub root_checked: bool,
     pub recovered: bool,
@@ -125,6 +152,15 @@ pub(crate) struct Process {
     pub no_space: bool,
     pub attempted: std::collections::BTreeSet<String>,
     pub pending_notification: bool,
+    pub selection: Selection,
+    pub visible: std::collections::BTreeSet<String>,
+    pub round_reads: std::collections::BTreeSet<String>,
+    pub sdk: Option<String>,
+    pub enabled: Option<bool>,
+    pub due: std::collections::BTreeSet<String>,
+    pub due_loaded: bool,
+    pub batch_reads: bool,
+    pub suppress_uploads: bool,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Apply {
@@ -148,4 +184,14 @@ pub struct Apply {
     pub abandoned: bool,
 }
 macro_rules! opaque {($($t:ty),*)=>{$(impl std::fmt::Debug for $t {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {f.write_str(stringify!($t))}})*};}
-opaque!(BlobState, NameState, Authority, Request, Work, Reply, Apply);
+opaque!(
+    BlobState,
+    NameState,
+    Authority,
+    Request,
+    Work,
+    Reply,
+    Apply,
+    BlobRead,
+    BlobReadResult
+);

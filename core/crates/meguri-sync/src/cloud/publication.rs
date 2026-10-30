@@ -39,6 +39,7 @@ pub enum ConnectDecision {
     ConfirmAdoption,
     ChooseCollection,
     CloudUnreadable,
+    NoCollection,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counts {
@@ -68,8 +69,8 @@ pub struct Preview {
     pub published_at_ms: Option<i64>,
     pub decision: ConnectDecision,
     pub account: OpaqueBytes,
-    pub native_file: NativeFileIdentity,
-    pub decision_before: DecisionSnapshot,
+    pub native_file: Option<NativeFileIdentity>,
+    pub decision_before: Option<DecisionSnapshot>,
     pub active: Option<ControlRecord>,
     pub active_epoch: Option<EpochId>,
     pub unpublished_by_kind: BTreeMap<Kind, u64>,

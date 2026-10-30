@@ -27,6 +27,21 @@ pub struct ProcessCore {
 }
 
 impl ProcessCore {
+    /// V13 discovery owns the existing process/providers without opening or
+    /// bootstrapping a collection. A file that appears must use ordinary open.
+    pub fn prepare_cloud_connection(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
+        match config.collection_directory.join("collection.anki2").symlink_metadata() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+            Ok(_) => {
+                return Err(EngineError::Busy {
+                    running_op: "existing collection requires open".into(),
+                });
+            }
+        }
+        self.prepare_host(config, false)
+    }
+
     pub fn new(config: EngineConfig) -> Result<Self, EngineError> {
         let job_workers = config.job_workers;
         let engine = Engine::new(config)?;
@@ -44,6 +59,9 @@ impl ProcessCore {
     /// opening the existing file failed; callers show engine.state(). No request
     /// is made here. Initial activation reuses these providers exactly once.
     pub fn open_for_manual_import(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
+        self.prepare_host(config, true)
+    }
+    fn prepare_host(&self, config: HostConfig, open_existing: bool) -> Result<CoreHost, EngineError> {
         {
             let mut opened = self.opened.lock().unwrap_or_else(PoisonError::into_inner);
             if *opened || config.engine.job_workers != self.job_workers {
@@ -62,10 +80,19 @@ impl ProcessCore {
             }
         }
         let mut reset = Reset(self, false);
-        let (host, paths, options) = CoreHost::compose_on(self, config)?;
+        let (mut host, paths, options) = CoreHost::compose_on(self, config)?;
         // Active means host-owned lifecycle, including NoCollection/Failed.
         *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
-        if paths.collection().symlink_metadata().is_ok() {
+        if !open_existing && let Some(runtime) = &host.cloud {
+            let live = Arc::new(Mutex::new(true));
+            runtime.attach_no_collection_identity_owner(
+                Arc::downgrade(&live),
+                host.engine.downgrade(),
+                host.engine.generation(),
+            );
+            host.no_collection_identity_owner = Some(live);
+        }
+        if open_existing && paths.collection().symlink_metadata().is_ok() {
             let _ = host.engine.open_raw(&paths.collection(), options);
         }
         reset.1 = true;
@@ -189,6 +216,7 @@ pub struct CoreHost {
     pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
     closed: Mutex<CloseState>,
+    no_collection_identity_owner: Option<Arc<Mutex<bool>>>,
     engine: Engine,
     derived: DerivedHost,
     media: Arc<MediaPort>,
@@ -349,6 +377,7 @@ impl CoreHost {
             export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),
+            no_collection_identity_owner: None,
             engine,
             derived,
             media,
@@ -453,6 +482,12 @@ impl CoreHost {
     }
 
     pub fn close(&self) -> Result<(), EngineError> {
+        // Identity provider calls hold no lease. Only begin/result/apply hold
+        // this original Host lease, so close never waits for a platform read.
+        let mut identity_owner = self
+            .no_collection_identity_owner
+            .as_ref()
+            .map(|live| live.lock().unwrap_or_else(PoisonError::into_inner));
         let prepared = {
             let mut closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
             match *closed {
@@ -511,6 +546,9 @@ impl CoreHost {
                 Ok(())
             },
             || {
+                if let Some(live) = identity_owner.as_mut() {
+                    **live = false;
+                }
                 *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;
                 *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
             },

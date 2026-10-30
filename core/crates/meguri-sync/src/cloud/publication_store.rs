@@ -273,6 +273,14 @@ impl TrackingStore {
         row.map(|(key, ack, crt)| Ok((RecordKey(key.try_into().map_err(|_| Error::InvalidData)?), ack, crt)))
             .transpose()
     }
+    pub(super) fn accept_media_root(&mut self, id: BindingId, key: [u8; 32], crt: i64) -> Result<(), Error> {
+        self.binding(id)?.ok_or(Error::BindingNotFound)?;
+        self.connection.execute(
+            "INSERT INTO cloud_publication_bindings(binding,media_key,root_acked,crt) VALUES(?1,?2,1,?3) ON CONFLICT(binding) DO UPDATE SET media_key=excluded.media_key,root_acked=1 WHERE root_acked=0",
+            params![id.0.as_slice(), key.as_slice(), crt],
+        )?;
+        Ok(())
+    }
     pub(super) fn publication_ack_control(&mut self, op: &PublishOp) -> Result<(), Error> {
         let id = op.binding_after.ok_or(Error::InvalidData)?;
         self.binding(id)?.ok_or(Error::BindingNotFound)?;

@@ -1013,6 +1013,8 @@ private actor CloudThrowingFetchEngine: CloudKitEngine {
     let sdk: CloudKitEngineFake
     private var throwFetch = false
     private var fetchGate: CloudCallbackGate?
+    private var activeFetchGates: [CloudCallbackGate] = []
+    private let networkLifetime = CloudKitNetworkLifetime()
     func pauseNextFetch(_ gate: CloudCallbackGate) { fetchGate = gate }
     init(sdk: CloudKitEngineFake) { self.sdk = sdk; instanceID = sdk.instanceID }
     func failNextFetch() { throwFetch = true }
@@ -1020,14 +1022,63 @@ private actor CloudThrowingFetchEngine: CloudKitEngine {
     func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
     func applyPendingUpdate(_ update: CloudPendingUpdate) async throws { await sdk.applyPendingUpdate(update) }
     func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
+        try await sdk.prepareSend(zones: zones)
+    }
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
+        let lifetime = networkLifetime
+        let generation = lifetime.authority()
+        let prepared = try await sdk.prepareFetch(options: options)
+        return CloudKitNetworkEnqueue { validate in
+            try lifetime.admit(cancelSDK: { await self.cancelFetchSDKCalls() }) {
+                try await self.invokePreparedFetch(prepared, generation: generation, validate: validate)
+            }
+        }
+    }
+    private func invokePreparedFetch(_ prepared: CloudKitNetworkEnqueue, generation: UInt64,
+                                     validate: @escaping @Sendable () throws -> Void) async throws {
+        try await waitForFetchGate()
+        let lifetime = networkLifetime
+        if throwFetch {
+            throwFetch = false
+            try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+            throw CloudTaskOriginalFailure()
+        }
+        let operation = try prepared.enqueue(validate: {
+            try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+        })
+        try await operation.drain()
+    }
+    private func waitForFetchGate() async throws {
+        if let gate = fetchGate {
+            fetchGate = nil
+            activeFetchGates.append(gate)
+            await gate.enter()
+            activeFetchGates.removeAll { $0 === gate }
+            try Task.checkCancellation()
+        }
+    }
     func sendChanges(zones: [String]) async throws { try await sdk.sendChanges(zones: zones) }
     func fetchChanges(options: CloudFetchOptions) async throws {
-        if let gate = fetchGate { fetchGate = nil; await gate.enter(); try Task.checkCancellation() }
+        try await waitForFetchGate()
         if throwFetch { throwFetch = false; throw CloudTaskOriginalFailure() }
         try await sdk.fetchChanges(options: options)
     }
-    func cancelOperations() async { await sdk.cancelOperations() }
-    func release() async { await sdk.release() }
+    private func cancelFetchSDKCalls() async {
+        for gate in activeFetchGates { await gate.open() }
+        await sdk.cancelOperations()
+    }
+    func cancelOperations() async {
+        let operations = networkLifetime.beginCancellation()
+        defer { networkLifetime.endCancellation() }
+        await cancelFetchSDKCalls()
+        for operation in operations { await operation.cancelAndDrain() }
+    }
+    func release() async {
+        networkLifetime.retire()
+        await cancelOperations()
+        await sdk.release()
+    }
 }
 private actor CloudThrowingFetchFactory: CloudKitEngineFactory {
     private var engine: CloudThrowingFetchEngine?

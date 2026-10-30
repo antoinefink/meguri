@@ -1,0 +1,179 @@
+import Foundation
+import Instrumentation
+import MeguriCoreBindings
+import Testing
+@testable import CoreBridge
+
+/// Holds the real policy actor call after Core accepted the actual read, before
+/// its maintenance-lane projection. It supplies no identity, ACK or Core result.
+private func projectionPolicy(_ gate: CloudCallbackGate) async throws -> CoreCloudPolicyService {
+    let workflow = try await MaintenanceLane.shared.call(.cloudWorkflowNew) { try MeguriCoreBindings.CloudWorkflow() }
+    let raw = try await MaintenanceLane.shared.call(.cloudWorkflowPolicy) { try workflow.policy() }
+    return CoreCloudPolicyService(raw, beforeIdentityProjection: { _ in await gate.enter() })
+}
+
+enum ProjectionInvalidation: Sendable { case refreeze, appClose, close, generation }
+
+extension EventTests {
+    @Test func acceptedAppIdentityProjectionCannotReplaceANewerActualRead() async throws {
+        try await withNativePolicyFixture { f in
+            let (_, executor) = try await nativePolicy(f)
+            let projection = CloudCallbackGate(), actualB = CloudCallbackGate()
+            let policy = try await projectionPolicy(projection)
+            let accounts = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            let engine = try await f.engine()
+            let original = engine.instanceID
+            let made = await f.factory.engines().count
+            let readCount = await f.factory.resolvedAccountReadCount()
+            let before = try await f.core.durableSnapshot()
+            try await f.collection.flushForBackground()
+            await accounts.freeze()
+            try await f.adapter.freezeForSuspend()
+            #expect(try await f.collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            let delivered = Task { await engine.emitRetained(.stateUpdate(Data([0x6f, 0x6c, 0x64])), label: "acceptedProjectionState") }
+            var readA: Task<CloudAppAccountReadResult, Never>?
+            var readB: Task<CloudAppAccountReadResult, Never>?
+            do {
+                try await f.adapter.waitForSuspendedDelivery()
+                _ = try await f.collection.resume()
+                await accounts.resumeAfterCoreResume()
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+                let a = try await accounts.begin(transition: false)
+                let pendingA = Task {
+                    let result = await accounts.read(a)
+                    _ = await projection.operationSucceeded()
+                    return result
+                }; readA = pendingA
+                try await projection.waitForArrival()
+                // The actual completion, not a test flag, reverified A. Its SDK
+                // delivery still cannot pass the suspended replay gate.
+                try await f.core.validateSDK(original)
+                #expect(try await f.core.durableSnapshot().serialization == before.serialization)
+                let b = try await accounts.begin(transition: true)
+                #expect(b == a + 1)
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-B".utf8))), gate: actualB)
+                let pendingB = Task {
+                    let result = await accounts.read(b)
+                    _ = await actualB.operationSucceeded()
+                    return result
+                }; readB = pendingB
+                try await actualB.waitForArrival()
+                await projection.open()
+                let stale = await pendingA.value
+                #expect(stale.error is CancellationError && !stale.verified && stale.outputs.isEmpty)
+                #expect(try await f.core.durableSnapshot().serialization == before.serialization)
+                #expect(!(await engine.recordedTrace()).contains(.eventReturned("acceptedProjectionState")))
+                await actualB.open()
+                let switched = await pendingB.value
+                #expect(switched.error == nil && !switched.verified)
+                try #require(switched.error == nil)
+                let status = try await policy.status()
+                #expect(status.accountStatus == .available && !status.accountMatchesBinding)
+                #expect(status.attention[.isolated] == 1)
+                await #expect(throws: (any Error).self) { try await f.core.validateSDK(original) }
+                let after = try await f.core.durableSnapshot()
+                #expect(after.binding == before.binding)
+                #expect(after.serialization == before.serialization)
+                let commands = switched.outputs.flatMap { output -> [CoreBridge.CloudPolicyCommand] in
+                    if case .commands(let commands) = output { return commands }; return []
+                }
+                #expect(commands.contains { if case .stopEngine = $0.action { true } else { false } })
+                #expect(!(await f.adapter.resumeDeliveries()))
+                #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+                #expect(!(await engine.recordedTrace()).contains(.eventReturned("acceptedProjectionState")))
+                #expect(await f.factory.resolvedAccountReadCount() == readCount + 2)
+                let next = try await f.core.beginIdentityRead()
+                #expect(next == b + 1)
+                #expect(try await f.core.completeIdentityRead(id: next, status: .couldNotDetermine, identity: nil))
+                for output in switched.outputs { try await consumePolicySetup(output, executor: executor) }
+                await delivered.value
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                #expect(await engine.recordedTrace().contains(.released))
+                #expect(await f.factory.engines().count == made)
+                #expect(try await f.core.durableSnapshot().serialization == before.serialization)
+            } catch {
+                await projection.open(); await actualB.open()
+                readA?.cancel(); readB?.cancel()
+                _ = await readA?.value; _ = await readB?.value
+                await accounts.close()
+                try? await f.adapter.stop()
+                await delivered.value
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [ProjectionInvalidation.refreeze, .appClose, .close, .generation])
+    func acceptedProjectionCannotReleaseDeliveryAfterOwnerInvalidation(change: ProjectionInvalidation) async throws {
+        try await withNativePolicyFixture { f in
+            _ = try await nativePolicy(f)
+            let projection = CloudCallbackGate()
+            let policy = try await projectionPolicy(projection)
+            let accounts = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot().serialization
+            try await f.collection.flushForBackground()
+            await accounts.freeze()
+            try await f.adapter.freezeForSuspend()
+            #expect(try await f.collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            let delivered = Task { await engine.emitRetained(.stateUpdate(Data([0x6c, 0x61, 0x74, 0x65])), label: "lateProjectionState") }
+            var read: Task<CloudAppAccountReadResult, Never>?
+            do {
+                try await f.adapter.waitForSuspendedDelivery()
+                _ = try await f.collection.resume()
+                await accounts.resumeAfterCoreResume()
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+                let id = try await accounts.begin(transition: false)
+                let pending = Task {
+                    let result = await accounts.read(id)
+                    _ = await projection.operationSucceeded()
+                    return result
+                }; read = pending
+                try await projection.waitForArrival()
+                switch change {
+                case .refreeze:
+                    // Same-actor execution revokes the app permit before the
+                    // release task runs when freeze waits for this real read.
+                    await Task { @MainActor in
+                        let release = Task { @MainActor in await projection.open() }
+                        await accounts.freeze()
+                        await release.value
+                    }.value
+                case .appClose:
+                    await Task { @MainActor in
+                        let release = Task { @MainActor in await projection.open() }
+                        await accounts.close()
+                        await release.value
+                    }.value
+                case .close:
+                    try await f.collection.close()
+                    await projection.open()
+                case .generation:
+                    try await f.collection.close()
+                    let location = CollectionLocation(collectionDirectory: f.directory.appending(path: "collection"),
+                        backupsDirectory: f.directory.appending(path: "backups"),
+                        appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+                    try await f.collection.open(location, randomSeed: 115)
+                    await projection.open()
+                }
+                let stale = await pending.value
+                #expect(stale.error != nil && !stale.verified && stale.outputs.isEmpty)
+                #expect(try await f.core.durableSnapshot().serialization == before)
+                #expect(!(await engine.recordedTrace()).contains(.eventReturned("lateProjectionState")))
+                await accounts.close()
+                try await f.adapter.stop()
+                await delivered.value
+                #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                #expect(await engine.recordedTrace().contains(.released))
+                #expect(try await f.core.durableSnapshot().serialization == before)
+            } catch {
+                await projection.open()
+                read?.cancel(); _ = await read?.value
+                await accounts.close()
+                try? await f.adapter.stop()
+                await delivered.value
+                throw error
+            }
+        }
+    }
+}

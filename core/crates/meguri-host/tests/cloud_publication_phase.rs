@@ -1198,7 +1198,7 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
     assert_eq!(runtime.apply_intents(old.id).unwrap(), pending);
     assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
     let p = actual_preview(&host, &mut service, &scope());
-    assert_eq!(p.native_file, intent.native_file);
+    assert_eq!(p.native_file, Some(intent.native_file));
     let calls = service.request_log().unwrap().len();
     let op_id = runtime.confirm_connection_publication(&p, &collection).unwrap();
 

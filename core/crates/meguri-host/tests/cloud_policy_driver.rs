@@ -206,6 +206,29 @@ fn cancelled_exchange(rig: &Rig) -> Command {
 }
 
 #[test]
+fn media_off_applies_ordinary_collection_incoming_without_blob_work() {
+    let rig = rig();
+    let (id, before, apply) = incoming_deck(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap().id;
+    assert_eq!(runtime.inbox_entries(binding).unwrap().len(), 1);
+    rig.host
+        .execute_cloud_policy_core(&apply, Duration::from_secs(10))
+        .unwrap();
+    assert_ne!(deck_row(&rig, id), before);
+    assert!(runtime.inbox_entries(binding).unwrap().is_empty());
+    assert!(runtime.apply_intents(binding).unwrap().is_empty());
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    assert!(
+        runtime
+            .cloud_media_work(&rig.host.collection().unwrap(), &rig.host.media().unwrap())
+            .unwrap()
+            .is_none()
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
 fn native_pause_rejects_issued_apply_without_changing_collection_or_tracking() {
     let rig = rig();
     let (id, before, apply) = incoming_deck(&rig);
@@ -776,4 +799,116 @@ fn completion_clock_reenters_runtime_and_rechecks_live_completion_facts() {
         }
         rig.host.close().unwrap();
     }
+}
+
+#[test]
+fn native_capture_uses_committed_sequence_after_apply_finishes() {
+    let rig = rig();
+    let (id, before, _) = incoming_deck(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    assert_eq!(
+        driver.native_exchange_readiness(&run, false, true).unwrap(),
+        (true, None)
+    );
+    let (arrived, arrival) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::sync_channel(1);
+    let released = std::sync::Mutex::new(released);
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == IncomingStage::ApplyAfterCommit {
+            arrived.send(()).unwrap();
+            released.lock().unwrap().recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    });
+    // Always unblock the real worker, including an assertion failure on this thread.
+    struct ReleaseOnDrop(std::sync::mpsc::SyncSender<()>);
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.try_send(());
+        }
+    }
+    std::thread::scope(|scope| {
+        let collection = rig.host.collection().unwrap();
+        let sdk = &rig.sdk;
+        let applying = scope.spawn(move || runtime.drain_native_incoming(&collection, sdk, Duration::from_secs(10)));
+        let release = ReleaseOnDrop(release);
+        arrival.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_ne!(deck_row(&rig, id), before, "the actual collection commit occurred");
+        let binding = runtime.status().unwrap().binding.unwrap().id;
+        let intents = runtime.apply_intents(binding).unwrap();
+        assert_eq!(intents.len(), 1);
+        assert!(intents[0].result_seq.is_some(), "committed but not settled");
+        assert!(!runtime.adapter_exchange_active());
+        rig.host
+            .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+            .unwrap();
+        let state = driver.state();
+        assert_eq!(state.facts.summary.unsettled_intents, 0);
+        assert!(state.facts.summary.apply_in_progress);
+        assert!(
+            state.gate_open() && state.engine_runs(),
+            "the separate apply exclusion is necessary"
+        );
+        assert_eq!(
+            driver.native_exchange_readiness(&run, false, true).unwrap(),
+            (false, None)
+        );
+        assert!(
+            matches!(
+                driver.complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation()),
+                Err(DriverError::UnqualifiedCompletion)
+            ),
+            "no Runtime capture was installed while readiness waited"
+        );
+        drop(release);
+        applying.join().unwrap().unwrap();
+    });
+    rig.host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    assert!(!driver.state().facts.summary.apply_in_progress);
+    assert_eq!(
+        driver.native_exchange_readiness(&run, false, true).unwrap(),
+        (true, None)
+    );
+    assert!(!runtime.adapter_exchange_active());
+    let collection = rig.host.collection().unwrap();
+    let expected_sequence = collection.last_seq().0;
+    let runtime_exchange = driver.capture_exchange(&run, &collection).unwrap();
+    let selection = runtime.exchange_result(runtime_exchange).unwrap();
+    assert_eq!(selection.boundary_seq, expected_sequence);
+    assert!(runtime.adapter_exchange_active());
+    assert_eq!(driver.capture_exchange(&run, &collection).unwrap(), runtime_exchange);
+    assert_eq!(runtime.exchange_result(runtime_exchange), Some(selection.clone()));
+    assert!(runtime.adapter_exchange_active());
+
+    use meguri_sync::cloud::adapter::CollectionOutcome;
+    let completed = runtime
+        .adapter_complete_exchange(&rig.sdk, runtime_exchange, false, Some(CollectionOutcome::Cancelled))
+        .unwrap();
+    assert_eq!(completed.id, runtime_exchange);
+    assert_eq!(completed.collection, CollectionOutcome::Cancelled);
+    assert_eq!(completed.result, selection);
+    assert!(!runtime.adapter_exchange_active());
+    let record = command(
+        driver
+            .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RecordExchange(_)),
+    );
+    let ActionKind::RecordExchange(record) = record.action.kind else {
+        unreachable!()
+    };
+    assert_eq!(record.exchange, exchange);
+    assert_eq!(record.outcome, ExchangeOutcome::Cancelled);
+    rig.host.close().unwrap();
 }

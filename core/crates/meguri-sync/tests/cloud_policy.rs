@@ -515,3 +515,99 @@ fn generated_event_orders_never_send_when_gate_closed_or_restart_a_live_engine()
         }
     }
 }
+
+#[test]
+fn control_facts_do_not_use_display_completion_or_attention_as_binding_evidence() {
+    let mut state = ready();
+    state.facts.summary.attention_known = false;
+    let status = state.status();
+    assert_eq!(status.state, StatusState::AwaitingEvidence);
+    assert_eq!(status.controls.enable, EnableControl::Pause);
+    assert!(status.controls.binding_usable && status.controls.binding_active);
+    assert!(status.controls.automatic_eligible);
+    assert_eq!(status.evidence.as_of_ms(), None);
+
+    state.facts.summary.attention.insert(Attention::Conflicts, 2);
+    let status = state.status();
+    assert_eq!(status.state, StatusState::NeedsAttention);
+    assert_eq!(status.controls.enable, EnableControl::Pause);
+    assert!(status.controls.binding_usable && status.controls.automatic_eligible);
+    state.facts.summary.attention.insert(Attention::RootUnreadable, 1);
+    assert!(!state.status().controls.automatic_eligible);
+    assert!(state.status().controls.binding_usable);
+}
+
+#[test]
+fn account_controls_follow_pause_decision_and_binding_priority_even_when_unavailable() {
+    use meguri_sync::cloud::IsolationReason;
+    let mut state = ready();
+    state.account.status = AccountStatus::NoAccount;
+    let status = state.status();
+    assert_eq!(
+        status.state,
+        StatusState::ICloudUnavailable(UnavailableReason::NoAccount)
+    );
+    assert_eq!(status.controls.enable, EnableControl::Pause);
+    assert!(status.controls.binding_active && status.controls.binding_usable);
+    assert!(!status.controls.automatic_eligible);
+    state.facts.binding.as_mut().unwrap().state = BindingState::Isolated(IsolationReason::SignedOut);
+    let signed_out = state.status();
+    assert_eq!(
+        signed_out.state,
+        StatusState::ICloudUnavailable(UnavailableReason::NoAccount)
+    );
+    assert!(!signed_out.controls.binding_active && !signed_out.controls.binding_usable);
+    assert!(!signed_out.controls.automatic_eligible);
+    assert_eq!(signed_out.controls.resume_binding_offered, None);
+    state.facts.binding.as_mut().unwrap().state = BindingState::Active;
+
+    state.facts.fence = Fence::DecisionRequired;
+    assert_eq!(state.status().controls.enable, EnableControl::DecisionRequired);
+    assert!(state.status().controls.decision_required);
+    state.settings.paused = true;
+    assert_eq!(state.status().controls.enable, EnableControl::ResumePause);
+    assert!(state.status().controls.decision_required);
+    assert!(state.status().controls.user_paused);
+
+    state.facts.binding.as_mut().unwrap().state = BindingState::Isolated(IsolationReason::Stopped);
+    assert_eq!(state.status().controls.enable, EnableControl::ResumePause);
+    state.settings.paused = false;
+    assert_eq!(state.status().controls.enable, EnableControl::DecisionRequired);
+    state.facts.fence = Fence::Clear;
+    let status = state.status();
+    assert_eq!(status.controls.enable, EnableControl::AwaitingResumeOffer);
+    assert!(status.controls.binding_stopped);
+    assert!(!status.controls.binding_active && !status.controls.binding_usable);
+    assert_eq!(status.controls.resume_binding_offered, None);
+    assert!(!status.controls.automatic_eligible);
+    state.facts.binding = None;
+    assert_eq!(state.status().controls.enable, EnableControl::Connect);
+    state.settings.paused = true;
+    assert_eq!(state.status().controls.enable, EnableControl::ResumePause);
+}
+
+#[test]
+fn review_copy_eligibility_reuses_core_engine_admission_with_unknown_status_evidence() {
+    let mut state = ready();
+    state.facts.session = Some(91);
+    state.facts.summary.attention_known = false;
+    assert_eq!(state.status().sync_now, Err(Unavailable::ReviewActive));
+    assert!(state.status().controls.automatic_eligible);
+    state.settings.automatic = false;
+    assert!(!state.status().controls.automatic_eligible);
+    state.settings.automatic = true;
+    state.facts.binding.as_mut().unwrap().verified = false;
+    assert!(!state.status().controls.automatic_eligible);
+    state.facts.binding.as_mut().unwrap().verified = true;
+    state.tracking_stop = Some(false);
+    assert!(!state.status().controls.automatic_eligible);
+    state.tracking_stop = None;
+    state.settings.paused = true;
+    assert!(!state.status().controls.automatic_eligible);
+    state.settings.paused = false;
+    state.facts.fence = Fence::DecisionRequired;
+    assert!(!state.status().controls.automatic_eligible);
+    state.facts.fence = Fence::Clear;
+    state.account.status = AccountStatus::Configuration;
+    assert!(!state.status().controls.automatic_eligible);
+}

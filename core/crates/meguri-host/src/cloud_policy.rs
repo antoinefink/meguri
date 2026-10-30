@@ -14,10 +14,15 @@ impl CoreHost {
             .handle(engine.state(), engine.generation(), event)
     }
     pub fn execute_cloud_policy_core(&self, command: &Command, timeout: Duration) -> Result<Vec<Command>, DriverError> {
+        let driver = self.cloud_policy.as_ref().ok_or(DriverError::StaleCommand)?;
+        if matches!(
+            &command.action.kind,
+            meguri_sync::cloud::policy::ActionKind::StatusChanged(_)
+        ) {
+            driver.validate(command)?;
+            return Ok(Vec::new());
+        }
         let collection = self.collection()?;
-        self.cloud_policy
-            .as_ref()
-            .ok_or(DriverError::StaleCommand)?
-            .execute_core(command, &collection, self.engine().state(), timeout)
+        driver.execute_core(command, &collection, self.engine().state(), timeout)
     }
 }

@@ -252,6 +252,8 @@ pub(crate) struct CloudFrontier {
 /// only after the sent event returns; a later full update cannot overtake one.
 #[derive(Default)]
 pub(crate) struct Actions {
+    pub media_upload: Option<(String, super::media::Work)>,
+    pub media_batches: BTreeMap<(String, u64), super::media::Work>,
     pub desired: BTreeMap<String, PendingChange>,
     pub queue: VecDeque<PendingUpdate>,
     pub emitted: Vec<u64>,

@@ -9,6 +9,7 @@ impl Runtime {
     pub fn policy_account_identity(&self) -> Result<(u64, IdentityStatus), RuntimeError> {
         let request = self.adapter_begin_identity_read(false, None)?;
         let identity = self.inputs.identity.read_identity(&self.inputs.scope);
+        self.adapter_validate_identity_read(request)?;
         Ok((request, identity))
     }
 
@@ -144,6 +145,26 @@ impl Runtime {
                 }
                 if publish.is_some() && s.publication.waiting || store.adoption_op()?.is_some() {
                     summary.attention.insert(Attention::RecoveryOpWaiting, 1);
+                }
+                summary.media = Self::policy_media_facts_locked(&s, store, b.binding.id)?;
+                let media_ledger = store.media_ledger(b.binding.id)?;
+                for (attention, count) in [
+                    (
+                        Attention::Unsyncable,
+                        media_ledger.names.values().filter(|f| f.unsyncable).count(),
+                    ),
+                    (
+                        Attention::MediaChanged,
+                        media_ledger
+                            .names
+                            .values()
+                            .filter(|f| f.media_changed.is_some())
+                            .count(),
+                    ),
+                ] {
+                    if count > 0 {
+                        summary.attention.insert(attention, count as u64);
+                    }
                 }
                 summary.collection_known = s.whole_complete;
                 // Existing stable-layout Runtime does not expose the full K10 flag/root/crt/generation ledger.

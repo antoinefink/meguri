@@ -57,6 +57,12 @@ impl Fixture {
         Self::with_identity(keys, None)
     }
     fn with_identity(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>) -> Self {
+        Self::with_collection(keys, identity, true)
+    }
+    fn without_collection(keys: Arc<Keys>) -> Self {
+        Self::with_collection(keys, None, false)
+    }
+    fn with_collection(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
         let backups = directory.path().join("backups");
@@ -64,7 +70,9 @@ impl Fixture {
         std::fs::create_dir_all(&backups).unwrap();
         let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
         let random = Arc::new(SeededRandom::new(114));
-        meguri_engine::bootstrap::create(&data.join("collection.anki2"), clock.as_ref(), random.as_ref()).unwrap();
+        if local {
+            meguri_engine::bootstrap::create(&data.join("collection.anki2"), clock.as_ref(), random.as_ref()).unwrap();
+        }
         let mut config = HostConfig::new(
             data,
             backups,
@@ -85,7 +93,14 @@ impl Fixture {
             files: Arc::new(NativeFiles),
         });
         config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys)));
-        let host = Arc::new(CoreHost::open(config).unwrap());
+        let host = Arc::new(if local {
+            CoreHost::open(config).unwrap()
+        } else {
+            meguri_host::ProcessCore::new(config.engine.clone())
+                .unwrap()
+                .prepare_cloud_connection(config)
+                .unwrap()
+        });
         let core = host.cloud_runtime().unwrap().clone();
         core.retain_adapter_inspection();
         Self {
@@ -121,6 +136,7 @@ impl Fixture {
             name: r.name,
             envelope: r.envelope,
             system_fields: Some(r.system_fields),
+            ..Default::default()
         };
         (
             self.workflow.register_sdk(false).unwrap(),
@@ -231,6 +247,7 @@ fn incoming_record(payload: c::entity_codec::Payload, erev: u64) -> CloudRecord 
         .encode()
         .unwrap(),
         system_fields: Some(erev.to_be_bytes().to_vec()),
+        ..Default::default()
     }
 }
 fn blocked_record(erev: u64) -> CloudRecord {
@@ -859,3 +876,9 @@ mod connection;
 
 #[path = "cloud_policy_tests.rs"]
 mod policy;
+
+#[path = "cloud_policy_execution_tests.rs"]
+mod policy_execution;
+
+#[path = "cloud_media_tests.rs"]
+mod media_port;

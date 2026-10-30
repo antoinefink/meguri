@@ -39,9 +39,10 @@ public enum CloudControlRead: Sendable, Equatable {
         switch self { case .found(let r): .found(record: r.raw); case .missing: .missing; case .zoneMissing: .zoneMissing; case .failed: .failed }
     }
 }
-public enum CloudConnectionDecision: Sendable, Equatable { case confirmUpload, confirmAdoption, chooseCollection, cloudUnreadable }
+public enum CloudConnectionDecision: Sendable, Equatable { case noCollection, confirmUpload, confirmAdoption, chooseCollection, cloudUnreadable }
 public enum CloudCountKind: Sendable, Hashable { case note, card, revlog, deck, preset, notetype, tag, config, mediaName }
 public struct CloudConnectionSummary: Sendable {
+    public let localCollectionPresent: Bool
     public let localCounts: [CloudCountKind: UInt64]
     public let localEmpty: Bool
     /// Counts from a manifest, labelled with publishedAtMilliseconds. Review
@@ -60,10 +61,11 @@ public struct CloudConnectionSummary: Sendable {
                 return (kind, row.count)
             })
         }
+        localCollectionPresent = v.localCollectionPresent
         localCounts = counts(v.localCounts); localEmpty = v.localEmpty
         manifestCounts = v.manifestCounts.map(counts); publishedAtMilliseconds = v.publishedAtMs
         unpublishedCounts = counts(v.unpublishedCounts)
-        decision = switch v.decision { case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
+        decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
     }
 }
 public struct CloudConnectionPreview: Sendable { let raw: MeguriCoreBindings.CloudConnectionPreview }

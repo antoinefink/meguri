@@ -218,6 +218,8 @@ impl Runtime {
     ) -> Result<[u8; 16], RuntimeError> {
         self.wait_incoming_idle();
         self.check_preview_authority(preview, collection)?;
+        let decision_before = preview.decision_before.as_ref().ok_or(PublicationError::NotOffered)?;
+        let native_file = preview.native_file.ok_or(PublicationError::NotOffered)?;
         meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
         if !matches!(
             preview.decision,
@@ -250,7 +252,7 @@ impl Runtime {
         fs::create_dir(stage.directory().join("incoming")).map_err(storage_io)?;
         let id = self.publication_random_id()?;
         let candidate = publication_id(self.publication_random_id()?);
-        if candidate == preview.decision_before.publication.identity || candidate == publication_id(id) {
+        if candidate == decision_before.publication.identity || candidate == publication_id(id) {
             return Err(refused());
         }
         let binding_after = BindingId(self.publication_random_id()?);
@@ -269,8 +271,8 @@ impl Runtime {
             binding_before: None,
             binding_after,
             account: preview.account.clone(),
-            before: preview.decision_before.clone(),
-            file_before: preview.native_file,
+            before: decision_before.clone(),
+            file_before: native_file,
             candidate: Publication {
                 identity: candidate,
                 binding,

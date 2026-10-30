@@ -91,6 +91,56 @@ impl State {
         }
         Ok(())
     }
+    pub fn controls(&self) -> Controls {
+        let binding = self.facts.binding.as_ref();
+        let usable = binding.is_some_and(|b| b.usable && b.state == BindingState::Active);
+        let active = binding.is_some_and(|b| b.state == BindingState::Active);
+        let stopped = binding.is_some_and(|b| b.state == BindingState::Isolated(IsolationReason::Stopped));
+        let decision = self.facts.fence == Fence::DecisionRequired;
+        let enable = if self.settings.paused {
+            EnableControl::ResumePause
+        } else if decision {
+            EnableControl::DecisionRequired
+        } else if stopped {
+            EnableControl::AwaitingResumeOffer
+        } else if !usable {
+            EnableControl::Connect
+        } else {
+            EnableControl::Pause
+        };
+        // Reuse the real engine gate; incomplete attention evidence does not erase
+        // a usable binding or claim that the collection has reached a quiet point.
+        let automatic_eligible = self.engine_allowed()
+            && self.automatic()
+            && !self.transient_auth
+            && !self.quota_full
+            && !self.facts.summary.crt_mismatch
+            && !self.facts.summary.attention.iter().any(|(item, count)| {
+                *count > 0
+                    && matches!(
+                        item,
+                        Attention::Isolated
+                            | Attention::RootUnreadable
+                            | Attention::ChooseCollection
+                            | Attention::CollectionCorrupt
+                            | Attention::RecoveryOpWaiting
+                            | Attention::QuotaFull
+                            | Attention::LocalStorageFull
+                            | Attention::TrackingError
+                            | Attention::CloudError
+                    )
+            });
+        Controls {
+            enable,
+            binding_usable: usable,
+            binding_active: active,
+            binding_stopped: stopped,
+            decision_required: decision,
+            user_paused: self.settings.paused,
+            resume_binding_offered: None,
+            automatic_eligible,
+        }
+    }
     pub fn status(&self) -> Status {
         let s = &self.facts.summary;
         let mut attention = s.attention.clone();
@@ -190,6 +240,7 @@ impl State {
             account_matches_binding: self.account_matches(),
             evidence: self.evidence.clone(),
             sync_now: self.sync_now_availability(),
+            controls: self.controls(),
         }
     }
 }

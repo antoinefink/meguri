@@ -11,6 +11,275 @@ use meguri_testkit::cloud::{
 fn keys() -> Arc<Keys> {
     Keys::new([Some(vec![31; 32]), Some(vec![47; 32])])
 }
+#[test]
+fn actual_no_collection_host_discovers_without_creating_an_empty_collection_or_publication() {
+    let keys = keys();
+    let fixture = Fixture::without_collection(keys.clone());
+    let host = &fixture.workflow.host;
+    assert!(matches!(
+        host.engine().state(),
+        meguri_engine::LifecycleState::NoCollection
+    ));
+    assert!(host.collection().is_err());
+    let path = host.cloud_connection_directory().join("collection.anki2");
+    assert!(!path.exists());
+    let connection = fixture.workflow.connection().unwrap();
+    let policy = fixture.workflow.policy().unwrap();
+    fixture.workflow.media().unwrap();
+    let output = policy.clone().refresh_account().unwrap();
+    if let crate::cloud_policy::CloudPolicyOutput::Commands { commands } = output {
+        for command in commands {
+            if matches!(
+                command.action,
+                crate::cloud_policy::CloudPolicyAction::StatusChanged { .. }
+            ) {
+                policy.clone().execute_core(command.handle).unwrap();
+            }
+        }
+    }
+    policy.status().unwrap();
+    for _ in 0..2 {
+        let CloudConnectionPreviewWork::ReadActive { preview, .. } = connection.begin_connection_preview().unwrap()
+        else {
+            panic!("actual active read required")
+        };
+        let CloudConnectionPreviewWork::Ready { preview, summary } = connection
+            .connection_active_read(preview, CloudControlRead::ZoneMissing)
+            .unwrap()
+        else {
+            panic!("actual absent-root discovery required")
+        };
+        assert!(!summary.local_collection_present && !summary.local_empty);
+        assert!(summary.local_counts.is_empty() && summary.manifest_counts.is_none());
+        assert!(matches!(summary.decision, CloudConnectionDecision::NoCollection));
+        failure_is(
+            connection.confirm_publication(preview.clone()),
+            CloudConnectionFailure::NotOffered,
+        );
+        failure_is(
+            connection.confirm_adoption(preview.clone()),
+            CloudConnectionFailure::NotOffered,
+        );
+        connection.cancel_preview(preview).unwrap();
+        assert!(!path.exists());
+        assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+    }
+    host.close().unwrap();
+    failure_is(connection.begin_connection_preview(), CloudConnectionFailure::Closed);
+}
+// Holds the actual original provider, without account-cache or transport fallback.
+struct HeldNoCollectionAccount {
+    held: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+}
+struct ReleaseNoCollectionRead(std::sync::mpsc::Sender<()>);
+impl Drop for ReleaseNoCollectionRead {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+impl HeldNoCollectionAccount {
+    fn arm(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (reached, wait) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        *self.held.lock().unwrap() = Some((reached, resume));
+        (wait, release)
+    }
+}
+impl r::IdentityProvider for HeldNoCollectionAccount {
+    fn read_identity(&self, _: &c::BuildScope) -> r::IdentityStatus {
+        let held = self.held.lock().unwrap().take();
+        if let Some((reached, resume)) = held {
+            reached.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(30)).unwrap();
+        }
+        r::IdentityStatus::Available(c::OpaqueBytes(b"synthetic-no-collection-owner".to_vec()))
+    }
+}
+fn held_no_collection_host() -> (
+    Fixture,
+    meguri_host::ProcessCore,
+    HostConfig,
+    Arc<HeldNoCollectionAccount>,
+    Arc<Keys>,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(directory.path().join("collection")).unwrap();
+    std::fs::create_dir_all(directory.path().join("backups")).unwrap();
+    let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
+    let random = Arc::new(SeededRandom::new(114));
+    let identity = Arc::new(HeldNoCollectionAccount { held: Mutex::new(None) });
+    let keys = keys();
+    let mut config = HostConfig::new(
+        directory.path().join("collection"),
+        directory.path().join("backups"),
+        directory.path().join("widget"),
+        clock.clone(),
+        random.clone(),
+        Arc::new(meguri_storage::space::StatvfsSpace),
+    );
+    config.cloud = Some(r::CloudInputs {
+        scope: c::BuildScope {
+            container: c::ContainerId::new("synthetic-u114").unwrap(),
+            environment: c::Environment::Development,
+        },
+        identity: identity.clone(),
+        files: Arc::new(NativeFiles),
+    });
+    config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys.clone())));
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = Arc::new(process.prepare_cloud_connection(config.clone()).unwrap());
+    let core = host.cloud_runtime().unwrap().clone();
+    (
+        Fixture {
+            _directory: directory,
+            workflow: CloudWorkflow {
+                host,
+                core,
+                identity: None,
+            },
+            clock,
+            random,
+        },
+        process,
+        config,
+        identity,
+        keys,
+    )
+}
+
+#[test]
+fn actual_held_no_collection_account_read_cannot_reach_same_generation_successor_host() {
+    let (fixture, process, config, identity, keys) = held_no_collection_host();
+    let policy = fixture.workflow.policy().unwrap();
+    let original_generation = fixture.workflow.host.engine().generation();
+    let (reached, release) = identity.arm();
+    std::thread::scope(|scope| {
+        let read = scope.spawn(move || policy.refresh_account());
+        let release = ReleaseNoCollectionRead(release);
+        reached.recv_timeout(Duration::from_secs(30)).unwrap();
+        fixture.workflow.host.close().unwrap(); // Does not wait for the provider.
+        let successor = Arc::new(process.prepare_cloud_connection(config).unwrap());
+        assert_eq!(successor.engine().generation(), original_generation);
+        let workflow = CloudWorkflow {
+            core: successor.cloud_runtime().unwrap().clone(),
+            host: successor.clone(),
+            identity: None,
+        };
+        let successor_policy = workflow.policy().unwrap();
+        successor_policy.clone().refresh_account().unwrap();
+        let guard = workflow.core.adapter_guard();
+        let status = successor_policy.status().unwrap();
+        release.0.send(()).unwrap();
+        assert!(read.join().unwrap().is_err());
+        assert_eq!(workflow.core.adapter_guard(), guard);
+        assert_eq!(successor_policy.status().unwrap().account_status, status.account_status);
+        assert!(!successor.cloud_connection_directory().join("collection.anki2").exists());
+        assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+        successor.close().unwrap();
+    });
+}
+
+#[test]
+fn actual_held_no_collection_account_read_rejects_appeared_local_file_before_result_and_apply() {
+    let (fixture, _process, config, identity, keys) = held_no_collection_host();
+    let core = fixture.workflow.core.clone();
+    let guard = core.adapter_guard();
+    let (reached, release) = identity.arm();
+    let read_core = core.clone();
+    std::thread::scope(|scope| {
+        let read = scope.spawn(move || read_core.policy_account_identity());
+        let release = ReleaseNoCollectionRead(release);
+        reached.recv_timeout(Duration::from_secs(30)).unwrap();
+        let path = config.collection_directory.join("collection.anki2");
+        meguri_engine::bootstrap::create(&path, fixture.clock.as_ref(), fixture.random.as_ref()).unwrap();
+        release.0.send(()).unwrap();
+        assert!(matches!(read.join().unwrap(), Err(r::RuntimeError::StaleIncarnation)));
+        // No new read can start for the still-unbound Host after a file appears.
+        assert!(matches!(
+            core.adapter_begin_identity_read(false, None),
+            Err(r::RuntimeError::StaleIncarnation)
+        ));
+        assert_eq!(core.adapter_guard(), guard);
+        assert!(
+            fixture
+                .workflow
+                .connection()
+                .unwrap()
+                .begin_connection_preview()
+                .is_err()
+        );
+        assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+        fixture.workflow.host.close().unwrap();
+    });
+}
+
+#[test]
+fn actual_no_collection_identity_completion_rechecks_local_file_without_mutating_policy() {
+    let (fixture, _process, config, _identity, keys) = held_no_collection_host();
+    let policy = fixture.workflow.policy().unwrap();
+    let core = &fixture.workflow.core;
+    let (request, identity) = core.policy_account_identity().unwrap();
+    let guard = core.adapter_guard();
+    let before = policy.status().unwrap().account_status;
+    meguri_engine::bootstrap::create(
+        &config.collection_directory.join("collection.anki2"),
+        fixture.clock.as_ref(),
+        fixture.random.as_ref(),
+    )
+    .unwrap();
+    assert!(!core.adapter_complete_identity_read(request, identity).unwrap());
+    assert_eq!(core.adapter_guard(), guard);
+    assert_eq!(policy.status().unwrap().account_status, before);
+    assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn actual_no_collection_completed_read_cannot_apply_after_transition_to_real_collection() {
+    let (fixture, process, config, _identity, keys) = held_no_collection_host();
+    let core = fixture.workflow.core.clone();
+    let (request, identity) = core.policy_account_identity().unwrap();
+    let generation = fixture.workflow.host.engine().generation();
+    fixture.workflow.host.close().unwrap();
+    meguri_engine::bootstrap::create(
+        &config.collection_directory.join("collection.anki2"),
+        fixture.clock.as_ref(),
+        fixture.random.as_ref(),
+    )
+    .unwrap();
+    let successor = Arc::new(process.open(config).unwrap());
+    assert!(successor.engine().generation().0 > generation.0);
+    assert!(successor.collection().unwrap().is_current());
+    let workflow = CloudWorkflow {
+        core: successor.cloud_runtime().unwrap().clone(),
+        host: successor.clone(),
+        identity: None,
+    };
+    let policy = workflow.policy().unwrap();
+    policy.clone().refresh_account().unwrap();
+    let guard = workflow.core.adapter_guard();
+    assert!(!core.adapter_complete_identity_read(request, identity).unwrap());
+    assert_eq!(workflow.core.adapter_guard(), guard);
+    assert!(matches!(
+        policy.status().unwrap().account_status,
+        crate::cloud_policy::CloudPolicyAccountStatus::Available
+    ));
+    let connection = workflow.connection().unwrap();
+    let CloudConnectionPreviewWork::ReadActive { preview, .. } = connection.begin_connection_preview().unwrap() else {
+        panic!("active read")
+    };
+    let CloudConnectionPreviewWork::Ready { summary, .. } = connection
+        .connection_active_read(preview, CloudControlRead::ZoneMissing)
+        .unwrap()
+    else {
+        panic!("ready")
+    };
+    assert!(summary.local_collection_present);
+    assert!(matches!(summary.decision, CloudConnectionDecision::ConfirmUpload));
+    assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+    successor.close().unwrap();
+}
+
 fn ready(connection: &CloudConnection) -> Arc<CloudConnectionPreview> {
     let CloudConnectionPreviewWork::ReadActive { preview, .. } = connection.begin_connection_preview().unwrap() else {
         panic!("actual record read required")
@@ -560,6 +829,7 @@ fn active_request_with_epoch(
                             name: record.name,
                             envelope: r.encrypted.unwrap(),
                             system_fields: Some(r.system_fields.0),
+                            ..Default::default()
                         }
                     })
                     .collect();

@@ -739,6 +739,50 @@ pub struct CloudPolicyErrorDetail {
     pub retry_after_ms: Option<i64>,
     pub operation: CloudPolicyOperation,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudPolicyEnableControl {
+    ResumePause,
+    DecisionRequired,
+    Connect,
+    Pause,
+    AwaitingResumeOffer,
+}
+impl From<p::EnableControl> for CloudPolicyEnableControl {
+    fn from(v: p::EnableControl) -> Self {
+        match v {
+            p::EnableControl::ResumePause => Self::ResumePause,
+            p::EnableControl::DecisionRequired => Self::DecisionRequired,
+            p::EnableControl::Connect => Self::Connect,
+            p::EnableControl::Pause => Self::Pause,
+            p::EnableControl::AwaitingResumeOffer => Self::AwaitingResumeOffer,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudPolicyControls {
+    pub enable: CloudPolicyEnableControl,
+    pub binding_usable: bool,
+    pub binding_active: bool,
+    pub binding_stopped: bool,
+    pub decision_required: bool,
+    pub user_paused: bool,
+    pub resume_binding_offered: Option<bool>,
+    pub automatic_eligible: bool,
+}
+impl From<p::Controls> for CloudPolicyControls {
+    fn from(v: p::Controls) -> Self {
+        Self {
+            enable: v.enable.into(),
+            binding_usable: v.binding_usable,
+            binding_active: v.binding_active,
+            binding_stopped: v.binding_stopped,
+            decision_required: v.decision_required,
+            user_paused: v.user_paused,
+            resume_binding_offered: v.resume_binding_offered,
+            automatic_eligible: v.automatic_eligible,
+        }
+    }
+}
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudPolicyStatus {
     pub state: CloudPolicyStatusState,
@@ -756,11 +800,13 @@ pub struct CloudPolicyStatus {
     pub last_completed: Option<CloudPolicyExchangeRecord>,
     pub last_attempt: Option<CloudPolicyExchangeRecord>,
     pub sync_now: CloudPolicySyncNowAvailability,
+    pub controls: CloudPolicyControls,
 }
 impl From<p::Status> for CloudPolicyStatus {
     fn from(v: p::Status) -> Self {
         Self {
             state: v.state.into(),
+            controls: v.controls.into(),
             pending: v.pending,
             held_back: v.held_back,
             in_flight: v.in_flight,
@@ -919,8 +965,7 @@ pub trait CloudPolicyQueue: Send + Sync {
 static POLICIES: Mutex<Vec<Weak<CloudPolicy>>> = Mutex::new(Vec::new());
 impl CloudPolicy {
     fn for_workflow(workflow: &CloudWorkflow) -> Result<Arc<Self>, CoreError> {
-        let collection = workflow.host.cloud_connection_collection()?;
-        let generation = collection.generation().0;
+        let generation = workflow.host.cloud_connection_generation()?.0;
         if workflow.host.cloud_policy_driver().is_none() {
             return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable));
         }
@@ -940,7 +985,18 @@ impl CloudPolicy {
         policies.push(Arc::downgrade(&policy));
         Ok(policy)
     }
+    fn validate_owner(&self) -> Result<(), CoreError> {
+        let generation = self
+            .host
+            .cloud_connection_generation()
+            .map_err(|_| failure(CloudPolicyFailure::Closed))?;
+        if generation.0 != self.generation {
+            return Err(failure(CloudPolicyFailure::GenerationChanged));
+        }
+        Ok(())
+    }
     fn collection(&self) -> Result<meguri_engine::Collection, CoreError> {
+        self.validate_owner()?;
         let collection = self
             .host
             .cloud_connection_collection()
@@ -996,7 +1052,7 @@ impl CloudPolicy {
         if !std::ptr::eq(self, Arc::as_ptr(&command.owner)) {
             return Err(failure(CloudPolicyFailure::WrongOwner));
         }
-        self.collection()?;
+        self.validate_owner()?;
         if command.command.action.guard.generation != self.generation {
             return Err(failure(CloudPolicyFailure::GenerationChanged));
         }
@@ -1014,7 +1070,7 @@ impl CloudWorkflow {
 impl CloudPolicy {
     pub fn input(self: Arc<Self>, event: CloudPolicyEvent) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.input");
-        self.collection()?;
+        self.validate_owner()?;
         let result = self.host.cloud_policy_input(event.into());
         self.output(result)
     }
@@ -1022,24 +1078,45 @@ impl CloudPolicy {
     /// identity-read workflow. No UI account string is accepted.
     pub fn refresh_account(self: Arc<Self>) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.refresh_account");
-        self.collection()?;
-        let (request, identity) = self
+        self.validate_owner()?;
+        let sampled = self
             .host
             .cloud_runtime()
             .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
-            .policy_account_identity()
-            .map_err(crate::cloud_connection::error)?;
-        self.collection()?;
+            .policy_account_identity();
+        self.validate_owner()?;
+        let (request, identity) = sampled.map_err(|error| match error {
+            meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation => failure(CloudPolicyFailure::StaleCommand),
+            error => crate::cloud_connection::error(error),
+        })?;
         let result = self
             .host
             .cloud_policy_input(p::DeviceEvent::IdentityRead { request, identity });
+        self.output(result)
+    }
+    /// Project an already accepted read from this original Host/Runtime. The
+    /// request is a lookup key, never frontend-supplied identity authority.
+    pub fn project_identity_read(self: Arc<Self>, request: u64) -> Result<CloudPolicyOutput, CoreError> {
+        callback::enter("CloudPolicy.project_identity_read");
+        self.validate_owner()?;
+        let result = self
+            .host
+            .cloud_policy_input(p::DeviceEvent::AcceptedIdentityRead { request });
+        // Preserve Closed/GenerationChanged precedence over stale proof.
+        self.validate_owner()?;
+        let result = result.map_err(|error| match error {
+            p::DriverError::Runtime(meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation) => {
+                p::DriverError::StaleCommand
+            }
+            error => error,
+        });
         self.output(result)
     }
     /// Read-only: lifecycle/session/tracking changes enter through Refresh,
     /// never by supplying CoreFacts or generation in a DTO.
     pub fn status(&self) -> Result<CloudPolicyStatus, CoreError> {
         callback::enter("CloudPolicy.status");
-        self.collection()?;
+        self.validate_owner()?;
         Ok(self.driver()?.status().into())
     }
     pub fn execute_core(self: Arc<Self>, command: Arc<CloudPolicyCommand>) -> Result<CloudPolicyOutput, CoreError> {
@@ -1152,12 +1229,20 @@ mod tests {
         raw.attention.insert(p::Attention::ApplyFailed, 23);
         raw.evidence.quiet_ms = Some(29);
         raw.sync_now = Err(p::Unavailable::ReviewActive);
+        raw.controls.enable = p::EnableControl::Pause;
+        raw.controls.binding_usable = true;
+        raw.controls.binding_active = true;
+        raw.controls.automatic_eligible = true;
         let dto = CloudPolicyStatus::from(raw);
         assert!(matches!(dto.state, CloudPolicyStatusState::AwaitingEvidence));
         assert_eq!(
             (dto.pending, dto.held_back, dto.in_flight, dto.incoming_waiting),
             (7, 11, 13, 17)
         );
+        assert_eq!(dto.controls.enable, CloudPolicyEnableControl::Pause);
+        assert!(dto.controls.binding_usable && dto.controls.binding_active);
+        assert!(dto.controls.automatic_eligible);
+        assert_eq!(dto.controls.resume_binding_offered, None);
         assert_eq!(dto.media.upload_files, Some(19));
         assert!(dto.media.download_files.is_none());
         assert_eq!(dto.as_of_ms, Some(29));
@@ -1174,3 +1259,7 @@ mod tests {
         ));
     }
 }
+
+#[path = "cloud_policy_execution.rs"]
+mod execution;
+pub use execution::{CloudPolicyExecution, CloudPolicyOperationFacts, CloudPolicyReadiness};

@@ -28,6 +28,14 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowConnection) { CoreCloudConnectionService(try raw.connection()) }
     }
+    public func media() async throws -> CoreCloudMediaService {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowMedia) { CoreCloudMediaService(try raw.media()) }
+    }
+    func submitMediaBatch(sdk: String, batch: UInt64, queue: any CloudMediaQueue) async throws -> Bool {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowSubmitMediaBatch) { try raw.submitMediaBatch(sdk: sdk, batch: batch, queue: ForeignMediaQueue(queue)) }
+    }
     public func instance() async throws -> String {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowInstance) { try raw.instance() }
@@ -112,6 +120,10 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowValidateSdk) { try raw.validateSdk(sdk: sdk) }
     }
+    func finalSDKAuthorization(_ sdk: String) async throws -> @Sendable () throws -> Void {
+        let raw = try await owner()
+        return { try cloudFinalCoreCall(.cloudWorkflowValidateSdk) { try raw.validateSdk(sdk: sdk) } }
+    }
      func retireSDK(_ sdk: String, policyStop: Bool) async throws -> Void {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowRetireSdk) { try raw.retireSdk(sdk: sdk, policyStop: policyStop) }
@@ -134,7 +146,16 @@ public actor CoreCloudWorkflowService {
     }
      func buildBatch(sdk: String, zone: String, pending: [String: CloudPendingChange]) async throws -> CloudEngineBatch? {
         let raw = try await owner()
-        return try await MaintenanceLane.shared.call(.cloudWorkflowBuildBatch) { try raw.buildBatch(sdk: sdk, zone: zone, pending: pending.mapValues(\.raw)).map { .init(id: $0.id, saves: $0.saves.map(CloudRecord.init), deletes: $0.deletes) } }
+        return try await MaintenanceLane.shared.call(.cloudWorkflowBuildBatch) {
+            try raw.buildBatch(sdk: sdk, zone: zone, pending: pending.mapValues(\.raw)).map { batch in
+                let admission: CloudMediaBatchAdmission? = zone == "meguri-media" ? CloudMediaBatchAdmission { queue in
+                    try await MaintenanceLane.shared.call(.cloudWorkflowSubmitMediaBatch) {
+                        try raw.submitMediaBatch(sdk: sdk, batch: batch.id, queue: ForeignMediaQueue(queue))
+                    }
+                } : nil
+                return .init(id: batch.id, saves: batch.saves.map(CloudRecord.init), deletes: batch.deletes, mediaAdmission: admission)
+            }
+        }
     }
      func sent(sdk: String, batchID: UInt64, saved: [CloudRecord], failed: [CloudRecordFailure], batchCount: UInt32) async throws -> Void {
         let raw = try await owner()

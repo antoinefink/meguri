@@ -35,6 +35,9 @@ pub enum DeviceEvent {
         request: u64,
         identity: IdentityStatus,
     },
+    AcceptedIdentityRead {
+        request: u64,
+    },
     Network {
         reachable: bool,
     },
@@ -104,7 +107,7 @@ impl std::fmt::Display for DriverError {
     }
 }
 impl std::error::Error for DriverError {}
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Owned {
     state: State,
     sdk: Option<String>,
@@ -142,12 +145,31 @@ impl Driver {
     ) -> Result<Vec<Command>, DriverError> {
         let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let event = match event {
+            DeviceEvent::AcceptedIdentityRead { request } => {
+                let identity = self.runtime.with_accepted_identity_read(request, Clone::clone)?;
+                let mut prepared = owned.clone();
+                let commands = self.project_and_step(
+                    &mut prepared,
+                    lifecycle,
+                    generation,
+                    Event::Account(account(identity)),
+                    None,
+                )?;
+                // Providers/projection ran outside Runtime's lock. Recheck
+                // freshness at the policy mutation boundary, then commit only
+                // prepared values while begin/completion cannot supersede us.
+                return Ok(self.runtime.with_accepted_identity_read(request, |_| {
+                    *owned = prepared;
+                    commands
+                })?);
+            }
             DeviceEvent::Refresh(cause) => Event::TrackingChanged(cause),
             DeviceEvent::TrackingWriteFailed { no_space } => {
                 self.runtime.policy_tracking_failed();
                 Event::TrackingWriteFailed { no_space }
             }
             DeviceEvent::Settings(settings) => {
+                self.runtime.policy_media_setting(settings.media)?;
                 self.runtime.adapter_pause(!settings.enabled || settings.paused)?;
                 Event::DeviceSettings(settings)
             }
@@ -213,6 +235,10 @@ impl Driver {
         ended_ms: Option<i64>,
     ) -> Result<Vec<Command>, DriverError> {
         let now_ms = ended_ms.unwrap_or_else(|| self.clock.now_ms());
+        let ended_session = match self.runtime.instance() {
+            Ok(instance) => self.runtime.poll_review(&instance)?,
+            Err(_) => None,
+        };
         let projection = self
             .runtime
             .policy_projection(lifecycle_kind(&lifecycle), generation.0)?;
@@ -267,6 +293,18 @@ impl Driver {
                     now_ms,
                     facts: Some(projection.facts.clone()),
                     event: Event::TrackingWriteFailed { no_space: false },
+                },
+            );
+            owned.state = state;
+            actions.extend(emitted);
+        }
+        if let Some(session) = ended_session {
+            let (state, emitted) = step(
+                owned.state.clone(),
+                Input {
+                    now_ms,
+                    facts: Some(projection.facts.clone()),
+                    event: Event::SessionEnded(session),
                 },
             );
             owned.state = state;
@@ -461,6 +499,11 @@ impl Driver {
                     .runtime
                     .policy_apply_ready(collection, guard, *retry_failed, timeout)
                 {
+                    Ok(crate::cloud::incoming::IncomingDisposition::Progress(0)) => {
+                        // Ready media can await bytes that only an external event supplies.
+                        // Reproject the observation without requesting another apply.
+                        Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                    }
                     Ok(crate::cloud::incoming::IncomingDisposition::Progress(_)) => {
                         Ok(Event::TrackingChanged(ChangeCause::Cloud))
                     }
@@ -685,3 +728,6 @@ fn lifecycle_kind(lifecycle: &LifecycleState) -> Lifecycle {
         LifecycleState::Failed { .. } => Lifecycle::Failed,
     }
 }
+
+#[path = "native_execution.rs"]
+mod native_execution;
