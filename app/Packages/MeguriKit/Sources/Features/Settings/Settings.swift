@@ -3,26 +3,60 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
-/// Independent Files actions and explicit manual server transfers.
+/// Compact/regular mobile Settings uses system navigation into grouped forms.
 public struct SettingsView: View {
     private let collection: ReviewCollection
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        Form {
-            ManualTransferSections(model: collection.manualTransfers, area: .connectionAndTransfers)
-            SettingsCollectionFilesSection(collection: collection)
-            ManualTransferSections(model: collection.manualTransfers, area: .history)
+        List {
+            ForEach(SettingsPage.allCases, id: \.self) { page in
+                NavigationLink(value: Destination.settingsPage(page)) {
+                    SettingsPageLabel(page: page)
+                }
+            }
         }
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
-        .frame(maxWidth: ContentWidth.readable)
-        .frame(maxWidth: .infinity)
-        .background(.token(.backgroundPrimary))
-        .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .navigationTitle(Text("Settings", bundle: .module))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
+    }
+}
+
+struct SettingsPageLabel: View {
+    let page: SettingsPage
+    var body: some View {
+        switch page {
+        case .accountSync: Label(SyncText.value("sync.settings.section"), systemImage: "icloud")
+        case .collection: Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
+        case .ankiServer: Label { Text("Anki Server", bundle: .module) } icon: { Image(systemName: "network") }
+        }
+    }
+}
+
+public struct SettingsPageView: View {
+    let collection: ReviewCollection
+    let page: SettingsPage
+    public init(collection: ReviewCollection, page: SettingsPage) { self.collection = collection; self.page = page }
+    public var body: some View {
+        if page == .accountSync { AccountSyncView(collection: collection) }
+        else {
+            Form {
+                if page == .collection {
+                    SettingsCollectionFilesSection(collection: collection)
+                    ManualTransferSections(model: collection.manualTransfers, area: .transfers)
+                } else {
+                    ManualTransferSections(model: collection.manualTransfers, area: .connection)
+                    Section {
+                        DisclosureGroup {
+                            ConnectionMetadata(model: collection.manualTransfers)
+                            ManualTransferSections(model: collection.manualTransfers, area: .history, inlineHistory: true)
+                        } label: { Text("Connection details", bundle: .module) }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle(Text(page == .collection ? "Collection" : "Anki Server", bundle: .module))
+            .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
+        }
     }
 }
 
@@ -96,24 +130,29 @@ private struct CollectionActionRow<Content: View, RowLabel: View>: View {
 public struct MacSettingsView: View {
     private let collection: ReviewCollection
     private let present: (SheetRoute) -> Void
-    @AppStorage("settings.selectedSection") private var selectedSection = "connection"
+    @AppStorage("settings.selectedSection") private var selectedSection = "accountSync"
     public init(collection: ReviewCollection, present: @escaping (SheetRoute) -> Void) {
         self.collection = collection; self.present = present
     }
     public var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: Binding<String?>(get: { selectedSection }, set: { if let value = $0, value != selectedSection { selectedSection = value } })) {
-                Label { Text("Connection", bundle: .module) } icon: { Image(systemName: "network") }
-                    .tag("connection")
-                    .accessibilityIdentifier("settings.root.connection")
-                Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
-                    .tag("collection")
-                    .accessibilityIdentifier("settings.root.collection")
+                ForEach(SettingsPage.allCases.filter(matchesSearch), id: \.self) { page in
+                    SettingsPageLabel(page: page)
+                        .tag(page.rawValue)
+                        .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                }
             }
+            .searchable(text: Binding(get: { collection.syncPresentation.settingsSearch },
+                set: { collection.syncPresentation.settingsSearch = $0 }), placement: .sidebar)
+            .background(SettingsSearchIdentifiers())
             .sidebarColumnChrome()
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            Form {
+            if selectedSection == "accountSync" {
+                AccountSyncView(collection: collection, host: .settings)
+            } else {
+              Form {
                 if selectedSection == "collection" {
                     SettingsCollectionFilesSection(collection: collection, present: present)
                     serverActions
@@ -137,10 +176,33 @@ public struct MacSettingsView: View {
             .frame(maxWidth: ContentWidth.readable)
             .frame(maxWidth: .infinity)
             .detailColumnChrome()
+            }
         }
+        .onAppear {
+            if selectedSection == "connection" { selectedSection = "ankiServer" }
+            if SettingsPage(rawValue: selectedSection) == nil { selectedSection = "accountSync" }
+            consumeAccountRequest()
+        }
+        .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeAccountRequest() }
         .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
+    }
+    private func consumeAccountRequest() {
+        guard collection.syncPresentation.settingsRequest != nil else { return }
+        selectedSection = "accountSync"
+        collection.syncPresentation.settingsSearch = ""
+        collection.syncPresentation.settingsRequest = nil
+    }
+    private func matchesSearch(_ page: SettingsPage) -> Bool {
+        let query = collection.syncPresentation.settingsSearch
+        guard !query.isEmpty else { return true }
+        let terms: String = switch page {
+        case .accountSync: SyncText.value("sync.settings.section") + " iCloud"
+        case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
+        case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"
+        }
+        return terms.localizedStandardContains(query)
     }
     private var hasActiveTransfer: Bool {
         let model = collection.manualTransfers

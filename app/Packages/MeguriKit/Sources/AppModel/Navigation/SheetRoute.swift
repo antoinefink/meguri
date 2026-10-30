@@ -12,6 +12,9 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case deckName(DeckActionsModel.Action)
     /// Explicit server-transfer preparation, decisions and retained history.
     case manualTransfer
+    case cloudSync(CloudSyncEntry)
+    /// Account & Sync over mobile review; closing preserves the retained card.
+    case accountSync
 
     public var id: Self { self }
 }

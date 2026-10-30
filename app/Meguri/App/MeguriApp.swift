@@ -62,7 +62,7 @@ struct MeguriApp: App {
             // Preserve navigation/window restoration while unavailable areas stay absent.
             navigation.show(.home)
             #if os(macOS)
-            AppDelegate.closeCollection = { await collection.close() }
+            AppDelegate.closeCollection = { await collection.closeForQuit() }
             #endif
         }
         self.collection = collection
@@ -83,6 +83,7 @@ struct MeguriApp: App {
             SidebarCommands()
             MainWindowCommands()
             StudyCommands()
+            CloudSyncCommands(collection: collection)
         }
         SwiftUI.Settings {
             if let collection {
@@ -95,6 +96,7 @@ struct MeguriApp: App {
         }
         .commands {
             SidebarCommands()
+            CloudSyncCommands(collection: collection)
         }
         #endif
     }

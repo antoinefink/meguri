@@ -47,6 +47,7 @@ let package = Package(
                 .product(name: "Instrumentation", package: "MeguriCore"),
             ],
             exclude: ["Review/AGENTS.md"],
+            resources: [.process("Sync/Resources")],
             swiftSettings: settings
         ),
         .target(

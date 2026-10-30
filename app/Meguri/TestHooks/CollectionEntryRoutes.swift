@@ -1,6 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import AppModel
 import DesignSystem
+import Foundation
 import Home
 import Settings
 import SwiftUI
@@ -8,6 +9,9 @@ import SwiftUI
 extension TestHooks {
     enum CollectionEntryRoutes {
         static func register(in registry: inout RouteRegistry) {
+            registry.register("settings/account-sync/setup-needed") { context in
+                .screen { AccountSyncInspection(configuration: context.configuration) }
+            }
             registry.register("settings/anki-transfer/empty") { _ in .screen { ManualTransferSettingsPreview.preview(.empty) } }
             registry.register("settings/anki-transfer/typical") { _ in .screen { ManualTransferSettingsPreview.preview(.typical) } }
             registry.register("settings/anki-transfer/error") { _ in .screen { ManualTransferSettingsPreview.preview(.error) } }
@@ -28,6 +32,41 @@ extension TestHooks {
             registry.register("collection/import/loading") { _ in .sheet { CollectionEntryPreview.preview(.loading) } }
             registry.register("home/deck-list/empty") { _ in .screen { HomeDeckListPreview.preview(.empty) } }
             registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.preview(.typical) } }
+        }
+    }
+
+    /// Production form and Settings composition, using a real generated local
+    /// collection. Explicitly absent CloudKit setup admits no native account read.
+    struct AccountSyncInspection: View {
+        private let configuration: LaunchConfiguration
+        private let preferences: UserDefaults
+        @State private var collection: ReviewCollection
+
+        init(configuration: LaunchConfiguration) {
+            self.configuration = configuration
+            let preferences = UserDefaults(suiteName: "meguri.testhooks.accountSyncInspection") ?? .standard
+            preferences.set("accountSync", forKey: "settings.selectedSection")
+            self.preferences = preferences
+            let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
+                clock: configuration.clock, configuration: nil, defaults: nil)
+            _collection = State(initialValue: ReviewCollection(configuration: configuration,
+                navigation: AppNavigation(), sync: sync))
+        }
+        var body: some View {
+            Group {
+                #if os(macOS)
+                SettingsWindow(collection: collection, features: .standard(collection: collection), configuration: configuration)
+                #else
+                NavigationStack { AccountSyncView(collection: collection) }
+                #endif
+            }
+            .defaultAppStorage(preferences)
+            .task {
+                #if os(macOS)
+                AppDelegate.closeCollection = { await collection.closeForQuit() }
+                #endif
+                await collection.start()
+            }
         }
     }
 }

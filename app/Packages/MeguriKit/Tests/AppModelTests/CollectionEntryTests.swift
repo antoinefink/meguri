@@ -19,12 +19,22 @@ extension ReviewCollectionStartupTests {
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         let original = try Data(contentsOf: source)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let cloud = SyncOwnerFake()
+        var configured = false
+        var retained = false
+        let sync = SyncCoordinator(bootstrap: { configured = true }, makeBackend: { _ in
+            #expect(configured)
+            #expect(try await CoreCollectionService().lifecycle() != .noCollection)
+            retained = true
+            return cloud
+        }, defaults: nil)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
         let display = EntryReviewDisplay()
         owner.makeReviewSurface = { _ in display }
         #expect(!files.fileExists(atPath: directory.path))
         await owner.start()
         try #require(owner.state == .noFile)
+        #expect(configured && !retained)
         #expect(files.fileExists(atPath: directory.path))
         #expect(!files.fileExists(atPath: configuration.collectionLocation.backupsDirectory.path))
         let entry = owner.entry
@@ -42,6 +52,7 @@ extension ReviewCollectionStartupTests {
         do {
             entry.confirm(); await entry.waitForCompletion()
             try #require(owner.state == .ready, "\(owner.error ?? entry.message ?? "Host not ready")")
+            #expect(retained && owner.sync === sync)
             #expect(owner.error == nil)
             #expect(entry.lastActivation?.media == .init(incoming: 0, decodedBytes: 0, reused: 0, added: 0, trashed: 0))
             #expect(entry.lastActivation?.backup == nil)

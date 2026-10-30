@@ -39,6 +39,9 @@ struct CompactRootView: View {
     private func stack(_ tab: CompactTab) -> some View {
         NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { navigation.setCompactPath($0, for: tab) })) {
             SectionDestinationView(screen: .root(tab.section), navigation: navigation, features: features)
+                .toolbar {
+                    if tab == .decks { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
+                }
                 .navigationDestination(for: Destination.self) { destination in
                     SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
                 }

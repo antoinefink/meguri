@@ -61,6 +61,7 @@ nonisolated public enum Destination: Hashable, Codable, Sendable {
     /// Note Types, pushed from Settings or from Browse's ⋯ menu in the tab
     /// layout (R18).
     case noteTypes
+    case settingsPage(SettingsPage)
 }
 
 /// What the sidebar has selected (R17): a section row or a deck row.

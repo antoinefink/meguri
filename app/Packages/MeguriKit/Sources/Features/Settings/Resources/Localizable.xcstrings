@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Close": {
+      "comment": "Closes the sync sheet while confirmed work remains owned by the coordinator.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Close" } }
+      }
+    },
+    "Anki Server": {
+      "comment": "Settings category for the existing manual server connection. Separate from Account & Sync.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anki Server"
+          }
+        }
+      }
+    },
     "The media source changed during export. Start a fresh export after changes finish.": {
       "localizations": {
         "en": {

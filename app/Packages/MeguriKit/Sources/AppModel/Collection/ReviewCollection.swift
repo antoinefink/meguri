@@ -63,6 +63,11 @@ public final class ReviewCollection {
     public var didFlushLocally: (() -> Void)? = nil
     public let configuration: LaunchConfiguration
     public let navigation: AppNavigation
+    /// Shared by the main scene, Settings, imports and every shell layout.
+    public let sync: SyncCoordinator
+    private var backgroundLease: UInt64 = 0
+    private var backgroundDeadlineMilliseconds: Int64?
+    private var backgroundLeaseExpired = false
     private let collection: CoreCollectionService
     private let entryService: any CollectionEntryService
     private var entryOwner: CollectionEntryCoordinator?
@@ -355,7 +360,9 @@ public final class ReviewCollection {
         default: return
         }
         releasedManualHostState = restored
-        try? await collection.close()
+        guard await sync.cancelAndDrain() else { return }
+        do { try await collection.close() }
+        catch { self.error = "Couldn’t close the collection. Try again."; return }
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
@@ -379,6 +386,7 @@ public final class ReviewCollection {
     private var deckTreeRevision: UInt64 = 0
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
+    private var cloudPreparationTask: Task<Void, any Error>?
     private var opening = false
     private var preparedGeneration: UInt64?
     private var starting = false
@@ -386,10 +394,11 @@ public final class ReviewCollection {
     private var pendingDeck: Int64?
     private var closed = false
     private var closing = false
+    private var closeTask: Task<Bool, Never>?
     private var day: ReviewDayMonitor?
     private var recoveryDrops: [Int64] = []
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
         saveSelectedDeck = { @MainActor id in try await CoreDeckService().selectDeck(id: id).generation }
@@ -398,6 +407,7 @@ public final class ReviewCollection {
         }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
+        self.sync = sync ?? SyncCoordinator(directory: configuration.collectionLocation.directory, clock: configuration.clock)
         self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone),
             inspectionSeed: { [input = configuration.nativeReviewInput] in
                 if let input { return try await input.inspectionSeed() }
@@ -421,6 +431,7 @@ public final class ReviewCollection {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
         do {
+            await sync.preparePlatform()
             try await configuration.nativeReviewInput?.prepare()
             try await subscribe()
             let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
@@ -450,6 +461,7 @@ public final class ReviewCollection {
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
         if generation != value { endGoToDeckGeneration(); invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
+        await sync.completeOpenedHost(generation: value)
         if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }
@@ -470,12 +482,45 @@ public final class ReviewCollection {
         preparedGeneration = generation
     }
     func prepareEntry() async throws -> CoreBridge.CollectionLocation {
+        await sync.preparePlatform()
         try await configuration.nativeReviewInput?.prepare()
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation)
     }
+    func prepareCloudConnectionHost() async throws {
+        if let cloudPreparationTask { try await cloudPreparationTask.value; return }
+        guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        let task = Task {
+            defer { cloudPreparationTask = nil }
+            if let openTask { await openTask.value }
+            guard !closing, !closed, !opening else { throw BridgeError.busy(runningOperation: "collection preparation") }
+            let location = try await prepareEntry()
+            try Task.checkCancellation()
+            guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            guard sync.setupState != .configurationUnavailable else { throw BridgeError.unavailable(reason: "configuration") }
+            if sync.connectionService != nil { await sync.prepareConnectionAuthority(); return }
+            // An existing file follows the owner's ordinary open path. Neither
+            // discovery nor its UI may create or replace that file.
+            if await Self.exists(configuration.collectionLocation.collectionFile), state != .ready {
+                await start()
+                await sync.prepareConnectionAuthority()
+                guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+                return
+            }
+            let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+            let retainedGeneration = try await collection.prepareCloudConnectionHost(location, randomSeed: seed)
+            guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            lifecycle = try await collection.lifecycle()
+            if case .noCollection = lifecycle { state = .noFile; generation = retainedGeneration }
+            await sync.completeOpenedHost(generation: retainedGeneration)
+            await sync.prepareConnectionAuthority()
+            guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        }
+        cloudPreparationTask = task
+        try await task.value
+    }
     var entryAllowed: Bool { (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
-    var manualAllowed: Bool { !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
+    var manualAllowed: Bool { cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
     func beginManualActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -565,6 +610,7 @@ public final class ReviewCollection {
         guard !closed else { return }
         // Never drop review commit failures behind a coalesced deck refresh.
         review?.receive(event)
+        sync.coreEvent(event)
         switch event.kind {
         case .lifecycle(let value):
             receiveLifecycle(value)
@@ -577,6 +623,7 @@ public final class ReviewCollection {
             }
         case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
         case .collectionReplaced(let next):
+            sync.collectionReplaced(next)
             guard preparedGeneration != next else { return }
             endGoToDeckGeneration()
             exportOwner?.generationChanged()
@@ -606,6 +653,7 @@ public final class ReviewCollection {
 
     // Also used by focused owner tests; the event consumer is the production caller.
     func receiveLifecycle(_ value: CollectionLifecycle) {
+        sync.receiveLifecycle(value)
         let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
         lifecycle = value
         switch value {
@@ -989,6 +1037,7 @@ public final class ReviewCollection {
                     if report.activeSession != review?.sessionID { review?.generationEnded(); review = nil; navigation.endReview() }
                     await refreshMedia()
                     if reviewIsActive, resolver != nil { try await review?.resume() }
+                    await sync.foregroundAfterLocalResume()
                     resuming = false
                     deferredSuspend = nil
                     refreshCounts()
@@ -998,6 +1047,9 @@ public final class ReviewCollection {
                     catch { self.error = String(describing: error) }
                     try await collection.flushForBackground()
                     didFlushLocally?()
+                    guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
+                        throw BridgeError.cloudPolicy(.coreCapabilityUnavailable)
+                    }
                     switch try await collection.suspend(timeoutMilliseconds: 1_500) {
                     case .suspended: deferredSuspend = nil
                     case .deferred(let id): deferredSuspend = id
@@ -1007,12 +1059,39 @@ public final class ReviewCollection {
         }
     }
     public func waitForLifecycle() async { await lifecycleTask?.value }
+    /// The UIKit assertion owner supplies the OS's remaining time, never a
+    /// guessed duration. Tokens keep a late expiry out of a later foreground.
+    public func beginBackgroundTask(deadlineMilliseconds: Int64?) -> UInt64? {
+        guard foreground else { return nil }
+        backgroundLease &+= 1
+        backgroundDeadlineMilliseconds = deadlineMilliseconds
+        backgroundLeaseExpired = false
+        let token = backgroundLease
+        setForeground(false)
+        return token
+    }
+    public func backgroundTaskExpired(_ token: UInt64) {
+        guard token == backgroundLease, !foreground else { return }
+        backgroundLeaseExpired = true
+        sync.backgroundExpired()
+    }
     public func systemTimeChanged() {
         NSTimeZone.resetSystemTimeZone()
         guard foreground, state == .ready else { return }
         Task { await day?.checkNow() }
     }
-    @discardableResult public func close() async -> Bool {
+    @discardableResult public func close() async -> Bool { await close(quitting: false) }
+    @discardableResult public func closeForQuit() async -> Bool { await close(quitting: true) }
+    private func close(quitting: Bool) async -> Bool {
+        if let closeTask { return await closeTask.value }
+        if closed { return true }
+        let task = Task { await performClose(quitting: quitting) }
+        closeTask = task
+        let result = await task.value
+        closeTask = nil
+        return result
+    }
+    private func performClose(quitting: Bool) async -> Bool {
         closing = true
         defer { closing = false }
         invalidateDeckActions()
@@ -1028,8 +1107,12 @@ public final class ReviewCollection {
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()
         await openTask?.value
+        _ = await cloudPreparationTask?.result
         await lifecycleTask?.value
         if state == .noFile || state == .unopened {
+            guard await sync.cancelAndDrain() else { return false }
+            do { try await collection.close() }
+            catch { self.error = "Couldn’t close the collection. Try again."; return false }
             closed = true; events?.cancel(); events = nil
             review?.generationEnded(); review = nil; navigation.endReview()
             invalidateMedia(); await mediaCloseTask?.value
@@ -1038,6 +1121,12 @@ public final class ReviewCollection {
         if review != nil { await finishReview(); if review != nil { return false } }
         do {
             try await collection.flushForBackground()
+            if quitting {
+                var quitAllowed = false
+                await sync.quitAfterLocalFlush { quitAllowed = true }
+                guard quitAllowed else { return false }
+            }
+            guard await sync.cancelAndDrain() else { return false }
             try await collection.close()
             try await configuration.nativeReviewInput?.closed()
             closed = true; events?.cancel(); events = nil; day?.close(); countTimer?.invalidate(); countsTask?.cancel()

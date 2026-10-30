@@ -54,6 +54,11 @@ struct SidebarRootView: View {
             }
             .detailColumnChrome()
         }
+        .toolbar {
+            if navigation.review == nil {
+                ToolbarItem(placement: .primaryAction) { features.syncStatus() }
+            }
+        }
     }
 
     /// The deck page Home shows in the Home section, else the section's root.

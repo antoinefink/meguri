@@ -1,0 +1,2382 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "sync.action.cancelOp": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Replacement…"
+          }
+        }
+      }
+    },
+    "sync.action.resumeOp": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume"
+          }
+        }
+      }
+    },
+    "sync.action.reviewConflicts": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review Conflicts…"
+          }
+        }
+      }
+    },
+    "sync.action.showDetails": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Details…"
+          }
+        }
+      }
+    },
+    "sync.adopt.action": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace Local Collection from iCloud…"
+          }
+        }
+      }
+    },
+    "sync.adopt.backup": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device’s collection is backed up first. Media files are not in the backup."
+          }
+        }
+      }
+    },
+    "sync.adopt.confirm": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace"
+          }
+        }
+      }
+    },
+    "sync.adopt.direction": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device’s collection will be replaced with the iCloud collection."
+          }
+        }
+      }
+    },
+    "sync.adopt.staging": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading the iCloud collection…"
+          }
+        }
+      }
+    },
+    "sync.adopt.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace Local Collection from iCloud"
+          }
+        }
+      }
+    },
+    "sync.adopt.validating": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the downloaded collection…"
+          }
+        }
+      }
+    },
+    "sync.attention.applyFailed": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change from iCloud couldn’t be applied. Meguri tries again later."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes from iCloud couldn’t be applied. Meguri tries again later."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.assetUnavailable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change from iCloud couldn’t be downloaded. Meguri tries again the next time the collection opens."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes from iCloud couldn’t be downloaded. Meguri tries again the next time the collection opens."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.chooseCollection": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose how this collection syncs with iCloud."
+          }
+        }
+      }
+    },
+    "sync.attention.claimStuck": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld note type change can’t sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld note type changes can’t sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.cloudError": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync isn’t working right now. If this continues, copy the debug info and report it."
+          }
+        }
+      }
+    },
+    "sync.attention.collectionCorrupt": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection is damaged, so syncing stopped."
+          }
+        }
+      }
+    },
+    "sync.attention.conflicts": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld edit was kept as a copy because it conflicted with a change from another device."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld edits were kept as copies because they conflicted with changes from other devices."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.conflictsUnreadable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some saved conflict copies couldn’t be read."
+          }
+        }
+      }
+    },
+    "sync.attention.crtMismatch": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection and the iCloud collection have different creation dates, so nothing syncs until you choose one."
+          }
+        }
+      }
+    },
+    "sync.attention.exchangeIncomplete": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some changes from your last Sync Now did not sync."
+          }
+        }
+      }
+    },
+    "sync.attention.isolated": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection stopped syncing with iCloud."
+          }
+        }
+      }
+    },
+    "sync.attention.localStorageFull": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device is out of storage space, so iCloud sync stopped. Free up space, then try again."
+          }
+        }
+      }
+    },
+    "sync.attention.mediaChanged": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file changed while it was syncing. It syncs after Meguri checks it again."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files changed while they were syncing. They sync after Meguri checks them again."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.mediaMissing": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file is missing on this device and in iCloud."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files are missing on this device and in iCloud."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.mediaMissingInICloud": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media files can’t sync because Meguri’s media data is missing from iCloud. Cards and notes still sync."
+          }
+        }
+      }
+    },
+    "sync.attention.oversize": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item is too large to sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items are too large to sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.publishConflict": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection was replaced from another device while this device was uploading."
+          }
+        }
+      }
+    },
+    "sync.attention.quotaFull": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your iCloud storage is full. Changes stay on this device until there’s room."
+          }
+        }
+      }
+    },
+    "sync.attention.referenceWaiting": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change from iCloud is waiting for a related change that has not arrived."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes from iCloud are waiting for related changes that have not arrived."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.refused": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item can’t sync because its copy in iCloud is not valid."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items can’t sync because their copies in iCloud are not valid."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.rekeyFailed": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item couldn’t be updated to match iCloud. Meguri tries again later."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items couldn’t be updated to match iCloud. Meguri tries again later."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.rootUnreadable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri can’t read which collection is current in iCloud. Your collection and its unsent changes are still on this device."
+          }
+        }
+      }
+    },
+    "sync.attention.storageGuidance": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Manage your iCloud storage in System Settings."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Manage your iCloud storage in Settings."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.trackingError": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t save its sync information on this device, so iCloud sync stopped."
+          }
+        }
+      }
+    },
+    "sync.attention.unreadable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item can’t be read, so it doesn’t sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items can’t be read, so they don’t sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.attention.unsupportedSchema": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sync information needs a newer version of Meguri. Update Meguri on this device to sync all your changes."
+          }
+        }
+      }
+    },
+    "sync.attention.unsyncable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file is empty or too large to sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files are empty or too large to sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.button.label": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud Sync"
+          }
+        }
+      }
+    },
+    "sync.connect.action": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect to iCloud…"
+          }
+        }
+      }
+    },
+    "sync.connect.reading": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting details of the iCloud collection…"
+          }
+        }
+      }
+    },
+    "sync.connect.two.keepLocal": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep This Device’s Collection Without iCloud"
+          }
+        }
+      }
+    },
+    "sync.connect.two.message": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri doesn’t merge two collections. Choose which one to keep."
+          }
+        }
+      }
+    },
+    "sync.connect.two.replace": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace the iCloud Collection with This Device’s…"
+          }
+        }
+      }
+    },
+    "sync.connect.two.replace.caption": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection can be restored for 30 days. Your other devices will ask what to do."
+          }
+        }
+      }
+    },
+    "sync.connect.two.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Device and iCloud Each Have a Collection"
+          }
+        }
+      }
+    },
+    "sync.connect.two.useICloud": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the iCloud Collection on This Device…"
+          }
+        }
+      }
+    },
+    "sync.connect.two.useICloud.caption": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device’s collection is backed up, then replaced."
+          }
+        }
+      }
+    },
+    "sync.connect.upload.confirm": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload"
+          }
+        }
+      }
+    },
+    "sync.connect.upload.message": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your other devices can then use this collection. It uses your iCloud storage."
+          }
+        }
+      }
+    },
+    "sync.connect.upload.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload This Collection to iCloud?"
+          }
+        }
+      }
+    },
+    "sync.connect.useICloud.confirm": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use iCloud Collection"
+          }
+        }
+      }
+    },
+    "sync.connect.useICloud.message": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device’s empty collection is backed up, then replaced."
+          }
+        }
+      }
+    },
+    "sync.connect.useICloud.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the iCloud Collection on This Device?"
+          }
+        }
+      }
+    },
+    "sync.counts.asOf": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As of %@"
+          }
+        }
+      }
+    },
+    "sync.counts.cards": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards"
+          }
+        }
+      }
+    },
+    "sync.counts.decks": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decks"
+          }
+        }
+      }
+    },
+    "sync.counts.iCloud": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud"
+          }
+        }
+      }
+    },
+    "sync.counts.lastChange": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Change"
+          }
+        }
+      }
+    },
+    "sync.counts.lastReview": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Review"
+          }
+        }
+      }
+    },
+    "sync.counts.mediaFiles": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media Files"
+          }
+        }
+      }
+    },
+    "sync.counts.noteTypes": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note Types"
+          }
+        }
+      }
+    },
+    "sync.counts.notes": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes"
+          }
+        }
+      }
+    },
+    "sync.counts.reviews": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews"
+          }
+        }
+      }
+    },
+    "sync.counts.thisDevice": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Device"
+          }
+        }
+      }
+    },
+    "sync.counts.unknown": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        }
+      }
+    },
+    "sync.decision.action": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose…"
+          }
+        }
+      }
+    },
+    "sync.decision.action.label": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where to keep this collection"
+          }
+        }
+      }
+    },
+    "sync.decision.keepLocal": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep on This Device Only"
+          }
+        }
+      }
+    },
+    "sync.decision.keepLocal.caption": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection stays on this device and doesn’t sync."
+          }
+        }
+      }
+    },
+    "sync.decision.message": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Until you choose, this collection stays on this device and nothing is sent to iCloud."
+          }
+        }
+      }
+    },
+    "sync.decision.notNow": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Now"
+          }
+        }
+      }
+    },
+    "sync.decision.replace": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace iCloud Collection…"
+          }
+        }
+      }
+    },
+    "sync.decision.replace.caption": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection is replaced with this one on all your devices."
+          }
+        }
+      }
+    },
+    "sync.decision.sheetTitle": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Where to Keep This Collection"
+          }
+        }
+      }
+    },
+    "sync.decision.title.none": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where to keep this collection."
+          }
+        }
+      }
+    },
+    "sync.details.heldBack": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your latest answer syncs when you finish reviewing, so you can still undo it."
+          }
+        }
+      }
+    },
+    "sync.details.incoming": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change from iCloud waiting to be applied"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes from iCloud waiting to be applied"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.details.lastAttempt": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Sync Now: %1$@, %2$@"
+          }
+        }
+      }
+    },
+    "sync.details.lastSync": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last synced %@"
+          }
+        }
+      }
+    },
+    "sync.details.toSend": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change to send"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes to send"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.error.cloudError": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync isn’t working right now."
+          }
+        }
+      }
+    },
+    "sync.error.conflictRecovery": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync needs your attention."
+          }
+        }
+      }
+    },
+    "sync.error.localStorageFull": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device is out of storage space."
+          }
+        }
+      }
+    },
+    "sync.error.noAccount": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud isn’t available."
+          }
+        }
+      }
+    },
+    "sync.error.offline": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You’re offline."
+          }
+        }
+      }
+    },
+    "sync.error.quotaFull": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your iCloud storage is full."
+          }
+        }
+      }
+    },
+    "sync.error.throttled": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud is busy. Try again later."
+          }
+        }
+      }
+    },
+    "sync.error.trackingError": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t save its sync information on this device."
+          }
+        }
+      }
+    },
+    "sync.error.unsupportedSchema": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sync information needs a newer version of Meguri."
+          }
+        }
+      }
+    },
+    "sync.kind.card": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld card"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld cards"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.deck": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld deck"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld decks"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.mediaFile": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.note": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld note"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld notes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.noteType": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld note type"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld note types"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.preset": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld preset"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld presets"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.review": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld review"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld reviews"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.setting": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld collection setting"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld collection settings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.kind.tag": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tag"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tags"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.media.filesLeft": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Syncing media, %lld file left"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Syncing media, %lld files left"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.media.noSpace": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media downloads are paused until this device has more free space."
+          }
+        }
+      }
+    },
+    "sync.media.off": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio and image sync is off."
+          }
+        }
+      }
+    },
+    "sync.media.sizeLeft": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ left"
+          }
+        }
+      }
+    },
+    "sync.media.timeLeft": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About %@ remaining"
+          }
+        }
+      }
+    },
+    "sync.media.waiting": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file waiting to sync"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files waiting to sync"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.now.cancel": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "sync.now.command": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now"
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.collectionUnavailable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now is available once the collection is ready."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.decisionRequired": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where to keep this collection before you sync."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.iCloudUnavailable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sign in to iCloud in System Settings to sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sign in to iCloud in Settings to sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.notConnected": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection doesn’t sync with iCloud. You can turn on syncing in Account & Sync."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.paused": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync is paused. Resume it in Account & Sync to sync now."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.recoveryRequired": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync needs your attention. Open iCloud Sync to see what to do."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.reviewActive": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud keeps syncing automatically while you review. Sync Now is available when you finish reviewing."
+          }
+        }
+      }
+    },
+    "sync.now.unavailable.reviewActive.manual": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now is available when you finish reviewing."
+          }
+        }
+      }
+    },
+    "sync.preview.otherDevicesUnknown": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes that other devices have not sent yet are not counted."
+          }
+        }
+      }
+    },
+    "sync.publish.action": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace iCloud Collection…"
+          }
+        }
+      }
+    },
+    "sync.publish.cancelling": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelling…"
+          }
+        }
+      }
+    },
+    "sync.publish.confirm": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace iCloud Collection"
+          }
+        }
+      }
+    },
+    "sync.publish.direction": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection will be replaced with this one on all your devices."
+          }
+        }
+      }
+    },
+    "sync.publish.finishing": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finishing…"
+          }
+        }
+      }
+    },
+    "sync.publish.otherDevices": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes other devices have not sent yet are not included. Those devices will ask what to do."
+          }
+        }
+      }
+    },
+    "sync.publish.preparing": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing…"
+          }
+        }
+      }
+    },
+    "sync.publish.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace iCloud Collection"
+          }
+        }
+      }
+    },
+    "sync.publish.uploading": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploading this collection to iCloud…"
+          }
+        }
+      }
+    },
+    "sync.recovery.error.notOffered": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This option is no longer available."
+          }
+        }
+      }
+    },
+    "sync.recovery.error.other": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t finish this. Try again."
+          }
+        }
+      }
+    },
+    "sync.recovery.error.sessionActive": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish reviewing, then try again."
+          }
+        }
+      }
+    },
+    "sync.recovery.tryAgain": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "sync.result.blocked": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change can’t sync. See the details below."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes can’t sync. See the details below."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.result.cancelled": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Stopped"
+          }
+        }
+      }
+    },
+    "sync.result.failed": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Failed"
+          }
+        }
+      }
+    },
+    "sync.result.incomingWaiting": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change is waiting for another device to finish syncing."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes are waiting for another device to finish syncing."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.result.incomplete": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some Changes Did Not Sync"
+          }
+        }
+      }
+    },
+    "sync.result.newerPending": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld newer change is waiting to sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld newer changes are waiting to sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.result.outstanding": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld change is still waiting to sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld changes are still waiting to sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.result.succeeded": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finished Syncing"
+          }
+        }
+      }
+    },
+    "sync.result.waiting": {
+      "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Couldn’t Finish Yet"
+          }
+        }
+      }
+    },
+    "sync.settings.account.available": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in to iCloud"
+          }
+        }
+      }
+    },
+    "sync.settings.account.none": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not signed in to iCloud"
+          }
+        }
+      }
+    },
+    "sync.settings.account.other": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in to a different iCloud account than this collection uses"
+          }
+        }
+      }
+    },
+    "sync.settings.account.restricted": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud is restricted on this device"
+          }
+        }
+      }
+    },
+    "sync.settings.account.setupNeeded": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri can’t use iCloud on this device"
+          }
+        }
+      }
+    },
+    "sync.settings.account.temporary": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud is temporarily unavailable"
+          }
+        }
+      }
+    },
+    "sync.settings.account.unknown": {
+      "comment": "Account row when no actual account status has been projected; does not infer a signed-out account from installation setup.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud account status unknown"
+          }
+        }
+      }
+    },
+    "sync.settings.advanced": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced"
+          }
+        }
+      }
+    },
+    "sync.settings.automatic": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Automatically"
+          }
+        }
+      }
+    },
+    "sync.settings.automatic.footer": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is off, changes sync only when you choose Sync Now."
+          }
+        }
+      }
+    },
+    "sync.settings.conflicts": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review Conflicts…"
+          }
+        }
+      }
+    },
+    "sync.settings.iCloud": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud"
+          }
+        }
+      }
+    },
+    "sync.settings.media": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Audio and Images"
+          }
+        }
+      }
+    },
+    "sync.settings.media.footer": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is off, cards and notes still sync."
+          }
+        }
+      }
+    },
+    "sync.settings.pause": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause iCloud Sync"
+          }
+        }
+      }
+    },
+    "sync.settings.privacy": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your collection is stored in your private iCloud account and uses your iCloud storage. With Advanced Data Protection on, your collection’s content and media are end-to-end encrypted; some sync information, such as sizes and dates, is not."
+          }
+        }
+      }
+    },
+    "sync.settings.resumePause": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume iCloud Sync"
+          }
+        }
+      }
+    },
+    "sync.settings.section": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account & Sync"
+          }
+        }
+      }
+    },
+    "sync.settings.stop": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop Using iCloud on This Device…"
+          }
+        }
+      }
+    },
+    "sync.status.automaticOff.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Sync Now to sync this collection."
+          }
+        }
+      }
+    },
+    "sync.status.automaticOff.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic Sync Off"
+          }
+        }
+      }
+    },
+    "sync.status.keptLocally": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your changes are saved on this device."
+          }
+        }
+      }
+    },
+    "sync.status.localOnly.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection is only on this device."
+          }
+        }
+      }
+    },
+    "sync.status.localOnly.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud Off"
+          }
+        }
+      }
+    },
+    "sync.status.needsAttention.count": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld issue needs your attention."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld issues need your attention."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.status.needsAttention.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs Attention"
+          }
+        }
+      }
+    },
+    "sync.status.offline.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes sync when you’re back online."
+          }
+        }
+      }
+    },
+    "sync.status.offline.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "sync.status.paused.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused"
+          }
+        }
+      }
+    },
+    "sync.status.paused.user": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud sync is paused."
+          }
+        }
+      }
+    },
+    "sync.status.pending.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some changes have not synced yet."
+          }
+        }
+      }
+    },
+    "sync.status.pending.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to Sync"
+          }
+        }
+      }
+    },
+    "sync.status.syncing.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing your collection with iCloud."
+          }
+        }
+      }
+    },
+    "sync.status.syncing.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing…"
+          }
+        }
+      }
+    },
+    "sync.status.syncingMedia.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing Media…"
+          }
+        }
+      }
+    },
+    "sync.status.unavailable.noAccount": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sign in to iCloud in System Settings to sync this collection."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sign in to iCloud in Settings to sync this collection."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.status.unavailable.restricted": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud is restricted on this device, so this collection can’t sync."
+          }
+        }
+      }
+    },
+    "sync.status.unavailable.setupNeeded": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri can’t use iCloud on this device."
+          }
+        }
+      }
+    },
+    "sync.status.unavailable.temporary": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud isn’t available right now. Syncing continues when it’s available again."
+          }
+        }
+      }
+    },
+    "sync.status.unavailable.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud Unavailable"
+          }
+        }
+      }
+    },
+    "sync.status.upToDate.detail": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last synced %@."
+          }
+        }
+      }
+    },
+    "sync.status.upToDate.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up to Date"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -54,12 +54,36 @@ struct ReviewLifecycle: ViewModifier {
 /// Keep the local flush alive while iOS transitions to background execution.
 enum ReviewBackgroundLease {
     static func begin(_ collection: ReviewCollection?) {
-        guard let collection else { return }
-        let lease = UIApplication.shared.beginBackgroundTask(withName: "Review local flush", expirationHandler: nil)
-        collection.setForeground(false)
+        guard let collection, collection.foreground else { return }
+        let lease = Lease(collection: collection)
+        lease.identifier = UIApplication.shared.beginBackgroundTask(withName: "Review and iCloud flush") {
+            Task { @MainActor in lease.expire() }
+        }
+        let remaining = UIApplication.shared.backgroundTimeRemaining
+        let deadline: Int64?
+        if lease.identifier != .invalid, remaining.isFinite, remaining > 0,
+           remaining < Double(Int64.max / 1_000) - Date().timeIntervalSince1970 {
+            deadline = Int64((Date().timeIntervalSince1970 + remaining) * 1_000)
+        } else { deadline = nil }
+        lease.token = collection.beginBackgroundTask(deadlineMilliseconds: deadline)
         Task {
             await collection.waitForLifecycle()
-            if lease != .invalid { UIApplication.shared.endBackgroundTask(lease) }
+            lease.finish()
+        }
+    }
+    @MainActor private final class Lease {
+        weak var collection: ReviewCollection?
+        var identifier: UIBackgroundTaskIdentifier = .invalid
+        var token: UInt64?
+        init(collection: ReviewCollection) { self.collection = collection }
+        func expire() {
+            finish()
+            if let token { collection?.backgroundTaskExpired(token) }
+        }
+        func finish() {
+            guard identifier != .invalid else { return }
+            let original = identifier; identifier = .invalid
+            UIApplication.shared.endBackgroundTask(original)
         }
     }
 }

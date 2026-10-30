@@ -302,6 +302,7 @@ extension TestHooks {
                     switch destination {
                     case let .deckPage(deck): "deck:\(deck.rawValue)"
                     case .noteTypes: "noteTypes"
+                    case .settingsPage(let page): "settings.\(page.rawValue)"
                     }
                 }.joined(separator: ",")
             }

@@ -224,6 +224,9 @@ extension TestHooks {
                 throw TestHookError("-MeguriImportSource applies to iOS only")
                 #endif
             }
+            if route?.path == "settings/account-sync/setup-needed", fixture == nil {
+                throw TestHookError("settings/account-sync/setup-needed requires -MeguriFixture with a generated collection")
+            }
             if let fixture {
                 try installer.install(from: fixture, into: configuration.collectionLocation)
             }

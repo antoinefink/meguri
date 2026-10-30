@@ -15,6 +15,8 @@ import SwiftUI
 struct ShellFeatures {
     var nativeMacWorkspace = false
     var availableSections: [AppSection] = AppSection.sidebar
+    var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
+    var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
     /// The rows of the sidebar's "Decks" group, each tagged
@@ -38,11 +40,13 @@ struct ShellFeatures {
             if section == .settings { AnyView(SettingsView(collection: collection)) }
             else { AnyView(HomeView(collection: collection)) }
         }
+        features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+        features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.review = { presentation, _ in
             if let model = presentation.session as? ReviewCoordinator {
-                AnyView(ReviewView(model: model, status: AnyView(ConnectionStatusView(model: collection.manualTransfers)), visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
+                AnyView(ReviewView(model: model, status: AnyView(CloudSyncStatusButton(collection: collection)), visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
             } else { AnyView(EmptyView()) }
         }
         features.sheet = { route, navigation in
@@ -58,6 +62,8 @@ struct ShellFeatures {
                     .frame(idealWidth: ContentWidth.readable, minHeight: WindowMetrics.minimum.height)
                     #endif
                 )
+            case .cloudSync(let entry): AnyView(CloudConnectionView(collection: collection, entry: entry))
+            case .accountSync: AnyView(AccountSyncSheet(collection: collection))
             case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
             }
         }
@@ -84,12 +90,14 @@ struct SectionDestinationView: View {
     enum Screen: Hashable {
         case root(AppSection)
         case deckPage(DeckID)
+        case settingsPage(SettingsPage)
 
         /// The screen a pushed destination shows.
         init(_ destination: Destination) {
             switch destination {
             case let .deckPage(deck): self = .deckPage(deck)
             case .noteTypes: self = .root(.noteTypes)
+            case .settingsPage(let page): self = .settingsPage(page)
             }
         }
     }
@@ -102,6 +110,7 @@ struct SectionDestinationView: View {
         switch screen {
         case let .root(section): features.sectionRoot(section, navigation)
         case let .deckPage(deck): features.deckPage(deck, navigation)
+        case let .settingsPage(page): features.settingsPage(page)
         }
     }
 }

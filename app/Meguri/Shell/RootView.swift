@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
@@ -97,6 +98,7 @@ struct RootView: View {
         }
         .onAppear {
             navigation.adoptLaunchLayout(layout)
+            collection?.syncPresentation.showStatusForCommands = layout == .sidebar
             collection?.setSceneActive(scenePhase == .active)
             updateReviewObscuration()
             #if os(macOS)
@@ -140,12 +142,20 @@ struct RootView: View {
         .onChange(of: launchAlert) { _, _ in updateReviewObscuration() }
         .onChange(of: linkRefusal != nil) { _, _ in updateReviewObscuration() }
         .onChange(of: navigation.review?.id) { _, _ in collection?.navigationChanged() }
+        .onChange(of: layout) { _, layout in collection?.syncPresentation.showStatusForCommands = layout == .sidebar }
+        .onChange(of: collection?.syncPresentation.statusPresented) { _, _ in updateReviewObscuration() }
+        .onKeyPress("y", phases: .down) { _ in
+            guard let collection, SyncKeyboardOwnership.admits(collection),
+                  collection.requestSyncNow(source: .key, showStatus: layout == .sidebar) else { return .ignored }
+            return .handled
+        }
         .modifier(ReviewLifecycle(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
     }
 
     private func updateReviewObscuration() {
-        collection?.setReviewObscured(navigation.sheet != nil || launchSheet || launchAlert || linkRefusal != nil)
+        collection?.setReviewObscured(navigation.sheet != nil || launchSheet || launchAlert || linkRefusal != nil
+            || collection?.syncPresentation.statusPresented == true)
     }
 
     /// A launch route's screen, shown in place of the shell.
