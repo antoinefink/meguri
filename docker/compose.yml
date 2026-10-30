@@ -17,7 +17,7 @@ services:
     volumes:
       - ..:/work
       - cargo-home:/cargo-home
-      - cargo-target:/cargo-target
+      - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
     # SQLite files and other test scratch stay on tmpfs, never on the bind mount.
     tmpfs:
       - /tmp:exec,mode=1777
@@ -60,7 +60,7 @@ services:
     volumes:
       - ..:/work
       - cargo-home:/cargo-home
-      - cargo-target:/cargo-target
+      - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
     tmpfs:
       - /tmp:exec,mode=1777
     environment:
@@ -85,7 +85,7 @@ services:
     working_dir: /work
     volumes:
       - ..:/work
-      - cargo-target:/cargo-target:ro
+      - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target:ro"
     tmpfs:
       - /tmp:exec,mode=1777
       - /work/local-data:mode=0700

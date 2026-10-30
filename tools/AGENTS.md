@@ -1,5 +1,7 @@
 # tools/
 
+- `MEGURI_DOCKER_CARGO_TARGET` optionally selects an existing absolute host directory for this checkout's Rust build cache; otherwise Compose uses its named volume. Use a dedicated cache directory. Set it on `tools/mg` so nested jobs inherit it. Native Rust builds separately honor `CARGO_TARGET_DIR`.
+
 - Antoine's temporary macOS-first pass (2026-10-25) permits direct host Xcode MCP build/run/debug/UI feedback. Keep it scoped to Meguri; defer VM/mobile iterations without counting them as passes. Required integration gates still use MG. A Mac-only Xcode build can extract partial-platform catalog edits: preserve them separately for review rather than committing mobile entries marked stale.
 
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
