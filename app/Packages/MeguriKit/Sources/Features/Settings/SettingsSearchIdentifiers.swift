@@ -34,27 +34,9 @@ struct SettingsSearchIdentifiers: NSViewRepresentable {
 
         private static func identify(_ field: NSSearchField) {
             field.setAccessibilityIdentifier("settings.root.search")
-            guard let search = (field.cell as? NSSearchFieldCell)?.searchButtonCell else { return }
-            // The exported button can be a virtual AX child rather than the
-            // public cell. Match its native localized name, never the cancel
-            // button or another search field. No roles or labels are changed.
-            var visited: Set<ObjectIdentifier> = []
-            identifyButton(in: field, search: search, visited: &visited)
-        }
-
-        private static func identifyButton(in element: any NSAccessibilityProtocol, search: NSButtonCell,
-                                           visited: inout Set<ObjectIdentifier>) {
-            guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { return }
-            if element.accessibilityRole() == .button,
-               (element as AnyObject === search || (search.accessibilityLabel() != nil
-                    && element.accessibilityLabel() == search.accessibilityLabel())) {
-                element.setAccessibilityIdentifier("settings.root.searchButton")
-            }
-            for child in element.accessibilityChildren() ?? [] {
-                if let child = child as? any NSAccessibilityProtocol {
-                    identifyButton(in: child, search: search, visited: &visited)
-                }
-            }
+            let accessibility = field as any NSAccessibilityProtocol
+            guard let search = accessibility.accessibilitySearchButton() as? any NSAccessibilityProtocol else { return }
+            search.setAccessibilityIdentifier("settings.root.searchButton")
         }
     }
 }

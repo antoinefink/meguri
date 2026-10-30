@@ -375,6 +375,32 @@ fn native_policy_fixture_binding() -> meguri_engine::device_state::AccountBindin
     }
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudPolicyExchangeObservation {
+    pub policy_exchange: u64,
+    pub mapped_runtime_id: Option<u64>,
+    pub captures: std::collections::HashMap<u64, u64>,
+    pub completed_ids: Vec<u64>,
+    pub active_id: Option<u64>,
+}
+
+/// Reads the original RunExchange's existing Driver mapping and Runtime IDs.
+/// Never captures, completes, resets or infers an exchange from a count.
+#[uniffi::export]
+pub fn test_cloud_policy_exchange_observation(
+    command: Arc<crate::cloud_policy::CloudPolicyCommand>,
+) -> Result<CloudPolicyExchangeObservation, CoreError> {
+    callback::enter("test_cloud_policy_exchange_observation");
+    let observed = command.exchange_observation_for_testing()?;
+    Ok(CloudPolicyExchangeObservation {
+        policy_exchange: observed.policy_exchange,
+        mapped_runtime_id: observed.captures.get(&observed.policy_exchange).copied(),
+        captures: observed.captures.into_iter().collect(),
+        completed_ids: observed.completed_ids,
+        active_id: observed.active_id,
+    })
+}
+
 /// Read-only setup assertions over the real publication sidecar and runtime
 /// projection. This grants no authority and never repairs an invalid fixture.
 #[uniffi::export]

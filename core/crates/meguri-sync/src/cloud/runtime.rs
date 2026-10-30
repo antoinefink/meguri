@@ -1047,6 +1047,23 @@ impl Runtime {
         with_tracking_access(|| Ok(state.store.as_ref().ok_or(Error::Database)?.runtime_binding(id)?))
     }
 
+    /// Read existing exchange identities without allocating or completing work.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn exchange_ids_for_testing(
+        &self,
+        owner: &str,
+        generation: u64,
+    ) -> Result<(Vec<u64>, Option<u64>), RuntimeError> {
+        let state = self.state();
+        if Self::instance_locked(&state)? != owner || Self::adapter_guard_locked(&state).generation != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok((
+            state.adapter.durable.exchanges.keys().copied().collect(),
+            state.actions.exchange.as_ref().map(|(id, _)| *id),
+        ))
+    }
+
     /// Counts actual workflow entity body materializations on the last observer callback.
     #[cfg(feature = "test-hooks")]
     pub fn last_capture_body_reads_for_testing(&self) -> usize {

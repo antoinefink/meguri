@@ -123,7 +123,35 @@ pub struct Driver {
     clock: Arc<dyn Clock>,
     inner: Mutex<Owned>,
 }
+#[cfg(feature = "test-hooks")]
+pub struct ExchangeObservation {
+    pub policy_exchange: u64,
+    pub captures: BTreeMap<u64, u64>,
+    pub completed_ids: Vec<u64>,
+    pub active_id: Option<u64>,
+}
 impl Driver {
+    /// Retained opening/generation only: completed commands may have old tokens.
+    #[cfg(feature = "test-hooks")]
+    pub fn exchange_observation_for_testing(&self, command: &Command) -> Result<ExchangeObservation, DriverError> {
+        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let ActionKind::RunExchange { exchange, .. } = command.action.kind else {
+            return Err(DriverError::NotCoreAction);
+        };
+        let (completed_ids, active_id) = self
+            .runtime
+            .exchange_ids_for_testing(&command.owner, command.action.guard.generation)?;
+        Ok(ExchangeObservation {
+            policy_exchange: exchange,
+            captures: owned
+                .captures
+                .iter()
+                .map(|(request, (_, id))| (*request, *id))
+                .collect(),
+            completed_ids,
+            active_id,
+        })
+    }
     pub fn new(runtime: Arc<Runtime>, clock: Arc<dyn Clock>) -> Self {
         Self {
             runtime,

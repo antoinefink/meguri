@@ -1,7 +1,62 @@
 import Foundation
 import Instrumentation
+import func MeguriCoreBindings.testCloudPolicyExchangeObservation
+import Synchronization
 import Testing
 @testable import CoreBridge
+
+private struct PolicyExchangeObservation: Sendable, Equatable {
+    let policyExchange: UInt64
+    let mappedRuntimeID: UInt64?
+    let captures: [UInt64: UInt64]
+    let completedIDs: Set<UInt64>
+    let activeID: UInt64?
+}
+
+private func observePolicyExchange(_ command: CoreBridge.CloudPolicyCommand) async throws -> PolicyExchangeObservation {
+    let raw = command.raw
+    return try await MaintenanceLane.shared.call(.testCloudPolicyExchangeObservation) {
+        let value = try MeguriCoreBindings.testCloudPolicyExchangeObservation(command: raw)
+        return PolicyExchangeObservation(policyExchange: value.policyExchange, mappedRuntimeID: value.mappedRuntimeId,
+            captures: value.captures, completedIDs: Set(value.completedIds), activeID: value.activeId)
+    }
+}
+
+/// Assert the original policy request's one actual capture and qualified result.
+@discardableResult
+private func qualifiedRecordExchange(_ command: CoreBridge.CloudPolicyCommand, result: CloudPolicyNativeResult,
+    fixture: CloudKitBridgeFixture, before: PolicyExchangeObservation, outcome: CloudCollectionOutcome,
+    alsoCompleted: Set<UInt64> = []) async throws -> CloudExchangeResult {
+    guard case .runExchange(let policyID, let source) = command.action else {
+        throw BridgeError.internal("Expected original RunExchange")
+    }
+    let observed = try await observePolicyExchange(command)
+    #expect(observed.policyExchange == policyID)
+    let runtimeID = try #require(observed.mappedRuntimeID)
+    #expect(before.mappedRuntimeID == nil && before.captures[policyID] == nil)
+    #expect(observed.captures == before.captures.merging([policyID: runtimeID]) { _, new in new })
+    #expect(!before.completedIDs.contains(runtimeID) && !alsoCompleted.contains(runtimeID))
+    #expect(observed.completedIDs == before.completedIDs.union(alsoCompleted).union([runtimeID]))
+    #expect(observed.activeID == nil)
+    let stored = try #require(try await fixture.core.exchangeResult(id: runtimeID))
+    #expect(stored.id == runtimeID && stored.collection == outcome)
+    let records = try result.outputs.flatMap(policyCommands).compactMap { command -> CoreBridge.CloudPolicyExchangeRecord? in
+        if case .recordExchange(let record) = command.action { record } else { nil }
+    }
+    try #require(records.count == 1)
+    let record = try #require(records.first)
+    #expect(record.exchange == policyID && record.source == source)
+    switch (record.outcome, stored.collection) {
+    case (.succeeded(let selected, _, _, _, _), .succeeded):
+        #expect(selected == UInt64(stored.selectedNames.count))
+    case (.cancelled, .cancelled): break
+    case (.failed(let error), .failed): #expect(error == .other)
+    default: Issue.record("RecordExchange outcome differs from the actual stored Runtime result")
+    }
+    #expect(try await fixture.core.exchangeResult(id: runtimeID) == stored)
+    #expect(try await observePolicyExchange(command) == observed)
+    return stored
+}
 
 private func policyCommands(_ output: CloudPolicyOutput) throws -> [CloudPolicyCommand] {
     guard case .commands(let commands) = output else { throw BridgeError.internal("Unexpected policy output") }
@@ -129,6 +184,7 @@ extension EventTests {
             let (policy, executor) = try await nativePolicy(fixture, gate: CancelledPolicyGate())
             let output = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
             #expect(result.error == nil && !result.deferred)
             let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
@@ -140,10 +196,17 @@ extension EventTests {
             if case .recordExchange(let value) = record.action {
                 guard case .cancelled = value.outcome else { Issue.record("pre-capture cancellation became success"); return }
             }
-            #expect(try await fixture.core.exchangeResult(id: 1) == nil)
+            let after = try await observePolicyExchange(command)
+            #expect(before.mappedRuntimeID == nil && after.mappedRuntimeID == nil)
+            #expect(after == before)
+            #expect(records.count == 1)
+            if case .recordExchange(let value) = record.action {
+                #expect(value.exchange == before.policyExchange)
+            }
             let persisted = await executor.execute(record)
             #expect(persisted.error == nil)
             #expect(try await policy.status().lastAttempt != nil)
+            #expect(try await observePolicyExchange(command) == before)
         }
     }
 
@@ -158,9 +221,10 @@ extension EventTests {
             ])
             let output = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
             #expect(result.error == nil)
-            let completed = try #require(try await fixture.core.exchangeResult(id: 1))
+            let completed = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
             #expect(!completed.selectedNames.isEmpty)
             let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
             var records: [CloudPolicyCommand] = []
@@ -168,7 +232,6 @@ extension EventTests {
                 if case .recordExchange = command.action { records.append(command) }
             }
             #expect(records.count == 1)
-            #expect(try await fixture.core.exchangeResult(id: 2) == nil)
             #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
         }
     }
@@ -184,10 +247,12 @@ extension EventTests {
             await engine.pauseAfterBatch(gate)
             let output = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
             guard case .runExchange(let id, _) = command.action else { return }
             try await withCloudTask(gates: [gate], operation: {
                 let result = await executor.execute(command)
                 #expect(result.error is CancellationError)
+                try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .cancelled)
                 let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
                 let records = policyOutputCommands.filter { if case .recordExchange = $0.action { true } else { false } }
                 let issued = try #require(records.first)
@@ -202,7 +267,9 @@ extension EventTests {
                 #expect(result.error == nil)
             })
             #expect(await engine.recordedTrace().contains(.cancelReturned))
-            #expect(try await fixture.core.exchangeResult(id: 1) != nil)
+            let observed = try await observePolicyExchange(command)
+            let runtimeID = try #require(observed.mappedRuntimeID)
+            #expect(try await fixture.core.exchangeResult(id: runtimeID)?.collection == .cancelled)
             #expect(!(try await fixture.core.status()).syncingCollection)
         }
     }
@@ -210,7 +277,7 @@ extension EventTests {
 
 @Suite struct CloudPolicyExecutionLaneTests {
     @Test @MainActor func everyNativeExecutionSelectorUsesMaintenanceLane() async throws {
-        let names: [BridgeCall] = [.cloudPolicyExecutionBeginMedia, .cloudPolicyExecutionContinueMediaAfterSend, .cloudPolicyExchangeReadiness, .cloudPolicyExecutionOperationActivity, .cloudPolicyPrepareExecution, .cloudPolicyExecutionOriginalSdk,
+        let names: [BridgeCall] = [.testCloudPolicyExchangeObservation, .cloudPolicyExecutionBeginMedia, .cloudPolicyExecutionContinueMediaAfterSend, .cloudPolicyExchangeReadiness, .cloudPolicyExecutionOperationActivity, .cloudPolicyPrepareExecution, .cloudPolicyExecutionOriginalSdk,
                                   .cloudPolicyExecutionValidateExecution, .cloudPolicyExecutionRegisterSdk,
                                   .cloudPolicyExecutionRetireOriginal, .cloudPolicyExecutionBeginFetch, .cloudPolicyExecutionBeginSend]
         for name in names {
@@ -241,6 +308,7 @@ extension EventTests {
                 try await gate.waitForArrival()
                 let output = try await policy.input(.syncNowRequested(.command))
                 let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(command)
                 let timed = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter, readinessClock: ImmediatePolicyReadinessDeadline())
                 let ended = await timed.execute(command)
                 #expect(ended.error == nil)
@@ -254,7 +322,9 @@ extension EventTests {
                 guard case .recordExchange(let value) = record.action, case .waiting = value.outcome else {
                     Issue.record("held native creation must end waiting at its deadline"); return
                 }
-                #expect(try await fixture.core.exchangeResult(id: 1) == nil)
+                #expect(try await observePolicyExchange(command) == before)
+                #expect(before.mappedRuntimeID == nil)
+                #expect(value.exchange == before.policyExchange)
                 #expect(await timed.execute(record).error == nil)
                 #expect(try await policy.status().lastAttempt != nil)
                 await gate.open()
@@ -326,9 +396,10 @@ extension EventTests {
             await engine.failNextOperation(failure)
             let issued = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
             #expect((result.error as? NativePolicyOriginalFailure) === failure)
-            let actual = try #require(try await fixture.core.exchangeResult(id: 1))
+            let actual = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .failed)
             #expect(actual.collection == .failed)
             #expect(!actual.selectedNames.isEmpty && !actual.outstandingNames.isEmpty)
             let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
@@ -339,14 +410,19 @@ extension EventTests {
             #expect(records.count == 1)
             #expect(try await policy.status().error?.error == .other)
             if let record = records.first { #expect(await executor.execute(record).error == nil) }
-            #expect(try await fixture.core.exchangeResult(id: 2) == nil)
+            let failed = try await observePolicyExchange(command)
+            #expect(failed.completedIDs == before.completedIDs.union([actual.id]))
             await engine.appendFetchScripts([
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil),
             ])
             let later = try await fixture.adapter.syncNow()
-            #expect(later.id == 2 && later.collection == .succeeded)
-            #expect(try await fixture.core.exchangeResult(id: 1) == actual)
+            #expect(later.id > actual.id && later.collection == .succeeded)
+            #expect(try await fixture.core.exchangeResult(id: later.id) == later)
+            let after = try await observePolicyExchange(command)
+            #expect(after.captures == failed.captures && after.activeID == nil)
+            #expect(after.completedIDs == failed.completedIDs.union([later.id]))
+            #expect(try await fixture.core.exchangeResult(id: actual.id) == actual)
         }
     }
 
@@ -358,30 +434,51 @@ extension EventTests {
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
             ] + Array(repeating: .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil), count: 5))
             let gate = CloudCallbackGate()
+            let publicResult = Mutex<CloudExchangeResult?>(nil)
             await engine.pauseAfterBatch(gate)
-            try await withCloudTask(gates: [gate], operation: {
-                let publicResult = try await fixture.adapter.syncNow()
-                #expect(publicResult.id == 1)
+            let (command, before, publicID) = try await withCloudTask(gates: [gate], operation: {
+                let returned = try await fixture.adapter.syncNow()
+                #expect(returned.collection == .succeeded)
+                #expect(try await fixture.core.exchangeResult(id: returned.id) == returned)
+                publicResult.withLock { $0 = returned }
             }, whileRunning: {
                 try await gate.waitForArrival()
                 let issued = try await policy.input(.syncNowRequested(.command))
                 let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(command)
+                let publicID = try #require(before.activeID)
+                #expect(before.mappedRuntimeID == nil && !before.completedIDs.contains(publicID))
                 try await withCloudTask(gates: [gate], expectedArrivals: [], operation: {
                     let result = await executor.execute(command)
                     #expect(result.error == nil)
+                    let completed = try await qualifiedRecordExchange(command, result: result, fixture: fixture,
+                        before: before, outcome: .succeeded, alsoCompleted: [publicID])
+                    #expect(completed.id > publicID)
                     let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
                     let filteredRecordExchange = policyOutputCommands.filter { if case .recordExchange = $0.action { true } else { false } }
                     #expect(filteredRecordExchange.count == 1)
                 }, whileRunning: {
                     try await fixture.adapter.waitForPolicyReservationWaiter()
-                    #expect(try await fixture.core.exchangeResult(id: 2) == nil)
+                    #expect(try await observePolicyExchange(command) == before)
                     await gate.open()
                 })
+                return (command, before, publicID)
             })
-            #expect(try await fixture.core.exchangeResult(id: 1) != nil)
-            #expect(try await fixture.core.exchangeResult(id: 2) != nil)
-            #expect(try await fixture.core.exchangeResult(id: 3) == nil)
-            #expect(try await fixture.adapter.syncNow().id == 3)
+            let first = try #require(publicResult.withLock { $0 })
+            #expect(first.id == publicID)
+            let after = try await observePolicyExchange(command)
+            let policyID = try #require(after.mappedRuntimeID)
+            #expect(policyID > publicID)
+            #expect(try await fixture.core.exchangeResult(id: publicID) == first)
+            #expect(try await fixture.core.exchangeResult(id: policyID)?.collection == .succeeded)
+            #expect(after.completedIDs == before.completedIDs.union([publicID, policyID]))
+            #expect(after.completedIDs.count == before.completedIDs.count + 2)
+            let next = try await fixture.adapter.syncNow()
+            #expect(next.id > policyID && next.collection == .succeeded)
+            #expect(try await fixture.core.exchangeResult(id: next.id) == next)
+            let final = try await observePolicyExchange(command)
+            #expect(final.captures == after.captures && final.activeID == nil)
+            #expect(final.completedIDs == after.completedIDs.union([next.id]))
         }
     }
 
@@ -398,9 +495,11 @@ extension EventTests {
             await engine.pauseAfterBatch(gate)
             let issued = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
             try await withCloudTask(gates: [gate], operation: {
                 let result = await executor.execute(command)
                 #expect(result.error == nil)
+                try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
                 let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
                 let filteredRecordExchange = policyOutputCommands.filter { if case .recordExchange = $0.action { true } else { false } }
                 #expect(filteredRecordExchange.count == 1)
@@ -416,7 +515,8 @@ extension EventTests {
             })
             #expect(await fixture.factory.engines().count == count + 1)
             #expect(await engine.recordedTrace().contains(.released))
-            #expect(try await fixture.core.exchangeResult(id: 1) != nil)
+            let runtimeID = try #require(try await observePolicyExchange(command).mappedRuntimeID)
+            #expect(try await fixture.core.exchangeResult(id: runtimeID)?.collection == .succeeded)
         }
     }
 }
@@ -452,21 +552,22 @@ extension EventTests {
                     readinessClock: ObservedPolicyReadinessDeadline(gate: deadline))
                 let requested = try await policy.input(.syncNowRequested(.command))
                 let command = try #require(try policyCommands(requested).first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(command)
                 try await withCloudTask(gates: [factoryGate], expectedArrivals: [], operation: {
                     let result = await executor.execute(command)
                     #expect(result.error == nil)
+                    try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
                     let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
                     let filteredRecordExchange = policyOutputCommands.filter { if case .recordExchange = $0.action { true } else { false } }
                     #expect(filteredRecordExchange.count == 1)
                 }, whileRunning: {
                     try await deadline.waitForArrival()
-                    #expect(try await fixture.core.exchangeResult(id: 1) == nil)
+                    #expect(try await observePolicyExchange(command) == before)
+                    #expect(before.mappedRuntimeID == nil)
                     #expect(engine.acceptedNetworkCalls.value == 0)
                     await factoryGate.open()
                 })
             })
-            #expect(try await fixture.core.exchangeResult(id: 1) != nil)
-            #expect(try await fixture.core.exchangeResult(id: 2) == nil)
         }
     }
 }
