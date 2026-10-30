@@ -416,6 +416,7 @@ impl Exclusive<'_> {
                     cloud,
                     activation_account,
                     safety_backup,
+                    false,
                 )
                 .map_err(|e| {
                     *record.lock().unwrap() = Some(e.clone());
@@ -454,6 +455,7 @@ struct SwapContext<'a> {
     verified_at: i64,
     cloud: Option<CloudAdoptInput>,
     safety_backup: Option<device_state::ReplacementBackup>,
+    initial_cloud_absence: bool,
 }
 
 fn swap(
@@ -471,6 +473,7 @@ fn swap(
         verified_at,
         cloud,
         safety_backup,
+        initial_cloud_absence,
     } = context;
     let (mut media, raw) = recovery;
     use meguri_storage::{atomic_file, verified_replace as storage};
@@ -499,6 +502,7 @@ fn swap(
         (intent, raw),
         cloud,
         safety_backup,
+        initial_cloud_absence,
         &cancelled,
         || {
             if let Some(m) = media.as_mut() {
@@ -780,6 +784,7 @@ pub(crate) fn run_swap(
     cloud: Option<CloudAdoptInput>,
     cloud_account: Option<AccountBinding>,
     safety_backup: Option<device_state::ReplacementBackup>,
+    initial_cloud_absence: bool,
 ) -> Result<(), ReplaceError> {
     if media.is_none() {
         return swap(
@@ -793,6 +798,7 @@ pub(crate) fn run_swap(
                 verified_at: clock.now_ms(),
                 cloud,
                 safety_backup,
+                initial_cloud_absence,
             },
             &activated,
             (None, raw),
@@ -822,6 +828,7 @@ pub(crate) fn run_swap(
                             verified_at: clock.now_ms(),
                             cloud,
                             safety_backup,
+                            initial_cloud_absence,
                         },
                         &activated,
                         (media.as_mut(), raw),

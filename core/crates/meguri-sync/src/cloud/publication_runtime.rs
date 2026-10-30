@@ -38,6 +38,7 @@ impl Runtime {
         };
         absent()?;
         let account = self.publication_account()?;
+        let decision_before = DeviceState::for_collection(&path).publication_decision()?;
         absent()?;
         let mut s = self.state();
         if s.bound.is_some() || s.cloud.generation.is_some() {
@@ -57,7 +58,7 @@ impl Runtime {
                 decision: ConnectDecision::NoCollection,
                 account,
                 native_file: None,
-                decision_before: None,
+                decision_before,
                 active: None,
                 active_epoch: None,
                 unpublished_by_kind: BTreeMap::new(),
@@ -480,7 +481,7 @@ impl Runtime {
     /// One actual local transition or one transport request at a time. Returning
     /// Scan/SendEntities grants existing Runtime/SDK work; it does not model it.
     pub fn next_publication_work(&self, collection: &Collection) -> Result<PublicationWork, RuntimeError> {
-        if let Some(work) = self.next_adoption_work(collection)? {
+        if let Some(work) = self.next_adoption_work(Some(collection))? {
             return Ok(PublicationWork::Adoption(work));
         }
         let Some(op) = self.publication_op()? else {

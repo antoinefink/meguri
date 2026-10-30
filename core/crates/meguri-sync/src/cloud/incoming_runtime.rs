@@ -125,12 +125,19 @@ impl Runtime {
                     RecoveryKind::Publish(p) => {
                         (&p.binding_before, &p.account, p.confirmed_file, p.confirmed_publication)
                     }
-                    RecoveryKind::Adopt(p) => (
-                        &p.binding_before,
-                        &p.account,
-                        p.file_before,
-                        p.before.publication.identity,
-                    ),
+                    RecoveryKind::Adopt(p) => {
+                        // Initial adoption has no old file whose intents could
+                        // be replayed. A prior binding must never be discarded.
+                        if p.file_before.is_none() && p.binding_before.is_none() {
+                            return Ok(None);
+                        }
+                        (
+                            &p.binding_before,
+                            &p.account,
+                            p.file_before.ok_or(Error::InvalidData)?,
+                            p.before.as_ref().ok_or(Error::InvalidData)?.publication.identity,
+                        )
+                    }
                 };
                 let Some(before) = before else { return Ok(None) };
                 let owner = store.binding(before.id)?.ok_or(Error::BindingNotFound)?;

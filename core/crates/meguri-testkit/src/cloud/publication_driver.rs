@@ -230,7 +230,7 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
         }
         Input::PublicationCancel(id) => {
             if device.runtime()?.adoption_op()?.is_some_and(|op| op.id == id) {
-                device.runtime()?.cancel_cloud_adoption(id, &collection)?;
+                device.runtime()?.cancel_cloud_adoption(id, Some(&collection))?;
             } else {
                 device.runtime()?.cancel_publication(id, &collection)?;
             }

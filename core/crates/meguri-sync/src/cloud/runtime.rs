@@ -591,7 +591,13 @@ impl Runtime {
             store.install_runtime()?;
             store.adapter_install()?;
             if !live_adoption {
-                store.recover_adoption(publication.as_ref(), activation.as_ref(), file)?;
+                let retained_adoption = store.adoption_op()?;
+                store.recover_adoption(publication.as_ref(), activation.as_ref(), Some(file))?;
+                if store.adoption_op()?.is_none()
+                    && let Some(op) = retained_adoption
+                {
+                    adoption_impl::remove_adoption_stage(&self.directory, &op)?;
+                }
             }
             let publication_op = store.publication_op()?;
             let restarted_confirmed = publication_op

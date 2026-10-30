@@ -91,6 +91,12 @@ impl ProcessCore {
                 host.engine.generation(),
             );
             host.no_collection_identity_owner = Some(live);
+            if let Err(error) = runtime.recover_initial_cloud_adoption(&host.engine, &host.initial_open) {
+                host.close()?;
+                return Err(EngineError::CollectionUnavailable {
+                    reason: error.to_string(),
+                });
+            }
         }
         if open_existing && paths.collection().symlink_metadata().is_ok() {
             let _ = host.engine.open_raw(&paths.collection(), options);
@@ -533,7 +539,7 @@ impl CoreHost {
                         })?
                     {
                         runtime
-                            .cancel_cloud_adoption(op.id, &self.collection()?)
+                            .cancel_cloud_adoption(op.id, self.engine.collection().ok().as_ref())
                             .map_err(|_| EngineError::Busy {
                                 running_op: "cloud adoption".into(),
                             })?;

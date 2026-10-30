@@ -784,8 +784,8 @@ fn confirmed_restart_requires_exact_account_publication_and_native_file_authorit
         assert_eq!(op.step, PublishStep::Confirmed);
         assert!(op.binding_after.is_none());
         assert!(op.account.0 == scope.account.as_bytes());
-        assert_eq!(op.confirmed_publication, before.decision.publication.identity);
-        assert_eq!(op.confirmed_file, before.native_file);
+        assert_eq!(op.confirmed_publication, Some(before.decision.publication.identity));
+        assert_eq!(op.confirmed_file, Some(before.native_file));
         assert!(confirmed.bindings == before.bindings);
         if variant == 4 {
             rig.driver().restore_backup(&backup).unwrap();
@@ -822,7 +822,7 @@ fn confirmed_restart_requires_exact_account_publication_and_native_file_authorit
                 assert!(resumed.decision.publication.decision == PublicationDecision::Clear);
                 assert_eq!(
                     resumed.current.as_ref().unwrap().facts.publication,
-                    op.confirmed_publication
+                    op.confirmed_publication.unwrap()
                 );
             }
             1 => {

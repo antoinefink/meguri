@@ -957,8 +957,7 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         let mut s = self.state();
-        if s.store.is_some()
-            || s.bound.is_some()
+        if s.bound.is_some()
             || s.cloud.generation.is_some()
             || s.incarnation != owner.incarnation
             || engine.generation() != owner.generation

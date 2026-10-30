@@ -1318,11 +1318,17 @@ impl Device {
                 let collection = self.host.collection()?;
                 let file = runtime::FileIdentityProvider::identity(&devices::NativeFiles, collection.path())?;
                 let proof_matches = collection.cloud_adopt_activation()?.is_some_and(|proof| {
-                    proof.matches(
-                        meguri_engine::device_state::PublicationId::from_bytes(op.id),
-                        &op.before.publication,
-                        &op.candidate,
-                    ) && proof.native_file() == (file.device, file.inode)
+                    let operation = meguri_engine::device_state::PublicationId::from_bytes(op.id);
+                    let matches = match (op.file_before, &op.before) {
+                        (Some(_), Some(before)) => proof.matches(operation, &before.publication, &op.candidate),
+                        (None, before) => proof.matches_initial_prior(
+                            operation,
+                            before.as_ref().map(|b| &b.publication),
+                            &op.candidate,
+                        ),
+                        _ => false,
+                    };
+                    matches && proof.native_file() == (file.device, file.inode)
                 });
                 let slot_available = self
                     .host

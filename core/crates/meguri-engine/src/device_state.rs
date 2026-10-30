@@ -645,6 +645,23 @@ impl CloudAdoptActivation {
             && &self.record.replacement.candidate == candidate
             && self.record.replacement.safety_backup.is_some()
     }
+    /// Initial adoption is proved by R6's measured old-file absence. The
+    /// journal's operation-named absent view is never a prior publication.
+    pub fn matches_initial(&self, operation: PublicationId, candidate: &Publication) -> bool {
+        self.record.operation == operation
+            && self.record.replacement.reason == crate::replace::ReplaceReason::CloudAdopt
+            && &self.record.replacement.candidate == candidate
+            && self.record.replacement.old_file.is_none()
+            && self.record.replacement.safety_backup.is_none()
+    }
+    pub fn matches_initial_prior(
+        &self,
+        operation: PublicationId,
+        prior: Option<&Publication>,
+        candidate: &Publication,
+    ) -> bool {
+        self.matches_initial(operation, candidate) && prior.is_none_or(|prior| prior == &self.record.replacement.prior)
+    }
     pub fn native_file(&self) -> (u64, u64) {
         (self.record.native.device, self.record.native.inode)
     }
@@ -1101,6 +1118,74 @@ pub(crate) fn ensure(live: &Path, binding: &AccountBinding, random: &dyn RandomS
     })
 }
 
+/// Initial recovery may select only the durable caller's exact R6 candidate.
+pub(crate) fn check_initial_cloud_adopt_recovery(
+    live: &Path,
+    expected: Option<&crate::replace::CloudAdoptInput>,
+    prior: Option<&Publication>,
+) -> Result<Option<CloudAdoptActivation>, StorageError> {
+    use std::os::unix::fs::MetadataExt;
+    let state = sidecar::read_document(&sidecar_path(live), decode)?;
+    let native = match live.symlink_metadata() {
+        Ok(metadata) if metadata.is_file() && metadata.nlink() == 1 => Some(NativeIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }),
+        Ok(_) => return Err(failure("initial recovery requires an independent regular file")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(intent) = state.as_ref().and_then(|state| state.intent.as_ref()) {
+        let input = expected.ok_or_else(|| failure("initial recovery lacks its durable adoption operation"))?;
+        input
+            .validate()
+            .map_err(|_| failure("invalid initial adoption operation"))?;
+        if intent.reason != crate::replace::ReplaceReason::CloudAdopt
+            || intent.operation != input.operation
+            || intent.candidate != input.candidate
+            || intent.old_file.is_some()
+            || intent.old_native.is_some()
+            || intent.safety_backup.is_some()
+            || intent.candidate_native.is_none()
+            || prior.is_some_and(|prior| prior != &intent.prior)
+            || native
+                .as_ref()
+                .is_some_and(|native| Some(native) != intent.candidate_native.as_ref())
+        {
+            return Err(failure("initial recovery differs from its R6 intent"));
+        }
+    } else if let Some(native) = native {
+        let input = expected.ok_or_else(|| failure("present initial destination lacks adoption authority"))?;
+        input
+            .validate()
+            .map_err(|_| failure("invalid initial adoption operation"))?;
+        let proof = DeviceState::for_collection(live)
+            .cloud_adopt_activation((native.device, native.inode))?
+            .filter(|proof| proof.matches_initial_prior(input.operation, prior, &input.candidate))
+            .ok_or_else(|| failure("present initial destination lacks its exact R6 activation"))?;
+        return Ok(Some(proof));
+    }
+    Ok(None)
+}
+
+/// No-file admission preserves a valid settled prior sidecar exactly. Only an
+/// outstanding replacement needs startup account reconciliation; malformed
+/// records still fail decoding before any candidate or tracking cleanup.
+pub(crate) fn reconcile_initial_cloud_adopt(live: &Path, config: &crate::OpenConfig) -> Result<(), StorageError> {
+    let state = sidecar::read_document(&sidecar_path(live), decode)?;
+    if state.as_ref().is_some_and(|s| s.intent.is_some()) {
+        reconcile_startup(
+            live,
+            &config.publication_binding,
+            config.startup_publication_binding.as_ref(),
+            config.startup_identity_read_failed,
+            config.clock.clone(),
+            config.random.clone(),
+        )?;
+    }
+    Ok(())
+}
+
 /// Called under the collection lock, before sweep/open/day writes. Activated
 /// records deliberately do not compare hashes: local review may have committed.
 /// Startup account authority is used only for CloudAdopt R6.6. Other local
@@ -1225,7 +1310,7 @@ pub(crate) fn reconcile_with_media(
                 && (intent.candidate_native.is_none() || current_native == intent.candidate_native);
             match (old, candidate) {
                 (true, false) => {
-                    if cloud && (!binding.certain() || &intent.prior.binding != binding) {
+                    if cloud && !cloud_account_matches(&intent.prior.binding, binding) {
                         return Err(failure("prior adoption binding no longer matches"));
                     }
                     intent.prior.clone()
@@ -1255,6 +1340,7 @@ pub(crate) fn reconcile_with_media(
     )?;
     // Keep decision and intent together in the first durable write. Clearing
     // the journal is a second write, never the source of the decision.
+    let cleanup_binding = decision.binding.clone();
     sidecar::update_document(&path, |doc| {
         let mut current = decode(Some(doc))?.ok_or_else(|| failure("missing journal"))?;
         bound(&current, binding)?;
@@ -1262,7 +1348,8 @@ pub(crate) fn reconcile_with_media(
         put(doc, &current)
     })?;
     complete(live, binding)?;
-    cleanup_completed_media(live, binding)
+    // Local cleanup follows the selected publication, not fresh account proof.
+    cleanup_completed_media(live, &cleanup_binding)
 }
 
 #[cfg(test)]
@@ -1286,6 +1373,7 @@ pub(crate) fn begin(
         recovery,
         None,
         None,
+        false,
         cancel,
         before_record,
     )
@@ -1303,6 +1391,7 @@ pub(crate) fn begin_with_cloud(
     ),
     cloud: Option<crate::replace::CloudAdoptInput>,
     safety_backup: Option<ReplacementBackup>,
+    initial_cloud_absence: bool,
     cancel: &dyn Fn() -> bool,
     before_record: impl FnOnce(),
 ) -> Result<(), StorageError> {
@@ -1337,6 +1426,9 @@ pub(crate) fn begin_with_cloud(
         ensure(live, binding, random)?;
     }
     let old_identity = fingerprint_native_checked(live, cancel, false)?;
+    if initial_cloud_absence && (cloud.is_none() || old_identity.is_some()) {
+        return Err(failure("initial cloud destination appeared before intent"));
+    }
     let (candidate_file, candidate_native) =
         fingerprint_native_checked(candidate, cancel, false)?.ok_or_else(|| failure("candidate absent"))?;
     let (old_file, old_native) = match old_identity {

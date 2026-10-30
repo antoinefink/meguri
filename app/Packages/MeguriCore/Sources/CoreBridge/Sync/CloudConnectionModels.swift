@@ -43,6 +43,7 @@ public enum CloudConnectionDecision: Sendable, Equatable { case noCollection, co
 public enum CloudCountKind: Sendable, Hashable { case note, card, revlog, deck, preset, notetype, tag, config, mediaName }
 public struct CloudConnectionSummary: Sendable {
     public let localCollectionPresent: Bool
+    public let initialAdoptionRequired: Bool
     public let localCounts: [CloudCountKind: UInt64]
     public let localEmpty: Bool
     /// Counts from a manifest, labelled with publishedAtMilliseconds. Review
@@ -62,6 +63,7 @@ public struct CloudConnectionSummary: Sendable {
             })
         }
         localCollectionPresent = v.localCollectionPresent
+        initialAdoptionRequired = v.initialAdoptionRequired
         localCounts = counts(v.localCounts); localEmpty = v.localEmpty
         manifestCounts = v.manifestCounts.map(counts); publishedAtMilliseconds = v.publishedAtMs
         unpublishedCounts = counts(v.unpublishedCounts)

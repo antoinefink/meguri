@@ -152,3 +152,71 @@ No Unit, P24/F5, UI or release closure. The original-base gate remains required.
 - Original-base full gate, focused checks, privacy and similarity.
 - Initial collection adoption and native collection assets.
 - Deletion handling and conflict navigation.
+
+## First adoption into an absent collection
+
+Continuation start: `8edfe8913e3ffb71c20a9955ae4aa95b3aa5154d`.
+U113's original start and the integration batch base above remain unchanged.
+Status: backend WIP; no Unit, P24/F5, first-install UI or release acceptance.
+
+The retained Host now drives ordinary inline-record adoption without opening
+a dummy collection. Prior file absence stays explicit. Valid prior sidecar
+state is retained. Actual R6 operation, candidate and native-file evidence
+guard activation and restart; a foreign file that appears during account
+preparation is refused before it can be opened or changed. An absent local
+file takes no safety backup; existing-file adoption retains its real backup.
+
+Source runs:
+
+- `cleanroom/20261030T025119Z-5778` ended at model capacity. Its prepared
+  regular files were retained, validated with the existing source-view rules,
+  and recovered against the exact starting commit. The failed run remains
+  failed; its draft was not treated as verified or accepted.
+- Fixes: `cleanroom/20261030T031233Z-13075`, `20261030T032710Z-18929` and
+  `20261030T060150Z-64996`, session `s-20261025T162405Z-9dc656e4`.
+- Independent reviews covered conformance, correctness and the clean-room
+  boundary. R1 found an unsafe native preview activation and insufficient
+  recovery account authority; R2 found an unwitnessed file-arrival path.
+  The unsafe native activation was removed, restoring read-only preview.
+  R3/R4 found no remaining P0/P1 in the bounded own-build backend slice.
+
+Evidence:
+
+- `core-test/20261030T030743Z-11147`: seven compile errors, retained in the
+  failed receipt. The declaration was corrected before the next run.
+- `core-test/20261030T032257Z-17153`: production libraries compile; one new
+  test used Ready as a unit variant. The struct-variant pattern was corrected
+  with the exact generation assertion retained.
+- `core-test/20261030T055701Z-62998`: 332 of 334 pass. A rejected adoption
+  consumed a read-only preview; absent-file rollback cleanup used the current
+  account binding instead of the selected prior publication. One pure mapping
+  test also reported LEAK; that evidence is retained without a harness change.
+- `core-test/20261030T060502Z-66627`: both failing tests pass unchanged after
+  the targeted preview and local-cleanup repairs.
+- `core-test/20261030T060613Z-67335`: all 334 selected tests pass, none skipped,
+  with no LEAK reported. This is a changed-source regression run, not a claim
+  that a separate harness defect was diagnosed or repaired.
+- `core-lint/20261030T060652Z-68647`: pass, including all-target checks,
+  formatting, layering and binary boundary checks.
+- `private/20261030T055733Z-63417` and
+  `private/20261030T060616Z-67605`: pass for the final backend source.
+- `swift-test/20261030T060755Z-69249`: all eight focused connection,
+  ownership and cancellation tests pass. Debug native bindings were rebuilt;
+  the parameterized account check covers all five statuses.
+- `similarity/20261030T060758Z-69679`: pass against the continuation start.
+
+Required next work:
+
+- The native AppModel must own initial adoption through actual replacement,
+  drain and new-generation attachment, enable sync only after acceptance, and
+  avoid returning a consumed no-file preview. Its real app regression is open.
+- Collection payload assets and structural generation completion remain open.
+- Shared R6 recovery across builds still needs its P24/Q11 proof; a missing
+  scoped operation currently refuses recovery. Do not count own-build tests
+  as evidence for that case.
+- Documented P2s: bounded release/join cleanup for the new held-provider tests;
+  a CloudUnreadable preview with retained active/epoch facts can still be
+  consumed before NotOffered. Preserve these findings for follow-up.
+
+The original-base full gate, native Search identifier P2, mobile and signed
+CloudKit evidence remain outstanding. No required verification is waived.

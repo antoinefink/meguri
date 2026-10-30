@@ -152,6 +152,8 @@ fn counts(v: &std::collections::BTreeMap<c::entity_codec::Kind, u64>) -> Vec<Clo
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudConnectionSummary {
     pub local_collection_present: bool,
+    /// The native owner must transition to V14 without a replacement confirmation.
+    pub initial_adoption_required: bool,
     pub local_counts: Vec<CloudKindCount>,
     pub local_empty: bool,
     /// Manifest estimates only. The native caller must show this date.
@@ -164,6 +166,9 @@ impl From<&p::Preview> for CloudConnectionSummary {
     fn from(v: &p::Preview) -> Self {
         Self {
             local_collection_present: v.native_file.is_some(),
+            initial_adoption_required: v.native_file.is_none()
+                && v.active_epoch.is_some()
+                && v.decision == p::ConnectDecision::NoCollection,
             local_counts: counts(&v.local.counts),
             local_empty: v.local.empty,
             manifest_counts: v.cloud.as_ref().map(|v| counts(&v.counts)),
@@ -275,6 +280,17 @@ impl CloudConnectionPreview {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| failure(CloudConnectionFailure::Consumed))
+    }
+    fn take_adoption(&self) -> Result<p::PreviewWork, CoreError> {
+        let mut work = self.work.lock().unwrap_or_else(PoisonError::into_inner);
+        // Inspect only owned preview facts. Runtime validates authority after
+        // this guard is dropped; an absent adoption offer stays cancellable.
+        match work.as_ref() {
+            Some(p::PreviewWork::Ready(preview)) if preview.active.is_some() && preview.active_epoch.is_some() => {}
+            Some(_) => return Err(failure(CloudConnectionFailure::NotOffered)),
+            None => return Err(failure(CloudConnectionFailure::Consumed)),
+        }
+        work.take().ok_or_else(|| failure(CloudConnectionFailure::Consumed))
     }
 }
 #[derive(Clone, uniffi::Enum)]
@@ -547,16 +563,15 @@ impl CloudConnection {
     ) -> Result<Arc<CloudRecoveryOperation>, CoreError> {
         callback::enter("CloudConnection.confirm_adoption");
         self.owns(&preview.owner)?;
-        self.owner.generation(preview.generation)?;
-        let p::PreviewWork::Ready(p) = preview.take()? else {
+        self.owner.check_generation(preview.generation)?;
+        let p::PreviewWork::Ready(p) = preview.take_adoption()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
         Ok(self.recovery(self.owner.host.confirm_cloud_adoption(&p).map_err(error)?, true))
     }
     pub fn next_publication_work(&self) -> Result<CloudPublicationWork, CoreError> {
         callback::enter("CloudConnection.next_publication_work");
-        let collection = self.owner.collection()?;
-        let generation = collection.generation().0;
+        let generation = self.owner.current_generation()?;
         let local = |work| {
             Arc::new(CloudPublicationLocal {
                 owner: self.owner.clone(),
@@ -564,99 +579,97 @@ impl CloudConnection {
                 work,
             })
         };
-        Ok(
-            match self.owner.core.next_publication_work(&collection).map_err(error)? {
-                work @ p::PublicationWork::Local { op, work: kind } => CloudPublicationWork::Local {
-                    handle: local(work),
-                    operation: self.recovery(op, false),
-                    kind: match kind {
-                        p::LocalWork::Bind => CloudPublicationLocalKind::Bind,
-                        p::LocalWork::WriteDecision => CloudPublicationLocalKind::WriteDecision,
-                        p::LocalWork::Cancel => CloudPublicationLocalKind::Cancel,
-                    },
+        Ok(match self.owner.host.next_cloud_publication_work().map_err(error)? {
+            work @ p::PublicationWork::Local { op, work: kind } => CloudPublicationWork::Local {
+                handle: local(work),
+                operation: self.recovery(op, false),
+                kind: match kind {
+                    p::LocalWork::Bind => CloudPublicationLocalKind::Bind,
+                    p::LocalWork::WriteDecision => CloudPublicationLocalKind::WriteDecision,
+                    p::LocalWork::Cancel => CloudPublicationLocalKind::Cancel,
                 },
-                p::PublicationWork::Own(request) => {
-                    let command = match &request.operation {
-                        p::OwnOperation::CreateZones(zones) => CloudOwnOperation::CreateZones { zones: zones.clone() },
-                        p::OwnOperation::Read { zone, name } => CloudOwnOperation::Read {
-                            target: CloudControlTarget {
-                                zone: zone.clone(),
-                                name: name.clone(),
-                                record_type: if name == "root" { "MGMediaRoot" } else { "MGEpoch" }.into(),
-                            },
-                        },
-                        p::OwnOperation::Save {
-                            zone,
-                            name,
-                            record_type,
-                            encrypted,
-                            if_unchanged,
-                        } => CloudOwnOperation::Save {
-                            target: CloudControlTarget {
-                                zone: zone.clone(),
-                                name: name.clone(),
-                                record_type: record_type.clone(),
-                            },
-                            encrypted: encrypted.clone(),
-                            system_fields: if_unchanged.as_ref().map(|v| v.0.clone()),
-                        },
-                    };
-                    CloudPublicationWork::Own {
-                        operation: self.recovery(request.op, false),
-                        command,
-                        metadata: (&*request).into(),
-                        request: Arc::new(CloudPublicationRequest {
-                            owner: self.owner.clone(),
-                            request: *request,
-                        }),
-                    }
-                }
-                p::PublicationWork::Adoption(work) => {
-                    let op = self
-                        .owner
-                        .core
-                        .adoption_op()
-                        .map_err(error)?
-                        .filter(|o| o.id == work.op)
-                        .ok_or_else(|| failure(CloudConnectionFailure::AuthorityChanged))?;
-                    let action = match &work.task {
-                        a::AdoptionTask::ReadActive | a::AdoptionTask::RecheckActive => {
-                            CloudAdoptionAction::Read { target: active() }
-                        }
-                        a::AdoptionTask::ReadEpoch => CloudAdoptionAction::Read {
-                            target: epoch(op.epoch),
-                        },
-                        a::AdoptionTask::ReadMediaRoot => CloudAdoptionAction::Read {
-                            target: CloudControlTarget {
-                                zone: "meguri-media".into(),
-                                name: "root".into(),
-                                record_type: "MGMediaRoot".into(),
-                            },
-                        },
-                        a::AdoptionTask::Fetch { cursor } => CloudAdoptionAction::Fetch {
-                            zone: c::adapter::collection_zone(op.epoch),
-                            cursor: cursor.as_ref().map(|v| v.0.clone()),
-                        },
-                        a::AdoptionTask::Validate => CloudAdoptionAction::Validate,
-                        a::AdoptionTask::Activate => CloudAdoptionAction::Activate,
-                    };
-                    CloudPublicationWork::Adoption {
-                        operation: self.recovery(work.op, true),
-                        action,
-                        handle: Arc::new(CloudAdoptionWork {
-                            owner: self.owner.clone(),
-                            generation,
-                            work,
-                        }),
-                    }
-                }
-                p::PublicationWork::Scan => CloudPublicationWork::Scan {
-                    handle: local(p::PublicationWork::Scan),
-                },
-                p::PublicationWork::SendEntities => CloudPublicationWork::SendEntities,
-                p::PublicationWork::Idle => CloudPublicationWork::Idle,
             },
-        )
+            p::PublicationWork::Own(request) => {
+                let command = match &request.operation {
+                    p::OwnOperation::CreateZones(zones) => CloudOwnOperation::CreateZones { zones: zones.clone() },
+                    p::OwnOperation::Read { zone, name } => CloudOwnOperation::Read {
+                        target: CloudControlTarget {
+                            zone: zone.clone(),
+                            name: name.clone(),
+                            record_type: if name == "root" { "MGMediaRoot" } else { "MGEpoch" }.into(),
+                        },
+                    },
+                    p::OwnOperation::Save {
+                        zone,
+                        name,
+                        record_type,
+                        encrypted,
+                        if_unchanged,
+                    } => CloudOwnOperation::Save {
+                        target: CloudControlTarget {
+                            zone: zone.clone(),
+                            name: name.clone(),
+                            record_type: record_type.clone(),
+                        },
+                        encrypted: encrypted.clone(),
+                        system_fields: if_unchanged.as_ref().map(|v| v.0.clone()),
+                    },
+                };
+                CloudPublicationWork::Own {
+                    operation: self.recovery(request.op, false),
+                    command,
+                    metadata: (&*request).into(),
+                    request: Arc::new(CloudPublicationRequest {
+                        owner: self.owner.clone(),
+                        request: *request,
+                    }),
+                }
+            }
+            p::PublicationWork::Adoption(work) => {
+                let op = self
+                    .owner
+                    .core
+                    .adoption_op()
+                    .map_err(error)?
+                    .filter(|o| o.id == work.op)
+                    .ok_or_else(|| failure(CloudConnectionFailure::AuthorityChanged))?;
+                let action = match &work.task {
+                    a::AdoptionTask::ReadActive | a::AdoptionTask::RecheckActive => {
+                        CloudAdoptionAction::Read { target: active() }
+                    }
+                    a::AdoptionTask::ReadEpoch => CloudAdoptionAction::Read {
+                        target: epoch(op.epoch),
+                    },
+                    a::AdoptionTask::ReadMediaRoot => CloudAdoptionAction::Read {
+                        target: CloudControlTarget {
+                            zone: "meguri-media".into(),
+                            name: "root".into(),
+                            record_type: "MGMediaRoot".into(),
+                        },
+                    },
+                    a::AdoptionTask::Fetch { cursor } => CloudAdoptionAction::Fetch {
+                        zone: c::adapter::collection_zone(op.epoch),
+                        cursor: cursor.as_ref().map(|v| v.0.clone()),
+                    },
+                    a::AdoptionTask::Validate => CloudAdoptionAction::Validate,
+                    a::AdoptionTask::Activate => CloudAdoptionAction::Activate,
+                };
+                CloudPublicationWork::Adoption {
+                    operation: self.recovery(work.op, true),
+                    action,
+                    handle: Arc::new(CloudAdoptionWork {
+                        owner: self.owner.clone(),
+                        generation,
+                        work,
+                    }),
+                }
+            }
+            p::PublicationWork::Scan => CloudPublicationWork::Scan {
+                handle: local(p::PublicationWork::Scan),
+            },
+            p::PublicationWork::SendEntities => CloudPublicationWork::SendEntities,
+            p::PublicationWork::Idle => CloudPublicationWork::Idle,
+        })
     }
     pub fn perform_local(&self, handle: Arc<CloudPublicationLocal>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.perform_local");
@@ -715,7 +728,7 @@ impl CloudConnection {
     ) -> Result<(), CoreError> {
         callback::enter("CloudConnection.adoption_result");
         self.owns(&handle.owner)?;
-        self.owner.generation(handle.generation)?;
+        self.owner.check_generation(handle.generation)?;
         let reply = match result {
             CloudAdoptionResult::Read { read } => a::AdoptionReply::Read(read.into()),
             CloudAdoptionResult::Page { records, deleted, next } => a::AdoptionReply::Page {
@@ -736,7 +749,7 @@ impl CloudConnection {
     pub fn perform_adoption_local(&self, handle: Arc<CloudAdoptionWork>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.perform_adoption_local");
         self.owns(&handle.owner)?;
-        self.owner.generation(handle.generation)?;
+        self.owner.check_generation(handle.generation)?;
         self.owner
             .host
             .perform_cloud_adoption_local(&handle.work)
@@ -745,16 +758,13 @@ impl CloudConnection {
     pub fn cancel_operation(&self, operation: Arc<CloudRecoveryOperation>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.cancel_operation");
         self.owns(&operation.owner)?;
-        let collection = self.owner.collection()?;
+        self.owner.current_generation()?;
         if operation.adoption {
-            self.owner
-                .core
-                .cancel_cloud_adoption(operation.id, &collection)
-                .map_err(error)
+            self.owner.host.cancel_cloud_adoption(operation.id).map_err(error)
         } else {
             self.owner
                 .core
-                .cancel_publication(operation.id, &collection)
+                .cancel_publication(operation.id, &self.owner.collection()?)
                 .map_err(error)
         }
     }
@@ -766,7 +776,7 @@ impl CloudConnection {
     }
     pub fn recovery_status(&self) -> Result<Option<CloudRecoveryStatus>, CoreError> {
         callback::enter("CloudConnection.recovery_status");
-        self.owner.collection()?;
+        self.owner.current_generation()?;
         if let Some(op) = self.owner.core.adoption_op().map_err(error)? {
             return Ok(Some(CloudRecoveryStatus {
                 operation: self.recovery(op.id, true),

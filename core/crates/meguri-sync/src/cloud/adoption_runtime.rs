@@ -32,6 +32,7 @@ pub(super) struct AdoptionOwner {
     directory: PathBuf,
     stage: Mutex<Option<ReplacementStage>>,
     next: Mutex<Option<AdoptionTask>>,
+    uncertain_activation: std::sync::atomic::AtomicBool,
 }
 impl AdoptionOwner {
     fn set_next(&self, task: AdoptionTask) {
@@ -150,6 +151,21 @@ fn check_space(space: &dyn SpaceProvider, directory: &Path) -> Result<(), Runtim
     meguri_storage::space::require_space(space, directory, required)?;
     Ok(())
 }
+pub(super) fn remove_adoption_stage(directory: &Path, op: &AdoptOp) -> Result<(), RuntimeError> {
+    if !op.staging_name.starts_with(".meguri-stage-")
+        || op.staging_name.len() <= ".meguri-stage-".len()
+        || Path::new(&op.staging_name).components().count() != 1
+    {
+        return Err(refused());
+    }
+    let path = directory.join(&op.staging_name);
+    match path.symlink_metadata() {
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path).map_err(storage_io),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(storage_io(e)),
+        _ => Err(refused()),
+    }
+}
 fn require_registered_media(media: &meguri_engine::media::MediaService) -> Result<(), RuntimeError> {
     if !media.store().media_feed_status().map_err(|_| refused())?.complete {
         return Err(refused());
@@ -198,32 +214,202 @@ impl Runtime {
         let mut s = self.state();
         with_tracking_access(|| Ok(s.store.as_mut().ok_or(Error::Database)?.update_adoption(op)?))
     }
-    fn check_adoption_before(&self, op: &AdoptOp, collection: &Collection) -> Result<(), RuntimeError> {
-        meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
-        if self.publication_account()? != op.account
-            || self.publication_decision()? != op.before
-            || self.inputs.files.identity(collection.path())? != op.file_before
-            || !collection.is_current()
+    /// Called once by the newly retained Host, before discovery.
+    pub fn recover_initial_cloud_adoption(
+        &self,
+        engine: &Engine,
+        config: &meguri_engine::OpenConfig,
+    ) -> Result<(), RuntimeError> {
+        let slot = engine.acquire_slot(LongOp::CloudAdopt)?;
+        let operation = {
+            let _state = self.state();
+            with_tracking_access(|| -> Result<Option<AdoptOp>, RuntimeError> {
+                match self.directory.join(super::open::TRACKING_FILE).symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(storage_io(e)),
+                    Ok(_) => {}
+                }
+                let mut store = match TrackingStore::open(&self.directory, self.inputs.scope.clone())? {
+                    OpenOutcome::Opened(store) => store,
+                    _ => return Err(Error::RecoveryRequired.into()),
+                };
+                store.install_runtime()?;
+                Ok(store.adoption_op()?)
+            })?
+        };
+        let expected = operation
+            .as_ref()
+            .filter(|op| op.file_before.is_none() && op.step == AdoptStep::Ready)
+            .map(|op| CloudAdoptInput {
+                operation: publication_id(op.id),
+                candidate: op.candidate.clone(),
+            });
+        let prior = operation
+            .as_ref()
+            .and_then(|op| op.before.as_ref())
+            .map(|before| &before.publication);
+        let recovered = slot.recover_cloud_adopt_absence(
+            &self.directory.join("collection.anki2"),
+            config.clone(),
+            expected.as_ref(),
+            prior,
+        )?;
+        if recovered.is_some() {
+            // The ordinary configured open step binds the actual activated
+            // candidate and settles step 9 using its native R6 proof.
+            return Ok(());
+        }
+        match self.directory.join(super::open::TRACKING_FILE).symlink_metadata() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(storage_io(e)),
+            Ok(_) => {}
+        }
+        self.with_initial_adoption_state(|s| {
+            with_tracking_access(|| {
+                let mut store = match TrackingStore::open(&self.directory, self.inputs.scope.clone())? {
+                    OpenOutcome::Missing(store) | OpenOutcome::Opened(store) => store,
+                    _ => return Err(Error::RecoveryRequired.into()),
+                };
+                store.install_runtime()?;
+                if let Some(op) = store.adoption_op()? {
+                    if op.file_before.is_some() {
+                        return Err(Error::RecoveryRefused.into());
+                    }
+                    // R6 has settled the old absent view. Keep its exact prior
+                    // decision; only this operation's unpublished stage is retired.
+                    let prior = meguri_engine::device_state::DeviceState::for_collection(
+                        &self.directory.join("collection.anki2"),
+                    )
+                    .publication_decision()?;
+                    if op.before.as_ref().is_some_and(|before| prior.as_ref() != Some(before)) {
+                        return Err(Error::RecoveryRefused.into());
+                    }
+                    remove_adoption_stage(&self.directory, &op)?;
+                    store.end_adoption(&op, None, None)?;
+                }
+                s.store = Some(store);
+                Ok(())
+            })
+        })
+    }
+    fn with_initial_adoption_state<T>(
+        &self,
+        apply: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        let owner = self
+            .no_collection_identity_owner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        let live = owner.live.upgrade().ok_or(RuntimeError::StaleIncarnation)?;
+        let live = live.lock().unwrap_or_else(PoisonError::into_inner);
+        let engine = owner.engine.upgrade().ok_or(RuntimeError::StaleIncarnation)?;
+        let mut s = self.state();
+        if !*live
+            || engine.generation() != owner.generation
+            || !matches!(engine.state(), meguri_engine::LifecycleState::NoCollection)
+            || s.incarnation != owner.incarnation
+            || s.bound.is_some()
+            || s.cloud.generation.is_some()
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.check_initial_path()?;
+        apply(&mut s)
+    }
+    fn with_adoption_state<T>(
+        &self,
+        collection: Option<&Collection>,
+        apply: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        if collection.is_none() {
+            self.with_initial_adoption_state(apply)
+        } else {
+            apply(&mut self.state())
+        }
+    }
+    fn check_initial_path(&self) -> Result<(), RuntimeError> {
+        match self.directory.join("collection.anki2").symlink_metadata() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(storage_io(e)),
+            Ok(_) => Err(PublicationError::AuthorityChanged.into()),
+        }
+    }
+    fn check_adoption_preview(&self, preview: &Preview, collection: Option<&Collection>) -> Result<(), RuntimeError> {
+        if let Some(collection) = collection {
+            return self.check_preview_authority(preview, collection);
+        }
+        if preview.native_file.is_some()
+            || meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
+                .publication_decision()?
+                != preview.decision_before
+            || self.publication_account()? != preview.account
         {
             return Err(PublicationError::AuthorityChanged.into());
         }
-        Ok(())
+        self.with_initial_adoption_state(|_| Ok(()))
+    }
+    fn check_adoption_before(&self, op: &AdoptOp, collection: Option<&Collection>) -> Result<(), RuntimeError> {
+        if self.publication_account()? != op.account {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
+        match (collection, &op.before, op.file_before) {
+            (Some(collection), Some(before), Some(file)) => {
+                meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
+                if self.publication_decision()? != *before
+                    || self.inputs.files.identity(collection.path())? != file
+                    || !collection.is_current()
+                {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
+                Ok(())
+            }
+            (None, before, None) => {
+                let prior =
+                    meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
+                        .publication_decision()?;
+                if &prior != before {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
+                self.with_initial_adoption_state(|_| Ok(()))
+            }
+            _ => Err(PublicationError::AuthorityChanged.into()),
+        }
     }
     /// V14.2 steps 2–3. Network starts only when the host later drives work.
     pub fn confirm_cloud_adoption(
         &self,
         preview: &Preview,
-        collection: &Collection,
+        collection: Option<&Collection>,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
         self.wait_incoming_idle();
-        self.check_preview_authority(preview, collection)?;
-        let decision_before = preview.decision_before.as_ref().ok_or(PublicationError::NotOffered)?;
-        let native_file = preview.native_file.ok_or(PublicationError::NotOffered)?;
-        meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
+        if preview.active.is_none() || preview.active_epoch.is_none() {
+            return Err(PublicationError::NotOffered.into());
+        }
+        self.check_adoption_preview(preview, collection)?;
+        let decision_before = preview.decision_before.as_ref();
+        let native_file = preview.native_file;
+        if let Some(collection) = collection {
+            meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
+        } else {
+            self.with_initial_adoption_state(|s| {
+                with_tracking_access(|| {
+                    if s.store.is_none() {
+                        s.store = Some(match TrackingStore::open(&self.directory, self.inputs.scope.clone())? {
+                            OpenOutcome::Missing(store) | OpenOutcome::Opened(store) => store,
+                            _ => return Err(Error::RecoveryRequired.into()),
+                        });
+                        s.store.as_mut().ok_or(Error::Database)?.install_runtime()?;
+                    }
+                    Ok(())
+                })
+            })?;
+        }
         if !matches!(
             preview.decision,
-            ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection
+            ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection | ConnectDecision::NoCollection
         ) {
             return Err(PublicationError::NotOffered.into());
         }
@@ -248,11 +434,22 @@ impl Runtime {
         }
         let slot = engine.acquire_slot(LongOp::CloudAdopt)?;
         slot.check_verified_review(ReplaceReason::CloudAdopt)?;
+        if collection.is_none() {
+            let owner = self
+                .no_collection_identity_owner
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+                .ok_or(RuntimeError::StaleIncarnation)?;
+            if !slot.belongs_to(&owner.engine.upgrade().ok_or(RuntimeError::StaleIncarnation)?) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        }
         let stage = ReplacementStage::new(&self.directory)?;
         fs::create_dir(stage.directory().join("incoming")).map_err(storage_io)?;
         let id = self.publication_random_id()?;
         let candidate = publication_id(self.publication_random_id()?);
-        if candidate == decision_before.publication.identity || candidate == publication_id(id) {
+        if decision_before.is_some_and(|d| candidate == d.publication.identity) || candidate == publication_id(id) {
             return Err(refused());
         }
         let binding_after = BindingId(self.publication_random_id()?);
@@ -271,7 +468,7 @@ impl Runtime {
             binding_before: None,
             binding_after,
             account: preview.account.clone(),
-            before: decision_before.clone(),
+            before: decision_before.cloned(),
             file_before: native_file,
             candidate: Publication {
                 identity: candidate,
@@ -290,45 +487,51 @@ impl Runtime {
                 .into(),
             started_at_ms: self.adapter_now()?,
         };
-        self.check_preview_authority(preview, collection)?;
+        self.check_adoption_preview(preview, collection)?;
         let owner = Arc::new(AdoptionOwner {
             slot,
             directory: stage.directory().to_owned(),
             stage: Mutex::new(Some(stage)),
             next: Mutex::new(Some(AdoptionTask::ReadActive)),
+            uncertain_activation: std::sync::atomic::AtomicBool::new(false),
         });
         let mut held = self.adoption.lock().unwrap_or_else(PoisonError::into_inner);
         if held.is_some() {
             return Err(PublicationError::Busy.into());
         }
-        let mut s = self.state();
-        if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
-            return Err(PublicationError::AuthorityChanged.into());
-        }
-        if s.incoming.running {
-            return Err(PublicationError::Busy.into());
-        }
-        with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_mut().ok_or(Error::Database)?;
-            op.binding_before = store
-                .publication_binding_for_account(&op.account)?
-                .map(|b| BindingBefore {
-                    id: b.id,
-                    state: b.facts.state,
-                });
-            store.record_adoption(&op)?;
+        self.with_adoption_state(collection, |s| {
+            if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
+            if s.incoming.running {
+                return Err(PublicationError::Busy.into());
+            }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                op.binding_before = store
+                    .publication_binding_for_account(&op.account)?
+                    .map(|b| BindingBefore {
+                        id: b.id,
+                        state: b.facts.state,
+                    });
+                store.record_adoption(&op)?;
+                Ok(())
+            })?;
+            *held = Some(owner);
+            s.publication.preview = None;
+            Self::adapter_close_exchange_locked(s);
             Ok(())
         })?;
-        *held = Some(owner);
-        s.publication.preview = None;
-        Self::adapter_close_exchange_locked(&mut s);
         Ok(id)
     }
     /// A distinct durable adoption row drives the existing publication lane.
-    pub fn next_adoption_work(&self, collection: &Collection) -> Result<Option<AdoptionWork>, RuntimeError> {
+    pub fn next_adoption_work(&self, collection: Option<&Collection>) -> Result<Option<AdoptionWork>, RuntimeError> {
         let Some(op) = self.adoption_op()? else {
             return Ok(None);
         };
+        if self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+            return Ok(None);
+        }
         if matches!(
             self.inputs.identity.read_identity(&self.inputs.scope),
             IdentityStatus::ReadFailed
@@ -362,7 +565,7 @@ impl Runtime {
         &self,
         work: &AdoptionWork,
         reply: AdoptionReply,
-        collection: &Collection,
+        collection: Option<&Collection>,
         space: &dyn SpaceProvider,
     ) -> Result<(), RuntimeError> {
         let mut op = self
@@ -508,18 +711,20 @@ impl Runtime {
         }
         Ok(())
     }
-    fn abort_adoption(&self, op: &AdoptOp, collection: &Collection) -> Result<(), RuntimeError> {
-        let file = self.inputs.files.identity(collection.path())?;
+    fn abort_adoption(&self, op: &AdoptOp, collection: Option<&Collection>) -> Result<(), RuntimeError> {
+        let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;
         {
             let mut s = self.state();
             with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.end_adoption(op, None, file))?;
         }
         self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
-        self.bind(collection)?;
-        self.refresh_identity()?;
+        if let Some(collection) = collection {
+            self.bind(collection)?;
+            self.refresh_identity()?;
+        }
         Ok(())
     }
-    pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: &Collection) -> Result<(), RuntimeError> {
+    pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: Option<&Collection>) -> Result<(), RuntimeError> {
         let op = self
             .adoption_op()?
             .filter(|p| p.id == id)
@@ -538,18 +743,46 @@ impl Runtime {
         space: &dyn SpaceProvider,
         backup: &dyn meguri_engine::ports::BackupService,
     ) -> Result<(), RuntimeError> {
+        self.perform_adoption_local(work, Some(collection), Some(media), space, backup, None)
+    }
+    pub fn perform_initial_cloud_adoption_local(
+        &self,
+        work: &AdoptionWork,
+        space: &dyn SpaceProvider,
+        backup: &dyn meguri_engine::ports::BackupService,
+        config: meguri_engine::OpenConfig,
+    ) -> Result<(), RuntimeError> {
+        self.perform_adoption_local(work, None, None, space, backup, Some(config))
+    }
+    fn perform_adoption_local(
+        &self,
+        work: &AdoptionWork,
+        collection: Option<&Collection>,
+        media: Option<&MediaService>,
+        space: &dyn SpaceProvider,
+        backup: &dyn meguri_engine::ports::BackupService,
+        initial: Option<meguri_engine::OpenConfig>,
+    ) -> Result<(), RuntimeError> {
         let mut op = self
             .adoption_op()?
             .filter(|p| p.id == work.op)
             .ok_or(RuntimeError::StaleIncarnation)?;
         let owner = self.adoption_owner()?;
         owner.claim(&work.task)?;
+        if self.publication_account().is_err() {
+            owner.set_next(work.task.clone());
+            return Err(PublicationError::AccountUnavailable.into());
+        }
         if self.check_adoption_before(&op, collection).is_err() {
             return self.abort_adoption(&op, collection);
         }
         let result = match work.task {
             AdoptionTask::Validate => self.validate_adoption(&owner, &mut op, collection, media, space),
-            AdoptionTask::Activate => self.activate_adoption(&owner, &op, collection, media, backup),
+            AdoptionTask::Activate => match (collection, media, initial) {
+                (Some(collection), Some(media), _) => self.activate_adoption(&owner, &op, collection, media, backup),
+                (None, None, Some(config)) => self.activate_initial_adoption(&owner, &op, config),
+                _ => Err(refused()),
+            },
             _ => Err(refused()),
         };
         if matches!(&result, Err(RuntimeError::Engine(EngineError::SessionActive))) {
@@ -558,8 +791,22 @@ impl Runtime {
         }
         if let Err(error) = result {
             // Never roll tracking back after a proven/uncertain R6 activation.
-            if self.publication_decision().is_ok_and(|d| d == op.before) && collection.is_current() {
+            let safe_to_abort = !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+                && if let Some(collection) = collection {
+                    self.publication_decision().is_ok_and(|d| Some(d) == op.before) && collection.is_current()
+                } else {
+                    owner.stage.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+                        || (self.check_initial_path().is_ok()
+                            && meguri_engine::device_state::DeviceState::for_collection(
+                                &self.directory.join("collection.anki2"),
+                            )
+                            .settled_publication()
+                            .is_ok())
+                };
+            if safe_to_abort {
                 self.abort_adoption(&op, collection)?;
+            } else {
+                self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
             }
             return Err(error);
         }
@@ -569,8 +816,8 @@ impl Runtime {
         &self,
         owner: &AdoptionOwner,
         op: &mut AdoptOp,
-        collection: &Collection,
-        media: &meguri_engine::media::MediaService,
+        collection: Option<&Collection>,
+        media: Option<&meguri_engine::media::MediaService>,
         space: &dyn SpaceProvider,
     ) -> Result<(), RuntimeError> {
         let epoch = epoch(op)?;
@@ -632,8 +879,12 @@ impl Runtime {
                 _ => {}
             }
         }
-        self.settle_before_transition(collection, Duration::from_secs(30))?;
-        let (_media_reader, _media_job) = inventory_registered_media(collection, media)?;
+        let _media = if let (Some(collection), Some(media)) = (collection, media) {
+            self.settle_before_transition(collection, Duration::from_secs(30))?;
+            Some(inventory_registered_media(collection, media)?)
+        } else {
+            None
+        };
         let clock = self
             .adapter_clock
             .lock()
@@ -652,7 +903,7 @@ impl Runtime {
             let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
             meguri_storage::verified_replace::prepare(
                 stage.as_ref().ok_or_else(refused)?,
-                collection.path(),
+                &self.directory.join("collection.anki2"),
                 &meguri_storage::OpenOptions::new(clock.as_ref(), random.as_ref()),
                 clock.as_ref(),
                 false,
@@ -721,8 +972,7 @@ impl Runtime {
             })
         });
         self.check_adoption_before(op, collection)?;
-        {
-            let mut s = self.state();
+        self.with_adoption_state(collection, |s| {
             with_tracking_access(|| {
                 s.store.as_mut().ok_or(Error::Database)?.ready_adoption(
                     op,
@@ -735,8 +985,74 @@ impl Runtime {
             if let Some(bound) = &mut s.bound {
                 bound.usable = false;
             }
-        }
+            Ok(())
+        })?;
         owner.set_next(AdoptionTask::RecheckActive);
+        Ok(())
+    }
+    fn activate_initial_adoption(
+        &self,
+        owner: &AdoptionOwner,
+        op: &AdoptOp,
+        config: meguri_engine::OpenConfig,
+    ) -> Result<(), RuntimeError> {
+        self.check_adoption_before(op, None)?;
+        owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
+        let stage = owner
+            .stage
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(refused)?;
+        let adopted = owner
+            .slot
+            .replace_verified_cloud_adopt_initial(
+                &self.directory.join("collection.anki2"),
+                config,
+                stage,
+                CloudAdoptInput {
+                    operation: publication_id(op.id),
+                    candidate: op.candidate.clone(),
+                },
+            )
+            .map_err(|e| {
+                if matches!(&e, meguri_engine::replace::ReplaceError::AfterActivation { .. }) {
+                    owner
+                        .uncertain_activation
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                match e {
+                    meguri_engine::replace::ReplaceError::Lifecycle(error) => RuntimeError::Engine(error),
+                    error => RuntimeError::Engine(engine_error(error)),
+                }
+            })?;
+        owner
+            .uncertain_activation
+            .store(true, std::sync::atomic::Ordering::Release);
+        // bind/open has already retained R6's native proof, not a guessed inode.
+        let activation = adopted.cloud_adopt_activation()?.ok_or_else(refused)?;
+        if !activation.matches_initial(publication_id(op.id), &op.candidate) {
+            return Err(refused());
+        }
+        let file = self.inputs.files.identity(adopted.path())?;
+        if activation.native_file() != (file.device, file.inode) {
+            return Err(refused());
+        }
+        meguri_model::faultpoint!("cloud.adopt.after_activation").map_err(Error::from)?;
+        {
+            let mut s = self.state();
+            if !with_tracking_access(|| {
+                s.store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .end_adoption(op, Some(&activation), Some(file))
+            })? {
+                return Err(refused());
+            }
+        }
+        self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
+        self.bind(&adopted)?;
+        self.refresh_identity()?;
         Ok(())
     }
     fn activate_adoption(
@@ -756,7 +1072,7 @@ impl Runtime {
         let mut exclusive = owner.slot.enter_exclusive(true)?;
         let working = exclusive.collection().clone();
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
-        self.check_adoption_before(op, exclusive.collection())?;
+        self.check_adoption_before(op, Some(exclusive.collection()))?;
         require_registered_media(media)?;
         let stage = owner
             .stage
@@ -781,7 +1097,7 @@ impl Runtime {
                         .clone()
                         .ok_or_else(|| engine_error("adoption safety backup unavailable"))?;
                     pin = Some(guarded);
-                    self.check_adoption_before(op, &working).map_err(engine_error)?;
+                    self.check_adoption_before(op, Some(&working)).map_err(engine_error)?;
                     require_registered_media(media).map_err(engine_error)?;
                     Ok(receipt)
                 },
@@ -792,7 +1108,7 @@ impl Runtime {
             })?;
         let decision = self.publication_decision()?;
         let evidence = meguri_engine::device_state::DeviceState::for_collection(adopted.path())
-            .replacement_evidence_for(op.before.publication.identity)?
+            .replacement_evidence_for(op.before.as_ref().ok_or_else(refused)?.publication.identity)?
             .ok_or_else(refused)?;
         let file = self.inputs.files.identity(adopted.path())?;
         let activation = adopted.cloud_adopt_activation()?.ok_or_else(refused)?;
@@ -809,11 +1125,15 @@ impl Runtime {
         }
         if decision.publication != candidate
             || decision.pending_reason.is_some()
-            || evidence.prior != op.before.publication
+            || evidence.prior != op.before.as_ref().ok_or_else(refused)?.publication
             || evidence.candidate != op.candidate
             || evidence.reason != ReplaceReason::CloudAdopt
             || evidence.safety_backup.is_none()
-            || !activation.matches(publication_id(op.id), &op.before.publication, &op.candidate)
+            || !activation.matches(
+                publication_id(op.id),
+                &op.before.as_ref().ok_or_else(refused)?.publication,
+                &op.candidate,
+            )
             || activation.native_file() != (file.device, file.inode)
         {
             return Err(refused());
@@ -825,7 +1145,7 @@ impl Runtime {
                 s.store
                     .as_mut()
                     .ok_or(Error::Database)?
-                    .end_adoption(op, Some(&activation), file)
+                    .end_adoption(op, Some(&activation), Some(file))
             })? {
                 return Err(refused());
             }

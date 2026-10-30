@@ -149,7 +149,7 @@ impl TrackingStore {
         &mut self,
         op: &AdoptOp,
         activation: Option<&CloudAdoptActivation>,
-        file: runtime::NativeFileIdentity,
+        file: Option<runtime::NativeFileIdentity>,
     ) -> Result<bool, Error> {
         if self.adoption_op()?.as_ref() != Some(op) {
             return Err(Error::InvalidData);
@@ -174,7 +174,17 @@ impl TrackingStore {
                     && environment == match self.scope.environment { Environment::Development => "development", Environment::Production => "production" });
             if op.step != AdoptStep::Ready
                 || !account_matches
-                || !proof.matches(PublicationId::from_bytes(op.id), &op.before.publication, &op.candidate)
+                || !match (op.file_before, &op.before) {
+                    (Some(_), Some(before)) => {
+                        proof.matches(PublicationId::from_bytes(op.id), &before.publication, &op.candidate)
+                    }
+                    (None, before) => proof.matches_initial_prior(
+                        PublicationId::from_bytes(op.id),
+                        before.as_ref().map(|b| &b.publication),
+                        &op.candidate,
+                    ),
+                    _ => false,
+                }
             {
                 return Err(Error::RecoveryRefused);
             }
@@ -187,6 +197,7 @@ impl TrackingStore {
                 return Err(Error::RecoveryRefused);
             }
             let recorded: Option<runtime::NativeFileIdentity> = activated_file.map(|s| decode(&s)).transpose()?;
+            let file = file.ok_or(Error::RecoveryRefused)?;
             if proof.native_file() != (file.device, file.inode)
                 || recorded.is_some_and(|prior| prior != file)
                 || self
@@ -209,7 +220,7 @@ impl TrackingStore {
             None
         };
         if let Some(state) = &mut state {
-            state.file = Some(file);
+            state.file = Some(file.ok_or(Error::RecoveryRefused)?);
             state.drained = false;
         }
         let tx = self.connection.transaction()?;
@@ -257,7 +268,7 @@ impl TrackingStore {
         &mut self,
         publication: Option<&Publication>,
         activation: Option<&CloudAdoptActivation>,
-        file: runtime::NativeFileIdentity,
+        file: Option<runtime::NativeFileIdentity>,
     ) -> Result<(), Error> {
         let Some(op) = self.adoption_op()? else {
             return Ok(());

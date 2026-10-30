@@ -138,6 +138,52 @@ impl SlotGuard {
         )
     }
 
+    /// Reconcile a retained first connection with actual startup authority.
+    /// A selected candidate opens through this same configured engine/Host;
+    /// returning None proves the old absent view, never a failed open.
+    pub fn recover_cloud_adopt_absence(
+        &self,
+        live: &std::path::Path,
+        config: crate::OpenConfig,
+        expected: Option<&crate::replace::CloudAdoptInput>,
+        prior: Option<&crate::device_state::Publication>,
+    ) -> Result<Option<Collection>, EngineError> {
+        if self.op != LongOp::CloudAdopt {
+            return Err(EngineError::InvalidArgument {
+                message: "cloud adoption slot required".into(),
+            });
+        }
+        self.check_verified_review(crate::replace::ReplaceReason::CloudAdopt)?;
+        {
+            let state = self.engine.lock_state();
+            self.check_held(&state)?;
+            if state.current.is_some() || !matches!(state.state, LifecycleState::NoCollection) {
+                return Err(EngineError::unavailable("initial cloud recovery requires NoCollection"));
+            }
+        }
+        let ownership = std::sync::Arc::new(meguri_storage::lockfile::CollectionLock::acquire(
+            live.parent().unwrap_or(std::path::Path::new(".")),
+        )?);
+        let _ = crate::device_state::check_initial_cloud_adopt_recovery(live, expected, prior)?;
+        crate::device_state::reconcile_initial_cloud_adopt(live, &config)?;
+        crate::device_state::DeviceState::for_collection(live).settled_publication()?;
+        let activation = crate::device_state::check_initial_cloud_adopt_recovery(live, expected, prior)?;
+        match live.symlink_metadata() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(meguri_storage::StorageError::from(e).into()),
+            Ok(_) if activation.is_none() => {
+                Err(EngineError::unavailable("initial cloud candidate lacks R6 activation"))
+            }
+            Ok(_) => {
+                let opened = self.engine.open_raw_owned(live, config, Some(ownership))?;
+                if let Some(holder) = self.engine.lock_state().slot.as_mut().filter(|s| s.id == self.id) {
+                    holder.generation = opened.generation();
+                }
+                Ok(Some(opened))
+            }
+        }
+    }
+
     /// Initial adoption uses the same ownership, recovery and L2 open path.
     pub fn replace_verified_cloud_adopt_initial(
         &self,
@@ -215,13 +261,37 @@ impl SlotGuard {
                     Err(e) => return Err(EngineError::from(meguri_storage::StorageError::from(e)).into()),
                 }
             }
-            crate::device_state::reconcile(
-                live,
-                &config.publication_binding,
-                config.clock.clone(),
-                config.random.clone(),
-            )
-            .map_err(EngineError::from)?;
+            // Initial CloudAdopt has no backup or prior-file authority. A
+            // destination that appeared during staging must use ordinary open.
+            if reason == crate::replace::ReplaceReason::CloudAdopt {
+                match live.symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(EngineError::from(meguri_storage::StorageError::from(e)).into()),
+                    Ok(_) => {
+                        return Err(EngineError::InvalidArgument {
+                            message: "initial cloud destination appeared".into(),
+                        }
+                        .into());
+                    }
+                }
+            }
+            if reason == crate::replace::ReplaceReason::CloudAdopt {
+                crate::device_state::reconcile_initial_cloud_adopt(live, &config).map_err(EngineError::from)?;
+                if let Some(prior) = crate::device_state::DeviceState::for_collection(live)
+                    .settled_publication()
+                    .map_err(EngineError::from)?
+                {
+                    config.publication_binding = prior.binding;
+                }
+            } else {
+                crate::device_state::reconcile(
+                    live,
+                    &config.publication_binding,
+                    config.clock.clone(),
+                    config.random.clone(),
+                )
+                .map_err(EngineError::from)?;
+            }
             let mut initializers = config.initializers.clone();
             initializers.register(meguri_search::sqlfns::register);
             initializers.register(meguri_sched::sqlfns::register);
@@ -306,6 +376,7 @@ impl SlotGuard {
                 cloud,
                 cloud_account.clone(),
                 None,
+                reason == crate::replace::ReplaceReason::CloudAdopt,
             );
             let changed = activated.load(std::sync::atomic::Ordering::Acquire);
             if media_recovered
@@ -318,11 +389,7 @@ impl SlotGuard {
             }
             crate::device_state::reconcile(
                 live,
-                if changed {
-                    cloud_account.as_ref().unwrap_or(&config.publication_binding)
-                } else {
-                    &config.publication_binding
-                },
+                cloud_account.as_ref().unwrap_or(&config.publication_binding),
                 config.clock.clone(),
                 config.random.clone(),
             )
