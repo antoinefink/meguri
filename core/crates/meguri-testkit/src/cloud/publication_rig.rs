@@ -180,6 +180,118 @@ pub struct PublicationRig {
     last_sync_phase: &'static str,
 }
 impl PublicationRig {
+    /// The online child must already be reaped. Recover A with cloud disabled,
+    /// then retire its writer/journal witnesses through the real exclusive swap.
+    /// This fixture grants no cloud authority and records no local replacement.
+    pub fn replace_native_file_offline(
+        directory: &Path,
+        scope: &Scope,
+        now: i64,
+        seed: u64,
+        expected: &PublicationFacts,
+    ) -> Result<cloud::runtime::NativeFileIdentity> {
+        use super::super::devices::{NativeFiles, build_scope, options};
+        use cloud::runtime::FileIdentityProvider;
+        use meguri_engine::{EngineError, LongOp, device_state::DeviceState};
+        use sha2::{Digest as _, Sha256};
+        use std::sync::Mutex;
+
+        let path = directory.join("collection.anki2");
+        let device = DeviceState::for_collection(&path);
+        let decision = device.publication_decision()?.ok_or_else(failure)?;
+        assert!(decision == expected.decision);
+        let evidence = device.replacement_evidence_for(decision.publication.identity)?;
+        let semantic_sidecar = || -> Result<serde_json::Value> {
+            let mut document: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(directory.join("meguri-sidecar.json"))?)?;
+            assert!(
+                document
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("clean_shutdown")
+                    .unwrap()
+                    .is_boolean()
+            );
+            Ok(document)
+        };
+        let sidecar_before = semantic_sidecar()?;
+        let tracking = || -> Result<_> {
+            let store = match cloud::TrackingStore::open(directory, build_scope(scope)?)? {
+                cloud::OpenOutcome::Opened(store) => store,
+                _ => return Err(failure()),
+            };
+            let mut bindings = Vec::new();
+            for binding in &expected.bindings {
+                bindings.push((store.binding(binding.id)?, store.stored_runtime_state(binding.id)?));
+            }
+            Ok((store.publication_op()?, bindings))
+        };
+        let tracking_before = tracking()?;
+        let op = tracking_before.0.as_ref().ok_or_else(failure)?;
+        assert!(expected.recovery_ops.len() == 1);
+        assert!(expected.recovery_ops[0] == cloud::adoption::RecoveryOpFacts::from(op.clone()));
+        for (binding, (stored, _)) in expected.bindings.iter().zip(&tracking_before.1) {
+            assert!(stored.as_ref() == Some(binding));
+        }
+        let native_a = NativeFiles.identity(&path)?;
+        assert_eq!(native_a, expected.native_file);
+        let current = expected.current.as_ref().ok_or_else(failure)?;
+        assert!(
+            tracking_before
+                .1
+                .iter()
+                .any(|(binding, runtime)| binding.as_ref() == Some(current)
+                    && runtime.as_ref().is_some_and(|r| r.file == Some(native_a)))
+        );
+
+        let assert_unchanged = || -> Result<()> {
+            assert!(semantic_sidecar()? == sidecar_before);
+            assert!(device.publication_decision()?.as_ref() == Some(&decision));
+            assert!(device.replacement_evidence_for(decision.publication.identity)? == evidence);
+            assert!(tracking()? == tracking_before);
+            Ok(())
+        };
+        let mut config = options(directory, now, seed);
+        config.publication_binding = decision.publication.binding.clone();
+        assert!(config.cloud.is_none() && config.cloud_key_bytes.is_none());
+        let host = meguri_host::CoreHost::open(config)?;
+        assert!(host.cloud_runtime().is_none());
+        assert_eq!(NativeFiles.identity(&path)?, native_a);
+        assert_unchanged()?;
+        let copied = Arc::new(Mutex::new(None));
+        {
+            let slot = host.engine().acquire_slot(LongOp::Restore)?;
+            let mut exclusive = slot.enter_exclusive(true)?;
+            let copied = copied.clone();
+            exclusive.replace(move |live| {
+                let replacement = live.with_file_name("external-copy.anki2");
+                std::fs::copy(live, &replacement).map_err(|e| EngineError::Storage(e.into()))?;
+                let bytes = std::fs::read(live).map_err(|e| EngineError::Storage(e.into()))?;
+                let candidate = std::fs::read(&replacement).map_err(|e| EngineError::Storage(e.into()))?;
+                assert!(bytes == candidate);
+                let native_b = NativeFiles.identity(&replacement).map_err(|_| EngineError::Internal {
+                    message: "fixture native identity unavailable".into(),
+                })?;
+                assert_ne!((native_a.device, native_a.inode), (native_b.device, native_b.inode));
+                std::fs::rename(&replacement, live).map_err(|e| EngineError::Storage(e.into()))?;
+                assert_eq!(NativeFiles.identity(live).unwrap(), native_b);
+                let digest: [u8; 32] = Sha256::digest(&bytes).into();
+                *copied.lock().unwrap() = Some((native_b, digest));
+                Ok(())
+            })?;
+        }
+        let (native_b, digest) = copied.lock().unwrap().take().ok_or_else(failure)?;
+        for after_close in [false, true] {
+            if after_close {
+                host.close()?;
+            }
+            assert_eq!(NativeFiles.identity(&path)?, native_b);
+            let actual: [u8; 32] = Sha256::digest(std::fs::read(&path)?).into();
+            assert!(actual == digest);
+            assert_unchanged()?;
+        }
+        Ok(native_b)
+    }
     pub fn open(
         directory: &Path,
         scope: &Scope,
@@ -817,8 +929,13 @@ pub(crate) fn read_result(response: &Response) -> Result<RecordRead> {
     })
 }
 impl ChildDriver {
+    /// SQL-backed collection rows only, matching the backup projection.
     pub fn collection_rows(&mut self) -> Result<Vec<cloud::entity_codec::Payload>> {
         self.call(Input::CollectionRows)
+    }
+    /// Read-only MediaName projection from the independent journal and files.
+    pub fn media_rows(&mut self) -> Result<Vec<cloud::entity_codec::Payload>> {
+        self.call(Input::MediaRows)
     }
     pub fn collection_header(&mut self) -> Result<CollectionHeader> {
         self.call(Input::CollectionHeader)

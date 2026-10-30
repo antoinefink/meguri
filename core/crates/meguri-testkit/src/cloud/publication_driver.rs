@@ -2,6 +2,9 @@
 use super::super::coordinator::{BackupResult, CollectionHeader, RecoveryState, RestoredWire};
 use super::*;
 use meguri_sync::cloud::row_payload::{self, View};
+use sha1::{Digest as _, Sha1};
+use sha2::{Digest as _, Sha256};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, PathBuf};
 
 impl Device {
@@ -10,6 +13,79 @@ impl Device {
         let lease = collection.reader(ReaderRole::Query)?;
         let snapshot = lease.snapshot()?;
         project_rows(&*snapshot)
+    }
+    fn media_rows(&self) -> Result<Vec<codec::Payload>> {
+        // Kind 9 has no collection table. Read its independent journal and
+        // verify the actual file, never a received or tracking payload/hash.
+        let mut result = Vec::new();
+        let media = self.host.media()?;
+        let names = media.tracked_names()?;
+        let entries = media.store().entries().map_err(|_| failure())?;
+        let mut payload_bytes = 0;
+        let mut file_bytes = 0;
+        for name in &names.names {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.name == name.name)
+                .ok_or_else(failure)?;
+            if !entry.syncable() {
+                continue;
+            }
+            if result.len() >= 2048 || entry.size > 8 * 1024 * 1024 - file_bytes {
+                return Err(failure());
+            }
+            let mut file = media
+                .store()
+                .open_file(&name.name)
+                .map_err(|_| failure())?
+                .ok_or_else(failure)?;
+            let before = file.metadata()?;
+            if before.len() != entry.size
+                || before.mtime() != entry.mtime_secs
+                || before.mtime_nsec() != i64::from(entry.mtime_nanos)
+            {
+                return Err(failure());
+            }
+            let mut bytes = Vec::new();
+            Read::by_ref(&mut file).take(entry.size + 1).read_to_end(&mut bytes)?;
+            let after = file.metadata()?;
+            if bytes.len() as u64 != entry.size
+                || before.dev() != after.dev()
+                || before.ino() != after.ino()
+                || before.len() != after.len()
+                || before.mtime() != after.mtime()
+                || before.mtime_nsec() != after.mtime_nsec()
+                || before.ctime() != after.ctime()
+                || before.ctime_nsec() != after.ctime_nsec()
+            {
+                return Err(failure());
+            }
+            let sha1: [u8; 20] = Sha1::digest(&bytes).into();
+            let sha1_text: String = sha1.iter().map(|byte| format!("{byte:02x}")).collect();
+            if entry.sha1.as_deref() != Some(sha1_text.as_str()) {
+                return Err(failure());
+            }
+            let payload = codec::Payload::MediaName(codec::MediaName {
+                name: name.name.as_bytes().to_vec(),
+                sha256: Sha256::digest(&bytes).into(),
+                sha1,
+                size: entry.size,
+            });
+            if row_payload::payload_key(&payload)? != name.case_key.as_bytes() {
+                return Err(failure());
+            }
+            payload_bytes += payload.encode()?.len();
+            if payload_bytes > 8 * 1024 * 1024 {
+                return Err(failure());
+            }
+            file_bytes += entry.size;
+            result.push(payload);
+        }
+        media.check_generation(names.generation)?;
+        if media.store().entries().map_err(|_| failure())? != entries {
+            return Err(failure());
+        }
+        Ok(result)
     }
     fn backup_path(&self, name: &str) -> Result<PathBuf> {
         let mut components = std::path::Path::new(name).components();
@@ -166,6 +242,7 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
         }
         Input::PublicationFacts => value(device.runtime()?.publication_facts(&collection)?),
         Input::CollectionRows => value(device.collection_rows()?),
+        Input::MediaRows => value(device.media_rows()?),
         Input::CollectionHeader => {
             let lease = collection.reader(ReaderRole::Query)?;
             let col = lease.col()?;

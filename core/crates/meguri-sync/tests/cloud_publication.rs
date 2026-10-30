@@ -12,7 +12,8 @@
 //! adopt_cloud invokes the real CloudAdopt replacement, never fixture binding.
 //! facts/decision/recovery_ops/intents are typed reads of actual Runtime,
 //! TrackingStore and DeviceState; collection_rows projects actual reader rows
-//! with row_payload/codec, independently of tracking/expected/acked payloads.
+//! with row_payload/codec; media_rows separately verifies MediaStore journal/files
+//! for kind 9, independently of tracking/expected/acked payloads.
 //! Secret-bearing facts/errors/Debug must be opaque. No helper seeds tracking,
 //! acks, keys, decisions, server baselines, traces or successful outcomes.
 //!
@@ -256,7 +257,13 @@ fn no_scan_since(rig: &PublicationRig, after: usize) {
 fn assert_server_rows(service: &Service<SeededRandom>, rig: &mut PublicationRig) {
     let facts = rig.facts().unwrap();
     let binding = facts.current.as_ref().unwrap();
-    let expected = payloads(&rig.driver().collection_rows().unwrap(), &binding.facts.record_key.0);
+    // Whole union: collection tables plus independent journal/file media rows.
+    let mut rows = rig.driver().collection_rows().unwrap();
+    rows.extend(rig.driver().media_rows().unwrap());
+    assert!(rows.len() <= 2048);
+    assert!(rows.iter().map(|p| p.encode().unwrap().len()).sum::<usize>() <= 8 * 1024 * 1024);
+    let expected = payloads(&rows, &binding.facts.record_key.0);
+    assert_eq!(expected.len(), rows.len());
     let db = service.inspect(rig.scope()).unwrap().unwrap();
     let zone = &db.zones[&rig.collection_zone().unwrap()];
     let records: BTreeMap<_, _> = zone
@@ -292,11 +299,34 @@ fn publish(rig: &mut PublicationRig, service: &mut Service<SeededRandom>) {
     assert!(rig.facts().unwrap().recovery_ops.is_empty());
     assert_server_rows(service, rig);
 }
-fn replace_native_file(dir: &Path) {
-    let live = dir.join("collection.anki2");
-    let replacement = dir.join("external-copy.anki2");
-    std::fs::copy(&live, &replacement).unwrap();
-    std::fs::rename(replacement, live).unwrap();
+#[test]
+fn collection_rows_stay_sql_only_while_media_rows_verify_retained_file_hashes() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = generated(run.path(), "media-observation", true);
+    let scope = scope("media-observation");
+    let mut rig = open(&dir, &scope, ORIGIN, ScriptedKeys::new(None));
+    let sql_rows = rig.driver().collection_rows().unwrap();
+    assert!(sql_rows.iter().all(|row| row.kind() != codec::Kind::MediaName));
+    assert!(rig.driver().media_rows().unwrap().is_empty());
+    rig.driver().put_media("withheld.bin", b"abc").unwrap();
+    assert_eq!(rig.driver().collection_rows().unwrap(), sql_rows);
+    let media_rows = rig.driver().media_rows().unwrap();
+    let [codec::Payload::MediaName(media)] = media_rows.as_slice() else {
+        panic!("one independent MediaName row required");
+    };
+    assert_eq!(media.name, b"withheld.bin");
+    assert_eq!(media.size, 3);
+    let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    // Published hash vectors for the actual synthetic bytes, not tracking data.
+    assert_eq!(hex(&media.sha1), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    assert_eq!(
+        hex(&media.sha256),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(rig.driver().media_rows().unwrap(), media_rows);
+    assert_eq!(rig.driver().collection_rows().unwrap(), sql_rows);
+    assert_eq!(rig.driver().media_files().unwrap()["withheld.bin"], b"abc");
+    rig.close_clean().unwrap();
 }
 
 /// V13.1-5, K2/K18.4, Q2/Q3/Q5 isolation: discovery never connects or merges.
@@ -762,7 +792,8 @@ fn confirmed_restart_requires_exact_account_publication_and_native_file_authorit
         }
         rig.kill().unwrap();
         if variant == 3 {
-            replace_native_file(&dir);
+            PublicationRig::replace_native_file_offline(&dir, &scope, ORIGIN, core_seed(&dir, &scope), &confirmed)
+                .unwrap();
         }
         let after = cursor(&service);
         let identity = match variant {
@@ -900,8 +931,16 @@ fn cancel_after_file_mismatch_or_restore_preserves_isolation_fence_and_backup_no
         assert!(rig.is_held(Point::BeforeScan));
         let mut observation_start = rig.observations().len();
         let safety_backup = if external {
+            let before_replacement = rig.facts().unwrap();
             rig.kill().unwrap();
-            replace_native_file(&dir);
+            PublicationRig::replace_native_file_offline(
+                &dir,
+                &scope,
+                ORIGIN,
+                core_seed(&dir, &scope),
+                &before_replacement,
+            )
+            .unwrap();
             rig = open(&dir, &scope, ORIGIN, ScriptedKeys::new(None));
             observation_start = 0;
             None

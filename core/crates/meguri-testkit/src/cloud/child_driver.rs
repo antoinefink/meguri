@@ -297,6 +297,7 @@ pub(crate) enum Input {
     PublicationTrigger,
     PublicationFacts,
     CollectionRows,
+    MediaRows,
     CollectionHeader,
     BackupNow,
     RestoreBackup(String),
@@ -349,6 +350,8 @@ enum EngineFailure {
     Open,
     Storage,
     Internal,
+    InvalidArgument,
+    ReviewJournalNativeIdentity,
     Other,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -420,6 +423,12 @@ impl EngineFailure {
             EngineError::Open(_) => Self::Open,
             EngineError::Storage(_) => Self::Storage,
             EngineError::Internal { .. } => Self::Internal,
+            EngineError::InvalidArgument { message }
+                if message == "review journal: unexpected native collection identity; evidence retained" =>
+            {
+                Self::ReviewJournalNativeIdentity
+            }
+            EngineError::InvalidArgument { .. } => Self::InvalidArgument,
             _ => Self::Other,
         }
     }
@@ -1772,6 +1781,7 @@ impl Device {
             | Input::PublicationTrigger
             | Input::PublicationFacts
             | Input::CollectionRows
+            | Input::MediaRows
             | Input::CollectionHeader
             | Input::BackupNow
             | Input::RestoreBackup(..)
