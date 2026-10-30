@@ -74,7 +74,9 @@ public final class SyncCoordinator {
     /// Publication and recovery work deliberately do not count as preview activity.
     public var connectionPreviewActive: Bool { readingPreview }
     public var connectionPreviewCancelling: Bool { readingPreview && ownTask?.isCancelled == true }
-    public var connectionOperationActive: Bool { ownTask != nil && !readingPreview }
+    public var connectionOperationActive: Bool { (ownTask != nil && !readingPreview) || initialAdoptionEnabledBefore != nil }
+    public var initialAdoptionActive: Bool { initialAdoptionEnabledBefore != nil }
+    public var connectionActivationActive: Bool { activatingInitialAdoption }
     public var connectionService: CoreCloudConnectionService? { setupState == .attached && !replacing ? backend?.connection : nil }
 
     private enum Input {
@@ -84,6 +86,7 @@ public final class SyncCoordinator {
         case replaced(UInt64)
         case persisted(revision: UInt64)
         case account(Bool)
+        case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
         case result(SyncCommandResult, generation: UInt64, revision: UInt64, acknowledged: CheckedContinuation<Void, Never>?)
         case barrier(CheckedContinuation<Void, Never>)
     }
@@ -112,6 +115,19 @@ public final class SyncCoordinator {
     private var accountTask: Task<Void, Never>?
     private var pendingAccountRead: UInt64?
     private var readingPreview = false
+    // A retained acceptance, not preview/view ownership. Nil is distinct from
+    // an earlier Enabled=false and survives queued work until Rust ends it.
+    private var initialAdoptionEnabledBefore: Bool?
+    @ObservationIgnored var observeInitialAdoptionPreview: (@MainActor (CloudConnectionPreview) async -> Void)?
+    @ObservationIgnored var observeInitialAdoptionAcceptance: (@MainActor () -> Void)?
+    private var activatingInitialAdoption = false
+    private var initialActivationReturned = false
+    private var initialAdoptionCancelled = false
+    private let initialOwnAdmission = CloudOwnWorkAdmission()
+    private var initialOwnDrain: Task<Void, Never>?
+    private var initialOwnResumeRead: UInt64?
+    private var initialOwnResume: Task<Void, Never>?
+    private var awaitingInitialOwnProof = false
     private var ownWorkRequested = false
     private var ownTask: Task<Void, Never>?
     private var flushTimer: Timer?
@@ -232,7 +248,33 @@ public final class SyncCoordinator {
     }
 
     public func setDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
+        let wasPaused = settings.paused
+        if paused { initialOwnAdmission.setOpen(false) }
         saveSettings(.init(enabled: settings.enabled, paused: paused, automatic: automatic, media: media))
+        guard initialAdoptionEnabledBefore != nil, wasPaused != paused else { return }
+        if paused { drainInitialOwnWork() }
+        else {
+            awaitingInitialOwnProof = true
+            initialOwnResume = Task {
+                defer { initialOwnResume = nil }
+                await initialOwnDrain?.value
+                guard !closing, !suspended, !replacing, !settings.paused else { return }
+                enqueue(.account(false))
+                await prepareConnectionAuthority()
+            }
+        }
+    }
+    private func drainInitialOwnWork() {
+        initialOwnAdmission.setOpen(false)
+        initialOwnResumeRead = nil
+        guard initialOwnDrain == nil, let own = backend?.own else { return }
+        let original = ownTask
+        original?.cancel()
+        initialOwnDrain = Task {
+            await own.interruptAndDrain()
+            await original?.value
+            initialOwnDrain = nil
+        }
     }
     private func saveSettings(_ settings: CloudPolicyDeviceSettings) {
         self.settings = settings
@@ -245,20 +287,49 @@ public final class SyncCoordinator {
     }
     public func cancelSyncNow(exchange: UInt64) { receive(.syncNowCancelled(exchange: exchange)) }
     public func visibleMedia(_ names: [String]) { receive(.visibleMedia(names: names)) }
-    /// Read-only, exact backend preview authority; never toggles Enabled.
+    /// Discovery is read-only. Only Rust's explicit no-file directive transfers
+    /// the ready authority to a separate, app-owned adoption operation.
     public func beginConnectionPreview() {
-        guard !closing, !suspended, !replacing, setupState == .attached, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
+        guard !closing, !suspended, !replacing, setupState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
         readingPreview = true
         ownTask = Task {
-            defer { ownTask = nil; readingPreview = false }
+            defer { readingPreview = false; finishOwnWork() }
             do {
                 let work = try await own.preview()
                 guard !Task.isCancelled, !closing, expected == generation, revision == hostRevision else {
                     if case .ready(let handle, _) = work { try await backend.connection?.cancelPreview(handle) }
                     return
                 }
-                preview = work
+                if case .ready(let handle, let summary) = work, summary.initialAdoptionRequired {
+                    guard !settings.paused, let connection = backend.connection else {
+                        try await backend.connection?.cancelPreview(handle)
+                        return
+                    }
+                    await observeInitialAdoptionPreview?(handle)
+                    guard !closing, !suspended, !replacing, !settings.paused, !Task.isCancelled,
+                          expected == generation, revision == hostRevision else {
+                        try await connection.cancelPreview(handle)
+                        return
+                    }
+                    readingPreview = false
+                    initialAdoptionCancelled = false
+                    initialActivationReturned = false
+                    initialAdoptionEnabledBefore = settings.enabled
+                    initialOwnAdmission.setOpen(true)
+                    // No await between the persistent setting and actual adopt.
+                    saveEnabled(true)
+                    observeInitialAdoptionAcceptance?()
+                    do { _ = try await connection.confirmAdoption(handle) }
+                    catch {
+                        // The call did not accept an operation. Restore even
+                        // when authority/account changed during the call.
+                        restoreInitialAdoptionEnabled()
+                        throw error
+                    }
+                    recovery = try await connection.recoveryStatus()
+                    await runOwnWork(backend, generation: expected, revision: revision)
+                } else { preview = work }
             } catch { if expected == generation, !closing, !Task.isCancelled { operationFailed = true } }
         }
     }
@@ -294,40 +365,100 @@ public final class SyncCoordinator {
         await ownTask?.value
     }
     public func resumeConnection() {
-        guard !closing, !suspended, !replacing, ownTask == nil, let backend, let connection = backend.connection else { return }
+        guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
+              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, let backend, let connection = backend.connection else { return }
         let expected = generation, revision = hostRevision
         ownTask = Task {
             defer { finishOwnWork() }
-            do { try await connection.trigger(); await runOwnWork(backend, generation: expected, revision: revision) }
+            do {
+                if initialAdoptionEnabledBefore == nil { try await connection.trigger() }
+                await runOwnWork(backend, generation: expected, revision: revision)
+            }
             catch { if expected == generation, !closing { operationFailed = true } }
         }
     }
     private func finishOwnWork() {
         ownTask = nil
-        if ownWorkRequested, !closing, !replacing, !suspended { ownWorkRequested = false; resumeConnection() }
+        if ownWorkRequested, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
     }
     public func cancelConnectionOperation() async {
-        guard !closing, !suspended, !replacing, let backend, let own = backend.own, let operation = recovery?.operation else { return }
+        guard !closing, !suspended, !replacing, !activatingInitialAdoption,
+              let backend, let own = backend.own, let operation = recovery?.operation else { return }
+        initialAdoptionCancelled = true
         do {
             try await own.cancel(operation)
             await ownTask?.value
             recovery = try await backend.connection?.recoveryStatus()
+            await reconcileInitialAdoption(backend)
             receive(.refresh(.cloud))
         } catch { operationFailed = true }
+    }
+    private func saveEnabled(_ enabled: Bool) {
+        saveSettings(.init(enabled: enabled, paused: settings.paused,
+            automatic: settings.automatic, media: settings.media))
+    }
+    private func restoreInitialAdoptionEnabled() {
+        guard let earlier = initialAdoptionEnabledBefore else { return }
+        initialAdoptionEnabledBefore = nil
+        saveEnabled(earlier)
+    }
+    private func reconcileInitialAdoption(_ original: any SyncCoordinatorBackend) async {
+        guard initialAdoptionEnabledBefore != nil, !activatingInitialAdoption, let connection = original.connection else { return }
+        let expected = generation, revision = hostRevision
+        do {
+            // No count, missing status, or transient failed step proves an end.
+            let current = try await connection.recoveryStatus()
+            guard expected == generation, revision == hostRevision else { return }
+            recovery = current
+            guard current == nil else { return }
+            let output = try await original.input(.refresh(.cloud))
+            guard expected == generation, revision == hostRevision else { return }
+            consume(output, generation: expected)
+            let policy = try await CoreCloudWorkflowService().policy()
+            let usable = try await policy.status().controls.bindingUsable
+            guard expected == generation, revision == hostRevision else { return }
+            if usable == true { initialAdoptionEnabledBefore = nil; initialActivationReturned = false }
+            else if usable == false { restoreInitialAdoptionEnabled() }
+        } catch { /* Unknown authority preserves the accepted operation's setting. */ }
+    }
+    private func willActivateInitialAdoption(generation expected: UInt64, revision: UInt64) throws {
+        guard !closing, !suspended, !replacing, !settings.paused, !initialAdoptionCancelled,
+              ownTask?.isCancelled == false, expected == generation, revision == hostRevision else { throw CancellationError() }
+        activatingInitialAdoption = true
+    }
+    private func didActivateInitialAdoption(generation expected: UInt64) async {
+        defer { activatingInitialAdoption = false }
+        if case .ready(let actual) = try? await CoreCollectionService().lifecycle(), actual > expected {
+            initialActivationReturned = true
+        }
     }
     private func runOwnWork(_ backend: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64) async {
         guard let own = backend.own else { return }
         do {
             while !closing, !Task.isCancelled, revision == hostRevision {
-                let progress = try await own.runNext()
+                let progress: CloudConnectionProgress
+                if initialAdoptionEnabledBefore != nil {
+                    guard !initialAdoptionCancelled, !settings.paused, !suspended, !awaitingInitialOwnProof else { return }
+                    progress = try await own.runNext(admission: initialOwnAdmission,
+                        beforeActivation: { [self] in try await self.willActivateInitialAdoption(generation: expected, revision: revision) },
+                        afterActivation: { [self] in await self.didActivateInitialAdoption(generation: expected) })
+                } else { progress = try await own.runNext() }
+                // Activation can deliver CollectionReplaced before this call
+                // returns. Finish this original task without touching successor
+                // state; replacementTask joins it, closes, then attaches once.
+                guard !initialActivationReturned, !replacing, expected == generation, revision == hostRevision else { return }
                 let current = try await backend.connection?.recoveryStatus()
                 if expected == generation { recovery = current }
+                await reconcileInitialAdoption(backend)
                 receive(.refresh(.cloud))
                 // A send is requested only by the Rust policy's emitted work.
                 // Continue only after real progress; no idle/retry polling.
                 switch progress { case .progressed: continue; case .idle, .sendEntities: return }
             }
-        } catch { if expected == generation, !closing { operationFailed = true } }
+        } catch {
+            if expected == generation, !closing, !initialAdoptionCancelled, !(error is CancellationError) { operationFailed = true }
+            if revision == hostRevision, !replacing { await reconcileInitialAdoption(backend) }
+        }
     }
     func foregroundAfterLocalResume() async {
         guard !closing, !replacing else { return }
@@ -348,18 +479,25 @@ public final class SyncCoordinator {
     }
     private func foregroundAfterAccountProof() {
         awaitingResumeProof = false
+        if !settings.paused { initialOwnAdmission.setOpen(true) }
         receive(.settings(settings))
         if let reachable { receive(.network(reachable: reachable)) }
         if pendingExpiry { pendingExpiry = false; receive(.backgroundExpiring) }
         if pendingLocalRefresh { pendingLocalRefresh = false; receive(.refresh(.local)) }
         reportAvailableSpace(); receive(.foreground)
+        if initialAdoptionEnabledBefore != nil, !initialAdoptionCancelled { resumeConnection() }
     }
     @discardableResult func backgroundAfterLocalFlush(deadlineMilliseconds: Int64?) async -> Bool {
         await replacementTask?.value
         guard !replacing else { return false }
+        if initialAdoptionEnabledBefore != nil { initialOwnAdmission.setOpen(false) }
         if let deadlineMilliseconds { receive(.background(deadlineMilliseconds: deadlineMilliseconds)) }
         else { receive(.backgroundExpiring) }
         await waitForInputs()
+        if initialAdoptionEnabledBefore != nil {
+            drainInitialOwnWork()
+            await initialOwnDrain?.value
+        }
         await drainOperations()
         suspended = true
         accountTask?.cancel()
@@ -412,6 +550,9 @@ public final class SyncCoordinator {
                 if result.deferred { hasDeferredNativeWork = true }
                 if result.error != nil { operationFailed = true; failureRevision &+= 1 }
                 if result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
+                if initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
+                    await reconcileInitialAdoption(backend)
+                }
             }
             acknowledged?.resume()
         case .replaced(let next):
@@ -423,6 +564,7 @@ public final class SyncCoordinator {
             // installation. Only successful platform preparation admits an owner.
             guard platformPrepared else { return }
             replacing = true
+            initialOwnAdmission.setOpen(false)
             awaitingResumeProof = false
             flushTimer?.invalidate(); flushTimer = nil
             if replacementTask == nil {
@@ -447,6 +589,13 @@ public final class SyncCoordinator {
             guard revision == hostRevision, !closing, !replacing, !suspended else { return }
             if requested { enqueue(.account(true)) }
             await policy(.refresh(.cloud))
+        case .ownAccountProof(let read, let expected, let revision):
+            guard read == initialOwnResumeRead, expected == generation, revision == hostRevision,
+                  !closing, !suspended, !replacing, !settings.paused, initialOwnDrain == nil else { return }
+            initialOwnResumeRead = nil
+            awaitingInitialOwnProof = false
+            initialOwnAdmission.setOpen(true)
+            resumeConnection()
         case .account(let transition):
             guard !closing, !replacing, !suspended, let backend else { return }
             do {
@@ -454,6 +603,7 @@ public final class SyncCoordinator {
                 // before awaiting any network resolution. A later signal makes
                 // an earlier in-flight reply stale immediately.
                 pendingAccountRead = try await backend.beginAccountRead(transition: transition)
+                if awaitingInitialOwnProof { initialOwnResumeRead = pendingAccountRead }
                 startAccountRead()
             } catch { operationFailed = true }
         }
@@ -556,7 +706,13 @@ public final class SyncCoordinator {
         defer { replacementTask = nil }
         guard platformPrepared else { return }
         for task in operationTasks.values { task.cancel() }
-        accountTask?.cancel(); ownTask?.cancel()
+        accountTask?.cancel()
+        await initialOwnDrain?.value
+        // Activation is a local Rust call, with no held SDK callback. Waiting
+        // for that call cannot wait for this replacement task. All transport
+        // work and unrelated replacements use the ordinary cancel/drain path.
+        if activatingInitialAdoption { await ownTask?.value }
+        else { ownTask?.cancel() }
         do {
             try await backend?.close()
             await accountTask?.value
@@ -588,6 +744,7 @@ public final class SyncCoordinator {
                 enqueue(.policy(.refresh(.cloud)))
                 if let reachable { enqueue(.policy(.network(reachable: reachable))) }
                 enqueue(.account(false))
+                await reconcileInitialAdoption(successor)
                 return
             }
         } catch { replacing = true; operationFailed = true; setupState = .failed }
@@ -611,6 +768,7 @@ public final class SyncCoordinator {
                 let expected = generation, revision = hostRevision
                 let result = await backend.readAccount(read)
                 enqueue(.result(result, generation: expected, revision: revision, acknowledged: nil))
+                if result.accountVerified { enqueue(.ownAccountProof(read, generation: expected, revision: revision)) }
             }
         }
     }
@@ -619,8 +777,11 @@ public final class SyncCoordinator {
               let capacity = values.volumeAvailableCapacityForImportantUsage, capacity >= 512 * 1_024 * 1_024 else { return }
         receive(.volumeSpaceAvailable)
     }
-    func waitForReplacement() async { await replacementTask?.value; await waitForInputs() }
+    func waitForReplacement() async { await waitForInputs(); await replacementTask?.value; await waitForInputs() }
     func waitForConnectionPreview() async { await ownTask?.value }
+    func waitForInitialOwnDrain() async { await initialOwnDrain?.value }
+    func waitForInitialOwnResume() async { await initialOwnResume?.value; await ownTask?.value }
+    func accountChanged() async { enqueue(.account(true)); await waitForInputs() }
     func prepareConnectionAuthority() async {
         await waitForInputs()
         await accountTask?.value
@@ -644,9 +805,12 @@ public final class SyncCoordinator {
         if let closeTask { return await closeTask.value }
         if drained { return true }
         closing = true
+        initialOwnAdmission.setOpen(false)
         let task = Task { () -> Bool in
             await attachmentTask?.value
             await replacementTask?.value
+            await initialOwnDrain?.value
+            await initialOwnResume?.value
             networkTask?.cancel(); accountEventsTask?.cancel(); networkMonitor?.cancel()
             if let accountObserver { NotificationCenter.default.removeObserver(accountObserver); self.accountObserver = nil }
             flushTimer?.invalidate(); flushTimer = nil
@@ -654,12 +818,18 @@ public final class SyncCoordinator {
             for task in operationTasks.values { task.cancel() }
             accountTask?.cancel(); ownTask?.cancel()
             do {
+                if initialAdoptionEnabledBefore != nil, !activatingInitialAdoption,
+                   let own = backend?.own, let operation = try await backend?.connection?.recoveryStatus()?.operation {
+                    initialAdoptionCancelled = true
+                    try await own.cancel(operation)
+                }
                 try await backend?.close()
                 await accountTask?.value
                 await networkTask?.value
                 await accountEventsTask?.value
                 await waitForInputs()
                 await drainOperations()
+                if let backend { await reconcileInitialAdoption(backend) }
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; platformPrepared = false
@@ -695,7 +865,7 @@ public final class SyncCoordinator {
         accountEventsTask = Task { [weak self] in
             for await _ in accounts {
                 guard let self, !Task.isCancelled else { return }
-                enqueue(.account(true))
+                await accountChanged()
             }
         }
     }

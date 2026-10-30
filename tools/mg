@@ -315,9 +315,13 @@ mg__invoke_docker() {
     mg_status error
     return 2
   fi
-  local rel="${MG_RUN_DIR#"$MG_ROOT"/}"
+  local rel="${MG_RUN_DIR#"$MG_ROOT"/}" fixture_env=()
+  if [ -n "${MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ]; then
+    fixture_env=(-e "MEGURI_INITIAL_ADOPTION_FIXTURE=$MEGURI_INITIAL_ADOPTION_FIXTURE")
+  fi
   mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
     -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
+    ${fixture_env[0]+"${fixture_env[@]}"} \
     "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"} </dev/null
 }
 

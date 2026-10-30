@@ -37,6 +37,33 @@ mg_core_xcframework() {
   fi
 }
 
+# The fixture is emitted by real Rust publication into this run's directory.
+# Keep its input and receipt with the Swift results; a missing or skipped
+# producer stops verification before Apple compilation.
+mg__swift_initial_adoption_fixture() {
+  local fixture="$MG_RUN_DIR/initial-adoption-fixture.json" result
+  if ! result="$(MEGURI_INITIAL_ADOPTION_FIXTURE="/work/${fixture#"$MG_ROOT"/}" \
+    "$MG_ROOT/tools/mg" core-test -- --test cloud_initial_app_fixture \
+      -E 'package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)')"; then
+    mg_failure initial-adoption-fixture "Rust fixture generation failed; Swift tests did not start"
+    mg_status fail
+    return 1
+  fi
+  if [ ! -f "$result" ] || [ -L "$result" ] ||
+    ! jq -e '.job == "core-test" and .status == "pass" and .dry_run == false and .summary.total == 1 and .summary.passed == 1 and .summary.failed == 0 and .summary.skipped == 0' "$result" >/dev/null ||
+    [ ! -f "$fixture" ] || [ ! -s "$fixture" ] || [ -L "$fixture" ]; then
+    mg_failure initial-adoption-fixture "Rust fixture generation lacks a passing receipt and owned output"
+    mg_status fail
+    return 1
+  fi
+  mg_artifact json "$result" "initial adoption fixture producer"
+  mg_artifact json "$fixture" "public initial adoption fixture"
+  mg_detail initial_adoption_fixture "$(jq -nc --arg result "$result" --arg path "$fixture" \
+    --arg sha256 "$(shasum -a 256 "$fixture" | awk '{print $1}')" \
+    '{result: $result, path: $path, sha256: $sha256}')"
+  export MEGURI_INITIAL_ADOPTION_FIXTURE="$fixture"
+}
+
 # tools/mg swift-test [--package NAME] [--config Debug|Profile] [-- swift test args]
 mg_swift_test() {
   local package=MeguriCore config=Debug spm_config=debug
@@ -118,6 +145,9 @@ mg_swift_test() {
   fi
 
   mg_lint_ui_first || return 0
+  if [ "$package" = MeguriKit ]; then
+    mg__swift_initial_adoption_fixture || return 0
+  fi
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_status fail

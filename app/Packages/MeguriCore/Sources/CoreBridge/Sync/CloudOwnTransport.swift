@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Commands contain only native transport inputs projected by Rust. Recovery
 /// decisions and confirmations remain in the retained core handles.
@@ -28,6 +29,27 @@ public protocol CloudOwnTransport: Sendable {
 }
 public enum CloudConnectionProgress: Sendable { case progressed, sendEntities, idle }
 
+extension CoreCloudWorkflowService {
+    /// Uses the existing guarded reconciliation before the app projects policy.
+    public func prepareRuntimeBeforePolicy() async throws { try await prepareRuntime() }
+}
+
+/// App lifecycle admission only. Core retains every request and binding authority.
+public final class CloudOwnWorkAdmission: Sendable {
+    private let open = Mutex(true)
+    public init() {}
+    public func setOpen(_ value: Bool) { open.withLock { $0 = value } }
+    public func check() throws { if !open.withLock({ $0 }) { throw CancellationError() } }
+    fileprivate func enqueue(_ operation: any CloudPublicationQueue) -> Bool {
+        open.withLock { $0 && operation.enqueue() }
+    }
+}
+private struct AdmittedCloudOwnQueue: CloudPublicationQueue {
+    let admission: CloudOwnWorkAdmission
+    let operation: any CloudPublicationQueue
+    func enqueue() -> Bool { admission.enqueue(operation) }
+}
+
 /// Runs outside CKSyncEngine event delivery. Own requests always cross Rust's
 /// submit guard after their last suspension and immediately before queue add.
 public actor CloudOwnExecutor {
@@ -40,9 +62,11 @@ public actor CloudOwnExecutor {
     private var closed = false
     public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport) { self.core = core; self.transport = transport }
 
-    public func runNext() async throws -> CloudConnectionProgress {
+    public func runNext(admission: CloudOwnWorkAdmission? = nil,
+                        beforeActivation: (@Sendable () async throws -> Void)? = nil,
+                        afterActivation: (@Sendable () async -> Void)? = nil) async throws -> CloudConnectionProgress {
         try requireIdle()
-        return try await run { try await self.executeNext() }
+        return try await run { try await self.executeNext(admission: admission, beforeActivation: beforeActivation, afterActivation: afterActivation) }
     }
     /// Reads the actual native records for the preview. Returning ready grants
     /// no publication; the caller must keep and confirm the returned handle.
@@ -98,10 +122,11 @@ public actor CloudOwnExecutor {
         if stopping || closed { throw CloudOwnTransportFailure.closed }
         try Task.checkCancellation()
     }
-    private func read(_ target: CloudControlTarget) async throws -> CloudControlRead {
+    private func read(_ target: CloudControlTarget, admission: CloudOwnWorkAdmission? = nil) async throws -> CloudControlRead {
         try checkStopping()
         let op = try transport.prepare(.read(target)); prepared = op
-        guard op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
+        try checkStopping()
+        guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
         let result = try await op.reply()
         prepared = nil
         guard case .read(let read) = result else { throw CloudOwnTransportFailure.unexpectedReply }
@@ -132,8 +157,13 @@ public actor CloudOwnExecutor {
             throw error
         }
     }
-    private func executeNext() async throws -> CloudConnectionProgress {
+    private func executeNext(admission: CloudOwnWorkAdmission?,
+                             beforeActivation: (@Sendable () async throws -> Void)?,
+                             afterActivation: (@Sendable () async -> Void)?) async throws -> CloudConnectionProgress {
+        try admission?.check()
         let work = try await core.nextPublicationWork()
+        try checkStopping()
+        try admission?.check()
         switch work {
         case .local(let handle, _, _), .scan(let handle):
             try checkStopping()
@@ -150,8 +180,12 @@ public actor CloudOwnExecutor {
                 throw error
             }
             let accepted: Bool
-            do { accepted = try await core.submitPublicationRequest(request, queue: op) }
-            catch {
+            do {
+                let queue: any CloudPublicationQueue
+                if let admission { queue = AdmittedCloudOwnQueue(admission: admission, operation: op) }
+                else { queue = op }
+                accepted = try await core.submitPublicationRequest(request, queue: queue)
+            } catch {
                 op.cancel(); prepared = nil
                 try? await core.publicationResult(request, result: .notStarted)
                 throw error
@@ -182,10 +216,11 @@ public actor CloudOwnExecutor {
             try checkStopping()
             switch action {
             case .read(let target):
-                try await core.adoptionResult(handle, result: .read(try await read(target)))
+                try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission)))
             case .fetch(let zone, let cursor):
                 let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor)); prepared = op
-                guard op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
+                try checkStopping()
+                guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                 do {
                     let reply = try await op.reply(); prepared = nil
                     guard case .page(let records, let deleted, let next) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
@@ -197,7 +232,18 @@ public actor CloudOwnExecutor {
                     try? await core.adoptionResult(handle, result: .read(.failed))
                     throw error
                 }
-            case .validate, .activate: try await core.performAdoptionLocal(handle)
+            case .validate: try await core.performAdoptionLocal(handle)
+            case .activate:
+                try await beforeActivation?()
+                do {
+                    try checkStopping()
+                    try admission?.check()
+                    try await core.performAdoptionLocal(handle)
+                } catch {
+                    await afterActivation?()
+                    throw error
+                }
+                await afterActivation?()
             }
         case .sendEntities: return .sendEntities
         case .idle: return .idle

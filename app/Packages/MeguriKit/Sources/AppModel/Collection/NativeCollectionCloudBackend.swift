@@ -61,7 +61,23 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     }
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
         let result = await accounts.read(id)
-        return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
+        guard result.verified, result.error == nil, !closed, !Task.isCancelled else {
+            return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
+        }
+        do {
+            let lifecycle: CollectionLifecycle = try await CoreCollectionService().lifecycle()
+            if case .ready = lifecycle {
+                let status: CloudPolicyStatus = try await policy.status()
+                if status.controls.bindingUsable == true {
+                    // Reconcile the current verified Host before policy can issue
+                    // StartEngine. Core settles queued inbox work before its scan.
+                    try await workflow.prepareRuntimeBeforePolicy()
+                    let refreshed = try await policy.input(.refresh(.cloud))
+                    return .init(outputs: result.outputs + [refreshed], error: nil, deferred: false, accountVerified: true)
+                }
+            }
+            return .init(outputs: result.outputs, error: nil, deferred: false, accountVerified: true)
+        } catch { return .init(outputs: result.outputs, error: error, deferred: false) }
     }
     func freezeForSuspend() async throws {
         await accounts.freeze()

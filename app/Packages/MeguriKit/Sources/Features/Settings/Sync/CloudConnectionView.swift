@@ -27,7 +27,7 @@ public struct CloudConnectionView: View {
             content(entry)
                 .navigationDestination(for: CloudSyncEntry.self) { content($0) }
         }
-        .interactiveDismissDisabled(confirming || preparing || cancelling)
+        .interactiveDismissDisabled(confirming || preparing || cancelling || sync.initialAdoptionActive)
         .task { await prepare() }
         .onChange(of: sync.settings.paused) { _, paused in
             if paused, !submitted { Task { await sync.cancelConnectionPreview() } }
@@ -38,7 +38,10 @@ public struct CloudConnectionView: View {
         Form {
             if let errorKey { Text(SyncText.value(errorKey)) }
             if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
-            if confirming {
+            if sync.initialAdoptionActive {
+                ProgressView(SyncText.value("sync.connect.downloading"))
+                    .accessibilityIdentifier("sync.connect.download")
+            } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {
                 if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
@@ -68,7 +71,7 @@ public struct CloudConnectionView: View {
                     if submitted { Text("Close", bundle: .module) }
                     else { Text(SyncText.value(page == .publicationChoice ? "sync.decision.notNow" : "sync.now.cancel")) }
                 }
-                .disabled(confirming || preparing || cancelling || sync.connectionPreviewCancelling)
+                .disabled(confirming || preparing || cancelling || sync.connectionPreviewCancelling || sync.connectionActivationActive)
                 .accessibilityIdentifier(page == .publicationChoice ? "sync.publicationChoice.notNow" : "sync.connection.cancel")
             }
             if !submitted, !confirming, !cancelling, !sync.connectionPreviewActive, let summary {
@@ -228,7 +231,8 @@ public struct CloudConnectionView: View {
         guard !confirming, !preparing, !cancelling else { return }
         cancelling = true
         defer { cancelling = false }
-        if !submitted { await sync.cancelConnectionPreview() }
+        if sync.initialAdoptionActive { await sync.cancelConnectionOperation() }
+        else if !submitted { await sync.cancelConnectionPreview() }
         collection.navigation.dismissSheet()
     }
     private static let kindKeys: [(CloudCountKind, String)] = [(.note, "sync.kind.note"), (.card, "sync.kind.card"),

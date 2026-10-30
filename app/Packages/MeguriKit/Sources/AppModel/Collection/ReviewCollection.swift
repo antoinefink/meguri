@@ -386,6 +386,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
     private var cloudPreparationTask: Task<Void, any Error>?
+    private var cloudActivationCompletion: Task<Void, Never>?
     private var opening = false
     private var preparedGeneration: UInt64?
     private var starting = false
@@ -628,11 +629,16 @@ public final class ReviewCollection: ChangeFanoutSink {
             if !opening {
                 navigation.dismissSheet()
                 entryOwner?.destinationChanged()
-                Task { [weak self] in
+                cloudActivationCompletion = Task { [weak self] in
                     guard let self else { return }
+                    defer { self.cloudActivationCompletion = nil }
+                    // The original NoCollection Host is retained already, but
+                    // R6 reopen/step 9 and the old SDK drain must finish first.
+                    await self.sync.waitForReplacement()
                     await self.mediaCloseTask?.value
-                    guard self.generation == next, !self.closed, !self.opening else { return }
-                    await self.day?.checkNow(); await self.readPolicy(); await self.loadCounts()
+                    guard self.generation == next, !self.closed, !self.closing, !self.opening else { return }
+                    do { try await self.completeOpenedHost(loadRecord: false) }
+                    catch { if self.generation == next { self.error = Self.openExplanation(error) } }
                 }
             }
         case .recoveryDropped(_, let cardID, _): recoveryDrops.append(cardID)
@@ -1018,7 +1024,17 @@ public final class ReviewCollection: ChangeFanoutSink {
                 await deckNamesOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
             }
             await openTask?.value
-            guard !closed, state != .unopened, state != .noFile else { resuming = false; return }
+            guard !closed, state != .unopened else { resuming = false; return }
+            if state == .noFile {
+                // A retained NoCollection Host has cloud callbacks to drain,
+                // even though there is no local writer to flush or suspend.
+                if sync.connectionService != nil {
+                    if active { await sync.foregroundAfterLocalResume() }
+                    else { _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) }
+                }
+                resuming = false
+                return
+            }
             do {
                 if active {
                     let began = day?.beginResult()
@@ -1050,6 +1066,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
     public func waitForLifecycle() async { await lifecycleTask?.value }
+    func waitForCloudActivation() async { await cloudActivationCompletion?.value }
     /// The UIKit assertion owner supplies the OS's remaining time, never a
     /// guessed duration. Tokens keep a late expiry out of a later foreground.
     public func beginBackgroundTask(deadlineMilliseconds: Int64?) -> UInt64? {
@@ -1099,6 +1116,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         await exportOwner?.cancelAndDrain()
         await openTask?.value
         _ = await cloudPreparationTask?.result
+        await cloudActivationCompletion?.value
         await lifecycleTask?.value
         if state == .noFile || state == .unopened {
             guard await sync.cancelAndDrain() else { return false }
