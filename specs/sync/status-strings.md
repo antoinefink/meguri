@@ -556,6 +556,7 @@ Decided 2026-10-27, so that the screen contract `sync.reviewConflicts` and T13.4
 | `sync.settings.account.none` | Not signed in to iCloud | |
 | `sync.settings.account.restricted` | iCloud is restricted on this device | |
 | `sync.settings.account.temporary` | iCloud is temporarily unavailable | |
+| `sync.settings.account.unknown` | iCloud account status unknown | account status is unknown; device setup does not imply sign-out |
 | `sync.settings.account.setupNeeded` | Meguri can’t use iCloud on this device | account status `configuration` (`unavailableReason` `setupNeeded`, P14.4) |
 | `sync.settings.account.other` | Signed in to a different iCloud account than this collection uses | the account does not match the binding |
 | `sync.settings.automatic` | Sync Automatically | toggle (R123) |
