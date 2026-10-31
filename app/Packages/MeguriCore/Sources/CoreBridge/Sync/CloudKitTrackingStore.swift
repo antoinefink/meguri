@@ -32,6 +32,13 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowMedia) { CoreCloudMediaService(try raw.media()) }
     }
+    /// Begin only after the original SDK handler has returned.
+    public func beginFirstAssetReadPass(sdk: String) async throws -> CoreCloudAssetReadPass {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowBeginFirstAssetReadPass) {
+            CoreCloudAssetReadPass(try raw.beginFirstAssetReadPass(sdk: sdk))
+        }
+    }
     func submitMediaBatch(sdk: String, batch: UInt64, queue: any CloudMediaQueue) async throws -> Bool {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowSubmitMediaBatch) { try raw.submitMediaBatch(sdk: sdk, batch: batch, queue: ForeignMediaQueue(queue)) }

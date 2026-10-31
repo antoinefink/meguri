@@ -7,6 +7,12 @@ internal import MeguriCoreBindings
 struct CoreCloudPolicyExecution: Sendable {
     let raw: MeguriCoreBindings.CloudPolicyExecution
     init(_ raw: MeguriCoreBindings.CloudPolicyExecution) { self.raw = raw }
+    func beginAssetReadPass() async throws -> CoreCloudAssetReadPass {
+        let raw = self.raw
+        return try await MaintenanceLane.shared.call(.cloudPolicyExecutionBeginAssetReadPass) {
+            CoreCloudAssetReadPass(try raw.beginAssetReadPass())
+        }
+    }
     func originalSDK() async throws -> String? {
         let raw = self.raw
         return try await CoreCloudPolicyService.call(.cloudPolicyExecutionOriginalSdk) { [raw] in try raw.originalSdk() }
