@@ -1256,6 +1256,8 @@ impl Runtime {
             inbox_ids: inbox.into_iter().collect(),
             keys: Vec::new(),
             result_seq: None,
+            originating_open: Some(a.open),
+            planned_at_ms: self.media_now()?,
             native_file: a.file,
             generation: a.generation,
             media: Some(Apply {
@@ -1396,6 +1398,7 @@ impl Runtime {
         }
         let mut planned = intent.clone();
         planned.result_seq = None;
+        planned.originating_open = Some(a.open);
         let shared = self.state.clone();
         let authority = a.clone();
         let now = self.media_now()?;
@@ -1966,6 +1969,7 @@ fn fresh_media_entity(
         origin,
         local_rev: 1,
         acked_rev: 0,
+        tombstone_at: None,
         payload,
         base_payload: None,
         mark: None,

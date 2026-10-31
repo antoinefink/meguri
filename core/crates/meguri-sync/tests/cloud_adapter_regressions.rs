@@ -44,6 +44,14 @@ const NOW_MS: i64 = 1_735_689_600_000; // 2025-01-01T00:00:00Z
 const STEPS: usize = 10_000;
 
 fn fixture(notes: usize, automatic: bool) -> (tempfile::TempDir, Service<SeededRandom>, PreboundDevice, SDKRig) {
+    fixture_with_deck_selection(notes, automatic, true)
+}
+
+fn fixture_with_deck_selection(
+    notes: usize,
+    automatic: bool,
+    select: bool,
+) -> (tempfile::TempDir, Service<SeededRandom>, PreboundDevice, SDKRig) {
     let run = tempfile::tempdir().unwrap();
     let collection = run.path().join("device");
     let recipe = Recipe::parse(&format!(
@@ -52,8 +60,26 @@ fn fixture(notes: usize, automatic: bool) -> (tempfile::TempDir, Service<SeededR
     .unwrap();
     let manifest = generate_recipe(&recipe, SEED, &collection).unwrap();
     assert_eq!(manifest.counts.notes, notes as u64);
+    if select {
+        PreboundDevice::select_review_deck(&collection, NOW_MS, SEED).unwrap();
+    }
     let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(SEED)).unwrap();
     let files = PreboundDevice::arrange(&collection, &mut service, SEED).unwrap();
+    if select {
+        let rows = files.read_collection_payloads().unwrap();
+        let deck = rows
+            .values()
+            .find_map(|p| match p {
+                codec::Payload::Card(c) if c.nid == files.note.id => Some(c.did),
+                _ => None,
+            })
+            .unwrap();
+        let key = codec::entity_name(&files.binding.facts.record_key.0, codec::Kind::Config, b"curDeck").unwrap();
+        let codec::Payload::Config(current) = decode(&files, &record(&service, &files, &key)).1 else {
+            panic!("actual selected-deck baseline required")
+        };
+        assert!(current.val == deck.to_string().as_bytes());
+    }
     let mut rig = SDKRig::open(&files, automatic, NOW_MS, SEED).unwrap();
     rig.reconcile_and_confirm_root(&mut service, STEPS).unwrap();
     assert!(rig.tracking_pending_names().unwrap().is_empty());
@@ -552,4 +578,52 @@ fn core_pending_actions_preserve_emission_order() {
 #[test]
 fn cloud_child_entry() {
     meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}
+
+/// P8.1: start selects curDeck before the held review session becomes active.
+/// This positive control intentionally retains the generator's default deck.
+#[test]
+fn initial_review_selection_sends_actual_cur_deck_before_any_answer() {
+    let (_run, mut service, files, mut rig) = fixture_with_deck_selection(1, true, false);
+    assert_eq!(rig.accepted_root_read().unwrap().instance, rig.instance());
+    let before = rig.driver().collection_rows().unwrap();
+    let config_name = codec::entity_name(&files.binding.facts.record_key.0, codec::Kind::Config, b"curDeck").unwrap();
+    let baseline = record(&service, &files, &config_name);
+    let (base_entity, base_payload) = decode(&files, &baseline);
+    let codec::Payload::Config(base_config) = base_payload else {
+        panic!("Config required")
+    };
+    assert_eq!(base_config.key, b"curDeck");
+    assert_eq!(base_config.val, b"1");
+    let after_baseline = cursor(&service);
+    let session = rig.driver().review_begin(files.note.id).unwrap();
+    let card = rig.driver().review_start(session).unwrap();
+    assert_ne!(card.did, 1);
+    assert!(rig.entity_facts(&config_name).unwrap().mark.is_some());
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let updated = record(&service, &files, &config_name);
+    let (entity, payload) = decode(&files, &updated);
+    let codec::Payload::Config(config) = payload else {
+        panic!("Config required")
+    };
+    assert_eq!(config.key, b"curDeck");
+    assert_eq!(config.val, card.did.to_string().as_bytes());
+    assert_eq!(entity.fields.erev, base_entity.fields.erev + 1);
+    assert!(
+        service
+            .request_log()
+            .unwrap()
+            .iter()
+            .any(|r| r.request_id > after_baseline && r.kind == RequestKind::Modify)
+    );
+    let after = rig.driver().collection_rows().unwrap();
+    for payload in before
+        .iter()
+        .filter(|p| matches!(p, codec::Payload::Card(_) | codec::Payload::Revlog(_)))
+    {
+        assert!(after.contains(payload));
+    }
+    eprintln!("pre-answer Config/curDeck: native update pending and conditionally saved");
+    rig.driver().review_end_and_drain(session).unwrap();
+    rig.close_clean().unwrap();
 }

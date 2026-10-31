@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 3;
+const VERSION: i64 = 4;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -38,7 +38,7 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         let versions = statement
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [2] && versions != [VERSION] {
+        if versions != [1] && versions != [2] && versions != [3] && versions != [VERSION] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
     } else {
@@ -65,12 +65,12 @@ impl TrackingStore {
             transaction.execute_batch(SCHEMA)?;
             transaction.commit()?;
         }
-        // V3 adds durable absence metadata. Earlier readers must refuse it;
-        // upgrade its tables and marker atomically without rewriting payloads.
+        // V4 adds ordinary deletion/flight facts. Earlier readers must refuse
+        // them. Preserve the V3 absence tables and upgrade the marker atomically.
         let transaction = self.connection.transaction()?;
         super::adapter_store::install(&transaction)?;
         transaction.execute(
-            "UPDATE cloud_runtime_schema SET version=?1 WHERE version IN (1,2)",
+            "UPDATE cloud_runtime_schema SET version=?1 WHERE version IN (1,2,3)",
             [VERSION],
         )?;
         transaction.commit()?;
@@ -423,6 +423,7 @@ impl TrackingStore {
             acked_rev: 0,
             in_flight: Vec::new(),
             acked_envelope: OpaqueBytes(envelope.to_vec()),
+            tombstone_at: None,
         };
         // Do not allow a fixture to erase pending facts or rewrite a baseline.
         let transaction = self.connection.transaction()?;

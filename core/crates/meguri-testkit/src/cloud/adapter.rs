@@ -515,7 +515,10 @@ impl SDKRig {
                 if_unchanged: s.system_fields.clone().map(SystemFields::from_bytes),
             })
             .collect();
-        self.refresh()?;
+        // Building can emit removals for held/deferred images even when it
+        // returns no saves. Apply the real ordered updates after handler return
+        // before reporting SDK pending state or selecting another batch.
+        self.updates()?;
         Ok((b, mutations))
     }
     fn send(&mut self, service: &mut Service<SeededRandom>, mutations: Vec<Mutation>) -> Result<ResponseBatch> {

@@ -613,7 +613,7 @@ impl Runtime {
                     let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
-                        apply(ctx, &mut s, binding, file, generation, entries, replay_of)
+                        apply(ctx, &mut s, &writer_guard, entries, replay_of)
                     })
                     .map_err(capture)?
                 };
@@ -831,6 +831,10 @@ impl Runtime {
                 if key.role != ApplyKeyRole::Entry {
                     continue;
                 }
+                if store.incoming_blocks_name(i.binding, &key.name)? {
+                    // Rekey is pending; this entry grants no ACK or image update.
+                    continue;
+                }
                 s.cloud.acked_images.remove(&key.name);
                 if let Some((rev, flights)) = own.get(&key.name) {
                     let e = store.entity_facts(i.binding, &key.name)?.ok_or(Error::InvalidData)?;
@@ -902,22 +906,106 @@ impl Runtime {
                 .keys
                 .iter()
                 .all(|k| digest(current.get(&k.name).and_then(Option::as_ref)).ok() == Some(k.after_digest));
-            if all_after {
+            let same_open_commit = self.with_incoming(guard, collection, |s| {
+                Ok(i.originating_open == Some(guard.open)
+                    && i.result_seq.is_some_and(|seq| {
+                        current_seq.0 > seq
+                            && s.incoming.runs.iter().any(|run| {
+                                run.intent_id == i.id
+                                    && run.seq == seq
+                                    && run.native_file == guard.file
+                                    && run.generation == guard.generation.0
+                                    && run.entry_ids == i.inbox_ids
+                            })
+                    }))
+            })?;
+            let restored_deletion = if !all_after && same_open_commit {
+                let tombstones = self.with_incoming(guard, collection, |s| {
+                    Ok(s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .inbox(guard.binding)?
+                        .into_iter()
+                        .filter(|e| i.inbox_ids.contains(&e.id))
+                        .filter_map(|e| match e.entry.value {
+                            InboxValue::Record { envelope, .. } => match codec::Entity::decode(&envelope.0) {
+                                Ok(codec::DecodeOutcome::Supported(v))
+                                    if v.fields.tombstone
+                                        && matches!(v.fields.kind, codec::Kind::Note | codec::Kind::Card) =>
+                                {
+                                    Some(e.entry.record_name)
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>())
+                })?;
+                // This opening delivered the entire op. Each mismatch needs
+                // its own newer matching observer image; a restored deletion
+                // cannot supply evidence for an unrelated locally edited key.
+                self.with_incoming(guard, collection, |s| {
+                    let store = s.store.as_ref().ok_or(Error::Database)?;
+                    let mut restored = false;
+                    for k in &i.keys {
+                        let local = current.get(&k.name).and_then(Option::as_ref);
+                        if digest(local)? == k.after_digest {
+                            continue;
+                        }
+                        if local.is_none() {
+                            return Ok(false);
+                        }
+                        if k.after_digest.is_none() {
+                            if tombstones.is_empty()
+                                || !matches!(k.kind, codec::Kind::Note | codec::Kind::Card)
+                                || !(k.role == ApplyKeyRole::SideEffect || tombstones.contains(&k.name))
+                            {
+                                return Ok(false);
+                            }
+                            restored = true;
+                        }
+                        let Some(e) = store.entity_facts(i.binding, &k.name)? else {
+                            return Ok(false);
+                        };
+                        if e.observer_open != guard.open
+                            || e.observed_generation != guard.generation.0
+                            || e.observed_seq <= i.result_seq.ok_or(Error::InvalidData)?
+                            || e.observed_seq > current_seq.0
+                            || e.tombstone_at.is_some()
+                            || digest(Some(&e.payload))? != digest(local)?
+                        {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(restored)
+                })?
+            } else {
+                false
+            };
+            if all_after || restored_deletion {
+                // A committed deletion followed by Undo needs fresh WAL coverage
+                // and parked rekey evidence, never a replay of the deletion.
                 self.settle_ordinary(collection, guard, i.id, timeout)?;
             } else {
                 // Retain the original inbox and acknowledged base. The next
                 // writer derives L afresh, so a local edit after a crash wins
                 // only its changed parts rather than being overwritten.
-                self.with_incoming(guard, collection, |s| {
-                    Ok(s.store.as_mut().ok_or(Error::Database)?.reconcile_apply_keys(
-                        &i,
-                        guard.open,
-                        current_seq.0,
-                        guard.generation.0,
-                        &current,
-                        guard.recovery.is_none(),
-                    )?)
-                })?;
+                let all_before = i
+                    .keys
+                    .iter()
+                    .all(|k| digest(current.get(&k.name).and_then(Option::as_ref)).ok() == Some(k.before_digest));
+                if !all_before {
+                    self.with_incoming(guard, collection, |s| {
+                        Ok(s.store.as_mut().ok_or(Error::Database)?.reconcile_apply_keys(
+                            &i,
+                            guard.open,
+                            current_seq.0,
+                            guard.generation.0,
+                            &current,
+                            guard.recovery.is_none(),
+                        )?)
+                    })?;
+                }
                 let entries = self.with_incoming(guard, collection, |s| {
                     let entries = s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?;
                     let mut by_id: BTreeMap<_, _> = entries.into_iter().map(|entry| (entry.id, entry)).collect();
@@ -986,12 +1074,11 @@ fn project(
 fn apply(
     ctx: &mut meguri_engine::OpContext<'_, '_>,
     s: &mut State,
-    binding: BindingId,
-    file: NativeFileIdentity,
-    generation: Generation,
+    guard: &IncomingGuard,
     entries: Vec<StoredInboxEntry>,
     replay_of: Option<i64>,
 ) -> Result<Option<i64>, RuntimeError> {
+    let binding = guard.binding;
     let store = s.store.as_mut().ok_or(Error::Database)?;
     let layouts = layouts(store, binding)?;
     let record_key = store
@@ -1016,6 +1103,16 @@ fn apply(
         .map_err(|_| Error::InvalidData)?;
         let remote = &received.entity;
         if remote.fields.tombstone
+            && remote.fields.generation.is_none()
+            && matches!(remote.fields.kind, codec::Kind::Note | codec::Kind::Card)
+        {
+            if let Some(mut deletion_keys) = plan_row_deletion(ctx, store, binding, &entry, remote, &layouts)? {
+                keys.append(&mut deletion_keys);
+                ids.push(entry.id);
+            }
+            continue;
+        }
+        if remote.fields.tombstone
             || remote.fields.generation.is_some()
             || matches!(remote.fields.kind, codec::Kind::Notetype | codec::Kind::MediaName)
         {
@@ -1023,10 +1120,6 @@ fn apply(
             continue;
         }
         let server = received.payload.ok_or(Error::InvalidData)?;
-        if !references(ctx.scope(), &server, &layouts)? {
-            store.park_incoming(binding, entry.id, InboxReason::Reference)?;
-            continue;
-        }
         let facts = store.entity_facts(binding, &entry.entry.record_name)?;
         let local = project(ctx.scope(), server.kind(), &remote.fields.key, &layouts)?;
         if facts
@@ -1034,6 +1127,9 @@ fn apply(
             .is_some_and(|e| e.origin != remote.fields.origin && e.server_erev == 0)
             && (remote.fields.kind as u8) <= 6
             && !same_object(local.as_ref(), &server)
+            && !facts
+                .as_ref()
+                .is_some_and(|e| local.is_none() && e.tombstone_at.is_some())
         {
             // K14 needs an atomic re-key before ordinary merging.
             store.park_incoming(binding, entry.id, InboxReason::Structure)?;
@@ -1052,10 +1148,45 @@ fn apply(
                 .or(e.base_payload.as_ref())
                 .or(e.acked_payload.as_ref())
         });
-        if local.is_none() && facts.is_some() {
-            // A local deletion needs K17's edit-versus-delete handling; it is
-            // not permission to resurrect the row as a clean download.
+        if local.is_none()
+            && facts
+                .as_ref()
+                .is_some_and(|e| e.tombstone_at.is_some() && e.origin == remote.fields.origin)
+        {
+            // K17.1: a real local deletion wins a same-origin server edit.
+            let e = facts.as_ref().ok_or(Error::InvalidData)?;
+            if e.origin != remote.fields.origin || e.acked_tombstone() {
+                store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+                continue;
+            }
+            let at = ctx.now().0;
+            if own.is_none() {
+                preserve_deleted_note(store, binding, ctx.scope(), &remote.fields, &server, at)?;
+            }
+            keys.push(ApplyKey {
+                name: entry.entry.record_name.clone(),
+                kind: server.kind(),
+                key: remote.fields.key.clone(),
+                role: ApplyKeyRole::Entry,
+                before_digest: None,
+                after_digest: None,
+                before_payload: Some(e.payload.clone()),
+                after_payload: None,
+                own_flight: own,
+            });
+            ids.push(entry.id);
+            continue;
+        }
+        if local.is_none()
+            && facts
+                .as_ref()
+                .is_some_and(|e| e.server_erev > 0 || e.tombstone_at.is_none())
+        {
             store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+            continue;
+        }
+        if !references(ctx.scope(), &server, &layouts)? {
+            store.park_incoming(binding, entry.id, InboxReason::Reference)?;
             continue;
         }
         let comparison_base = facts.as_ref().and_then(|e| {
@@ -1176,8 +1307,12 @@ fn apply(
         if let Some(prior) = unique.get_mut(&key.name) {
             if key.role == ApplyKeyRole::Entry {
                 prior.role = ApplyKeyRole::Entry;
-                prior.before_payload = None;
+                prior.before_payload = key.before_payload;
                 prior.own_flight = key.own_flight;
+            } else if prior.role == ApplyKeyRole::Entry && key.after_digest.is_none() {
+                // A live inbox entry can be removed by a later note tombstone.
+                // Retain its actual pre-delete image as well as its entry role.
+                prior.before_payload = key.before_payload.or_else(|| prior.after_payload.clone());
             }
         } else {
             unique.insert(key.name.clone(), key);
@@ -1191,6 +1326,7 @@ fn apply(
         key.after_digest = digest(after.as_ref())?;
         key.after_payload = after;
     }
+    let planned_at_ms = ctx.now().0;
     let id = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         store.persist_apply_intent(
             &ApplyIntent {
@@ -1200,8 +1336,10 @@ fn apply(
                 inbox_ids: ids,
                 keys,
                 result_seq: None,
-                native_file: file,
-                generation: generation.0,
+                originating_open: Some(guard.open),
+                planned_at_ms,
+                native_file: guard.file,
+                generation: guard.generation.0,
             },
             replay_of,
         )
@@ -1396,6 +1534,169 @@ fn preserve_conflict(
             winning_payload_digest: PayloadDigest(retained_digest),
             field_names,
             template_names,
+            note_deck,
+            staged_path: None,
+            created_at_ms: at,
+            resolved_at_ms: None,
+        },
+    )?;
+    meguri_model::faultpoint!("cloud.apply.after_copy").map_err(Error::from)?;
+    Ok(())
+}
+
+/// K17 ordinary deletion uses this op's live rows, never a held image or a
+/// reconstructed base. Unknown identities remain blocked for collision work.
+fn plan_row_deletion(
+    ctx: &mut meguri_engine::OpContext<'_, '_>,
+    store: &mut TrackingStore,
+    binding: BindingId,
+    entry: &StoredInboxEntry,
+    remote: &codec::Entity,
+    layouts: &BTreeMap<i64, codec::Notetype>,
+) -> Result<Option<Vec<ApplyKey>>, RuntimeError> {
+    let Some(facts) = store.entity_facts(binding, &entry.entry.record_name)? else {
+        store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+        return Ok(None);
+    };
+    if facts.origin != remote.fields.origin {
+        store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+        return Ok(None);
+    }
+    let local = project(ctx.scope(), remote.fields.kind, &remote.fields.key, layouts)?;
+    let InboxValue::Record { envelope, .. } = &entry.entry.value else {
+        return Err(Error::InvalidData.into());
+    };
+    let own_flight = facts
+        .own_row_tombstone_flight(binding.0, remote, &envelope.0)
+        .map(|f| f.local_rev);
+    if remote.fields.writer == binding.0 {
+        // K13.2: a fetched own save never writes collection rows. An Undo
+        // needs K17 rekey support even when it restored the old ACK digest.
+        // Keep both the exact flight and fetched evidence until that exists.
+        if own_flight.is_none() || local.is_some() || remote.fields.erev <= facts.server_erev {
+            store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+            return Ok(None);
+        }
+        return Ok(Some(vec![ApplyKey {
+            name: entry.entry.record_name.clone(),
+            kind: remote.fields.kind,
+            key: remote.fields.key.clone(),
+            role: ApplyKeyRole::Entry,
+            before_digest: None,
+            after_digest: None,
+            before_payload: Some(facts.payload),
+            after_payload: None,
+            own_flight,
+        }]));
+    }
+    let at = ctx.now().0;
+    if let Some(local) = &local
+        && local.row_digest().map_err(|_| Error::InvalidData)? != facts.acked_row_digest
+    {
+        preserve_deleted_note(store, binding, ctx.scope(), &remote.fields, local, at)?;
+    }
+    let mut keys = Vec::new();
+    let key = super::super::workflow_store::row_key(remote.fields.kind, &remote.fields.key)?;
+    let RowKey::Id(id) = key else {
+        return Err(Error::InvalidData.into());
+    };
+    if remote.fields.kind == codec::Kind::Note {
+        for card in ctx.scope().cards_of_note(meguri_model::ids::NoteId(id))? {
+            let key = codec::id_key(card.id.0).to_vec();
+            let before = project(ctx.scope(), codec::Kind::Card, &key, layouts)?.ok_or(Error::InvalidData)?;
+            let name = codec::entity_name(
+                &store
+                    .binding(binding)?
+                    .ok_or(Error::BindingNotFound)?
+                    .facts
+                    .record_key
+                    .0,
+                codec::Kind::Card,
+                &key,
+            )
+            .map_err(|_| Error::InvalidData)?;
+            let clean = store.entity_facts(binding, &name)?.is_none_or(|e| e.mark.is_none());
+            keys.push(ApplyKey {
+                name,
+                kind: codec::Kind::Card,
+                key,
+                role: ApplyKeyRole::SideEffect,
+                before_digest: digest(Some(&before))?,
+                after_digest: None,
+                before_payload: if clean { Some(before) } else { None },
+                after_payload: None,
+                own_flight: None,
+            });
+        }
+        ctx.scope().remove_note_and_cards(meguri_model::ids::NoteId(id))?;
+    } else {
+        ctx.scope().remove_card(meguri_model::ids::CardId(id))?;
+        ctx.scope().add_grave(
+            id,
+            meguri_model::grave::GraveKind::Card,
+            meguri_model::usn::Usn::PENDING,
+        )?;
+    }
+    keys.push(ApplyKey {
+        name: entry.entry.record_name.clone(),
+        kind: remote.fields.kind,
+        key: remote.fields.key.clone(),
+        role: ApplyKeyRole::Entry,
+        before_digest: digest(local.as_ref())?,
+        after_digest: None,
+        before_payload: Some(local.unwrap_or(facts.payload)),
+        after_payload: None,
+        own_flight,
+    });
+    Ok(Some(keys))
+}
+
+fn preserve_deleted_note(
+    store: &mut TrackingStore,
+    binding: BindingId,
+    rows: &impl ReadRows,
+    fields: &codec::EntityFields,
+    losing: &codec::Payload,
+    at: i64,
+) -> Result<(), RuntimeError> {
+    let codec::Payload::Note(note) = losing else {
+        return Ok(());
+    };
+    let discarded = losing.payload_digest().map_err(|_| Error::InvalidData)?;
+    let retained = codec::sha256(&[]);
+    let mut identity = binding.0.to_vec();
+    identity.extend_from_slice(&discarded);
+    identity.extend_from_slice(&retained);
+    let mut id = [0; 16];
+    id.copy_from_slice(&codec::sha256(&identity)[..16]);
+    let mut copy_fields = fields.clone();
+    copy_fields.tombstone = false;
+    copy_fields.deleted_at_ms = 0;
+    let envelope = codec::Entity::build(copy_fields, &losing.encode().map_err(|_| Error::InvalidData)?)
+        .map_err(|_| Error::InvalidData)?
+        .encode()
+        .map_err(|_| Error::InvalidData)?;
+    let notetype = rows.notetype(meguri_model::ids::NotetypeId(note.mid))?;
+    let note_deck = rows
+        .cards_of_note(meguri_model::ids::NoteId(note.id))?
+        .first()
+        .map(|c| c.deck_id.0);
+    store.store_conflict(
+        binding,
+        &ConflictCopy {
+            id: CopyId(id),
+            kind: ConflictKind::Note,
+            key: OpaqueBytes(fields.key.clone()),
+            reason: ConflictReason::EditVsDelete,
+            losing_envelope: OpaqueBytes(envelope),
+            losing_payload_digest: PayloadDigest(discarded),
+            winning_payload_digest: PayloadDigest(retained),
+            field_names: notetype
+                .as_ref()
+                .map(|n| n.fields.iter().map(|f| f.name.clone()).collect()),
+            template_names: notetype
+                .as_ref()
+                .map(|n| n.templates.iter().map(|t| t.name.clone()).collect()),
             note_deck,
             staged_path: None,
             created_at_ms: at,

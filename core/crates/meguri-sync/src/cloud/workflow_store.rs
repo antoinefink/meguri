@@ -75,6 +75,7 @@ pub(super) fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
         origin: n.origin,
         local_rev: n.local_rev,
         acked_rev: n.acked_rev,
+        tombstone_at: n.tombstone_at,
         payload: p,
         base_payload: n
             .base
@@ -149,6 +150,7 @@ pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) 
             observed_seq: e.observed_seq,
             observed_generation: e.observed_generation,
             acked_rev: e.acked_rev,
+            tombstone_at: e.tombstone_at,
             in_flight: e.in_flight.clone(),
             acked_envelope: e.acked_envelope.clone(),
         };
@@ -178,6 +180,7 @@ pub(super) fn new_pending_entity(
         origin,
         local_rev: 1,
         acked_rev: 0,
+        tombstone_at: None,
         payload,
         base_payload: None,
         mark: Some(runtime::DirtyMark {
@@ -439,11 +442,13 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if e.in_flight.len() >= 250 {
             return Err(Error::InvalidData);
         }
-        if !e
-            .in_flight
-            .iter()
-            .any(|f| f.local_rev == flight.local_rev && f.payload_digest == flight.payload_digest)
-        {
+        if !e.in_flight.iter().any(|f| {
+            f.local_rev == flight.local_rev
+                && f.payload_digest == flight.payload_digest
+                && f.erev == flight.erev
+                && f.tombstone == flight.tombstone
+                && f.tombstone_envelope_digest == flight.tombstone_envelope_digest
+        }) {
             e.in_flight.push(flight);
         }
         let tx = self.connection.transaction()?;
@@ -457,6 +462,11 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         saved: &Saved,
         received: codec::Received,
     ) -> Result<bool, Error> {
+        if received.entity.fields.tombstone
+            && matches!(received.entity.fields.kind, codec::Kind::Note | codec::Kind::Card)
+        {
+            return self.acknowledge_row_tombstone(b, saved, received);
+        }
         if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
             return self.acknowledge_media_tombstone(b, saved, received);
         }
@@ -484,7 +494,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
         e.acked_payload = Some(p.clone());
         e.in_flight.retain(|v| v.local_rev > f.local_rev);
-        if e.payload.row_digest().map_err(|_| Error::InvalidData)? == f.row_digest {
+        if e.tombstone_at.is_none() && e.payload.row_digest().map_err(|_| Error::InvalidData)? == f.row_digest {
             e.acked_rev = e.local_rev;
             e.mark = None;
             e.base_payload = None;
@@ -554,6 +564,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             origin: f.origin,
             local_rev: 1,
             acked_rev: 1,
+            tombstone_at: None,
             acked_row_digest: p.row_digest().map_err(|_| Error::InvalidData)?,
             acked_payload_digest: p.payload_digest().map_err(|_| Error::InvalidData)?,
             payload: p.clone(),
@@ -611,6 +622,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             open: s.open_counter,
             cursor,
             counts,
+            retained_tombstones: Vec::new(),
             media_feed_id: feed_id,
             media_cursor,
         });
@@ -687,7 +699,50 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 }
                 let existing = entity(&tx, b, kind, &key)?;
                 if raw.is_none() {
-                    let e = existing.ok_or(Error::InvalidData)?;
+                    // Only explicit committed removals create tombstones. A
+                    // missing scan row never supplies a deletion or its base.
+                    let Some(mut e) = existing else {
+                        if matches!(kind, codec::Kind::Note | codec::Kind::Card) && delta.before.is_none() {
+                            continue; // created and removed within this commit
+                        }
+                        return Err(Error::InvalidData.into());
+                    };
+                    if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
+                        if e.server_erev == 0 && e.in_flight.is_empty() {
+                            remove_entity(&tx, b, &e)?;
+                            continue;
+                        }
+                        let view = BeforeCommitView {
+                            inner: CommitView {
+                                c: &tx,
+                                b,
+                                rows,
+                                added_decks: &added_decks,
+                            },
+                            commit,
+                        };
+                        let before = delta.before.as_ref().ok_or(Error::InvalidData)?;
+                        let payload = row_payload::project(&view, kind, before, |id| layout(&tx, b, id))?;
+                        // A fixed clock (or a raw incoming op) can leave col
+                        // unchanged, so the journal has no CollectionMark.
+                        // Read the actual same-commit metadata, never a made-up
+                        // deletion time or an earlier tracking timestamp.
+                        let at = match commit.collection {
+                            Some(mark) => mark.col_mod,
+                            None => row_payload::int(
+                                &rows.row_image(Table::Col, &RowKey::Id(1))?.ok_or(Error::InvalidData)?,
+                                2,
+                            )?,
+                        };
+                        e.remove(payload, at, &mut state.change_counter)?;
+                        e.observer_open = open;
+                        e.observed_seq = commit.seq.0;
+                        e.observed_generation = commit.generation.0;
+                        put(&tx, b, &e)?;
+                        written += 1;
+                        hook(written)?;
+                        continue;
+                    }
                     if kind != codec::Kind::Revlog || e.server_erev != 0 || !e.in_flight.is_empty() {
                         return Err(Error::InvalidData.into());
                     }
@@ -854,7 +909,11 @@ impl TrackingStore {
                     && flight.payload_digest == sent.payload_digest
             })
             .ok_or(Error::InvalidData)?;
-        if current.server_erev == 0 {
+        let drop_row = sent.tombstone
+            && matches!(current.kind, codec::Kind::Note | codec::Kind::Card)
+            && current.tombstone_at.is_some()
+            && current.local_rev == flight.local_rev;
+        if current.server_erev == 0 && !drop_row {
             return Ok(MissingSaveDisposition::Outstanding);
         }
         // Existing intake may describe a later server state. Preserve it and
@@ -886,13 +945,10 @@ impl TrackingStore {
             fetched_at_ms: received_at,
         };
         super::incoming_store::receive(&transaction, binding, &[deletion], &[])?;
-        let disposition = if drop_media {
-            // J6 has already removed the file. Settle only this unchanged
-            // handed revision; no collection operation or Saved receipt exists.
-            transaction.execute(
-                "DELETE FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
-                params![binding.0.as_slice(), current.kind as i64, current.key],
-            )?;
+        let disposition = if drop_media || drop_row {
+            // Settle only this unchanged, explicitly removed handed revision;
+            // no collection operation or Saved receipt is fabricated.
+            remove_entity(&transaction, binding, &current)?;
             transaction.execute(
                 "DELETE FROM inbox WHERE binding=?1 AND json_extract(entry,'$.record_name')=?2 AND json_extract(entry,'$.value')='Deletion'",
                 params![binding.0.as_slice(), record_name],
@@ -901,14 +957,16 @@ impl TrackingStore {
                 "DELETE FROM cloud_absence_seen WHERE binding=?1 AND name=?2",
                 params![binding.0.as_slice(), record_name],
             )?;
-            media_state
-                .names
-                .remove(std::str::from_utf8(&current.key).map_err(|_| Error::InvalidData)?);
-            media_state.revision = next(media_state.revision)?;
-            transaction.execute(
-                "UPDATE cloud_media_state SET content=?2 WHERE binding=?1",
-                params![binding.0.as_slice(), encode(&media_state)?],
-            )?;
+            if drop_media {
+                media_state
+                    .names
+                    .remove(std::str::from_utf8(&current.key).map_err(|_| Error::InvalidData)?);
+                media_state.revision = next(media_state.revision)?;
+                transaction.execute(
+                    "UPDATE cloud_media_state SET content=?2 WHERE binding=?1",
+                    params![binding.0.as_slice(), encode(&media_state)?],
+                )?;
+            }
             MissingSaveDisposition::TerminalAbsence {
                 local_rev: flight.local_rev,
             }
@@ -920,5 +978,143 @@ impl TrackingStore {
         meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;
         transaction.commit()?;
         Ok(disposition)
+    }
+}
+
+pub(super) fn remove_entity(tx: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) -> Result<(), Error> {
+    if e.kind == codec::Kind::Note {
+        let RowKey::Id(id) = row_key(e.kind, &e.key)? else {
+            return Err(Error::InvalidData);
+        };
+        tx.execute(
+            "DELETE FROM cloud_runtime_notes WHERE binding=?1 AND id=?2",
+            params![b.0.as_slice(), id],
+        )?;
+    } else {
+        tx.execute(
+            "DELETE FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
+            params![b.0.as_slice(), e.kind as i64, e.key],
+        )?;
+    }
+    Ok(())
+}
+
+/// Projection before this exact commit, including a card's deleted note and
+/// same-op history. Unchanged rows still come from the committed writer view.
+struct BeforeCommitView<'a, 'r, 'c> {
+    inner: CommitView<'a, 'r>,
+    commit: &'a meguri_engine::ObservedCommit<'c>,
+}
+impl View for BeforeCommitView<'_, '_, '_> {
+    fn row(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, Error> {
+        for delta in self.commit.payload.rows(table) {
+            let delta = delta?;
+            if &delta.key == key {
+                return Ok(delta.before);
+            }
+        }
+        self.inner.row(table, key)
+    }
+    fn page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, Error> {
+        self.inner.page(table, after)
+    }
+    fn parts(&self, table: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
+        self.inner.parts(table, id, after)
+    }
+    fn history(&self, id: i64) -> Result<i64, Error> {
+        let mut maximum = self.inner.history(id)?;
+        let mut changed_maximum = false;
+        for delta in self.commit.payload.rows(Table::Revlog) {
+            let delta = delta?;
+            if delta.key == RowKey::Id(maximum) {
+                changed_maximum = true;
+            }
+            if let Some(row) = delta.before
+                && row_payload::int(&row, 1)? == id
+            {
+                maximum = maximum.max(row_payload::int(&row, 0)?);
+            }
+        }
+        if !changed_maximum {
+            return Ok(maximum);
+        }
+        maximum = 0;
+        let mut after = None;
+        loop {
+            let page = keys(self.inner.c, self.inner.b, codec::Kind::Revlog, after.as_deref())?;
+            if page.is_empty() {
+                break;
+            }
+            for key in &page {
+                if let Some(row) = self.row(Table::Revlog, &row_key(codec::Kind::Revlog, key)?)?
+                    && row_payload::int(&row, 1)? == id
+                {
+                    maximum = maximum.max(row_payload::int(&row, 0)?);
+                }
+            }
+            after = page.last().cloned();
+        }
+        Ok(maximum)
+    }
+}
+
+impl TrackingStore {
+    fn acknowledge_row_tombstone(
+        &mut self,
+        b: BindingId,
+        saved: &Saved,
+        received: codec::Received,
+    ) -> Result<bool, Error> {
+        let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
+        let remote = &received.entity;
+        if remote.fields.origin != e.origin
+            || remote.fields.writer != b.0
+            || remote.fields.kind != e.kind
+            || remote.fields.key != e.key
+            || remote.fields.generation.is_some()
+            || remote.fields.erev <= e.server_erev
+            || remote.payload.as_deref() != Some(&[])
+            || received.payload.is_some()
+        {
+            return Err(Error::InvalidData);
+        }
+        let flight = e
+            .own_row_tombstone_flight(b.0, remote, &saved.envelope)
+            .cloned()
+            .ok_or(Error::InvalidData)?;
+        let mut state = self.runtime_binding(b)?;
+        // An ACK of an older deletion never clears a newer native revision.
+        e.server_erev = flight.erev;
+        e.acked_rev = flight.local_rev;
+        e.acked_payload = Some(flight.payload);
+        e.acked_row_digest = flight.row_digest;
+        e.acked_payload_digest = flight.payload_digest;
+        e.acked_envelope = OpaqueBytes(saved.envelope.clone());
+        e.acked_system_fields = saved.system_fields.clone();
+        e.in_flight.retain(|f| f.local_rev > flight.local_rev);
+        if e.tombstone_at.is_some() && e.local_rev == flight.local_rev {
+            e.mark = None;
+            e.base_payload = None;
+        } else if e.tombstone_at.is_none() && e.mark.is_none() {
+            // An exact old-row Undo can have matched the previous live ACK.
+            // The landed tombstone is a real ACK, but the restored row still
+            // needs rekey; never report that row clean or send it under this id.
+            if e.local_rev <= flight.local_rev {
+                e.local_rev = next(flight.local_rev)?;
+            }
+            state.change_counter = next(state.change_counter)?;
+            e.mark = Some(runtime::DirtyMark {
+                source: DirtySource::Observer,
+                change_seq: state.change_counter,
+                payload_digest: e.payload.payload_digest().map_err(|_| Error::InvalidData)?,
+            });
+        }
+        let pending = e.mark.is_some();
+        let tx = self.connection.transaction()?;
+        put(&tx, b, &e)?;
+        put_binding(&tx, b, &state)?;
+        super::adapter_store::mark_ack(&tx, b, &e.name)?;
+        tx.commit()?;
+        Ok(pending)
     }
 }

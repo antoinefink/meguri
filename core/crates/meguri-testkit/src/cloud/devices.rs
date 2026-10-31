@@ -162,6 +162,20 @@ pub(crate) fn open_store(files: &PreboundDevice) -> Result<production::TrackingS
     }
 }
 impl PreboundDevice {
+    /// Select the fixture's real review deck through the engine before the
+    /// healthy server baseline is recorded. No config/tracking facts are seeded.
+    pub fn select_review_deck(directory: &Path, now: i64, seed: u64) -> Result<()> {
+        let host = meguri_host::CoreHost::open(options(directory, now, seed))?;
+        let collection = host.collection()?;
+        let deck = {
+            let lease = collection.reader(ReaderRole::Query)?;
+            let rows = lease.row_page(Table::Cards, None)?;
+            row_payload::int(rows.first().ok_or_else(failure)?, 2)?
+        };
+        meguri_engine::decks::current::select(&collection, meguri_model::ids::DeckId(deck))?;
+        host.close()?;
+        Ok(())
+    }
     pub fn arrange(directory: &Path, service: &mut Service<SeededRandom>, seed: u64) -> Result<Self> {
         const NOW: i64 = 1_735_689_600_000;
         let host = meguri_host::CoreHost::open(options(directory, NOW, seed))?;

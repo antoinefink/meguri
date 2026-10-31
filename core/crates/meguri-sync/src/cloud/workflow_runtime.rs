@@ -361,10 +361,12 @@ impl Runtime {
             let view = row_payload::ReadView(&*snapshot);
             let mut recovered = Vec::new();
             let mut counts = Vec::new();
+            let mut retained_tombstones = Vec::new();
             for kind in row_payload::KINDS.into_iter().filter(|k| *k != codec::Kind::MediaName) {
                 let table = row_payload::table(kind).ok_or(Error::InvalidData)?;
                 // Include tracked absences; a local-only scan cannot prove completeness.
                 let mut after = None;
+                let mut tombstones = 0;
                 loop {
                     let page = self.with_scan(&guard, collection, |s| {
                         Ok(s.store.as_ref().ok_or(Error::Database)?.entity_keys_page(
@@ -381,10 +383,33 @@ impl Runtime {
                             .row(table, &super::super::workflow_store::row_key(kind, &key)?)?
                             .is_none()
                         {
-                            return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+                            let e = self.with_scan(&guard, collection, |s| {
+                                let content = s
+                                    .store
+                                    .as_ref()
+                                    .ok_or(Error::Database)?
+                                    .entity_content(guard.binding, kind, &key)?
+                                    .ok_or(Error::InvalidData)?;
+                                Ok(super::super::workflow_store::decode_entity(kind, &content)?)
+                            })?;
+                            e.validate()?;
+                            let deleted = e.tombstone_at.is_some()
+                                || (e.server_erev > 0
+                                    && e.acked_tombstone()
+                                    && e.mark.is_none()
+                                    && e.local_rev == e.acked_rev);
+                            if !matches!(kind, codec::Kind::Note | codec::Kind::Card) || !deleted {
+                                return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+                            }
+                            // K11.4/K17.1: absence is already recorded. Preserve
+                            // its pending revision, base, ACK and handed flights.
+                            tombstones += 1;
                         }
                         after = Some(key);
                     }
+                }
+                if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
+                    retained_tombstones.push((kind, tombstones));
                 }
                 let mut cursor = None;
                 let mut count = 0;
@@ -551,6 +576,7 @@ impl Runtime {
                             schema_modified: col.schema_modified.0,
                         },
                         counts: coverage_counts,
+                        retained_tombstones,
                         media_feed_id: feed.status.feed_id.0,
                         media_cursor: feed.status.counter,
                     },
@@ -771,7 +797,7 @@ impl Runtime {
         };
         {
             let s = self.state();
-            if Self::caller_locked(&s, instance).is_err() {
+            if Self::caller_locked(&s, instance).is_err() || Self::gate_locked(&s).is_err() {
                 return Ok(empty());
             }
         }
@@ -877,7 +903,8 @@ impl Runtime {
                 deferred.insert(name.clone());
                 continue;
             }
-            if e.mark.is_none()
+            if (e.acked_tombstone() && e.kind != codec::Kind::MediaName)
+                || e.mark.is_none()
                 || (!publishing
                     && !matches!(
                         e.kind,
@@ -899,8 +926,13 @@ impl Runtime {
             let table = row_payload::table(e.kind).ok_or(Error::InvalidData)?;
             let key = super::super::workflow_store::row_key(e.kind, &e.key)?;
             let Some(row) = view.row(table, &key)? else {
-                // A held creation is absent, never a deletion/tombstone.
-                deferred.insert(name.clone());
+                let (image_seq, held) = view.image();
+                if !held && e.tombstone_at.is_some() && !e.acked_tombstone() {
+                    images.insert(name.clone(), (e.payload.clone(), image_seq, false));
+                } else {
+                    // Defer held creates. Deleted rows use the captured image.
+                    deferred.insert(name.clone());
+                }
                 continue;
             };
             let payload = row_payload::project(&view, e.kind, &row, |id| {
@@ -963,15 +995,22 @@ impl Runtime {
                 .names
                 .get(std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?)
                 .and_then(|n| n.tombstone_at)
+            } else if !held {
+                e.tombstone_at
             } else {
                 None
             };
-            let payload = if tombstone_at.is_some() {
+            let row_tombstone = tombstone_at.is_some() && e.kind != codec::Kind::MediaName;
+            let payload = if tombstone_at.is_some() && !row_tombstone {
                 e.acked_payload.clone().ok_or(Error::InvalidData)?
             } else {
                 payload
             };
-            let encoded_payload = payload.encode().map_err(|_| Error::InvalidData)?;
+            let encoded_payload = if row_tombstone {
+                Vec::new()
+            } else {
+                payload.encode().map_err(|_| Error::InvalidData)?
+            };
             let entity = codec::Entity::build(
                 codec::EntityFields {
                     kind: e.kind,
@@ -996,13 +1035,17 @@ impl Runtime {
             }
             let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
             let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
-            let mut references = super::super::publication_store::references(&payload)?
-                .into_iter()
-                .map(|(kind, key)| {
-                    codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if let codec::Payload::Note(note) = &payload {
+            let mut references = (if row_tombstone {
+                Vec::new()
+            } else {
+                super::super::publication_store::references(&payload)?
+            })
+            .into_iter()
+            .map(|(kind, key)| {
+                codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+            if !row_tombstone && let codec::Payload::Note(note) = &payload {
                 let fields = std::str::from_utf8(&note.flds).map_err(|_| Error::InvalidData)?;
                 for local_name in meguri_text::media_refs::local_references(fields) {
                     let case = local_name.to_lowercase();
@@ -1025,11 +1068,17 @@ impl Runtime {
             let flight = Flight {
                 local_rev: e.local_rev,
                 payload_digest: entity.payload_sha256,
-                row_digest: payload.row_digest().map_err(|_| Error::InvalidData)?,
+                row_digest: if row_tombstone {
+                    entity.payload_sha256
+                } else {
+                    payload.row_digest().map_err(|_| Error::InvalidData)?
+                },
                 payload,
                 erev,
                 image_seq,
                 held,
+                tombstone: tombstone_at.is_some(),
+                tombstone_envelope_digest: row_tombstone.then(|| codec::sha256(&envelope)),
             };
             prepared.insert(name, (flight, envelope, size, references));
         }
@@ -1060,9 +1109,11 @@ impl Runtime {
                             break;
                         }
                         if waiting.contains(reference)
-                            || !store
-                                .entity_facts(b.id, reference)?
-                                .is_some_and(|e| e.server_erev > 0 && e.acked_payload.is_some())
+                            || !store.entity_facts(b.id, reference)?.is_some_and(|e| {
+                                e.server_erev > 0
+                                    && e.acked_payload.is_some()
+                                    && !(matches!(e.kind, codec::Kind::Note | codec::Kind::Card) && e.acked_tombstone())
+                            })
                         {
                             changed |= waiting.insert(name.clone());
                         }

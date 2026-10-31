@@ -454,6 +454,7 @@ impl TrackingStore {
             origin,
             local_rev: 1,
             acked_rev: 0,
+            tombstone_at: None,
             mark: Some(runtime::DirtyMark {
                 source: runtime::DirtySource::Snapshot,
                 change_seq: state.change_counter,

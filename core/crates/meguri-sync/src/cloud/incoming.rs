@@ -46,6 +46,11 @@ pub struct ApplyIntent {
     pub inbox_ids: Vec<i64>,
     pub keys: Vec<ApplyKey>,
     pub result_seq: Option<u64>,
+    /// Opening that created this intent. Legacy counters carry no open identity.
+    #[serde(default)]
+    pub originating_open: Option<u64>,
+    #[serde(default)]
+    pub planned_at_ms: i64,
     pub native_file: runtime::NativeFileIdentity,
     pub generation: u64,
 }

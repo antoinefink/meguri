@@ -956,6 +956,7 @@ impl Runtime {
                 origin: received.entity.fields.origin,
                 local_rev: 1,
                 acked_rev: 1,
+                tombstone_at: None,
                 payload: payload.clone(),
                 base_payload: None,
                 mark: None,

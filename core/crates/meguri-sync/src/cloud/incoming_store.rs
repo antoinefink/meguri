@@ -149,7 +149,7 @@ pub(super) fn intents(c: &Connection, b: BindingId) -> Result<Vec<ApplyIntent>, 
     .collect()
 }
 
-/// Every caller (SDK and non-SDK) uses these same semantic ordering rules.
+/// Classified native intake shares ordering, pass attribution and intent protection.
 pub(super) fn receive(
     tx: &Transaction<'_>,
     b: BindingId,
@@ -512,6 +512,7 @@ impl TrackingStore {
     ) -> Result<(), Error> {
         let mut state = self.runtime_binding(i.binding)?;
         let tx = self.connection.transaction()?;
+        let mut parked = std::collections::BTreeSet::new();
         for key in &i.keys {
             let prior = facts(&tx, i.binding, &key.name)?;
             let observed = current.get(&key.name).ok_or(Error::InvalidData)?.clone();
@@ -524,9 +525,18 @@ impl TrackingStore {
                         && e.observed_generation == generation
                         && e.observed_seq > seq
                 })
-                .map(|e| Some(e.payload.clone()))
-                .unwrap_or(observed)
-                .ok_or(Error::InvalidData)?;
+                .map(|e| {
+                    if e.tombstone_at.is_some() {
+                        None
+                    } else {
+                        Some(e.payload.clone())
+                    }
+                })
+                .unwrap_or(observed);
+            let Some(local) = local else {
+                settle_absent_key(&tx, i, key, prior, &mut state, (open, seq, generation))?;
+                continue;
+            };
             let mut e = if let Some(e) = prior {
                 e
             } else {
@@ -537,6 +547,7 @@ impl TrackingStore {
                     origin: [0; 16],
                     local_rev: 1,
                     acked_rev: 0,
+                    tombstone_at: None,
                     payload: local.clone(),
                     base_payload: None,
                     mark: None,
@@ -557,6 +568,7 @@ impl TrackingStore {
                 e.local_rev = super::runtime_store::next(e.local_rev)?;
             }
             e.payload = local;
+            e.tombstone_at = None;
             if key.role == ApplyKeyRole::Entry {
                 let id = i
                     .inbox_ids
@@ -573,13 +585,12 @@ impl TrackingStore {
                     })
                     .ok_or(Error::InvalidData)?;
                 let text: String = tx.query_row("SELECT entry FROM inbox WHERE id=?1", [id], |r| r.get(0))?;
-                let entry: InboxEntry = decode(&text)?;
-                super::adapter_store::transfer_entry(&tx, i.binding, &key.name, entry.absence_pass)?;
+                let mut entry: InboxEntry = decode(&text)?;
                 let InboxValue::Record {
                     envelope,
                     system_fields,
                     ..
-                } = entry.value
+                } = entry.value.clone()
                 else {
                     return Err(Error::InvalidData);
                 };
@@ -588,6 +599,41 @@ impl TrackingStore {
                 else {
                     return Err(Error::InvalidData);
                 };
+                if server.fields.tombstone && matches!(key.kind, entity_codec::Kind::Note | entity_codec::Kind::Card) {
+                    if server.fields.origin != e.origin
+                        || server.fields.kind != e.kind
+                        || server.fields.key != e.key
+                        || server.payload.as_deref() != Some(&[])
+                    {
+                        return Err(Error::InvalidData);
+                    }
+                    // The covered read/newer observer supplied a live row after
+                    // this intent. Keep it pending and retain the tombstone for
+                    // rekey work, without decoding its empty body or advancing ACK.
+                    if was_clean {
+                        e.base_payload = key.before_payload.clone().or(e.acked_payload.clone());
+                    }
+                    if e.local_rev <= e.acked_rev {
+                        e.local_rev = super::runtime_store::next(e.local_rev)?;
+                    }
+                    state.change_counter = super::runtime_store::next(state.change_counter)?;
+                    e.mark = Some(runtime::DirtyMark {
+                        source: runtime::DirtySource::Observer,
+                        change_seq: state.change_counter,
+                        payload_digest: e.payload.payload_digest().map_err(|_| Error::InvalidData)?,
+                    });
+                    if !current_observer_open || e.observer_open != open || e.observed_seq <= seq {
+                        e.observer_open = open;
+                        e.observed_seq = seq;
+                        e.observed_generation = generation;
+                    }
+                    super::workflow_store::put(&tx, i.binding, &e)?;
+                    entry.reason = InboxReason::Structure;
+                    tx.execute("UPDATE inbox SET entry=?2 WHERE id=?1", params![id, encode(&entry)?])?;
+                    parked.insert(*id);
+                    continue;
+                }
+                super::adapter_store::transfer_entry(&tx, i.binding, &key.name, entry.absence_pass)?;
                 let payload = entity_codec::Payload::decode(
                     server.fields.kind,
                     server.payload.as_deref().ok_or(Error::InvalidData)?,
@@ -636,6 +682,9 @@ impl TrackingStore {
         }
         super::runtime_store::put_binding(&tx, i.binding, &state)?;
         for id in &i.inbox_ids {
+            if parked.contains(id) {
+                continue;
+            }
             tx.execute(
                 "DELETE FROM inbox WHERE binding=?1 AND id=?2",
                 params![i.binding.0.as_slice(), id],
@@ -649,4 +698,165 @@ impl TrackingStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn settle_absent_key(
+    tx: &Transaction<'_>,
+    intent: &ApplyIntent,
+    key: &ApplyKey,
+    prior: Option<workflow::EntityFacts>,
+    state: &mut runtime::StoredRuntimeState,
+    observed: (u64, u64, u64),
+) -> Result<(), Error> {
+    if !matches!(key.kind, entity_codec::Kind::Note | entity_codec::Kind::Card) {
+        return Err(Error::InvalidData);
+    }
+    let mut e = if key.role == ApplyKeyRole::SideEffect {
+        let mut e = prior.ok_or(Error::InvalidData)?;
+        let before = key.before_payload.clone().unwrap_or_else(|| e.payload.clone());
+        // This is the exact intent before-image when the entity was clean.
+        // A dirty entity keeps its earlier pending base instead.
+        if e.server_erev == 0 && e.in_flight.is_empty() {
+            return super::workflow_store::remove_entity(tx, intent.binding, &e);
+        }
+        e.remove(before, intent.planned_at_ms, &mut state.change_counter)?;
+        e
+    } else {
+        let mut found = None;
+        for id in &intent.inbox_ids {
+            let text: String = tx.query_row(
+                "SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                params![intent.binding.0.as_slice(), id],
+                |r| r.get(0),
+            )?;
+            let entry: InboxEntry = decode(&text)?;
+            if entry.record_name == key.name {
+                found = Some(entry);
+                break;
+            }
+        }
+        let entry = found.ok_or(Error::InvalidData)?;
+        super::adapter_store::transfer_entry(tx, intent.binding, &key.name, entry.absence_pass)?;
+        let InboxValue::Record {
+            envelope,
+            system_fields,
+            ..
+        } = entry.value
+        else {
+            return Err(Error::InvalidData);
+        };
+        let entity_codec::DecodeOutcome::Supported(server) =
+            entity_codec::Entity::decode(&envelope.0).map_err(|_| Error::InvalidData)?
+        else {
+            return Err(Error::InvalidData);
+        };
+        let tombstone = server.fields.tombstone;
+        if server.fields.kind != key.kind || server.fields.key != key.key {
+            return Err(Error::InvalidData);
+        }
+        let mut e = match prior {
+            Some(e) => e,
+            None if !tombstone && key.kind == entity_codec::Kind::Card && key.after_digest.is_none() => {
+                // This card was downloaded and removed by its note's tombstone
+                // in the same op. Its real server entry is the first ACK/base.
+                let payload =
+                    entity_codec::Payload::decode(key.kind, server.payload.as_deref().ok_or(Error::InvalidData)?)
+                        .map_err(|_| Error::InvalidData)?;
+                workflow::EntityFacts {
+                    name: key.name.clone(),
+                    kind: key.kind,
+                    key: key.key.clone(),
+                    origin: server.fields.origin,
+                    local_rev: 1,
+                    acked_rev: 0,
+                    tombstone_at: None,
+                    payload,
+                    base_payload: None,
+                    mark: None,
+                    server_erev: 0,
+                    acked_system_fields: Vec::new(),
+                    acked_row_digest: [0; 32],
+                    acked_payload_digest: [0; 32],
+                    acked_payload: None,
+                    acked_envelope: OpaqueBytes::default(),
+                    in_flight: Vec::new(),
+                    observer_open: observed.0,
+                    observed_seq: observed.1,
+                    observed_generation: observed.2,
+                }
+            }
+            None => return Err(Error::InvalidData),
+        };
+        let before = key.before_payload.clone().unwrap_or_else(|| e.payload.clone());
+        if server.fields.origin != e.origin || server.fields.kind != e.kind || server.fields.key != e.key {
+            return Err(Error::InvalidData);
+        }
+        let own = if tombstone && key.own_flight.is_some() {
+            let flight = e
+                .own_row_tombstone_flight(intent.binding.0, &server, &envelope.0)
+                .cloned()
+                .ok_or(Error::InvalidData)?;
+            if Some(flight.local_rev) != key.own_flight {
+                return Err(Error::InvalidData);
+            }
+            Some(flight)
+        } else {
+            None
+        };
+        let newer = own.as_ref().is_some_and(|f| e.local_rev > f.local_rev);
+        let acked = if tombstone {
+            own.as_ref()
+                .map(|f| f.payload.clone())
+                .unwrap_or_else(|| before.clone())
+        } else {
+            entity_codec::Payload::decode(e.kind, server.payload.as_deref().ok_or(Error::InvalidData)?)
+                .map_err(|_| Error::InvalidData)?
+        };
+        e.server_erev = server.fields.erev;
+        e.acked_system_fields = system_fields.0;
+        e.acked_row_digest = if tombstone {
+            entity_codec::sha256(&[])
+        } else {
+            acked.row_digest().map_err(|_| Error::InvalidData)?
+        };
+        e.acked_payload_digest = server.payload_sha256;
+        e.acked_payload = Some(acked.clone());
+        e.acked_envelope = envelope;
+        if !newer {
+            e.payload = before;
+        }
+        if let Some(rev) = key.own_flight {
+            e.acked_rev = rev;
+            e.in_flight.retain(|f| f.local_rev > rev);
+        } else {
+            e.acked_rev = e.local_rev;
+            e.in_flight.clear();
+        }
+        if tombstone {
+            if !newer {
+                e.tombstone_at = Some(server.fields.deleted_at_ms);
+                e.mark = None;
+                e.base_payload = None;
+            }
+        } else {
+            // The incoming live version supplies the conditional base, but
+            // cannot resurrect the explicitly deleted local object (K17.1).
+            e.base_payload = Some(acked);
+            e.tombstone_at = Some(e.tombstone_at.unwrap_or(intent.planned_at_ms));
+            e.local_rev = super::runtime_store::next(e.local_rev)?;
+            state.change_counter = super::runtime_store::next(state.change_counter)?;
+            e.mark = Some(runtime::DirtyMark {
+                source: runtime::DirtySource::Observer,
+                change_seq: state.change_counter,
+                payload_digest: e.payload.payload_digest().map_err(|_| Error::InvalidData)?,
+            });
+        }
+        e
+    };
+    if e.observer_open != observed.0 || e.observed_seq <= observed.1 {
+        e.observer_open = observed.0;
+        e.observed_seq = observed.1;
+        e.observed_generation = observed.2;
+    }
+    super::workflow_store::put(tx, intent.binding, &e)
 }

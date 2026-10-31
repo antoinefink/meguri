@@ -534,6 +534,17 @@ fn unsupported_notetype_sort_field_and_deck_parent_changes_remain_gated_through_
         assert!(runtime.status().unwrap().scan_required);
         assert!(runtime.reconcile_binding(&c, &h.media().unwrap(), TIMEOUT).is_err());
         assert!(runtime.require_collection_sending().is_err());
+        let state_before_stale = runtime.stored_state_for_testing().unwrap();
+        let observations_before_stale = runtime.observations();
+        let seq_before_stale = c.last_seq();
+        let stale = runtime
+            .build_collection_batch("stale caller while sending is closed", &c, &BTreeSet::new())
+            .unwrap();
+        assert_eq!(stale.id, 0);
+        assert!(stale.saves.is_empty());
+        assert_eq!(runtime.stored_state_for_testing().unwrap(), state_before_stale);
+        assert_eq!(runtime.observations(), observations_before_stale);
+        assert_eq!(c.last_seq(), seq_before_stale);
         assert!(
             runtime
                 .build_collection_batch(

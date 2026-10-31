@@ -163,12 +163,12 @@ impl TrackingStore {
         }
     }
 
-    /// Commit classified fetched inbox facts and the exact SDK serialization
+    /// Commit opaque fetched inbox facts and the exact SDK serialization
     /// together. There is no independent cursor-write API. This is a storage
     /// primitive, not an engine event handler: the future coordinator must
     /// enforce account/instance guards and stop after any prior commit failure.
-    /// Exact repeated entries are idempotent; readable entity versions share
-    /// the ordinary incoming origin/revision ordering and intent protection.
+    /// Exact repeated entries are idempotent. Classification, absence-pass
+    /// attribution and version ordering belong to the native intake boundary.
     pub fn commit_fetched(
         &mut self,
         binding: BindingId,
@@ -194,7 +194,13 @@ impl TrackingStore {
         if facts.state != BindingState::Active {
             return Err(Error::IsolatedBinding);
         }
-        super::incoming_store::receive(&transaction, binding, entries, &[])?;
+        for entry in entries {
+            validate_entry(entry)?;
+            transaction.execute(
+                "INSERT INTO inbox(binding,entry) VALUES(?1,?2) ON CONFLICT(binding,entry) DO NOTHING",
+                params![binding.0.as_slice(), encode(entry)?],
+            )?;
+        }
         transaction.execute(
             "INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3)
              ON CONFLICT(binding) DO UPDATE SET serialization=excluded.serialization,saved_at_ms=excluded.saved_at_ms",

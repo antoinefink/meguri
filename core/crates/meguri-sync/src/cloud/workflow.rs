@@ -81,6 +81,11 @@ pub struct Flight {
     pub image_seq: u64,
     #[serde(default)]
     pub held: bool,
+    #[serde(default)]
+    pub tombstone: bool,
+    /// Exact handed ordinary tombstone; an empty payload cannot identify it.
+    #[serde(default)]
+    pub tombstone_envelope_digest: Option<[u8; 32]>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityFacts {
@@ -90,6 +95,9 @@ pub struct EntityFacts {
     pub origin: [u8; 16],
     pub local_rev: u64,
     pub acked_rev: u64,
+    /// Explicit committed removal; payload retains the actual last local image.
+    #[serde(default)]
+    pub tombstone_at: Option<i64>,
     pub payload: c::Payload,
     pub base_payload: Option<c::Payload>,
     pub mark: Option<DirtyMark>,
@@ -105,6 +113,34 @@ pub struct EntityFacts {
     pub observed_generation: u64,
 }
 impl EntityFacts {
+    pub(crate) fn own_row_tombstone_flight(
+        &self,
+        writer: [u8; 16],
+        remote: &c::Entity,
+        envelope: &[u8],
+    ) -> Option<&Flight> {
+        if remote.fields.writer != writer
+            || remote.fields.origin != self.origin
+            || remote.fields.kind != self.kind
+            || remote.fields.key != self.key
+            || !matches!(self.kind, c::Kind::Note | c::Kind::Card)
+            || !remote.fields.tombstone
+            || remote.fields.generation.is_some()
+            || remote.payload.as_deref() != Some(&[])
+        {
+            return None;
+        }
+        self.in_flight.iter().find(|f| {
+            f.tombstone
+                && f.erev == remote.fields.erev
+                && f.payload_digest == remote.payload_sha256
+                && f.tombstone_envelope_digest == Some(c::sha256(envelope))
+        })
+    }
+    pub(crate) fn acked_tombstone(&self) -> bool {
+        matches!(c::Entity::decode(&self.acked_envelope.0),
+            Ok(c::DecodeOutcome::Supported(e)) if e.fields.tombstone)
+    }
     pub(crate) fn acked_media_tombstone(&self) -> bool {
         self.kind == c::Kind::MediaName
             && matches!(c::Entity::decode(&self.acked_envelope.0),
@@ -117,8 +153,21 @@ impl EntityFacts {
         {
             return Err(Error::InvalidData);
         }
+        if self.tombstone_at.is_some() && !matches!(self.kind, c::Kind::Note | c::Kind::Card) {
+            return Err(Error::InvalidData);
+        }
         for flight in &self.in_flight {
             super::runtime_store::checked(flight.image_seq)?;
+            if flight.tombstone
+                && self.kind != c::Kind::MediaName
+                && (!matches!(self.kind, c::Kind::Note | c::Kind::Card)
+                    || flight.row_digest != c::sha256(&[])
+                    || flight.payload_digest != c::sha256(&[])
+                    || flight.payload.kind() != self.kind
+                    || super::row_payload::payload_key(&flight.payload)? != self.key)
+            {
+                return Err(Error::InvalidData);
+            }
         }
         for n in [
             self.local_rev,
@@ -136,11 +185,32 @@ impl EntityFacts {
         if self.server_erev > 0 {
             let p = self.acked_payload.as_ref().ok_or(Error::InvalidData)?;
             if p.kind() != self.kind
-                || p.row_digest().map_err(|_| Error::InvalidData)? != self.acked_row_digest
-                || p.payload_digest().map_err(|_| Error::InvalidData)? != self.acked_payload_digest
+                || ((!self.acked_tombstone() || self.kind == c::Kind::MediaName)
+                    && (p.row_digest().map_err(|_| Error::InvalidData)? != self.acked_row_digest
+                        || p.payload_digest().map_err(|_| Error::InvalidData)? != self.acked_payload_digest))
                 || self.acked_system_fields.is_empty()
             {
                 return Err(Error::InvalidData);
+            }
+            if self.acked_tombstone() && self.kind != c::Kind::MediaName {
+                let c::DecodeOutcome::Supported(entity) =
+                    c::Entity::decode(&self.acked_envelope.0).map_err(|_| Error::InvalidData)?
+                else {
+                    return Err(Error::InvalidData);
+                };
+                if !matches!(self.kind, c::Kind::Note | c::Kind::Card)
+                    || entity.fields.kind != self.kind
+                    || entity.fields.key != self.key
+                    || entity.fields.origin != self.origin
+                    || entity.fields.erev != self.server_erev
+                    || entity.payload.as_deref() != Some(&[])
+                    || entity.payload_size != 0
+                    || entity.payload_sha256 != c::sha256(&[])
+                    || self.acked_payload_digest != entity.payload_sha256
+                    || self.acked_row_digest != entity.payload_sha256
+                {
+                    return Err(Error::InvalidData);
+                }
             }
             if self.acked_media_tombstone() {
                 let c::DecodeOutcome::Supported(entity) =
@@ -162,15 +232,40 @@ impl EntityFacts {
         }
         Ok(())
     }
+    pub(crate) fn remove(&mut self, before: c::Payload, at: i64, counter: &mut u64) -> Result<(), Error> {
+        if !matches!(self.kind, c::Kind::Note | c::Kind::Card) || self.acked_tombstone() {
+            return Err(Error::InvalidData);
+        }
+        if self.tombstone_at.is_some() {
+            return Ok(());
+        }
+        if self.mark.is_none() {
+            self.base_payload = Some(before.clone());
+        }
+        self.payload = before;
+        self.tombstone_at = Some(at);
+        self.local_rev = self.local_rev.checked_add(1).ok_or(Error::InvalidData)?;
+        *counter = counter.checked_add(1).ok_or(Error::InvalidData)?;
+        self.mark = Some(DirtyMark {
+            source: super::runtime::DirtySource::Observer,
+            change_seq: *counter,
+            payload_digest: self.payload.payload_digest().map_err(|_| Error::InvalidData)?,
+        });
+        Ok(())
+    }
     pub(crate) fn observe(
         &mut self,
         p: c::Payload,
         source: super::runtime::DirtySource,
         counter: &mut u64,
     ) -> Result<bool, Error> {
-        if self.payload == p {
+        if self.acked_tombstone() && self.kind != c::Kind::MediaName {
+            return Err(Error::InvalidData);
+        }
+        if self.payload == p && self.tombstone_at.is_none() {
             return Ok(false);
         }
+        self.tombstone_at = None;
         self.local_rev = self.local_rev.checked_add(1).ok_or(Error::InvalidData)?;
         self.payload = p;
         if self.payload.row_digest().map_err(|_| Error::InvalidData)? == self.acked_row_digest && self.server_erev > 0 {
@@ -409,7 +504,11 @@ pub enum TraceEvent {
 pub struct CoverageLedger {
     pub open: u64,
     pub cursor: super::runtime::NoteScanCursor,
+    /// Actual rows covered by the snapshot (media uses its journal feed).
     pub counts: Vec<(c::Kind, u64)>,
+    /// Absent Note/Card keys whose deletion facts remain in tracking.
+    #[serde(default)]
+    pub retained_tombstones: Vec<(c::Kind, u64)>,
     pub media_feed_id: [u8; 16],
     pub media_cursor: u64,
 }
@@ -421,9 +520,14 @@ impl CoverageLedger {
         if self.counts.iter().map(|(k, _)| *k).collect::<Vec<_>>() != super::row_payload::KINDS {
             return Err(Error::InvalidData);
         }
+        if !self.retained_tombstones.is_empty()
+            && self.retained_tombstones.iter().map(|(k, _)| *k).collect::<Vec<_>>() != [c::Kind::Note, c::Kind::Card]
+        {
+            return Err(Error::InvalidData);
+        }
         super::runtime_store::checked(self.open)?;
         super::runtime_store::checked(self.media_cursor)?;
-        for (_, n) in &self.counts {
+        for (_, n) in self.counts.iter().chain(&self.retained_tombstones) {
             super::runtime_store::checked(*n)?;
         }
         Ok(())

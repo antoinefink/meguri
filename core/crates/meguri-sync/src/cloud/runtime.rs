@@ -176,6 +176,8 @@ pub struct NoteTracking {
     pub in_flight: Vec<super::workflow::Flight>,
     #[serde(default)]
     pub acked_envelope: OpaqueBytes,
+    #[serde(default)]
+    pub tombstone_at: Option<i64>,
 }
 impl NoteTracking {
     pub(super) fn layout_generation(&self) -> Result<u64, Error> {
@@ -250,8 +252,10 @@ impl NoteTracking {
                 && self.acknowledged.payload_digest == [0; 32]
         } else {
             !self.acknowledged.system_fields.0.is_empty()
-                && acked.row_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.row_digest
-                && acked.payload_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.payload_digest
+                && (matches!(codec::Entity::decode(&self.acked_envelope.0),
+                    Ok(codec::DecodeOutcome::Supported(e)) if e.fields.tombstone)
+                    || (acked.row_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.row_digest
+                        && acked.payload_digest().map_err(|_| Error::InvalidData)? == self.acknowledged.payload_digest))
         };
         if !valid_ack
             || self.layout_generation()? == 0
@@ -264,6 +268,12 @@ impl NoteTracking {
         }
         if let codec::Payload::Note(local) = &local {
             self.require_supported_update(None, Some(local))?;
+        }
+        if self.tombstone_at.is_some()
+            || matches!(codec::Entity::decode(&self.acked_envelope.0),
+            Ok(codec::DecodeOutcome::Supported(e)) if e.fields.tombstone)
+        {
+            super::workflow_store::note_facts(self.clone())?.validate()?;
         }
         if let Some(base) = &self.base {
             codec::Payload::decode(codec::Kind::Note, &base.0).map_err(|_| Error::InvalidData)?;

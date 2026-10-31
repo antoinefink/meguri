@@ -471,6 +471,132 @@ fn restart_decides_all_before_all_after_and_mixed_keys_and_preserves_intervening
 }
 
 #[test]
+fn power_loss_of_mixed_live_update_and_tombstone_replays_real_post_commit_intent() {
+    for local_edit in [false, true] {
+        let mut pair = Pair::adopted();
+        let b = binding(&pair);
+        let originals = notes(&mut pair.receiver);
+        let live_id = originals[0].id;
+        let deleted_id = originals[1].id;
+        let live_key = name(&pair, codec::Kind::Note, live_id);
+        let deleted_key = name(&pair, codec::Kind::Note, deleted_id);
+        let before_rows = pair.receiver.driver().collection_rows().unwrap();
+        let fields: Vec<_> = std::str::from_utf8(&originals[0].flds)
+            .unwrap()
+            .split('\u{1f}')
+            .collect();
+
+        // Checkpoint before applying; retain these database bytes for power loss.
+        pair.receiver.close_clean().unwrap();
+        let collection = pair.receiver_dir.join("collection.anki2");
+        let durable_before = std::fs::read(&collection).unwrap();
+        let wal = pair.receiver_dir.join("collection.anki2-wal");
+        match std::fs::metadata(&wal) {
+            Ok(metadata) => assert_eq!(metadata.len(), 0),
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
+        }
+        pair.receiver = online(&pair.receiver_dir, false);
+        let old_ack = pair.receiver.facts().unwrap().entities[&live_key].clone();
+        pair.sender.advance_clock_ms(7_000).unwrap();
+        pair.sender
+            .driver()
+            .edit_note_fields(live_id, &["power-loss remote", fields[1]])
+            .unwrap();
+        pair.sender.driver().delete_note(deleted_id).unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let remote_live = saved(&pair, &live_key);
+        let remote_delete = saved(&pair, &deleted_key);
+        let remote_payload = body(&remote_live);
+        pair.receiver
+            .driver()
+            .pause_automatic_wal_flush_for_testing(true)
+            .unwrap();
+        pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
+        pair.receiver
+            .driver()
+            .deliver_collection_records(&[remote_live, remote_delete])
+            .unwrap();
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
+        let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+        assert!(intent.originating_open.is_some());
+        let committed = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert_eq!(committed.runs.len(), 1);
+        assert_eq!(intent.result_seq, Some(committed.runs[0].seq));
+        assert_eq!(note(&mut pair.receiver, live_id), remote_payload);
+        assert!(!notes(&mut pair.receiver).iter().any(|n| n.id == deleted_id));
+        let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(inbox.len(), 2);
+        assert!(pair.receiver.facts().unwrap().entities[&live_key] == old_ack);
+        assert!(!committed.wal_receipts.iter().any(|r| {
+            r.native_file == intent.native_file
+                && r.generation == intent.generation
+                && r.through >= intent.result_seq.unwrap()
+        }));
+        pair.receiver.kill().unwrap();
+        // Restore database bytes in place; keep the committed tracking intent.
+        std::fs::write(&collection, &durable_before).unwrap();
+        for suffix in ["collection.anki2-wal", "collection.anki2-shm"] {
+            let path = pair.receiver_dir.join(suffix);
+            if path.exists() {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+        pair.reopen_before_identity();
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), before_rows);
+        assert_eq!(pair.receiver.driver().apply_intents(b).unwrap(), vec![intent.clone()]);
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), inbox);
+        if local_edit {
+            pair.receiver.advance_clock_ms(30_000).unwrap();
+            pair.receiver
+                .driver()
+                .edit_note_fields(live_id, &[fields[0], "surviving local back"])
+                .unwrap();
+        }
+        pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
+        pair.verify_and_drive();
+        assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
+        let replayed = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+        assert_ne!(replayed.id, intent.id);
+        assert_ne!(replayed.originating_open, intent.originating_open);
+        assert_eq!(replayed.inbox_ids, intent.inbox_ids);
+        // The server ACK is still old until the replayed real op is covered.
+        let during = pair.receiver.facts().unwrap().entities[&live_key].clone();
+        assert_eq!(during.server_erev, old_ack.server_erev);
+        assert_eq!(during.acked_envelope, old_ack.acked_envelope);
+        let Payload::Note(applied) = note(&mut pair.receiver, live_id) else {
+            panic!("note")
+        };
+        let expected_back = if local_edit { "surviving local back" } else { fields[1] };
+        assert_eq!(
+            applied.flds,
+            format!("power-loss remote\u{1f}{expected_back}").as_bytes()
+        );
+        assert!(!pair.receiver.driver().collection_rows().unwrap().iter().any(|p| {
+            matches!(p, Payload::Note(n) if n.id == deleted_id) || matches!(p, Payload::Card(c) if c.nid == deleted_id)
+        }));
+        pair.receiver.release(Point::ApplyAfterCommit).unwrap();
+        pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        settled(&mut pair, b);
+        let ack = pair.receiver.facts().unwrap().entities[&live_key].clone();
+        assert!(ack.acked_payload.as_ref() == Some(&remote_payload));
+        assert_eq!(ack.mark.is_some(), local_edit);
+        assert!(
+            pair.receiver.facts().unwrap().entities[&deleted_key]
+                .tombstone_at
+                .is_some()
+        );
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let Payload::Note(server) = body(&saved(&pair, &live_key)) else {
+            panic!("server note")
+        };
+        assert_eq!(server.flds, applied.flds);
+        assert!(envelope(&saved(&pair, &deleted_key)).fields.tombstone);
+        pair.close();
+    }
+}
+
+#[test]
 fn erev_order_ignores_duplicates_and_older_accepted_versions_cannot_clear_newer_refusal() {
     let (mut pair, id, key, before, first_row) = changed_note();
     let b = binding(&pair);
@@ -1353,4 +1479,780 @@ fn detached_review_rows_and_incoming_held_names_wait_for_real_session_end() {
     assert!(names.contains(&card_name));
     assert!(names.contains(&revlog_name));
     pair.close();
+}
+
+#[test]
+fn actual_delete_undo_before_handoff_restores_clean_note_and_cards() {
+    let mut pair = Pair::adopted();
+    let id = notes(&mut pair.sender)[0].id;
+    let before = pair.sender.driver().collection_rows().unwrap();
+    let note_name = name(&pair, codec::Kind::Note, id);
+    let original = saved(&pair, &note_name);
+    pair.sender.driver().delete_note(id).unwrap();
+    let deleted = pair.sender.facts().unwrap().entities[&note_name].clone();
+    assert!(deleted.tombstone_at.is_some());
+    let sender_binding = pair.sender.facts().unwrap().current.unwrap().id;
+    let committed = pair.sender.driver().incoming_observation(sender_binding).unwrap();
+    assert_eq!(deleted.tombstone_at, Some(committed.col_mod));
+    for row in before.iter().filter(|p| matches!(p, Payload::Card(c) if c.nid == id)) {
+        let Payload::Card(card) = row else { unreachable!() };
+        let key = name(&pair, codec::Kind::Card, card.id);
+        let tracked = pair.sender.facts().unwrap().entities[&key].clone();
+        assert_eq!(tracked.tombstone_at, Some(committed.col_mod));
+        assert!(tracked.payload == *row);
+        assert!(tracked.base_payload.as_ref() == Some(row));
+    }
+    assert!(deleted.base_payload.as_ref() == before.iter().find(|p| matches!(p, Payload::Note(n) if n.id == id)));
+    pair.sender.driver().undo().unwrap();
+    let restored = pair.sender.driver().collection_rows().unwrap();
+    for payload in before
+        .iter()
+        .filter(|p| matches!(p, Payload::Note(n) if n.id == id) || matches!(p, Payload::Card(c) if c.nid == id))
+    {
+        assert!(restored.contains(payload));
+    }
+    let entity = pair.sender.facts().unwrap().entities[&note_name].clone();
+    assert!(entity.tombstone_at.is_none());
+    assert!(entity.mark.is_none());
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(saved(&pair, &note_name), original);
+    pair.close();
+}
+
+#[test]
+fn pending_delete_reopen_keeps_tracking_and_counts_live_rows() {
+    let mut pair = Pair::adopted();
+    let id = notes(&mut pair.receiver)[0].id;
+    let key = name(&pair, codec::Kind::Note, id);
+    pair.receiver.driver().delete_note(id).unwrap();
+    let absent = pair.receiver.driver().collection_rows().unwrap();
+    let deleted = pair
+        .receiver
+        .facts()
+        .unwrap()
+        .entities
+        .into_iter()
+        .filter(|(_, e)| e.tombstone_at.is_some())
+        .collect::<Vec<_>>();
+    assert!(deleted.iter().any(|(name, _)| name == &key));
+    assert!(deleted.iter().any(|(_, e)| e.kind == codec::Kind::Card));
+    for (_, e) in &deleted {
+        assert!(e.mark.is_some() && e.in_flight.is_empty());
+        assert!(e.base_payload.is_some());
+    }
+    pair.receiver.kill().unwrap();
+    pair.reopen_before_identity();
+    pair.verify_and_drive();
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    let reopened = pair.receiver.facts().unwrap();
+    for (name, before) in deleted {
+        assert!(reopened.entities[&name] == before);
+    }
+    assert_scan_live_counts(&pair.receiver, &absent);
+    pair.close();
+}
+
+fn assert_scan_live_counts(rig: &PublicationRig, rows: &[Payload]) {
+    use meguri_sync::cloud::workflow::{Observation, TraceEvent};
+    assert!(
+        rig.trace()
+            .iter()
+            .any(|event| matches!(event, TraceEvent::ScanCommitted { .. }))
+    );
+    for kind in [codec::Kind::Note, codec::Kind::Card] {
+        let expected = rows.iter().filter(|p| p.kind() == kind).count();
+        assert!(rig.observations().iter().any(|event| matches!(event,
+            Observation::ReconcileKindCompleted { kind: actual, row_count }
+                if *actual == kind && *row_count == expected)));
+    }
+}
+
+#[test]
+fn held_actual_delete_waits_then_saves_empty_conditional_tombstones_and_reopens() {
+    let mut pair = Pair::adopted();
+    pair.sender.close_clean().unwrap();
+    pair.sender = PublicationRig::open(
+        &pair.root.path().join("sender"),
+        &scope(),
+        IdentityReads::Available(scope().account),
+        true,
+        NOW,
+        808,
+        Arc::new(NoReopenKeys),
+    )
+    .unwrap();
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    let id = notes(&mut pair.sender)[0].id;
+    // P8.1/M2: drain initial deck selection before the held-review baseline.
+    let setup_session = pair.sender.driver().review_begin(id).unwrap();
+    pair.sender.driver().review_end_and_drain(setup_session).unwrap();
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    let note_name = name(&pair, codec::Kind::Note, id);
+    let cards: Vec<_> = pair
+        .sender
+        .driver()
+        .collection_rows()
+        .unwrap()
+        .into_iter()
+        .filter_map(|p| match p {
+            Payload::Card(c) if c.nid == id => Some(c),
+            _ => None,
+        })
+        .collect();
+    let record_key = pair.sender.facts().unwrap().current.unwrap().facts.record_key;
+    let config_name = codec::entity_name(&record_key.0, codec::Kind::Config, b"curDeck").unwrap();
+    let Payload::Config(current) = body(&saved(&pair, &config_name)) else {
+        panic!("Service selected-deck Config required")
+    };
+    assert_eq!(current.key, b"curDeck");
+    assert_eq!(current.val, cards.first().unwrap().did.to_string().as_bytes());
+    let baseline = saved(&pair, &note_name);
+    let base_entity = envelope(&baseline);
+    let after_baseline = pair.service.request_log().unwrap().last().unwrap().request_id;
+    let session = pair.sender.driver().review_begin(id).unwrap();
+    let question = pair.sender.driver().review_start(session).unwrap();
+    pair.sender.driver().review_show_answer(session, question.id).unwrap();
+    pair.sender.driver().review_answer_good(session, question.id).unwrap();
+    pair.sender.driver().delete_note(id).unwrap();
+    let held = pair.sender.driver().read_cloud_review_hold(session).unwrap();
+    assert!(held.entity_names.contains(&note_name));
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(
+        !pair
+            .service
+            .request_log()
+            .unwrap()
+            .iter()
+            .any(|r| { r.request_id > after_baseline && r.kind == meguri_testkit::cloud::RequestKind::Modify })
+    );
+    let facts = pair.sender.facts().unwrap();
+    let pending = &facts.entities[&note_name];
+    assert!(pending.tombstone_at.is_some() && pending.mark.is_some());
+    assert!(pending.payload == body(&baseline));
+    assert_eq!(
+        pending.acked_envelope.0,
+        match &baseline.fields["e"] {
+            Field::EncryptedBytes(bytes) => bytes.clone(),
+            _ => panic!("baseline envelope"),
+        }
+    );
+    assert!(pending.in_flight.is_empty());
+    let sender_binding = facts.current.unwrap().id;
+    let instance = pair
+        .sender
+        .driver()
+        .incoming_observation(sender_binding)
+        .unwrap()
+        .engine_instance
+        .unwrap();
+    let mut requested = BTreeSet::from([note_name.clone()]);
+    for card in &cards {
+        requested.insert(name(&pair, codec::Kind::Card, card.id));
+    }
+    let batch = pair.sender.driver().build_for_instance(instance, requested).unwrap();
+    assert!(batch.saves.is_empty());
+    assert_eq!(saved(&pair, &note_name), baseline);
+    for card in &cards {
+        assert!(
+            !envelope(&saved(&pair, &name(&pair, codec::Kind::Card, card.id)))
+                .fields
+                .tombstone
+        );
+    }
+    pair.sender.driver().review_end_and_drain(session).unwrap();
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    let deleted = envelope(&saved(&pair, &note_name));
+    assert!(deleted.fields.tombstone);
+    assert_eq!(deleted.payload.as_deref(), Some([].as_slice()));
+    assert_eq!(deleted.fields.erev, base_entity.fields.erev + 1);
+    assert_eq!(deleted.fields.base_sha256, Some(base_entity.payload_sha256));
+    for card in cards {
+        let key = name(&pair, codec::Kind::Card, card.id);
+        let entity = envelope(&saved(&pair, &key));
+        assert!(entity.fields.tombstone);
+        assert_eq!(entity.payload.as_deref(), Some([].as_slice()));
+    }
+    assert!(pair.sender.driver().undo().is_err());
+    pair.sender.close_clean().unwrap();
+    pair.sender = online(&pair.root.path().join("sender"), false);
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let facts = pair.sender.facts().unwrap().entities[&note_name].clone();
+    assert!(facts.tombstone_at.is_some());
+    assert!(facts.mark.is_none());
+    assert_eq!(facts.acked_payload_digest, codec::sha256(&[]));
+    pair.close();
+}
+
+#[test]
+fn incoming_note_tombstone_side_effect_cards_settle_against_actual_server_tombstones() {
+    let mut pair = Pair::adopted();
+    let id = notes(&mut pair.sender)[0].id;
+    let note_name = name(&pair, codec::Kind::Note, id);
+    let cards: Vec<_> = pair
+        .receiver
+        .driver()
+        .collection_rows()
+        .unwrap()
+        .into_iter()
+        .filter_map(|p| match p {
+            Payload::Card(c) if c.nid == id => Some(c),
+            _ => None,
+        })
+        .collect();
+    pair.sender.driver().delete_note(id).unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let tombstone = saved(&pair, &note_name);
+    pair.receiver.driver().deliver_collection_records(&[tombstone]).unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    for card in &cards {
+        let key = name(&pair, codec::Kind::Card, card.id);
+        let facts = pair.receiver.facts().unwrap().entities[&key].clone();
+        assert!(facts.base_payload == Some(Payload::Card(card.clone())));
+        assert!(facts.tombstone_at.is_some());
+        assert!(facts.mark.is_some());
+    }
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    for card in cards {
+        let key = name(&pair, codec::Kind::Card, card.id);
+        assert!(envelope(&saved(&pair, &key)).fields.tombstone);
+        let facts = pair.receiver.facts().unwrap().entities[&key].clone();
+        assert!(facts.mark.is_none());
+        assert_eq!(facts.acked_payload_digest, codec::sha256(&[]));
+    }
+    pair.close();
+}
+
+fn mixed_live_card_then_note_tombstone(new_card: bool) {
+    use meguri_testkit::cloud::{Mutation, Operation};
+
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let existing = notes(&mut pair.sender)[0].clone();
+    let (id, card_id) = if new_card {
+        let old_card = pair
+            .sender
+            .driver()
+            .collection_rows()
+            .unwrap()
+            .into_iter()
+            .find_map(|p| match p {
+                Payload::Card(c) if c.nid == existing.id => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        pair.sender.advance_clock_ms(7_000).unwrap();
+        let added = pair
+            .sender
+            .driver()
+            .add_note(existing.mid, old_card.did, &["new remote", "back"])
+            .unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let note_key = name(&pair, codec::Kind::Note, added.note.id);
+        // Download the real Note alone; its Card has never had tracking here.
+        let live_note = saved(&pair, &note_key);
+        pair.receiver.driver().deliver_collection_records(&[live_note]).unwrap();
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        settled(&mut pair, b);
+        (added.note.id, added.cards[0].id)
+    } else {
+        let card = pair
+            .sender
+            .driver()
+            .collection_rows()
+            .unwrap()
+            .into_iter()
+            .find_map(|p| match p {
+                Payload::Card(c) if c.nid == existing.id => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        pair.sender.driver().bury_card(card.id).unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        (existing.id, card.id)
+    };
+    let card_key = name(&pair, codec::Kind::Card, card_id);
+    let note_key = name(&pair, codec::Kind::Note, id);
+    assert_eq!(
+        pair.receiver.facts().unwrap().entities.contains_key(&card_key),
+        !new_card
+    );
+    let live_card = saved(&pair, &card_key);
+    let live = envelope(&live_card);
+    assert!(!live.fields.tombstone);
+    let server_payload = body(&live_card);
+
+    pair.sender.driver().delete_note(id).unwrap();
+    pair.sender.hold(Point::BeforeCollectionSave).unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert!(pair.sender.is_held(Point::BeforeCollectionSave));
+    let request = pair.sender.held_request().unwrap();
+    let Operation::Modify { zone, atomic, changes } = request.operation else {
+        panic!("actual sender deletion request")
+    };
+    // Commit only the production-built Note tombstone. The actual Service Card
+    // remains LIVE, so the receiver must itself save its conditional tombstone.
+    let changes: Vec<_> = changes
+        .into_iter()
+        .filter(|change| matches!(change, Mutation::Save { record, .. } if record.name == note_key))
+        .collect();
+    assert_eq!(changes.len(), 1);
+    let response = pair
+        .service
+        .request(&scope(), request.caller, Operation::Modify { zone, atomic, changes })
+        .unwrap();
+    let Ok(Reply::Modified(items)) = response.result else {
+        panic!("actual Service reply")
+    };
+    let Ok(MutationSuccess::Saved(tombstone)) = &items[0].result else {
+        panic!("actual Service Note tombstone")
+    };
+    assert!(envelope(tombstone).fields.tombstone);
+    pair.receiver.hold(Point::ApplyAfterIntent).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_records(&[live_card.clone(), tombstone.clone()])
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ApplyAfterIntent));
+    let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+    assert_eq!(intent.inbox_ids.len(), 2);
+    let card = intent.keys.iter().find(|key| key.name == card_key).unwrap();
+    assert_eq!(card.role, ApplyKeyRole::Entry);
+    assert_eq!(card.after_digest, None);
+    assert!(card.before_payload.as_ref() == Some(&server_payload));
+    pair.receiver.release(Point::ApplyAfterIntent).unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    settled(&mut pair, b);
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .collection_rows()
+            .unwrap()
+            .iter()
+            .any(|p| { matches!(p, Payload::Note(n) if n.id == id) || matches!(p, Payload::Card(c) if c.nid == id) })
+    );
+    let pending = pair.receiver.facts().unwrap().entities[&card_key].clone();
+    assert!(pending.tombstone_at.is_some());
+    assert!(pending.mark.is_some());
+    assert!(pending.base_payload.as_ref() == Some(&server_payload));
+    assert!(pending.acked_payload.as_ref() == Some(&server_payload));
+    assert_eq!(pending.server_erev, live.fields.erev);
+    assert_eq!(pending.acked_system_fields, live_card.system_fields.bytes());
+    assert_eq!(saved(&pair, &card_key), live_card);
+
+    pair.receiver.hold(Point::BeforeCollectionSave).unwrap();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::BeforeCollectionSave));
+    let request = pair.receiver.held_request().unwrap();
+    let Operation::Modify { changes, .. } = request.operation else {
+        panic!("actual receiver tombstone request")
+    };
+    let (record, conditional) = changes
+        .iter()
+        .find_map(|change| match change {
+            Mutation::Save { record, if_unchanged } if record.name == card_key => Some((record, if_unchanged)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(conditional.as_ref(), Some(&live_card.system_fields));
+    let Field::EncryptedBytes(bytes) = &record.fields["e"] else {
+        panic!("envelope")
+    };
+    let codec::DecodeOutcome::Supported(sent) = codec::Entity::decode(bytes).unwrap() else {
+        panic!("supported")
+    };
+    assert!(sent.fields.tombstone);
+    assert_eq!(sent.fields.erev, live.fields.erev + 1);
+    assert_eq!(sent.fields.base_sha256, Some(live.payload_sha256));
+    pair.receiver.release(Point::BeforeCollectionSave).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(envelope(&saved(&pair, &card_key)).fields.tombstone);
+    let acked = pair.receiver.facts().unwrap().entities[&card_key].clone();
+    assert!(acked.tombstone_at.is_some());
+    assert!(acked.mark.is_none());
+    assert_eq!(acked.acked_payload_digest, codec::sha256(&[]));
+    // Discard the sender's original held batch; it was never submitted whole.
+    pair.sender.kill().unwrap();
+    pair.sender = online(&pair.root.path().join("sender"), false);
+    pair.close();
+}
+
+#[test]
+fn live_tracked_card_and_note_tombstone_settle_then_save_real_conditional_card_tombstone() {
+    mixed_live_card_then_note_tombstone(false);
+}
+
+#[test]
+fn live_new_card_and_note_tombstone_settle_then_save_real_conditional_card_tombstone() {
+    mixed_live_card_then_note_tombstone(true);
+}
+
+fn lost_note_tombstone() -> (Pair, i64, String, Record) {
+    let mut pair = Pair::adopted();
+    let id = notes(&mut pair.receiver)[0].id;
+    let key = name(&pair, codec::Kind::Note, id);
+    pair.receiver.driver().delete_note(id).unwrap();
+    hold_receive(&mut pair, Point::BeforeCollectionSave);
+    let request = pair.receiver.held_request().unwrap();
+    let response = pair
+        .service
+        .request(&scope(), request.caller, request.operation)
+        .unwrap();
+    let Ok(Reply::Modified(items)) = response.result else {
+        panic!("actual Service reply")
+    };
+    let Ok(MutationSuccess::Saved(landed)) = &items.iter().find(|i| i.name == key).unwrap().result else {
+        panic!("actual landed tombstone")
+    };
+    assert!(envelope(landed).fields.tombstone);
+    (pair, id, key, landed.clone())
+}
+
+#[test]
+fn lost_tombstone_reply_refuses_undo_and_fetches_exact_ack_after_reopen() {
+    let (mut pair, id, key, landed) = lost_note_tombstone();
+    let b = binding(&pair);
+    let handed = pair.receiver.facts().unwrap().entities[&key].clone();
+    let flight = handed.in_flight.iter().find(|f| f.tombstone).unwrap().clone();
+    let Field::EncryptedBytes(bytes) = &landed.fields["e"] else {
+        panic!("envelope")
+    };
+    assert_eq!(flight.erev, envelope(&landed).fields.erev);
+    assert_eq!(flight.tombstone_envelope_digest, Some(codec::sha256(bytes)));
+    assert!(pair.receiver.driver().undo().is_err());
+    let absent = pair.receiver.driver().collection_rows().unwrap();
+    assert!(
+        !absent
+            .iter()
+            .any(|p| { matches!(p, Payload::Note(n) if n.id == id) || matches!(p, Payload::Card(c) if c.nid == id) })
+    );
+    assert!(pair.receiver.facts().unwrap().entities[&key] == handed);
+    // The Service committed the original request; its reply never reaches the child.
+    pair.receiver.kill().unwrap();
+    pair.reopen_before_identity();
+    assert!(pair.receiver.facts().unwrap().entities[&key] == handed);
+    pair.verify_and_drive();
+    assert_scan_live_counts(&pair.receiver, &absent);
+    // Fetch the actual landed record while its original reply remains lost.
+    pair.receiver
+        .driver()
+        .deliver_collection_records(std::slice::from_ref(&landed))
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    let retained = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(retained.local_rev, handed.local_rev);
+    assert!(retained.payload == handed.payload);
+    assert_eq!(retained.tombstone_at, handed.tombstone_at);
+    assert_eq!(retained.server_erev, flight.erev);
+    assert_eq!(retained.acked_rev, flight.local_rev);
+    assert_eq!(retained.acked_envelope.0, *bytes);
+    assert_eq!(retained.acked_system_fields, landed.system_fields.bytes());
+    assert_eq!(retained.acked_payload_digest, codec::sha256(&[]));
+    assert_eq!(retained.acked_row_digest, codec::sha256(&[]));
+    assert!(retained.mark.is_none() && retained.base_payload.is_none());
+    assert!(retained.in_flight.is_empty());
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert!(!inbox.iter().any(|e| e.record_name == key));
+    let instance = pair
+        .receiver
+        .driver()
+        .incoming_observation(b)
+        .unwrap()
+        .engine_instance
+        .unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .build_for_instance(instance, BTreeSet::from([key.clone()]))
+            .unwrap()
+            .saves
+            .is_empty()
+    );
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    // Force another real opening to scan the ACKed deletion facts as well.
+    pair.receiver.kill().unwrap();
+    pair.reopen_before_identity();
+    pair.verify_and_drive();
+    assert_scan_live_counts(&pair.receiver, &absent);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == retained);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    pair.close();
+}
+
+#[test]
+fn empty_tombstone_digest_cannot_ack_another_revision_or_another_handed_envelope() {
+    for change_revision in [true, false] {
+        let (mut pair, _, key, landed) = lost_note_tombstone();
+        let b = binding(&pair);
+        let handed = pair.receiver.facts().unwrap().entities[&key].clone();
+        let mut fields = envelope(&landed).fields;
+        if change_revision {
+            fields.erev += 1;
+        } else {
+            fields.deleted_at_ms += 1;
+        }
+        let other = codec::Entity::build(fields, &[]).unwrap().encode().unwrap();
+        let response = pair
+            .service
+            .request(
+                &scope(),
+                Default::default(),
+                meguri_testkit::cloud::Operation::Modify {
+                    zone: pair.receiver.collection_zone().unwrap(),
+                    atomic: false,
+                    changes: vec![meguri_testkit::cloud::Mutation::Save {
+                        record: meguri_testkit::cloud::RecordInput::encrypted(&key, "MGEntity", other),
+                        if_unchanged: Some(landed.system_fields.clone()),
+                    }],
+                },
+            )
+            .unwrap();
+        let Ok(Reply::Modified(items)) = response.result else {
+            panic!("actual Service reply")
+        };
+        let Ok(MutationSuccess::Saved(other)) = &items[0].result else {
+            panic!("actual Service save")
+        };
+        assert_eq!(envelope(other).payload_sha256, codec::sha256(&[]));
+        pair.receiver.kill().unwrap();
+        pair.reopen_before_identity();
+        pair.verify_and_drive();
+        // Deliver only this actual Service version, independently of delta coalescing.
+        pair.receiver
+            .driver()
+            .deliver_collection_records(std::slice::from_ref(other))
+            .unwrap();
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        let retained = pair.receiver.facts().unwrap().entities[&key].clone();
+        assert_eq!(retained.server_erev, handed.server_erev);
+        assert_eq!(retained.acked_rev, handed.acked_rev);
+        assert!(retained.in_flight == handed.in_flight);
+        assert!(
+            pair.receiver
+                .driver()
+                .inbox_entries(b)
+                .unwrap()
+                .iter()
+                .any(|e| e.record_name == key && e.reason == InboxReason::Structure)
+        );
+        pair.close();
+    }
+}
+
+#[test]
+fn local_changes_during_apply() {
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let original = pair.receiver.driver().collection_rows().unwrap();
+    let originals = notes(&mut pair.receiver);
+    let deleted_id = originals[0].id;
+    let live_id = originals[1].id;
+    let deleted_key = name(&pair, codec::Kind::Note, deleted_id);
+    let live_key = name(&pair, codec::Kind::Note, live_id);
+    let old_deleted = pair.receiver.facts().unwrap().entities[&deleted_key].clone();
+    pair.receiver.driver().delete_note(deleted_id).unwrap();
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    pair.sender.driver().delete_note(deleted_id).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(live_id, &["remote live B", "remote back B"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let remote_delete = saved(&pair, &deleted_key);
+    let remote_live = saved(&pair, &live_key);
+    let remote_payload = body(&remote_live);
+    let remote_entity = envelope(&remote_live);
+    pair.receiver
+        .driver()
+        .pause_automatic_wal_flush_for_testing(true)
+        .unwrap();
+    pair.receiver.hold(Point::ApplyAfterFlush).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_records(&[remote_live.clone(), remote_delete])
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ApplyAfterFlush));
+    let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+    let committed = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(committed.runs.len(), 1);
+    assert_eq!(intent.result_seq, Some(committed.runs[0].seq));
+    assert_eq!(committed.runs[0].changed_keys, BTreeSet::from([live_key.clone()]));
+    assert_eq!(note(&mut pair.receiver, live_id), remote_payload);
+    assert!(!notes(&mut pair.receiver).iter().any(|n| n.id == deleted_id));
+
+    pair.receiver.driver().undo().unwrap();
+    pair.receiver
+        .driver()
+        .edit_note_fields(live_id, &["remote live B", "new local back B"])
+        .unwrap();
+    let retained_rows = pair.receiver.driver().collection_rows().unwrap();
+    for row in original.iter().filter(|p| {
+        matches!(p, Payload::Note(n) if n.id == deleted_id) || matches!(p, Payload::Card(c) if c.nid == deleted_id)
+    }) {
+        assert!(retained_rows.contains(row));
+    }
+    let newer = pair.receiver.facts().unwrap();
+    let newer_delete = &newer.entities[&deleted_key];
+    let newer_live = &newer.entities[&live_key];
+    assert!(newer_delete.observed_seq > intent.result_seq.unwrap());
+    assert!(newer_live.observed_seq > newer_delete.observed_seq);
+    assert_eq!(newer_live.observer_open, intent.originating_open.unwrap());
+    assert_eq!(newer_live.observed_generation, intent.generation);
+    assert!(newer_live.payload == note(&mut pair.receiver, live_id));
+    assert!(
+        !committed
+            .wal_receipts
+            .iter()
+            .any(|r| r.native_file == intent.native_file
+                && r.generation == intent.generation
+                && r.through >= newer_live.observed_seq)
+    );
+    pair.receiver.release(Point::ApplyAfterFlush).unwrap();
+    let stale_receipt = pair.receiver.driver().drain_incoming(STEPS).unwrap_err();
+    assert_eq!(
+        stale_receipt.to_string(),
+        "cloud device operation failed: RuntimeEngine(Busy)"
+    );
+    assert_eq!(pair.receiver.driver().apply_intents(b).unwrap(), vec![intent.clone()]);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), retained_rows);
+
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), retained_rows);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let settled = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(settled.runs, committed.runs);
+    assert!(settled.wal_receipts.iter().any(|r| r.native_file == intent.native_file
+        && r.generation == intent.generation
+        && r.through >= newer_live.observed_seq));
+    let facts = pair.receiver.facts().unwrap();
+    let deleted = &facts.entities[&deleted_key];
+    assert!(deleted.payload == newer_delete.payload);
+    assert!(deleted.tombstone_at.is_none());
+    assert!(deleted.mark.is_some());
+    assert_eq!(deleted.local_rev, newer_delete.local_rev);
+    assert_eq!(deleted.server_erev, old_deleted.server_erev);
+    assert_eq!(deleted.acked_rev, old_deleted.acked_rev);
+    assert_eq!(deleted.acked_envelope, old_deleted.acked_envelope);
+    let live = &facts.entities[&live_key];
+    assert!(live.payload == newer_live.payload);
+    assert_eq!(live.local_rev, newer_live.local_rev);
+    assert!(live.mark.is_some());
+    assert!(live.base_payload.as_ref() == Some(&remote_payload));
+    assert!(live.acked_payload.as_ref() == Some(&remote_payload));
+    assert_eq!(live.server_erev, remote_entity.fields.erev);
+    assert_eq!(live.acked_system_fields, remote_live.system_fields.bytes());
+    let Field::EncryptedBytes(remote_envelope) = &remote_live.fields["e"] else {
+        panic!("actual live envelope required")
+    };
+    assert!(live.acked_envelope.0 == *remote_envelope);
+    let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].record_name, deleted_key);
+    assert_eq!(inbox[0].reason, InboxReason::Structure);
+    pair.receiver
+        .driver()
+        .pause_automatic_wal_flush_for_testing(false)
+        .unwrap();
+    pair.close();
+}
+
+#[test]
+fn held_delete_undo_keeps_rows_and_wal() {
+    for undo_after_flush in [false, true] {
+        let mut pair = Pair::adopted();
+        let b = binding(&pair);
+        let id = notes(&mut pair.receiver)[0].id;
+        let key = name(&pair, codec::Kind::Note, id);
+        let original = pair.receiver.driver().collection_rows().unwrap();
+        let old_ack = pair.receiver.facts().unwrap().entities[&key].clone();
+        pair.receiver.driver().delete_note(id).unwrap();
+        pair.sender.driver().delete_note(id).unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let tombstone = saved(&pair, &key);
+        pair.receiver
+            .driver()
+            .pause_automatic_wal_flush_for_testing(true)
+            .unwrap();
+        pair.receiver.driver().deliver_collection_records(&[tombstone]).unwrap();
+        pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
+        let intent = pair.receiver.driver().apply_intents(b).unwrap().remove(0);
+        let committed = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert_eq!(committed.runs.len(), 1);
+        assert!(committed.runs[0].changed_keys.is_empty());
+        assert_eq!(intent.result_seq, Some(committed.runs[0].seq));
+        assert!(
+            !committed
+                .wal_receipts
+                .iter()
+                .any(|r| r.native_file == intent.native_file
+                    && r.generation == intent.generation
+                    && r.through >= intent.result_seq.unwrap())
+        );
+        if !undo_after_flush {
+            pair.receiver.driver().undo().unwrap();
+        }
+        pair.receiver.hold(Point::ApplyAfterFlush).unwrap();
+        pair.receiver.release(Point::ApplyAfterCommit).unwrap();
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        assert!(pair.receiver.is_held(Point::ApplyAfterFlush));
+        let flushed = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert!(flushed.wal_receipts.iter().any(|r| r.native_file == intent.native_file
+            && r.generation == intent.generation
+            && r.through >= intent.result_seq.unwrap()));
+        if undo_after_flush {
+            pair.receiver.driver().undo().unwrap();
+        }
+        let restored = pair.receiver.driver().collection_rows().unwrap();
+        for row in original
+            .iter()
+            .filter(|p| matches!(p, Payload::Note(n) if n.id == id) || matches!(p, Payload::Card(c) if c.nid == id))
+        {
+            assert!(restored.contains(row));
+        }
+        let newer = pair.receiver.facts().unwrap().entities[&key].clone();
+        assert!(newer.observed_seq > intent.result_seq.unwrap());
+        pair.receiver.release(Point::ApplyAfterFlush).unwrap();
+        if undo_after_flush {
+            // The old receipt cannot cover Undo: retain the intent on Busy.
+            assert!(pair.receiver.driver().drain_incoming(STEPS).is_err());
+            assert_eq!(pair.receiver.driver().apply_intents(b).unwrap(), vec![intent.clone()]);
+            assert_eq!(pair.receiver.driver().collection_rows().unwrap(), restored);
+        }
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), restored);
+        assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+        let retained = pair.receiver.facts().unwrap().entities[&key].clone();
+        assert!(retained.payload == note(&mut pair.receiver, id));
+        assert!(retained.tombstone_at.is_none());
+        assert!(retained.mark.is_some());
+        assert_eq!(retained.local_rev, newer.local_rev);
+        assert_eq!(retained.server_erev, old_ack.server_erev);
+        assert_eq!(retained.acked_rev, old_ack.acked_rev);
+        assert_eq!(retained.acked_envelope, old_ack.acked_envelope);
+        assert!(
+            pair.receiver
+                .driver()
+                .inbox_entries(b)
+                .unwrap()
+                .iter()
+                .any(|e| e.record_name == key && e.reason == InboxReason::Structure)
+        );
+        let settled = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert_eq!(settled.runs, committed.runs);
+        assert!(settled.wal_receipts.iter().any(|r| r.native_file == intent.native_file
+            && r.generation == intent.generation
+            && r.through >= newer.observed_seq));
+        pair.receiver
+            .driver()
+            .pause_automatic_wal_flush_for_testing(false)
+            .unwrap();
+        pair.close();
+    }
 }
