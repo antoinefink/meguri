@@ -44,6 +44,21 @@ Independent review cleared its corrected fixture and diagnostic-only follow-up.
 Keep the two technical failures open. The next repair must preserve message,
 payload and heap limits and native callback ownership.
 
+## Inline fetch transport
+
+This follow-up starts at `d08cb76b`. One file holds the encrypted envelopes
+of each callback. Exact ranges recover the original bytes before core intake.
+The parent keeps this source until that callback's terminal reply.
+
+- `core-test/20261031T212429Z-65052`: all 47 incoming cases pass.
+- `core-test/20261031T212532Z-65458`: both source and range tests pass.
+- `core-lint/20261031T212609Z-66088`: pass.
+- `private/20261031T212548Z-65756`: pass.
+
+Review found one P2 error path: a source read failure must complete the original
+exchange as failed. That repair and its focused test remain required.
+The earlier failed checks stay in the evidence.
+
 Native execution, complete media and device proof, structural generations and
 the required integration gate remain outstanding. This is WIP; U113 and U114
 remain unaccepted, without Unit trailers.

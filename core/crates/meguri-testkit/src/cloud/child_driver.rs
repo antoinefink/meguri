@@ -16,7 +16,7 @@ use meguri_sync::cloud::{
     workflow::*,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Read, Write},
@@ -124,16 +124,16 @@ fn inbox_value_sha256(value: &core::InboxValue) -> Result<[u8; 32]> {
     struct HashWriter(Sha256);
     impl Write for HashWriter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.update(bytes);
+            sha2::Digest::update(&mut self.0, bytes);
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    let mut writer = HashWriter(Sha256::new());
+    let mut writer = HashWriter(<Sha256 as sha2::Digest>::new());
     serde_json::to_writer(&mut writer, value)?;
-    Ok(writer.0.finalize().into())
+    Ok(sha2::Digest::finalize(writer.0).into())
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingRefusedEntry {
@@ -218,10 +218,18 @@ pub(crate) struct FetchedAssetRecord {
     pub record: Saved,
     pub asset_path: Option<std::path::PathBuf>,
 }
+/// Only the owned Fetched callback projects envelopes out of Saved. Other
+/// download/result commands keep their existing inline envelope transport.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct FetchedEnvelopeSource {
+    path: std::path::PathBuf,
+    ranges: Vec<(u64, u64)>,
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct FetchedCallback {
     pub instance: String,
     pub records: Vec<FetchedAssetRecord>,
+    pub envelopes: Option<FetchedEnvelopeSource>,
     pub zone: String,
     pub serialization: Vec<u8>,
     pub exchange: Option<u64>,
@@ -584,10 +592,30 @@ impl ChildDriver {
     ) -> Result<FetchedCallback> {
         let mut files = Vec::new();
         let mut inputs = Vec::new();
+        let mut envelopes = None;
+        let mut ranges = Vec::new();
+        let mut offset = 0_u64;
         for record in records {
             let Some(super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
                 return Err(Box::new(std::io::Error::other("fetched callback: envelope shape")));
             };
+            let length = u64::try_from(envelope.len())?;
+            if length > super::Limits::default().non_asset_per_record {
+                return Err(Box::new(std::io::Error::other("fetched callback: envelope length")));
+            }
+            if envelopes.is_none() {
+                envelopes = Some(
+                    tempfile::NamedTempFile::new()
+                        .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: envelope create"))?,
+                );
+            }
+            envelopes
+                .as_mut()
+                .ok_or_else(failure)?
+                .write_all(envelope)
+                .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: envelope write"))?;
+            ranges.push((offset, length));
+            offset = offset.checked_add(length).ok_or_else(failure)?;
             let asset_path = match record.fields.get("pa") {
                 Some(super::Field::Asset(asset)) => {
                     let mut file = tempfile::NamedTempFile::new()
@@ -607,15 +635,26 @@ impl ChildDriver {
             inputs.push(FetchedAssetRecord {
                 record: Saved {
                     name: record.name,
-                    envelope: envelope.clone(),
+                    envelope: Vec::new(),
                     system_fields: record.system_fields.bytes().to_vec(),
                 },
                 asset_path,
             });
         }
+        // These are disposable, unbuffered transport writes. Runtime still owns
+        // all durable intake; the spool needs no per-record fsync.
+        let envelopes = envelopes.map(|file| {
+            let source = FetchedEnvelopeSource {
+                path: file.path().to_path_buf(),
+                ranges,
+            };
+            files.push(file);
+            source
+        });
         let callback = FetchedCallback {
             instance,
             records: inputs,
+            envelopes,
             zone,
             serialization,
             exchange,

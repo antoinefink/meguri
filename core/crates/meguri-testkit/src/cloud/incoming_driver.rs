@@ -177,6 +177,48 @@ fn with_service_records<T>(
     drop(files);
     result
 }
+// Decode only the fetched-callback projection, before entering Runtime or
+// acquiring tracking locks. Saved itself never treats paths as record data.
+pub(super) fn hydrate_fetched_records(
+    records: Vec<FetchedAssetRecord>,
+    source: Option<FetchedEnvelopeSource>,
+) -> Result<Vec<core::workflow::FetchedRecord>> {
+    if records.is_empty() {
+        return if source.is_none() {
+            Ok(Vec::new())
+        } else {
+            Err(failure())
+        };
+    }
+    let source = source.ok_or_else(failure)?;
+    if source.ranges.len() != records.len() || records.iter().any(|input| !input.record.envelope.is_empty()) {
+        return Err(failure());
+    }
+    let mut end = 0_u64;
+    for &(offset, length) in &source.ranges {
+        if offset != end || length > super::super::Limits::default().non_asset_per_record {
+            return Err(failure());
+        }
+        end = offset.checked_add(length).ok_or_else(failure)?;
+    }
+    let mut file = std::fs::File::open(source.path)?;
+    if file.metadata()?.len() != end {
+        return Err(failure());
+    }
+    records
+        .into_iter()
+        .zip(source.ranges)
+        .map(|(mut input, (_, length))| {
+            let mut envelope = vec![0; usize::try_from(length)?];
+            file.read_exact(&mut envelope)?;
+            input.record.envelope = envelope;
+            Ok(core::workflow::FetchedRecord {
+                record: input.record,
+                asset_path: input.asset_path,
+            })
+        })
+        .collect()
+}
 /// A pause is a separate protocol frame. The one original reply is emitted only
 /// after release/continuation; queries have their own independent reply frames.
 pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStream) -> Result<Option<Input>> {
@@ -240,17 +282,12 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                 Input::Fetched(FetchedCallback {
                     instance,
                     records,
+                    envelopes,
                     zone,
                     serialization,
                     exchange,
                 }) => {
-                    let inputs: Vec<_> = records
-                        .into_iter()
-                        .map(|input| core::workflow::FetchedRecord {
-                            record: input.record,
-                            asset_path: input.asset_path,
-                        })
-                        .collect();
+                    let inputs = hydrate_fetched_records(records, envelopes)?;
                     let mut failure_stage: fn(Box<ChildFailure>) -> ChildFailure = ChildFailure::FetchCursorProjection;
                     let mut callback = || -> Result<()> {
                         if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
