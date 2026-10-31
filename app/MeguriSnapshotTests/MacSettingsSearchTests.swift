@@ -22,10 +22,15 @@ import Testing
             try #require(fields.count == 1)
             let field = try #require(fields.first)
             #expect((field as any NSAccessibilityProtocol).accessibilityIdentifier() == "settings.root.search")
-            let search = try #require((field as any NSAccessibilityProtocol).accessibilitySearchButton() as? any NSAccessibilityProtocol)
-            #expect(search.accessibilityIdentifier() == "settings.root.searchButton")
+            let cell = try #require(field.cell as? NSSearchFieldCell)
+            let searchLabel = try #require(cell.searchButtonCell?.accessibilityLabel())
+            try #require(!searchLabel.isEmpty)
             var visited: Set<ObjectIdentifier> = []
             let buttons = accessibilityButtons(in: field, visited: &visited)
+            let matches = buttons.filter { $0.accessibilityLabel() == searchLabel }
+            try #require(matches.count == 1)
+            let search = try #require(matches.first)
+            #expect(search.accessibilityIdentifier() == "settings.root.searchButton")
             let identified = buttons.filter { $0.accessibilityIdentifier() == "settings.root.searchButton" }
             try #require(identified.count == 1)
             #expect(identified[0] as AnyObject === search as AnyObject)
