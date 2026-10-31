@@ -5,6 +5,9 @@ use meguri_model::ids::{DeckId, NoteId, NotetypeId};
 use meguri_sync::cloud::entity_codec as codec;
 use meguri_testkit::cloud::{Asset, Record};
 
+#[path = "cloud_asset_reads_tests.rs"]
+mod asset_reads;
+
 fn note_facts(fixture: &PublishedFixture, id: NoteId) -> w::EntityFacts {
     fixture
         .workflow

@@ -34,6 +34,33 @@ pub struct CloudPolicyExecution {
 }
 
 impl CloudPolicyExecution {
+    // A terminal reply keeps its original command when policy has moved on.
+    // Let Driver retire that command's read; validate new admission separately
+    // so an FFI generation check cannot bypass cleanup of the original owner.
+    pub(crate) fn asset_read_driver(&self) -> Result<(&p::Driver, &p::Command), CoreError> {
+        Ok((self.policy().driver()?, &self.command.command))
+    }
+    pub(crate) fn asset_read_owner(
+        &self,
+    ) -> Result<
+        (
+            Arc<meguri_host::CoreHost>,
+            Arc<meguri_sync::cloud::runtime::Runtime>,
+            meguri_engine::Collection,
+            String,
+        ),
+        CoreError,
+    > {
+        self.policy().owns(&self.command)?;
+        let collection = self.policy().collection()?;
+        let core = self
+            .policy()
+            .host
+            .cloud_runtime()
+            .cloned()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?;
+        Ok((self.policy().host.clone(), core, collection, self.sdk()?))
+    }
     fn policy(&self) -> &Arc<CloudPolicy> {
         &self.command.owner
     }
@@ -112,6 +139,7 @@ impl CloudPolicy {
             | p::ActionKind::ResumeMedia
             | p::ActionKind::PauseMedia
             | p::ActionKind::ReadBlobs { .. }
+            | p::ActionKind::RetryAssetEntries
             | p::ActionKind::PrioritizeMedia { .. }
             | p::ActionKind::BackgroundFlush { .. }
             | p::ActionKind::QuitFlush { .. }

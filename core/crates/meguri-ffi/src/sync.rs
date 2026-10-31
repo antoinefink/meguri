@@ -22,7 +22,7 @@ pub struct CloudRecord {
     pub asset_path: Option<String>,
 }
 impl CloudRecord {
-    fn fetched(self) -> w::FetchedRecord {
+    pub(crate) fn fetched(self) -> w::FetchedRecord {
         let asset_path = self.asset_path.as_ref().map(std::path::PathBuf::from);
         w::FetchedRecord {
             record: self.saved(),
