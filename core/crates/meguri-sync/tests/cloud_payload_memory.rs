@@ -106,6 +106,15 @@ fn eight_lost_40_mib_revisions_of_one_note_edit_reopen_and_recover_exact_own_sav
         let (peak, live) = sdk.driver().payload_memory_peak().unwrap();
         eprintln!("device/core Rust heap phase={phase} cumulative_peak={peak} live={live}");
     }
+    fn sample_stages(sdk: &mut SDKRig) {
+        for sample in sdk.driver().payload_memory_stages().unwrap().into_iter().flatten() {
+            let stage = sample.stage;
+            let (peak, live) = sample.first;
+            eprintln!("device/core Rust heap stage={stage:?} first cumulative_peak={peak} live={live}");
+            let (peak, live) = sample.high_water;
+            eprintln!("device/core Rust heap stage={stage:?} high_water cumulative_peak={peak} live={live}");
+        }
+    }
 
     let run = tempfile::tempdir().unwrap();
     let directory = run.path().join("device");
@@ -188,11 +197,13 @@ fn eight_lost_40_mib_revisions_of_one_note_edit_reopen_and_recover_exact_own_sav
     sample(&mut sdk, "after reconcile register and root");
     sdk.fetch_recovery_exchange(&mut service, 10_000).unwrap();
     sample(&mut sdk, "after fetch");
+    sample_stages(&mut sdk);
     assert!(matches!(
         sdk.driver().drain_incoming(10_000).unwrap(),
         meguri_testkit::cloud::child_driver::IncomingProgress::Completed(_)
     ));
     sample(&mut sdk, "after final drain");
+    sample_stages(&mut sdk);
     let recovered = sdk.driver().payload_proof(&newer.name).unwrap();
     assert_eq!(recovered.acked_rev, saved.local_rev);
     assert_eq!(recovered.server_erev, saved.server_erev + 1);

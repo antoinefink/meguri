@@ -8,6 +8,8 @@ struct LatchState {
     held: BTreeSet<IncomingStage>,
     events: Option<mpsc::Sender<WorkEvent>>,
     receive_events: Option<mpsc::Sender<WorkEvent>>,
+    // Enabled only by PayloadMemoryReset; fixed storage survives host reopen.
+    payload_memory: Option<[Option<PayloadMemoryStageSamples>; 6]>,
 }
 #[derive(Default)]
 pub(super) struct Latches {
@@ -15,6 +17,16 @@ pub(super) struct Latches {
     released: Condvar,
 }
 impl Latches {
+    pub(super) fn reset_payload_memory(&self) {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).payload_memory = Some([None; 6]);
+    }
+    pub(super) fn payload_memory_stages(&self) -> [Option<PayloadMemoryStageSamples>; 6] {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .payload_memory
+            .unwrap_or([None; 6])
+    }
     pub(super) fn hold(&self, stage: IncomingStage) {
         self.state
             .lock()
@@ -30,6 +42,35 @@ impl Latches {
     }
     pub(super) fn hit(&self, stage: IncomingStage) {
         let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(samples) = s.payload_memory.as_mut() {
+            let index = match stage {
+                IncomingStage::FetchAfterInbox => Some(0),
+                IncomingStage::FetchAfterCursor => Some(1),
+                IncomingStage::ApplyAfterIntent => Some(2),
+                IncomingStage::ApplyAfterCommit => Some(3),
+                IncomingStage::ApplyAfterFlush => Some(4),
+                IncomingStage::IntentSettlementComplete => Some(5),
+                _ => None,
+            };
+            if let Some(index) = index {
+                use crate::bench::peak_alloc::PeakAlloc;
+                let reading = (PeakAlloc::peak(), PeakAlloc::current());
+                match &mut samples[index] {
+                    Some(sample) => {
+                        if reading.0 > sample.high_water.0 {
+                            sample.high_water = reading;
+                        }
+                    }
+                    slot @ None => {
+                        *slot = Some(PayloadMemoryStageSamples {
+                            stage,
+                            first: reading,
+                            high_water: reading,
+                        });
+                    }
+                }
+            }
+        }
         if !s.armed.contains(&stage) {
             return;
         }

@@ -364,6 +364,77 @@ fn ordinary_edit_materializes_only_affected_bodies_with_large_clean_baseline() {
 }
 
 #[test]
+fn exchange_fetch_coverage_reads_headers_without_bodies_and_keeps_missing_records_due() {
+    use meguri_sync::cloud::{
+        runtime::{Incomplete, RuntimeError},
+        workflow::FetchPhase,
+    };
+
+    // Both Note and generic entity scans must cross the 250-key page boundary.
+    let (_root, mut service, files) = fixture(251);
+    let seen: BTreeSet<_> = core::row_payload::KINDS
+        .into_iter()
+        .flat_map(|kind| files.entity_names(kind))
+        .collect();
+    let last_note = files.notes().last().unwrap();
+    let missing_note = codec::entity_name(
+        &files.binding.facts.record_key.0,
+        codec::Kind::Note,
+        &codec::id_key(last_note.id),
+    )
+    .unwrap();
+    let missing_card = files.entity_names(codec::Kind::Card).into_iter().next().unwrap();
+    let h = host(&files);
+    let c = h.collection().unwrap();
+    let runtime = h.cloud_runtime().unwrap();
+    runtime.reconcile_binding(&c, &h.media().unwrap(), TIMEOUT).unwrap();
+    let instance = confirm_root(runtime, &mut service, &files);
+    for name in [&missing_note, &missing_card] {
+        let before = core::testing::entity_body_reads();
+        let entity = runtime.entity_facts(name).unwrap().unwrap();
+        assert!(entity.server_erev > 0 && seen.contains(name));
+        assert!(
+            core::testing::entity_body_reads() > before,
+            "full-image read must exercise the counter"
+        );
+    }
+    runtime.sync_now(&instance, &c).unwrap();
+    for phase in [FetchPhase::BeforeSend, FetchPhase::AfterSend] {
+        assert_eq!(runtime.exchange_fetch_due(), Some(phase));
+        let before = core::testing::entity_body_reads();
+        assert!(matches!(
+            runtime.exchange_fetch_completed("stale-instance", phase, &seen),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+        let wrong_phase = match phase {
+            FetchPhase::BeforeSend => FetchPhase::AfterSend,
+            FetchPhase::AfterSend => FetchPhase::BeforeSend,
+        };
+        assert!(matches!(
+            runtime.exchange_fetch_completed(&instance, wrong_phase, &seen),
+            Err(RuntimeError::Tracking(core::Error::InvalidData))
+        ));
+        for name in [&missing_note, &missing_card] {
+            let mut incomplete = seen.clone();
+            assert!(incomplete.remove(name));
+            assert!(matches!(
+                runtime.exchange_fetch_completed(&instance, phase, &incomplete),
+                Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation))
+            ));
+            assert_eq!(runtime.exchange_fetch_due(), Some(phase));
+            assert_eq!(core::testing::entity_body_reads(), before);
+        }
+        runtime.exchange_fetch_completed(&instance, phase, &seen).unwrap();
+        assert_eq!(runtime.exchange_fetch_due(), None);
+        assert_eq!(core::testing::entity_body_reads(), before);
+        if phase == FetchPhase::BeforeSend {
+            runtime.exchange_sends_finished(&instance).unwrap();
+        }
+    }
+    h.close().unwrap();
+}
+
+#[test]
 fn corehost_card_capture_uses_untracked_raw_history_and_preserves_negative_maximum() {
     for history in [vec![NOW + 123, NOW + 999], vec![i64::MIN, -1]] {
         let (_root, _service, files) = fixture(1);

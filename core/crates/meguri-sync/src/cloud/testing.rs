@@ -3,6 +3,11 @@ use super::Error;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, PoisonError};
 
+/// Cumulative workflow payload body materializations on the calling thread.
+pub fn entity_body_reads() -> usize {
+    super::workflow_store::body_reads()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IncomingStage {
     FetchBeforeInbox,

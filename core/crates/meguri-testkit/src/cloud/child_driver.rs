@@ -89,6 +89,13 @@ pub enum IncomingProgress {
     Completed(usize),
     Paused(IncomingStage),
 }
+/// First and highest readings at one fixed stage, each (cumulative peak, current bytes).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct PayloadMemoryStageSamples {
+    pub stage: IncomingStage,
+    pub first: (usize, usize),
+    pub high_water: (usize, usize),
+}
 #[derive(Debug)]
 struct WorkPaused;
 impl std::fmt::Display for WorkPaused {
@@ -211,6 +218,7 @@ pub(crate) enum Input {
     BodyReads,
     PayloadMemoryReset,
     PayloadMemoryPeak,
+    PayloadMemoryStages,
     PayloadRecordLimit(usize),
     EditGeneratedPayload(i64, usize, u64),
     PayloadProof(String),
@@ -1032,6 +1040,9 @@ impl ChildDriver {
     pub fn payload_memory_peak(&mut self) -> Result<(usize, usize)> {
         self.call(Input::PayloadMemoryPeak)
     }
+    pub fn payload_memory_stages(&mut self) -> Result<[Option<PayloadMemoryStageSamples>; 6]> {
+        self.call(Input::PayloadMemoryStages)
+    }
     pub fn payload_record_limit(&mut self, limit: usize) -> Result<()> {
         self.call(Input::PayloadRecordLimit(limit))
     }
@@ -1354,12 +1365,14 @@ impl Device {
                     return Err(failure());
                 }
                 PeakAlloc::reset_peak();
+                self.incoming_latches.reset_payload_memory();
                 value(PeakAlloc::current())
             }
             Input::PayloadMemoryPeak => value((
                 crate::bench::peak_alloc::PeakAlloc::peak(),
                 crate::bench::peak_alloc::PeakAlloc::current(),
             )),
+            Input::PayloadMemoryStages => value(self.incoming_latches.payload_memory_stages()),
             Input::PayloadRecordLimit(limit) => {
                 self.runtime()?.set_collection_record_limit_for_testing(limit)?;
                 value(())

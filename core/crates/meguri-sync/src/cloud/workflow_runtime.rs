@@ -1802,8 +1802,8 @@ impl Runtime {
         phase: FetchPhase,
         seen: &BTreeSet<String>,
     ) -> Result<(), RuntimeError> {
-        // Full baseline discovery stays off the writer. Copy one bounded body
-        // under the guards, then decode and compare after releasing both.
+        // Coverage needs only the validated tracking header's server revision
+        // and name; keep payload bodies out of this paged membership check.
         for kind in row_payload::KINDS {
             let mut after = None;
             loop {
@@ -1825,7 +1825,7 @@ impl Runtime {
                     break;
                 }
                 for key in page {
-                    let entity = {
+                    let header = {
                         let s = self.state();
                         Self::caller_locked(&s, instance)?;
                         if s.actions.exchange_phase != Some(phase) {
@@ -1836,11 +1836,11 @@ impl Runtime {
                             s.store
                                 .as_ref()
                                 .ok_or(Error::Database)?
-                                .entity_image(binding, kind, &key)
+                                .entity_key_header(binding, kind, &key)
                         })?
                         .ok_or(Error::InvalidData)?
                     };
-                    if entity.server_erev > 0 && !seen.contains(&entity.name) {
+                    if header.facts.server_erev > 0 && !seen.contains(&header.facts.name) {
                         return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
                     }
                     after = Some(key);
