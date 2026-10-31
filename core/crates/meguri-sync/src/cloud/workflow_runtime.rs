@@ -1534,6 +1534,39 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Shared durable ACK and opening-local upload bookkeeping. The caller
+    /// independently proves either an exact Saved result or a historical flight.
+    fn acknowledge_sent_locked(
+        s: &mut State,
+        collection: &Collection,
+        saved: &Saved,
+        received: codec::Received,
+        force: &mut BTreeSet<String>,
+    ) -> Result<(), RuntimeError> {
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let image_key = (
+            saved.name.clone(),
+            received.entity.fields.erev,
+            received.entity.payload_sha256,
+        );
+        let image = s.cloud.handed_images.get(&image_key).copied();
+        let store = s.store.as_mut().ok_or(Error::Database)?;
+        if store.acknowledge(b, saved, received)? {
+            force.insert(saved.name.clone());
+        }
+        if let Some(image) = image {
+            s.cloud
+                .acked_images
+                .entry(saved.name.clone())
+                .and_modify(|seq| *seq = (*seq).max(image))
+                .or_insert(image);
+        }
+        s.cloud
+            .handed_images
+            .retain(|(name, erev, _), _| name != &image_key.0 || *erev > image_key.1);
+        Self::settle_cloud_uploaded_locked(s, collection)?;
+        Ok(())
+    }
     pub fn sent_results(
         &self,
         instance: &str,
@@ -1543,10 +1576,28 @@ impl Runtime {
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
+        self.sent_results_with_conflicts(instance, collection, request_id, saved, &[], failed, batch_count)
+    }
+
+    /// One original SDK receipt, validated in full before any record can ACK.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sent_results_with_conflicts(
+        &self,
+        instance: &str,
+        collection: &Collection,
+        request_id: u64,
+        saved: &[Saved],
+        conflicts: &[Saved],
+        failed: &[(String, SendError)],
+        batch_count: usize,
+    ) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
+        if !conflicts.is_empty() {
+            Self::sdk_locked(&s, instance)?;
+        }
         // Receipt authority comes from the current caller, file, handler and
         // persisted flight below. A scan may block new sends after this save landed.
         if s.bound
@@ -1584,29 +1635,50 @@ impl Runtime {
                 }
                 Self::decode_saved_record_locked(&s, instance, request_id, record)?;
             }
+            for server in conflicts {
+                if !names.insert(&server.name) {
+                    return Err(Error::InvalidData.into());
+                }
+                Self::decode_save_conflict_locked(&s, instance, request_id, server)?;
+            }
+            for (name, _) in failed {
+                if !names.insert(name)
+                    || !s
+                        .actions
+                        .request_flights
+                        .get(&(instance.to_owned(), request_id))
+                        .is_some_and(|records| records.contains_key(name))
+                {
+                    return Err(Error::InvalidData.into());
+                }
+            }
             for saved in saved {
                 let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
-                let image_key = (
-                    saved.name.clone(),
-                    received.entity.fields.erev,
-                    received.entity.payload_sha256,
-                );
-                let image = s.cloud.handed_images.get(&image_key).copied();
-                let store = s.store.as_mut().ok_or(Error::Database)?;
-                if store.acknowledge(b, saved, received)? {
-                    force.insert(saved.name.clone());
+                Self::acknowledge_sent_locked(&mut s, collection, saved, received, &mut force)?;
+            }
+            for server in conflicts {
+                if let Some(received) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
+                    Self::acknowledge_sent_locked(&mut s, collection, server, received, &mut force)?;
+                } else {
+                    let key = s
+                        .bound
+                        .as_ref()
+                        .ok_or(RuntimeError::StaleIncarnation)?
+                        .binding
+                        .facts
+                        .record_key
+                        .0;
+                    let (mut entries, refused) =
+                        super::super::incoming::classify(&key, std::slice::from_ref(server), at_ms);
+                    for entry in &mut entries {
+                        entry.source = super::super::InboxSource::SaveConflict;
+                    }
+                    s.store
+                        .as_mut()
+                        .ok_or(Error::Database)?
+                        .receive_asset_save_conflict(b, &entries, &refused)?;
+                    force.insert(server.name.clone());
                 }
-                if let Some(image) = image {
-                    s.cloud
-                        .acked_images
-                        .entry(saved.name.clone())
-                        .and_modify(|seq| *seq = (*seq).max(image))
-                        .or_insert(image);
-                }
-                s.cloud
-                    .handed_images
-                    .retain(|(name, erev, _), _| name != &image_key.0 || *erev > image_key.1);
-                Self::settle_cloud_uploaded_locked(&mut s, collection)?;
             }
             Ok(())
         })?;
@@ -1645,12 +1717,22 @@ impl Runtime {
             s.actions.byte_limit = (s.actions.byte_limit / 2).max(1);
         }
         if let Some(names) = s.policy.flights.get_mut(&(instance.to_owned(), request_id)) {
-            for name in saved.iter().map(|v| &v.name).chain(failed.iter().map(|(n, _)| n)) {
+            for name in saved
+                .iter()
+                .chain(conflicts)
+                .map(|v| &v.name)
+                .chain(failed.iter().map(|(n, _)| n))
+            {
                 names.remove(name);
             }
         }
         if let Some(records) = s.actions.request_flights.get_mut(&(instance.to_owned(), request_id)) {
-            for name in saved.iter().map(|r| &r.name).chain(failed.iter().map(|(n, _)| n)) {
+            for name in saved
+                .iter()
+                .chain(conflicts)
+                .map(|r| &r.name)
+                .chain(failed.iter().map(|(n, _)| n))
+            {
                 records.remove(name);
             }
         }
@@ -1666,7 +1748,7 @@ impl Runtime {
         let acknowledged = with_tracking_access(|| -> Result<Vec<String>, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut done = Vec::new();
-            for saved in saved {
+            for saved in saved.iter().chain(conflicts) {
                 if let Some(selected) = s.actions.selected_revs.get(&saved.name) {
                     let e = store.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?.facts;
                     if e.acked_rev >= *selected {
@@ -1710,7 +1792,7 @@ impl Runtime {
             Self::invalidate_locked(&mut s);
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
-        if !saved.is_empty() || !failed.is_empty() {
+        if !saved.is_empty() || !conflicts.is_empty() || !failed.is_empty() {
             self.emit_pending_locked(&mut s, UpdateKind::Changes, force)?;
         }
         Ok(())

@@ -2340,9 +2340,6 @@ fn save_conflict_first_same_version_read_applies_and_pending_merge_is_sent_after
     pair.close();
 }
 
-// K12.3/K13.1/K13.2, policy P4/P12. Tests-only starting commit:
-// 2dd03a15cee4482625c71afef00c353fe6489a11. One source consistency pass;
-// root owns execution. Keep the ordinary SDK sent-event mapping under test.
 fn reopen_incoming_sdk(pair: &mut Pair) -> meguri_testkit::cloud::adapter::SDKRig {
     pair.receiver.close_clean().unwrap();
     let mut sdk = meguri_testkit::cloud::adapter::SDKRig::open_existing_collection(
@@ -2691,7 +2688,7 @@ fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_e
     assert_eq!(body(&returned), lost_row);
     let handed = sdk.entity_facts(&key).unwrap();
     assert!(handed.local_rev > historical_flight.local_rev);
-    assert!(handed.in_flight.iter().any(|flight| *flight == historical_flight));
+    assert!(handed.in_flight.contains(&historical_flight));
     assert!(
         handed
             .in_flight

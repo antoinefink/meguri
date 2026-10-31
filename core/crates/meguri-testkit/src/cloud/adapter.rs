@@ -824,6 +824,7 @@ impl SDKRig {
             .call::<()>(Input::EnterHandler(batch.instance.clone(), batch.backend_batch_id))?;
         self.handler = Some(response.request_id);
         let mut saved = Vec::new();
+        let mut conflicts = Vec::new();
         let mut failed = Vec::new();
         let error = |c: ErrorCode| match c {
             ErrorCode::LimitExceeded => SendError::LimitExceeded,
@@ -845,12 +846,29 @@ impl SDKRig {
                                 system_fields: record.system_fields.bytes().to_vec(),
                             });
                         }
+                        Err(e) if e.code == ErrorCode::ServerRecordChanged => {
+                            let record = e.server_record.as_deref().ok_or_else(failure)?;
+                            let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                                return Err(failure());
+                            };
+                            if record.name != item.name || record.record_type != "MGEntity" {
+                                return Err(failure());
+                            }
+                            conflicts.push(Saved {
+                                name: record.name.clone(),
+                                envelope: envelope.clone(),
+                                system_fields: record.system_fields.bytes().to_vec(),
+                            });
+                        }
                         Err(e) => failed.push((item.name.clone(), error(e.code))),
                         _ => {}
                     }
                 }
             }
             Err(e) => {
+                if e.code == ErrorCode::ServerRecordChanged {
+                    return Err(failure());
+                }
                 for m in &batch.mutations {
                     if let Mutation::Save { record, .. } = m {
                         failed.push((record.name.clone(), error(e.code)));
@@ -863,6 +881,7 @@ impl SDKRig {
             batch.instance.clone(),
             batch.backend_batch_id,
             saved,
+            conflicts,
             failed,
             batch.mutations.len(),
         ))?;
@@ -874,8 +893,14 @@ impl SDKRig {
             return Err(failure());
         }
         self.driver.call::<()>(Input::EnterHandler(self.instance.clone(), 0))?;
-        self.driver
-            .call::<()>(Input::Sent(self.instance.clone(), 0, Vec::new(), Vec::new(), 0))?;
+        self.driver.call::<()>(Input::Sent(
+            self.instance.clone(),
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        ))?;
         self.handler = Some(0);
         self.refresh()
     }

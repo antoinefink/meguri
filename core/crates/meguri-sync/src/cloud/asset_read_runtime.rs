@@ -5,7 +5,7 @@ use crate::cloud::{
     incoming::*,
     workflow::{FetchedRecord, Saved},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub(crate) struct PendingRead {
     request: AssetReadRequest,
@@ -563,10 +563,7 @@ impl Runtime {
         completion
     }
 
-    /// Narrow K12.3 result intake for ordinary pa conflicts. The caller forwards
-    /// the actual server record of a handed save, with no asset file in the SDK
-    /// error. Structural, inline and own-landed-save outcomes stay with their
-    /// respective result paths; this API never invents an ACK or a success.
+    /// Compatibility entry for callers delivering a single actual conflict.
     pub fn sent_asset_save_conflict(
         &self,
         sdk: &str,
@@ -574,69 +571,113 @@ impl Runtime {
         request_id: u64,
         server: &Saved,
     ) -> Result<(), RuntimeError> {
-        let at = self.adapter_now()?;
-        let evidence = collection.open_evidence()?;
-        let mut s = self.state();
-        Self::sdk_locked(&s, sdk)?;
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        if evidence.generation != b.evidence.generation
-            || evidence.native_file != b.file.pair()
-            || s.actions.handler != Some(request_id)
-            || !s
-                .actions
-                .request_flights
-                .get(&(sdk.to_owned(), request_id))
-                .is_some_and(|names| names.contains_key(&server.name))
-        {
-            return Err(Error::InvalidData.into());
-        }
-        let binding = b.binding.id;
-        let key = b.binding.facts.record_key.0;
-        let Ok(codec::DecodeOutcome::Supported(entity)) = codec::Entity::decode(&server.envelope) else {
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        };
-        if entity.payload.is_some() || entity.fields.tombstone || entity.fields.generation.is_some() {
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
+        self.sent_results_with_conflicts(sdk, collection, request_id, &[], std::slice::from_ref(server), &[], 1)
+    }
+
+    /// Check the original handler's current handed authority before using an older
+    /// matching retained flight. Requires tracking access.
+    pub(super) fn decode_save_conflict_locked(
+        s: &State,
+        sdk: &str,
+        request_id: u64,
+        server: &Saved,
+    ) -> Result<Option<codec::Received>, RuntimeError> {
+        let b = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
+        let store = s.store.as_ref().ok_or(Error::Database)?;
         let handed = s
             .actions
             .request_flights
             .get(&(sdk.to_owned(), request_id))
             .and_then(|names| names.get(&server.name))
-            .copied()
             .ok_or(Error::InvalidData)?;
-        with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_mut().ok_or(Error::Database)?;
-            let local = store
-                .entity_header(binding, &server.name)?
-                .ok_or(Error::InvalidData)?
-                .facts;
-            // Only a persisted flight of this original request authorizes a
-            // conflict. Own landed images must use the existing ACK path.
-            if !local.in_flight.iter().any(|f| {
-                f.local_rev == handed.local_rev && f.erev == handed.erev && f.payload_digest == handed.payload_digest
-            }) || (entity.fields.writer == binding.0
-                && local
-                    .in_flight
-                    .iter()
-                    .any(|f| f.payload_digest == entity.payload_sha256))
+        if server.system_fields.is_empty() {
+            return Err(Error::InvalidData.into());
+        }
+        let header = store.entity_header(b.id, &server.name)?.ok_or(Error::InvalidData)?;
+        let local = &header.facts;
+        if local.origin != handed.origin
+            || !local.in_flight.iter().any(|f| {
+                f.local_rev == handed.local_rev
+                    && f.erev == handed.erev
+                    && f.payload_digest == handed.payload_digest
+                    && f.tombstone == handed.tombstone
+                    && (!f.tombstone
+                        || local.kind == codec::Kind::MediaName
+                        || f.tombstone_envelope_digest == Some(handed.envelope_digest))
+            })
+        {
+            return Err(Error::InvalidData.into());
+        }
+        if let Ok(codec::DecodeOutcome::Supported(entity)) = codec::Entity::decode(&server.envelope) {
+            // Structural generations, media and rekey remain separate work.
+            // K20 refusals still reach ordinary classification below.
+            let (_, refused) = classify(&b.facts.record_key.0, std::slice::from_ref(server), 0);
+            if refused.is_empty()
+                && (entity.fields.generation.is_some()
+                    || matches!(entity.fields.kind, codec::Kind::Notetype | codec::Kind::MediaName)
+                    || (entity.fields.tombstone
+                        && !matches!(entity.fields.kind, codec::Kind::Note | codec::Kind::Card))
+                    || (entity.fields.origin != local.origin
+                        && local.server_erev == 0
+                        && (entity.fields.kind as u8) <= 6))
             {
-                return Err(Error::InvalidData.into());
+                return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
             }
-            let (mut entries, refused) = classify(&key, std::slice::from_ref(server), at);
-            for entry in &mut entries {
-                entry.source = InboxSource::SaveConflict;
+            if entity.fields.writer == b.id.0
+                && entity.fields.origin == local.origin
+                && entity.fields.kind == local.kind
+                && entity.fields.key == local.key
+                && entity.fields.generation.is_none()
+                && entity.fields.erev > local.server_erev
+            {
+                let flight = if entity.fields.tombstone {
+                    local.own_row_tombstone_flight(b.id.0, &entity, &server.envelope)
+                } else {
+                    local.in_flight.iter().find(|f| {
+                        !f.tombstone && f.erev == entity.fields.erev && f.payload_digest == entity.payload_sha256
+                    })
+                };
+                if let Some(flight) = flight {
+                    let index = local
+                        .in_flight
+                        .iter()
+                        .position(|f| std::ptr::eq(f, flight))
+                        .ok_or(Error::InvalidData)?;
+                    let bytes = if flight.tombstone {
+                        Vec::new()
+                    } else {
+                        header.flight_bytes(&store.connection, b.id, index)?
+                    };
+                    // The real persisted bytes must explain this exact envelope,
+                    // including inline/asset choice. Empty tombstones additionally
+                    // require the retained handed envelope hash above.
+                    let rebuilt = codec::Entity::build(entity.fields.clone(), &bytes)
+                        .and_then(|e| e.encode())
+                        .map_err(|_| Error::InvalidData)?;
+                    if rebuilt != server.envelope {
+                        return Err(Error::InvalidData.into());
+                    }
+                    let received = codec::receive(
+                        &b.facts.record_key.0,
+                        &server.name,
+                        &server.envelope,
+                        codec::AssetInput::Bytes(&bytes),
+                    )
+                    .map_err(|_| Error::InvalidData)?;
+                    if !flight.tombstone {
+                        let payload = received.payload.as_ref().ok_or(Error::InvalidData)?;
+                        if payload.kind() != local.kind
+                            || super::super::row_payload::payload_key(payload).map_err(|_| Error::InvalidData)?
+                                != local.key
+                            || payload.row_digest().map_err(|_| Error::InvalidData)? != flight.row_digest
+                        {
+                            return Err(Error::InvalidData.into());
+                        }
+                    }
+                    return Ok(Some(received));
+                }
             }
-            store.receive_asset_save_conflict(binding, &entries, &refused)?;
-            Ok(())
-        })?;
-        if let Some(names) = s.policy.flights.get_mut(&(sdk.to_owned(), request_id)) {
-            names.remove(&server.name);
         }
-        if let Some(names) = s.actions.request_flights.get_mut(&(sdk.to_owned(), request_id)) {
-            names.remove(&server.name);
-        }
-        self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
-        Ok(())
+        Ok(None)
     }
 }

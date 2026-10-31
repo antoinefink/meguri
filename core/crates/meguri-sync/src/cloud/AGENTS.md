@@ -7,6 +7,7 @@
 - `workflow*` is the stable-layout, prebound runtime. Notes stay authoritative in `cloud_runtime_notes`; generic access adapts them. The separate `reconcile_notes` API remains partial and cannot clear whole scan-required.
 - Whole completion needs all nine kind counts, raw notetype parts/deck parents, empty physical media plus complete J6 and a matching held-snapshot WAL receipt. Only lifecycle suspend writes durable drain.
 - Pending updates are whole ordered lists. SDKs apply them after handler return and report actual additions/removals; Saved must preserve a newer local revision. Unsupported incoming/structural/assets workflows stay blocked.
+- A conditional conflict can prove an older retained flight. Keep its validation separate from the exact current Saved result, preserve whole-receipt validation, and share ACK bookkeeping; never rewrite request flights to make an old record pass.
 - Probe the runtime v1 marker before opening the V2 source. Validate ordinary runtime payloads only within the store scope. Fixture acknowledgements require `test-hooks`.
 - Lock state before `with_tracking_access`. Store owners also gate opens, writes, checkpoints and drops. Call providers outside both guards. Scan reads/encoding run outside them; page merges recheck incarnation, account and full file identity. Retain the snapshot and matching WAL receipt until return.
 

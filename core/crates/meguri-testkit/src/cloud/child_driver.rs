@@ -317,7 +317,7 @@ pub(crate) enum Input {
     Build(String, BTreeSet<String>),
     EnterHandler(String, u64),
     ReturnHandler(String),
-    Sent(String, u64, Vec<Saved>, Vec<(String, SendError)>, usize),
+    Sent(String, u64, Vec<Saved>, Vec<Saved>, Vec<(String, SendError)>, usize),
     AppliedUpdate(String, u64, Vec<String>),
     SavedRemoved(String, u64, Vec<String>),
     Qualify(String),
@@ -2104,9 +2104,16 @@ impl Device {
                 value(())
             }
             Input::ReturnHandler(i) => value(self.runtime()?.return_sent_handler(&i)?),
-            Input::Sent(i, id, saved, failed, n) => {
-                self.runtime()?
-                    .sent_results(&i, &self.host.collection()?, id, &saved, &failed, n)?;
+            Input::Sent(i, id, saved, conflicts, failed, n) => {
+                self.runtime()?.sent_results_with_conflicts(
+                    &i,
+                    &self.host.collection()?,
+                    id,
+                    &saved,
+                    &conflicts,
+                    &failed,
+                    n,
+                )?;
                 value(())
             }
             Input::AppliedUpdate(i, id, names) => {

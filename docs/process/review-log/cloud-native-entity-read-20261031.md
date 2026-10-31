@@ -30,8 +30,8 @@ assertions remain.
   joins, original control operations and the asset-read bridge.
 - `private/20261031T223135Z-96778`: repaired native source and tests pass.
 - `similarity/20261031T223137Z-97026`: repaired native source and tests pass.
-- Final whole-slice similarity and privacy receipts are recorded with the
-  combined conflict checkpoint after its two comment-only privacy repairs.
+- `private/20261031T224137Z-7336`: final core and native transport source pass.
+- `similarity/20261031T224140Z-7823`: final core and native transport source pass.
 
 The retained per-SDK worker, post-event scheduling, native conflict metadata and
 FFI routing, signed cross-device checks and the batch gate remain pending.

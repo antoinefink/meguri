@@ -492,9 +492,34 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             .iter()
             .position(|f| f.payload_digest == digest && f.erev == received.entity.fields.erev)
             .ok_or(Error::InvalidData)?;
-        let pending = h.ack(index, saved)?;
+        let flight_rev = e.in_flight[index].local_rev;
+        h.ack(index, saved)?;
+        // Undo may have made the row clean against the previous ACK while an
+        // older save was still unconfirmed. The new ACK makes that local row
+        // pending again; it must remain sendable without another host edit.
+        let state = if h.facts.mark.is_none()
+            && (h.facts.tombstone_at.is_some() || h.images.local_row_digest != h.facts.acked_row_digest)
+        {
+            let mut state = self.runtime_binding(b)?;
+            if h.facts.local_rev <= flight_rev {
+                h.facts.local_rev = next(flight_rev)?;
+            }
+            state.change_counter = next(state.change_counter)?;
+            h.facts.mark = Some(runtime::DirtyMark {
+                source: DirtySource::Observer,
+                change_seq: state.change_counter,
+                payload_digest: h.local_digest(),
+            });
+            Some(state)
+        } else {
+            None
+        };
+        let pending = h.facts.mark.is_some();
         let tx = self.connection.transaction()?;
         super::tracking_payload::put_header(&tx, b, &h)?;
+        if let Some(state) = state {
+            put_binding(&tx, b, &state)?;
+        }
         super::adapter_store::mark_ack(&tx, b, &h.facts.name)?;
         super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
