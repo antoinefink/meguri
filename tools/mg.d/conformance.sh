@@ -135,7 +135,7 @@ mg_conf__native_ready() {
 # launching anything, then retain --no-fail-fast across the emitted binaries.
 # Match Cargo's package working directory for this package's test executables.
 mg_conf__testkit_native() {
-  local executable rc=0
+  local executable binary_rc rc=0 jobs="${MG_CONF_NATIVE_JOBS:-2}"
   mg_conf__native_owner || return 2
   if ! (cd "$MG_ROOT/core" && cargo test -q -p meguri-testkit --tests --no-run --message-format=json) \
       >"$MG_RUN_DIR/native-testkit-build.jsonl" \
@@ -149,7 +149,11 @@ mg_conf__testkit_native() {
   fi
   while IFS= read -r -d '' executable; do
     mg_conf__native_ready || return 2
-    (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable") || rc=1
+    echo "conformance: native binary start $executable test-threads=$jobs" >&2
+    binary_rc=0
+    (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "--test-threads=$jobs") || binary_rc=$?
+    echo "conformance: native binary exit $executable rc=$binary_rc" >&2
+    [ "$binary_rc" -eq 0 ] || rc=1
   done <"$MG_RUN_DIR/native-testkit-executables"
   return "$rc"
 }
@@ -184,8 +188,10 @@ mg_conf__cli_native() {
     return 2
   fi
   mg_conf__native_ready || return 2
+  echo "conformance: native binary start $executable" >&2
   (cd "$MG_ROOT/core" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "$@")
   rc=$?
+  echo "conformance: native binary exit $executable rc=$rc" >&2
   return "$rc"
 }
 
@@ -234,6 +240,10 @@ mg_conformance() {
   done
   case "$lane" in native | docker | all) ;; *) mg_conf__usage "tools/mg conformance --lane native|docker|all" "unknown lane '$lane'"; return 0 ;; esac
   case "$jobs" in '' | *[!0-9]* | 0) mg_conf__usage "tools/mg conformance --jobs N" "--jobs needs a positive number"; return 0 ;; esac
+  # Native harnesses (including datatest) need an explicit argument. Keep
+  # oracle worker scheduling independent and Docker's defaults unchanged.
+  local MG_CONF_NATIVE_JOBS=2
+  [ "$jobs" -ne 1 ] || MG_CONF_NATIVE_JOBS=1
   if [ "$live" = true ] && [ "$lane" = docker ]; then
     mg_conf__usage "tools/mg conformance --live [--lane native|all]" "--live drives the oracle from the host and needs the native lane"
     return 0
@@ -242,6 +252,10 @@ mg_conformance() {
     mg_conf__docker_ok || return 0
   fi
   mg_on_exit mg_conf__cleanup
+  if [ "$t0" = true ] && [ "$lane" != docker ]; then
+    mg_detail native_concurrency "$MG_CONF_NATIVE_JOBS"
+    echo "conformance: native concurrency=$MG_CONF_NATIVE_JOBS" >&2
+  fi
   MG_CONF_LANES=""
   local failed=false rc actors
 
@@ -271,7 +285,7 @@ mg_conformance() {
       [ "$rc" -eq 0 ] || failed=true
     fi
     mg_conf__cli_native conformance run --conformance "$MG_ROOT/conformance" --lane macos-native \
-      --report "$native" ${filters[0]+"${filters[@]}"}
+      --jobs "$MG_CONF_NATIVE_JOBS" --report "$native" ${filters[0]+"${filters[@]}"}
     rc=$?
     mg_conf__lane_report native "$native" "$rc" || failed=true
     [ "$rc" -eq 0 ] || failed=true
@@ -333,7 +347,8 @@ mg_conformance() {
 # oracle harness, the only writer of goldens (dsl.md D11).
 mg_conf__record_stale() {
   local plan="$MG_RUN_DIR/stale-before.json" ids id
-  mg_conf__cli_native conformance run --conformance "$MG_ROOT/conformance" --lane plan --report "$plan" "$@" >/dev/null 2>&1
+  mg_conf__cli_native conformance run --conformance "$MG_ROOT/conformance" --lane plan \
+    --jobs "${MG_CONF_NATIVE_JOBS:-2}" --report "$plan" "$@" >/dev/null
   if [ ! -s "$plan" ]; then
     mg_failure live/plan "could not list missing and stale goldens; see log.txt"
     return 1

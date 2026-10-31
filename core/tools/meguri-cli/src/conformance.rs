@@ -2,6 +2,7 @@
 //! (specs/conformance/dsl.md D8-D14). `tools/mg conformance`, `goldens-check`
 //! and `harvest-report` call it.
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use meguri_testkit::catalog::{self, Catalog, LiveReport};
@@ -38,7 +39,7 @@ common options:
   --oracle-cmd JSON   the worker argv JSON, {tz} for zone, {worker} for trusted identity
                       (default: $MEGURI_ORACLE_WORKER)
   --meguri-edge-cmd JSON  native T1 per-session edge helper, a JSON argv array
-  --jobs N            oracle workers at once (default 12)
+  --jobs N            T0 scenario workers (default host parallelism), or T1 oracle workers (default 12)
 
 exit status: 0 pass, 1 failures, 2 usage or setup errors";
 
@@ -53,7 +54,7 @@ struct Options {
     conformance: Option<PathBuf>,
     oracle_cmd: Option<String>,
     meguri_edge_cmd: Option<Vec<String>>,
-    jobs: usize,
+    jobs: Option<NonZeroUsize>,
     live: bool,
     lane: Option<String>,
     report: Option<PathBuf>,
@@ -73,7 +74,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         conformance: None,
         oracle_cmd: None,
         meguri_edge_cmd: None,
-        jobs: 12,
+        jobs: None,
         live: false,
         lane: None,
         report: None,
@@ -101,7 +102,13 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
                 }
                 o.meguri_edge_cmd = Some(command);
             }
-            "--jobs" => o.jobs = value(arg)?.parse().map_err(|_| "--jobs needs a number".to_owned())?,
+            "--jobs" => {
+                o.jobs = Some(
+                    value(arg)?
+                        .parse()
+                        .map_err(|_| "--jobs needs a positive number".to_owned())?,
+                );
+            }
             "--live" | "--oracle" => o.live = true,
             "--lane" => o.lane = Some(value(arg)?),
             "--report" => o.report = Some(value(arg)?.into()),
@@ -199,7 +206,7 @@ fn oracle(options: &Options) -> Result<OracleExecutor, String> {
     if command.is_empty() {
         return Err("the worker command is empty".to_owned());
     }
-    Ok(OracleExecutor::new(command, options.jobs))
+    Ok(OracleExecutor::new(command, options.jobs.map_or(12, NonZeroUsize::get)))
 }
 
 fn write_file(path: &Path, text: &str) -> Result<(), String> {
@@ -227,7 +234,11 @@ fn run(options: &Options) -> Result<i32, String> {
         let report = suite.run_live(&options.rest, &live, &lane);
         (report, oracle.hello())
     } else {
-        (suite.run(&options.rest, &meguri, &lane), None)
+        let report = match options.jobs {
+            Some(jobs) => suite.run_with_jobs(&options.rest, &meguri, &lane, jobs),
+            None => suite.run(&options.rest, &meguri, &lane),
+        };
+        (report, None)
     };
     eprint!("{}", report.render_text());
     if let Some(path) = &options.report {
@@ -533,6 +544,18 @@ fn to_json(options: &Options) -> Result<i32, String> {
 #[cfg(test)]
 mod edge_option_tests {
     use super::parse_options;
+
+    #[test]
+    fn jobs_are_an_explicit_positive_limit_with_no_standalone_override() {
+        assert!(parse_options(&[]).unwrap().jobs.is_none());
+        for jobs in [1, 2, 12] {
+            let options = parse_options(&["--jobs".into(), jobs.to_string()]).unwrap();
+            assert_eq!(options.jobs.unwrap().get(), jobs);
+        }
+        for value in ["0", "-1", "two"] {
+            assert!(parse_options(&["--jobs".into(), value.into()]).is_err());
+        }
+    }
 
     #[test]
     fn edge_command_is_a_literal_argv_capability() {

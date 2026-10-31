@@ -878,7 +878,33 @@ fn to_json_reads_quoted_keys_and_flow_mappings_as_the_same_members() {
 fn usage_errors_exit_2() {
     assert_eq!(cli(&["conformance", "frobnicate"]).status.code(), Some(2));
     assert_eq!(cli(&["conformance", "run", "--jobs"]).status.code(), Some(2));
+    assert_eq!(cli(&["conformance", "run", "--jobs", "0"]).status.code(), Some(2));
     assert_eq!(cli(&[]).status.code(), Some(2));
+}
+
+#[test]
+fn t0_accepts_explicit_jobs_and_preserves_the_selected_report() {
+    let dir = tree();
+    let report = dir.path().join("report.json");
+    for jobs in ["1", "2"] {
+        let out = cli(&[
+            "conformance",
+            "run",
+            "--conformance",
+            dir.path().to_str().unwrap(),
+            "--jobs",
+            jobs,
+            "--report",
+            report.to_str().unwrap(),
+            "smoke/timing-tz-utc",
+        ]);
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        let value: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert_eq!(value["tier"], "t0");
+        assert_eq!(value["scenarios"].as_array().unwrap().len(), 1);
+        assert_eq!(value["scenarios"][0]["scenario"], "smoke/timing-tz-utc");
+        assert_eq!(value["scenarios"][0]["status"], "pass");
+    }
 }
 
 const LOCK: &str = "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7";

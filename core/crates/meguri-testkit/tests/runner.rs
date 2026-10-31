@@ -3,6 +3,7 @@
 //! scenarios and oracle-recorded goldens in a temporary tree.
 
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use meguri_testkit::exec::{
@@ -707,6 +708,72 @@ impl Executor for PanicsOn {
     fn run(&self, scenario: &LoadedScenario) -> Result<Value, ExecError> {
         assert_ne!(scenario.scenario.id, self.0, "an adapter bug");
         Ok(json!({"steps": [{}]}))
+    }
+}
+
+#[test]
+fn explicit_t0_jobs_bound_actual_workers_and_keep_all_results_after_failure() {
+    use std::collections::HashSet;
+    use std::sync::{Condvar, Mutex};
+    use std::thread::{ThreadId, current};
+    use std::time::Duration;
+
+    struct Counted {
+        limit: usize,
+        workers: Mutex<HashSet<ThreadId>>,
+        ready: Condvar,
+    }
+    impl Executor for Counted {
+        fn name(&self) -> &str {
+            "counted"
+        }
+        fn missing(&self, _: &Needs) -> Needs {
+            Needs::default()
+        }
+        fn run(&self, scenario: &LoadedScenario) -> Result<Value, ExecError> {
+            let mut workers = self.workers.lock().unwrap();
+            workers.insert(current().id());
+            self.ready.notify_all();
+            // Hold the first scenario until the requested workers arrive.
+            // A broken scheduler fails after a bounded wait rather than hangs.
+            let (workers, _) = self
+                .ready
+                .wait_timeout_while(workers, Duration::from_secs(5), |w| w.len() < self.limit)
+                .unwrap();
+            assert_eq!(workers.len(), self.limit);
+            drop(workers);
+            PanicsOn("bulk/s3").run(scenario)
+        }
+    }
+
+    let dir = tree();
+    let root = dir.path();
+    for n in 0..8 {
+        write(
+            root,
+            &format!("scenarios/bulk/s{n}.yaml"),
+            &format!(
+                "id: bulk/s{n}\nclock: {{tz: Europe/Paris, start: '2030-01-15T10:00:00', mode: step}}\nsteps: [{{advance: 1d}}]\n"
+            ),
+        );
+        golden_for_bulk(root, n);
+    }
+    write(root, "scenarios/bulk/area.yaml", "area: bulk\nactive: ['*']\n");
+    let suite = Suite::open(root).unwrap();
+    for limit in [1, 2] {
+        let executor = Counted {
+            limit,
+            workers: Mutex::new(HashSet::new()),
+            ready: Condvar::new(),
+        };
+        let report = suite.run_with_jobs(&[], &executor, "bounded", NonZeroUsize::new(limit).unwrap());
+        assert_eq!(executor.workers.lock().unwrap().len(), limit);
+        let ids: Vec<_> = report.outcomes.iter().map(|o| o.scenario.clone()).collect();
+        assert_eq!(ids, (0..8).map(|n| format!("bulk/s{n}")).collect::<Vec<_>>());
+        assert_eq!(report.outcomes.iter().filter(|o| o.status == Status::Pass).count(), 7);
+        assert_eq!(report.failures().len(), 1);
+        assert_eq!(report.failures()[0].scenario, "bulk/s3");
+        assert_eq!(report.failures()[0].status, Status::Error);
     }
 }
 

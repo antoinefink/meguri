@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1034,12 +1035,21 @@ impl Suite {
     /// T0: every selected scenario with Meguri's executor, in parallel, in id
     /// order.
     pub fn run(&self, filters: &[String], meguri: &dyn Executor, lane: &str) -> Report {
-        self.run_each(filters, Tier::T0, meguri.name(), lane, |file| self.check(file, meguri))
+        self.run_each(filters, Tier::T0, meguri.name(), lane, None, |file| {
+            self.check(file, meguri)
+        })
+    }
+
+    /// T0 with at most `jobs` scenario workers; retains every selected result.
+    pub fn run_with_jobs(&self, filters: &[String], meguri: &dyn Executor, lane: &str, jobs: NonZeroUsize) -> Report {
+        self.run_each(filters, Tier::T0, meguri.name(), lane, Some(jobs), |file| {
+            self.check(file, meguri)
+        })
     }
 
     /// T1: every selected scenario on the oracle, and the live ones as chains.
     pub fn run_live(&self, filters: &[String], live: &LiveRun<'_>, lane: &str) -> Report {
-        self.run_each(filters, Tier::T1, live.oracle.name(), lane, |file| {
+        self.run_each(filters, Tier::T1, live.oracle.name(), lane, None, |file| {
             self.check_live(file, live)
         })
     }
@@ -1050,12 +1060,16 @@ impl Suite {
         tier: Tier,
         executor: &str,
         lane: &str,
+        jobs: Option<NonZeroUsize>,
         check: impl Fn(&ScenarioFile) -> Outcome + Sync,
     ) -> Report {
         let watch = Stopwatch::start();
         let files = self.discover(filters).unwrap_or_default();
-        let threads = std::thread::available_parallelism()
-            .map_or(4, usize::from)
+        let threads = jobs
+            .map_or_else(
+                || std::thread::available_parallelism().map_or(4, usize::from),
+                NonZeroUsize::get,
+            )
             .min(files.len().max(1));
         let next = AtomicUsize::new(0);
         let results: Vec<(usize, Outcome)> = std::thread::scope(|scope| {

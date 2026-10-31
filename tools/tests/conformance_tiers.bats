@@ -53,6 +53,10 @@ mg_conf__scratch() {
       ;;
     check) [ -d "$MG_RUN_DIR/native-scratch/mount/tmp" ] ;;
     cleanup)
+      # Cleanup must follow the stopped child, including cancellation.
+      if [ -s "$CALLS.ready" ]; then
+        ! kill -0 "$(cat "$CALLS.ready")" 2>/dev/null || return 1
+      fi
       [ -d "$MG_RUN_DIR/native-scratch" ] || return 0
       rmdir "$MG_RUN_DIR/native-scratch/mount/tmp" "$MG_RUN_DIR/native-scratch/mount" "$MG_RUN_DIR/native-scratch"
       ;;
@@ -108,6 +112,7 @@ mg() {
 
 native_scratch_stubs() {
   export STUB_CLI="$SB/core/stub-cli" STUB_TESTKIT="$SB/core/test binaries" CLI_EXIT=0 CLI_WAIT=no
+  export EXPECT_NATIVE_JOBS=2
   mkdir -p "$STUB_TESTKIT" "$SB/conformance/scenarios"
   printf '%s\n' 'package-relative scenarios resolved' >"$SB/conformance/scenarios/native-cwd-sentinel"
   cat >"$SB/stubs/cargo" <<'EOF'
@@ -158,7 +163,15 @@ name="${0##*/}"
 printf '%s\n' "$name" >>"$CALLS.tests"
 printf '%s\n' "$TMPDIR" >>"$CALLS.test-tmp"
 printf '%s\n' "$PWD" >>"$CALLS.test-cwd"
-printf '%s\n' "$#" >>"$CALLS.test-argc"
+printf '%s\n' "$*" >>"$CALLS.test-args"
+[ "$#" -eq 1 ] && [ "$1" = "--test-threads=$EXPECT_NATIVE_JOBS" ] || exit 91
+[ "$PWD" = "${STUB_CLI%/*}/crates/meguri-testkit" ] || exit 92
+case "$TMPDIR" in */native-scratch/mount/tmp) [ -d "$TMPDIR" ] || exit 93 ;; *) exit 93 ;; esac
+mkdir "$CALLS.active" || exit 94
+printf 'start %s\n' "$name" >>"$CALLS.test-order"
+trap 'printf "exit %s\n" "$name" >>"$CALLS.test-order"; rmdir "$CALLS.active"' EXIT
+# Give an incorrectly parallel launcher time to overlap.
+sleep 0.05
 if [ "$name" = conformance ]; then
   # The harness=false target discovers scenarios relative to the package root.
   sentinel="$(cat ../../../conformance/scenarios/native-cwd-sentinel)" || exit 1
@@ -177,12 +190,19 @@ EOF
 #!/bin/sh
 printf '%s\n' "$TMPDIR" >>"$CALLS.child-tmp"
 printf '%s\n' "$PWD" >>"$CALLS.child-cwd"
-prev= tier=t0 report=
+prev= tier=t0 report= jobs=
 for arg in "$@"; do
   [ "$arg" != --live ] || tier=t1
   [ "$prev" != --report ] || report="$arg"
+  [ "$prev" != --jobs ] || jobs="$arg"
   prev="$arg"
 done
+if [ "$tier" = t0 ]; then
+  [ "$jobs" = "$EXPECT_NATIVE_JOBS" ] || exit 95
+  [ ! -d "$CALLS.active" ] || exit 94
+fi
+[ "$PWD" = "${STUB_CLI%/*}" ] || exit 92
+case "$TMPDIR" in */native-scratch/mount/tmp) [ -d "$TMPDIR" ] || exit 93 ;; *) exit 93 ;; esac
 if [ "$CLI_WAIT" = yes ]; then
   echo "$$" >"$CALLS.ready"
   exec sleep 300
@@ -196,7 +216,7 @@ EOF
   cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
 eval "$(declare -f mg_fixture__real_native | sed '1s/mg_fixture__real_native/mg_conf__cli_native/')"
 mg_conf__record_stale() {
-  mg_conf__cli_native conformance run --lane plan --report "$MG_RUN_DIR/stale-before.json" "$@"
+  mg_conf__cli_native conformance run --lane plan --jobs "${MG_CONF_NATIVE_JOBS:-2}" --report "$MG_RUN_DIR/stale-before.json" "$@"
 }
 EOF
 }
@@ -213,19 +233,32 @@ EOF
   [ "$(grep -Fxc -- "$inherited" "$CALLS.build-tmp")" -eq 3 ]
   [ "$(grep -Fxc -- "$SB/core" "$CALLS.build-cwd")" -eq 3 ]
   [ "$(grep -Fxc -- "$SB/core" "$CALLS.child-cwd")" -eq 3 ]
+  [ "$(grep -Fxc -- "conformance: native binary start $STUB_CLI" "$run_dir/log.txt")" -eq 3 ]
+  [ "$(grep -Fxc -- "conformance: native binary exit $STUB_CLI rc=0" "$run_dir/log.txt")" -eq 3 ]
   ! grep -q TMPDIR "$CALLS.docker-args"
   grep -qx docker-t0 "$CALLS"
   [ ! -e "$run_dir/native-scratch" ]
 }
 
-@test "unfiltered native testkit builds outside scratch and runs every target with defaults on the shared owner" {
+@test "unfiltered native testkit explicitly bounds every harness and runs targets serially on the shared owner" {
   native_scratch_stubs
   local inherited="${TMPDIR-unset}"
   mg conformance --live --lane all
   [ "$status" -eq 0 ]
   local run_dir="$(dirname "$result")"
   [ "$(cat "$CALLS.tests")" = $'unit\nintegration\nconformance' ]
-  [ "$(grep -cx 0 "$CALLS.test-argc")" -eq 3 ]
+  [ "$(grep -cx -- '--test-threads=2' "$CALLS.test-args")" -eq 3 ]
+  [ "$(cat "$CALLS.test-order")" = $'start unit\nexit unit\nstart integration\nexit integration\nstart conformance\nexit conformance' ]
+  jq -e '.details.native_concurrency==2' "$result"
+  python3 - "$run_dir/log.txt" "$STUB_TESTKIT" <<'PY'
+import pathlib, sys
+log = pathlib.Path(sys.argv[1]).read_text()
+markers = [f'conformance: native binary {event} {sys.argv[2]}/{name}' +
+           (' rc=0' if event == 'exit' else ' test-threads=2')
+           for name in ('unit', 'integration', 'conformance') for event in ('start', 'exit')]
+positions = [log.index(marker) for marker in markers]
+assert positions == sorted(positions)
+PY
   [ "$(grep -Fxc -- "$run_dir/native-scratch/mount/tmp" "$CALLS.test-tmp")" -eq 3 ]
   [ "$(grep -Fxc -- "$SB/core/crates/meguri-testkit" "$CALLS.test-cwd")" -eq 3 ]
   [ "$(cat "$CALLS.scenarios-resolved")" = 'package-relative scenarios resolved' ]
@@ -256,10 +289,31 @@ PY
   [ "$status" -eq 1 ]
   jq -e '.status=="fail" and any(.failures[]; .id=="native/testkit" and .repro=="tools/mg conformance --lane native")' "$result"
   [ "$(cat "$CALLS.tests")" = $'unit\nintegration\nconformance' ]
+  [ "$(grep -cx -- '--test-threads=2' "$CALLS.test-args")" -eq 3 ]
+  [ "$(cat "$CALLS.test-order")" = $'start unit\nexit unit\nstart integration\nexit integration\nstart conformance\nexit conformance' ]
+  grep -Fq "conformance: native binary exit $STUB_TESTKIT/unit rc=1" "$(dirname "$result")/log.txt"
+  [ ! -d "$CALLS.active" ]
   [ "$(grep -cx prepare "$CALLS.scratch")" -eq 1 ]
   [ "$(grep -cx check "$CALLS.scratch")" -eq 4 ]
   [ "$(wc -l <"$CALLS.child-tmp")" -eq 1 ]
+  grep -Fxq -- "conformance: native binary exit $STUB_CLI rc=0" "$(dirname "$result")/log.txt"
   [ ! -e "$(dirname "$result")/native-scratch" ]
+}
+
+@test "native jobs one lowers both harness and actual T0 workers while larger jobs stay capped" {
+  native_scratch_stubs
+  local jobs expected
+  for jobs in 1 7; do
+    expected=2
+    [ "$jobs" != 1 ] || expected=1
+    export EXPECT_NATIVE_JOBS="$expected"
+    mg conformance --lane native --jobs "$jobs"
+    [ "$status" -eq 0 ]
+    jq -e --argjson n "$expected" '.details.native_concurrency==$n' "$result"
+    [ ! -e "$(dirname "$result")/native-scratch" ]
+  done
+  [ "$(grep -cx -- '--test-threads=1' "$CALLS.test-args")" -eq 3 ]
+  [ "$(grep -cx -- '--test-threads=2' "$CALLS.test-args")" -eq 3 ]
 }
 
 @test "native testkit refuses zero malformed incomplete or invalid artifacts before any binary executes" {
@@ -389,6 +443,7 @@ PY
   jq -e '.status=="error" and any(.failures[]; .id=="cancelled")' "$result"
   ! kill -0 "$ready" 2>/dev/null
   [ "$(cat "$CALLS.tests")" = unit ]
+  grep -Fq -- "conformance: native binary start $STUB_TESTKIT/unit test-threads=2" "$(dirname "$result")/log.txt"
   [ ! -e "$CALLS.child-tmp" ]
   [ ! -e "$(dirname "$result")/native-scratch" ]
   grep -qx cleanup "$CALLS.scratch"
@@ -464,7 +519,7 @@ native = [json.loads(line) for line in pathlib.Path(calls + '.args').read_text()
 assert len(native) == 2
 assert native[0] == [
     'conformance', 'run', '--conformance', root + '/conformance',
-    '--lane', 'macos-native', '--report', run_dir + '/t0-native.json',
+    '--lane', 'macos-native', '--jobs', '2', '--report', run_dir + '/t0-native.json',
 ]
 docker = [json.loads(line) for line in pathlib.Path(calls + '.docker-args').read_text().splitlines()]
 assert len(docker) == 1 and len(docker[0]) == 2 and docker[0][0] == '--'
