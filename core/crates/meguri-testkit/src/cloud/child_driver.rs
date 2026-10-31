@@ -234,6 +234,26 @@ pub(crate) struct FetchedCallback {
     pub serialization: Vec<u8>,
     pub exchange: Option<u64>,
 }
+/// One-shot damage to the original driver's next nonempty fetched envelope spool.
+#[derive(Clone, Copy)]
+pub enum FetchedEnvelopeFault {
+    Missing,
+    Short,
+}
+/// Observations of the original command's disposable sources, without exposing paths.
+#[derive(Clone)]
+pub struct FetchedEnvelopeFaultObservation {
+    pub exchange: Option<u64>,
+    pub exchange_active_before_fault: bool,
+    pub staged_sources: usize,
+    pub sources_after_fault: usize,
+    paths: Vec<std::path::PathBuf>,
+}
+impl FetchedEnvelopeFaultObservation {
+    pub fn existing_sources(&self) -> usize {
+        self.paths.iter().filter(|path| path.exists()).count()
+    }
+}
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Input {
     Boot(Boot),
@@ -338,6 +358,7 @@ pub(crate) enum Input {
     FinishCall(String, u64),
     Calls,
     Exchange(u64),
+    FetchedExchange(u64),
     Begin(i64),
     Start(u64),
     Show(u64, i64),
@@ -405,6 +426,7 @@ enum ChildFailure {
     SDKQualify(Box<ChildFailure>),
     FetchRootAccept(Box<ChildFailure>),
     FetchCompleted(Box<ChildFailure>),
+    FetchEnvelopeHydration(Box<ChildFailure>),
     FetchCursorProjection(Box<ChildFailure>),
     FetchNativeIntake(Box<ChildFailure>),
     FetchStateUpdate(Box<ChildFailure>),
@@ -579,9 +601,27 @@ pub struct ChildDriver {
     completed_work: Vec<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
     paused_work: Option<IncomingStage>,
     fetched_sources: BTreeMap<Vec<u8>, Vec<tempfile::NamedTempFile>>,
+    fetched_envelope_fault: Option<FetchedEnvelopeFault>,
+    fetched_envelope_fault_observation: Option<FetchedEnvelopeFaultObservation>,
     asset_commands: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 impl ChildDriver {
+    pub fn fault_next_fetched_envelope_for_testing(&mut self, fault: FetchedEnvelopeFault) {
+        self.fetched_envelope_fault = Some(fault);
+        self.fetched_envelope_fault_observation = None;
+    }
+    pub fn fetched_envelope_fault_observation_for_testing(&self) -> Option<FetchedEnvelopeFaultObservation> {
+        self.fetched_envelope_fault_observation.clone()
+    }
+    pub fn fetched_source_count_for_testing(&self) -> usize {
+        self.fetched_sources.values().map(Vec::len).sum()
+    }
+    pub fn fetched_exchange_for_testing(
+        &mut self,
+        id: u64,
+    ) -> Result<(bool, Option<core::adapter::CompletedExchange>)> {
+        self.call(Input::FetchedExchange(id))
+    }
     pub(crate) fn stage_fetched(
         &mut self,
         instance: String,
@@ -660,7 +700,32 @@ impl ChildDriver {
             exchange,
         };
         let key = serde_json::to_vec(&Input::Fetched(callback.clone()))?;
-        self.fetched_sources.insert(key, files);
+        self.fetched_sources.insert(key.clone(), files);
+        if callback.envelopes.is_some()
+            && let Some(fault) = self.fetched_envelope_fault.take()
+        {
+            let exchange_active_before_fault = match callback.exchange {
+                Some(id) => self.fetched_exchange_for_testing(id)?.0,
+                None => false,
+            };
+            // The last owned file is this callback's envelope spool. Damage it
+            // only after staging, leaving the command and every asset untouched.
+            let files = self.fetched_sources.get(&key).ok_or_else(failure)?;
+            let spool = files.last().ok_or_else(failure)?;
+            match fault {
+                FetchedEnvelopeFault::Missing => std::fs::remove_file(spool.path()),
+                FetchedEnvelopeFault::Short => spool.as_file().set_len(offset.checked_sub(1).ok_or_else(failure)?),
+            }
+            .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: envelope fault"))?;
+            let paths: Vec<_> = files.iter().map(|file| file.path().to_path_buf()).collect();
+            self.fetched_envelope_fault_observation = Some(FetchedEnvelopeFaultObservation {
+                exchange: callback.exchange,
+                exchange_active_before_fault,
+                staged_sources: paths.len(),
+                sources_after_fault: paths.iter().filter(|path| path.exists()).count(),
+                paths,
+            });
+        }
         Ok(callback)
     }
     pub fn apply_intents(&mut self, binding: core::BindingId) -> Result<Vec<ApplyIntent>> {
@@ -1108,6 +1173,8 @@ impl ChildDriver {
             completed_work: Vec::new(),
             paused_work: None,
             fetched_sources: BTreeMap::new(),
+            fetched_envelope_fault: None,
+            fetched_envelope_fault_observation: None,
             asset_commands: BTreeMap::new(),
         };
         driver.call::<()>(Input::Boot(boot))?;
@@ -2231,6 +2298,10 @@ impl Device {
             }
             Input::Calls => value(self.runtime()?.send_calls()),
             Input::Exchange(id) => value(self.runtime()?.exchange_result(id).ok_or_else(failure)?),
+            Input::FetchedExchange(id) => value((
+                self.runtime()?.adapter_exchange_active(),
+                self.runtime()?.adapter_exchange_result(id),
+            )),
             Input::Begin(note) => {
                 let c = self.host.collection()?;
                 let (id, deck) = {

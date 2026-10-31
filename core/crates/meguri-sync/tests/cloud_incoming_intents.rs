@@ -52,7 +52,7 @@ use meguri_sync::cloud::{
 };
 use meguri_testkit::cloud::{
     Field, MutationSuccess, Record, Reply,
-    child_driver::{ApplyInterruption, ApplyKeyRole, IncomingProgress, TrackingFault},
+    child_driver::{ApplyInterruption, ApplyKeyRole, FetchedEnvelopeFault, IncomingProgress, TrackingFault},
     coordinator::{Point, PublicationRig},
     devices::IdentityReads,
 };
@@ -194,6 +194,81 @@ fn hold_receive(pair: &mut Pair, point: Point) {
 fn settled(pair: &mut Pair, b: BindingId) {
     assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
     assert!(pair.receiver.driver().inbox_entries(b).unwrap().is_empty());
+}
+
+#[test]
+fn fetched_envelope_spool_failure_ends_original_exchange_without_intake_or_writer_changes() {
+    use meguri_sync::cloud::adapter::CollectionOutcome;
+
+    for fault in [FetchedEnvelopeFault::Missing, FetchedEnvelopeFault::Short] {
+        let (mut pair, _, _, _, _) = changed_asset_note();
+        let b = binding(&pair);
+        let initial = pair.receiver.driver().incoming_observation(b).unwrap();
+        let rows = pair.receiver.driver().collection_rows().unwrap();
+        let entities = pair.receiver.facts().unwrap().entities;
+        let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
+        let intents = pair.receiver.driver().apply_intents(b).unwrap();
+        assert_eq!(pair.receiver.driver().fetched_source_count_for_testing(), 0);
+        pair.receiver.driver().fault_next_fetched_envelope_for_testing(fault);
+
+        // Real SDKRig stages the actual Service page with the active CoreHost
+        // exchange. Only its owned envelope spool is damaged before dispatch.
+        let error = pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap_err();
+        let sources = pair
+            .receiver
+            .driver()
+            .fetched_envelope_fault_observation_for_testing()
+            .unwrap();
+        let exchange = sources.exchange.expect("original SDK callback exchange");
+        assert!(
+            sources.exchange_active_before_fault,
+            "the staged callback owns a real active exchange"
+        );
+        let (active, completed) = pair.receiver.driver().fetched_exchange_for_testing(exchange).unwrap();
+        assert!(!active, "the actual core exchange must terminate on hydration failure");
+        let completed = completed.expect("actual completed original exchange");
+        assert_eq!(completed.id, exchange);
+        assert_eq!(completed.collection, CollectionOutcome::Failed);
+        assert!(completed.result.selected_names.is_empty());
+        assert!(completed.result.acked_names.is_empty());
+        assert!(completed.result.outstanding_names.is_empty());
+        assert_eq!(
+            error.to_string(),
+            "cloud device operation failed: FetchEnvelopeHydration(Unknown)"
+        );
+        assert_eq!(sources.staged_sources, 2, "one actual pa source and its envelope spool");
+        assert_eq!(
+            sources.sources_after_fault,
+            match fault {
+                FetchedEnvelopeFault::Missing => 1,
+                FetchedEnvelopeFault::Short => 2,
+            }
+        );
+        assert_eq!(
+            sources.existing_sources(),
+            0,
+            "original terminal reply releases every source"
+        );
+        assert_eq!(pair.receiver.driver().fetched_source_count_for_testing(), 0);
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+        assert!(pair.receiver.facts().unwrap().entities == entities);
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), inbox);
+        assert_eq!(pair.receiver.driver().apply_intents(b).unwrap(), intents);
+        let failed = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert_eq!(failed.engine_instance, initial.engine_instance);
+        assert_eq!(failed.engine_state, initial.engine_state);
+        assert_eq!(failed.last_fetch_engine_state, initial.last_fetch_engine_state);
+        assert_eq!(failed.seq, initial.seq);
+        assert_eq!(failed.native_file, initial.native_file);
+        assert_eq!(failed.generation, initial.generation);
+        assert_eq!(failed.col_mod, initial.col_mod);
+        assert_eq!(failed.undo_depth, initial.undo_depth);
+        assert_eq!(failed.change_events, initial.change_events);
+        assert_eq!(failed.runs, initial.runs);
+        assert_eq!(failed.wal_receipts, initial.wal_receipts);
+        assert_eq!(failed.rollovers, initial.rollovers);
+        pair.close();
+    }
 }
 
 #[test]

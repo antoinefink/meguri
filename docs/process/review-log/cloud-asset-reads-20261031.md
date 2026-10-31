@@ -59,6 +59,22 @@ Review found one P2 error path: a source read failure must complete the original
 exchange as failed. That repair and its focused test remain required.
 The earlier failed checks stay in the evidence.
 
+The failure repair starts at `590ab2b9`. Tests and fault probes were applied
+before the handler change. `core-test/20261031T213301Z-68542` fails because
+the original runtime exchange stays active after its source is damaged.
+After hydration moves inside the callback failure boundary:
+
+- `core-test/20261031T213503Z-69497`: all 48 incoming cases pass.
+- `core-test/20261031T213649Z-70069`: source lifetime, ranges, header coverage
+  and the unchanged large-payload heap case all pass.
+- `core-lint/20261031T213824Z-70842`: pass.
+- `private/20261031T213653Z-70346`: pass.
+- `similarity/20261031T213831Z-71122`: pass.
+
+Independent round-two review has no required findings. Missing and truncated
+sources fail the actual exchange without cursor, ACK or writer changes.
+This closes the scoped transport findings, not U113/U114 or their batch gate.
+
 Native execution, complete media and device proof, structural generations and
 the required integration gate remain outstanding. This is WIP; U113 and U114
 remain unaccepted, without Unit trailers.

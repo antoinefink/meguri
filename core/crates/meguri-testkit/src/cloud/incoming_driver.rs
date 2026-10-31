@@ -287,9 +287,10 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                     serialization,
                     exchange,
                 }) => {
-                    let inputs = hydrate_fetched_records(records, envelopes)?;
-                    let mut failure_stage: fn(Box<ChildFailure>) -> ChildFailure = ChildFailure::FetchCursorProjection;
-                    let mut callback = || -> Result<()> {
+                    let mut failure_stage: fn(Box<ChildFailure>) -> ChildFailure = ChildFailure::FetchEnvelopeHydration;
+                    let callback = || -> Result<()> {
+                        let inputs = hydrate_fetched_records(records, envelopes)?;
+                        failure_stage = ChildFailure::FetchCursorProjection;
                         if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
                             let projection = super::super::adapter::collection_cursor_projection(&serialization)?;
                             *last_fetch.lock().unwrap_or_else(PoisonError::into_inner) = projection;
