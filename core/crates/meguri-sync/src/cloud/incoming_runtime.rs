@@ -836,8 +836,9 @@ impl Runtime {
             for key in &i.keys {
                 if let Some(rev) = key.own_flight {
                     let flights = store
-                        .entity_facts(i.binding, &key.name)?
+                        .entity_header(i.binding, &key.name)?
                         .ok_or(Error::InvalidData)?
+                        .facts
                         .in_flight;
                     own.insert(key.name.clone(), (rev, flights));
                 }
@@ -860,7 +861,10 @@ impl Runtime {
                 }
                 s.cloud.acked_images.remove(&key.name);
                 if let Some((rev, flights)) = own.get(&key.name) {
-                    let e = store.entity_facts(i.binding, &key.name)?.ok_or(Error::InvalidData)?;
+                    let e = store
+                        .entity_header(i.binding, &key.name)?
+                        .ok_or(Error::InvalidData)?
+                        .facts;
                     if let Some(image) = flights
                         .iter()
                         .filter(|f| f.local_rev == *rev && f.payload_digest == e.acked_payload_digest)

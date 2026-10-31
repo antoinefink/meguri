@@ -102,6 +102,11 @@ fn four_40_mib_ordinary_payloads_build_persist_and_ack_with_bounded_child_heap()
 
 #[test]
 fn eight_lost_40_mib_revisions_of_one_note_edit_reopen_and_recover_exact_own_save() {
+    fn sample(sdk: &mut SDKRig, phase: &str) {
+        let (peak, live) = sdk.driver().payload_memory_peak().unwrap();
+        eprintln!("device/core Rust heap phase={phase} cumulative_peak={peak} live={live}");
+    }
+
     let run = tempfile::tempdir().unwrap();
     let directory = run.path().join("device");
     let recipe = Recipe::parse("recipe: retained-pa-memory\ndescription: Generated public Note\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic\n    notetype: basic\n    new: 1\n    fields: [\"front\", \"back\"]\n").unwrap();
@@ -166,22 +171,28 @@ fn eight_lost_40_mib_revisions_of_one_note_edit_reopen_and_recover_exact_own_sav
         assert_eq!(after.acked_payload_digest, proof.acked_payload_digest);
         assert!(after.dirty);
         assert!(sdk.send_changes_calls().last().unwrap().returned);
+        sample(&mut sdk, "after generated edit and lost reply");
     }
     let (saved, system_fields, envelope) = landed.unwrap();
     let newer = sdk.driver().edit_generated_payload(note, BYTES, SEED + 8).unwrap();
     assert_eq!(newer.flights, 8);
     assert!(newer.local_rev > saved.local_rev);
+    sample(&mut sdk, "after newer edit");
     sdk.reopen_after_lost_replies().unwrap();
     let reopened = sdk.driver().payload_proof(&newer.name).unwrap();
     assert_eq!(reopened.flights, 8);
     assert_eq!(reopened.payload_digest, newer.payload_digest);
     assert_eq!(reopened.acked_rev, newer.acked_rev);
+    sample(&mut sdk, "after reopen");
     sdk.reconcile_register_and_confirm_root(&mut service, 10_000).unwrap();
+    sample(&mut sdk, "after reconcile register and root");
     sdk.fetch_recovery_exchange(&mut service, 10_000).unwrap();
+    sample(&mut sdk, "after fetch");
     assert!(matches!(
         sdk.driver().drain_incoming(10_000).unwrap(),
         meguri_testkit::cloud::child_driver::IncomingProgress::Completed(_)
     ));
+    sample(&mut sdk, "after final drain");
     let recovered = sdk.driver().payload_proof(&newer.name).unwrap();
     assert_eq!(recovered.acked_rev, saved.local_rev);
     assert_eq!(recovered.server_erev, saved.server_erev + 1);
@@ -194,10 +205,7 @@ fn eight_lost_40_mib_revisions_of_one_note_edit_reopen_and_recover_exact_own_sav
     assert_eq!(recovered.flights, 0);
     let (peak, live) = sdk.driver().payload_memory_peak().unwrap();
     eprintln!(
-        "retained own Note: digests={} flights_before=8 flights_after={} ACK={:?}; device/core Rust heap baseline={baseline} peak={peak} live={live}; RSS/native R1852 unmeasured",
-        digests.len(),
-        recovered.flights,
-        recovered.acked_payload_digest
+        "device/core Rust heap: baseline={baseline} peak={peak} live={live}; parent Service excluded; RSS/native R1852 unmeasured"
     );
     assert!(
         peak < RUST_HEAP_LIMIT,
