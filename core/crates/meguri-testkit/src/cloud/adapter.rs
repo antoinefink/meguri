@@ -88,6 +88,26 @@ pub struct SDKRig {
     building: Option<BTreeSet<String>>,
 }
 impl SDKRig {
+    /// Reopen actual adopted files without supplying a binding or baseline.
+    /// Call reconcile_register_and_confirm_root before using the SDK transport.
+    pub fn open_existing_collection(
+        directory: &std::path::Path,
+        scope: &Scope,
+        now: i64,
+        seed: u64,
+        keys: std::sync::Arc<dyn meguri_sync::cloud::runtime::KeyByteSource>,
+    ) -> Result<Self> {
+        let driver = ChildDriver::spawn_unbound(
+            directory,
+            scope,
+            IdentityReads::Available(scope.account.clone()),
+            true,
+            now,
+            seed,
+            keys,
+        )?;
+        Ok(Self::from_driver(driver, scope.clone(), String::new(), String::new()))
+    }
     pub fn open(files: &PreboundDevice, automatic: bool, now: i64, seed: u64) -> Result<Self> {
         Self::open_with_identity(
             files,
@@ -609,6 +629,28 @@ impl SDKRig {
         self.return_sent_handler()?;
         self.updates()?;
         Ok(attempt)
+    }
+    /// Send the SDK's next real batch without fetching or delivering its reply.
+    /// A paused build resumes its original command on the next call.
+    pub fn request_collection_batch_response(&mut self, service: &mut Service<SeededRandom>) -> Result<ResponseBatch> {
+        if self.handler.is_some() || self.waiting.is_some() {
+            return Err(failure());
+        }
+        let (built, mutations) = self.build()?;
+        if mutations.is_empty() {
+            return Err(failure());
+        }
+        let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
+        let call = call.ok_or_else(failure)?;
+        let batch = self.send(service, &built, mutations)?;
+        self.driver.call::<()>(Input::RecordCall(
+            self.instance.clone(),
+            call.id,
+            batch.backend_batch_id,
+        ))?;
+        self.calls.insert(batch.response.request_id, call.id);
+        self.refresh()?;
+        Ok(batch)
     }
     /// Real handed request whose SDK reply is lost. End the physical send,
     /// without a fabricated result callback or ACK; durable flights survive.

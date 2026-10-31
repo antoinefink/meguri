@@ -118,6 +118,7 @@ pub struct IncomingInboxEntry {
     /// Zero only for a deletion or an envelope with no readable revision.
     pub erev: u64,
     pub reason: core::InboxReason,
+    pub source: core::InboxSource,
     pub retry_count: u32,
 }
 fn inbox_value_sha256(value: &core::InboxValue) -> Result<[u8; 32]> {
@@ -999,13 +1000,13 @@ impl ChildDriver {
     pub fn arm_tracking_fault(&mut self, name: &str, fault: TrackingFault) -> Result<()> {
         self.call(Input::TrackingFault(name.into(), fault))
     }
-    pub(crate) fn is_incoming_stage_held(&self, stage: IncomingStage) -> bool {
+    pub fn is_incoming_stage_held(&self, stage: IncomingStage) -> bool {
         self.paused_work == Some(stage) || self.suspended_work.iter().any(|(_, paused)| *paused == Some(stage))
     }
-    pub(crate) fn hold_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
+    pub fn hold_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
         self.call(Input::LatchHold(stage))
     }
-    pub(crate) fn release_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
+    pub fn release_incoming_stage(&mut self, stage: IncomingStage) -> Result<()> {
         self.call::<()>(Input::LatchRelease(stage))?;
         if self.paused_work == Some(stage) {
             self.paused_work = None;
@@ -2243,6 +2244,7 @@ impl Device {
                                 core::InboxValue::Deletion => 0,
                             },
                             reason: stored.entry.reason,
+                            source: stored.entry.source,
                             retry_count: stored.entry.retry_count,
                         })
                     })

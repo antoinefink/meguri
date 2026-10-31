@@ -2340,6 +2340,420 @@ fn save_conflict_first_same_version_read_applies_and_pending_merge_is_sent_after
     pair.close();
 }
 
+// K12.3/K13.1/K13.2, policy P4/P12. Tests-only starting commit:
+// 2dd03a15cee4482625c71afef00c353fe6489a11. One source consistency pass;
+// root owns execution. Keep the ordinary SDK sent-event mapping under test.
+fn reopen_incoming_sdk(pair: &mut Pair) -> meguri_testkit::cloud::adapter::SDKRig {
+    pair.receiver.close_clean().unwrap();
+    let mut sdk = meguri_testkit::cloud::adapter::SDKRig::open_existing_collection(
+        &pair.receiver_dir,
+        &scope(),
+        NOW,
+        809,
+        Arc::new(NoReopenKeys),
+    )
+    .unwrap();
+    sdk.reconcile_register_and_confirm_root(&mut pair.service, STEPS)
+        .unwrap();
+    sdk
+}
+
+fn sdk_note(sdk: &mut meguri_testkit::cloud::adapter::SDKRig, id: i64) -> Payload {
+    sdk.driver()
+        .collection_rows()
+        .unwrap()
+        .into_iter()
+        .find(|row| matches!(row, Payload::Note(n) if n.id == id))
+        .unwrap()
+}
+
+fn conditional_server_record(response: &meguri_testkit::cloud::Response, key: &str) -> Record {
+    let Ok(Reply::Modified(items)) = &response.result else {
+        panic!("actual conditional Service response")
+    };
+    let Err(error) = &items.iter().find(|item| item.name == key).unwrap().result else {
+        panic!("the real conditional save must conflict")
+    };
+    assert_eq!(error.code, meguri_testkit::cloud::ErrorCode::ServerRecordChanged);
+    error
+        .server_record
+        .as_deref()
+        .expect("actual Service server record")
+        .clone()
+}
+
+fn assert_same_sdk_ack(
+    actual: &meguri_sync::cloud::workflow::EntityFacts,
+    before: &meguri_sync::cloud::workflow::EntityFacts,
+) {
+    assert_eq!(actual.server_erev, before.server_erev);
+    assert_eq!(actual.acked_rev, before.acked_rev);
+    assert_eq!(actual.acked_system_fields, before.acked_system_fields);
+    assert_eq!(actual.acked_row_digest, before.acked_row_digest);
+    assert_eq!(actual.acked_payload_digest, before.acked_payload_digest);
+    assert_eq!(actual.acked_payload, before.acked_payload);
+    assert_eq!(actual.acked_envelope, before.acked_envelope);
+    assert_eq!(actual.base_payload, before.base_payload);
+}
+
+#[test]
+fn sdk_inline_save_conflict_keeps_ack_until_wal_then_resends_disjoint_field_merge() {
+    use meguri_sync::cloud::{InboxSource, testing::IncomingStage};
+    use meguri_testkit::cloud::Mutation;
+
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let base = notes(&mut pair.receiver)[0].clone();
+    let id = base.id;
+    let key = name(&pair, codec::Kind::Note, id);
+    let base_fields: Vec<_> = base.flds.split(|byte| *byte == 0x1f).collect();
+    let mut sdk = reopen_incoming_sdk(&mut pair);
+    sdk.advance_clock_ms(20_000).unwrap();
+    sdk.driver()
+        .edit_note_fields(id, &[std::str::from_utf8(base_fields[0]).unwrap(), "inline local A"])
+        .unwrap();
+    let local = sdk_note(&mut sdk, id);
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::BeforeCollectionSave)
+        .unwrap();
+    // The builder persists the original flight before this real child latch.
+    // No transport has run, and resuming uses that same retained build command.
+    assert!(sdk.request_collection_batch_response(&mut pair.service).is_err());
+    assert!(sdk.driver().is_incoming_stage_held(IncomingStage::BeforeCollectionSave));
+    let handed = sdk.entity_facts(&key).unwrap();
+    assert!(handed.in_flight.iter().any(|flight| flight.payload == local));
+
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &["inline remote Q", std::str::from_utf8(base_fields[1]).unwrap()])
+        .unwrap();
+    let remote = note(&mut pair.sender, id);
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let server = saved(&pair, &key);
+    assert!(envelope(&server).payload.is_some());
+    assert!(!server.fields.contains_key("pa"));
+    assert_eq!(body(&server), remote);
+    assert_ne!(envelope(&server).fields.writer, b.0);
+    assert_eq!(envelope(&server).fields.origin, handed.origin);
+
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::BeforeCollectionSave)
+        .unwrap();
+    let batch = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    let Mutation::Save { if_unchanged, .. } = batch
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation, Mutation::Save { record, .. } if record.name == key))
+        .unwrap()
+    else {
+        panic!("original SDK save")
+    };
+    assert_eq!(if_unchanged.as_ref().unwrap().bytes(), handed.acked_system_fields);
+    assert_ne!(if_unchanged.as_ref().unwrap(), &server.system_fields);
+    assert_eq!(conditional_server_record(&batch.response, &key), server);
+    sdk.deliver_sent_event(&batch.response).unwrap();
+    // Baseline red: deliver_sent_event drops this server record as Other.
+    let inbox = sdk.driver().inbox_entries(b).unwrap();
+    assert_eq!(inbox.len(), 1, "normal SDK conflict must enter the durable inbox");
+    assert_eq!(inbox[0].record_name, key);
+    assert_eq!(inbox[0].source, InboxSource::SaveConflict);
+    assert_eq!(inbox[0].reason, InboxReason::Ready);
+    assert_eq!(inbox[0].erev, envelope(&server).fields.erev);
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+    assert_eq!(sdk_note(&mut sdk, id), local);
+    sdk.return_sent_handler().unwrap();
+
+    sdk.driver().pause_automatic_wal_flush_for_testing(true).unwrap();
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::ApplyAfterIntent)
+        .unwrap();
+    assert!(matches!(
+        sdk.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Paused(IncomingStage::ApplyAfterIntent)
+    ));
+    let intent = sdk.driver().apply_intents(b).unwrap().remove(0);
+    assert_eq!(intent.inbox_ids, vec![inbox[0].id]);
+    assert_eq!(intent.keys.len(), 1);
+    assert_eq!(intent.keys[0].name, key);
+    assert_eq!(intent.keys[0].role, ApplyKeyRole::Entry);
+    assert_eq!(intent.keys[0].before_digest, Some(local.row_digest().unwrap()));
+    assert!(intent.keys[0].own_flight.is_none());
+    assert!(intent.result_seq.is_none());
+    assert_eq!(sdk_note(&mut sdk, id), local);
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::ApplyAfterCommit)
+        .unwrap();
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::ApplyAfterIntent)
+        .unwrap();
+    assert!(matches!(
+        sdk.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Paused(IncomingStage::ApplyAfterCommit)
+    ));
+    let merged = sdk_note(&mut sdk, id);
+    let Payload::Note(merged_note) = &merged else {
+        panic!("merged Note row")
+    };
+    assert_eq!(merged_note.flds, b"inline remote Q\x1finline local A");
+    assert_ne!(merged, local);
+    assert_ne!(merged, remote);
+    assert_eq!(intent.keys[0].after_digest, Some(merged.row_digest().unwrap()));
+    let committed = sdk.driver().incoming_observation(b).unwrap();
+    let run = committed.runs.iter().find(|run| run.intent_id == intent.id).unwrap();
+    assert_eq!(run.entry_ids, intent.inbox_ids);
+    assert_eq!(run.changed_keys, BTreeSet::from([key.clone()]));
+    assert_eq!(sdk.driver().apply_intents(b).unwrap()[0].result_seq, Some(run.seq));
+    assert!(!committed.wal_receipts.iter().any(|receipt| {
+        receipt.native_file == run.native_file && receipt.generation == run.generation && receipt.through >= run.seq
+    }));
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+    assert_eq!(sdk.driver().inbox_entries(b).unwrap(), inbox);
+
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::ApplyAfterFlush)
+        .unwrap();
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::ApplyAfterCommit)
+        .unwrap();
+    assert!(matches!(
+        sdk.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Paused(IncomingStage::ApplyAfterFlush)
+    ));
+    let flushed = sdk.driver().incoming_observation(b).unwrap();
+    assert!(flushed.wal_receipts.iter().any(|receipt| {
+        receipt.native_file == run.native_file && receipt.generation == run.generation && receipt.through >= run.seq
+    }));
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::ApplyAfterFlush)
+        .unwrap();
+    sdk.driver().drain_incoming(STEPS).unwrap();
+    sdk.driver().pause_automatic_wal_flush_for_testing(false).unwrap();
+    assert!(sdk.driver().inbox_entries(b).unwrap().is_empty());
+    assert!(sdk.driver().apply_intents(b).unwrap().is_empty());
+    let pending = sdk.entity_facts(&key).unwrap();
+    assert_eq!(pending.acked_system_fields, server.system_fields.bytes());
+    assert_eq!(pending.server_erev, envelope(&server).fields.erev);
+    assert_eq!(pending.acked_payload_digest, remote.payload_digest().unwrap());
+    assert_eq!(pending.acked_payload.as_ref(), Some(&remote));
+    assert_eq!(pending.base_payload.as_ref(), Some(&remote));
+    assert!(pending.mark.is_some());
+    assert_eq!(sdk_note(&mut sdk, id), merged);
+
+    // No fetch may repair the conflict before the pending merged resend.
+    let resend = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    let sent = saved(&pair, &key);
+    assert_eq!(body(&sent), merged);
+    assert_eq!(envelope(&sent).fields.writer, b.0);
+    sdk.deliver_sent_event(&resend.response).unwrap();
+    sdk.return_sent_handler().unwrap();
+    assert!(sdk.entity_facts(&key).unwrap().mark.is_none());
+    sdk.close_clean().unwrap();
+    pair.sender.close_clean().unwrap();
+}
+
+#[test]
+fn sdk_inline_same_content_from_another_writer_is_save_conflict_not_own_ack() {
+    use meguri_sync::cloud::{InboxSource, testing::IncomingStage};
+
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let id = notes(&mut pair.receiver)[0].id;
+    let key = name(&pair, codec::Kind::Note, id);
+    let mut sdk = reopen_incoming_sdk(&mut pair);
+    // Both actual writers use the same legal modified stamp and field values.
+    sdk.advance_clock_ms(7_000).unwrap();
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    sdk.driver()
+        .edit_note_fields(id, &["equal inline Q", "equal inline A"])
+        .unwrap();
+    let local = sdk_note(&mut sdk, id);
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::BeforeCollectionSave)
+        .unwrap();
+    assert!(sdk.request_collection_batch_response(&mut pair.service).is_err());
+    assert!(sdk.driver().is_incoming_stage_held(IncomingStage::BeforeCollectionSave));
+    let handed = sdk.entity_facts(&key).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &["equal inline Q", "equal inline A"])
+        .unwrap();
+    assert_eq!(
+        note(&mut pair.sender, id),
+        local,
+        "independently edited real rows must match"
+    );
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::BeforeCollectionSave)
+        .unwrap();
+    let batch = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    let server = conditional_server_record(&batch.response, &key);
+    let remote = envelope(&server);
+    assert!(remote.payload.is_some());
+    assert_eq!(body(&server), local);
+    assert_eq!(remote.fields.origin, handed.origin);
+    assert_ne!(remote.fields.writer, b.0);
+    assert!(
+        handed
+            .in_flight
+            .iter()
+            .any(|flight| flight.payload_digest == remote.payload_sha256)
+    );
+
+    sdk.deliver_sent_event(&batch.response).unwrap();
+    let inbox = sdk.driver().inbox_entries(b).unwrap();
+    assert_eq!(
+        inbox.len(),
+        1,
+        "equal content from another binding still needs normal inbox apply"
+    );
+    assert_eq!(inbox[0].source, InboxSource::SaveConflict);
+    assert_eq!(inbox[0].reason, InboxReason::Ready);
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+    sdk.return_sent_handler().unwrap();
+    sdk.driver()
+        .hold_incoming_stage(IncomingStage::ApplyAfterIntent)
+        .unwrap();
+    assert!(matches!(
+        sdk.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Paused(IncomingStage::ApplyAfterIntent)
+    ));
+    let intent = sdk.driver().apply_intents(b).unwrap().remove(0);
+    assert_eq!(intent.inbox_ids, vec![inbox[0].id]);
+    assert_eq!(intent.keys.len(), 1);
+    assert_eq!(intent.keys[0].name, key);
+    assert!(
+        intent.keys[0].own_flight.is_none(),
+        "writer identity is required for own ACK"
+    );
+    assert_same_sdk_ack(&sdk.entity_facts(&key).unwrap(), &handed);
+    sdk.driver()
+        .release_incoming_stage(IncomingStage::ApplyAfterIntent)
+        .unwrap();
+    sdk.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(sdk_note(&mut sdk, id), local);
+    let ack = sdk.entity_facts(&key).unwrap();
+    assert_eq!(ack.acked_system_fields, server.system_fields.bytes());
+    assert!(ack.mark.is_none());
+    sdk.close_clean().unwrap();
+    pair.sender.close_clean().unwrap();
+}
+
+#[test]
+fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_edit() {
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let id = notes(&mut pair.receiver)[0].id;
+    let key = name(&pair, codec::Kind::Note, id);
+    let mut sdk = reopen_incoming_sdk(&mut pair);
+    sdk.advance_clock_ms(7_000).unwrap();
+    sdk.driver().edit_note_fields(id, &["lost inline Q", "back"]).unwrap();
+    let lost_row = sdk_note(&mut sdk, id);
+    let old_ack = sdk.entity_facts(&key).unwrap();
+    let lost = sdk.lose_collection_batch_reply(&mut pair.service).unwrap();
+    let Ok(Reply::Modified(items)) = &lost.response.result else {
+        panic!("actual lost save result")
+    };
+    let Ok(MutationSuccess::Saved(landed)) = &items.iter().find(|item| item.name == key).unwrap().result else {
+        panic!("original save really landed")
+    };
+    let historical = envelope(landed);
+    assert!(historical.payload.is_some());
+    assert_eq!(historical.fields.writer, b.0);
+    assert_eq!(historical.fields.origin, old_ack.origin);
+    assert_eq!(body(landed), lost_row);
+    let outstanding = sdk.entity_facts(&key).unwrap();
+    assert_same_sdk_ack(&outstanding, &old_ack);
+    let historical_flight = outstanding
+        .in_flight
+        .iter()
+        .find(|flight| flight.payload_digest == historical.payload_sha256)
+        .unwrap()
+        .clone();
+    assert_eq!(historical_flight.erev, historical.fields.erev);
+    assert!(historical_flight.payload == lost_row);
+    assert!(sdk.send_changes_calls().last().unwrap().returned);
+
+    // A legal host edit after the lost result, with a separate undo run.
+    sdk.advance_clock_ms(61_001).unwrap();
+    sdk.driver()
+        .edit_note_fields(id, &["newer inline Q", "newer inline A"])
+        .unwrap();
+    let current = sdk_note(&mut sdk, id);
+    assert_ne!(current, lost_row);
+    let retry = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    let returned = conditional_server_record(&retry.response, &key);
+    assert_eq!(&returned, landed);
+    assert_eq!(body(&returned), lost_row);
+    let handed = sdk.entity_facts(&key).unwrap();
+    assert!(handed.local_rev > historical_flight.local_rev);
+    assert!(handed.in_flight.iter().any(|flight| *flight == historical_flight));
+    assert!(
+        handed
+            .in_flight
+            .iter()
+            .any(|flight| { flight.local_rev > historical_flight.local_rev && flight.payload == current })
+    );
+    assert_same_sdk_ack(&handed, &old_ack);
+    let rows = sdk.driver().collection_rows().unwrap();
+    let before = sdk.driver().incoming_observation(b).unwrap();
+
+    sdk.deliver_sent_event(&retry.response).unwrap();
+    // Baseline red: the ordinary SDK path currently drops the historical ACK.
+    let ack = sdk.entity_facts(&key).unwrap();
+    assert_eq!(
+        ack.acked_system_fields,
+        landed.system_fields.bytes(),
+        "ACK the actual older landed flight"
+    );
+    assert_eq!(ack.server_erev, historical.fields.erev);
+    assert_eq!(ack.acked_payload_digest, historical.payload_sha256);
+    assert_eq!(ack.acked_row_digest, lost_row.row_digest().unwrap());
+    assert_eq!(ack.acked_payload.as_ref(), Some(&lost_row));
+    assert_eq!(ack.base_payload.as_ref(), Some(&lost_row));
+    assert_eq!(ack.local_rev, handed.local_rev);
+    assert!(ack.acked_rev < ack.local_rev);
+    assert!(ack.mark.is_some());
+    let newer_flights: Vec<_> = handed
+        .in_flight
+        .iter()
+        .filter(|flight| flight.local_rev > historical_flight.local_rev)
+        .cloned()
+        .collect();
+    assert!(ack.in_flight == newer_flights);
+    sdk.return_sent_handler().unwrap();
+    sdk.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(sdk.driver().collection_rows().unwrap(), rows);
+    assert_eq!(sdk_note(&mut sdk, id), current);
+    assert!(sdk.driver().inbox_entries(b).unwrap().is_empty());
+    assert!(sdk.driver().apply_intents(b).unwrap().is_empty());
+    let after = sdk.driver().incoming_observation(b).unwrap();
+    assert_eq!(
+        after.seq, before.seq,
+        "historical conditional ACK submits no collection write"
+    );
+    assert_eq!(after.native_file, before.native_file);
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(after.col_mod, before.col_mod);
+    assert_eq!(after.undo_depth, before.undo_depth);
+    assert_eq!(after.change_events, before.change_events);
+    assert_eq!(after.runs, before.runs);
+    assert!(sdk.core_tracking_sendables().unwrap().contains_key(&key));
+
+    let resend = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    let saved_current = saved(&pair, &key);
+    assert_eq!(body(&saved_current), current);
+    sdk.deliver_sent_event(&resend.response).unwrap();
+    sdk.return_sent_handler().unwrap();
+    assert!(sdk.entity_facts(&key).unwrap().mark.is_none());
+    sdk.close_clean().unwrap();
+    pair.sender.close_clean().unwrap();
+}
+
 #[test]
 fn asset_intake_preserves_pending_version_when_revision_or_origin_is_invalid() {
     use meguri_testkit::cloud::{Mutation, Operation, RecordInput};
