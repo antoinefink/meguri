@@ -370,7 +370,9 @@ extension WebKitSuites {
             _ = try pair.present(fresh)
             try await page.waitForShown(fresh)
             try await CardBehaviorFixture.until("current runtime still confirms paint") { page.acceptsVisibleConfirmation() }
-            #expect(pair.current === page && page.update == fresh && pair.diagnostics.entries == diagnostics)
+            #expect(pair.current === page)
+            #expect(page.update == fresh)
+            #expect(pair.diagnostics.entries == diagnostics)
         }
 
         @Test func lifecycleResumeDoesNotRestartHTMLPlaybackHeldInBackground() async throws {

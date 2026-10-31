@@ -662,7 +662,7 @@ STUB
 import sys, yaml
 s = yaml.safe_load(open(sys.argv[1]))["services"]["private"]
 assert s["network_mode"] == "none", s
-assert s["volumes"] == ["..:/work", "cargo-target:/cargo-target:ro"], s["volumes"]
+assert s["volumes"] == ["..:/work", "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target:ro"], s["volumes"]
 assert any(t.split(":")[0] == "/work/local-data" for t in s["tmpfs"]), s["tmpfs"]
 assert "ports" not in s and "networks" not in s, s
 EOF

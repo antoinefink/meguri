@@ -21,12 +21,12 @@ import Testing
             let fields = searchFields(in: host)
             try #require(fields.count == 1)
             let field = try #require(fields.first)
-            #expect((field as any NSAccessibilityProtocol).accessibilityIdentifier == "settings.root.search")
+            #expect((field as any NSAccessibilityProtocol).accessibilityIdentifier() == "settings.root.search")
             let search = try #require((field as any NSAccessibilityProtocol).accessibilitySearchButton() as? any NSAccessibilityProtocol)
-            #expect(search.accessibilityIdentifier == "settings.root.searchButton")
+            #expect(search.accessibilityIdentifier() == "settings.root.searchButton")
             var visited: Set<ObjectIdentifier> = []
             let buttons = accessibilityButtons(in: field, visited: &visited)
-            let identified = buttons.filter { $0.accessibilityIdentifier == "settings.root.searchButton" }
+            let identified = buttons.filter { $0.accessibilityIdentifier() == "settings.root.searchButton" }
             try #require(identified.count == 1)
             #expect(identified[0] as AnyObject === search as AnyObject)
             #expect(field.stringValue == "iCloud")

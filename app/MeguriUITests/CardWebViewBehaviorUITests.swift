@@ -149,6 +149,12 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         }
         capture("main")
         let list = try openActions(in: app)
+        func recordGeometry(_ phase: String, viewport: Int) {
+            let bounds = visibleListBounds(list, in: app)
+            let signature = actionPositions(in: list, bounds: bounds)
+            let refreshFrame = list.buttons["card.behavior.refresh"].frame
+            print("card-behavior audit geometry variant=\(variant) viewport=\(viewport) phase=\(phase) actionPositions=\(signature) visibleListBounds=\(bounds) card.behavior.refresh.frame=\(refreshFrame)")
+        }
         let close = app.buttons["card.behavior.actions.close"]
         defer {
             if close.exists { close.tap() }
@@ -170,7 +176,11 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             }
             let closeVisible = fullyVisible(close, in: app.windows.firstMatch.frame)
             capture("sheet viewport \(position + 1)")
-            findings += try AccessibilityAudit.run(app, variant: label, suppressions: suppressions)
+            do {
+                defer { recordGeometry("after", viewport: position + 1) }
+                recordGeometry("before", viewport: position + 1)
+                findings += try AccessibilityAudit.run(app, variant: label, suppressions: suppressions)
+            }
             targets += try TouchTargets.violations(in: app).map {
                 TouchTargetViolation(identifier: "\(label): \($0.identifier)", label: $0.label,
                                      size: $0.size, minimum: $0.minimum)

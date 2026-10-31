@@ -284,7 +284,16 @@ extension ReviewCollectionStartupTests {
             entry.chooseFile(); entry.inspect(source); entry.reinspect(); entry.confirm()
             await entry.waitForCompletion()
             await entry.continueAfterActivation() // Host setup alone cannot verify this outcome.
-            let deck = try #require(owner.decks.first)
+            // Observe the committed collection without refreshing the fenced owner's decks.
+            let committedTree = try await CoreDeckService().treeWithCounts()
+            try #require(committedTree.generation == actual.generation)
+            func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] {
+                nodes.flatMap { [$0] + flatten($0.children) }
+            }
+            let importedDecks = flatten(committedTree.nodes).filter { !$0.filtered }
+            let deck = try #require(importedDecks.first(where: {
+                $0.counts.new > 0 || $0.counts.learning > 0 || $0.counts.review > 0
+            }) ?? importedDecks.first)
             await owner.startStudy(deckID: deck.id)
             #expect(owner.review == nil && !owner.canStudy && !owner.entryAllowed)
             #expect(owner.entry === entry && entry.failure == failure && entry.preview == nil)

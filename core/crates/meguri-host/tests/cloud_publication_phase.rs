@@ -260,9 +260,10 @@ fn initial_rows_are_unacknowledged_until_actual_sdk_saves_and_own_switch_is_last
                         system_fields: record.system_fields.bytes().to_vec(),
                     });
                 }
-                runtime.enter_sent_handler(&instance, response.request_id).unwrap();
+                assert_ne!(batch.id, response.request_id, "Service and runtime use independent IDs");
+                runtime.enter_sent_handler(&instance, batch.id).unwrap();
                 runtime
-                    .sent_results(&instance, &collection, response.request_id, &saved, &[], saved.len())
+                    .sent_results(&instance, &collection, batch.id, &saved, &[], saved.len())
                     .unwrap();
                 runtime.return_sent_handler(&instance).unwrap();
             }
@@ -702,12 +703,12 @@ fn send_actual_batch(
             _ => panic!("entity save expected"),
         }
     }
-    runtime.enter_sent_handler(&instance, response.request_id).unwrap();
+    runtime.enter_sent_handler(&instance, batch.id).unwrap();
     runtime
         .sent_results(
             &instance,
             &host.collection().unwrap(),
-            response.request_id,
+            batch.id,
             &saved,
             &failed,
             batch.saves.len(),

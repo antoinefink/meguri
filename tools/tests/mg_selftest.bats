@@ -1525,8 +1525,9 @@ STUB
 # --- lint-ui first (AE90) ----------------------------------------------------
 
 # lint_first_sandbox: a card face that applies glass, with SwiftLint, the core
-# build and the project check stubbed. Every stubbed call is logged to
-# $STUB_LOG. SwiftLint prints the report $STUB_SWIFTLINT_REPORT names; with
+# build, initial-adoption fixture and project check stubbed. Every stubbed
+# call is logged to $STUB_LOG. SwiftLint prints the report
+# $STUB_SWIFTLINT_REPORT names; with
 # STUB_DOCKER=0 the daemon is down. The core build and the project check fail
 # at once, so a run that gets past lint stops there.
 lint_first_sandbox() {
@@ -1578,6 +1579,12 @@ printf '%s\n' "${s##*/} \$*" >>"\$STUB_LOG"
 exit 1
 EOF
   done
+  cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+mg__swift_initial_adoption_fixture() {
+  printf '%s\n' initial-adoption-fixture >>"$STUB_LOG"
+  return 0
+}
+EOF
   export PATH="$STUBS:$PATH"
 }
 
@@ -1600,7 +1607,7 @@ stub_calls() {
     [ "$(failure_ids)" = "lint-ui
 lint/glass-outside-chrome" ]
     [ "$(field '.failures[] | select(.id == "lint/glass-outside-chrome") | .repro')" = "tools/mg lint-ui" ]
-    # Lint ran, and nothing after it: no core build, no swift, no xcodebuild.
+    # Lint ran, and nothing after it: no fixture, core build, swift or xcodebuild.
     [ "$(stub_calls)" = "docker-info swiftlint " ] || { echo "$job: $(stub_calls)"; return 1; }
     lint="$(field '.artifacts[] | select(.kind == "lint-ui") | .path')"
     [ "$(jq -r '.job + " " + .status' "$lint")" = "lint-ui fail" ]
@@ -1611,13 +1618,17 @@ lint/glass-outside-chrome" ]
 @test "with lint-ui clean, swift-test and xcode-check go on to build after it" {
   lint_first_sandbox
   export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
-  local job
+  local job expected
   for job in "swift-test --package MeguriKit" "xcode-check --no-ui"; do
     : >"$STUB_LOG"
     # shellcheck disable=SC2086
     mg $job
     [ "$(failure_ids)" = xcframework ] || { echo "$job: $(failure_ids); stderr: $stderr"; return 1; }
-    [ "$(stub_calls)" = "docker-info swiftlint build-core-xcframework.sh " ] || { echo "$job: $(stub_calls)"; return 1; }
+    case "$job" in
+      swift-test*) expected="docker-info swiftlint initial-adoption-fixture build-core-xcframework.sh " ;;
+      xcode-check*) expected="docker-info swiftlint build-core-xcframework.sh " ;;
+    esac
+    [ "$(stub_calls)" = "$expected" ] || { echo "$job: $(stub_calls)"; return 1; }
     [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
   done
 }
@@ -2109,7 +2120,14 @@ case "$1" in
   image) echo sha256:new; exit 0 ;;
   inspect) echo "true healthy"; exit 0 ;;
   exec) printf '%s\n' "$STUB_HEALTH"; exit 0 ;;
-  compose) ;;
+  compose)
+    if [ "$#" -eq 10 ] && [ "$2" = -p ] && [ -n "$3" ] &&
+      [ "$4" = -f ] && [ -n "$5" ] && [ "$6" = --profile ] &&
+      [ "$7" = oracle-sync ] && [ "$8" = ps ] && [ "$9" = -q ] &&
+      [ "${10}" = sync-faults ]; then
+      exit 0
+    fi
+    ;;
   *) exit 97 ;;
 esac
 case " $* " in
