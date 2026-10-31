@@ -59,7 +59,9 @@ public actor CoreCloudConnectionService {
     }
     public func adoptionResult(_ handle: CloudAdoptionWork, result: CloudAdoptionResult) async throws {
         let raw = self.raw
-        try await MaintenanceLane.shared.call(.cloudConnectionAdoptionResult) { [raw] in try raw.adoptionResult(handle: handle.raw, result: result.raw) }
+        try await result.withRaw { value in
+            try await MaintenanceLane.shared.call(.cloudConnectionAdoptionResult) { [raw] in try raw.adoptionResult(handle: handle.raw, result: value) }
+        }
     }
     public func performAdoptionLocal(_ handle: CloudAdoptionWork) async throws {
         let raw = self.raw

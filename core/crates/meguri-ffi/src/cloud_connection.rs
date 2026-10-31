@@ -431,6 +431,7 @@ pub struct CloudStagingRecord {
     pub name: String,
     pub record_type: String,
     pub record: CloudControlRecord,
+    pub payload_file: Option<String>,
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionResult {
@@ -738,6 +739,7 @@ impl CloudConnection {
                         name: v.name,
                         record_type: v.record_type,
                         record: v.record.into(),
+                        payload_file: v.payload_file.map(std::path::PathBuf::from),
                     })
                     .collect(),
                 deleted,

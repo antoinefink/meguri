@@ -93,6 +93,33 @@ enum NativeCloudOwnRecords {
     }
 }
 
+/// Adoption's MGEntity projection owns downloaded pa bytes. Control operations
+/// keep using the asset-free projection above; Swift never parses the payload.
+enum NativeCloudStagingRecords {
+    // A page owns every pa until the original operation replies. Size the SDK
+    // request for the worst case: one maximum-size asset per changed record.
+    static let pageLimit = Int(CloudMediaStaging.stagedLimit / CloudMediaStaging.assetLimit)
+
+    static func project(_ record: CKRecord, target: CloudControlTarget, staging: CloudMediaStaging,
+                        cancelled: @Sendable () -> Bool) throws -> CloudStagingRecord {
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
+        guard record.recordID == NativeCloudOwnRecords.id(target), record.recordType == target.recordType else { throw NativeCloudKitFailure.unsupportedRecord }
+        if record.recordType == "MGEpoch", target.name == "epoch", target.zone.hasPrefix("c-") {
+            return .init(name: target.name, recordType: target.recordType, record: try NativeCloudOwnRecords.control(record, target: target))
+        }
+        guard record.recordType == "MGEntity", target.zone.hasPrefix("c-") else { throw NativeCloudKitFailure.unsupportedRecord }
+        let metadata = try NativeCloudRecordConversion.decode(record)
+        var lease: CloudMediaStagedAsset?
+        if let asset = record["pa"] as? CKAsset {
+            guard let source = asset.fileURL, source.isFileURL else { throw CloudMediaSourceFailure.invalidShape }
+            lease = try staging.copyPayload(source, cancelled: cancelled, retainedAssetLimit: Int.max)
+        }
+        return .init(name: target.name, recordType: target.recordType,
+                     record: .init(encrypted: metadata.envelope, systemFields: try NativeCloudKitSystemFields.encode(record)),
+                     payloadLease: lease)
+    }
+}
+
 protocol NativeCloudDatabaseQueue: Sendable { func add(_ operation: CKDatabaseOperation) -> Bool }
 private struct PrivateCloudDatabaseQueue: NativeCloudDatabaseQueue {
     let database: CKDatabase
@@ -112,6 +139,7 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
         self.operation = operation; self.queue = queue
         (stream, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
+    var cancelled: Bool { state.withLock { $0.cancelled } }
     func enqueue() -> Bool {
         let allowed = state.withLock { state in
             guard !state.queued, !state.cancelled else { return false }
@@ -133,19 +161,25 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
         if first { continuation.yield(reply); continuation.finish() }
     }
     func reply() async throws -> CloudOwnTransportReply {
-        var iterator = stream.makeAsyncIterator()
-        guard let reply = await iterator.next() else { throw CloudOwnTransportFailure.missingReply }
-        return try reply.get()
+        let stream = self.stream
+        // Join the original callback even when the waiting task is cancelled.
+        return try await Task.detached {
+            var iterator = stream.makeAsyncIterator()
+            guard let reply = await iterator.next() else { throw CloudOwnTransportFailure.missingReply }
+            return try reply.get()
+        }.value
     }
 }
 
 public struct NativeCloudOwnTransport: CloudOwnTransport {
     private let queue: any NativeCloudDatabaseQueue
+    private let staging: CloudMediaStaging?
     public init(database: CKDatabase) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
+        staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
     }
-    init(queue: any NativeCloudDatabaseQueue) { self.queue = queue }
+    init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil) { self.queue = queue; self.staging = staging }
     public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         switch command {
         case .read(let target): return read(target, publication: false)
@@ -248,30 +282,45 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         } else { token = nil }
         let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         configuration.previousServerChangeToken = token; configuration.desiredKeys = nil
-        configuration.resultsLimit = 200
+        configuration.resultsLimit = NativeCloudStagingRecords.pageLimit
         let operation = CKFetchRecordZoneChangesOperation(recordZoneIDs: [id], configurationsByRecordZoneID: [id: configuration])
         operation.fetchAllChanges = false
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        let staging = try self.staging ?? CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
         struct Page {
             var records: [CloudStagingRecord] = []
             var deleted: [String] = []
             var next: Data?
             var completed = false
             var failure: (any Error)?
+            var finished = false
+            var changes = 0
+            mutating func acceptChange() -> Bool {
+                guard !finished, failure == nil else { return false }
+                guard changes < NativeCloudStagingRecords.pageLimit else {
+                    failure = NativeCloudKitFailure.unsupportedRecord
+                    return false
+                }
+                changes += 1
+                return true
+            }
         }
         let state = Mutex(Page())
-        operation.recordWasChangedBlock = { recordID, result in
+        operation.recordWasChangedBlock = { [weak prepared] recordID, result in
+            guard state.withLock({ $0.acceptChange() }) else { return }
             do {
+                guard let prepared, !prepared.cancelled else { throw CancellationError() }
                 guard recordID.zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
                 let record = try result.get()
                 guard record.recordID == recordID else { throw NativeCloudKitFailure.unsupportedRecord }
                 let target = CloudControlTarget(zone: zone, name: recordID.recordName, recordType: record.recordType)
-                let value = try NativeCloudOwnRecords.control(record, target: target)
-                state.withLock { $0.records.append(.init(name: recordID.recordName, recordType: record.recordType, record: value)) }
-            } catch { state.withLock { $0.failure = error } }
+                let value = try NativeCloudStagingRecords.project(record, target: target, staging: staging, cancelled: { prepared.cancelled })
+                state.withLock { if !$0.finished { $0.records.append(value) } }
+            } catch { state.withLock { if !$0.finished { $0.failure = error } } }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
             state.withLock { value in
+                guard value.acceptChange() else { return }
                 if recordID.zoneID == id { value.deleted.append(recordID.recordName) }
                 else { value.failure = NativeCloudKitFailure.unsupportedRecord }
             }
@@ -285,8 +334,13 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             } catch { state.withLock { $0.failure = error } }
         }
         operation.fetchRecordZoneChangesResultBlock = { [weak prepared] result in
+            let page = state.withLock { value in
+                let page = value
+                value.records.removeAll(); value.finished = true
+                return page
+            }
             guard let prepared else { return }
-            let page = state.withLock { $0 }
+            if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
             if let error = page.failure { prepared.finish(.failure(error)); return }
             if case .failure(let error) = result { prepared.finish(.failure(error)); return }
             guard page.completed else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }

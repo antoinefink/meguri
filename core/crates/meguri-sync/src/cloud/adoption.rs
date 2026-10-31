@@ -1,6 +1,7 @@
 use super::{publication::*, runtime::NativeFileIdentity, *};
 use meguri_engine::device_state::{Publication, PublicationId};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdoptStep {
@@ -50,6 +51,9 @@ pub struct StagingRecord {
     pub name: String,
     pub record_type: String,
     pub record: ControlRecord,
+    /// Borrowed transport source. Adoption copies it; it never moves/removes it.
+    #[serde(default)]
+    pub payload_file: Option<PathBuf>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum AdoptionReply {

@@ -137,14 +137,31 @@ public struct CloudStagingRecord: Sendable {
     public let name: String
     public let recordType: String
     public let record: CloudControlRecord
-    public init(name: String, recordType: String, record: CloudControlRecord) { self.name = name; self.recordType = recordType; self.record = record }
-    var raw: MeguriCoreBindings.CloudStagingRecord { .init(name: name, recordType: recordType, record: record.raw) }
+    public let payloadFile: URL?
+    // The URL is only a transport projection. This lease owns the bytes until
+    // the awaited Rust intake returns, including its queued maintenance call.
+    private let payloadLease: CloudMediaStagedAsset?
+    public init(name: String, recordType: String, record: CloudControlRecord, payloadFile: URL? = nil) {
+        self.name = name; self.recordType = recordType; self.record = record
+        self.payloadFile = payloadFile; payloadLease = nil
+    }
+    init(name: String, recordType: String, record: CloudControlRecord, payloadLease: CloudMediaStagedAsset?) {
+        self.name = name; self.recordType = recordType; self.record = record
+        self.payloadLease = payloadLease; payloadFile = payloadLease?.url
+    }
+    var raw: MeguriCoreBindings.CloudStagingRecord { .init(name: name, recordType: recordType, record: record.raw, payloadFile: payloadFile?.path) }
 }
 public enum CloudAdoptionResult: Sendable {
     case read(CloudControlRead)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
     var raw: MeguriCoreBindings.CloudAdoptionResult {
         switch self { case .read(let r): .read(read: r.raw); case .page(let r, let d, let n): .page(records: r.map(\.raw), deleted: d, next: n) }
+    }
+    /// Keep the concrete staging projection alive across the awaited lane.
+    /// Capturing raw paths alone would allow ARC to release native file leases.
+    func withRaw<T: Sendable>(_ body: @Sendable (MeguriCoreBindings.CloudAdoptionResult) async throws -> T) async rethrows -> T {
+        defer { withExtendedLifetime(self) {} }
+        return try await body(raw)
     }
 }
 public enum CloudPublicationWork: Sendable {

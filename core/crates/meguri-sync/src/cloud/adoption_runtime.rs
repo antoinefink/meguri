@@ -5,7 +5,7 @@ use crate::cloud::{
     adoption::*,
     control_codec::{DecodeOutcome, Epoch, EpochState, MediaRoot},
     publication::*,
-    workflow::{EntityFacts, Saved},
+    workflow::EntityFacts,
 };
 use meguri_engine::{
     Engine, LongOp, ReaderLease, SlotGuard,
@@ -77,7 +77,17 @@ fn root(op: &AdoptOp) -> Result<MediaRoot, RuntimeError> {
     };
     Ok(root)
 }
-fn saved(path: &Path) -> Result<Saved, RuntimeError> {
+/// Inline spools retain their original JSON shape. Asset spools add only an
+/// operation-relative filename; canonical bodies never enter spool JSON.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StagedRecord {
+    name: String,
+    envelope: Vec<u8>,
+    system_fields: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    payload_file: Option<String>,
+}
+fn saved(path: &Path) -> Result<StagedRecord, RuntimeError> {
     let mut bytes = Vec::new();
     fs::File::open(path)
         .map_err(storage_io)?
@@ -89,21 +99,22 @@ fn saved(path: &Path) -> Result<Saved, RuntimeError> {
     }
     serde_json::from_slice(&bytes).map_err(|_| refused())
 }
-fn received(op: &AdoptOp, record: &Saved) -> Result<codec::Received, RuntimeError> {
+fn received_bytes(op: &AdoptOp, record: &StagedRecord, bytes: Option<&[u8]>) -> Result<codec::Received, RuntimeError> {
     let received = codec::receive(
         &epoch(op)?.record_key,
         &record.name,
         &record.envelope,
-        codec::AssetInput::Absent,
+        bytes.map_or(codec::AssetInput::Absent, codec::AssetInput::Bytes),
     )
     .map_err(|_| refused())?;
-    // K19 and remote asset/tombstone application require the next phase. Never
+    // K19 and remote tombstone application require the next phase. Never
     // expose a partially installed collection when these are encountered.
     if received.entity.fields.generation.is_some()
         || received.entity.fields.tombstone
         || received.payload.is_none()
         || received.entity.fields.erev == 0
         || record.system_fields.is_empty()
+        || (bytes.is_some() && received.entity.payload.is_some())
     {
         return Err(refused());
     }
@@ -114,6 +125,19 @@ fn received(op: &AdoptOp, record: &Saved) -> Result<codec::Received, RuntimeErro
         return Err(refused());
     }
     Ok(received)
+}
+fn received(directory: &Path, op: &AdoptOp, record: &StagedRecord) -> Result<codec::Received, RuntimeError> {
+    let bytes = record
+        .payload_file
+        .as_ref()
+        .map(|name| {
+            if name != &format!("{}.pa", record.name) || Path::new(name).components().count() != 1 {
+                return Err(refused());
+            }
+            super::payload_asset::read(&directory.join("payloads").join(name)).map_err(RuntimeError::from)
+        })
+        .transpose()?;
+    received_bytes(op, record, bytes.as_deref())
 }
 fn spool(directory: &Path) -> Result<Vec<PathBuf>, RuntimeError> {
     let mut paths = Vec::new();
@@ -128,6 +152,9 @@ fn spool(directory: &Path) -> Result<Vec<PathBuf>, RuntimeError> {
     Ok(paths)
 }
 fn check_space(space: &dyn SpaceProvider, directory: &Path) -> Result<(), RuntimeError> {
+    check_space_for(space, directory, 0)
+}
+fn check_space_for(space: &dyn SpaceProvider, directory: &Path, additional: u64) -> Result<(), RuntimeError> {
     fn size(path: &Path) -> Result<u64, RuntimeError> {
         let mut bytes = 0_u64;
         for entry in fs::read_dir(path).map_err(storage_io)? {
@@ -145,6 +172,8 @@ fn check_space(space: &dyn SpaceProvider, directory: &Path) -> Result<(), Runtim
         Ok(bytes)
     }
     let required = size(directory)?
+        .checked_add(additional)
+        .ok_or_else(refused)?
         .checked_mul(2)
         .and_then(|n| n.checked_add(64 * 1024 * 1024))
         .ok_or_else(refused)?;
@@ -447,6 +476,8 @@ impl Runtime {
         }
         let stage = ReplacementStage::new(&self.directory)?;
         fs::create_dir(stage.directory().join("incoming")).map_err(storage_io)?;
+        fs::create_dir(stage.directory().join("payloads")).map_err(storage_io)?;
+        meguri_storage::atomic_file::sync_directory(stage.directory())?;
         let id = self.publication_random_id()?;
         let candidate = publication_id(self.publication_random_id()?);
         if decision_before.is_some_and(|d| candidate == d.publication.identity) || candidate == publication_id(id) {
@@ -648,10 +679,9 @@ impl Runtime {
                     if !deleted.is_empty() {
                         return Err(refused());
                     }
-                    let mut payloads = Vec::new();
                     for item in records {
                         if item.record_type == "MGEpoch" && item.name == "epoch" {
-                            if Some(&item.record) != op.epoch_record.as_ref() {
+                            if item.payload_file.is_some() || Some(&item.record) != op.epoch_record.as_ref() {
                                 return Err(refused());
                             }
                             continue;
@@ -659,37 +689,61 @@ impl Runtime {
                         if item.record_type != "MGEntity" {
                             return Err(refused());
                         }
-                        let record = Saved {
+                        let mut record = StagedRecord {
                             name: item.name,
                             envelope: item.record.encrypted.ok_or_else(refused)?,
                             system_fields: item.record.system_fields.0,
+                            payload_file: None,
                         };
-                        let incoming = received(&op, &record)?;
-                        if let Some(payload) = incoming.payload
-                            && payload.kind() != codec::Kind::MediaName
-                        {
-                            payloads.push(payload);
+                        // One source/image at a time. The caller retains its file
+                        // until this reply returns; only our copy is durable.
+                        if let Some(source) = item.payload_file {
+                            let codec::DecodeOutcome::Supported(entity) =
+                                codec::Entity::decode(&record.envelope).map_err(|_| refused())?
+                            else {
+                                return Err(refused());
+                            };
+                            if entity.payload.is_some()
+                                || entity.fields.generation.is_some()
+                                || entity.fields.tombstone
+                                || codec::entity_name(&epoch(&op)?.record_key, entity.fields.kind, &entity.fields.key)
+                                    .map_err(|_| refused())?
+                                    != record.name
+                            {
+                                return Err(refused());
+                            }
+                            let bytes = super::payload_asset::read(&source)?;
+                            check_space_for(space, &owner.directory, bytes.len() as u64)?;
+                            let name = format!("{}.pa", record.name);
+                            let path = owner.directory.join("payloads").join(&name);
+                            let mut file = AtomicFile::new(&path, Purpose::Stage)?;
+                            file.file_mut().write_all(&bytes).map_err(storage_io)?;
+                            file.publish(|_| Ok(()))?;
+                            record.payload_file = Some(name);
                         }
+                        // Validate/decode the owned copy, never an SDK path.
+                        let incoming = received(&owner.directory, &op, &record)?;
                         // receive checked the HMAC name before it becomes a path.
                         let path = owner.directory.join("incoming").join(&record.name);
                         let bytes = serde_json::to_vec(&record).map_err(|_| refused())?;
                         let mut file = AtomicFile::new(&path, Purpose::Stage)?;
                         file.file_mut().write_all(&bytes).map_err(storage_io)?;
                         file.publish(|_| Ok(()))?;
-                    }
-                    let clock = self.adoption_clock()?;
-                    {
-                        let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
-                        meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(
-                            stage.as_ref().ok_or_else(refused)?,
-                            clock.as_ref(),
-                            |scope| {
-                                for payload in &payloads {
-                                    crate::cloud::row_payload::stage_payload(scope, payload)?;
-                                }
-                                Ok(())
-                            },
-                        )?;
+                        if let Some(payload) = incoming.payload
+                            && payload.kind() != codec::Kind::MediaName
+                        {
+                            let clock = self.adoption_clock()?;
+                            let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
+                            meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(
+                                stage.as_ref().ok_or_else(refused)?,
+                                clock.as_ref(),
+                                |scope| {
+                                    crate::cloud::row_payload::stage_payload(scope, &payload)?;
+                                    Ok(())
+                                },
+                            )?;
+                        }
+                        check_space(space, &owner.directory)?;
                     }
                     check_space(space, &owner.directory)?;
                     if let Some(cursor) = next {
@@ -826,7 +880,7 @@ impl Runtime {
 
         for path in &paths {
             let record = saved(path)?;
-            let received = received(op, &record)?;
+            let received = received(&owner.directory, op, &record)?;
             let payload = received.payload.ok_or_else(refused)?;
             if payload.kind() == codec::Kind::MediaName {
                 if !keys.insert((received.entity.fields.kind, received.entity.fields.key)) {
@@ -841,7 +895,7 @@ impl Runtime {
         // Missing-notetype graphs fail here, even when media is also pending.
         for path in &paths {
             let record = saved(path)?;
-            let payload = received(op, &record)?.payload.ok_or_else(refused)?;
+            let payload = received(&owner.directory, op, &record)?.payload.ok_or_else(refused)?;
             for reference in crate::cloud::publication_store::references(&payload)? {
                 if !keys.contains(&reference) {
                     return Err(refused());
@@ -865,9 +919,13 @@ impl Runtime {
                 codec::Payload::Card(card) => {
                     let name = codec::entity_name(&epoch.record_key, codec::Kind::Note, &codec::id_key(card.nid))
                         .map_err(|_| refused())?;
-                    let note = received(op, &saved(&owner.directory.join("incoming").join(name))?)?
-                        .payload
-                        .ok_or_else(refused)?;
+                    let note = received(
+                        &owner.directory,
+                        op,
+                        &saved(&owner.directory.join("incoming").join(name))?,
+                    )?
+                    .payload
+                    .ok_or_else(refused)?;
                     let codec::Payload::Note(note) = note else {
                         return Err(refused());
                     };
@@ -919,7 +977,9 @@ impl Runtime {
             .open(ReaderRole::Cloud)?;
             let view = crate::cloud::row_payload::ReadView(&reader);
             for path in &paths {
-                let payload = received(op, &saved(path)?)?.payload.ok_or_else(refused)?;
+                let payload = received(&owner.directory, op, &saved(path)?)?
+                    .payload
+                    .ok_or_else(refused)?;
                 if payload.kind() == codec::Kind::MediaName {
                     continue;
                 }
@@ -945,7 +1005,7 @@ impl Runtime {
         let acknowledged_op = op.clone();
         let entities = paths.into_iter().map(|path| {
             let record = saved(&path).map_err(|_| Error::InvalidData)?;
-            let received = received(&acknowledged_op, &record).map_err(|_| Error::InvalidData)?;
+            let received = received(&owner.directory, &acknowledged_op, &record).map_err(|_| Error::InvalidData)?;
             let payload = received.payload.ok_or(Error::InvalidData)?;
             let row_digest = payload.row_digest().map_err(|_| Error::InvalidData)?;
             let payload_digest = payload.payload_digest().map_err(|_| Error::InvalidData)?;
@@ -1163,9 +1223,13 @@ impl Runtime {
 fn load_notetype(owner: &AdoptionOwner, op: &AdoptOp, id: i64) -> Result<codec::Notetype, RuntimeError> {
     let name =
         codec::entity_name(&epoch(op)?.record_key, codec::Kind::Notetype, &codec::id_key(id)).map_err(|_| refused())?;
-    let payload = received(op, &saved(&owner.directory.join("incoming").join(name))?)?
-        .payload
-        .ok_or_else(refused)?;
+    let payload = received(
+        &owner.directory,
+        op,
+        &saved(&owner.directory.join("incoming").join(name))?,
+    )?
+    .payload
+    .ok_or_else(refused)?;
     match payload {
         codec::Payload::Notetype(nt) => Ok(nt),
         _ => Err(refused()),

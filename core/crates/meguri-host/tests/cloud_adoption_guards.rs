@@ -968,6 +968,7 @@ fn initial_reply(
                         record: meguri_testkit::cloud::coordinator::publication_control_record(&record).unwrap(),
                         name: record.name,
                         record_type: record.record_type,
+                        payload_file: None,
                     }),
                     meguri_testkit::cloud::RecordChange::Deleted { name, .. } => deleted.push(name),
                 }
@@ -1339,6 +1340,178 @@ fn initial_adoption_cancel_account_change_and_destination_collision_leave_no_fal
                 .is_none()
         );
         drop(saved);
+        pair.close();
+    }
+}
+
+#[test]
+fn adoption_payload_source_failures_and_owned_copy_cancellation_leave_live_untouched() {
+    use cloud::{
+        adoption::{AdoptionReply, AdoptionTask as T},
+        publication::{PreviewWork, PublicationWork},
+    };
+    use std::io::Write;
+
+    for case in [
+        "missing",
+        "truncated",
+        "changed",
+        "malformed",
+        "owned-changed",
+        "cancel",
+        "restart",
+    ] {
+        let mut pair = Pair::published();
+        let note = pair
+            .sender
+            .driver()
+            .collection_rows()
+            .unwrap()
+            .into_iter()
+            .find_map(|payload| {
+                if let codec::Payload::Note(note) = payload {
+                    Some(note.id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let answer = "ordinary adoption payload ".repeat(44_000);
+        pair.sender
+            .driver()
+            .edit_note_fields(note, &["ordinary adoption front", &answer])
+            .unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let zone = pair.sender.collection_zone().unwrap();
+        let server = pair.service.inspect(&scope()).unwrap().unwrap();
+        let remote = server.zones[&zone]
+            .records
+            .values()
+            .find(|record| record.fields.contains_key("pa"))
+            .unwrap();
+        let Field::Asset(asset) = &remote.fields["pa"] else {
+            panic!("real pa save")
+        };
+        let Field::EncryptedBytes(envelope) = &remote.fields["e"] else {
+            panic!("real envelope")
+        };
+        let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(envelope).unwrap() else {
+            panic!("supported")
+        };
+        assert!(entity.payload.is_none() && entity.fields.generation.is_none());
+        assert_eq!(codec::sha256(asset.bytes()), entity.payload_sha256);
+        assert_eq!(asset.size(), entity.payload_size);
+
+        let directory = generated(pair._root.path(), "live-source-failure", 899);
+        let (config, _, backup) = initial_config(&directory);
+        let host = meguri_host::CoreHost::open(config.clone()).unwrap();
+        let core = host.cloud_runtime().unwrap();
+        let local = initial_rows(&host);
+        let generation = host.engine().generation();
+        let before_binding = core.status().unwrap().binding;
+        let live = directory.join("collection.anki2");
+        let before_file = NativeFiles.identity(&live).unwrap();
+        let before_decision = DeviceState::for_collection(&live).publication_decision().unwrap();
+        let PreviewWork::ReadActive { id } = host.begin_cloud_connection_preview().unwrap() else {
+            panic!("active")
+        };
+        let PreviewWork::ReadEpoch { epoch, .. } = core
+            .connection_active_read(id, initial_read(&mut pair.service, "meguri-root", "active"))
+            .unwrap()
+        else {
+            panic!("epoch")
+        };
+        let PreviewWork::Ready(preview) = core
+            .connection_epoch_read(id, initial_read(&mut pair.service, &zone, "epoch"))
+            .unwrap()
+        else {
+            panic!("ready")
+        };
+        let id = host.confirm_cloud_adoption(&preview).unwrap();
+        for _ in 0..3 {
+            initial_step(&host, &mut pair.service).unwrap();
+        }
+        let op = core.adoption_op().unwrap().unwrap();
+        let stage = directory.join(&op.staging_name);
+        let PublicationWork::Adoption(work) = host.next_cloud_publication_work().unwrap() else {
+            panic!("adoption fetch")
+        };
+        assert!(matches!(work.task, T::Fetch { .. }));
+        let mut reply = initial_reply(&mut pair.service, epoch, &work.task);
+        let AdoptionReply::Page { records, .. } = &mut reply else {
+            panic!("real page")
+        };
+        let item = records.iter_mut().find(|item| item.name == remote.name).unwrap();
+        assert_eq!(item.record.encrypted.as_ref().unwrap(), envelope);
+        assert_eq!(item.record.system_fields.0, remote.system_fields.bytes());
+        let mut source = tempfile::NamedTempFile::new_in(pair._root.path()).unwrap();
+        source.write_all(asset.bytes()).unwrap();
+        source.as_file().sync_all().unwrap();
+        let source_path = source.path().to_path_buf();
+        item.payload_file = Some(source_path.clone());
+        match case {
+            "missing" => std::fs::remove_file(&source_path).unwrap(),
+            "truncated" => source.as_file().set_len(asset.size() - 1).unwrap(),
+            "changed" => std::fs::write(&source_path, vec![0; asset.size() as usize]).unwrap(),
+            "malformed" => std::fs::write(&source_path, b"not a canonical payload").unwrap(),
+            _ => {}
+        }
+        let source_before = std::fs::read(&source_path).ok();
+        let result = host.cloud_adoption_reply(&work, reply);
+        if ["owned-changed", "cancel", "restart"].contains(&case) {
+            result.unwrap();
+            let owned = stage.join("payloads").join(format!("{}.pa", remote.name));
+            assert_eq!(std::fs::read(&owned).unwrap(), asset.bytes());
+            // The source is still caller-owned, and its removal cannot break
+            // the core copy retained for validation/ACK installation.
+            assert_eq!(std::fs::read(&source_path).unwrap(), asset.bytes());
+            std::fs::remove_file(&source_path).unwrap();
+            assert_eq!(std::fs::read(&owned).unwrap(), asset.bytes());
+            if case == "owned-changed" {
+                std::fs::write(&owned, b"changed after intake").unwrap();
+                assert!(initial_step(&host, &mut pair.service).is_err());
+            } else if case == "cancel" {
+                host.cancel_cloud_adoption(id).unwrap();
+            } else {
+                // Closing and reopening must sweep unpublished stage files.
+                assert_eq!(initial_rows(&host), local);
+                host.close().unwrap();
+                drop(host);
+                let reopened = meguri_host::CoreHost::open(config).unwrap();
+                assert_eq!(initial_rows(&reopened), local);
+                assert_eq!(
+                    reopened.cloud_runtime().unwrap().status().unwrap().binding,
+                    before_binding
+                );
+                assert!(reopened.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+                assert!(!stage.exists());
+                assert_eq!(NativeFiles.identity(&live).unwrap(), before_file);
+                assert_eq!(
+                    DeviceState::for_collection(&live).publication_decision().unwrap(),
+                    before_decision
+                );
+                assert_eq!(backup.0.load(Ordering::SeqCst), 0);
+                reopened.close().unwrap();
+                pair.close();
+                continue;
+            }
+        } else {
+            assert!(result.is_err(), "a bad source cannot complete staging");
+            assert_eq!(std::fs::read(&source_path).ok(), source_before);
+        }
+        assert_eq!(initial_rows(&host), local);
+        assert_eq!(host.engine().generation(), generation);
+        assert_eq!(core.status().unwrap().binding, before_binding);
+        assert!(core.adoption_op().unwrap().is_none());
+        assert_eq!(host.engine().slot_holder(), None);
+        assert!(!stage.exists());
+        assert_eq!(NativeFiles.identity(&live).unwrap(), before_file);
+        assert_eq!(
+            DeviceState::for_collection(&live).publication_decision().unwrap(),
+            before_decision
+        );
+        assert_eq!(backup.0.load(Ordering::SeqCst), 0);
+        host.close().unwrap();
         pair.close();
     }
 }

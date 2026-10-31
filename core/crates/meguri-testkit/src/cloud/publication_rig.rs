@@ -511,6 +511,9 @@ impl PublicationRig {
             .find(|p| p.id == work.op)
             .ok_or_else(failure)?
             .epoch;
+        // These exact parent-owned files survive the synchronous child call,
+        // including any IPC pause, until production adoption has copied them.
+        let mut payload_files = Vec::new();
         let reply = match &work.task {
             T::ReadActive | T::RecheckActive => {
                 AdoptionReply::Read(self.read(service, "meguri-root".into(), "active", RequestedFields::All)?)
@@ -542,6 +545,26 @@ impl PublicationRig {
                 for change in page.changes {
                     match change {
                         RecordChange::Saved(record) => {
+                            let payload_file = match record.fields.get("pa") {
+                                Some(Field::Asset(asset)) if record.record_type == "MGEntity" => {
+                                    use std::io::Write;
+                                    let mut file = tempfile::NamedTempFile::new()?;
+                                    file.write_all(asset.bytes())?;
+                                    file.as_file().sync_all()?;
+                                    let path = file.path().to_path_buf();
+                                    payload_files.push(file);
+                                    Some(path)
+                                }
+                                None => None,
+                                _ => return Err(failure()),
+                            };
+                            if record
+                                .fields
+                                .iter()
+                                .any(|(key, field)| key != "pa" && matches!(field, Field::Asset(_)))
+                            {
+                                return Err(failure());
+                            }
                             let encrypted = match record.fields.get("e") {
                                 Some(Field::EncryptedBytes(e)) => Some(e.clone()),
                                 _ => None,
@@ -553,6 +576,7 @@ impl PublicationRig {
                                     encrypted,
                                     system_fields: cloud::OpaqueBytes(record.system_fields.bytes().to_vec()),
                                 },
+                                payload_file,
                             });
                         }
                         RecordChange::Deleted { name, .. } => deleted.push(name),
@@ -567,7 +591,9 @@ impl PublicationRig {
             }
             _ => return Err(failure()),
         };
-        self.sdk.get_mut().driver.call(Input::AdoptionReply(work, reply))
+        let result = self.sdk.get_mut().driver.call(Input::AdoptionReply(work, reply));
+        drop(payload_files);
+        result
     }
     pub fn verify_identity(&mut self, account: String) -> Result<()> {
         self.sdk.get_mut().driver.call::<()>(Input::Identity(Some(account)))?;
