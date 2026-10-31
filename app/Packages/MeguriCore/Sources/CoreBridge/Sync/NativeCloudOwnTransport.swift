@@ -183,6 +183,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
     public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         switch command {
         case .read(let target): return read(target, publication: false)
+        case .assetRead(let zone, let name): return try assetRead(zone: zone, name: name)
         case .publication(.read(let target)): return read(target, publication: true)
         case .publication(.createZones(let zones)): return createZones(zones)
         case .publication(.save(let target, let encrypted, let fields)): return try save(target, encrypted: encrypted, fields: fields)
@@ -216,6 +217,73 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 else { throw CloudOwnTransportFailure.missingReply }
                 prepared.finish(.success(publication ? .publication(.read(read)) : .read(read)))
             } catch { prepared.finish(.failure(error)) }
+        }
+        return prepared
+    }
+    private func assetRead(zone: String, name: String) throws -> NativePreparedOwnOperation {
+        guard zone.hasPrefix("c-") else { throw NativeCloudKitFailure.unsupportedRecord }
+        let target = CloudControlTarget(zone: zone, name: name, recordType: "MGEntity")
+        let id = NativeCloudOwnRecords.id(target)
+        let operation = CKFetchRecordsOperation(recordIDs: [id])
+        operation.desiredKeys = nil // All fields, including encrypted e and pa.
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        let staging = try self.staging ?? CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
+        struct Read {
+            var received = false
+            var result: CloudAssetReadResult?
+            var failure: (any Error)?
+            var finished = false
+        }
+        let state = Mutex(Read())
+        operation.perRecordResultBlock = { [weak prepared] received, result in
+            // Serialize projection with terminal delivery so the SDK file is
+            // copied before this callback returns, and no copy escapes a join.
+            state.withLock { value in
+                guard !value.finished else { return }
+                guard !value.received else {
+                    value.failure = NativeCloudKitFailure.unsupportedRecord
+                    return // Retain the first copy until the original terminal.
+                }
+                value.received = true
+                do {
+                    guard let prepared, !prepared.cancelled else { throw CancellationError() }
+                    guard received == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                    switch result {
+                    case .failure: value.result = .failed
+                    case .success(let native):
+                        try NativeCloudKitIdentityValidation.requireCurrentOwner(native.recordID.zoneID)
+                        guard native.recordID == id, native.recordType == target.recordType else { throw NativeCloudKitFailure.unsupportedRecord }
+                        let metadata = try NativeCloudRecordConversion.decode(native)
+                        var lease: CloudMediaStagedAsset?
+                        if let asset = native["pa"] as? CKAsset {
+                            do {
+                                guard let source = asset.fileURL, source.isFileURL else { throw CloudMediaSourceFailure.invalidShape }
+                                lease = try staging.copyPayload(source, cancelled: { prepared.cancelled })
+                            } catch is CloudMediaSourceFailure {
+                                // Core intake still needs this version to retry its payload.
+                            } catch CloudMediaFailure.stagingLimit {
+                                // Keep metadata when the native copy budget is full.
+                            }
+                        }
+                        let record = CloudRecord(name: metadata.name, envelope: metadata.envelope, systemFields: metadata.systemFields,
+                                                 recordType: metadata.recordType, zone: metadata.zone, assetURL: lease?.url)
+                        value.result = try CloudAssetReadResult(record: record, asset: lease)
+                    }
+                } catch { value.failure = error }
+            }
+        }
+        operation.fetchRecordsResultBlock = { [weak prepared] result in
+            let read = state.withLock { value in
+                let read = value
+                value.result = nil; value.finished = true
+                return read
+            }
+            guard let prepared else { return }
+            if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
+            if let error = read.failure { prepared.finish(.failure(error)); return }
+            if case .failure = result { prepared.finish(.success(.assetRead(.failed))); return }
+            guard let result = read.result else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
+            prepared.finish(.success(.assetRead(result)))
         }
         return prepared
     }
