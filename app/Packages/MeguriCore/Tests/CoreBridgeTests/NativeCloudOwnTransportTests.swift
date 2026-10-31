@@ -303,6 +303,37 @@ struct NativeCloudOwnTransportTests {
         other.modifyRecordZonesResultBlock?(.success(()))
         guard case .publication(.failed) = try await incomplete.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
     }
+    /// K3/K7/K18.4, V14: ordinary pa is accepted per record before zone completion.
+    @Test func adoptionRecordAcceptsEntityPayloadAssetBeforeZoneCompletion() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("ordinary-payload")
+        try Data(repeating: 7, count: 1_048_576).write(to: source)
+        let queue = NativeOwnCapturingQueue()
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let zone = NativeCloudOwnRecords.zone("c-synthetic")
+        #expect(!operation.fetchAllChanges)
+        #expect(operation.configurationsByRecordZoneID?[zone]?.desiredKeys == nil)
+        let target = CloudControlTarget(zone: "c-synthetic", name: "entity", recordType: "MGEntity")
+        let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
+        let encrypted = Data([1, 3, 5])
+        record.encryptedValues["e"] = encrypted as CKRecordValue
+        record["pa"] = CKAsset(fileURL: source)
+        operation.recordWasChangedBlock?(record.recordID, .success(record))
+        // Omit zone completion: an accepted record must reach the missingReply check.
+        operation.fetchRecordZoneChangesResultBlock?(.success(()))
+        await #expect {
+            try await prepared.reply()
+        } throws: { error in
+            guard let failure = error as? CloudOwnTransportFailure else { return false }
+            if case .missingReply = failure { return true }
+            return false
+        }
+    }
+
     @Test func stagingAssetFailureAndMissingZoneCompletionNeverProduceAnEmptyFinalPage() async throws {
         for withAsset in [false, true] {
             let queue = NativeOwnCapturingQueue()
