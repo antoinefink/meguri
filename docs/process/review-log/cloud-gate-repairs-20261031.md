@@ -19,3 +19,16 @@ Production request ownership and recovery fencing remain enforced.
 Snapshot getter compilation and the instrumented accessibility audit await execution.
 Geometry logging preserves all audit and coverage checks. A passing diagnostic run
 alone cannot resolve the recorded contrast failure. U113 and U114 remain unaccepted.
+
+The recording fixture now models the exact native planning selector interface.
+Review caught its first incorrect return status; the fixer corrected it before use.
+`selftest/20261031T204404Z-46460` passes all four actor and recording cases,
+including invalid usage and incomplete recording rejection. Real scratch and
+launch admission remain unchanged.
+
+`mac-hosted-test/20261031T203844Z-40820` compiles, then fails because the optional
+native Search-button shortcut is absent. The N11.4 attachment repair is reviewed
+and awaits its focused native check.
+`ui-test/20261031T204027Z-43047` retains the contrast failure. Before/after
+geometry shows the large-text viewport moves during the audit. Color changes,
+delays, retries and suppressed findings are not justified by this evidence.

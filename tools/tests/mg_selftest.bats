@@ -2106,6 +2106,21 @@ actor_fixture() {
   printf 'id: smoke/sync/pair\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\nactors: [client_a, client_c]\n' \
     >"$SB/conformance/scenarios/smoke/sync/pair.yaml"
   printf 'id: smoke/plain\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\n' >"$SB/conformance/scenarios/smoke/plain.yaml"
+  # Only this fixture's selected plan uses the direct cargo CLI stub.
+  cat >"$SB/tools/mg.d/zz-actor-scratch.sh" <<'STUB'
+mg_conf__scratch() {
+  if [ "$#" -eq 10 ] && [ "$1" = selected ] &&
+    [ "$2" = conformance ] && [ "$3" = run ] &&
+    [ "$4" = --conformance ] && [ "$5" = "$MG_ROOT/conformance" ] &&
+    [ "$6" = --lane ] && [ "$7" = plan ] &&
+    [ "$8" = --report ] && [ "$9" = "$MG_RUN_DIR/plan.json" ] &&
+    [ "${10}" = smoke/sync/pair ]; then
+    printf '%s\n' false
+    return 0
+  fi
+  return 97
+}
+STUB
   cat >"$stubs/docker" <<'STUB'
 #!/bin/bash
 printf '%s\n' "$*" >>"$STUB_LOG"
