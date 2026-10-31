@@ -16,6 +16,7 @@ use meguri_sync::cloud::{
     workflow::*,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sha2::{Digest as _, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Read, Write},
@@ -25,7 +26,7 @@ use std::{
         process::{CommandExt, ExitStatusExt},
     },
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 const FRAME: usize = 16 * 1024 * 1024;
@@ -111,11 +112,28 @@ pub(crate) fn is_work_paused(error: &(dyn std::error::Error + Send + Sync + 'sta
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingInboxEntry {
     pub id: i64,
+    /// SHA-256 of the JSON serialization of the complete stored InboxValue.
+    pub value_sha256: [u8; 32],
     pub record_name: String,
     /// Zero only for a deletion or an envelope with no readable revision.
     pub erev: u64,
     pub reason: core::InboxReason,
     pub retry_count: u32,
+}
+fn inbox_value_sha256(value: &core::InboxValue) -> Result<[u8; 32]> {
+    struct HashWriter(Sha256);
+    impl Write for HashWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = HashWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, value)?;
+    Ok(writer.0.finalize().into())
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingRefusedEntry {
@@ -278,6 +296,7 @@ pub(crate) enum Input {
     RootFetch(String, Option<Saved>, bool, u64),
     ReadDue,
     RootEpoch,
+    CollectionZone,
     SyncNow(String),
     FetchDue,
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
@@ -288,6 +307,19 @@ pub(crate) enum Input {
     BindingEntity(core::BindingId, String),
     DeliverCollection(Vec<Saved>),
     DeliverCollectionAssets(Vec<super::Record>),
+    DeliverCollectionDownload(FetchedAssetRecord),
+    AssetReadPass(core::incoming::AssetReadKind),
+    NextAssetRead(core::incoming::AssetReadPass),
+    AdmitAssetRead(core::incoming::AssetReadRequest, bool),
+    CancelAssetRead(core::incoming::AssetReadRequest),
+    CancelAssetPass(core::incoming::AssetReadPass),
+    AssetReadResult(core::incoming::AssetReadRequest, Option<FetchedAssetRecord>),
+    AssetReadOwnership(core::incoming::AssetReadRequest),
+    AssetSDK,
+    AssetSuspendResume,
+    AssetConflictBodyReads,
+    AssetBodyReadControl(core::BindingId, String),
+    AssetConflict(String, u64, Saved),
     DrainIncoming(usize),
     PauseAutomaticWAL(bool),
     CloudHold(u64),
@@ -326,6 +358,7 @@ pub(crate) enum Input {
     PublicationCancel([u8; 16]),
     PublicationTrigger,
     PublicationFacts,
+    PublicationControl,
     CollectionRows,
     MediaRows,
     CollectionHeader,
@@ -538,6 +571,7 @@ pub struct ChildDriver {
     completed_work: Vec<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
     paused_work: Option<IncomingStage>,
     fetched_sources: BTreeMap<Vec<u8>, Vec<tempfile::NamedTempFile>>,
+    asset_commands: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 impl ChildDriver {
     pub(crate) fn stage_fetched(
@@ -620,6 +654,212 @@ impl ChildDriver {
             })
             .collect::<Result<Vec<_>>>()?;
         self.call(Input::DeliverCollection(records))
+    }
+    /// Deliver unchanged Service metadata with this download's optional file.
+    /// The parent owns the source through the final reply, including pauses;
+    /// only Runtime's normal intake may classify or durably copy its bytes.
+    pub fn deliver_collection_asset_download(
+        &mut self,
+        record: &super::Record,
+        asset_path: Option<&std::path::Path>,
+    ) -> Result<()> {
+        let Some(super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+            return Err(failure());
+        };
+        self.asset_input(Input::DeliverCollectionDownload(FetchedAssetRecord {
+            record: Saved {
+                name: record.name.clone(),
+                envelope: envelope.clone(),
+                system_fields: record.system_fields.bytes().to_vec(),
+            },
+            asset_path: asset_path.map(std::path::Path::to_path_buf),
+        }))
+    }
+    // Keep both the original transport command and its files through its final
+    // reply. A repeated helper call resumes that command with the same paths.
+    fn asset_input<T: DeserializeOwned>(&mut self, mut input: Input) -> Result<T> {
+        let caller_key = serde_json::to_vec(&input)?;
+        let original = if let Some(original) = self.asset_commands.get(&caller_key) {
+            input = serde_json::from_slice(original)?;
+            original.clone()
+        } else {
+            let mut files = Vec::new();
+            let record = match &mut input {
+                Input::DeliverCollectionDownload(record) => Some(record),
+                Input::AssetReadResult(_, record) => record.as_mut(),
+                _ => return Err(failure()),
+            };
+            if let Some(record) = record
+                && let Some(path) = &record.asset_path
+            {
+                let mut file = tempfile::NamedTempFile::new()?;
+                std::io::copy(&mut std::fs::File::open(path)?, &mut file)?;
+                file.as_file().sync_all()?;
+                record.asset_path = Some(file.path().to_path_buf());
+                files.push(file);
+            }
+            let original = serde_json::to_vec(&input)?;
+            self.fetched_sources.insert(original.clone(), files);
+            self.asset_commands.insert(caller_key.clone(), original.clone());
+            original
+        };
+        let result = self.call(input);
+        if !self.fetched_sources.contains_key(&original) {
+            self.asset_commands.remove(&caller_key);
+        }
+        result
+    }
+    pub fn asset_read_requests(
+        &mut self,
+        kind: core::incoming::AssetReadKind,
+    ) -> Result<Vec<core::incoming::AssetReadRequest>> {
+        // Legacy single-entry fixtures still cross the real three boundaries.
+        // This helper admits only the selected request, never a bulk vector.
+        let pass = self.begin_asset_read_pass(kind)?;
+        let request = self.next_asset_read(&pass)?;
+        if let Some(request) = &request
+            && !self.admit_asset_read(request, true)?
+        {
+            return Err(failure());
+        }
+        self.call::<()>(Input::CancelAssetPass(pass))?;
+        Ok(request.into_iter().collect())
+    }
+    pub fn begin_asset_read_pass(
+        &mut self,
+        kind: core::incoming::AssetReadKind,
+    ) -> Result<core::incoming::AssetReadPass> {
+        self.call(Input::AssetReadPass(kind))
+    }
+    pub fn next_asset_read(
+        &mut self,
+        pass: &core::incoming::AssetReadPass,
+    ) -> Result<Option<core::incoming::AssetReadRequest>> {
+        self.call(Input::NextAssetRead(pass.clone()))
+    }
+    pub fn admit_asset_read(&mut self, request: &core::incoming::AssetReadRequest, accept: bool) -> Result<bool> {
+        self.call(Input::AdmitAssetRead(request.clone(), accept))
+    }
+    pub fn cancel_asset_read(&mut self, request: &core::incoming::AssetReadRequest) -> Result<bool> {
+        self.call(Input::CancelAssetRead(request.clone()))
+    }
+    /// Observe the actual core result owner and accepted transport queue entry.
+    pub fn asset_read_ownership(&mut self, request: &core::incoming::AssetReadRequest) -> Result<(bool, bool)> {
+        self.call(Input::AssetReadOwnership(request.clone()))
+    }
+    pub fn asset_read_result(
+        &mut self,
+        request: &core::incoming::AssetReadRequest,
+        record: Option<&super::Record>,
+        asset_path: Option<&std::path::Path>,
+    ) -> Result<bool> {
+        let result = record
+            .map(|record| -> Result<_> {
+                let Some(super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                    return Err(failure());
+                };
+                Ok(FetchedAssetRecord {
+                    record: Saved {
+                        name: record.name.clone(),
+                        envelope: envelope.clone(),
+                        system_fields: record.system_fields.bytes().to_vec(),
+                    },
+                    asset_path: asset_path.map(std::path::Path::to_path_buf),
+                })
+            })
+            .transpose()?;
+        self.asset_input(Input::AssetReadResult(request.clone(), result))
+    }
+    pub fn suspend_resume_asset_sdk(&mut self) -> Result<(String, String)> {
+        self.call(Input::AssetSuspendResume)
+    }
+    /// Enter/return the real Runtime handler without supplying a sent result.
+    pub fn enter_asset_read_sent_handler(&mut self, sdk: &str, request_id: u64) -> Result<()> {
+        self.call(Input::EnterHandler(sdk.to_owned(), request_id))
+    }
+    pub fn return_asset_read_sent_handler(&mut self, sdk: &str) -> Result<u64> {
+        self.call(Input::ReturnHandler(sdk.to_owned()))
+    }
+    pub fn hold_asset_read_prepared(&mut self) -> Result<()> {
+        self.hold_incoming_stage(IncomingStage::AssetReadPrepared)
+    }
+    pub fn release_asset_read_prepared(&mut self) -> Result<()> {
+        self.release_incoming_stage(IncomingStage::AssetReadPrepared)
+    }
+    pub fn hold_asset_read_finishing(&mut self) -> Result<()> {
+        self.hold_incoming_stage(IncomingStage::AssetReadFinishing)
+    }
+    pub fn release_asset_read_finishing(&mut self) -> Result<()> {
+        self.release_incoming_stage(IncomingStage::AssetReadFinishing)
+    }
+    pub fn asset_conflict_body_reads(&mut self) -> Result<usize> {
+        self.call(Input::AssetConflictBodyReads)
+    }
+    pub fn asset_body_read_control(&mut self, binding: core::BindingId, name: &str) -> Result<usize> {
+        self.call(Input::AssetBodyReadControl(binding, name.to_owned()))
+    }
+    pub fn recreate_asset_sdk(&mut self) -> Result<()> {
+        let old: String = self.call(Input::AssetSDK)?;
+        let _: (String, Option<Vec<u8>>, String) = self.call(Input::RegisterSDK(Some(old)))?;
+        Ok(())
+    }
+    /// Submit a local save to Service and forward its conflict response to the
+    /// child while retaining the flight created by the production send path.
+    pub fn deliver_real_asset_save_conflict(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+        name: &str,
+    ) -> Result<()> {
+        let sdk: String = self.call(Input::AssetSDK)?;
+        let batch: BuiltBatch = self.call(Input::Build(sdk.clone(), BTreeSet::from([name.to_owned()])))?;
+        let save = batch.saves.iter().find(|save| save.name == name).ok_or_else(failure)?;
+        let mut record = super::RecordInput::encrypted(name, "MGEntity", save.envelope.clone());
+        if let Some(path) = &save.asset_path {
+            record.fields.insert(
+                "pa".into(),
+                super::Field::Asset(super::Asset::synthetic(std::fs::read(path)?)),
+            );
+        }
+        let zone: String = self.call(Input::CollectionZone)?;
+        let response = service.request(
+            scope,
+            Default::default(),
+            super::Operation::Modify {
+                zone,
+                atomic: false,
+                changes: vec![super::Mutation::Save {
+                    record,
+                    if_unchanged: save.system_fields.clone().map(super::SystemFields::from_bytes),
+                }],
+            },
+        )?;
+        let Ok(super::Reply::Modified(items)) = response.result else {
+            return Err(failure());
+        };
+        let Some(item) = items.into_iter().next() else {
+            return Err(failure());
+        };
+        let Err(error) = item.result else { return Err(failure()) };
+        if error.code != super::ErrorCode::ServerRecordChanged {
+            return Err(failure());
+        }
+        let server = error.server_record.ok_or_else(failure)?;
+        let Some(super::Field::EncryptedBytes(envelope)) = server.fields.get("e") else {
+            return Err(failure());
+        };
+        self.call::<()>(Input::EnterHandler(sdk.clone(), batch.id))?;
+        self.call::<()>(Input::AssetConflict(
+            sdk.clone(),
+            batch.id,
+            Saved {
+                name: server.name.clone(),
+                envelope: envelope.clone(),
+                system_fields: server.system_fields.bytes().to_vec(),
+            },
+        ))?;
+        let _: u64 = self.call(Input::ReturnHandler(sdk))?;
+        Ok(())
     }
     pub fn drain_incoming(&mut self, steps: usize) -> Result<IncomingProgress> {
         match self.call(Input::DrainIncoming(steps)) {
@@ -829,6 +1069,7 @@ impl ChildDriver {
             completed_work: Vec::new(),
             paused_work: None,
             fetched_sources: BTreeMap::new(),
+            asset_commands: BTreeMap::new(),
         };
         driver.call::<()>(Input::Boot(boot))?;
         Ok(driver)
@@ -853,6 +1094,8 @@ impl ChildDriver {
             Input::Fetched(..)
                 | Input::DeliverCollection(..)
                 | Input::DeliverCollectionAssets(..)
+                | Input::DeliverCollectionDownload(..)
+                | Input::AssetReadResult(..)
                 | Input::DrainIncoming(..)
                 | Input::Reconcile
                 | Input::Build(..)
@@ -1100,6 +1343,8 @@ impl ChildDriver {
         }
         if self.pending_work.is_some() {
             for stage in [
+                IncomingStage::AssetReadPrepared,
+                IncomingStage::AssetReadFinishing,
                 IncomingStage::FetchBeforeInbox,
                 IncomingStage::FetchAfterInbox,
                 IncomingStage::FetchAfterCursor,
@@ -1190,6 +1435,8 @@ struct Device {
     closed: bool,
     incoming_worker: Option<incoming_driver::Work>,
     incoming_latches: Arc<incoming_driver::Latches>,
+    asset_conflict_body_reads: usize,
+    asset_read_queue: Arc<Mutex<Vec<core::incoming::AssetReadRequest>>>,
     incoming_events: meguri_engine::changes::stream::Subscription,
     change_events: Vec<u64>,
     rollovers: Vec<RolloverObservation>,
@@ -1232,6 +1479,8 @@ impl Device {
             closed: false,
             incoming_worker: None,
             incoming_latches,
+            asset_conflict_body_reads: 0,
+            asset_read_queue: Arc::new(Mutex::new(Vec::new())),
             incoming_events,
             change_events: Vec::new(),
             rollovers: Vec::new(),
@@ -1359,6 +1608,7 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::PublicationControl => value(self.runtime()?.publication_control_for_testing()?),
             Input::PayloadMemoryReset => {
                 use crate::bench::peak_alloc::PeakAlloc;
                 if !PeakAlloc::is_installed() {
@@ -1778,6 +2028,10 @@ impl Device {
             ),
             Input::ReadDue => value(self.runtime()?.root_read_due()?),
             Input::RootEpoch => value(self.runtime()?.accepted_root_epoch()?),
+            Input::CollectionZone => {
+                let binding = self.runtime()?.status()?.binding.ok_or_else(failure)?;
+                value(core::adapter::collection_zone(binding.facts.epoch))
+            }
             Input::SyncNow(i) => value(
                 self.runtime()?
                     .sync_now(&i, &self.host.collection()?)
@@ -1790,22 +2044,103 @@ impl Device {
                     .map_err(|error| ChildFailure::FetchCompleted(Box::new(ChildFailure::classify(Box::new(error)))))?;
                 value(())
             }
+            Input::AssetSuspendResume => {
+                let before = self
+                    .runtime()?
+                    .incoming_sdk_instance_for_testing()
+                    .ok_or_else(failure)?;
+                if !matches!(
+                    self.host.engine().suspend(IPC_TIMEOUT)?,
+                    meguri_engine::suspend::SuspendOutcome::Suspended
+                ) {
+                    return Err(failure());
+                }
+                self.host.engine().resume()?;
+                self.runtime()?.refresh_identity()?;
+                let after = self
+                    .runtime()?
+                    .incoming_sdk_instance_for_testing()
+                    .ok_or_else(failure)?;
+                value((before, after))
+            }
+            Input::AssetConflictBodyReads => value(self.asset_conflict_body_reads),
+            Input::AssetBodyReadControl(b, name) => {
+                let before = core::testing::entity_body_reads();
+                let _ = self.runtime()?.binding_entity(b, &name)?.ok_or_else(failure)?;
+                value(core::testing::entity_body_reads().saturating_sub(before))
+            }
+            Input::AssetSDK => value(
+                self.runtime()?
+                    .incoming_sdk_instance_for_testing()
+                    .ok_or_else(failure)?,
+            ),
+            Input::AssetReadPass(kind) => {
+                let sdk = self
+                    .runtime()?
+                    .incoming_sdk_instance_for_testing()
+                    .ok_or_else(failure)?;
+                value(
+                    self.runtime()?
+                        .begin_asset_read_pass(&sdk, &self.host.collection()?, kind)?,
+                )
+            }
+            Input::NextAssetRead(pass) => value(self.runtime()?.next_asset_read(&self.host.collection()?, &pass)?),
+            Input::CancelAssetRead(request) => value(self.runtime()?.cancel_asset_read(&request)),
+            Input::AssetReadOwnership(request) => value((
+                self.runtime()?.asset_read_owned_for_testing(&request),
+                self.asset_read_queue
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains(&request),
+            )),
+            Input::CancelAssetPass(pass) => {
+                self.runtime()?.cancel_asset_read_pass(&pass);
+                value(())
+            }
+            Input::AdmitAssetRead(request, accept) => value(self.runtime()?.submit_asset_read_queue(
+                &self.host.collection()?,
+                &request,
+                || {
+                    if !accept {
+                        return false;
+                    }
+                    let mut queue = self
+                        .asset_read_queue
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if queue.contains(&request) {
+                        return false;
+                    }
+                    queue.push(request.clone());
+                    true
+                },
+            )?),
+            Input::AssetConflict(sdk, id, server) => {
+                let before = core::testing::entity_body_reads();
+                self.runtime()?
+                    .sent_asset_save_conflict(&sdk, &self.host.collection()?, id, &server)?;
+                self.asset_conflict_body_reads = core::testing::entity_body_reads().saturating_sub(before);
+                value(())
+            }
             Input::IncomingIntents(b) => value(self.runtime()?.apply_intents(b)?),
             Input::IncomingInbox(b) => value(
                 self.runtime()?
                     .inbox_entries(b)?
                     .into_iter()
-                    .map(|stored| IncomingInboxEntry {
-                        id: stored.id,
-                        record_name: stored.entry.record_name,
-                        erev: match stored.entry.value {
-                            core::InboxValue::Record { erev, .. } => erev,
-                            core::InboxValue::Deletion => 0,
-                        },
-                        reason: stored.entry.reason,
-                        retry_count: stored.entry.retry_count,
+                    .map(|stored| {
+                        Ok(IncomingInboxEntry {
+                            id: stored.id,
+                            record_name: stored.entry.record_name,
+                            value_sha256: inbox_value_sha256(&stored.entry.value)?,
+                            erev: match stored.entry.value {
+                                core::InboxValue::Record { erev, .. } => erev,
+                                core::InboxValue::Deletion => 0,
+                            },
+                            reason: stored.entry.reason,
+                            retry_count: stored.entry.retry_count,
+                        })
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>>>()?,
             ),
             Input::IncomingRefused(b) => value(
                 self.runtime()?
@@ -1837,7 +2172,10 @@ impl Device {
                 self.host.collection()?.pause_automatic_wal_flush_for_testing(paused);
                 value(())
             }
-            Input::Fetched(..) | Input::DeliverCollectionAssets(..) => Err(failure()),
+            Input::Fetched(..)
+            | Input::DeliverCollectionAssets(..)
+            | Input::DeliverCollectionDownload(..)
+            | Input::AssetReadResult(..) => Err(failure()),
             Input::SendsFinished(i) => {
                 self.runtime()?.exchange_sends_finished(&i)?;
                 value(())

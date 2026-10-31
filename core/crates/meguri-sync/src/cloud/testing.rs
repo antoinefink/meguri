@@ -3,6 +3,19 @@ use super::Error;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, PoisonError};
 
+/// Control state for child orchestration, without entity image bodies.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PublicationControl {
+    pub current: Option<super::Binding>,
+    pub recovery_ops: Vec<super::adoption::RecoveryOpFacts>,
+    pub zones: std::collections::BTreeMap<String, super::publication::RetainedZone>,
+}
+impl std::fmt::Debug for PublicationControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PublicationControl")
+    }
+}
+
 /// Cumulative workflow payload body materializations on the calling thread.
 pub fn entity_body_reads() -> usize {
     super::workflow_store::body_reads()
@@ -10,6 +23,8 @@ pub fn entity_body_reads() -> usize {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IncomingStage {
+    AssetReadPrepared,
+    AssetReadFinishing,
     FetchBeforeInbox,
     FetchAfterInbox,
     FetchAfterCursor,
@@ -100,6 +115,7 @@ pub fn arm_tracking_fault(name: &str, fault: TrackingFault) -> Result<(), Error>
     if !matches!(
         name,
         "cloud.tracking.commit.inbox"
+            | "cloud.tracking.commit.asset_read"
             | "cloud.tracking.commit.engine_state"
             | "cloud.tracking.commit.intent"
             | "cloud.tracking.commit.rollback"

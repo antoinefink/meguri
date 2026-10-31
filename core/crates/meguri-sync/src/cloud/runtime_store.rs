@@ -67,6 +67,7 @@ impl TrackingStore {
         }
         let transaction = self.connection.transaction()?;
         super::adapter_store::install(&transaction)?;
+        super::incoming_store::install_asset_reads(&transaction)?;
         super::tracking_payload::migrate(&transaction, &self.scope)?;
         transaction.commit()?;
         self.install_workflow()?;
@@ -156,6 +157,17 @@ impl TrackingStore {
         }
         let transaction = self.connection.transaction()?;
         put_binding(&transaction, binding, &value)?;
+        // A lost post-handler first read follows ordinary retries on the next open.
+        transaction.execute(
+            "DELETE FROM cloud_asset_first_reads WHERE binding=?1",
+            [binding.0.as_slice()],
+        )?;
+        // Only an actual collection open resets asset attempts, including 1..4.
+        transaction.execute(
+            "UPDATE inbox SET entry=json_set(entry,'$.retry_count',0)
+             WHERE binding=?1 AND json_extract(entry,'$.reason')='Asset'",
+            [binding.0.as_slice()],
+        )?;
         transaction.commit()?;
         Ok(value)
     }

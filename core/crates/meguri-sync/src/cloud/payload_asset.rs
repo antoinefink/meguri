@@ -3,11 +3,12 @@ use super::{
     BindingId, Error, InboxEntry, InboxReason, InboxValue, StoredInboxEntry, entity_codec as c, incoming, workflow,
 };
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
 };
 
 fn directory(root: &Path, binding: BindingId, purpose: &str) -> PathBuf {
@@ -74,22 +75,99 @@ pub(super) fn upload(root: &Path, binding: BindingId, bytes: &[u8]) -> Result<te
     write(root, binding, "upload", bytes)
 }
 
+// Preparation can run outside tracking access. Sweeps must not remove its
+// uncommitted copies; the lease ends only after ownership commit or cleanup.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IntakeLease {
+    Preparing,
+    Published,
+    Retired,
+}
+static PREPARING: Mutex<BTreeMap<PathBuf, IntakeLease>> = Mutex::new(BTreeMap::new());
+struct IntakeFile {
+    file: Option<tempfile::TempPath>,
+    path: PathBuf,
+}
+impl Drop for IntakeFile {
+    fn drop(&mut self) {
+        // Keep sweep protection until the TempPath has actually been removed.
+        drop(self.file.take());
+        PREPARING
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.path);
+    }
+}
+
+fn write_intake(root: &Path, binding: BindingId, bytes: &[u8]) -> Result<IntakeFile, Error> {
+    c::validate_payload_size(bytes.len() as u64).map_err(|_| Error::InvalidData)?;
+    let dir = directory(root, binding, "inbox");
+    ensure_directory(&dir)?;
+    // Only creation and lease registration serialize with a sweep. Bytes,
+    // hashing/decoding by intake, and durability I/O hold no shared guard.
+    let mut preparing = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
+    let file = tempfile::Builder::new().prefix("payload-").tempfile_in(&dir)?;
+    let (mut file, path) = file.into_parts();
+    preparing.insert(path.to_path_buf(), IntakeLease::Preparing);
+    let owned = IntakeFile {
+        path: path.to_path_buf(),
+        file: Some(path),
+    };
+    drop(preparing);
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    File::open(&dir)?.sync_all()?;
+    Ok(owned)
+}
+
 /// A failed tracking commit drops these files. A successful commit releases
 /// only the files actually named by durable inbox rows (stale fetches may drop).
 pub(super) struct Intake {
     pub entries: Vec<InboxEntry>,
     pub refused: Vec<incoming::RefusedEntry>,
-    files: Vec<tempfile::TempPath>,
+    files: Vec<IntakeFile>,
 }
 impl Intake {
-    pub fn commit(self, live: &[StoredInboxEntry]) -> Result<(), Error> {
+    /// Update lease metadata while tracking access protects the committed inbox paths.
+    pub fn publish(&self, live: &[StoredInboxEntry]) {
         let paths = live_paths(live);
-        for file in self.files {
-            if paths.contains(file.to_path_buf().as_path()) {
-                file.keep().map_err(|error| Error::from(error.error))?;
+        let mut preparing = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
+        for owned in &self.files {
+            if let Some(lease) = preparing.get_mut(&owned.path) {
+                *lease = if paths.contains(&owned.path) {
+                    IntakeLease::Published
+                } else {
+                    IntakeLease::Retired
+                };
             }
         }
+    }
+
+    /// Explicit reads finish outside runtime/tracking access. A sweep may have
+    /// retired a published reference while this owner was waiting to finish.
+    pub fn finish(self) -> Result<(), Error> {
+        for mut owned in self.files {
+            let mut preparing = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
+            if preparing.get(&owned.path) == Some(&IntakeLease::Published) {
+                owned
+                    .file
+                    .take()
+                    .ok_or(Error::InvalidData)?
+                    .keep()
+                    .map_err(|error| Error::from(error.error))?;
+                // Release atomically with keep: a later sweep must see a
+                // finished file, rather than retire an already-kept lease.
+                preparing.remove(&owned.path);
+            }
+            drop(preparing);
+            drop(owned);
+        }
         Ok(())
+    }
+
+    pub fn commit(self, live: &[StoredInboxEntry]) -> Result<(), Error> {
+        self.publish(live);
+        self.finish()
     }
 }
 
@@ -130,14 +208,14 @@ pub(super) fn intake(
                                         == Some(&received.entity.fields.key))
                         });
                         if valid {
-                            let file = write(root, binding, "inbox", &bytes)?;
+                            let owned = write_intake(root, binding, &bytes)?;
                             let entry = entries.first_mut().ok_or(Error::InvalidData)?;
                             entry.reason = InboxReason::Ready;
                             let InboxValue::Record { staged_asset, .. } = &mut entry.value else {
                                 return Err(Error::InvalidData);
                             };
-                            *staged_asset = Some(file.to_string_lossy().into_owned());
-                            output.files.push(file);
+                            *staged_asset = Some(owned.path.to_string_lossy().into_owned());
+                            output.files.push(owned);
                         } else {
                             entries.clear();
                             refused.push(refusal(record, &received.entity, at));
@@ -221,6 +299,35 @@ pub(super) fn receive_owned(
     c::receive(key, name, envelope, asset)
 }
 
+/// Remove the previous path after its inbox reference has been replaced.
+/// Generated paths are unique and cannot be reused by later intake, allowing
+/// removal outside runtime and tracking access.
+pub(super) fn discard_replaced(
+    root: &Path,
+    binding: BindingId,
+    old: &StoredInboxEntry,
+    live: &[StoredInboxEntry],
+) -> Result<(), Error> {
+    let InboxValue::Record {
+        staged_asset: Some(path),
+        ..
+    } = &old.entry.value
+    else {
+        return Ok(());
+    };
+    let path = Path::new(path);
+    if live_paths(live).contains(path) {
+        return Ok(());
+    }
+    owned(root, binding, path)?;
+    match fs::remove_file(path) {
+        Ok(()) => File::open(path.parent().ok_or(Error::InvalidData)?)?.sync_all()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
 /// Requires tracking access. Remove only this binding's unused inbox files;
 /// pending intents retain their rows until collection and WAL work settles.
 pub(super) fn sweep(root: &Path, binding: BindingId, live: &[StoredInboxEntry]) -> Result<(), Error> {
@@ -232,12 +339,17 @@ pub(super) fn sweep(root: &Path, binding: BindingId, live: &[StoredInboxEntry]) 
         Ok(_) => {}
     }
     let paths = live_paths(live);
+    let mut preparing = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
         owned(root, binding, &path)?;
         if !paths.contains(&path) {
-            fs::remove_file(path)?;
+            match preparing.get_mut(&path) {
+                Some(lease) if *lease == IntakeLease::Published => *lease = IntakeLease::Retired,
+                Some(_) => {}
+                None => fs::remove_file(path)?,
+            }
         }
     }
     File::open(dir)?.sync_all()?;

@@ -21,6 +21,8 @@ use super::{entity_codec as codec, *};
 mod adapter_impl;
 #[path = "adoption_runtime.rs"]
 mod adoption_impl;
+#[path = "asset_read_runtime.rs"]
+pub(super) mod asset_read_impl;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
 #[path = "media_runtime.rs"]
@@ -448,7 +450,7 @@ pub struct Runtime {
     #[cfg(feature = "test-hooks")]
     cloud_capture_hook: Mutex<Option<CloudCaptureHook>>,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct ScanGuard {
     invalidation: u64,
     binding: BindingId,

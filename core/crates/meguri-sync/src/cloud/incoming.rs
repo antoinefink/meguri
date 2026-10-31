@@ -78,6 +78,13 @@ pub struct ApplyRun {
 #[derive(Default)]
 pub(crate) struct ProcessState {
     pub running: bool,
+    pub asset_read_next: u64,
+    pub asset_pass_next: u64,
+    pub asset_passes: std::collections::BTreeMap<u64, super::runtime::asset_read_impl::ReadPass>,
+    pub asset_reads: std::collections::BTreeMap<u64, super::runtime::asset_read_impl::PendingRead>,
+    // Accepted reads whose accounting has not committed. Terminal delivery
+    // retires ownership, never this per-open admission fence.
+    pub asset_read_accounting: std::collections::BTreeMap<u64, ([u8; 16], u64)>,
     pub retry_granted: bool,
     pub failed_this_open: std::collections::BTreeSet<i64>,
     pub runs: Vec<ApplyRun>,
@@ -168,4 +175,46 @@ pub(crate) fn classify(key: &[u8; 32], records: &[workflow::Saved], at: i64) -> 
         }
     }
     (entries, refused)
+}
+
+/// Retry scheduling belongs to policy. The first save-conflict read is issued
+/// only for a grant persisted by the original handed send result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssetReadKind {
+    Retry,
+    SaveConflictFirst,
+}
+
+/// One event-triggered visit to the entries present when the pass began.
+/// Runtime retains the cursor, full authority and original policy command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssetReadPass {
+    pub(super) id: u64,
+    pub(super) sdk: String,
+    pub(super) kind: AssetReadKind,
+}
+
+/// An opaque selection of one actual waiting entry. Returning this value is
+/// necessary but not sufficient authority: Runtime retains its guard and row.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssetReadRequest {
+    pub(super) id: u64,
+    pub(super) sdk: String,
+    pub(super) name: String,
+    pub(super) zone: String,
+    pub(super) kind: AssetReadKind,
+}
+impl AssetReadRequest {
+    pub fn sdk_instance(&self) -> &str {
+        &self.sdk
+    }
+    pub fn record_name(&self) -> &str {
+        &self.name
+    }
+    pub fn zone(&self) -> &str {
+        &self.zone
+    }
+    pub fn kind(&self) -> AssetReadKind {
+        self.kind
+    }
 }

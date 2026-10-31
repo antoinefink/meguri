@@ -1,5 +1,93 @@
 //! Pure Rust execution ports. No provider or native callback runs under Driver authority.
 use super::*;
+use crate::cloud::incoming::{AssetReadKind, AssetReadPass, AssetReadRequest};
+
+impl Driver {
+    /// Retain this exact issued command for the entire once-per-action pass.
+    pub fn begin_native_asset_read_pass(
+        &self,
+        command: &Command,
+        sdk: &str,
+        collection: &Collection,
+    ) -> Result<AssetReadPass, DriverError> {
+        self.validate(command)?;
+        if command.action.kind != ActionKind::RetryAssetEntries {
+            return Err(DriverError::NotCoreAction);
+        }
+        Ok(self
+            .runtime
+            .begin_asset_read_pass_owned(sdk, collection, AssetReadKind::Retry, Some(command.clone()))?)
+    }
+
+    pub fn next_native_asset_read(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        pass: &AssetReadPass,
+    ) -> Result<Option<AssetReadRequest>, DriverError> {
+        self.validate(command)?;
+        if !self.runtime.asset_pass_command(pass, command) {
+            return Err(DriverError::StaleCommand);
+        }
+        Ok(self.runtime.next_asset_read(collection, pass)?)
+    }
+
+    /// Same synchronous queue contract as native control admission. Validation
+    /// releases Driver authority before Runtime checks the exact selection and
+    /// invokes foreign enqueue. Neither lock spans that callback or reply wait.
+    pub fn submit_native_asset_read_queue(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        enqueue: impl FnOnce() -> bool,
+    ) -> Result<bool, DriverError> {
+        if let Err(error) = self.validate(command) {
+            if self.runtime.asset_request_command(request, command) {
+                self.runtime.cancel_asset_read(request);
+            }
+            return Err(error);
+        }
+        if !self.runtime.asset_request_command(request, command) {
+            return Err(DriverError::StaleCommand);
+        }
+        let mut command_error = None;
+        let admission = self.runtime.submit_asset_read_queue(collection, request, || {
+            // Validate the command after Runtime checks the file and reader.
+            // Policy changes during preparation must be reflected at admission.
+            if let Err(error) = self.validate(command) {
+                command_error = Some(error);
+                return false;
+            }
+            enqueue()
+        });
+        if let Some(error) = command_error {
+            return Err(error);
+        }
+        Ok(admission?)
+    }
+
+    pub fn native_asset_read_result(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        result: Option<&crate::cloud::workflow::FetchedRecord>,
+    ) -> Result<bool, DriverError> {
+        if let Err(error) = self.validate(command) {
+            if self.runtime.asset_request_command(request, command) {
+                self.runtime.retire_asset_read(request);
+            }
+            return Err(error);
+        }
+        if !self.runtime.asset_request_command(request, command) {
+            return Err(DriverError::StaleCommand);
+        }
+        Ok(self
+            .runtime
+            .asset_read_result(request.sdk_instance(), collection, request, result)?)
+    }
+}
 
 impl Driver {
     /// P12.3 step 1. Only this query decides whether native may keep waiting.

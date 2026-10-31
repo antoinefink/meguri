@@ -105,6 +105,11 @@ pub(super) fn validate(c: &Connection, required: bool) -> Result<(), Error> {
 }
 
 pub(super) fn facts(c: &Connection, b: BindingId, name: &str) -> Result<Option<EntityFacts>, Error> {
+    facts_for(c, b, name, true)
+}
+
+// Receive compares identity/version metadata only; applying still needs bodies.
+fn facts_for(c: &Connection, b: BindingId, name: &str, bodies: bool) -> Result<Option<EntityFacts>, Error> {
     for (table, notes) in [("cloud_runtime_notes", true), ("cloud_runtime_entities", false)] {
         let exists: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
@@ -119,7 +124,14 @@ pub(super) fn facts(c: &Connection, b: BindingId, name: &str) -> Result<Option<E
             .query_row(&sql, params![b.0.as_slice(), name], |r| r.get(0))
             .optional()?;
         if let Some(text) = text {
-            return Ok(Some(if notes {
+            return Ok(Some(if !bodies {
+                let kind = if notes {
+                    entity_codec::Kind::Note
+                } else {
+                    decode::<EntityFacts>(&text)?.kind
+                };
+                super::tracking_payload::header(kind, &text)?.facts
+            } else if notes {
                 super::workflow_store::note_facts(super::tracking_payload::load_note(c, b, &text)?)?
             } else {
                 let e: EntityFacts = decode(&text)?;
@@ -157,6 +169,17 @@ pub(super) fn receive(
     entries: &[InboxEntry],
     refused: &[RefusedEntry],
 ) -> Result<(), Error> {
+    receive_selected(tx, b, entries, refused, None)
+}
+
+// Equal-version replacement authority is private to the exact guarded read.
+fn receive_selected(
+    tx: &Transaction<'_>,
+    b: BindingId,
+    entries: &[InboxEntry],
+    refused: &[RefusedEntry],
+    settle: Option<i64>,
+) -> Result<(), Error> {
     let active_pass = super::adapter_store::running_pass(tx, b)?;
     // K13.1 records all delivered names, including inputs rejected below.
     // These marks commit with the received entries before cursor persistence.
@@ -171,7 +194,7 @@ pub(super) fn receive(
     }
     let protected: std::collections::BTreeSet<i64> = intents(tx, b)?.into_iter().flat_map(|i| i.inbox_ids).collect();
     for refusal in refused {
-        let local = facts(tx, b, &refusal.record_name)?;
+        let local = facts_for(tx, b, &refusal.record_name, false)?;
         if let (Some(origin), Some(erev)) = (refusal.origin, refusal.erev) {
             if local
                 .as_ref()
@@ -224,10 +247,12 @@ pub(super) fn receive(
     }
     for original in entries {
         let mut inserted = original.clone();
-        inserted.absence_pass = active_pass;
+        if settle.is_none() {
+            inserted.absence_pass = active_pass;
+        }
         let e = &inserted;
         validate_entry(e)?;
-        let local = facts(tx, b, &e.record_name)?;
+        let local = facts_for(tx, b, &e.record_name, false)?;
         let mut q = tx.prepare(
             "SELECT id,entry FROM inbox WHERE binding=?1 AND json_extract(entry,'$.record_name')=?2 ORDER BY id",
         )?;
@@ -268,7 +293,7 @@ pub(super) fn receive(
             }
             if queued
                 .iter()
-                .any(|(_, old)| version(old).is_some_and(|(o, v)| o == origin && v >= erev))
+                .any(|(id, old)| Some(*id) != settle && version(old).is_some_and(|(o, v)| o == origin && v >= erev))
             {
                 continue;
             }
@@ -294,6 +319,14 @@ pub(super) fn receive(
                 "DELETE FROM cloud_refused WHERE binding=?1 AND name=?2",
                 params![b.0.as_slice(), e.record_name],
             )?;
+        }
+        if let Some(id) = settle {
+            // The caller checked this entry and its exact version in this transaction.
+            tx.execute(
+                "UPDATE inbox SET entry=?3 WHERE binding=?1 AND id=?2",
+                params![b.0.as_slice(), id, encode(e)?],
+            )?;
+            continue;
         }
         for (id, _) in queued {
             if !protected.contains(&id) && (version(e).is_some() || matches!(e.value, InboxValue::Deletion)) {
@@ -1032,4 +1065,232 @@ fn settle_absent_key(
         e.observed_generation = observed.2;
     }
     super::workflow_store::put(tx, intent.binding, &e)
+}
+
+/// Durable one-shot grants are separate from per-open retry/apply counts.
+pub(super) fn install_asset_reads(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS cloud_asset_first_reads(
+        inbox INTEGER PRIMARY KEY REFERENCES inbox(id) ON DELETE CASCADE,
+        binding BLOB NOT NULL REFERENCES bindings(id));",
+    )?;
+    Ok(())
+}
+
+fn asset_read_identity(entry: &InboxEntry) -> Result<[u8; 32], Error> {
+    let mut identity = entry.clone();
+    // Another pass charging this version does not make it a new arrival.
+    identity.retry_count = 0;
+    Ok(entity_codec::sha256(encode(&identity)?.as_bytes()))
+}
+
+impl TrackingStore {
+    pub(super) fn asset_read_pass_members(
+        &self,
+        b: BindingId,
+    ) -> Result<std::collections::BTreeMap<i64, [u8; 32]>, Error> {
+        // Inbox rowids may be reused after replacement. Retain only fixed-size
+        // identity digests, then page live rows through the existing selector.
+        let mut query = self
+            .connection
+            .prepare("SELECT id,entry FROM inbox WHERE binding=?1 ORDER BY id")?;
+        let rows = query.query_map([b.0.as_slice()], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.map(|row| {
+            let (id, text) = row?;
+            Ok((id, asset_read_identity(&decode::<InboxEntry>(&text)?)?))
+        })
+        .collect()
+    }
+
+    pub(super) fn select_asset_read(
+        &self,
+        b: BindingId,
+        kind: AssetReadKind,
+        after: i64,
+        members: &std::collections::BTreeMap<i64, [u8; 32]>,
+        excluded: &std::collections::BTreeSet<i64>,
+    ) -> Result<Option<StoredInboxEntry>, Error> {
+        let protected: std::collections::BTreeSet<i64> = intents(&self.connection, b)?
+            .into_iter()
+            .flat_map(|i| i.inbox_ids)
+            .collect();
+        let mut query = self
+            .connection
+            .prepare("SELECT id,entry FROM inbox WHERE binding=?1 AND id>?2 AND id<=?3 ORDER BY id")?;
+        let through = members.last_key_value().map_or(0, |(id, _)| *id);
+        let rows = query.query_map(params![b.0.as_slice(), after, through], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (id, text) = row?;
+            if excluded.contains(&id) || protected.contains(&id) {
+                continue;
+            }
+            let entry: InboxEntry = decode(&text)?;
+            if members.get(&id) != Some(&asset_read_identity(&entry)?) {
+                continue;
+            }
+            if self.asset_read_eligible(b, id, &entry, kind)? {
+                return Ok(Some(StoredInboxEntry { id, entry }));
+            }
+        }
+        Ok(None)
+    }
+
+    fn asset_read_eligible(
+        &self,
+        b: BindingId,
+        id: i64,
+        entry: &InboxEntry,
+        kind: AssetReadKind,
+    ) -> Result<bool, Error> {
+        if entry.record_type != RecordType::Entity || entry.reason != InboxReason::Asset {
+            return Ok(false);
+        }
+        let InboxValue::Record { envelope, .. } = &entry.value else {
+            return Ok(false);
+        };
+        if !matches!(entity_codec::Entity::decode(&envelope.0),
+            Ok(entity_codec::DecodeOutcome::Supported(e)) if e.fields.generation.is_none())
+        {
+            return Ok(false);
+        }
+        let first: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_asset_first_reads WHERE binding=?1 AND inbox=?2)",
+            params![b.0.as_slice(), id],
+            |r| r.get(0),
+        )?;
+        Ok(match kind {
+            AssetReadKind::SaveConflictFirst => first,
+            AssetReadKind::Retry => !first && entry.retry_count < 5,
+        })
+    }
+
+    /// Only called after the synchronous queue has accepted this exact read.
+    pub(super) fn admit_asset_read(
+        &mut self,
+        b: BindingId,
+        expected: &StoredInboxEntry,
+        kind: AssetReadKind,
+    ) -> Result<StoredInboxEntry, Error> {
+        if !self.asset_read_current(b, expected)? || !self.asset_read_eligible(b, expected.id, &expected.entry, kind)? {
+            return Err(Error::InvalidData);
+        }
+        let mut admitted = expected.clone();
+        let tx = self.connection.transaction()?;
+        match kind {
+            AssetReadKind::SaveConflictFirst => {
+                tx.execute(
+                    "DELETE FROM cloud_asset_first_reads WHERE binding=?1 AND inbox=?2",
+                    params![b.0.as_slice(), expected.id],
+                )?;
+            }
+            AssetReadKind::Retry => {
+                admitted.entry.retry_count += 1;
+                tx.execute(
+                    "UPDATE inbox SET entry=?3 WHERE binding=?1 AND id=?2",
+                    params![b.0.as_slice(), expected.id, encode(&admitted.entry)?],
+                )?;
+            }
+        }
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&tx, "cloud.tracking.commit.asset_read")?;
+        tx.commit()?;
+        Ok(admitted)
+    }
+
+    pub(super) fn asset_read_current(&self, b: BindingId, expected: &StoredInboxEntry) -> Result<bool, Error> {
+        Ok(self.inbox(b)?.iter().any(|entry| entry == expected)
+            && !intents(&self.connection, b)?
+                .iter()
+                .any(|i| i.inbox_ids.contains(&expected.id)))
+    }
+
+    pub(super) fn settle_asset_read(
+        &mut self,
+        b: BindingId,
+        expected: &StoredInboxEntry,
+        entries: &[InboxEntry],
+        refused: &[RefusedEntry],
+        same: bool,
+    ) -> Result<Vec<StoredInboxEntry>, Error> {
+        let tx = self.connection.transaction()?;
+        let text: Option<String> = tx
+            .query_row(
+                "SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                params![b.0.as_slice(), expected.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if text.as_deref().map(decode::<InboxEntry>).transpose()?.as_ref() != Some(&expected.entry)
+            || intents(&tx, b)?.iter().any(|i| i.inbox_ids.contains(&expected.id))
+        {
+            return Err(Error::InvalidData);
+        }
+        // Failed reads retain all metadata, including the original system fields.
+        if !(same && entries.first().is_some_and(|e| e.reason == InboxReason::Asset)) {
+            let mut entries = entries.to_vec();
+            if same {
+                for entry in &mut entries {
+                    entry.source = expected.entry.source;
+                    entry.absence_pass = expected.entry.absence_pass;
+                    entry.fetched_at_ms = expected.entry.fetched_at_ms;
+                    entry.retry_count = 0;
+                }
+            }
+            receive_selected(&tx, b, &entries, refused, same.then_some(expected.id))?;
+        }
+        // Collect retained paths within the transaction so a read failure rolls
+        // back before temporary-file destructors can remove referenced data.
+        let live = {
+            let mut query = tx.prepare("SELECT id,entry FROM inbox WHERE binding=?1 ORDER BY id")?;
+            let rows = query.query_map([b.0.as_slice()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.map(|row| {
+                let (id, entry) = row?;
+                Ok(StoredInboxEntry {
+                    id,
+                    entry: decode(&entry)?,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?
+        };
+        tx.commit()?;
+        Ok(live)
+    }
+
+    /// Called only after the runtime proves the actual handler and handed flight.
+    pub(super) fn receive_asset_save_conflict(
+        &mut self,
+        b: BindingId,
+        entries: &[InboxEntry],
+        refused: &[RefusedEntry],
+    ) -> Result<(), Error> {
+        let tx = self.connection.transaction()?;
+        receive(&tx, b, entries, refused)?;
+        for original in entries {
+            if original.reason != InboxReason::Asset {
+                continue;
+            }
+            let mut entry = original.clone();
+            entry.absence_pass = super::adapter_store::running_pass(&tx, b)?;
+            let id: Option<i64> = tx
+                .query_row(
+                    "SELECT id FROM inbox WHERE binding=?1 AND entry=?2",
+                    params![b.0.as_slice(), encode(&entry)?],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            // A stale result never grants an extra read to an existing fetch entry.
+            if let Some(id) = id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO cloud_asset_first_reads(inbox,binding) VALUES(?1,?2)",
+                    params![id, b.0.as_slice()],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }

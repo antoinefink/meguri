@@ -52,11 +52,11 @@ use meguri_sync::cloud::{
 };
 use meguri_testkit::cloud::{
     Field, MutationSuccess, Record, Reply,
-    child_driver::{ApplyInterruption, ApplyKeyRole, TrackingFault},
+    child_driver::{ApplyInterruption, ApplyKeyRole, IncomingProgress, TrackingFault},
     coordinator::{Point, PublicationRig},
     devices::IdentityReads,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, io::Write, sync::Arc};
 use support::*;
 
 fn binding(pair: &Pair) -> BindingId {
@@ -162,6 +162,26 @@ fn changed_note() -> (Pair, i64, String, Payload, Payload) {
     let after = note(&mut pair.sender, id);
     assert_ne!(before.row_digest().unwrap(), after.row_digest().unwrap());
     pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    (pair, id, key, before, after)
+}
+
+fn changed_asset_note() -> (Pair, i64, String, Payload, Payload) {
+    let mut pair = Pair::adopted();
+    let id = notes(&mut pair.sender)[0].id;
+    let key = name(&pair, codec::Kind::Note, id);
+    let before = note(&mut pair.receiver, id);
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    let field = "r".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &[&field, "remote asset A"])
+        .unwrap();
+    let after = note(&mut pair.sender, id);
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let record = saved(&pair, &key);
+    assert!(envelope(&record).payload.is_none());
+    assert!(envelope(&record).fields.generation.is_none());
+    assert_eq!(body(&record), after);
     (pair, id, key, before, after)
 }
 
@@ -599,6 +619,1791 @@ fn power_loss_of_mixed_live_update_and_tombstone_replays_real_post_commit_intent
         assert!(envelope(&saved(&pair, &deleted_key)).fields.tombstone);
         pair.close();
     }
+}
+
+// Rust/core asset-read slice: integration base 332cfb29e29bf51aec54e92f6f8934dfa29da6e7;
+// original batch base 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+// Review/fix: corrected P2 (ordinary equal-erev delivery stays stale); added
+// named core retry cases before implementation. One source consistency pass;
+// no build/test/formatter, commit, gate, or acceptance evidence in this packet.
+// K13.1 / K20 / P24 / Q11: ordinary pa, before native retry scheduling.
+#[test]
+fn inbox_diagnostic_hashes_complete_near_inline_values_without_an_oversized_reply() {
+    use meguri_sync::cloud::{InboxValue, OpaqueBytes};
+    use meguri_testkit::cloud::{Caller, Operation, RequestedFields};
+
+    const FRAME_BYTES: usize = 16 * 1024 * 1024;
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let template = notes(&mut pair.sender)[0].clone();
+    let did = pair
+        .sender
+        .driver()
+        .collection_rows()
+        .unwrap()
+        .iter()
+        .find_map(|p| match p {
+            Payload::Card(c) if c.nid == template.id => Some(c.did),
+            _ => None,
+        })
+        .unwrap();
+    let zone = pair.sender.collection_zone().unwrap();
+    let field = "r".repeat(codec::INLINE_ENVELOPE_BYTES - 4096);
+    let mut expected = Vec::new();
+    let mut ids = BTreeSet::new();
+    let mut full_value_json_bytes = 0;
+    assert!(pair.receiver.driver().inbox_entries(b).unwrap().is_empty());
+    for index in 0..8 {
+        let added = pair
+            .sender
+            .driver()
+            .add_note(template.mid, did, &[&format!("diagnostic {index}"), &field])
+            .unwrap();
+        assert!(
+            pair.sender.sync_now_and_drain(&mut pair.service, STEPS).is_ok(),
+            "sender sync failed index={index} phase={}",
+            pair.sender.last_sync_phase()
+        );
+        let key = name(&pair, codec::Kind::Note, added.note.id);
+        // Read one real saved version: the aggregate exceeds Service::inspect's
+        // small-fixture cap too. Never collect the full record bodies together.
+        let response = pair
+            .service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Read {
+                    zone: zone.clone(),
+                    name: key.clone(),
+                    fields: RequestedFields::All,
+                },
+            )
+            .unwrap();
+        let Ok(Reply::Record(remote)) = response.result else {
+            panic!("actual saved sender record")
+        };
+        let entity = envelope(&remote);
+        assert!(entity.payload.is_some());
+        assert!(entity.fields.generation.is_none());
+        assert!(!remote.fields.contains_key("pa"));
+        let Field::EncryptedBytes(bytes) = &remote.fields["e"] else {
+            panic!("actual inline envelope")
+        };
+        assert!(bytes.len() > codec::INLINE_ENVELOPE_BYTES - 8192);
+        assert!(bytes.len() <= codec::INLINE_ENVELOPE_BYTES);
+        let actual_value = InboxValue::Record {
+            erev: entity.fields.erev,
+            system_fields: OpaqueBytes(remote.system_fields.bytes().to_vec()),
+            envelope: OpaqueBytes(bytes.clone()),
+            staged_asset: None,
+        };
+        let encoded = serde_json::to_vec(&actual_value).unwrap();
+        full_value_json_bytes += encoded.len();
+        let digest = codec::sha256(&encoded);
+        drop(encoded);
+        pair.receiver
+            .driver()
+            .deliver_collection_records(std::slice::from_ref(&remote))
+            .unwrap();
+        let entries = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(entries.len(), expected.len() + 1);
+        assert_eq!(&entries[..expected.len()], expected.as_slice());
+        let entry = entries.last().unwrap();
+        assert!(entry.id > 0);
+        assert!(ids.insert(entry.id));
+        assert_eq!(entry.record_name, key);
+        assert_eq!(entry.erev, entity.fields.erev);
+        assert_eq!(entry.value_sha256, digest);
+        assert_eq!(entry.reason, InboxReason::Ready);
+        assert_eq!(entry.retry_count, 0);
+        expected.push(entry.clone());
+    }
+    // The sum uses each actual value's complete encoding, a strict lower bound
+    // on the original reply including ids, names, reasons, retries and framing.
+    assert!(full_value_json_bytes > FRAME_BYTES);
+    let entries = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(entries, expected);
+    let diagnostic_bytes = serde_json::to_vec(&entries).unwrap().len();
+    assert!(diagnostic_bytes <= entries.len() * 1024);
+    assert!(diagnostic_bytes < FRAME_BYTES);
+    pair.close();
+}
+
+#[test]
+fn ordinary_asset_same_version_reread_recovers_through_intent_writer_wal_and_ack() {
+    let (mut pair, id, key, before, after) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let entity = envelope(&remote);
+    let old_ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(entity.fields.origin, old_ack.origin);
+    assert_ne!(entity.fields.writer, b.0, "ordinary incoming, not an own landed save");
+    assert!(old_ack.in_flight.is_empty());
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("production send must save a real pa on Service")
+    };
+    assert_eq!(asset.bytes(), after.encode().unwrap());
+    assert_eq!(asset.size(), entity.payload_size);
+    assert_eq!(asset.sha256(), entity.payload_sha256);
+    // The parent keeps both source files alive through their intake replies.
+    // The saved Service record and its system fields never change on a reread.
+    let mut downloaded = tempfile::NamedTempFile::new().unwrap();
+    downloaded.write_all(asset.bytes()).unwrap();
+    downloaded.as_file().sync_all().unwrap();
+    let mut bad_bytes = asset.bytes().to_vec();
+    bad_bytes[0] ^= 1;
+    let mut invalid = tempfile::NamedTempFile::new().unwrap();
+    invalid.write_all(&bad_bytes).unwrap();
+    invalid.as_file().sync_all().unwrap();
+    assert_ne!(codec::sha256(&bad_bytes), entity.payload_sha256);
+    let rows = pair.receiver.driver().collection_rows().unwrap();
+    let initial = pair.receiver.driver().incoming_observation(b).unwrap();
+    let mut waiting = None;
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    // An ordinary equal-version delivery remains stale even with a valid file.
+    let ordinary_wait = pair.receiver.driver().inbox_entries(b).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, Some(downloaded.path()))
+        .unwrap();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), ordinary_wait);
+    for path in [None, Some(invalid.path())] {
+        let request = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), path)
+            .unwrap();
+        assert!(matches!(
+            pair.receiver.driver().drain_incoming(STEPS).unwrap(),
+            IncomingProgress::Completed(0)
+        ));
+        let entries = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].record_name, key);
+        assert_eq!(entries[0].erev, entity.fields.erev);
+        assert_eq!(entries[0].reason, InboxReason::Asset);
+        if let Some(previous) = &waiting {
+            let previous: &Vec<meguri_testkit::cloud::child_driver::IncomingInboxEntry> = previous;
+            assert_eq!(entries[0].id, previous[0].id);
+            assert_eq!(entries[0].erev, previous[0].erev);
+            assert_eq!(entries[0].retry_count, previous[0].retry_count + 1);
+        }
+        waiting = Some(entries);
+        assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+        assert!(pair.receiver.driver().refused_entries(b).unwrap().is_empty());
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+        assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+        let unchanged = pair.receiver.driver().incoming_observation(b).unwrap();
+        assert_eq!(unchanged.seq, initial.seq);
+        assert_eq!(unchanged.col_mod, initial.col_mod);
+        assert_eq!(unchanged.change_events, initial.change_events);
+        assert_eq!(unchanged.runs, initial.runs);
+    }
+    let waiting = waiting.unwrap();
+    pair.receiver
+        .driver()
+        .pause_automatic_wal_flush_for_testing(true)
+        .unwrap();
+    pair.receiver.hold(Point::ApplyAfterIntent).unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    pair.receiver
+        .driver()
+        .asset_read_result(&request, Some(&remote), Some(downloaded.path()))
+        .unwrap();
+    // Explicit read intake copies the real bytes and settles this entry in place.
+    let ready = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].reason, InboxReason::Ready);
+    assert_eq!(ready[0].id, waiting[0].id);
+    assert_eq!(ready[0].erev, entity.fields.erev);
+    assert_eq!(ready[0].retry_count, 0);
+    drop(downloaded); // subsequent application reads the file retained by Runtime
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ApplyAfterIntent));
+    let intents = pair.receiver.driver().apply_intents(b).unwrap();
+    assert_eq!(intents.len(), 1);
+    let intent = &intents[0];
+    assert_eq!(intent.inbox_ids, vec![waiting[0].id]);
+    assert!(intent.result_seq.is_none());
+    assert_eq!(intent.keys.len(), 1);
+    assert_eq!(intent.keys[0].name, key);
+    assert_eq!(intent.keys[0].role, ApplyKeyRole::Entry);
+    assert!(intent.keys[0].own_flight.is_none());
+    assert_eq!(intent.keys[0].before_digest, Some(before.row_digest().unwrap()));
+    assert_eq!(intent.keys[0].after_digest, Some(after.row_digest().unwrap()));
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    pair.receiver.hold(Point::ApplyAfterCommit).unwrap();
+    pair.receiver.release(Point::ApplyAfterIntent).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ApplyAfterCommit));
+    assert_eq!(note(&mut pair.receiver, id), after);
+    let committed = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(committed.runs.len(), initial.runs.len() + 1);
+    let run = committed.runs.last().unwrap();
+    assert_eq!(run.intent_id, intent.id);
+    assert_eq!(run.entry_ids, intent.inbox_ids);
+    assert_eq!(run.changed_keys, BTreeSet::from([key.clone()]));
+    assert_eq!(
+        committed.change_events,
+        [initial.change_events.clone(), vec![run.seq]].concat()
+    );
+    let pending = pair.receiver.driver().apply_intents(b).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].result_seq, Some(run.seq));
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), ready);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    assert!(
+        !committed
+            .wal_receipts
+            .iter()
+            .any(|r| r.native_file == run.native_file && r.generation == run.generation && r.through >= run.seq)
+    );
+    pair.receiver.hold(Point::ApplyAfterFlush).unwrap();
+    pair.receiver.release(Point::ApplyAfterCommit).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ApplyAfterFlush));
+    let flushed = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert!(
+        flushed
+            .wal_receipts
+            .iter()
+            .any(|r| r.native_file == run.native_file && r.generation == run.generation && r.through >= run.seq)
+    );
+    assert_eq!(pair.receiver.driver().apply_intents(b).unwrap(), pending);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), ready);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    pair.receiver.hold(Point::IntentSettlementComplete).unwrap();
+    pair.receiver.release(Point::ApplyAfterFlush).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::IntentSettlementComplete));
+    settled(&mut pair, b);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    let Field::EncryptedBytes(bytes) = &remote.fields["e"] else {
+        panic!("envelope")
+    };
+    assert_eq!(ack.origin, entity.fields.origin);
+    assert_eq!(ack.server_erev, entity.fields.erev);
+    assert_eq!(ack.acked_system_fields, remote.system_fields.bytes());
+    assert_eq!(ack.acked_envelope.0, *bytes);
+    assert_eq!(ack.acked_payload_digest, entity.payload_sha256);
+    assert_eq!(ack.acked_row_digest, after.row_digest().unwrap());
+    assert!(ack.acked_payload.as_ref() == Some(&after));
+    assert_eq!(ack.payload, after);
+    assert_eq!(ack.acked_rev, ack.local_rev);
+    assert!(ack.base_payload.is_none());
+    assert!(ack.mark.is_none());
+    assert!(ack.in_flight.is_empty());
+    pair.receiver.release(Point::IntentSettlementComplete).unwrap();
+    pair.receiver
+        .driver()
+        .pause_automatic_wal_flush_for_testing(false)
+        .unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(matches!(
+        pair.receiver.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Completed(1)
+    ));
+    let applied = pair.receiver.driver().incoming_observation(b).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_records(std::slice::from_ref(&remote))
+        .unwrap();
+    assert!(matches!(
+        pair.receiver.driver().drain_incoming(STEPS).unwrap(),
+        IncomingProgress::Completed(0)
+    ));
+    let duplicate = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(duplicate.runs, applied.runs);
+    assert_eq!(duplicate.seq, applied.seq);
+    assert_eq!(duplicate.change_events, applied.change_events);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    settled(&mut pair, b);
+    assert_eq!(saved(&pair, &key), remote, "recovery issued no newer Service save");
+    pair.receiver.close_clean().unwrap();
+    pair.reopen_before_identity();
+    assert_eq!(note(&mut pair.receiver, id), after);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    settled(&mut pair, b);
+    pair.verify_and_drive();
+    let reopened = pair.receiver.driver().incoming_observation(b).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_records(std::slice::from_ref(&remote))
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    let duplicate = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(duplicate.runs, reopened.runs);
+    assert_eq!(duplicate.seq, reopened.seq);
+    assert_eq!(duplicate.change_events, reopened.change_events);
+    assert_eq!(note(&mut pair.receiver, id), after);
+    settled(&mut pair, b);
+    pair.close();
+}
+
+fn asset_retry() -> meguri_sync::cloud::incoming::AssetReadKind {
+    meguri_sync::cloud::incoming::AssetReadKind::Retry
+}
+
+// Admission review repairs over the supplied unlanded candidate (root gate
+// 332cfb29); original integration base remains 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+// Source-only controls; root owns execution, review and acceptance.
+#[test]
+fn accepted_asset_accounting_fault_closes_admission_through_original_terminal_result() {
+    use meguri_sync::cloud::incoming::AssetReadKind;
+    for kind in [asset_retry(), AssetReadKind::SaveConflictFirst] {
+        let (mut pair, id, key, _, _) = changed_asset_note();
+        let b = binding(&pair);
+        if kind == AssetReadKind::SaveConflictFirst {
+            pair.receiver
+                .driver()
+                .edit_note_fields(id, &["local", "pending"])
+                .unwrap();
+            pair.receiver
+                .driver()
+                .deliver_real_asset_save_conflict(&mut pair.service, &scope(), &key)
+                .unwrap();
+        } else {
+            let remote = saved(&pair, &key);
+            pair.receiver
+                .driver()
+                .deliver_collection_asset_download(&remote, None)
+                .unwrap();
+        }
+        let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+        let rows = pair.receiver.driver().collection_rows().unwrap();
+        let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+        let pass = pair.receiver.driver().begin_asset_read_pass(kind).unwrap();
+        let request = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+        pair.receiver
+            .driver()
+            .arm_tracking_fault("cloud.tracking.commit.asset_read", TrackingFault::Io)
+            .unwrap();
+        let error = pair.receiver.driver().admit_asset_read(&request, true).unwrap_err();
+        assert!(error.to_string().contains("RuntimeTracking(Io)"), "{error}");
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&request).unwrap(),
+            (true, true)
+        );
+        assert!(!pair.receiver.driver().cancel_asset_read(&request).unwrap());
+        assert!(pair.receiver.driver().next_asset_read(&pass).is_err());
+        for blocked in [asset_retry(), AssetReadKind::SaveConflictFirst] {
+            assert!(pair.receiver.driver().begin_asset_read_pass(blocked).is_err());
+        }
+        // The failed accounting return did not cancel the accepted operation.
+        // Its actual failed terminal callback still reaches preparation and owns
+        // both runtime and transport state until that callback finishes.
+        pair.receiver.driver().hold_asset_read_prepared().unwrap();
+        assert!(pair.receiver.driver().asset_read_result(&request, None, None).is_err());
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&request).unwrap(),
+            (true, true)
+        );
+        pair.receiver.driver().release_asset_read_prepared().unwrap();
+        assert!(!pair.receiver.driver().asset_read_result(&request, None, None).unwrap());
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&request).unwrap(),
+            (false, false)
+        );
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+        assert!(pair.receiver.driver().begin_asset_read_pass(kind).is_err());
+        pair.receiver.driver().recreate_asset_sdk().unwrap();
+        assert!(pair.receiver.driver().begin_asset_read_pass(kind).is_err());
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+        assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+        assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+        // Actual reopening resets policy; no synthetic accounting recovery or
+        // retry is supplied. Lost first-read grants become ordinary retries.
+        pair.receiver.close_clean().unwrap();
+        pair.reopen_before_identity();
+        pair.verify_and_drive();
+        let fresh = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 1);
+        pair.receiver.driver().asset_read_result(&fresh, None, None).unwrap();
+        pair.close();
+    }
+}
+
+#[test]
+fn highest_unvisited_asset_replacement_waits_for_a_fresh_pass_despite_reused_rowid() {
+    let (mut pair, id, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let other_id = notes(&mut pair.sender).into_iter().find(|n| n.id != id).unwrap().id;
+    let other_key = name(&pair, codec::Kind::Note, other_id);
+    let field = "h".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(other_id, &[&field, "unvisited"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let other = saved(&pair, &other_key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&other, None)
+        .unwrap();
+    let original = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(original.len(), 2);
+    assert_eq!(original[1].record_name, other_key);
+    assert!(original[1].id > original[0].id);
+    let pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let visited = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+    assert_eq!(visited.record_name(), key);
+    assert!(pair.receiver.driver().admit_asset_read(&visited, true).unwrap());
+    pair.receiver.driver().asset_read_result(&visited, None, None).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(other_id, &[&field, "post-pass successor"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let successor = saved(&pair, &other_key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&successor, None)
+        .unwrap();
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let replaced = waiting.iter().find(|e| e.record_name == other_key).unwrap();
+    // Observe SQLite's real reuse after actual version replacement, rather than
+    // pretending that INTEGER PRIMARY KEY provides an arrival counter.
+    assert_eq!(replaced.id, original[1].id);
+    assert!(replaced.erev > original[1].erev);
+    assert_eq!(replaced.retry_count, 0);
+    assert!(pair.receiver.driver().next_asset_read(&pass).unwrap().is_none());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    let fresh = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let first = pair.receiver.driver().next_asset_read(&fresh).unwrap().unwrap();
+    assert_eq!(first.record_name(), key);
+    assert!(pair.receiver.driver().cancel_asset_read(&first).unwrap());
+    let next = pair.receiver.driver().next_asset_read(&fresh).unwrap().unwrap();
+    assert_eq!(next.record_name(), other_key);
+    assert!(!pair.receiver.driver().admit_asset_read(&next, false).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&fresh).unwrap().is_none());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    pair.close();
+}
+
+#[test]
+fn new_asset_pass_preserves_old_accepted_owner_until_stale_terminal_call() {
+    for replace_sdk in [false, true] {
+        let (mut pair, id, key, before, _) = changed_asset_note();
+        let b = binding(&pair);
+        let older = saved(&pair, &key);
+        pair.receiver
+            .driver()
+            .deliver_collection_asset_download(&older, None)
+            .unwrap();
+        let old = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        assert_eq!(pair.receiver.driver().asset_read_ownership(&old).unwrap(), (true, true));
+        if replace_sdk {
+            pair.receiver.driver().recreate_asset_sdk().unwrap();
+        } else {
+            let (before_sdk, after_sdk) = pair.receiver.driver().suspend_resume_asset_sdk().unwrap();
+            assert_eq!(before_sdk, old.sdk_instance());
+            assert_eq!(after_sdk, before_sdk);
+        }
+        assert_eq!(pair.receiver.driver().asset_read_ownership(&old).unwrap(), (true, true));
+        let field = "s".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+        pair.sender
+            .driver()
+            .edit_note_fields(id, &[&field, "new authority successor"])
+            .unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let newer = saved(&pair, &key);
+        pair.receiver
+            .driver()
+            .deliver_collection_asset_download(&newer, None)
+            .unwrap();
+        let pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+        assert_eq!(pair.receiver.driver().asset_read_ownership(&old).unwrap(), (true, true));
+        let successor = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+        assert_ne!(successor, old);
+        assert_eq!(successor.record_name(), old.record_name());
+        assert!(pair.receiver.driver().admit_asset_read(&successor, true).unwrap());
+        let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&successor).unwrap(),
+            (true, true)
+        );
+        assert!(
+            pair.receiver
+                .driver()
+                .asset_read_result(&old, Some(&older), None)
+                .is_err()
+        );
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&old).unwrap(),
+            (false, false)
+        );
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&successor).unwrap(),
+            (true, true)
+        );
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+        assert_eq!(note(&mut pair.receiver, id), before);
+        let Field::Asset(asset) = &newer.fields["pa"] else {
+            panic!("pa")
+        };
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(asset.bytes()).unwrap();
+        file.as_file().sync_all().unwrap();
+        assert!(
+            pair.receiver
+                .driver()
+                .asset_read_result(&successor, Some(&newer), Some(file.path()))
+                .unwrap()
+        );
+        assert_eq!(
+            pair.receiver.driver().asset_read_ownership(&successor).unwrap(),
+            (false, false)
+        );
+        assert!(pair.receiver.driver().next_asset_read(&pass).unwrap().is_none());
+        drop(file);
+        pair.receiver.driver().drain_incoming(STEPS).unwrap();
+        assert_eq!(note(&mut pair.receiver, id), body(&newer));
+        settled(&mut pair, b);
+        pair.close();
+    }
+}
+
+#[test]
+fn asset_read_selection_is_unique_and_retry_budget_tracks_enqueue_success() {
+    let (mut pair, id, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let late_id = notes(&mut pair.sender).into_iter().find(|n| n.id != id).unwrap().id;
+    let late_key = name(&pair, codec::Kind::Note, late_id);
+    let field = "q".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(late_id, &[&field, "second asset"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let late = saved(&pair, &late_key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&late, None)
+        .unwrap();
+    let initial = pair.receiver.driver().inbox_entries(b).unwrap();
+    let rows = pair.receiver.driver().collection_rows().unwrap();
+    let pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let first = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), initial);
+    assert!(pair.receiver.driver().next_asset_read(&pass).is_err());
+    // This acknowledges a real synchronous child enqueue, not a read result.
+    assert!(pair.receiver.driver().admit_asset_read(&first, true).unwrap());
+    assert!(!pair.receiver.driver().cancel_asset_read(&first).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&pass).is_err());
+    pair.receiver.driver().asset_read_result(&first, None, None).unwrap();
+    let second = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+    assert_ne!(first.record_name(), second.record_name());
+    assert!(!pair.receiver.driver().admit_asset_read(&second, false).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&pass).unwrap().is_none());
+    let after = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(
+        after
+            .iter()
+            .find(|e| e.record_name == first.record_name())
+            .unwrap()
+            .retry_count,
+        1
+    );
+    assert_eq!(
+        after
+            .iter()
+            .find(|e| e.record_name == second.record_name())
+            .unwrap()
+            .retry_count,
+        0
+    );
+    let fresh = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let cancelled = pair.receiver.driver().next_asset_read(&fresh).unwrap().unwrap();
+    assert!(pair.receiver.driver().cancel_asset_read(&cancelled).unwrap());
+    let remaining = pair.receiver.driver().next_asset_read(&fresh).unwrap().unwrap();
+    assert_ne!(remaining.record_name(), cancelled.record_name());
+    assert!(pair.receiver.driver().cancel_asset_read(&remaining).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&fresh).unwrap().is_none());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), after);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    pair.close();
+}
+
+#[test]
+fn cancelled_enqueued_asset_read_keeps_original_file_and_completion_ownership() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let request = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+    assert!(pair.receiver.driver().admit_asset_read(&request, true).unwrap());
+    assert!(!pair.receiver.driver().cancel_asset_read(&request).unwrap());
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    pair.receiver.driver().hold_asset_read_prepared().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    assert!(!pair.receiver.driver().cancel_asset_read(&request).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&pass).is_err());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 1);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert!(file.path().exists());
+    pair.receiver.driver().release_asset_read_prepared().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    assert!(!pair.receiver.driver().cancel_asset_read(&request).unwrap());
+    assert!(pair.receiver.driver().next_asset_read(&pass).unwrap().is_none());
+    assert_eq!(
+        pair.receiver.driver().inbox_entries(b).unwrap()[0].reason,
+        InboxReason::Ready
+    );
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    settled(&mut pair, b);
+    pair.close();
+}
+
+#[test]
+fn first_asset_grant_survives_refused_enqueue_and_stale_pass_cannot_take_successor() {
+    use meguri_sync::cloud::incoming::AssetReadKind;
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    pair.receiver
+        .driver()
+        .edit_note_fields(id, &["local", "pending"])
+        .unwrap();
+    let local = note(&mut pair.receiver, id);
+    assert_ne!(local, before);
+    pair.receiver
+        .driver()
+        .deliver_real_asset_save_conflict(&mut pair.service, &scope(), &key)
+        .unwrap();
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let pass = pair
+        .receiver
+        .driver()
+        .begin_asset_read_pass(AssetReadKind::SaveConflictFirst)
+        .unwrap();
+    let old = pair.receiver.driver().next_asset_read(&pass).unwrap().unwrap();
+    assert!(!pair.receiver.driver().admit_asset_read(&old, false).unwrap());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert!(pair.receiver.driver().next_asset_read(&pass).unwrap().is_none());
+    let cancelled_pass = pair
+        .receiver
+        .driver()
+        .begin_asset_read_pass(AssetReadKind::SaveConflictFirst)
+        .unwrap();
+    let cancelled = pair
+        .receiver
+        .driver()
+        .next_asset_read(&cancelled_pass)
+        .unwrap()
+        .unwrap();
+    assert!(pair.receiver.driver().cancel_asset_read(&cancelled).unwrap());
+    let granted_pass = pair
+        .receiver
+        .driver()
+        .begin_asset_read_pass(AssetReadKind::SaveConflictFirst)
+        .unwrap();
+    let granted = pair.receiver.driver().next_asset_read(&granted_pass).unwrap().unwrap();
+    assert!(pair.receiver.driver().admit_asset_read(&granted, true).unwrap());
+    pair.receiver.driver().asset_read_result(&granted, None, None).unwrap();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    let stale_pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let stale = pair.receiver.driver().next_asset_read(&stale_pass).unwrap().unwrap();
+    pair.receiver.driver().suspend_resume_asset_sdk().unwrap();
+    assert!(pair.receiver.driver().next_asset_read(&stale_pass).is_err());
+    let fresh_pass = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    let fresh = pair.receiver.driver().next_asset_read(&fresh_pass).unwrap().unwrap();
+    assert!(!pair.receiver.driver().cancel_asset_read(&stale).unwrap());
+    assert!(pair.receiver.driver().admit_asset_read(&stale, true).is_err());
+    assert!(!pair.receiver.driver().asset_read_result(&stale, None, None).unwrap());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert!(pair.receiver.driver().admit_asset_read(&fresh, true).unwrap());
+    assert!(!pair.receiver.driver().cancel_asset_read(&fresh).unwrap());
+    pair.receiver.driver().asset_read_result(&fresh, None, None).unwrap();
+    let done = pair
+        .receiver
+        .driver()
+        .begin_asset_read_pass(AssetReadKind::SaveConflictFirst)
+        .unwrap();
+    assert!(pair.receiver.driver().next_asset_read(&done).unwrap().is_none());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 1);
+    assert_eq!(note(&mut pair.receiver, id), local);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    pair.close();
+}
+
+#[test]
+fn asset_retries_count_per_entry_including_a_late_entry_after_fifth_pass() {
+    let (mut pair, id, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    let rows = pair.receiver.driver().collection_rows().unwrap();
+    for count in 1..=5 {
+        let requests = pair.receiver.driver().asset_read_requests(asset_retry()).unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].record_name(), key);
+        pair.receiver
+            .driver()
+            .asset_read_result(&requests[0], None, None)
+            .unwrap();
+        let entries = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(entries[0].retry_count, count);
+        assert_eq!(entries[0].reason, InboxReason::Asset);
+    }
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .is_empty()
+    );
+    let exhausted = pair.receiver.driver().begin_asset_read_pass(asset_retry()).unwrap();
+    assert!(pair.receiver.driver().next_asset_read(&exhausted).unwrap().is_none());
+    let late_id = notes(&mut pair.sender).into_iter().find(|n| n.id != id).unwrap().id;
+    let late_key = name(&pair, codec::Kind::Note, late_id);
+    let field = "l".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(late_id, &[&field, "late asset"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let late = saved(&pair, &late_key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&late, None)
+        .unwrap();
+    assert!(pair.receiver.driver().next_asset_read(&exhausted).unwrap().is_none());
+    for count in 1..=5 {
+        let requests = pair.receiver.driver().asset_read_requests(asset_retry()).unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].record_name(), late_key);
+        pair.receiver
+            .driver()
+            .asset_read_result(&requests[0], Some(&late), None)
+            .unwrap();
+        let entries = pair.receiver.driver().inbox_entries(b).unwrap();
+        assert_eq!(entries.iter().find(|e| e.record_name == key).unwrap().retry_count, 5);
+        assert_eq!(
+            entries.iter().find(|e| e.record_name == late_key).unwrap().retry_count,
+            count
+        );
+    }
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    pair.close();
+}
+
+#[test]
+fn asset_count_three_at_close_gets_five_reads_on_next_actual_open() {
+    let (mut pair, _, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    for _ in 0..3 {
+        let request = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        pair.receiver.driver().asset_read_result(&request, None, None).unwrap();
+    }
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 3);
+    pair.receiver.close_clean().unwrap();
+    pair.reopen_before_identity();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 0);
+    pair.verify_and_drive();
+    // The test-only driver does not run retry actions automatically.
+    for count in 1..=5 {
+        let request = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        pair.receiver.driver().asset_read_result(&request, None, None).unwrap();
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, count);
+    }
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .is_empty()
+    );
+    pair.close();
+}
+
+#[test]
+fn asset_read_results_cannot_settle_a_successor_version_or_sdk() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let older = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&older, None)
+        .unwrap();
+    let old_request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let field = "v".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &[&field, "successor"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let newer = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&newer, None)
+        .unwrap();
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let Field::Asset(asset) = &older.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&old_request, Some(&older), Some(file.path()))
+            .unwrap()
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let selected = pair.receiver.driver().inbox_entries(b).unwrap();
+    // Older results to the current request cannot clear its newer waiting version.
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&request, Some(&older), Some(file.path()))
+            .unwrap()
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let inbox_at_sdk_replacement = pair.receiver.driver().inbox_entries(b).unwrap();
+    pair.receiver.driver().recreate_asset_sdk().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&newer), None)
+            .is_err()
+    );
+    assert_eq!(
+        pair.receiver.driver().inbox_entries(b).unwrap(),
+        inbox_at_sdk_replacement
+    );
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    pair.close();
+}
+
+// Fixer packet: original base 1416a520542a8c5daa38a23bfe398da704c3d6c9;
+// filtered seed 93850d35cda45b3ff758a995b36d970d80466ce1. Four runtime
+// review repairs; source/callsite consistency only, execution belongs to root.
+#[test]
+fn outstanding_asset_read_is_refused_after_actual_same_sdk_suspend_resume() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let old = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let selected = pair.receiver.driver().inbox_entries(b).unwrap();
+    let (before_sdk, after_sdk) = pair.receiver.driver().suspend_resume_asset_sdk().unwrap();
+    assert_eq!(before_sdk, old.sdk_instance());
+    assert_eq!(after_sdk, before_sdk);
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&old, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].id, selected[0].id);
+    // No completion, caller state assertion, or SDK replacement grants this:
+    // begin must prune the old selection using the new core's complete guard.
+    let fresh = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    assert_eq!(fresh.sdk_instance(), old.sdk_instance());
+    assert_ne!(fresh, old);
+    assert_eq!(fresh.record_name(), old.record_name());
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&old, Some(&remote), Some(file.path()))
+            .is_ok_and(|v| !v)
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&fresh, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    pair.close();
+}
+
+fn inbox_asset_files(pair: &Pair) -> Vec<std::path::PathBuf> {
+    let staging = pair.receiver_dir.join("meguri-cloud-staging");
+    let mut files = Vec::new();
+    if staging.exists() {
+        for directory in std::fs::read_dir(staging).unwrap() {
+            let directory = directory.unwrap();
+            if directory.file_name().to_string_lossy().ends_with("-inbox") {
+                files.extend(
+                    std::fs::read_dir(directory.path())
+                        .unwrap()
+                        .map(|file| file.unwrap().path()),
+                );
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn preparation_storage_failure_retires_only_selection_and_restored_storage_recovers() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let observation = pair.receiver.driver().incoming_observation(b).unwrap();
+    let files_before = inbox_asset_files(&pair);
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    let owner = b.0.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let staging = pair.receiver_dir.join("meguri-cloud-staging");
+    std::fs::create_dir_all(&staging).unwrap();
+    let destination = staging.join(format!("pa-{owner}-inbox"));
+    let retained = staging.join("retained-inbox");
+    let existed = destination.exists();
+    if existed {
+        std::fs::rename(&destination, &retained).unwrap();
+    }
+    // Block the destination used by the intake writer. The supplied Service
+    // bytes are valid, so the returned error must describe the storage failure.
+    std::fs::write(&destination, b"blocked destination").unwrap();
+    let error = pair
+        .receiver
+        .driver()
+        .asset_read_result(&request, Some(&remote), Some(file.path()))
+        .unwrap_err();
+    assert!(error.to_string().contains("RuntimeTracking(InvalidData)"));
+    std::fs::remove_file(&destination).unwrap();
+    if existed {
+        std::fs::rename(&retained, &destination).unwrap();
+    }
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let unchanged = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(unchanged.seq, observation.seq);
+    assert_eq!(unchanged.runs, observation.runs);
+    assert_eq!(unchanged.change_events, observation.change_events);
+    let fresh = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    assert_ne!(fresh, request);
+    assert_eq!(fresh.sdk_instance(), request.sdk_instance());
+    assert_eq!(fresh.record_name(), request.record_name());
+    let selected = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(selected[0].id, waiting[0].id);
+    assert_eq!(selected[0].retry_count, waiting[0].retry_count + 1);
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&fresh, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    let settled = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(settled.server_erev, envelope(&remote).fields.erev);
+    assert_eq!(settled.acked_system_fields.as_slice(), remote.system_fields.bytes());
+    assert_eq!(settled.acked_payload_digest, envelope(&remote).payload_sha256);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    pair.close();
+}
+
+#[test]
+fn sent_handler_during_asset_preparation_retires_failed_selection_and_recovers() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let observation = pair.receiver.driver().incoming_observation(b).unwrap();
+    let files_before = inbox_asset_files(&pair);
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    pair.receiver.driver().hold_asset_read_prepared().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    let prepared_files = inbox_asset_files(&pair);
+    assert_eq!(prepared_files.len(), files_before.len() + 1);
+    let owned = prepared_files.iter().find(|path| !files_before.contains(path)).unwrap();
+    assert_eq!(std::fs::read(owned).unwrap(), asset.bytes());
+    // This enters the actual Runtime handler while its preparation worker is
+    // outside both guards. No Sent result, ACK or success is supplied.
+    pair.receiver
+        .driver()
+        .enter_asset_read_sent_handler(request.sdk_instance(), 0)
+        .unwrap();
+    pair.receiver.driver().release_asset_read_prepared().unwrap();
+    let error = pair
+        .receiver
+        .driver()
+        .asset_read_result(&request, Some(&remote), Some(file.path()))
+        .unwrap_err();
+    assert!(error.to_string().contains("RuntimeTracking(InvalidData)"));
+    // The failed completion and its file cleanup finish with the handler still
+    // active. Clearing it must expose this same waiting entry to fresh selection.
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let failed = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(failed.seq, observation.seq);
+    assert_eq!(failed.runs, observation.runs);
+    assert_eq!(failed.wal_receipts, observation.wal_receipts);
+    assert_eq!(failed.change_events, observation.change_events);
+    assert_eq!(
+        pair.receiver
+            .driver()
+            .return_asset_read_sent_handler(request.sdk_instance())
+            .unwrap(),
+        0
+    );
+    let fresh = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    assert_ne!(fresh, request);
+    assert_eq!(fresh.sdk_instance(), request.sdk_instance());
+    assert_eq!(fresh.record_name(), request.record_name());
+    let selected = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(selected[0].id, waiting[0].id);
+    assert_eq!(selected[0].retry_count, waiting[0].retry_count + 1);
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&fresh, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    let settled = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(settled.server_erev, envelope(&remote).fields.erev);
+    assert_eq!(settled.acked_system_fields.as_slice(), remote.system_fields.bytes());
+    assert_eq!(settled.acked_payload_digest, envelope(&remote).payload_sha256);
+    assert!(pair.receiver.driver().inbox_entries(b).unwrap().is_empty());
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    pair.close();
+}
+
+#[test]
+fn published_asset_read_file_survives_until_wal_ack_and_finishes_without_orphan() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let observation = pair.receiver.driver().incoming_observation(b).unwrap();
+    let files_before = inbox_asset_files(&pair);
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    pair.receiver.driver().hold_asset_read_finishing().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    let prepared_files = inbox_asset_files(&pair);
+    assert_eq!(prepared_files.len(), files_before.len() + 1);
+    let owned = prepared_files.iter().find(|path| !files_before.contains(path)).unwrap();
+    assert_eq!(std::fs::read(owned).unwrap(), asset.bytes());
+    let ready = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].id, waiting[0].id);
+    assert_eq!(ready[0].reason, InboxReason::Ready);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    // Release file finalization before applying the entry and covering its WAL.
+    // Keep the referenced file until acknowledgement removes the inbox entry.
+    pair.receiver.driver().release_asset_read_finishing().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    assert_eq!(std::fs::read(owned).unwrap(), asset.bytes());
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    assert!(pair.receiver.driver().inbox_entries(b).unwrap().is_empty());
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let applied = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert!(applied.seq > observation.seq);
+    let run = applied.runs.last().unwrap();
+    assert!(run.entry_ids.contains(&waiting[0].id));
+    assert!(run.changed_keys.contains(&key));
+    assert!(
+        applied
+            .wal_receipts
+            .iter()
+            .any(|receipt| receipt.native_file == run.native_file
+                && receipt.generation == run.generation
+                && receipt.through >= run.seq)
+    );
+    let settled = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(settled.server_erev, envelope(&remote).fields.erev);
+    assert_eq!(settled.acked_system_fields.as_slice(), remote.system_fields.bytes());
+    assert_eq!(settled.acked_payload_digest, envelope(&remote).payload_sha256);
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    pair.close();
+}
+
+#[test]
+fn paused_asset_read_preparation_releases_guards_and_stale_authority_cleans_owned_file() {
+    let (mut pair, id, key, before, _) = changed_asset_note();
+    let b = binding(&pair);
+    let remote = saved(&pair, &key);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    let observation = pair.receiver.driver().incoming_observation(b).unwrap();
+    let files_before = inbox_asset_files(&pair);
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    pair.receiver.driver().hold_asset_read_prepared().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    let prepared_files = inbox_asset_files(&pair);
+    assert_eq!(prepared_files.len(), files_before.len() + 1);
+    let owned = prepared_files.iter().find(|path| !files_before.contains(path)).unwrap();
+    assert_eq!(std::fs::read(owned).unwrap(), asset.bytes());
+    // These commands complete while the actual child preparation is latched.
+    // status takes runtime state; inbox/intent/ACK diagnostics take tracking too.
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    let paused = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(paused.seq, observation.seq);
+    assert_eq!(paused.native_file, observation.native_file);
+    assert_eq!(paused.generation, observation.generation);
+    assert_eq!(paused.col_mod, observation.col_mod);
+    assert_eq!(paused.undo_depth, observation.undo_depth);
+    assert_eq!(paused.runs, observation.runs);
+    assert_eq!(paused.wal_receipts, observation.wal_receipts);
+    assert_eq!(paused.change_events, observation.change_events);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].reason, InboxReason::Asset);
+    assert_eq!(waiting[0].retry_count, 1);
+    let (old_sdk, new_sdk) = pair.receiver.driver().suspend_resume_asset_sdk().unwrap();
+    assert_eq!(old_sdk, new_sdk);
+    let resumed = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].id, waiting[0].id);
+    assert_eq!(resumed[0].record_name, waiting[0].record_name);
+    assert_eq!(resumed[0].erev, waiting[0].erev);
+    assert_eq!(resumed[0].value_sha256, waiting[0].value_sha256);
+    assert_eq!(resumed[0].reason, waiting[0].reason);
+    assert_eq!(resumed[0].retry_count, 0);
+    pair.receiver.driver().hold_asset_read_finishing().unwrap();
+    pair.receiver.driver().release_asset_read_prepared().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    // Pause finalization after authority validation has refused the result.
+    // Both guards are released; the lease protects the file until removal.
+    assert_eq!(inbox_asset_files(&pair), prepared_files);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), resumed);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    let finishing = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(finishing.seq, observation.seq);
+    assert_eq!(finishing.change_events, observation.change_events);
+    pair.receiver.driver().release_asset_read_finishing().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&remote), Some(file.path()))
+            .is_err()
+    );
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    let after = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(after.seq, observation.seq);
+    assert_eq!(after.runs, observation.runs);
+    assert_eq!(after.change_events, observation.change_events);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == ack);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), resumed);
+    let fresh = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&fresh, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&fresh, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), body(&remote));
+    let applied = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert!(applied.seq > observation.seq);
+    let run = applied.runs.last().unwrap();
+    assert!(run.entry_ids.contains(&waiting[0].id));
+    assert!(run.changed_keys.contains(&key));
+    assert_eq!(run.native_file, applied.native_file);
+    assert_eq!(run.generation, applied.generation);
+    assert!(
+        applied
+            .wal_receipts
+            .iter()
+            .any(|receipt| receipt.native_file == run.native_file
+                && receipt.generation == run.generation
+                && receipt.through >= run.seq)
+    );
+    let settled = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(settled.server_erev, envelope(&remote).fields.erev);
+    assert_eq!(settled.acked_system_fields.as_slice(), remote.system_fields.bytes());
+    assert_eq!(settled.acked_payload_digest, envelope(&remote).payload_sha256);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    pair.close();
+}
+
+#[test]
+fn save_conflict_first_asset_read_is_granted_by_a_real_handed_result_and_is_separate() {
+    use meguri_sync::cloud::incoming::AssetReadKind;
+    let (mut pair, id, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    // An ordinary fetch cannot obtain the extra save-conflict read.
+    let remote = saved(&pair, &key);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&remote, None)
+        .unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(AssetReadKind::SaveConflictFirst)
+            .unwrap()
+            .is_empty()
+    );
+    let Field::Asset(asset) = &remote.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    let retry = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&retry, Some(&remote), Some(file.path()))
+            .unwrap()
+    );
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    // Advance the server revision before submitting the conflicting local save.
+    let field = "c".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &[&field, "conflict version"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let local = "l".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.receiver
+        .driver()
+        .edit_note_fields(id, &[&local, "pending"])
+        .unwrap();
+    assert!(pair.receiver.driver().asset_body_read_control(b, &key).unwrap() > 0);
+    pair.receiver
+        .driver()
+        .deliver_real_asset_save_conflict(&mut pair.service, &scope(), &key)
+        .unwrap();
+    assert_eq!(pair.receiver.driver().asset_conflict_body_reads().unwrap(), 0);
+    let requests = pair
+        .receiver
+        .driver()
+        .asset_read_requests(AssetReadKind::SaveConflictFirst)
+        .unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].record_name(), key);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, 0);
+    pair.receiver
+        .driver()
+        .asset_read_result(&requests[0], None, None)
+        .unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(AssetReadKind::SaveConflictFirst)
+            .unwrap()
+            .is_empty()
+    );
+    for count in 1..=5 {
+        let request = pair
+            .receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .remove(0);
+        pair.receiver.driver().asset_read_result(&request, None, None).unwrap();
+        assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap()[0].retry_count, count);
+    }
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(asset_retry())
+            .unwrap()
+            .is_empty()
+    );
+    pair.close();
+}
+
+#[test]
+fn save_conflict_first_same_version_read_applies_and_pending_merge_is_sent_after() {
+    use meguri_sync::cloud::incoming::AssetReadKind;
+    let (mut pair, id, key, _, _) = changed_asset_note();
+    let b = binding(&pair);
+    let server = saved(&pair, &key);
+    pair.receiver.advance_clock_ms(20_000).unwrap();
+    pair.receiver
+        .driver()
+        .edit_note_fields(id, &["new local", "pending merge"])
+        .unwrap();
+    let local = note(&mut pair.receiver, id);
+    let ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    pair.receiver
+        .driver()
+        .deliver_real_asset_save_conflict(&mut pair.service, &scope(), &key)
+        .unwrap();
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].reason, InboxReason::Asset);
+    assert_eq!(waiting[0].retry_count, 0);
+    let pending = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(pending.server_erev, ack.server_erev);
+    assert_eq!(pending.acked_system_fields, ack.acked_system_fields);
+    assert_eq!(pending.acked_payload_digest, ack.acked_payload_digest);
+    assert!(pending.base_payload == ack.base_payload);
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(AssetReadKind::SaveConflictFirst)
+        .unwrap()
+        .remove(0);
+    let Field::Asset(asset) = &server.fields["pa"] else {
+        panic!("pa")
+    };
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(asset.bytes()).unwrap();
+    file.as_file().sync_all().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(&server), Some(file.path()))
+            .unwrap()
+    );
+    let ready = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(ready[0].id, waiting[0].id);
+    assert_eq!(ready[0].erev, waiting[0].erev);
+    assert_eq!(ready[0].reason, InboxReason::Ready);
+    assert_eq!(ready[0].retry_count, 0);
+    drop(file);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(note(&mut pair.receiver, id), local);
+    let merged = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert_eq!(merged.server_erev, envelope(&server).fields.erev);
+    assert!(merged.base_payload.as_ref() == Some(&body(&server)));
+    assert!(merged.mark.is_some());
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_requests(AssetReadKind::SaveConflictFirst)
+            .unwrap()
+            .is_empty()
+    );
+    // The duplicate reply cannot apply twice or recreate the one-shot grant.
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&request, Some(&server), None)
+            .unwrap()
+    );
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let sent = saved(&pair, &key);
+    assert_eq!(envelope(&sent).fields.writer, b.0);
+    assert_eq!(body(&sent), local);
+    assert!(pair.receiver.facts().unwrap().entities[&key].mark.is_none());
+    pair.close();
+}
+
+#[test]
+fn asset_intake_preserves_pending_version_when_revision_or_origin_is_invalid() {
+    use meguri_testkit::cloud::{Mutation, Operation, RecordInput};
+
+    let (mut pair, id, key, before, _) = changed_note();
+    let b = binding(&pair);
+    let older = saved(&pair, &key);
+    let old_ack = pair.receiver.facts().unwrap().entities[&key].clone();
+    let field = "n".repeat(codec::INLINE_ENVELOPE_BYTES + 1);
+    pair.sender
+        .driver()
+        .edit_note_fields(id, &[&field, "newer asset A"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let newer = saved(&pair, &key);
+    let newest = envelope(&newer);
+    assert!(newest.payload.is_none());
+    assert!(newest.fields.erev > envelope(&older).fields.erev);
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&newer, None)
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    let waiting = pair.receiver.driver().inbox_entries(b).unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].reason, InboxReason::Asset);
+    assert_eq!(waiting[0].erev, newest.fields.erev);
+    let initial = pair.receiver.driver().incoming_observation(b).unwrap();
+    pair.receiver
+        .driver()
+        .deliver_collection_asset_download(&older, None)
+        .unwrap();
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    // A real conditional Service save with another origin and a higher erev.
+    // Its owned bytes pass asset intake; id-keyed origin safety must still win.
+    let mut fields = newest.fields.clone();
+    fields.origin[0] ^= 1;
+    fields.erev += 1;
+    let wrong = codec::Entity::build(fields.clone(), &body(&newer).encode().unwrap()).unwrap();
+    let mut record = RecordInput {
+        name: newer.name.clone(),
+        record_type: newer.record_type.clone(),
+        fields: newer.fields.clone(),
+    };
+    record
+        .fields
+        .insert("e".into(), Field::EncryptedBytes(wrong.encode().unwrap()));
+    let response = pair
+        .service
+        .request(
+            &scope(),
+            Default::default(),
+            Operation::Modify {
+                zone: pair.sender.collection_zone().unwrap(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record,
+                    if_unchanged: Some(newer.system_fields.clone()),
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Modified(items)) = response.result else {
+        panic!("real modify")
+    };
+    let Ok(MutationSuccess::Saved(wrong)) = &items[0].result else {
+        panic!("real save")
+    };
+    let Field::Asset(asset) = &wrong.fields["pa"] else {
+        panic!("real pa")
+    };
+    let mut downloaded = tempfile::NamedTempFile::new().unwrap();
+    downloaded.write_all(asset.bytes()).unwrap();
+    downloaded.as_file().sync_all().unwrap();
+    let request = pair
+        .receiver
+        .driver()
+        .asset_read_requests(asset_retry())
+        .unwrap()
+        .remove(0);
+    let selected = pair.receiver.driver().inbox_entries(b).unwrap();
+    let files_before = inbox_asset_files(&pair);
+    pair.receiver.driver().hold_asset_read_finishing().unwrap();
+    assert!(
+        pair.receiver
+            .driver()
+            .asset_read_result(&request, Some(wrong), Some(downloaded.path()))
+            .is_err()
+    );
+    // The rejected intake has prepared valid bytes. Inspect its temporary file
+    // while finalization waits with runtime and tracking access released.
+    assert_eq!(inbox_asset_files(&pair).len(), files_before.len() + 1);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(pair.receiver.driver().refused_entries(b).unwrap().len(), 1);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    assert_eq!(note(&mut pair.receiver, id), before);
+    let finishing = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(finishing.seq, initial.seq);
+    assert_eq!(finishing.change_events, initial.change_events);
+    pair.receiver.driver().release_asset_read_finishing().unwrap();
+    assert!(
+        !pair
+            .receiver
+            .driver()
+            .asset_read_result(&request, Some(wrong), Some(downloaded.path()))
+            .unwrap()
+    );
+    assert_eq!(inbox_asset_files(&pair), files_before);
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    // Verify the origin rejection recorded by this explicit read before any
+    // subsequent fetch can contribute another refusal entry.
+    assert_eq!(inbox_asset_files(&pair).len(), 0);
+    pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), selected);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    let refused = pair.receiver.driver().refused_entries(b).unwrap();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].record_name, key);
+    assert_eq!(refused[0].origin, Some(fields.origin));
+    assert_eq!(refused[0].erev, fields.erev);
+    assert_eq!(refused[0].reason, "origin_mismatch");
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    let unchanged = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(unchanged.seq, initial.seq);
+    assert_eq!(unchanged.runs, initial.runs);
+    assert_eq!(unchanged.change_events, initial.change_events);
+    assert_eq!(pair.receiver.kill().unwrap().signal, Some(9));
+    pair.reopen_before_identity();
+    assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), waiting);
+    assert_eq!(pair.receiver.driver().refused_entries(b).unwrap(), refused);
+    assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
+    assert_eq!(note(&mut pair.receiver, id), before);
+    assert!(pair.receiver.facts().unwrap().entities[&key] == old_ack);
+    pair.close();
 }
 
 #[test]

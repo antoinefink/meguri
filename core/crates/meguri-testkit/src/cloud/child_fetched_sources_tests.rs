@@ -24,6 +24,7 @@ fn staged_sources_survive_suspended_callbacks_until_the_original_terminal_reply(
             completed_work: Vec::new(),
             paused_work: None,
             fetched_sources: BTreeMap::new(),
+            asset_commands: BTreeMap::new(),
         };
         let bytes = b"small actual transport source".to_vec();
         let record = super::super::Record {

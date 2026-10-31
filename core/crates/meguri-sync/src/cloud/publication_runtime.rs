@@ -1385,6 +1385,28 @@ impl meguri_engine::ports::CloudPublicationAuthority for Runtime {
 }
 
 impl Runtime {
+    #[cfg(feature = "test-hooks")]
+    pub fn publication_control_for_testing(&self) -> Result<super::testing::PublicationControl, RuntimeError> {
+        let s = self.state();
+        with_tracking_access(|| -> Result<_, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let current = s.bound.as_ref().map(|b| b.binding.clone());
+            let zones = match &current {
+                Some(binding) => store.retained_zones(binding.id)?,
+                None => BTreeMap::new(),
+            };
+            Ok(super::testing::PublicationControl {
+                current,
+                recovery_ops: store
+                    .publication_op()?
+                    .into_iter()
+                    .map(Into::into)
+                    .chain(store.adoption_op()?.into_iter().map(Into::into))
+                    .collect(),
+                zones,
+            })
+        })
+    }
     pub fn publication_facts(&self, collection: &Collection) -> Result<PublicationFacts, RuntimeError> {
         // Provider reads precede locks; a snapshot is observational, never authority
         // for a later write (the mutating APIs revalidate independently).

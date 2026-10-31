@@ -345,12 +345,15 @@ impl PublicationRig {
     pub fn facts(&self) -> Result<PublicationFacts> {
         self.sdk.borrow_mut().driver.call(Input::PublicationFacts)
     }
+    fn control(&self) -> Result<cloud::testing::PublicationControl> {
+        self.sdk.borrow_mut().driver.call(Input::PublicationControl)
+    }
     pub fn recovery_state(&self) -> Result<RecoveryState> {
         self.sdk.borrow_mut().driver.call(Input::RecoveryState)
     }
     pub fn collection_zone(&self) -> Result<String> {
         Ok(cloud::adapter::collection_zone(
-            self.facts()?.current.ok_or_else(failure)?.facts.epoch,
+            self.control()?.current.ok_or_else(failure)?.facts.epoch,
         ))
     }
     pub fn observations(&self) -> &[Observation] {
@@ -505,7 +508,7 @@ impl PublicationRig {
             return self.sdk.get_mut().driver.call(Input::AdoptionLocal(work));
         }
         let epoch = self
-            .facts()?
+            .control()?
             .recovery_ops
             .into_iter()
             .find(|p| p.id == work.op)
@@ -852,7 +855,7 @@ impl PublicationRig {
                     self.sdk.get_mut().drive_media_budget(service, remaining)?;
                     self.work = None;
                     if self
-                        .facts()?
+                        .control()?
                         .recovery_ops
                         .iter()
                         .any(|op| op.step == PublishStep::Zones)
@@ -863,7 +866,7 @@ impl PublicationRig {
                 }
                 PublicationWork::Idle => {
                     self.work = None;
-                    let facts = self.facts()?;
+                    let facts = self.control()?;
                     if !facts.recovery_ops.is_empty() {
                         return self.refresh();
                     }
@@ -900,8 +903,8 @@ impl PublicationRig {
             self.last_sync_phase = "media_resume";
             self.sdk.get_mut().driver.call::<()>(Input::MediaResume)?;
             let mut remaining = steps;
-            self.last_sync_phase = "read_publication_facts";
-            if self.facts()?.recovery_ops.is_empty() {
+            self.last_sync_phase = "read_publication_control";
+            if self.control()?.recovery_ops.is_empty() {
                 self.explicit_sync_pending = true;
                 self.last_sync_phase = "prepare_sdk";
                 if !self.prepare_sdk(service, &mut remaining)? {
@@ -923,7 +926,7 @@ impl PublicationRig {
         if self.held.is_some() {
             return Ok(());
         }
-        let facts = self.facts()?;
+        let facts = self.control()?;
         if facts.recovery_ops.is_empty()
             && facts
                 .current
@@ -931,7 +934,7 @@ impl PublicationRig {
                 .is_some_and(|b| b.facts.state == cloud::BindingState::Active)
         {
             self.sdk.get_mut().driver.call::<()>(Input::CollectionDrained)?;
-            if self.facts()?.zones.values().any(|z| z.deletion_due) {
+            if self.control()?.zones.values().any(|z| z.deletion_due) {
                 self.cleanup_pending = true;
                 self.drive_budget(service, remaining)?;
             }

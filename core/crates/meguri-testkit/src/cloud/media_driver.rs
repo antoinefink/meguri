@@ -11,7 +11,7 @@ impl SDKRig {
     ) -> Result<bool> {
         self.updates()?;
         while *remaining > 0 {
-            let facts: PublicationFacts = self.driver.call(Input::PublicationFacts)?;
+            let facts: cloud::testing::PublicationControl = self.driver.call(Input::PublicationControl)?;
             if !facts
                 .current
                 .as_ref()

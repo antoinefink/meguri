@@ -189,6 +189,8 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
         Input::Fetched(..)
             | Input::DeliverCollection(..)
             | Input::DeliverCollectionAssets(..)
+            | Input::DeliverCollectionDownload(..)
+            | Input::AssetReadResult(..)
             | Input::DrainIncoming(..)
             | Input::Reconcile
             | Input::Build(..)
@@ -199,10 +201,13 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     }
     // Receive-only work cannot grant a second writer. The journalled apply's
     // AfterIntent hook holds neither runtime nor tracking locks.
-    let nested_receive = matches!(input, Input::DeliverCollection(..) | Input::DeliverCollectionAssets(..))
-        && device.incoming_worker.as_ref().is_some_and(|work| {
-            work.previous.is_none() && work.notified_pause == Some(IncomingStage::ApplyAfterIntent)
-        });
+    let nested_receive = matches!(
+        input,
+        Input::DeliverCollection(..) | Input::DeliverCollectionAssets(..) | Input::DeliverCollectionDownload(..)
+    ) && device
+        .incoming_worker
+        .as_ref()
+        .is_some_and(|work| work.previous.is_none() && work.notified_pause == Some(IncomingStage::ApplyAfterIntent));
     if device.incoming_worker.is_some() && !nested_receive {
         write_frame(
             stream,
@@ -216,6 +221,7 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     let unbound = device.stable.is_none();
     let last_fetch = device.last_fetch_engine_state.clone();
     let submission = device.incoming_submission.clone();
+    let asset_read_queue = device.asset_read_queue.clone();
     let (events, receiver) = mpsc::channel();
     let mut latches = device
         .incoming_latches
@@ -305,6 +311,32 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                         runtime.adapter_fetched_assets(&sdk, &zone, inputs, &[])?;
                         Ok(())
                     })?;
+                    Ok(serde_json::Value::Null)
+                }
+                Input::AssetReadResult(request, input) => {
+                    let input = input.map(|input| core::workflow::FetchedRecord {
+                        record: input.record,
+                        asset_path: input.asset_path,
+                    });
+                    let completion =
+                        runtime.asset_read_result(request.sdk_instance(), &collection, &request, input.as_ref());
+                    // Keep an accepted request until its original callback ends,
+                    // including all preparation/finishing latches and errors.
+                    asset_read_queue
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .retain(|queued| queued != &request);
+                    Ok(serde_json::to_value(completion?)?)
+                }
+                Input::DeliverCollectionDownload(input) => {
+                    let sdk = runtime.incoming_sdk_instance_for_testing().ok_or_else(failure)?;
+                    let binding = runtime.status()?.binding.ok_or_else(failure)?;
+                    let zone = core::adapter::collection_zone(binding.facts.epoch);
+                    let input = core::workflow::FetchedRecord {
+                        record: input.record,
+                        asset_path: input.asset_path,
+                    };
+                    runtime.adapter_fetched_assets(&sdk, &zone, &[input], &[])?;
                     Ok(serde_json::Value::Null)
                 }
                 Input::DeliverCollection(records) => {
