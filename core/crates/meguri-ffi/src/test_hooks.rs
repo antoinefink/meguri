@@ -15,6 +15,54 @@ use crate::events::{self, CoreEventKind};
 use crate::jobs::{self, JobHandle, JobOutcome};
 use crate::{callback, changes, runtime};
 
+#[path = "test_hooks_cloud_asset_reads.rs"]
+mod cloud_asset_read_fixtures;
+
+/// Codec-authored remote pa over the synthetic adapter fixture's real row and
+/// binding. This supplies bytes only; fetched/policy ports must issue the work.
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAssetReadRemoteFixture {
+    pub record: crate::sync::CloudRecord,
+    pub payload: Vec<u8>,
+    pub note_id: i64,
+    pub fields: Vec<u8>,
+}
+
+#[uniffi::export]
+pub fn test_cloud_asset_read_remote_fixture(ordinal: u32) -> Result<CloudAssetReadRemoteFixture, CoreError> {
+    callback::enter("test_cloud_asset_read_remote_fixture");
+    cloud_asset_read_fixtures::remote(ordinal)
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAssetReadFixtureObservation {
+    pub retry_count: Option<u32>,
+    pub owned_count: u64,
+    pub row_fields: Option<Vec<u8>>,
+    pub wal_receipts: u64,
+    pub changed_by_incoming: bool,
+}
+
+#[uniffi::export]
+pub fn test_cloud_asset_read_fixture_observation(
+    name: String,
+    note_id: i64,
+) -> Result<CloudAssetReadFixtureObservation, CoreError> {
+    callback::enter("test_cloud_asset_read_fixture_observation");
+    cloud_asset_read_fixtures::observe(&name, note_id)
+}
+
+/// Fail the next actual admission-accounting transaction after native enqueue.
+#[uniffi::export]
+pub fn test_cloud_asset_read_fail_next_accounting() -> Result<(), CoreError> {
+    callback::enter("test_cloud_asset_read_fail_next_accounting");
+    meguri_sync::cloud::testing::arm_tracking_fault(
+        "cloud.tracking.commit.asset_read",
+        meguri_sync::cloud::testing::TrackingFault::Io,
+    )
+    .map_err(crate::sync::cloud_error)
+}
+
 /// Returns `error`, so Swift can check how each error crosses the bridge.
 #[uniffi::export]
 pub fn test_return_error(error: CoreError) -> Result<(), CoreError> {

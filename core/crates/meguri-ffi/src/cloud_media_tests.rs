@@ -2127,7 +2127,8 @@ fn handed_media_absence(retain_older_flight: bool) {
                 vec![],
                 vec![CloudRecordFailure {
                     name: name.clone(),
-                    code: CloudEngineErrorCode::UnknownItem
+                    code: CloudEngineErrorCode::UnknownItem,
+                    server_record: None,
                 }],
                 batch.saves.len() as u32
             )
@@ -2144,6 +2145,7 @@ fn handed_media_absence(retain_older_flight: bool) {
             vec![CloudRecordFailure {
                 name: name.clone(),
                 code: CloudEngineErrorCode::UnknownItem,
+                server_record: None,
             }],
             batch.saves.len() as u32,
         )
@@ -2276,6 +2278,7 @@ fn missing_save_reply_preserves_recreated_media_and_other_selected_work() {
             vec![CloudRecordFailure {
                 name: name.clone(),
                 code: CloudEngineErrorCode::UnknownItem,
+                server_record: None,
             }],
             1,
         )

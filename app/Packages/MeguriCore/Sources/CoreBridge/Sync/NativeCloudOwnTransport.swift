@@ -73,6 +73,15 @@ enum NativeCloudOwnRecords {
     static func maximumDelay(_ first: UInt64?, _ second: UInt64?) -> UInt64? {
         switch (first, second) { case (nil, nil): nil; default: max(first ?? 0, second ?? 0) }
     }
+    static func assetReadFailure(_ error: any Error, perRecord: CloudAssetReadFailureFacts? = nil) -> CloudAssetReadResult {
+        let native = error as NSError
+        // A single-record partial wrapper describes the per-record cause.
+        // Other terminal errors retain their own actual SDK code.
+        let code = native.domain == CKErrorDomain && native.code == CKError.partialFailure.rawValue && perRecord != nil
+            ? perRecord?.code : (native.domain == CKErrorDomain ? Int64(native.code) : nil)
+        let delay = maximumDelay(perRecord?.retryAfterMilliseconds.flatMap { UInt64(exactly: $0) }, retryDuration(error))
+        return .nativeFailure(code: code, retryAfterMilliseconds: delay.map { Int64(clamping: $0) })
+    }
     static func readError(_ error: any Error) -> CloudControlRead {
         guard let error = error as? CKError else { return .failed }
         switch error.code { case .unknownItem: return .missing; case .zoneNotFound: return .zoneMissing; default: return .failed }
@@ -249,7 +258,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                     guard let prepared, !prepared.cancelled else { throw CancellationError() }
                     guard received == id else { throw NativeCloudKitFailure.unsupportedRecord }
                     switch result {
-                    case .failure: value.result = .failed
+                    case .failure(let error): value.result = NativeCloudOwnRecords.assetReadFailure(error)
                     case .success(let native):
                         try NativeCloudKitIdentityValidation.requireCurrentOwner(native.recordID.zoneID)
                         guard native.recordID == id, native.recordType == target.recordType else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -281,7 +290,10 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let prepared else { return }
             if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
             if let error = read.failure { prepared.finish(.failure(error)); return }
-            if case .failure = result { prepared.finish(.success(.assetRead(.failed))); return }
+            if case .failure(let error) = result {
+                prepared.finish(.success(.assetRead(NativeCloudOwnRecords.assetReadFailure(error, perRecord: read.result?.failureFacts))))
+                return
+            }
             guard let result = read.result else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
             prepared.finish(.success(.assetRead(result)))
         }

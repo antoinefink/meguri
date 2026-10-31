@@ -341,6 +341,54 @@ impl Runtime {
             Ok(ack.epoch)
         })
     }
+    /// Bounded admission for collection conflict metadata, before handler entry.
+    /// Headers prove original handed membership without hydrating any image.
+    /// Full receipt validation remains in `sent_results_with_conflicts`.
+    pub fn preflight_sent_conflicts(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        request_id: u64,
+        names: &[String],
+    ) -> Result<(), RuntimeError> {
+        let evidence = collection.open_evidence()?;
+        let s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if !collection.is_current()
+            || b.evidence.generation != evidence.generation
+            || b.file.pair() != evidence.native_file
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        with_tracking_access(|| -> Result<(), RuntimeError> {
+            let handed = s
+                .actions
+                .request_flights
+                .get(&(sdk.to_owned(), request_id))
+                .ok_or(Error::InvalidData)?;
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            for name in names {
+                let flight = handed.get(name).ok_or(Error::InvalidData)?;
+                let header = store.entity_header(b.binding.id, name)?.ok_or(Error::InvalidData)?;
+                let local = &header.facts;
+                if local.origin != flight.origin
+                    || !local.in_flight.iter().any(|f| {
+                        f.local_rev == flight.local_rev
+                            && f.erev == flight.erev
+                            && f.payload_digest == flight.payload_digest
+                            && f.tombstone == flight.tombstone
+                            && (!f.tombstone
+                                || local.kind == codec::Kind::MediaName
+                                || f.tombstone_envelope_digest == Some(flight.envelope_digest))
+                    })
+                {
+                    return Err(Error::InvalidData.into());
+                }
+            }
+            Ok(())
+        })
+    }
     pub fn enter_sent_handler(&self, instance: &str, request_id: u64) -> Result<(), RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
@@ -1577,9 +1625,12 @@ impl Runtime {
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
         self.sent_results_with_conflicts(instance, collection, request_id, saved, &[], failed, batch_count)
+            .map(|_| ())
     }
 
     /// One original SDK receipt, validated in full before any record can ACK.
+    /// Returns actual Saved ACKs plus own historical-flight conflict ACKs;
+    /// inbox intake and refusals contribute zero.
     #[allow(clippy::too_many_arguments)]
     pub fn sent_results_with_conflicts(
         &self,
@@ -1590,7 +1641,7 @@ impl Runtime {
         conflicts: &[Saved],
         failed: &[(String, SendError)],
         batch_count: usize,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<u64, RuntimeError> {
         let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
@@ -1624,6 +1675,7 @@ impl Runtime {
             }
         }
         let mut force = BTreeSet::new();
+        let mut saved_count = 0;
         with_tracking_access(|| -> Result<(), RuntimeError> {
             // Validate the whole receipt before committing any ACK, but retain
             // no decoded payload across records. Malformed tails cannot partly
@@ -1655,10 +1707,12 @@ impl Runtime {
             for saved in saved {
                 let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
                 Self::acknowledge_sent_locked(&mut s, collection, saved, received, &mut force)?;
+                saved_count += 1;
             }
             for server in conflicts {
                 if let Some(received) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
                     Self::acknowledge_sent_locked(&mut s, collection, server, received, &mut force)?;
+                    saved_count += 1;
                 } else {
                     let key = s
                         .bound
@@ -1795,7 +1849,7 @@ impl Runtime {
         if !saved.is_empty() || !conflicts.is_empty() || !failed.is_empty() {
             self.emit_pending_locked(&mut s, UpdateKind::Changes, force)?;
         }
-        Ok(())
+        Ok(saved_count)
     }
     pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
         self.poll_review(instance)?;

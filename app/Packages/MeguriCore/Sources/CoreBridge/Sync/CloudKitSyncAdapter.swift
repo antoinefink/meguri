@@ -473,8 +473,8 @@ public actor CloudKitSyncAdapter {
             case .fetched(let zone, let records, let deleted): try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
             case .sent(let id, let saved, let failed, let deleted):
                 guard deleted.isEmpty else { throw BridgeError.internal("Cloud deletion acknowledgement is unavailable") }
-                try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count))
-                instance.operationSaved += UInt64(saved.count)
+                let actualSaved = try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count))
+                instance.operationSaved += actualSaved
                 if let actual = failed.first(where: { $0.zone == "meguri-media" && $0.nativeCode != nil }) {
                     instance.mediaSendFailure = .init(underlying: CloudMediaFailure.queueRejected, code: actual.nativeCode!,
                         retryAfterMilliseconds: failed.compactMap(\.retryAfterMilliseconds).max())

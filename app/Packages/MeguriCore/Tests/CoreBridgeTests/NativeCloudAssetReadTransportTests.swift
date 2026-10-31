@@ -76,6 +76,7 @@ private struct NativeAssetReadFixture: Sendable {
         #expect(record.zone == native.recordID.zoneID.zoneName)
         #expect(record.envelope == (native.encryptedValues["e"] as? Data))
         #expect(record.assetURL == nil)
+        #expect(result.failureFacts == nil)
         let fields = try #require(record.systemFields)
         let restored = try NativeCloudKitSystemFields.restore(fields, target: target)
         #expect(restored.recordID == native.recordID && restored.recordType == native.recordType)
@@ -163,6 +164,7 @@ struct NativeCloudAssetReadTransportTests {
         let result = try await read.result()
         #expect(result.record?.name == read.target.name && result.record?.envelope == Data([1, 3, 5]))
         #expect(result.record?.assetURL == nil)
+        #expect(result.failureFacts == nil)
         #expect(try read.ownedFiles().isEmpty)
     }
 
@@ -313,7 +315,34 @@ struct NativeCloudAssetReadTransportTests {
             read.perRecord(native.recordID, .success(native))
         }
         read.terminal(source == 0 ? .success(()) : .failure(CKError(.networkFailure)))
-        #expect(try await read.result().record == nil)
+        let result = try await read.result()
+        #expect(result.record == nil)
+        #expect(result.failureFacts?.code == Int64(source == 0 ? CKError.unknownItem.rawValue : CKError.networkFailure.rawValue))
+        #expect(result.failureFacts?.retryAfterMilliseconds == nil)
+        #expect(try read.ownedFiles().isEmpty)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func failedReadRetainsActualCodeAndLongestDelay(partialTerminal: Bool, perRecordLonger: Bool) async throws {
+        let read = try NativeAssetReadFixture()
+        defer { read.remove() }
+        let id = NativeCloudOwnRecords.id(read.target)
+        let cause = NSError(domain: CKErrorDomain, code: CKError.unknownItem.rawValue,
+                            userInfo: [CKErrorRetryAfterKey: perRecordLonger ? 240 : 120])
+        read.perRecord(id, .failure(cause))
+        let nested = NSError(domain: CKErrorDomain, code: CKError.serviceUnavailable.rawValue,
+                             userInfo: [CKErrorRetryAfterKey: 180])
+        let terminal = NSError(domain: CKErrorDomain,
+                               code: partialTerminal ? CKError.partialFailure.rawValue : CKError.networkFailure.rawValue,
+                               userInfo: partialTerminal
+                                   ? [CKErrorRetryAfterKey: 30, CKPartialErrorsByItemIDKey: [id: nested]]
+                                   : [CKErrorRetryAfterKey: 180])
+        read.terminal(.failure(terminal))
+        let result = try await read.result()
+        #expect(result.record == nil)
+        let facts = try #require(result.failureFacts)
+        #expect(facts.code == Int64(partialTerminal ? CKError.unknownItem.rawValue : CKError.networkFailure.rawValue))
+        #expect(facts.retryAfterMilliseconds == (perRecordLonger ? 240_000 : 180_000))
         #expect(try read.ownedFiles().isEmpty)
     }
 

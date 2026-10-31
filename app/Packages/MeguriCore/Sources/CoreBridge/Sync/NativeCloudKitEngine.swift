@@ -160,6 +160,14 @@ private final class PreparedNativeMediaBatch: @unchecked Sendable {
     init(_ value: CKSyncEngine.RecordZoneChangeBatch) { self.value = value }
 }
 enum NativeCloudKitSendError {
+    // Only the actual sent callback's matching server record can take this
+    // immutable-blob Saved path. Rust still validates the retained media Work.
+    static func savedBlobConflict(record: CKRecord, error: CKError) throws -> CloudRecord? {
+        guard record.recordID.zoneID == NativeCloudOwnRecords.zone("meguri-media"),
+              error.code == .serverRecordChanged,
+              let server = error.serverRecord, server.recordID == record.recordID else { return nil }
+        return try NativeCloudRecordConversion.decode(server)
+    }
     static func code(_ error: any Error) -> CloudEngineErrorCode {
         guard (error as NSError).domain == CKErrorDomain, let error = error as? CKError else { return .other }
         return switch error.code {
@@ -174,8 +182,35 @@ enum NativeCloudKitSendError {
         case .batchRequestFailed: .batchRequestFailed
         case .unknownItem: .unknownItem
         case .zoneNotFound: .zoneNotFound
+        case .serverRecordChanged: .serverRecordChanged
         default: .other
         }
+    }
+    static func failure(record: CKRecord, error: CKError, collectionZoneID: CKRecordZone.ID) throws -> CloudRecordFailure {
+        if error.code == .serverRecordChanged, record.recordType == "MGBlob",
+           record.recordID.zoneID == NativeCloudOwnRecords.zone("meguri-media") {
+            // No positive blob proof: park the retained upload as before,
+            // without forwarding unverifiable server metadata to collection intake.
+            return .init(name: record.recordID.recordName, code: .other,
+                zone: record.recordID.zoneID.zoneName, nativeCode: Int64(error.code.rawValue),
+                retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(error).flatMap { Int64(exactly: $0) })
+        }
+        let serverRecord: CloudRecord?
+        if error.code == .serverRecordChanged {
+            try NativeCloudKitIdentityValidation.requireCurrentOwner(collectionZoneID)
+            guard record.recordID.zoneID == collectionZoneID, record.recordType == "MGEntity",
+                  let server = error.serverRecord, server.recordID == record.recordID,
+                  server.recordType == "MGEntity" else { throw NativeCloudKitFailure.unsupportedRecord }
+            // The shared SDK converter validates encrypted e and archives the
+            // actual system fields. It never projects any CKAsset file URL.
+            let metadata = try NativeCloudRecordConversion.decode(server)
+            guard !metadata.envelope.isEmpty else { throw NativeCloudKitFailure.unsupportedRecord }
+            serverRecord = metadata
+        } else { serverRecord = nil }
+        return .init(name: record.recordID.recordName, code: code(error),
+            zone: record.recordID.zoneID.zoneName, nativeCode: Int64(error.code.rawValue),
+            retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(error).flatMap { Int64(exactly: $0) },
+            serverRecord: serverRecord)
     }
 }
 
@@ -392,14 +427,10 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                     // K9.3 immutable-blob conflicts count only from the real
                     // SDK sent callback and its actual server record. Rust
                     // still checks the original Work and exact blob metadata.
-                    if item.record.recordID.zoneID == zone("meguri-media"),
-                       item.error.code == .serverRecordChanged,
-                       let server = item.error.serverRecord, server.recordID == item.record.recordID {
-                        saved.append(try decode(server))
+                    if let blob = try NativeCloudKitSendError.savedBlobConflict(record: item.record, error: item.error) {
+                        saved.append(blob)
                     } else {
-                        failed.append(.init(name: item.record.recordID.recordName, code: code(item.error),
-                            zone: item.record.recordID.zoneID.zoneName, nativeCode: Int64(item.error.code.rawValue),
-                            retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(item.error).flatMap { Int64(exactly: $0) }))
+                        failed.append(try NativeCloudKitSendError.failure(record: item.record, error: item.error, collectionZoneID: zone(collectionZone)))
                     }
                 }
                 forwarded = .sent(batchID: batch, saved: saved, failed: failed, deleted: sent.deletedRecordIDs.map(\.recordName))

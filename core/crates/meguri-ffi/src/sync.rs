@@ -3,7 +3,7 @@
 use crate::{CoreError, callback, runtime};
 use meguri_sync::cloud::{self as c, adapter as a, runtime as r, workflow as w};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex, PoisonError},
 };
 
@@ -312,11 +312,13 @@ pub enum CloudEngineErrorCode {
     ZoneNotFound,
     Other,
     UnknownItem,
+    ServerRecordChanged,
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudRecordFailure {
     pub name: String,
     pub code: CloudEngineErrorCode,
+    pub server_record: Option<CloudRecord>,
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CloudAccountStatus {
@@ -680,7 +682,7 @@ impl CloudWorkflow {
         saved: Vec<CloudRecord>,
         failed: Vec<CloudRecordFailure>,
         batch_count: u32,
-    ) -> Result<(), CoreError> {
+    ) -> Result<u64, CoreError> {
         callback::enter("CloudWorkflow.sent");
         self.core.validate_sdk(&sdk).map_err(cloud_error)?;
         // Record metadata cannot turn a collection callback into media work.
@@ -712,6 +714,55 @@ impl CloudWorkflow {
                 return Err(cloud_error("collection Saved metadata mismatch"));
             }
         }
+        let mut names = BTreeSet::new();
+        if saved
+            .iter()
+            .map(|record| &record.name)
+            .chain(failed.iter().map(|failure| &failure.name))
+            .any(|name| !names.insert(name))
+        {
+            return Err(cloud_error("duplicate sent receipt name"));
+        }
+        let mut conflicts = Vec::new();
+        for failure in &failed {
+            match (&failure.code, &failure.server_record) {
+                (CloudEngineErrorCode::ServerRecordChanged, Some(record)) => {
+                    let binding = self
+                        .core
+                        .status()
+                        .map_err(cloud_error)?
+                        .binding
+                        .ok_or_else(|| cloud_error("binding unavailable"))?;
+                    let zone = c::adapter::collection_zone(binding.facts.epoch);
+                    if media_metadata
+                        || record.name != failure.name
+                        || record.record_type.as_deref() != Some("MGEntity")
+                        || record.zone.as_deref() != Some(zone.as_str())
+                        || record.system_fields.as_ref().is_none_or(Vec::is_empty)
+                        || record.envelope.is_empty()
+                        || record.envelope.len() > 1_000_000
+                        || record.asset_path.is_some()
+                    {
+                        return Err(cloud_error("collection conflict metadata mismatch"));
+                    }
+                    conflicts.push(record.clone().saved());
+                }
+                (CloudEngineErrorCode::ServerRecordChanged, None) | (_, Some(_)) => {
+                    return Err(cloud_error("unexpected or missing conflict metadata"));
+                }
+                (_, None) => {}
+            }
+        }
+        if !conflicts.is_empty() {
+            self.core
+                .preflight_sent_conflicts(
+                    &sdk,
+                    &self.host.collection()?,
+                    batch_id,
+                    &conflicts.iter().map(|record| record.name.clone()).collect::<Vec<_>>(),
+                )
+                .map_err(cloud_error)?;
+        }
         self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
         let sdk_retrying = failed.iter().any(|f| {
             matches!(
@@ -739,6 +790,7 @@ impl CloudWorkflow {
                         | CloudEngineErrorCode::UnknownItem
                         | CloudEngineErrorCode::ZoneNotFound
                         | CloudEngineErrorCode::Other
+                        | CloudEngineErrorCode::ServerRecordChanged
                 )
             })
             .map(|f| f.name.clone())
@@ -762,17 +814,18 @@ impl CloudWorkflow {
             .cloud_media_sdk_sent(&sdk, &self.host.collection()?, batch_id, &saved, &failed, &retrying)
             .map_err(cloud_error)?
         {
-            return Ok(());
+            return Ok(saved.len() as u64);
         }
         if media_metadata {
             return Err(cloud_error("media Saved has no original SDK work"));
         }
         self.core
-            .sent_results(
+            .sent_results_with_conflicts(
                 &sdk,
                 &self.host.collection()?,
                 batch_id,
                 &saved,
+                &conflicts,
                 &failed,
                 batch_count as usize,
             )

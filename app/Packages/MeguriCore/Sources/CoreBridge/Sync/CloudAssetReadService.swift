@@ -46,10 +46,17 @@ public enum CloudAssetReadResultFailure: Error, Sendable {
     case assetLeaseMismatch
 }
 
+/// Descriptive SDK facts only. Rust retains error classification authority.
+public struct CloudAssetReadFailureFacts: Sendable, Equatable {
+    public let code: Int64?
+    public let retryAfterMilliseconds: Int64?
+}
+
 /// The actual SDK record plus ownership of its copied pa file. Inline records
 /// need no lease; failed reads carry no record. Rust validates payload content.
 public struct CloudAssetReadResult: Sendable {
     public let record: CloudRecord?
+    public let failureFacts: CloudAssetReadFailureFacts?
     private let asset: CloudMediaStagedAsset?
 
     public init(record: CloudRecord, asset: CloudMediaStagedAsset? = nil) throws {
@@ -58,10 +65,18 @@ public struct CloudAssetReadResult: Sendable {
         }
         self.record = record
         self.asset = asset
+        failureFacts = nil
     }
 
-    private init() { record = nil; asset = nil }
-    public static let failed = CloudAssetReadResult()
+    private init(failure: CloudAssetReadFailureFacts) {
+        record = nil; asset = nil; failureFacts = failure
+    }
+    public static let failed = CloudAssetReadResult(failure: .init(code: nil, retryAfterMilliseconds: nil))
+
+    /// Native transport construction, without retaining SDK errors or records.
+    static func nativeFailure(code: Int64?, retryAfterMilliseconds: Int64?) -> Self {
+        Self(failure: .init(code: code, retryAfterMilliseconds: retryAfterMilliseconds))
+    }
 
     /// A raw path alone does not own a file. Retain the entire result through
     /// the awaited maintenance call, including errors and task cancellation.

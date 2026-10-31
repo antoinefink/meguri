@@ -39,7 +39,7 @@ public struct CloudEngineBatch: Sendable, Equatable {
 }
 public enum CloudEngineErrorCode: Sendable, Equatable {
     case notAuthenticated, accountTemporarilyUnavailable, networkFailure, networkUnavailable
-    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, unknownItem, zoneNotFound, other
+    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, unknownItem, zoneNotFound, serverRecordChanged, other
 }
 public struct CloudRecordFailure: Sendable, Equatable {
     public let name: String
@@ -47,9 +47,12 @@ public struct CloudRecordFailure: Sendable, Equatable {
     public let zone: String?
     public let nativeCode: Int64?
     public let retryAfterMilliseconds: Int64?
-    public init(name: String, code: CloudEngineErrorCode, zone: String? = nil, nativeCode: Int64? = nil, retryAfterMilliseconds: Int64? = nil) {
+    public let serverRecord: CloudRecord?
+    public init(name: String, code: CloudEngineErrorCode, zone: String? = nil, nativeCode: Int64? = nil, retryAfterMilliseconds: Int64? = nil, serverRecord: CloudRecord? = nil) {
         self.name = name; self.code = code; self.zone = zone; self.nativeCode = nativeCode; self.retryAfterMilliseconds = retryAfterMilliseconds
+        self.serverRecord = serverRecord
     }
+    var raw: MeguriCoreBindings.CloudRecordFailure { .init(name: name, code: code.raw, serverRecord: serverRecord?.raw) }
 }
 public enum CloudFetchReason: Sendable, Equatable { case manual, scheduled }
 public enum CloudAccountChange: Sendable, Equatable { case signIn, signOut, switchAccounts }
@@ -181,6 +184,7 @@ extension CloudEngineErrorCode {
         case .batchRequestFailed: .batchRequestFailed
         case .unknownItem: .unknownItem
         case .zoneNotFound: .zoneNotFound
+        case .serverRecordChanged: .serverRecordChanged
         case .other: .other
         }
     }

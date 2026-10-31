@@ -214,6 +214,16 @@ impl Runtime {
             .is_some_and(|read| read.request == *request && read.phase != ReadPhase::Selected)
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn asset_read_owned_count_for_testing(&self) -> usize {
+        self.state()
+            .incoming
+            .asset_reads
+            .values()
+            .filter(|read| read.phase != ReadPhase::Selected)
+            .count()
+    }
+
     pub(crate) fn asset_pass_command(&self, pass: &AssetReadPass, command: &crate::cloud::policy::Command) -> bool {
         self.state()
             .incoming
@@ -572,6 +582,7 @@ impl Runtime {
         server: &Saved,
     ) -> Result<(), RuntimeError> {
         self.sent_results_with_conflicts(sdk, collection, request_id, &[], std::slice::from_ref(server), &[], 1)
+            .map(|_| ())
     }
 
     /// Check the original handler's current handed authority before using an older

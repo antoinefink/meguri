@@ -8,6 +8,9 @@ use meguri_testkit::cloud::{Asset, Record};
 #[path = "cloud_asset_reads_tests.rs"]
 mod asset_reads;
 
+#[path = "cloud_conflict_receipts_tests.rs"]
+mod conflict_receipts;
+
 fn note_facts(fixture: &PublishedFixture, id: NoteId) -> w::EntityFacts {
     fixture
         .workflow
