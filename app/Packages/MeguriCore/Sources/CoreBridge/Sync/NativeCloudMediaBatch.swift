@@ -2,8 +2,8 @@
 import CloudKit
 import Foundation
 
-/// Asset support is confined to immutable MGBlob saves in meguri-media.
-/// Collection pa/ma and control-record assets remain explicitly unsupported.
+/// Rust selects inline versus pa. Native code validates routing and file shape;
+/// it never decodes or rewrites the canonical envelope or payload.
 enum NativeCloudRecordConversion {
     static func decode(_ record: CKRecord) throws -> CloudRecord {
         try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
@@ -16,7 +16,15 @@ enum NativeCloudRecordConversion {
             if let asset = record["a"], !(asset is CKAsset) { throw NativeCloudKitFailure.unsupportedAsset }
         } else {
             guard ["MGEntity", "MGActive", "MGEpoch"].contains(record.recordType) else { throw NativeCloudKitFailure.unsupportedRecord }
-            try NativeCloudOwnRecords.requireNoAssets(record)
+            if record.recordType == "MGEntity" {
+                guard zone.hasPrefix("c-"), record["a"] == nil, record["ma"] == nil,
+                      !record.allKeys().contains(where: { $0 != "pa" && record[$0] is CKAsset }) else { throw NativeCloudKitFailure.unsupportedAsset }
+                if let asset = record["pa"], !(asset is CKAsset) { throw NativeCloudKitFailure.unsupportedAsset }
+            } else {
+                guard (record.recordType == "MGActive" && zone == "meguri-root" && name == "active") ||
+                      (record.recordType == "MGEpoch" && zone.hasPrefix("c-") && name == "epoch") else { throw NativeCloudKitFailure.unsupportedRecord }
+                try NativeCloudOwnRecords.requireNoAssets(record)
+            }
         }
         guard let envelope = record.encryptedValues["e"] as? Data, envelope.count <= 1_000_000 else { throw NativeCloudKitFailure.unsupportedRecord }
         // Sent callbacks need metadata only. The original upload file remains
@@ -31,15 +39,25 @@ enum NativeCloudRecordConversion {
             guard values.isRegularFile == true, values.isSymbolicLink != true, let size = values.fileSize,
                   size > 0, UInt64(size) <= CloudMediaStaging.assetLimit else { throw NativeCloudKitFailure.unsupportedAsset }
         } else {
-            guard record.recordType == "MGEntity", record.assetURL == nil else { throw NativeCloudKitFailure.unsupportedAsset }
+            guard zone.hasPrefix("c-"), record.recordType == "MGEntity" else { throw NativeCloudKitFailure.unsupportedAsset }
+            if let asset = record.assetURL { try validatePayloadFile(asset) }
         }
         let target = CloudControlTarget(zone: zone, name: record.name, recordType: record.recordType)
         let native: CKRecord
         if let fields = record.systemFields { native = try NativeCloudKitSystemFields.restore(fields, target: target) }
         else { native = CKRecord(recordType: record.recordType, recordID: NativeCloudOwnRecords.id(target)) }
         native.encryptedValues["e"] = record.envelope as CKRecordValue
-        if let asset = record.assetURL { native["a"] = CKAsset(fileURL: asset) }
+        if record.recordType == "MGEntity" {
+            native["a"] = nil; native["ma"] = nil
+            native["pa"] = record.assetURL.map { CKAsset(fileURL: $0) }
+        } else if let asset = record.assetURL { native["a"] = CKAsset(fileURL: asset) }
         return native
+    }
+    static func validatePayloadFile(_ file: URL) throws {
+        guard file.isFileURL else { throw NativeCloudKitFailure.unsupportedAsset }
+        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, let size = values.fileSize,
+              size > 0, UInt64(size) <= CloudMediaStaging.assetLimit else { throw NativeCloudKitFailure.unsupportedAsset }
     }
 }
 
@@ -62,7 +80,11 @@ enum NativeCloudMediaBatch {
             }
             guard bytes <= 128 * 1_024 * 1_024 else { throw NativeCloudKitFailure.unsupportedAsset }
         } else {
-            guard batch.deletes.isEmpty, batch.saves.allSatisfy({ $0.recordType == "MGEntity" && $0.assetURL == nil && ($0.zone == nil || $0.zone == zone) }) else { throw NativeCloudKitFailure.unsupportedRecord }
+            guard zone.hasPrefix("c-"), batch.deletes.isEmpty,
+                  batch.saves.allSatisfy({ $0.recordType == "MGEntity" && ($0.zone == nil || $0.zone == zone) }) else { throw NativeCloudKitFailure.unsupportedRecord }
+            for record in batch.saves {
+                if let file = record.assetURL { try NativeCloudRecordConversion.validatePayloadFile(file) }
+            }
         }
     }
 }

@@ -191,6 +191,15 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var batches: [String: UInt64] = [:]
     private var pendingBatch: UInt64?
     private var failure: (any Error)?
+    private var payloadStaging: CloudMediaStaging?
+    private func fetchedPayloadStaging() throws -> CloudMediaStaging {
+        if let payloadStaging { return payloadStaging }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeguriCloudPayloads", isDirectory: true)
+        let staging = try CloudMediaStaging(directory: directory)
+        payloadStaging = staging
+        return staging
+    }
     init(instanceID: String, delegate: any CloudKitEngineDelegate) {
         self.instanceID = instanceID; self.delegate = delegate
     }
@@ -347,8 +356,19 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }
         else { activeEvent = true; networkLifetime.beginEvent() }
         if let returnedWork { await returnedWork.value }
+        // Stage before the delivery gate can suspend. Keep all native leases
+        // through original callback completion, including any suspended wait.
+        let staged = Result<NativeCloudFetchedPayloads?, any Error> {
+            if case .fetchedRecordZoneChanges(let fetched) = event {
+                return try NativeCloudFetchedPayloads(records: fetched.modifications.map(\.record),
+                    deleted: fetched.deletions.map(\.recordID), staging: fetchedPayloadStaging())
+            }
+            return nil
+        }
+        defer { withExtendedLifetime(staged) {} }
         await delegate.eventWillDeliver(engine: self)
         do {
+            let fetchedPayloads = try staged.get()
             if failure != nil { throw NativeCloudKitFailure.unsupportedRecord }
             let forwarded: CloudEngineEvent
             switch event {
@@ -357,11 +377,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 let kind: CloudAccountChange
                 switch change.changeType { case .signIn: kind = .signIn; case .signOut: kind = .signOut; case .switchAccounts: kind = .switchAccounts; @unknown default: throw NativeCloudKitFailure.unsupportedRecord }
                 forwarded = .accountChanged(change: kind, identity: nil)
-            case .fetchedRecordZoneChanges(let fetched):
-                let groups = try NativeCloudKitRecordRouting.validatedGroups(records: fetched.modifications.map(\.record), deleted: fetched.deletions.map(\.recordID))
-                let events: [CloudEngineEvent] = try groups.map {
-                    .fetched(zone: $0.zoneID.zoneName, records: try $0.records.map(decode), deleted: $0.deleted.map(\.recordName))
-                }
+            case .fetchedRecordZoneChanges:
+                guard let fetchedPayloads else { throw NativeCloudKitFailure.unsupportedRecord }
+                let events = fetchedPayloads.events
                 for event in events.dropLast() { await delegate.handleEvent(event, engine: self) }
                 // Empty batches own a callback too; no zone or drain is inferred.
                 forwarded = events.last ?? .databaseChanges

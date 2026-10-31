@@ -15,6 +15,30 @@ struct NativeCloudOwnTransportTests {
     let active = CloudControlTarget(zone: "meguri-root", name: "active", recordType: "MGActive")
     let root = CloudControlTarget(zone: "meguri-media", name: "root", recordType: "MGMediaRoot")
 
+    @Test func actualActiveAndEpochReadsRemainEOnlyWhenEntityAssetsAreSupported() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("unexpected-control-asset")
+        try Data([7, 5, 3]).write(to: file)
+        let epoch = CloudControlTarget(zone: "c-synthetic", name: "epoch", recordType: "MGEpoch")
+        for target in [active, epoch] {
+            for field in ["pa", "ma", "a"] {
+                let queue = NativeOwnCapturingQueue()
+                let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.read(target))
+                #expect(prepared.enqueue())
+                let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordsOperation })
+                #expect(operation.desiredKeys == nil)
+                let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
+                record.encryptedValues["e"] = Data([1]) as CKRecordValue
+                record[field] = CKAsset(fileURL: file)
+                operation.perRecordResultBlock?(record.recordID, .success(record))
+                operation.fetchRecordsResultBlock?(.success(()))
+                await #expect(throws: NativeCloudKitFailure.self) { try await prepared.reply() }
+            }
+        }
+    }
+
     @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
     func publicationReadsSavesAndZonesForwardActualServerDuration(code: CKError.Code) async throws {
         let retry = CKError(code, userInfo: [CKErrorRetryAfterKey: 120.0])

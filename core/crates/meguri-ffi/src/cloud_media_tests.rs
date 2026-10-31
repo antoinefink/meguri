@@ -9,6 +9,9 @@ use meguri_testkit::cloud::{
     coordinator::{execute_publication_request, publication_control_record},
 };
 
+#[path = "cloud_payload_asset_tests.rs"]
+mod payload_assets;
+
 struct PublishedFixture {
     fixture: Fixture,
     policy: Arc<CloudPolicy>,

@@ -237,6 +237,34 @@ struct NativeCloudMediaTests {
         control["a"] = CKAsset(fileURL: file)
         #expect(throws: NativeCloudKitFailure.self) { try NativeCloudRecordConversion.decode(control) }
     }
+
+    @Test func ordinaryEntityUploadUsesPaAndKeepsItsOriginalFileThroughSavedConversion() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("rust-owned-pa")
+        let bytes = Data(repeating: 0x70, count: 800_000)
+        try bytes.write(to: file)
+        let record = CloudRecord(name: "ordinary-note", envelope: Data([1]), systemFields: nil,
+            recordType: "MGEntity", zone: "c-synthetic", assetURL: file)
+        // This is the same conversion the native collection batch calls.
+        let encoded = try NativeCloudRecordConversion.encode(record, zone: "c-synthetic")
+        #expect(encoded.recordType == "MGEntity")
+        #expect((encoded["pa"] as? CKAsset)?.fileURL == file)
+        #expect(encoded["a"] == nil && encoded["ma"] == nil)
+        #expect(encoded.encryptedValues["e"] as? Data == record.envelope)
+        try NativeCloudMediaBatch.validate(.init(id: 72, saves: [record], deletes: []), zone: "c-synthetic")
+        let saved = try NativeCloudRecordConversion.decode(encoded)
+        #expect(saved.name == record.name && saved.envelope == record.envelope)
+        #expect(saved.systemFields?.isEmpty == false)
+        // Saved conversion cannot consume or remove Rust's original upload.
+        #expect(try Data(contentsOf: file) == bytes)
+        let foreign = CKRecord(recordType: "MGEntity", recordID: .init(recordName: record.name,
+            zoneID: .init(zoneName: "c-synthetic", ownerName: "foreign-owner")))
+        foreign.encryptedValues["e"] = record.envelope as CKRecordValue
+        foreign["pa"] = CKAsset(fileURL: file)
+        #expect(throws: NativeCloudKitFailure.self) { try NativeCloudRecordConversion.decode(foreign) }
+    }
 }
 #endif
 
