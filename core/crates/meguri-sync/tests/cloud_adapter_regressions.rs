@@ -189,6 +189,94 @@ fn assert_no_modify_since(service: &Service<SeededRandom>, after: u64) {
     );
 }
 
+/// K13.2: real editback can be clean against the old ACK before an own lost
+/// save is fetched. The fetched ACK must make that current row pending again.
+#[test]
+fn own_landed_save_after_real_editback_to_old_ack_is_pending_with_a_new_change_seq() {
+    let (_run, mut service, files, mut rig) = fixture(1, true);
+    let name = files.entity_name.clone();
+    let id = files.note.id;
+    // Save A through the real service at this fixture's fixed NOW_MS. Note's
+    // modified stamp participates in row_digest, so an older seeded ACK cannot
+    // provide this legal clean editback control.
+    rig.driver().edit_note_fields(id, &["old ACK Q", "back"]).unwrap();
+    rig.sync_now().unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let a_record = record(&service, &files, &name);
+    let (_, a) = decode(&files, &a_record);
+    let initial = rig.entity_facts(&name).unwrap();
+    assert!(initial.payload == a);
+    assert!(initial.acked_payload.as_ref() == Some(&a));
+    assert!(initial.mark.is_none() && initial.base_payload.is_none());
+    assert!(initial.in_flight.is_empty());
+
+    rig.driver().edit_note_fields(id, &["lost save B", "back"]).unwrap();
+    let sent = rig.entity_facts(&name).unwrap();
+    let lost = rig.lose_collection_batch_reply(&mut service).unwrap();
+    let landed = saved(&service, &files, &lost.response, &name);
+    let (entity, b) = decode(&files, &landed);
+    assert!(b == sent.payload && b != a);
+    assert_eq!(entity.fields.writer, files.binding.id.0);
+    assert!(rig.send_changes_calls().last().unwrap().returned);
+    let outstanding = rig.entity_facts(&name).unwrap();
+    assert_eq!(outstanding.acked_system_fields, a_record.system_fields.bytes());
+    assert!(outstanding.in_flight.iter().any(|flight| {
+        flight.local_rev == sent.local_rev && flight.erev == entity.fields.erev && flight.payload == b
+    }));
+
+    // A real edit, with no clock advance and no handed Undo. The observer
+    // legitimately clears its dirty mark because this row equals the old ACK.
+    rig.driver().edit_note_fields(id, &["old ACK Q", "back"]).unwrap();
+    let editback = rig.entity_facts(&name).unwrap();
+    assert!(editback.payload == a);
+    assert_eq!(editback.payload.row_digest().unwrap(), initial.acked_row_digest);
+    assert!(editback.mark.is_none(), "legal editback is initially clean against A");
+    assert!(editback.base_payload.is_none());
+    assert!(editback.acked_payload.as_ref() == Some(&a));
+    assert!(editback.local_rev > sent.local_rev);
+    assert!(editback.in_flight == outstanding.in_flight);
+    let before = rig.driver().stored_runtime_state().unwrap();
+    assert!(!rig.tracking_pending_names().unwrap().contains(&name));
+
+    // Fetch the real landed B without a Saved callback or another save.
+    let after_lost = cursor(&service);
+    rig.fetch_recovery_exchange(&mut service, STEPS).unwrap();
+    assert_no_modify_since(&service, after_lost);
+    let recovered = rig.entity_facts(&name).unwrap();
+    let state = rig.driver().stored_runtime_state().unwrap();
+    assert!(recovered.payload == a);
+    assert_eq!(recovered.local_rev, editback.local_rev);
+    assert_eq!(recovered.acked_rev, sent.local_rev);
+    assert!(recovered.acked_payload.as_ref() == Some(&b));
+    assert!(recovered.base_payload.as_ref() == Some(&b));
+    assert_eq!(recovered.server_erev, entity.fields.erev);
+    assert_eq!(recovered.acked_system_fields, landed.system_fields.bytes());
+    assert_eq!(recovered.acked_payload_digest, entity.payload_sha256);
+    assert!(recovered.in_flight.is_empty());
+    let mark = recovered.mark.as_ref().expect("A must be pending against fetched B");
+    assert_eq!(state.change_counter, before.change_counter + 1);
+    assert_eq!(mark.change_seq, state.change_counter);
+    assert!(mark.change_seq > sent.mark.as_ref().unwrap().change_seq);
+    assert_eq!(mark.payload_digest, a.payload_digest().unwrap());
+    assert!(rig.tracking_pending_names().unwrap().contains(&name));
+    assert_eq!(
+        rig.core_tracking_sendables().unwrap().get(&name),
+        Some(&PendingChange::Save)
+    );
+
+    // The next actual handoff carries A, conditional on the fetched B ACK.
+    let attempt = rig.request_collection_batch(&mut service).unwrap();
+    let codec::Payload::Note(a_note) = &a else {
+        panic!("actual Note A")
+    };
+    conditional_note(&attempt.mutations, &landed, a_note, &files, entity.fields.erev + 1);
+    let handed = rig.sent_request(attempt.request_ids[0]).unwrap();
+    let final_saved = saved(&service, &files, &handed.response, &name);
+    assert!(decode(&files, &final_saved).1 == a);
+    assert!(rig.entity_facts(&name).unwrap().mark.is_none());
+    rig.close_clean().unwrap();
+}
+
 /// K12.3 Saved, K12.4 Between full updates, A23; real revs/digests, not counters alone.
 #[test]
 fn saved_rev3_in_flight_edit4_rehanded_after_handler_return_without_trigger() {
@@ -244,7 +332,7 @@ fn saved_rev3_in_flight_edit4_rehanded_after_handler_return_without_trigger() {
     let returned = observations
         .iter()
         .position(
-            |o| matches!(o, Observation::HandlerReturned { request_id } if *request_id == batch3.response.request_id),
+            |o| matches!(o, Observation::HandlerReturned { request_id } if *request_id == batch3.backend_batch_id),
         )
         .unwrap();
     let removed = observations
@@ -465,7 +553,7 @@ fn sync_now_auto_off_400_after_first_250_limit_exceeded_finishes_within_eight_ca
     assert!(
         rig.send_changes_calls()[0]
             .request_ids
-            .contains(&first.response.request_id)
+            .contains(&first.backend_batch_id)
     );
     rig.sdk_drop_nonretry_failures(&first.response).unwrap();
     assert!(first_names.iter().all(|n| !rig.sdk_pending().contains_key(n)));
@@ -492,7 +580,8 @@ fn sync_now_auto_off_400_after_first_250_limit_exceeded_finishes_within_eight_ca
         assert_eq!(request.caller.instance.as_deref(), Some(rig.instance().as_str()));
         assert_eq!(request.scope, files.scope);
         assert_eq!(request.zone.as_deref(), Some(files.collection_zone.as_str()));
-        assert!(calls.iter().any(|c| c.request_ids.contains(&request.request_id)));
+        let backend = rig.sent_request(request.request_id).unwrap().backend_batch_id;
+        assert!(calls.iter().any(|c| c.request_ids.contains(&backend)));
         let outcome = outcomes.iter().find(|o| o.request_id == request.request_id).unwrap();
         let Ok(ReplyReference::Modified(items)) = &outcome.result else {
             panic!("expected actual acceptance")
@@ -625,5 +714,31 @@ fn initial_review_selection_sends_actual_cur_deck_before_any_answer() {
     }
     eprintln!("pre-answer Config/curDeck: native update pending and conditionally saved");
     rig.driver().review_end_and_drain(session).unwrap();
+    rig.close_clean().unwrap();
+}
+
+#[test]
+fn service_request_id_is_distinct_from_backend_batch_authority_through_handler_and_send_call() {
+    let (_run, mut service, files, mut rig) = fixture(1, true);
+    let edited = rig
+        .driver()
+        .edit_note_fields(files.note.id, &["mapped request", "back"])
+        .unwrap();
+    let batch = rig.drive_until_response(&mut service, STEPS).unwrap();
+    assert_ne!(batch.backend_batch_id, batch.response.request_id);
+    let calls = rig.send_changes_calls();
+    let call = calls.last().unwrap();
+    assert_eq!(call.request_ids, vec![batch.backend_batch_id]);
+    assert!(!call.returned);
+    let landed = saved(&service, &files, &batch.response, &files.entity_name);
+    assert_eq!(decode(&files, &landed).1, codec::Payload::Note(edited.note));
+    rig.deliver_sent_event(&batch.response).unwrap();
+    assert_eq!(
+        rig.entity_facts(&files.entity_name).unwrap().acked_system_fields,
+        landed.system_fields.bytes()
+    );
+    rig.return_sent_handler().unwrap();
+    assert!(rig.send_changes_calls().last().unwrap().returned);
+    assert!(rig.entity_facts(&files.entity_name).unwrap().mark.is_none());
     rig.close_clean().unwrap();
 }

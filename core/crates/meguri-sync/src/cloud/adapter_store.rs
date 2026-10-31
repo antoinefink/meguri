@@ -272,9 +272,12 @@ impl TrackingStore {
                 for (rowid, content) in page {
                     after = rowid;
                     let e = if notes {
-                        super::workflow_store::note_facts(decode(&content)?)?
+                        super::workflow_store::note_facts(super::tracking_payload::load_note(&tx, b, &content)?)?
                     } else {
-                        decode::<workflow::EntityFacts>(&content)?
+                        {
+                            let e: workflow::EntityFacts = decode(&content)?;
+                            super::tracking_payload::load_entity(&tx, b, e.kind, &content)?
+                        }
                     };
                     if e.server_erev > 0 && !e.acked_system_fields.is_empty() {
                         names.insert(e.name);

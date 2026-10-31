@@ -120,9 +120,10 @@ pub(super) fn facts(c: &Connection, b: BindingId, name: &str) -> Result<Option<E
             .optional()?;
         if let Some(text) = text {
             return Ok(Some(if notes {
-                super::workflow_store::note_facts(decode(&text)?)?
+                super::workflow_store::note_facts(super::tracking_payload::load_note(c, b, &text)?)?
             } else {
-                decode(&text)?
+                let e: EntityFacts = decode(&text)?;
+                super::tracking_payload::load_entity(c, b, e.kind, &text)?
             }));
         }
     }
@@ -452,6 +453,7 @@ impl TrackingStore {
                 tx.execute("DELETE FROM cloud_apply_intents WHERE id=?1", [i.id])?;
             }
         }
+        super::tracking_payload::collect_retired(&tx, b)?;
         #[cfg(feature = "test-hooks")]
         super::testing::tracking_commit(&tx, "cloud.tracking.commit.rollback")?;
         tx.commit()?;
@@ -511,9 +513,27 @@ impl TrackingStore {
         current_observer_open: bool,
     ) -> Result<(), Error> {
         let mut state = self.runtime_binding(i.binding)?;
+        let record_key = self
+            .binding(i.binding)?
+            .ok_or(Error::BindingNotFound)?
+            .facts
+            .record_key
+            .0;
+        let payload_source = (self.directory.as_path(), &record_key);
         let tx = self.connection.transaction()?;
         let mut parked = std::collections::BTreeSet::new();
         for key in &i.keys {
+            if settle_own_live(
+                &tx,
+                i,
+                key,
+                current,
+                (open, seq, generation),
+                payload_source,
+                &mut state,
+            )? {
+                continue;
+            }
             let prior = facts(&tx, i.binding, &key.name)?;
             let observed = current.get(&key.name).ok_or(Error::InvalidData)?.clone();
             // A newer observer may already have run after the covered snapshot.
@@ -534,7 +554,7 @@ impl TrackingStore {
                 })
                 .unwrap_or(observed);
             let Some(local) = local else {
-                settle_absent_key(&tx, i, key, prior, &mut state, (open, seq, generation))?;
+                settle_absent_key(&tx, i, key, prior, &mut state, (open, seq, generation), payload_source)?;
                 continue;
             };
             let mut e = if let Some(e) = prior {
@@ -589,6 +609,7 @@ impl TrackingStore {
                 let InboxValue::Record {
                     envelope,
                     system_fields,
+                    staged_asset,
                     ..
                 } = entry.value.clone()
                 else {
@@ -634,11 +655,17 @@ impl TrackingStore {
                     continue;
                 }
                 super::adapter_store::transfer_entry(&tx, i.binding, &key.name, entry.absence_pass)?;
-                let payload = entity_codec::Payload::decode(
-                    server.fields.kind,
-                    server.payload.as_deref().ok_or(Error::InvalidData)?,
+                let payload = super::payload_asset::receive_owned(
+                    payload_source.0,
+                    i.binding,
+                    payload_source.1,
+                    &key.name,
+                    &envelope.0,
+                    staged_asset.as_deref(),
                 )
-                .map_err(|_| Error::InvalidData)?;
+                .map_err(|_| Error::InvalidData)?
+                .payload
+                .ok_or(Error::InvalidData)?;
                 e.origin = server.fields.origin;
                 e.server_erev = server.fields.erev;
                 e.acked_system_fields = system_fields.0;
@@ -694,10 +721,136 @@ impl TrackingStore {
             "DELETE FROM cloud_apply_intents WHERE binding=?1 AND id=?2",
             params![i.binding.0.as_slice(), i.id],
         )?;
+        super::tracking_payload::collect_retired(&tx, i.binding)?;
         meguri_model::faultpoint!("cloud.tracking.commit.ack")?;
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Settle a digest-only own-save intent against the exact durable flight. All
+/// authority and current-row checks precede the transactional reference ACK.
+fn settle_own_live(
+    tx: &Transaction<'_>,
+    intent: &ApplyIntent,
+    key: &ApplyKey,
+    current: &std::collections::BTreeMap<String, Option<entity_codec::Payload>>,
+    observed: (u64, u64, u64),
+    payload_source: (&std::path::Path, &[u8; 32]),
+    state: &mut runtime::StoredRuntimeState,
+) -> Result<bool, Error> {
+    let Some(rev) = key.own_flight else {
+        return Ok(false);
+    };
+    if key.role != ApplyKeyRole::Entry || key.after_digest.is_none() {
+        return Ok(false);
+    }
+    let Some(local) = current.get(&key.name).and_then(Option::as_ref) else {
+        return Ok(false);
+    };
+    let Some(text) = (if key.kind == entity_codec::Kind::Note {
+        let id = i64::from_be_bytes(key.key.as_slice().try_into().map_err(|_| Error::InvalidData)?);
+        tx.query_row(
+            "SELECT content FROM cloud_runtime_notes WHERE binding=?1 AND id=?2",
+            params![intent.binding.0.as_slice(), id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    } else {
+        tx.query_row(
+            "SELECT content FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
+            params![intent.binding.0.as_slice(), key.kind as i64, &key.key],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    }) else {
+        return Ok(false);
+    };
+    let mut h = super::tracking_payload::header(key.kind, &text)?;
+    if h.facts.tombstone_at.is_some()
+        || local.row_digest().map_err(|_| Error::InvalidData)? != h.images.local_row_digest
+    {
+        return Ok(false);
+    }
+    let mut found = None;
+    for id in &intent.inbox_ids {
+        let text: String = tx.query_row(
+            "SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+            params![intent.binding.0.as_slice(), id],
+            |r| r.get(0),
+        )?;
+        let e: InboxEntry = decode(&text)?;
+        if e.record_name == key.name {
+            found = Some(e);
+            break;
+        }
+    }
+    let entry = found.ok_or(Error::InvalidData)?;
+    let InboxValue::Record {
+        envelope,
+        system_fields,
+        staged_asset,
+        ..
+    } = &entry.value
+    else {
+        return Err(Error::InvalidData);
+    };
+    let received = super::payload_asset::receive_owned(
+        payload_source.0,
+        intent.binding,
+        payload_source.1,
+        &key.name,
+        &envelope.0,
+        staged_asset.as_deref(),
+    )
+    .map_err(|_| Error::InvalidData)?;
+    let remote = &received.entity;
+    if remote.fields.writer != intent.binding.0
+        || remote.fields.origin != h.facts.origin
+        || remote.fields.kind != key.kind
+        || remote.fields.key != key.key
+        || remote.fields.tombstone
+        || remote.fields.generation.is_some()
+        || received.payload.is_none()
+    {
+        return Err(Error::InvalidData);
+    }
+    let index = h
+        .facts
+        .in_flight
+        .iter()
+        .position(|f| {
+            f.local_rev == rev
+                && !f.tombstone
+                && f.erev == remote.fields.erev
+                && f.payload_digest == remote.payload_sha256
+        })
+        .ok_or(Error::InvalidData)?;
+    let saved = workflow::Saved {
+        name: key.name.clone(),
+        envelope: envelope.0.clone(),
+        system_fields: system_fields.0.clone(),
+    };
+    h.ack(index, &saved)?;
+    if h.images.local_row_digest != h.facts.acked_row_digest {
+        // A real edit back to the old ACK may have cleared the observer mark.
+        // This newly acknowledged flight changes the base, so refresh pending
+        // evidence in the same transaction without changing the local revision.
+        state.change_counter = super::runtime_store::next(state.change_counter)?;
+        h.facts.mark = Some(runtime::DirtyMark {
+            source: runtime::DirtySource::Observer,
+            change_seq: state.change_counter,
+            payload_digest: h.local_digest(),
+        });
+    }
+    if h.facts.observer_open != observed.0 || h.facts.observed_seq <= observed.1 {
+        h.facts.observer_open = observed.0;
+        h.facts.observed_seq = observed.1;
+        h.facts.observed_generation = observed.2;
+    }
+    super::tracking_payload::put_header(tx, intent.binding, &h)?;
+    super::adapter_store::transfer_entry(tx, intent.binding, &key.name, entry.absence_pass)?;
+    Ok(true)
 }
 
 fn settle_absent_key(
@@ -707,6 +860,7 @@ fn settle_absent_key(
     prior: Option<workflow::EntityFacts>,
     state: &mut runtime::StoredRuntimeState,
     observed: (u64, u64, u64),
+    payload_source: (&std::path::Path, &[u8; 32]),
 ) -> Result<(), Error> {
     if !matches!(key.kind, entity_codec::Kind::Note | entity_codec::Kind::Card) {
         return Err(Error::InvalidData);
@@ -740,6 +894,7 @@ fn settle_absent_key(
         let InboxValue::Record {
             envelope,
             system_fields,
+            staged_asset,
             ..
         } = entry.value
         else {
@@ -759,9 +914,17 @@ fn settle_absent_key(
             None if !tombstone && key.kind == entity_codec::Kind::Card && key.after_digest.is_none() => {
                 // This card was downloaded and removed by its note's tombstone
                 // in the same op. Its real server entry is the first ACK/base.
-                let payload =
-                    entity_codec::Payload::decode(key.kind, server.payload.as_deref().ok_or(Error::InvalidData)?)
-                        .map_err(|_| Error::InvalidData)?;
+                let payload = super::payload_asset::receive_owned(
+                    payload_source.0,
+                    intent.binding,
+                    payload_source.1,
+                    &key.name,
+                    &envelope.0,
+                    staged_asset.as_deref(),
+                )
+                .map_err(|_| Error::InvalidData)?
+                .payload
+                .ok_or(Error::InvalidData)?;
                 workflow::EntityFacts {
                     name: key.name.clone(),
                     kind: key.kind,
@@ -806,11 +969,21 @@ fn settle_absent_key(
         let newer = own.as_ref().is_some_and(|f| e.local_rev > f.local_rev);
         let acked = if tombstone {
             own.as_ref()
-                .map(|f| f.payload.clone())
+                .map(|f| super::tracking_payload::flight_payload(tx, intent.binding, f))
+                .transpose()?
                 .unwrap_or_else(|| before.clone())
         } else {
-            entity_codec::Payload::decode(e.kind, server.payload.as_deref().ok_or(Error::InvalidData)?)
-                .map_err(|_| Error::InvalidData)?
+            super::payload_asset::receive_owned(
+                payload_source.0,
+                intent.binding,
+                payload_source.1,
+                &key.name,
+                &envelope.0,
+                staged_asset.as_deref(),
+            )
+            .map_err(|_| Error::InvalidData)?
+            .payload
+            .ok_or(Error::InvalidData)?
         };
         e.server_erev = server.fields.erev;
         e.acked_system_fields = system_fields.0;

@@ -1,5 +1,6 @@
 //! K6.1 projections of raw stored rows. These functions never write a collection.
 use super::{Error, entity_codec as c};
+use c::wire::Message;
 use meguri_model::ids::{CardId, NotetypeId};
 use meguri_storage::{Cell, ReadRows, RowImage, RowKey, Table};
 
@@ -100,7 +101,6 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
         templates: Vec::new(),
         struct_gen: generation,
     };
-    let mut total = n.name.len().checked_add(n.config.len()).ok_or(Error::InvalidData)?;
     for t in [Table::Fields, Table::Templates] {
         let mut after = None;
         loop {
@@ -115,13 +115,6 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
                 }
                 let name = bytes(&p, 2, false)?;
                 let config = bytes(&p, if t == Table::Fields { 3 } else { 5 }, true)?;
-                total = total
-                    .checked_add(name.len())
-                    .and_then(|n| n.checked_add(config.len() + 64))
-                    .ok_or(Error::InvalidData)?;
-                if total > c::INLINE_ENVELOPE_BYTES {
-                    return Err(Error::InvalidData);
-                }
                 if t == Table::Fields {
                     n.fields.push(c::Field { ord, name, config });
                 } else {
@@ -134,8 +127,11 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
                 }
                 after = Some(ord);
             }
+            // Bound each assembled page by its actual canonical payload length.
+            n.encoded_len(false).map_err(|_| Error::InvalidData)?;
         }
     }
+    n.encoded_len(false).map_err(|_| Error::InvalidData)?;
     Ok(n)
 }
 /// An acknowledged generation is usable only when the complete raw layout agrees.
@@ -270,9 +266,8 @@ pub fn project(
         }),
         c::Kind::MediaName => return Err(Error::InvalidData),
     };
-    if p.encode().map_err(|_| Error::InvalidData)?.len() > c::INLINE_ENVELOPE_BYTES {
-        return Err(Error::InvalidData);
-    }
+    // The codec enforces the payload cap; envelope placement owns the inline limit.
+    p.encode().map_err(|_| Error::InvalidData)?;
     Ok(p)
 }
 

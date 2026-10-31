@@ -608,10 +608,13 @@ pub fn test_cloud_prepare_adapter_baseline(
     let review_name =
         codec::entity_name(&[114; 32], codec::Kind::Card, &codec::id_key(card.0)).map_err(crate::sync::cloud_error)?;
     core.arm_adapter_faults_for_testing(fail_next_inbox_commit, fail_next_state_commit);
-    let record = |r: Saved| crate::sync::CloudRecord {
+    let collection_zone = meguri_sync::cloud::adapter::collection_zone(meguri_sync::cloud::EpochId([114; 16]));
+    let record = |r: Saved, record_type: &str, zone: &str| crate::sync::CloudRecord {
         name: r.name,
         envelope: r.envelope,
         system_fields: Some(r.system_fields),
+        record_type: Some(record_type.into()),
+        zone: Some(zone.into()),
         ..Default::default()
     };
     Ok(CloudAdapterBaseline {
@@ -620,9 +623,9 @@ pub fn test_cloud_prepare_adapter_baseline(
         review_deck_id: review_deck.0,
         review_card_id: card.0,
         review_record_name: review_name,
-        collection_zone: meguri_sync::cloud::adapter::collection_zone(meguri_sync::cloud::EpochId([114; 16])),
-        incoming_record: record(incoming),
-        root_record: record(root),
+        collection_zone: collection_zone.clone(),
+        incoming_record: record(incoming, "MGEntity", &collection_zone),
+        root_record: record(root, "MGActive", "meguri-root"),
     })
 }
 

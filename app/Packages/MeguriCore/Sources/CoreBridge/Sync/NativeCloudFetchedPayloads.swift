@@ -19,7 +19,7 @@ struct NativeCloudFetchedPayloads {
                 var staged: CloudMediaStagedAsset?
                 if record.recordType == "MGEntity", let source = (record["pa"] as? CKAsset)?.fileURL {
                     do {
-                        staged = try staging.copy(source, cancelled: { false }, retainedAssetLimit: Int.max)
+                        staged = try staging.copyPayload(source, cancelled: { false }, retainedAssetLimit: Int.max)
                     } catch is CloudMediaSourceFailure {
                         // Retain metadata so core intake can retry unavailable pa.
                     } catch CloudMediaFailure.stagingLimit {

@@ -43,6 +43,15 @@ impl Runtime {
     fn finish_incoming(&self, running: Running) -> Result<(), RuntimeError> {
         drop(running);
         let mut s = self.state();
+        let cleanup = with_tracking_access(|| -> Result<(), Error> {
+            let binding = s.bound.as_ref().ok_or(Error::BindingNotFound)?.binding.id;
+            let live = s.store.as_ref().ok_or(Error::Database)?.inbox(binding)?;
+            super::super::payload_asset::sweep(&self.directory, binding, &live)
+        });
+        if let Err(error) = cleanup {
+            Self::invalidate_locked(&mut s);
+            return Err(error.into());
+        }
         self.emit_pending_locked(&mut s, workflow::UpdateKind::Full, BTreeSet::new())?;
         Ok(())
     }
@@ -306,7 +315,7 @@ impl Runtime {
         name: &str,
     ) -> Result<Option<workflow::EntityFacts>, RuntimeError> {
         let s = self.state();
-        with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.entity_facts(binding, name)?))
+        with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.entity_dump(binding, name)?))
     }
     pub fn incoming_runs(&self) -> Vec<ApplyRun> {
         self.state().incoming.runs.clone()
@@ -558,11 +567,24 @@ impl Runtime {
             .iter()
             .filter(|e| matches!(e.entry.reason, InboxReason::Reference))
         {
-            let InboxValue::Record { envelope, .. } = &entry.entry.value else {
+            let InboxValue::Record {
+                envelope, staged_asset, ..
+            } = &entry.entry.value
+            else {
                 continue;
             };
-            let received = codec::receive(&key, &entry.entry.record_name, &envelope.0, codec::AssetInput::Absent)
-                .map_err(|_| Error::InvalidData)?;
+            let received = match super::super::payload_asset::receive_owned(
+                &self.directory,
+                guard.binding,
+                &key,
+                &entry.entry.record_name,
+                &envelope.0,
+                staged_asset.as_deref(),
+            ) {
+                Ok(received) => received,
+                Err(codec::ReceiveError::RetryableAsset(_)) => continue,
+                Err(_) => return Err(Error::InvalidData.into()),
+            };
             if let Some(payload) = received.payload
                 && references(&*snapshot, &payload, &layouts)?
             {
@@ -591,6 +613,7 @@ impl Runtime {
         let generation = guard.generation;
         let binding = guard.binding;
         let writer_guard = guard.clone();
+        let directory = self.directory.clone();
         let attempted: Vec<_> = entries.iter().map(|e| e.id).collect();
         // The writer transports EngineError only. Retain typed tracking/guard
         // failures before that conversion so they can never become Deferred.
@@ -613,7 +636,7 @@ impl Runtime {
                     let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
-                        apply(ctx, &mut s, &writer_guard, entries, replay_of)
+                        apply(ctx, &mut s, &writer_guard, &directory, entries, replay_of)
                     })
                     .map_err(capture)?
                 };
@@ -1075,6 +1098,7 @@ fn apply(
     ctx: &mut meguri_engine::OpContext<'_, '_>,
     s: &mut State,
     guard: &IncomingGuard,
+    directory: &Path,
     entries: Vec<StoredInboxEntry>,
     replay_of: Option<i64>,
 ) -> Result<Option<i64>, RuntimeError> {
@@ -1090,17 +1114,28 @@ fn apply(
     let mut keys = Vec::new();
     let mut ids = Vec::new();
     for entry in entries {
-        let InboxValue::Record { envelope, .. } = &entry.entry.value else {
+        let InboxValue::Record {
+            envelope, staged_asset, ..
+        } = &entry.entry.value
+        else {
             store.park_incoming(binding, entry.id, InboxReason::Structure)?;
             continue;
         };
-        let received = codec::receive(
+        let received = match super::super::payload_asset::receive_owned(
+            directory,
+            binding,
             &record_key,
             &entry.entry.record_name,
             &envelope.0,
-            codec::AssetInput::Absent,
-        )
-        .map_err(|_| Error::InvalidData)?;
+            staged_asset.as_deref(),
+        ) {
+            Ok(received) => received,
+            Err(codec::ReceiveError::RetryableAsset(_)) => {
+                store.park_incoming(binding, entry.id, InboxReason::Asset)?;
+                continue;
+            }
+            Err(_) => return Err(Error::InvalidData.into()),
+        };
         let remote = &received.entity;
         if remote.fields.tombstone
             && remote.fields.generation.is_none()
@@ -1120,8 +1155,43 @@ fn apply(
             continue;
         }
         let server = received.payload.ok_or(Error::InvalidData)?;
-        let facts = store.entity_facts(binding, &entry.entry.record_name)?;
         let local = project(ctx.scope(), server.kind(), &remote.fields.key, &layouts)?;
+        // An exact fetched own save needs a durable digest/flight intent and
+        // actual WAL coverage, but no duplicate copy of the unchanged local
+        // 40 MiB image in intent JSON. Its ACK image is the retained flight.
+        if let Some(h) = store.entity_header(binding, &entry.entry.record_name)?
+            && h.facts.origin == remote.fields.origin
+            && remote.fields.writer == binding.0
+            && h.facts.kind == remote.fields.kind
+            && h.facts.key == remote.fields.key
+            && h.facts.tombstone_at.is_none()
+            && local.is_some()
+            && let Some(f) = h
+                .facts
+                .in_flight
+                .iter()
+                .find(|f| !f.tombstone && f.erev == remote.fields.erev && f.payload_digest == remote.payload_sha256)
+        {
+            if !references(ctx.scope(), &server, &layouts)? {
+                store.park_incoming(binding, entry.id, InboxReason::Reference)?;
+                continue;
+            }
+            let digest = digest(local.as_ref())?;
+            keys.push(ApplyKey {
+                name: entry.entry.record_name.clone(),
+                kind: server.kind(),
+                key: remote.fields.key.clone(),
+                role: ApplyKeyRole::Entry,
+                before_digest: digest,
+                after_digest: digest,
+                before_payload: None,
+                after_payload: None,
+                own_flight: Some(f.local_rev),
+            });
+            ids.push(entry.id);
+            continue;
+        }
+        let facts = store.entity_facts(binding, &entry.entry.record_name)?;
         if facts
             .as_ref()
             .is_some_and(|e| e.origin != remote.fields.origin && e.server_erev == 0)
@@ -1140,13 +1210,20 @@ fn apply(
             .filter(|e| e.origin == remote.fields.origin && remote.fields.writer == binding.0)
             .and_then(|e| e.in_flight.iter().find(|f| f.payload_digest == remote.payload_sha256))
             .map(|f| f.local_rev);
-        let base = facts.as_ref().and_then(|e| {
-            remote
-                .fields
-                .base_sha256
-                .and_then(|d| e.in_flight.iter().find(|f| f.payload_digest == d).map(|f| &f.payload))
-                .or(e.base_payload.as_ref())
-                .or(e.acked_payload.as_ref())
+        let flight_base = facts
+            .as_ref()
+            .and_then(|e| {
+                remote
+                    .fields
+                    .base_sha256
+                    .and_then(|d| e.in_flight.iter().find(|f| f.payload_digest == d))
+            })
+            .map(|f| super::super::tracking_payload::flight_payload(&store.connection, binding, f))
+            .transpose()?;
+        let base = flight_base.as_ref().or_else(|| {
+            facts
+                .as_ref()
+                .and_then(|e| e.base_payload.as_ref().or(e.acked_payload.as_ref()))
         });
         if local.is_none()
             && facts
@@ -1324,7 +1401,12 @@ fn apply(
     for key in &mut keys {
         let after = project(ctx.scope(), key.kind, &key.key, &layouts)?;
         key.after_digest = digest(after.as_ref())?;
-        key.after_payload = after;
+        key.after_payload =
+            if key.own_flight.is_some() && key.before_payload.is_none() && key.before_digest == key.after_digest {
+                None
+            } else {
+                after
+            };
     }
     let planned_at_ms = ctx.now().0;
     let id = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

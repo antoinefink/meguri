@@ -22,6 +22,13 @@ pub struct CloudRecord {
     pub asset_path: Option<String>,
 }
 impl CloudRecord {
+    fn fetched(self) -> w::FetchedRecord {
+        let asset_path = self.asset_path.as_ref().map(std::path::PathBuf::from);
+        w::FetchedRecord {
+            record: self.saved(),
+            asset_path,
+        }
+    }
     fn saved(self) -> w::Saved {
         w::Saved {
             name: self.name,
@@ -658,7 +665,9 @@ impl CloudWorkflow {
                     name: r.name,
                     envelope: r.envelope,
                     system_fields: r.system_fields,
-                    ..Default::default()
+                    record_type: Some("MGEntity".into()),
+                    zone: Some(zone.clone()),
+                    asset_path: r.asset_path,
                 })
                 .collect(),
             deletes: Vec::new(),
@@ -686,8 +695,22 @@ impl CloudWorkflow {
         {
             return Err(cloud_error("mixed media Saved callback"));
         }
-        if !media_metadata && saved.iter().any(|r| r.asset_path.is_some()) {
-            return Err(cloud_error("collection asset support unavailable"));
+        if !media_metadata {
+            let epoch = self
+                .core
+                .status()
+                .map_err(cloud_error)?
+                .binding
+                .ok_or_else(|| cloud_error("binding unavailable"))?
+                .facts
+                .epoch;
+            let zone = c::adapter::collection_zone(epoch);
+            if saved.iter().any(|record| {
+                record.record_type.as_deref().is_some_and(|kind| kind != "MGEntity")
+                    || record.zone.as_deref().is_some_and(|actual| actual != zone.as_str())
+            }) {
+                return Err(cloud_error("collection Saved metadata mismatch"));
+            }
         }
         self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
         let sdk_retrying = failed.iter().any(|f| {
@@ -775,17 +798,29 @@ impl CloudWorkflow {
         deleted: Vec<String>,
     ) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.fetched");
-        if records
-            .iter()
-            .any(|r| r.asset_path.is_some() || r.zone.as_ref().is_some_and(|z| z != &zone))
-        {
-            return Err(cloud_error("unsupported fetched record asset or zone"));
+        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        if records.iter().any(|r| {
+            let expected = if zone == "meguri-root" {
+                "MGActive"
+            } else if r.name == "epoch" {
+                "MGEpoch"
+            } else if r.name.starts_with('g') {
+                "MGGeneration"
+            } else {
+                "MGEntity"
+            };
+            r.zone.as_ref().is_some_and(|z| z != &zone)
+                || r.record_type.as_deref().is_some_and(|kind| kind != expected)
+                || (expected != "MGEntity" && r.asset_path.is_some())
+        }) {
+            self.core.adapter_tracking_failure(&sdk).map_err(cloud_error)?;
+            return Err(cloud_error("unsupported fetched record metadata"));
         }
         self.core
-            .adapter_fetched(
+            .adapter_fetched_assets(
                 &sdk,
                 &zone,
-                &records.into_iter().map(CloudRecord::saved).collect::<Vec<_>>(),
+                &records.into_iter().map(CloudRecord::fetched).collect::<Vec<_>>(),
                 &deleted,
             )
             .map_err(cloud_error)?;

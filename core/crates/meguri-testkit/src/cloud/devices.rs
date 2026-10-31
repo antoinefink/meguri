@@ -237,7 +237,7 @@ impl PreboundDevice {
         let mut epoch = [0; 16];
         epoch[..8].copy_from_slice(&rng.next_u64().to_le_bytes());
         epoch[8..].copy_from_slice(&rng.next_u64().to_le_bytes());
-        let collection_zone = format!("c-{}", epoch.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let collection_zone = production::adapter::collection_zone(production::EpochId(epoch));
         let publication = meguri_engine::device_state::DeviceState::for_collection(&directory.join("collection.anki2"))
             .publication()?
             .ok_or_else(failure)?
@@ -420,7 +420,7 @@ impl PreboundDevice {
     pub fn read_entity_durable(&self, name: &str) -> Result<EntityFacts> {
         runtime::with_tracking_access(|| {
             open_store(self)?
-                .entity_facts(self.binding.id, name)?
+                .entity_dump(self.binding.id, name)?
                 .ok_or_else(failure)
         })
     }
@@ -450,9 +450,7 @@ impl PreboundDevice {
         };
         runtime::with_tracking_access(|| {
             let s = open_store(self)?;
-            let e = s
-                .entity_facts(self.binding.id, &self.entity_name)?
-                .ok_or_else(failure)?;
+            let e = s.entity_dump(self.binding.id, &self.entity_name)?.ok_or_else(failure)?;
             let state = s.stored_runtime_state(self.binding.id)?.ok_or_else(failure)?;
             let binding = s.binding(self.binding.id)?.ok_or_else(failure)?;
             let mut pending_names = BTreeSet::new();

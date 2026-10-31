@@ -176,7 +176,8 @@ struct NativeCloudPayloadAssetTests {
             _ = try NativeCloudMediaRecords.read(record, request: request, staging: staging, cancelled: { false })
             Issue.record("MGBlob source failure became a successful read")
         } catch {
-            #expect(error is CloudMediaSourceFailure)
+            #expect((error as NSError).domain == NSCocoaErrorDomain)
+            #expect(!(error is CloudMediaSourceFailure))
             guard case .failed(let code) = NativeCloudMediaRecords.failure(error).result else { Issue.record("MGBlob failure changed"); return }
             #expect(code == 0)
         }

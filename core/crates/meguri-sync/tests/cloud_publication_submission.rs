@@ -409,7 +409,7 @@ fn ordinary_partial_failure_keeps_a_sibling_saved_ack_and_the_failed_record_pend
     rig.return_sent_handler().unwrap();
     assert!(!rig.sdk_pending().contains_key(&success));
     assert!(rig.tracking_pending_names().unwrap().contains(&failed));
-    assert_eq!(rig.observations().iter().filter(|e| matches!(e, Observation::SavedPendingRemoved { name, request_id } if name == &success && *request_id == batch.response.request_id)).count(), 1);
+    assert_eq!(rig.observations().iter().filter(|e| matches!(e, Observation::SavedPendingRemoved { name, request_id } if name == &success && *request_id == batch.backend_batch_id)).count(), 1);
     rig.close_clean().unwrap();
     let durable = files.read_entity_durable(&success).unwrap();
     assert!(durable == ack);

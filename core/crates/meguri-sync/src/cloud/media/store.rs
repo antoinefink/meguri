@@ -230,16 +230,16 @@ impl TrackingStore {
         let flight = e
             .in_flight
             .iter()
-            .find(|f| {
-                f.erev == r.entity.fields.erev
-                    && f.payload_digest == r.entity.payload_sha256
-                    && Some(&f.payload) == r.payload.as_ref()
-            })
+            .find(|f| f.erev == r.entity.fields.erev && f.payload_digest == r.entity.payload_sha256)
             .cloned()
             .ok_or(Error::InvalidData)?;
+        let image = crate::cloud::tracking_payload::flight_payload(&self.connection, b, &flight)?;
+        if Some(&image) != r.payload.as_ref() {
+            return Err(Error::InvalidData);
+        }
         e.acked_rev = flight.local_rev;
         e.server_erev = flight.erev;
-        e.acked_payload = Some(flight.payload.clone());
+        e.acked_payload = Some(image.clone());
         e.acked_row_digest = flight.row_digest;
         e.acked_payload_digest = flight.payload_digest;
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
@@ -251,7 +251,7 @@ impl TrackingStore {
             .get(std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?)
             .is_some_and(|n| n.tombstone_at.is_some())
         {
-            e.payload = flight.payload;
+            e.payload = image;
             e.mark = None;
             e.base_payload = None;
             e.acked_rev = e.local_rev;

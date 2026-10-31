@@ -58,6 +58,16 @@ impl Runtime {
         let (serialization, durable) = with_tracking_access(|| -> Result<_, RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
             store.adapter_install()?;
+            let live = store.inbox(b.id)?;
+            super::super::payload_asset::sweep(&self.directory, b.id, &live)?;
+            let leased = s
+                .actions
+                .payload_uploads
+                .values()
+                .flatten()
+                .map(|path| path.to_path_buf())
+                .collect();
+            super::super::payload_asset::sweep_uploads(&self.directory, b.id, &leased)?;
             Ok((
                 store.engine_state(b.id)?.map(|v| v.serialization.0),
                 store.adapter_durable(b.id)?,
@@ -154,6 +164,17 @@ impl Runtime {
     pub fn release_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         let mut s = self.state();
         if s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk && a.stopping) {
+            // Release follows the original SDK's cancellation/drain, including
+            // any late callbacks. Retiring alone cannot release upload files.
+            s.actions.request_flights.retain(|(owner, _), _| owner != sdk);
+            s.actions.payload_uploads.retain(|(owner, _), _| owner != sdk);
+            s.actions.payload_upload_sends.retain(|(owner, _), _| owner != sdk);
+            s.actions.payload_handlers_returned.retain(|(owner, _)| owner != sdk);
+            // This sole installed SDK has completed cancellation/drain; its
+            // explicit sends cannot become dependencies of a successor batch.
+            for call in &mut s.actions.calls {
+                call.returned = true;
+            }
             s.adapter.sdk = None;
             s.actions.handler = None;
             s.adapter.fetch = None;
@@ -357,16 +378,64 @@ impl Runtime {
         records: &[Saved],
         deleted: &[String],
     ) -> Result<(), RuntimeError> {
+        let inputs: Vec<_> = records
+            .iter()
+            .map(|record| FetchedRecord {
+                record: record.clone(),
+                asset_path: None,
+            })
+            .collect();
+        self.adapter_fetched_assets(sdk, zone, &inputs, deleted)
+    }
+    pub fn adapter_fetched_assets(
+        &self,
+        sdk: &str,
+        zone: &str,
+        records: &[FetchedRecord],
+        deleted: &[String],
+    ) -> Result<(), RuntimeError> {
+        let guard = {
+            let s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            Self::adapter_guard_locked(&s)
+        };
+        let result = self.adapter_fetched_owned(sdk, zone, records, deleted);
+        if result.is_err() {
+            let mut s = self.state();
+            // A failed intake closes only the adapter that supplied it. A
+            // successor must never inherit this callback's failure authority.
+            if Self::adapter_guard_locked(&s) == guard && Self::sdk_locked(&s, sdk).is_ok() {
+                Self::invalidate_locked(&mut s);
+            }
+        }
+        result
+    }
+    fn adapter_fetched_owned(
+        &self,
+        sdk: &str,
+        zone: &str,
+        inputs: &[FetchedRecord],
+        deleted: &[String],
+    ) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
-        let (key, epoch) = {
+        let (key, epoch, binding, guard) = {
             let s = self.state();
             Self::sdk_locked(&s, sdk)?;
             let b = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
-            (b.facts.record_key.0, b.facts.epoch.0)
+            (
+                b.facts.record_key.0,
+                b.facts.epoch.0,
+                b.id,
+                Self::adapter_guard_locked(&s),
+            )
         };
+        let records: Vec<_> = inputs.iter().map(|input| input.record.clone()).collect();
         if zone == "meguri-root" {
             // A root proof is accepted at its drained fetch, never from an old callback.
-            for r in records {
+            if inputs.iter().any(|input| input.asset_path.is_some()) {
+                return Err(Error::InvalidData.into());
+            }
+            for r in &records {
                 if r.name != "active" {
                     return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
                 }
@@ -375,13 +444,30 @@ impl Runtime {
         } else if zone != collection_zone(EpochId(epoch)) {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
         }
-        let (mut entries, refused) = if zone != "meguri-root" {
-            // The collection's epoch header is a control record, never an entity.
-            let entities: Vec<_> = records.iter().filter(|r| r.name != "epoch").cloned().collect();
-            super::super::incoming::classify(&key, &entities, at_ms)
+        if zone != "meguri-root" {
+            meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
+        }
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        if Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let intake = if zone != "meguri-root" {
+            Some(super::super::payload_asset::intake(
+                &self.directory,
+                binding,
+                &key,
+                inputs,
+                at_ms,
+            )?)
         } else {
-            (Vec::new(), Vec::new())
+            None
         };
+        let mut entries = intake.as_ref().map_or_else(Vec::new, |intake| intake.entries.clone());
+        let refused = intake.as_ref().map_or_else(Vec::new, |intake| intake.refused.clone());
         if zone != "meguri-root" {
             for name in deleted {
                 entries.push(InboxEntry {
@@ -396,14 +482,6 @@ impl Runtime {
                 });
             }
         }
-        if zone != "meguri-root" {
-            meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
-            #[cfg(feature = "test-hooks")]
-            self.incoming_hooks
-                .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
-        }
-        let mut s = self.state();
-        Self::sdk_locked(&s, sdk)?;
         #[cfg(feature = "test-hooks")]
         let fail = std::mem::take(&mut s.adapter.fail_inbox);
         #[cfg(not(feature = "test-hooks"))]
@@ -422,6 +500,13 @@ impl Runtime {
         if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, &refused, None, at_ms, fail, false) {
             s.adapter.durable = previous;
             return Err(error);
+        }
+        if let Some(intake) = intake {
+            with_tracking_access(|| -> Result<(), Error> {
+                let live = s.store.as_ref().ok_or(Error::Database)?.inbox(binding)?;
+                intake.commit(&live)?;
+                super::super::payload_asset::sweep(&self.directory, binding, &live)
+            })?;
         }
         if zone != "meguri-root" {
             s.incoming.retry_granted = true;

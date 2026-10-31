@@ -5,6 +5,14 @@ use crate::cloud::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 impl Runtime {
+    #[cfg(feature = "test-hooks")]
+    pub fn set_collection_record_limit_for_testing(&self, limit: usize) -> Result<(), RuntimeError> {
+        if !(1..=250).contains(&limit) {
+            return Err(Error::InvalidData.into());
+        }
+        self.state().actions.record_limit = limit;
+        Ok(())
+    }
     pub fn attach_sources(
         &self,
         random: Arc<dyn meguri_model::rng::RandomSource>,
@@ -145,6 +153,7 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Full-image diagnostic readout. Production selection uses stored headers.
     pub fn entity_facts(&self, name: &str) -> Result<Option<EntityFacts>, RuntimeError> {
         let s = self.state();
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -152,17 +161,56 @@ impl Runtime {
             Ok(s.store
                 .as_ref()
                 .ok_or(Error::Database)?
-                .entity_facts(b.binding.id, name)?)
+                .entity_dump(b.binding.id, name)?)
         })
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn payload_proof_for_testing(&self, name: &str) -> Result<Option<PayloadTrackingProof>, RuntimeError> {
+        let s = self.state();
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        with_tracking_access(|| {
+            let Some(h) = s
+                .store
+                .as_ref()
+                .ok_or(Error::Database)?
+                .entity_header(b.binding.id, name)?
+            else {
+                return Ok(None);
+            };
+            let digest = h.local_digest();
+            let e = h.facts;
+            Ok(Some(PayloadTrackingProof {
+                name: e.name,
+                local_rev: e.local_rev,
+                acked_rev: e.acked_rev,
+                server_erev: e.server_erev,
+                dirty: e.mark.is_some(),
+                flights: e.in_flight.len(),
+                payload_digest: digest,
+                acked_payload_digest: e.acked_payload_digest,
+                system_fields: e.acked_system_fields,
+                envelope: e.acked_envelope.0,
+            }))
+        })
+    }
+    /// Full-image diagnostic page, including canonical retained flight payloads.
     pub fn entity_facts_page(&self, kind: codec::Kind, after: Option<&[u8]>) -> Result<Vec<EntityFacts>, RuntimeError> {
         let s = self.state();
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         with_tracking_access(|| {
-            Ok(s.store
-                .as_ref()
-                .ok_or(Error::Database)?
-                .entity_page(b.binding.id, kind, after)?)
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            store
+                .entity_keys_page(b.binding.id, kind, after)?
+                .into_iter()
+                .map(|key| {
+                    let h = store
+                        .entity_key_header(b.binding.id, kind, &key)?
+                        .ok_or(Error::InvalidData)?;
+                    Ok(store
+                        .entity_dump(b.binding.id, &h.facts.name)?
+                        .ok_or(Error::InvalidData)?)
+                })
+                .collect()
         })
     }
     pub(super) fn sendables_locked(s: &State) -> Result<PendingSnapshot, RuntimeError> {
@@ -301,7 +349,29 @@ impl Runtime {
     pub fn return_sent_handler(&self, instance: &str) -> Result<u64, RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
-        Ok(s.actions.end_handler()?)
+        let request = s.actions.end_handler()?;
+        let key = (instance.to_owned(), request);
+        s.actions.request_flights.remove(&key);
+        s.policy.flights.remove(&key);
+        if s.actions.payload_uploads.contains_key(&key) {
+            s.actions.payload_handlers_returned.insert(key.clone());
+        }
+        let sends = s.actions.payload_upload_sends.get(&key);
+        // Automatic SDK sends have no explicit SendCall. Handler return is
+        // their drain point even when a failed record remains outstanding.
+        let release = sends.is_none_or(|ids| {
+            s.actions
+                .calls
+                .iter()
+                .filter(|call| ids.contains(&call.id))
+                .all(|call| call.returned)
+        });
+        if release {
+            s.actions.payload_uploads.remove(&key);
+            s.actions.payload_upload_sends.remove(&key);
+            s.actions.payload_handlers_returned.remove(&key);
+        }
+        Ok(request)
     }
     pub fn reconcile_binding(
         &self,
@@ -384,13 +454,11 @@ impl Runtime {
                             .is_none()
                         {
                             let e = self.with_scan(&guard, collection, |s| {
-                                let content = s
-                                    .store
+                                Ok(s.store
                                     .as_ref()
                                     .ok_or(Error::Database)?
-                                    .entity_content(guard.binding, kind, &key)?
-                                    .ok_or(Error::InvalidData)?;
-                                Ok(super::super::workflow_store::decode_entity(kind, &content)?)
+                                    .entity_image(guard.binding, kind, &key)?
+                                    .ok_or(Error::InvalidData)?)
                             })?;
                             e.validate()?;
                             let deleted = e.tombstone_at.is_some()
@@ -422,16 +490,12 @@ impl Runtime {
                         let key = row_payload::key(kind, &row)?;
                         cursor = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
                         // Copy only one tracking body per projection, then release guards.
-                        let content = self.with_scan(&guard, collection, |s| {
+                        let mut existing = self.with_scan(&guard, collection, |s| {
                             Ok(s.store
                                 .as_ref()
                                 .ok_or(Error::Database)?
-                                .entity_content(guard.binding, kind, &key)?)
+                                .entity_image(guard.binding, kind, &key)?)
                         })?;
-                        let mut existing = content
-                            .as_deref()
-                            .map(|content| super::super::workflow_store::decode_entity(kind, content))
-                            .transpose()?;
                         let newly_observed = existing.is_none();
                         if newly_observed && !publishing && !matches!(kind, codec::Kind::Note | codec::Kind::Card) {
                             return Err(Error::InvalidData.into());
@@ -440,15 +504,14 @@ impl Runtime {
                             let tracked = {
                                 let s = self.state();
                                 with_tracking_access(|| {
-                                    s.store.as_ref().ok_or(Error::Database)?.entity_content(
+                                    s.store.as_ref().ok_or(Error::Database)?.entity_image(
                                         guard.binding,
                                         codec::Kind::Notetype,
                                         &codec::id_key(id),
                                     )
                                 })
                             }?;
-                            if let Some(content) = tracked {
-                                let e = super::super::workflow_store::decode_entity(codec::Kind::Notetype, &content)?;
+                            if let Some(e) = tracked {
                                 match e.acked_payload.unwrap_or(e.payload) {
                                     codec::Payload::Notetype(n) => Ok(n),
                                     _ => Err(Error::InvalidData),
@@ -826,12 +889,23 @@ impl Runtime {
             let mut named: BTreeMap<(Table, RowKey), BTreeSet<String>> = BTreeMap::new();
             let store = s.store.as_ref().ok_or(Error::Database)?;
             for name in requested {
-                if let Some(e) = store.entity_facts(guard.binding, name)? {
-                    if e.kind == codec::Kind::MediaName {
-                        continue;
+                if let Some(h) = store.entity_header(guard.binding, name)? {
+                    let e = h.facts;
+                    if e.kind != codec::Kind::Tag
+                        && let Some(table) = row_payload::table(e.kind)
+                    {
+                        named
+                            .entry((table, super::super::workflow_store::row_key(e.kind, &e.key)?))
+                            .or_default()
+                            .insert(name.clone());
                     }
-                    for (table, key, _) in row_payload::payload_rows(&e.payload)? {
-                        named.entry((table, key)).or_default().insert(name.clone());
+                    if matches!(e.kind, codec::Kind::Notetype | codec::Kind::Tag) {
+                        // Preserve layout-part keys and the stored tag spelling.
+                        // Ordinary Note/Card key capture reads metadata only.
+                        let full = store.entity_facts(guard.binding, name)?.ok_or(Error::InvalidData)?;
+                        for (table, key, _) in row_payload::payload_rows(&full.payload)? {
+                            named.entry((table, key)).or_default().insert(name.clone());
+                        }
                     }
                 }
             }
@@ -854,8 +928,8 @@ impl Runtime {
                 if store.incoming_blocks_name(guard.binding, name)? {
                     blocked.insert(name.clone());
                 }
-                if let Some(e) = store.entity_facts(guard.binding, name)? {
-                    facts.insert(name.clone(), e);
+                if let Some(e) = store.entity_header(guard.binding, name)? {
+                    facts.insert(name.clone(), e.facts);
                 }
             }
             let ready = Self::gate_locked(s).is_ok()
@@ -890,103 +964,119 @@ impl Runtime {
                 _ => return Ok(empty()),
             };
         let mut deferred = BTreeSet::new();
-        let mut images = BTreeMap::new();
-        // All collection reads, lazy journal reads and projection/encoding are
-        // off the writer and outside state/tracking guards. Incoming merge L
-        // continues to be read directly from its write scope.
-        for (name, e) in &facts {
-            if blocked.contains(name)
-                || (e.observer_open == guard.open
-                    && e.observed_generation == snapshot.generation().0
-                    && e.observed_seq > snapshot.seq().0)
-            {
-                deferred.insert(name.clone());
-                continue;
-            }
-            if (e.acked_tombstone() && e.kind != codec::Kind::MediaName)
-                || e.mark.is_none()
-                || (!publishing
-                    && !matches!(
-                        e.kind,
-                        codec::Kind::Note
-                            | codec::Kind::Card
-                            | codec::Kind::Revlog
-                            | codec::Kind::Deck
-                            | codec::Kind::Config
-                            | codec::Kind::MediaName
-                    ))
-            {
-                continue;
-            }
-            if e.kind == codec::Kind::MediaName {
-                images.insert(name.clone(), (e.payload.clone(), snapshot.seq().0, false));
-                continue;
-            }
-            let view = super::super::held_view::HeldView::new(&*snapshot, &runs, snapshot.seq());
-            let table = row_payload::table(e.kind).ok_or(Error::InvalidData)?;
-            let key = super::super::workflow_store::row_key(e.kind, &e.key)?;
-            let Some(row) = view.row(table, &key)? else {
-                let (image_seq, held) = view.image();
-                if !held && e.tombstone_at.is_some() && !e.acked_tombstone() {
-                    images.insert(name.clone(), (e.payload.clone(), image_seq, false));
-                } else {
-                    // Defer held creates. Deleted rows use the captured image.
-                    deferred.insert(name.clone());
-                }
-                continue;
-            };
-            let payload = row_payload::project(&view, e.kind, &row, |id| {
-                let tracked = self
-                    .with_scan(&guard, collection, |s| {
-                        let name = codec::entity_name(
-                            &s.bound
-                                .as_ref()
-                                .ok_or(RuntimeError::StaleIncarnation)?
-                                .binding
-                                .facts
-                                .record_key
-                                .0,
-                            codec::Kind::Notetype,
-                            &codec::id_key(id),
-                        )
-                        .map_err(|_| Error::InvalidData)?;
-                        Ok(s.store
-                            .as_ref()
-                            .ok_or(Error::Database)?
-                            .entity_facts(guard.binding, &name)?)
-                    })
-                    .map_err(|_| Error::InvalidData)?;
-                if let Some(e) = tracked
-                    && let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload)
+        // The first pass retains descriptors only. Every full image and codec
+        // buffer dies before the next requested name. The pinned snapshot,
+        // held runs and WAL receipt cover both passes and every flight commit.
+        type PreparedCandidate = (Flight, Vec<u8>, usize, Vec<String>, Option<Vec<u8>>);
+        let prepare = |name: &String,
+                       e: &EntityFacts,
+                       deferred: &mut BTreeSet<String>|
+         -> Result<Option<PreparedCandidate>, RuntimeError> {
+            let (payload, image_seq, held) = 'image: {
+                if blocked.contains(name)
+                    || (e.observer_open == guard.open
+                        && e.observed_generation == snapshot.generation().0
+                        && e.observed_seq > snapshot.seq().0)
                 {
-                    return Ok(n);
-                }
-                if publishing {
-                    let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
-                    return row_payload::notetype(&view, &row, 1);
-                }
-                Err(Error::InvalidData)
-            });
-            let payload = match payload {
-                Ok(payload) => payload,
-                Err(Error::InvalidData) => {
                     deferred.insert(name.clone());
-                    continue;
+                    return Ok(None);
                 }
-                Err(error) => return Err(error.into()),
+                if (e.acked_tombstone() && e.kind != codec::Kind::MediaName)
+                    || e.mark.is_none()
+                    || (!publishing
+                        && !matches!(
+                            e.kind,
+                            codec::Kind::Note
+                                | codec::Kind::Card
+                                | codec::Kind::Revlog
+                                | codec::Kind::Deck
+                                | codec::Kind::Config
+                                | codec::Kind::MediaName
+                        ))
+                {
+                    return Ok(None);
+                }
+                if e.kind == codec::Kind::MediaName {
+                    let payload = self.with_scan(&guard, collection, |s| {
+                        let store = s.store.as_ref().ok_or(Error::Database)?;
+                        store
+                            .entity_header(guard.binding, name)?
+                            .ok_or(Error::InvalidData)?
+                            .local_payload(&store.connection, guard.binding)
+                            .map_err(RuntimeError::from)
+                    })?;
+                    break 'image (payload, snapshot.seq().0, false);
+                }
+                let view = super::super::held_view::HeldView::new(&*snapshot, &runs, snapshot.seq());
+                let table = row_payload::table(e.kind).ok_or(Error::InvalidData)?;
+                let key = super::super::workflow_store::row_key(e.kind, &e.key)?;
+                let Some(row) = view.row(table, &key)? else {
+                    let (image_seq, held) = view.image();
+                    if !held && e.tombstone_at.is_some() && !e.acked_tombstone() {
+                        let payload = self.with_scan(&guard, collection, |s| {
+                            let store = s.store.as_ref().ok_or(Error::Database)?;
+                            store
+                                .entity_header(guard.binding, name)?
+                                .ok_or(Error::InvalidData)?
+                                .local_payload(&store.connection, guard.binding)
+                                .map_err(RuntimeError::from)
+                        })?;
+                        break 'image (payload, image_seq, false);
+                    } else {
+                        // Defer held creates. Deleted rows use the captured image.
+                        deferred.insert(name.clone());
+                    }
+                    return Ok(None);
+                };
+                let payload = row_payload::project(&view, e.kind, &row, |id| {
+                    let tracked = self
+                        .with_scan(&guard, collection, |s| {
+                            let name = codec::entity_name(
+                                &s.bound
+                                    .as_ref()
+                                    .ok_or(RuntimeError::StaleIncarnation)?
+                                    .binding
+                                    .facts
+                                    .record_key
+                                    .0,
+                                codec::Kind::Notetype,
+                                &codec::id_key(id),
+                            )
+                            .map_err(|_| Error::InvalidData)?;
+                            Ok(s.store
+                                .as_ref()
+                                .ok_or(Error::Database)?
+                                .entity_facts(guard.binding, &name)?)
+                        })
+                        .map_err(|_| Error::InvalidData)?;
+                    if let Some(e) = tracked
+                        && let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload)
+                    {
+                        return Ok(n);
+                    }
+                    if publishing {
+                        let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                        return row_payload::notetype(&view, &row, 1);
+                    }
+                    Err(Error::InvalidData)
+                });
+                let payload = match payload {
+                    Ok(payload) => payload,
+                    Err(Error::InvalidData) => {
+                        deferred.insert(name.clone());
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error.into()),
+                };
+                let (image_seq, held) = view.image();
+                if payload.row_digest().map_err(|_| Error::InvalidData)? == e.acked_row_digest && e.server_erev > 0 {
+                    if held {
+                        deferred.insert(name.clone());
+                    }
+                    return Ok(None);
+                }
+                break 'image (payload, image_seq, held);
             };
-            let (image_seq, held) = view.image();
-            if payload.row_digest().map_err(|_| Error::InvalidData)? == e.acked_row_digest && e.server_erev > 0 {
-                if held {
-                    deferred.insert(name.clone());
-                }
-                continue;
-            }
-            images.insert(name.clone(), (payload, image_seq, held));
-        }
-        let mut prepared = BTreeMap::new();
-        for (name, (payload, image_seq, held)) in images {
-            let e = facts.get(&name).ok_or(Error::InvalidData)?;
             let erev = e.server_erev.checked_add(1).ok_or(Error::InvalidData)?;
             let tombstone_at = if e.kind == codec::Kind::MediaName {
                 self.with_scan(&guard, collection, |s| {
@@ -1002,9 +1092,22 @@ impl Runtime {
             };
             let row_tombstone = tombstone_at.is_some() && e.kind != codec::Kind::MediaName;
             let payload = if tombstone_at.is_some() && !row_tombstone {
-                e.acked_payload.clone().ok_or(Error::InvalidData)?
+                self.with_scan(&guard, collection, |s| {
+                    Ok(s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .entity_facts(guard.binding, name)?
+                        .ok_or(Error::InvalidData)?
+                        .acked_payload
+                        .ok_or(Error::InvalidData)?)
+                })?
             } else {
                 payload
+            };
+            let row_digest = if row_tombstone {
+                codec::sha256(&[])
+            } else {
+                payload.row_digest().map_err(|_| Error::InvalidData)?
             };
             let encoded_payload = if row_tombstone {
                 Vec::new()
@@ -1030,9 +1133,7 @@ impl Runtime {
                 &encoded_payload,
             )
             .map_err(|_| Error::InvalidData)?;
-            if entity.payload.is_none() {
-                return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-            }
+            let asset = entity.payload.is_none().then_some(encoded_payload);
             let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
             let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
             let mut references = (if row_tombstone {
@@ -1068,34 +1169,34 @@ impl Runtime {
             let flight = Flight {
                 local_rev: e.local_rev,
                 payload_digest: entity.payload_sha256,
-                row_digest: if row_tombstone {
-                    entity.payload_sha256
-                } else {
-                    payload.row_digest().map_err(|_| Error::InvalidData)?
-                },
-                payload,
+                row_digest,
+                payload: payload.into(),
                 erev,
                 image_seq,
                 held,
                 tombstone: tombstone_at.is_some(),
                 tombstone_envelope_digest: row_tombstone.then(|| codec::sha256(&envelope)),
             };
-            prepared.insert(name, (flight, envelope, size, references));
+            Ok(Some((flight, envelope, size, references, asset)))
+        };
+        let mut descriptors = BTreeMap::new();
+        for (name, e) in &facts {
+            if let Some((flight, envelope, size, references, asset)) = prepare(name, e, &mut deferred)? {
+                // No payload, encoded asset or full image survives this loop.
+                let _ = (flight, envelope, asset);
+                descriptors.insert(name.clone(), (size, references));
+            }
         }
-        self.with_scan(&guard, collection, |s| {
+        let selected = self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
             if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
-                return Ok(empty());
+                return Ok(Vec::new());
             }
-            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
-            let store = s.store.as_mut().ok_or(Error::Database)?;
-            // This transport uses ordinary non-atomic batches. Unacked
-            // references go first; dependents wait until their real ACK.
-            // These waits stay pending; only image deferrals persist below.
+            let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut waiting = BTreeSet::new();
             loop {
                 let mut changed = false;
-                for (name, (_, _, _, references)) in &prepared {
+                for (name, (_, references)) in &descriptors {
                     if deferred.contains(name) {
                         continue;
                     }
@@ -1103,13 +1204,14 @@ impl Runtime {
                         if deferred.contains(reference)
                             || s.cloud.deferred.contains(reference)
                             || s.cloud.incoming_held.contains(reference)
-                            || store.incoming_blocks_name(b.id, reference)?
+                            || store.incoming_blocks_name(guard.binding, reference)?
                         {
                             changed |= deferred.insert(name.clone());
                             break;
                         }
                         if waiting.contains(reference)
-                            || !store.entity_facts(b.id, reference)?.is_some_and(|e| {
+                            || !store.entity_header(guard.binding, reference)?.is_some_and(|h| {
+                                let e = h.facts;
                                 e.server_erev > 0
                                     && e.acked_payload.is_some()
                                     && !(matches!(e.kind, codec::Kind::Note | codec::Kind::Card) && e.acked_tombstone())
@@ -1123,74 +1225,129 @@ impl Runtime {
                     break;
                 }
             }
-            let mut saves = Vec::new();
-            let mut flights = BTreeMap::new();
+            let mut selected = Vec::new();
             let mut bytes = 0usize;
-            for (name, (flight, envelope, size, _)) in prepared {
-                if deferred.contains(&name) || waiting.contains(&name) || store.incoming_blocks_name(b.id, &name)? {
-                    continue;
-                }
-                if saves.len() >= s.actions.record_limit {
-                    break;
-                }
-                let e = store.entity_facts(b.id, &name)?.ok_or(Error::InvalidData)?;
-                let captured = facts.get(&name).ok_or(Error::InvalidData)?;
-                // Another saved callback may have advanced the conditional
-                // tag while this snapshot was being encoded. Rebuild later.
-                if e.server_erev != captured.server_erev
-                    || e.acked_payload_digest != captured.acked_payload_digest
-                    || e.acked_system_fields != captured.acked_system_fields
+            for (name, (size, _)) in &descriptors {
+                if deferred.contains(name)
+                    || waiting.contains(name)
+                    || store.incoming_blocks_name(guard.binding, name)?
                 {
                     continue;
                 }
-                if size > s.actions.byte_limit {
+                if selected.len() >= s.actions.record_limit {
+                    break;
+                }
+                if *size > s.actions.byte_limit {
                     return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
                 }
-                if bytes + size > s.actions.byte_limit {
+                if bytes.checked_add(*size).ok_or(Error::InvalidData)? > s.actions.byte_limit {
                     break;
                 }
                 bytes += size;
-                let image = (name.clone(), flight.erev, flight.payload_digest);
-                let image_seq = flight.image_seq;
-                let held_image = flight.held;
-                let codec::DecodeOutcome::Supported(entity) =
-                    codec::Entity::decode(&envelope).map_err(|_| Error::InvalidData)?
-                else {
-                    return Err(Error::InvalidData.into());
-                };
-                flights.insert(
-                    name.clone(),
-                    HandedSave {
-                        origin: entity.fields.origin,
-                        local_rev: flight.local_rev,
-                        erev: entity.fields.erev,
-                        payload_digest: entity.payload_sha256,
-                        tombstone: entity.fields.tombstone,
-                    },
-                );
-                store.persist_flight(b.id, &name, flight)?;
+                selected.push(name.clone());
+            }
+            Ok(selected)
+        })?;
+        let mut saves = Vec::new();
+        let mut flights = BTreeMap::new();
+        let mut uploads = Vec::new();
+        let mut images = Vec::new();
+        // Incremental staging and persistence: one full image at a time,
+        // independently of record count, asset count and total asset bytes.
+        for name in selected {
+            let captured = facts.get(&name).ok_or(Error::InvalidData)?;
+            let Some((flight, envelope, _, _, asset)) = prepare(&name, captured, &mut deferred)? else {
+                continue;
+            };
+            let upload = asset
+                .map(|asset| super::super::payload_asset::upload(&self.directory, guard.binding, &asset))
+                .transpose()?;
+            // The asset Vec has been released before persistence encodes the
+            // flight into its binding-scoped blob. Files alone cross records.
+            let handed = HandedSave {
+                origin: captured.origin,
+                local_rev: flight.local_rev,
+                erev: flight.erev,
+                payload_digest: flight.payload_digest,
+                tombstone: flight.tombstone,
+                envelope_digest: codec::sha256(&envelope),
+            };
+            let image = (
+                name.clone(),
+                flight.erev,
+                flight.payload_digest,
+                flight.image_seq,
+                flight.held,
+            );
+            let committed = self.with_scan(&guard, collection, |s| {
+                Self::caller_locked(s, instance)?;
+                if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+                    return Ok(false);
+                }
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                let e = store
+                    .entity_header(guard.binding, &name)?
+                    .ok_or(Error::InvalidData)?
+                    .facts;
+                if e.server_erev != captured.server_erev
+                    || e.acked_payload_digest != captured.acked_payload_digest
+                    || e.acked_system_fields != captured.acked_system_fields
+                    || store.incoming_blocks_name(guard.binding, &name)?
+                {
+                    return Ok(false);
+                }
+                store.persist_flight(guard.binding, &name, flight)?;
+                Ok(true)
+            })?;
+            if !committed {
+                continue;
+            }
+            let asset_path = upload.as_ref().map(|p| p.to_string_lossy().into_owned());
+            if let Some(upload) = upload {
+                uploads.push(upload);
+            }
+            flights.insert(name.clone(), handed);
+            images.push(image);
+            saves.push(SaveInput {
+                name,
+                envelope,
+                system_fields: (captured.server_erev > 0).then(|| captured.acked_system_fields.clone()),
+                asset_path,
+            });
+        }
+        self.with_scan(&guard, collection, |s| {
+            Self::caller_locked(s, instance)?;
+            if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+                return Ok(empty());
+            }
+            // Recheck conditional authority after all incremental commits.
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            for input in &saves {
+                let e = store
+                    .entity_header(guard.binding, &input.name)?
+                    .ok_or(Error::InvalidData)?
+                    .facts;
+                let captured = facts.get(&input.name).ok_or(Error::InvalidData)?;
+                if e.server_erev != captured.server_erev
+                    || e.acked_payload_digest != captured.acked_payload_digest
+                    || e.acked_system_fields != captured.acked_system_fields
+                    || store.incoming_blocks_name(guard.binding, &input.name)?
+                {
+                    return Ok(empty());
+                }
+            }
+            for (name, erev, digest, seq, held) in images {
                 s.cloud
                     .handed_images
-                    .entry(image)
-                    .and_modify(|seq| *seq = (*seq).max(image_seq))
-                    .or_insert(image_seq);
-                if held_image {
-                    s.policy.held_images.insert(name.clone());
+                    .entry((name.clone(), erev, digest))
+                    .and_modify(|v| *v = (*v).max(seq))
+                    .or_insert(seq);
+                if held {
+                    s.policy.held_images.insert(name);
                 } else {
                     s.policy.held_images.remove(&name);
                 }
-                saves.push(SaveInput {
-                    name,
-                    envelope,
-                    system_fields: if e.server_erev > 0 {
-                        Some(e.acked_system_fields)
-                    } else {
-                        None
-                    },
-                });
             }
-            // A full update after S already released old deferrals. Do not
-            // reinstall them from a snapshot preceding that local operation.
             if s.last_capture
                 .as_ref()
                 .is_none_or(|proof| proof.observed_seq <= snapshot.seq())
@@ -1199,23 +1356,32 @@ impl Runtime {
             }
             let pending = Self::sendables_locked(s)?;
             s.actions.update(UpdateKind::Changes, pending, BTreeSet::new());
-            // Retain the actual receipt and pinned view through flight commit.
             let _covered = &receipt;
             s.actions.batch += 1;
             let id = s.actions.batch;
             if !saves.is_empty() {
-                let names = saves.iter().map(|v| v.name.clone()).collect();
                 s.trace.push(TraceEvent::CollectionBatchBuilt {
                     instance: instance.into(),
-                    names,
+                    names: saves.iter().map(|v| v.name.clone()).collect(),
                 });
                 s.actions.observations.push(Observation::BatchBuilt {
                     batch_id: id,
                     names: saves.iter().map(|e| e.name.clone()).collect(),
                 });
-            }
-            if !saves.is_empty() {
                 s.actions.request_flights.insert((instance.to_owned(), id), flights);
+                if !uploads.is_empty() {
+                    let sends: BTreeSet<_> = s
+                        .actions
+                        .calls
+                        .iter()
+                        .filter(|call| !call.returned)
+                        .map(|call| call.id)
+                        .collect();
+                    if !sends.is_empty() {
+                        s.actions.payload_upload_sends.insert((instance.to_owned(), id), sends);
+                    }
+                    s.actions.payload_uploads.insert((instance.to_owned(), id), uploads);
+                }
                 s.policy.flights.insert(
                     (instance.to_owned(), id),
                     saves.iter().map(|v| v.name.clone()).collect(),
@@ -1224,25 +1390,62 @@ impl Runtime {
             Ok(BuiltBatch { id, saves })
         })
     }
-    fn decode_saved(&self, instance: &str, records: &[Saved]) -> Result<Vec<codec::Received>, RuntimeError> {
-        let key = {
-            let s = self.state();
-            Self::caller_locked(&s, instance)?;
-            s.bound
-                .as_ref()
-                .ok_or(RuntimeError::StaleIncarnation)?
-                .binding
-                .facts
-                .record_key
-                .0
-        };
-        records
+    fn decode_saved_record_locked(
+        s: &State,
+        instance: &str,
+        request: u64,
+        record: &Saved,
+    ) -> Result<codec::Received, RuntimeError> {
+        let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
+        let store = s.store.as_ref().ok_or(Error::Database)?;
+        let handed = s
+            .actions
+            .request_flights
+            .get(&(instance.to_owned(), request))
+            .and_then(|records| records.get(&record.name))
+            .ok_or(Error::InvalidData)?;
+        if record.system_fields.is_empty() || codec::sha256(&record.envelope) != handed.envelope_digest {
+            return Err(Error::InvalidData.into());
+        }
+        let header = store
+            .entity_header(binding.id, &record.name)?
+            .ok_or(Error::InvalidData)?;
+        let facts = &header.facts;
+        let index = facts
+            .in_flight
             .iter()
-            .map(|record| {
-                codec::receive(&key, &record.name, &record.envelope, codec::AssetInput::Absent)
-                    .map_err(|_| RuntimeError::Tracking(Error::InvalidData))
+            .position(|flight| {
+                flight.local_rev == handed.local_rev
+                    && flight.erev == handed.erev
+                    && flight.payload_digest == handed.payload_digest
+                    && flight.tombstone == handed.tombstone
             })
-            .collect()
+            .ok_or(Error::InvalidData)?;
+        // The durable flight owns the old image even when a newer row has
+        // been captured. No returned SDK file participates in this proof.
+        let flight = &facts.in_flight[index];
+        let bytes = if flight.tombstone && facts.kind != codec::Kind::MediaName {
+            Vec::new()
+        } else {
+            header.flight_bytes(&store.connection, binding.id, index)?
+        };
+        let received = codec::receive(
+            &binding.facts.record_key.0,
+            &record.name,
+            &record.envelope,
+            codec::AssetInput::Bytes(&bytes),
+        )
+        .map_err(|_| Error::InvalidData)?;
+        if received.entity.fields.writer != binding.id.0
+            || received.entity.fields.origin != handed.origin
+            || received.entity.fields.erev != handed.erev
+            || received.entity.payload_sha256 != handed.payload_digest
+            || received.entity.fields.generation.is_some()
+            || received.entity.fields.tombstone != handed.tombstone
+        {
+            return Err(Error::InvalidData.into());
+        }
+        Ok(received)
     }
     /// Resolve Engine's retained overlap against the current binding, never
     /// cached record names or the rest of a step's touched rows. No journals
@@ -1279,14 +1482,19 @@ impl Runtime {
                         _ => None,
                     };
                     if let Some(entity_key) = entity_key
-                        && let Some(content) = store.entity_content(binding, kind, &entity_key)?
+                        && let Some(header) = store.entity_key_header(binding, kind, &entity_key)?
                     {
-                        let entity = super::super::workflow_store::decode_entity(kind, &content)?;
-                        if row_payload::payload_rows(&entity.payload)?
-                            .iter()
-                            .any(|(t, k, _)| *t == table && super::super::held_view::compare(table, &key, k).is_eq())
-                        {
-                            name = Some(entity.name);
+                        if matches!(table, Table::Fields | Table::Templates) {
+                            let entity = store
+                                .entity_facts(binding, &header.facts.name)?
+                                .ok_or(Error::InvalidData)?;
+                            if row_payload::payload_rows(&entity.payload)?.iter().any(|(t, k, _)| {
+                                *t == table && super::super::held_view::compare(table, &key, k).is_eq()
+                            }) {
+                                name = Some(entity.name);
+                            }
+                        } else {
+                            name = Some(header.facts.name);
                         }
                     }
                 }
@@ -1311,9 +1519,9 @@ impl Runtime {
                     complete = false;
                     continue;
                 };
-                let e = store.entity_facts(b, name)?;
+                let e = store.entity_header(b, name)?;
                 let acked = s.cloud.acked_images.get(name).is_some_and(|seq| *seq >= id.0);
-                let clean = e.is_some_and(|e| e.server_erev > 0 && e.mark.is_none());
+                let clean = e.is_some_and(|h| h.facts.server_erev > 0 && h.facts.mark.is_none());
                 complete &= acked || clean;
             }
             if complete {
@@ -1335,7 +1543,6 @@ impl Runtime {
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<(), RuntimeError> {
-        let decoded = self.decode_saved(instance, saved)?;
         let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
@@ -1367,7 +1574,18 @@ impl Runtime {
         }
         let mut force = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
-            for (saved, received) in saved.iter().zip(decoded) {
+            // Validate the whole receipt before committing any ACK, but retain
+            // no decoded payload across records. Malformed tails cannot partly
+            // apply a receipt, and a large batch cannot retain all ACK images.
+            let mut names = BTreeSet::new();
+            for record in saved {
+                if !names.insert(&record.name) {
+                    return Err(Error::InvalidData.into());
+                }
+                Self::decode_saved_record_locked(&s, instance, request_id, record)?;
+            }
+            for saved in saved {
+                let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
                 let image_key = (
                     saved.name.clone(),
                     received.entity.fields.erev,
@@ -1450,7 +1668,7 @@ impl Runtime {
             let mut done = Vec::new();
             for saved in saved {
                 if let Some(selected) = s.actions.selected_revs.get(&saved.name) {
-                    let e = store.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
+                    let e = store.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?.facts;
                     if e.acked_rev >= *selected {
                         done.push(saved.name.clone());
                     }
@@ -1550,7 +1768,7 @@ impl Runtime {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut revs = BTreeMap::new();
             for name in &names {
-                let e = store.entity_facts(b, name)?.ok_or(Error::InvalidData)?;
+                let e = store.entity_header(b, name)?.ok_or(Error::InvalidData)?.facts;
                 if e.observer_open == open
                     && e.observed_generation == snapshot.generation().0
                     && e.observed_seq > boundary
@@ -1607,7 +1825,7 @@ impl Runtime {
                     break;
                 }
                 for key in page {
-                    let content = {
+                    let entity = {
                         let s = self.state();
                         Self::caller_locked(&s, instance)?;
                         if s.actions.exchange_phase != Some(phase) {
@@ -1618,11 +1836,10 @@ impl Runtime {
                             s.store
                                 .as_ref()
                                 .ok_or(Error::Database)?
-                                .entity_content(binding, kind, &key)
+                                .entity_image(binding, kind, &key)
                         })?
                         .ok_or(Error::InvalidData)?
                     };
-                    let entity = super::super::workflow_store::decode_entity(kind, &content)?;
                     if entity.server_erev > 0 && !seen.contains(&entity.name) {
                         return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
                     }
@@ -1701,6 +1918,10 @@ impl Runtime {
             .find(|c| c.id == id)
             .ok_or(Error::InvalidData)?;
         c.request_ids.push(request);
+        let key = (instance.to_owned(), request);
+        if s.actions.payload_uploads.contains_key(&key) {
+            s.actions.payload_upload_sends.entry(key).or_default().insert(id);
+        }
         Ok(())
     }
     pub fn finish_send_call(&self, instance: &str, id: u64) -> Result<(), RuntimeError> {
@@ -1713,10 +1934,26 @@ impl Runtime {
             .find(|c| c.id == id)
             .ok_or(Error::InvalidData)?;
         call.returned = true;
-        let requests = call.request_ids.clone();
-        for request in requests {
-            s.policy.flights.remove(&(instance.to_owned(), request));
-            s.actions.request_flights.remove(&(instance.to_owned(), request));
+        let uploads: Vec<_> = s
+            .actions
+            .payload_upload_sends
+            .iter()
+            .filter(|((owner, batch), sends)| {
+                owner == instance
+                    && sends.contains(&id)
+                    && s.actions.payload_handlers_returned.contains(&(owner.clone(), *batch))
+                    && s.actions
+                        .calls
+                        .iter()
+                        .filter(|call| sends.contains(&call.id))
+                        .all(|call| call.returned)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in uploads {
+            s.actions.payload_uploads.remove(&key);
+            s.actions.payload_upload_sends.remove(&key);
+            s.actions.payload_handlers_returned.remove(&key);
         }
         Ok(())
     }

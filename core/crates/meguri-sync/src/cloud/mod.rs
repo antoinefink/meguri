@@ -26,11 +26,13 @@ mod incoming_merge;
 mod incoming_store;
 pub mod media;
 mod open;
+mod payload_asset;
 mod recovery;
 mod runtime_store;
 mod store;
 #[cfg(feature = "test-hooks")]
 pub mod testing;
+mod tracking_payload;
 mod types;
 
 pub use open::{OpenOutcome, TRACKING_FILE};

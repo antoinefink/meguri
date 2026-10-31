@@ -55,6 +55,29 @@ proof also remain open.
 Privacy, similarity and the original-base gate remain required.
 No Unit/U114, P24, Q6, F5 or full-workflow acceptance.
 
+Public-copy compatibility repair (source only): clean source base
+`d9df5e6ce59a6c60de93eda65f1dc208d745acf7`; original integration base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. Filtered snapshot start:
+`d5a5b2a44e627fa932bcb411d31ed593414ee514`. No seed patch.
+Broad `swift-test/20261031T162505Z-70725` exposed a legacy staging error-type
+regression outside the earlier 36 native cases. `copy` now maps typed source
+shape/short-read failures to `CloudMediaFailure.invalidAsset`, size failures to
+`assetTooLarge`, and unavailable source operations to their original error.
+Fetched MGEntity pa alone calls `copyPayload`, the same bounded implementation
+with its typed source failures. Destination open/write/sync/close, cancellation,
+capacity and reservation failures remain outside source-error wrapping.
+
+All existing native cases and per-entry zero/nonregular/oversize cases remain
+enabled. The blob read-failure assertion now requires the original Foundation
+error rather than the leaked internal wrapper; its failed-read and cleanup
+assertions remain. Added bounded wrapper regressions for empty/directory/symlink,
+oversize/growth/short-read, raw source open/read error identity and cleanup with
+reservation reuse. One source consistency check; no builds, tests, formatter,
+network or commits in this runner. Integrator compilation, focused tests,
+independent review, provenance/privacy/similarity and original-base gates remain
+unrun. Other Swift policy/capture failures and Rust migration/lazy-flight work
+are outside this repair. No Unit or fullsync acceptance.
+
 Integrator checks for native preparation: `private/20261031T150508Z-31715`
 passes all 29 selected source/note files; final native source is covered by
 `similarity/20261031T150653Z-32828`. The diagnostic-only edit changes no native

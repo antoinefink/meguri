@@ -353,8 +353,9 @@ actor CloudKitEngineFake: CloudKitEngine {
             await deliver(.willFetch(groupID: group, reason: .manual), label: "willFetch")
             for zone in zones where scoped.zones.contains(zone) {
                 await deliver(.willFetchZone(zone: zone), label: "willFetchZone")
-                if !records.isEmpty {
-                    await deliver(.fetched(zone: zone, records: records, deleted: []), label: "fetched")
+                let zoneRecords = records.filter { $0.zone == nil || $0.zone == zone }
+                if !zoneRecords.isEmpty {
+                    await deliver(.fetched(zone: zone, records: zoneRecords, deleted: []), label: "fetched")
                 }
                 await deliver(.didFetchZone(zone: zone, error: nil), label: "didFetchZone")
             }

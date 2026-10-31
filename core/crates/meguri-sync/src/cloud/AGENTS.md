@@ -9,3 +9,7 @@
 - Pending updates are whole ordered lists. SDKs apply them after handler return and report actual additions/removals; Saved must preserve a newer local revision. Unsupported incoming/structural/assets workflows stay blocked.
 - Probe the runtime v1 marker before opening the V2 source. Validate ordinary runtime payloads only within the store scope. Fixture acknowledgements require `test-hooks`.
 - Lock state before `with_tracking_access`. Store owners also gate opens, writes, checkpoints and drops. Call providers outside both guards. Scan reads/encoding run outside them; page merges recheck incarnation, account and full file identity. Retain the snapshot and matching WAL receipt until return.
+
+- V5 keeps image bodies in `cloud_runtime_payloads`. Headers retain only image structure for current, base and ACK state. `FlightPayload::Image` selects a historical body. Read bodies only for a selected flight or an explicit diagnostic request; validation and sending require complete images.
+- The shared V5 marker fences older readers; `cloud_runtime_payload_owners` records actual per-binding conversion. Install upgrades only non-salvage owners in this build scope, including later upgrades after another scope advanced V5.
+- GC checks only blob IDs freed by this write in its binding. Header and own-flight intent refs can keep them live. Check that small list again when an intent ends. Digest-only own-save intents still need real writer and WAL proof.

@@ -1212,7 +1212,7 @@ fn saved_flight_during_real_reconcile_scan_preserves_newer_edit_and_capture_acco
         assert!(acked.in_flight.is_empty());
         assert_eq!(acked.local_rev, newer.local_rev);
         assert!(acked.payload == newer.payload && acked.mark.is_some());
-        assert!(acked.base_payload.as_ref() == Some(&flight.payload));
+        assert!(acked.base_payload.as_ref() == Some(flight.payload.canonical().expect("diagnostic flight payload")));
         let result = runtime.exchange_result(id).unwrap();
         assert_eq!(result.boundary_seq, selection.boundary_seq);
         assert_eq!(result.selected_names, selection.selected_names);

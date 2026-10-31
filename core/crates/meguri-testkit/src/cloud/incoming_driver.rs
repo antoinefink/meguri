@@ -98,6 +98,44 @@ fn advance(device: &mut Device, stream: &mut UnixStream) -> Result<()> {
         }
     }
 }
+// The Service owns immutable asset bytes. This transport stages those exact
+// bytes and holds the source files through the real receive callback. Runtime
+// must make its own durable copy before this helper releases them.
+fn with_service_records<T>(
+    records: &[super::super::Record],
+    receive: impl FnOnce(&[core::workflow::FetchedRecord]) -> Result<T>,
+) -> Result<T> {
+    let mut files = Vec::new();
+    let mut inputs = Vec::new();
+    for record in records {
+        let Some(super::super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+            return Err(failure());
+        };
+        let asset_path = match record.fields.get("pa") {
+            Some(super::super::Field::Asset(asset)) => {
+                let mut file = tempfile::NamedTempFile::new()?;
+                file.write_all(asset.bytes())?;
+                file.as_file().sync_all()?;
+                let path = file.path().to_path_buf();
+                files.push(file);
+                Some(path)
+            }
+            None => None,
+            _ => return Err(failure()),
+        };
+        inputs.push(core::workflow::FetchedRecord {
+            record: Saved {
+                name: record.name.clone(),
+                envelope: envelope.clone(),
+                system_fields: record.system_fields.bytes().to_vec(),
+            },
+            asset_path,
+        });
+    }
+    let result = receive(&inputs);
+    drop(files);
+    result
+}
 /// A pause is a separate protocol frame. The one original reply is emitted only
 /// after release/continuation; queries have their own independent reply frames.
 pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStream) -> Result<Option<Input>> {
@@ -109,6 +147,7 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
         input,
         Input::Fetched(..)
             | Input::DeliverCollection(..)
+            | Input::DeliverCollectionAssets(..)
             | Input::DrainIncoming(..)
             | Input::Reconcile
             | Input::Build(..)
@@ -119,7 +158,7 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     }
     // Receive-only work cannot grant a second writer. The journalled apply's
     // AfterIntent hook holds neither runtime nor tracking locks.
-    let nested_receive = matches!(input, Input::DeliverCollection(..))
+    let nested_receive = matches!(input, Input::DeliverCollection(..) | Input::DeliverCollectionAssets(..))
         && device.incoming_worker.as_ref().is_some_and(|work| {
             work.previous.is_none() && work.notified_pause == Some(IncomingStage::ApplyAfterIntent)
         });
@@ -151,22 +190,45 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     let thread = std::thread::spawn(move || {
         let run = || -> Result<serde_json::Value> {
             match input {
-                Input::Fetched(instance, records, zone, serialization, exchange) => {
-                    let callback = || -> Result<()> {
+                Input::Fetched(FetchedCallback {
+                    instance,
+                    records,
+                    zone,
+                    serialization,
+                    exchange,
+                }) => {
+                    let inputs: Vec<_> = records
+                        .into_iter()
+                        .map(|input| core::workflow::FetchedRecord {
+                            record: input.record,
+                            asset_path: input.asset_path,
+                        })
+                        .collect();
+                    let mut failure_stage: fn(Box<ChildFailure>) -> ChildFailure = ChildFailure::FetchCursorProjection;
+                    let mut callback = || -> Result<()> {
                         if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
                             let projection = super::super::adapter::collection_cursor_projection(&serialization)?;
                             *last_fetch.lock().unwrap_or_else(PoisonError::into_inner) = projection;
-                            runtime.adapter_fetched(&instance, &zone, &records, &[])?;
+                            failure_stage = ChildFailure::FetchNativeIntake;
+                            runtime.adapter_fetched_assets(&instance, &zone, &inputs, &[])?;
                             // The state event follows the durable inbox handler and
                             // precedes any writer grant. Store exactly SDK bytes.
+                            failure_stage = ChildFailure::FetchStateUpdate;
                             runtime.adapter_state_update(&instance, &serialization)?;
+                            failure_stage = ChildFailure::FetchCursorHook;
                             meguri_model::faultpoint!("cloud.fetch.after_cursor")?;
                             runtime.incoming_stage_for_testing(IncomingStage::FetchAfterCursor);
                         } else {
                             // Legacy explicit full-fetch proof fixtures have no SDK
                             // authority and make no native cursor-resume claim.
+                            failure_stage = ChildFailure::FetchLegacyIntake;
+                            if inputs.iter().any(|input| input.asset_path.is_some()) {
+                                return Err(Box::new(ChildFailure::FetchLegacyAssetRejected));
+                            }
+                            let records: Vec<_> = inputs.iter().map(|input| input.record.clone()).collect();
                             runtime.receive_collection_records(&instance, &records)?;
                         }
+                        failure_stage = ChildFailure::FetchCoreApply;
                         runtime.drain_incoming(&collection, IPC_TIMEOUT)?;
                         Ok(())
                     };
@@ -185,13 +247,23 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                                 runtime.adapter_complete_exchange(&instance, id, false, Some(outcome))
                             {
                                 return Err(Box::new(ChildFailure::FetchCompletion(
-                                    Box::new(ChildFailure::classify(error)),
+                                    Box::new(failure_stage(Box::new(ChildFailure::classify(error)))),
                                     Box::new(ChildFailure::classify(Box::new(completion))),
                                 )));
                             }
                         }
-                        return Err(error);
+                        return Err(Box::new(failure_stage(Box::new(ChildFailure::classify(error)))));
                     }
+                    Ok(serde_json::Value::Null)
+                }
+                Input::DeliverCollectionAssets(records) => {
+                    let sdk = runtime.incoming_sdk_instance_for_testing().ok_or_else(failure)?;
+                    let binding = runtime.status()?.binding.ok_or_else(failure)?;
+                    let zone = core::adapter::collection_zone(binding.facts.epoch);
+                    with_service_records(&records, |inputs| {
+                        runtime.adapter_fetched_assets(&sdk, &zone, inputs, &[])?;
+                        Ok(())
+                    })?;
                     Ok(serde_json::Value::Null)
                 }
                 Input::DeliverCollection(records) => {

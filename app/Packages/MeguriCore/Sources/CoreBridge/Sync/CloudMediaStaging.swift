@@ -48,6 +48,20 @@ public final class CloudMediaStaging: Sendable {
         self.beforeSourceRead = beforeSourceRead
     }
     func copy(_ source: URL, cancelled: @Sendable () -> Bool, retainedAssetLimit: Int = 2) throws -> CloudMediaStagedAsset {
+        do {
+            return try copyPayload(source, cancelled: cancelled, retainedAssetLimit: retainedAssetLimit)
+        } catch let error as CloudMediaSourceFailure {
+            // Existing media callers retain their validation and raw I/O errors.
+            switch error {
+            case .unavailable(let underlying): throw underlying
+            case .invalidShape, .shortRead: throw CloudMediaFailure.invalidAsset
+            case .invalidSize: throw CloudMediaFailure.assetTooLarge
+            }
+        }
+    }
+
+    // Only fetched pa intake uses source failures to omit one entry's file.
+    func copyPayload(_ source: URL, cancelled: @Sendable () -> Bool, retainedAssetLimit: Int = 2) throws -> CloudMediaStagedAsset {
         if cancelled() { throw CancellationError() }
         let values = try sourceOperation {
             try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])

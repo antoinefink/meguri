@@ -2,9 +2,9 @@
 use super::{
     entity_codec as codec,
     row_payload::{self, View},
-    runtime::{DirtySource, NoteAcknowledgement, NoteTracking},
+    runtime::{DirtySource, NoteTracking},
     runtime_store::{next, put_binding},
-    store::{decode, encode},
+    store::encode,
     workflow::*,
     *,
 };
@@ -17,13 +17,8 @@ pub(super) fn body_reads() -> usize {
     BODY_READS.with(std::cell::Cell::get)
 }
 #[cfg(feature = "test-hooks")]
-fn body_read() {
+pub(super) fn body_read() {
     BODY_READS.with(|v| v.set(v.get().saturating_add(1)));
-}
-fn generic_facts(content: &str) -> Result<EntityFacts, Error> {
-    #[cfg(feature = "test-hooks")]
-    body_read();
-    decode(content)
 }
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cloud_workflow_schema(version INTEGER NOT NULL); INSERT INTO cloud_workflow_schema SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM cloud_workflow_schema); CREATE TABLE IF NOT EXISTS cloud_runtime_entities(binding BLOB NOT NULL REFERENCES bindings(id),kind INTEGER NOT NULL,key BLOB NOT NULL,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));";
 pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
@@ -113,53 +108,15 @@ pub(super) fn entity(
             |r| r.get(0),
         )
         .optional()?;
-    value.map(|v| generic_facts(&v)).transpose()
+    value
+        .map(|v| super::tracking_payload::load_entity(c, b, kind, &v))
+        .transpose()
 }
 pub(super) fn put(c: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) -> Result<(), Error> {
     e.validate()?;
-    if e.kind == codec::Kind::Note {
-        let codec::Payload::Note(p) = &e.payload else {
-            return Err(Error::InvalidData);
-        };
-        let ack = e.acked_payload.as_ref();
-        let n = NoteTracking {
-            id: p.id,
-            name: e.name.clone(),
-            origin: e.origin,
-            local_rev: e.local_rev,
-            last_observed_digest: Some(e.payload.row_digest().map_err(|_| Error::InvalidData)?),
-            local_payload: OpaqueBytes(e.payload.encode().map_err(|_| Error::InvalidData)?),
-            base: e
-                .base_payload
-                .as_ref()
-                .map(|p| p.encode().map(OpaqueBytes).map_err(|_| Error::InvalidData))
-                .transpose()?,
-            mark: e.mark.clone(),
-            acknowledged: NoteAcknowledgement {
-                erev: e.server_erev,
-                system_fields: OpaqueBytes(e.acked_system_fields.clone()),
-                payload: OpaqueBytes(
-                    ack.map(|p| p.encode().map_err(|_| Error::InvalidData))
-                        .transpose()?
-                        .unwrap_or_default(),
-                ),
-                row_digest: e.acked_row_digest,
-                payload_digest: e.acked_payload_digest,
-            },
-            observer_open: e.observer_open,
-            observed_seq: e.observed_seq,
-            observed_generation: e.observed_generation,
-            acked_rev: e.acked_rev,
-            tombstone_at: e.tombstone_at,
-            in_flight: e.in_flight.clone(),
-            acked_envelope: e.acked_envelope.clone(),
-        };
-        c.execute("INSERT INTO cloud_runtime_notes(binding,id,content) VALUES(?1,?2,?3) ON CONFLICT(binding,id) DO UPDATE SET content=excluded.content",params![b.0.as_slice(),p.id,encode(&n)?])?;
-        return Ok(());
-    }
-    c.execute("INSERT INTO cloud_runtime_entities(binding,kind,key,content) VALUES(?1,?2,?3,?4) ON CONFLICT(binding,kind,key) DO UPDATE SET content=excluded.content",params![b.0.as_slice(),e.kind as i64,&e.key,encode(e)?])?;
-    Ok(())
+    super::tracking_payload::put_entity(c, b, e)
 }
+
 pub(super) fn new_pending_entity(
     record_key: &RecordKey,
     payload: codec::Payload,
@@ -228,11 +185,15 @@ impl TrackingStore {
 CREATE INDEX IF NOT EXISTS cloud_entities_by_name ON cloud_runtime_entities(binding,json_extract(content,'$.name'));
 CREATE INDEX IF NOT EXISTS cloud_dirty_notes ON cloud_runtime_notes(binding,json_extract(content,'$.name')) WHERE json_extract(content,'$.mark') IS NOT NULL;
 CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(binding,kind,json_extract(content,'$.name')) WHERE json_extract(content,'$.mark') IS NOT NULL;")?;
-        let mut s=self.connection.prepare("SELECT r.content,r.kind,r.key FROM cloud_runtime_entities r JOIN bindings b ON b.id=r.binding WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0")?;
+        let mut s=self.connection.prepare("SELECT r.content,r.kind,r.key,r.binding FROM cloud_runtime_entities r JOIN bindings b ON b.id=r.binding WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0")?;
         let mut rows = s.query(params![self.scope.container.as_str(), self.scope.environment.code()])?;
         while let Some(r) = rows.next()? {
-            let e: EntityFacts = decode(&r.get::<_, String>(0)?)?;
+            let owner = super::store::binding_id(r.get(3)?)?;
+            let kind = codec::Kind::try_from(u64::try_from(r.get::<_, i64>(1)?).map_err(|_| Error::InvalidData)?)
+                .map_err(|_| Error::InvalidData)?;
+            let e = super::tracking_payload::load_entity(&self.connection, owner, kind, &r.get::<_, String>(0)?)?;
             e.validate()?;
+            super::tracking_payload::validate_flights(&self.connection, owner, kind, &e.key, &e.in_flight)?;
             if e.kind as i64 != r.get::<_, i64>(1)? || e.key != r.get::<_, Vec<u8>>(2)? {
                 return Err(Error::InvalidData);
             }
@@ -248,9 +209,24 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
         keys(&self.connection, b, kind, after)
     }
-    pub(super) fn entity_content(&self, b: BindingId, kind: codec::Kind, key: &[u8]) -> Result<Option<String>, Error> {
+    pub(super) fn entity_image(
+        &self,
+        b: BindingId,
+        kind: codec::Kind,
+        key: &[u8],
+    ) -> Result<Option<EntityFacts>, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
-        Ok(if kind == codec::Kind::Note {
+        entity(&self.connection, b, kind, key)
+    }
+
+    pub(super) fn entity_key_header(
+        &self,
+        b: BindingId,
+        kind: codec::Kind,
+        key: &[u8],
+    ) -> Result<Option<super::tracking_payload::Header>, Error> {
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let text: Option<String> = if kind == codec::Kind::Note {
             let RowKey::Id(id) = row_key(kind, key)? else {
                 return Err(Error::InvalidData);
             };
@@ -269,7 +245,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     |r| r.get(0),
                 )
                 .optional()?
-        })
+        };
+        text.map(|text| super::tracking_payload::header(kind, &text))
+            .transpose()
     }
     pub(super) fn dirty_names(&self, b: BindingId) -> Result<PendingSnapshot, Error> {
         let mut names = std::collections::BTreeMap::new();
@@ -292,7 +270,8 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         let media = self.media_ledger(b)?;
         names.retain(|name, _| {
-            self.entity_facts(b, name).ok().flatten().is_none_or(|e| {
+            self.entity_header(b, name).ok().flatten().is_none_or(|h| {
+                let e = h.facts;
                 e.kind != codec::Kind::MediaName
                     || std::str::from_utf8(&e.key)
                         .ok()
@@ -334,6 +313,19 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
     }
     pub fn entity_facts(&self, b: BindingId, name: &str) -> Result<Option<EntityFacts>, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let Some((kind, text)) = self.entity_header_text(b, name)? else {
+            return Ok(None);
+        };
+        super::tracking_payload::load_entity(&self.connection, b, kind, &text).map(Some)
+    }
+    /// Explicit full-image diagnostic; normal storage callers use entity_facts.
+    pub fn entity_dump(&self, b: BindingId, name: &str) -> Result<Option<EntityFacts>, Error> {
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        self.entity_header_text(b, name)?
+            .map(|(kind, text)| super::tracking_payload::dump_entity(&self.connection, b, kind, &text))
+            .transpose()
+    }
+    fn entity_header_text(&self, b: BindingId, name: &str) -> Result<Option<(codec::Kind, String)>, Error> {
         let note: Option<String> = self
             .connection
             .query_row(
@@ -342,18 +334,31 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 |r| r.get(0),
             )
             .optional()?;
-        if let Some(note) = note {
-            return Ok(Some(note_facts(decode(&note)?)?));
+        if let Some(text) = note {
+            return Ok(Some((codec::Kind::Note, text)));
         }
-        let generic: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT content FROM cloud_runtime_entities WHERE binding=?1 AND json_extract(content,'$.name')=?2",
-                params![b.0.as_slice(), name],
-                |r| r.get(0),
-            )
-            .optional()?;
-        generic.map(|v| generic_facts(&v)).transpose()
+        let value: Option<(i64, String)> = self.connection.query_row(
+            "SELECT kind,content FROM cloud_runtime_entities WHERE binding=?1 AND json_extract(content,'$.name')=?2",
+            params![b.0.as_slice(), name], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        value
+            .map(|(kind, text)| {
+                Ok((
+                    codec::Kind::try_from(u64::try_from(kind).map_err(|_| Error::InvalidData)?)
+                        .map_err(|_| Error::InvalidData)?,
+                    text,
+                ))
+            })
+            .transpose()
+    }
+    pub(super) fn entity_header(
+        &self,
+        b: BindingId,
+        name: &str,
+    ) -> Result<Option<super::tracking_payload::Header>, Error> {
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        self.entity_header_text(b, name)?
+            .map(|(kind, text)| super::tracking_payload::header(kind, &text))
+            .transpose()
     }
     pub(super) fn set_workflow_drained(
         &mut self,
@@ -438,21 +443,22 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         Ok(())
     }
     pub(super) fn persist_flight(&mut self, b: BindingId, name: &str, flight: Flight) -> Result<(), Error> {
-        let mut e = self.entity_facts(b, name)?.ok_or(Error::InvalidData)?;
-        if e.in_flight.len() >= 250 {
+        let mut h = self.entity_header(b, name)?.ok_or(Error::InvalidData)?;
+        if h.facts.in_flight.len() >= 250 {
             return Err(Error::InvalidData);
         }
-        if !e.in_flight.iter().any(|f| {
+        let exists = h.facts.in_flight.iter().any(|f| {
             f.local_rev == flight.local_rev
                 && f.payload_digest == flight.payload_digest
                 && f.erev == flight.erev
                 && f.tombstone == flight.tombstone
                 && f.tombstone_envelope_digest == flight.tombstone_envelope_digest
-        }) {
-            e.in_flight.push(flight);
-        }
+        });
         let tx = self.connection.transaction()?;
-        put(&tx, b, &e)?;
+        if !exists {
+            h.append_flight(&tx, b, &flight)?;
+        }
+        super::tracking_payload::put_header(&tx, b, &h)?;
         tx.commit()?;
         Ok(())
     }
@@ -470,41 +476,26 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
             return self.acknowledge_media_tombstone(b, saved, received);
         }
-        let p = received.payload.ok_or(Error::InvalidData)?;
-        let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
+        let mut h = self.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?;
+        let e = &h.facts;
         if received.entity.fields.origin != e.origin
             || received.entity.fields.writer != b.0
             || received.entity.fields.tombstone
             || received.entity.fields.generation.is_some()
+            || received.payload.is_none()
         {
             return Err(Error::InvalidData);
         }
-        let digest = p.payload_digest().map_err(|_| Error::InvalidData)?;
-        let f = e
+        let digest = received.entity.payload_sha256;
+        let index = e
             .in_flight
             .iter()
-            .find(|f| f.payload_digest == digest && f.erev == received.entity.fields.erev)
-            .cloned()
+            .position(|f| f.payload_digest == digest && f.erev == received.entity.fields.erev)
             .ok_or(Error::InvalidData)?;
-        e.server_erev = f.erev;
-        e.acked_rev = f.local_rev;
-        e.acked_row_digest = f.row_digest;
-        e.acked_payload_digest = digest;
-        e.acked_system_fields = saved.system_fields.clone();
-        e.acked_envelope = OpaqueBytes(saved.envelope.clone());
-        e.acked_payload = Some(p.clone());
-        e.in_flight.retain(|v| v.local_rev > f.local_rev);
-        if e.tombstone_at.is_none() && e.payload.row_digest().map_err(|_| Error::InvalidData)? == f.row_digest {
-            e.acked_rev = e.local_rev;
-            e.mark = None;
-            e.base_payload = None;
-        } else {
-            e.base_payload = Some(p);
-        }
-        let pending = e.mark.is_some();
+        let pending = h.ack(index, saved)?;
         let tx = self.connection.transaction()?;
-        put(&tx, b, &e)?;
-        super::adapter_store::mark_ack(&tx, b, &e.name)?;
+        super::tracking_payload::put_header(&tx, b, &h)?;
+        super::adapter_store::mark_ack(&tx, b, &h.facts.name)?;
         super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
         Ok(pending)
@@ -746,11 +737,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     if kind != codec::Kind::Revlog || e.server_erev != 0 || !e.in_flight.is_empty() {
                         return Err(Error::InvalidData.into());
                     }
-                    tx.execute(
-                        "DELETE FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
-                        params![b.0.as_slice(), kind as i64, key],
-                    )
-                    .map_err(Error::from)?;
+                    remove_entity(&tx, b, &e)?;
                     continue;
                 }
                 let view = CommitView {
@@ -876,14 +863,6 @@ impl View for CommitView<'_, '_> {
     }
 }
 
-pub(super) fn decode_entity(kind: codec::Kind, content: &str) -> Result<EntityFacts, Error> {
-    if kind == codec::Kind::Note {
-        note_facts(decode(content)?)
-    } else {
-        generic_facts(content)
-    }
-}
-
 impl TrackingStore {
     /// K17.4.
     pub(super) fn record_unknown_item(
@@ -982,6 +961,7 @@ impl TrackingStore {
 }
 
 pub(super) fn remove_entity(tx: &rusqlite::Transaction<'_>, b: BindingId, e: &EntityFacts) -> Result<(), Error> {
+    let removed = super::tracking_payload::removed_images(tx, b, e.kind, &e.key)?;
     if e.kind == codec::Kind::Note {
         let RowKey::Id(id) = row_key(e.kind, &e.key)? else {
             return Err(Error::InvalidData);
@@ -996,7 +976,7 @@ pub(super) fn remove_entity(tx: &rusqlite::Transaction<'_>, b: BindingId, e: &En
             params![b.0.as_slice(), e.kind as i64, e.key],
         )?;
     }
-    Ok(())
+    super::tracking_payload::collect_removed(tx, b, &e.name, removed)
 }
 
 /// Projection before this exact commit, including a card's deleted note and
@@ -1086,7 +1066,7 @@ impl TrackingStore {
         // An ACK of an older deletion never clears a newer native revision.
         e.server_erev = flight.erev;
         e.acked_rev = flight.local_rev;
-        e.acked_payload = Some(flight.payload);
+        e.acked_payload = Some(super::tracking_payload::flight_payload(&self.connection, b, &flight)?);
         e.acked_row_digest = flight.row_digest;
         e.acked_payload_digest = flight.payload_digest;
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());

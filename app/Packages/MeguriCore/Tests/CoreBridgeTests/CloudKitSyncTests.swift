@@ -948,7 +948,8 @@ extension EventTests {
             // fields. Redelivery cannot replace its acknowledged version.
             #expect(first == second)
             try await expectAppliedCloudIncoming(f)
-            let root = CloudRecord(name: f.root.name, envelope: f.root.envelope, systemFields: Data([0x72, 0x33, 0x02]))
+            let root = CloudRecord(name: f.root.name, envelope: f.root.envelope, systemFields: Data([0x72, 0x33, 0x02]),
+                                   recordType: f.root.recordType, zone: f.root.zone)
             await old.emitRetained(.fetched(zone: "meguri-root", records: [root], deleted: []), label: "pendingRoot")
             let third = try await f.core.durableSnapshot()
             #expect(second.rootEnvelope == third.rootEnvelope && second.rootSystemFields == third.rootSystemFields)

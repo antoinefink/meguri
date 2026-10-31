@@ -118,6 +118,7 @@ pub struct IncomingRefusedEntry {
     pub origin: Option<[u8; 16]>,
     pub reason: String,
 }
+pub use core::workflow::PayloadTrackingProof as PayloadProof;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Edit {
     pub note: codec::Note,
@@ -186,6 +187,20 @@ pub(crate) struct Boot {
     now: i64,
     seed: u64,
 }
+/// Parent-staged Service bytes are disposable sources, never durable ownership.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct FetchedAssetRecord {
+    pub record: Saved,
+    pub asset_path: Option<std::path::PathBuf>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct FetchedCallback {
+    pub instance: String,
+    pub records: Vec<FetchedAssetRecord>,
+    pub zone: String,
+    pub serialization: Vec<u8>,
+    pub exchange: Option<u64>,
+}
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Input {
     Boot(Boot),
@@ -194,6 +209,11 @@ pub(crate) enum Input {
     SignOut,
     Reopen,
     BodyReads,
+    PayloadMemoryReset,
+    PayloadMemoryPeak,
+    PayloadRecordLimit(usize),
+    EditGeneratedPayload(i64, usize, u64),
+    PayloadProof(String),
     StoredState,
     Identity(Option<String>),
     Reconcile,
@@ -221,6 +241,7 @@ pub(crate) enum Input {
     AddNote(i64, i64, Vec<String>),
     DeleteNote(i64),
     BuryCard(i64),
+    WriteCardData(i64, String),
     IncomingObservation(core::BindingId),
     IncomingSubmission,
     InterruptIncoming(ApplyInterruption),
@@ -252,12 +273,13 @@ pub(crate) enum Input {
     SyncNow(String),
     FetchDue,
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
-    Fetched(String, Vec<Saved>, String, Vec<u8>, Option<u64>),
+    Fetched(FetchedCallback),
     IncomingIntents(core::BindingId),
     IncomingInbox(core::BindingId),
     IncomingRefused(core::BindingId),
     BindingEntity(core::BindingId, String),
     DeliverCollection(Vec<Saved>),
+    DeliverCollectionAssets(Vec<super::Record>),
     DrainIncoming(usize),
     PauseAutomaticWAL(bool),
     CloudHold(u64),
@@ -328,6 +350,19 @@ enum ChildMessage {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum ChildFailure {
     Unknown,
+    SDKSyncNow(Box<ChildFailure>),
+    SDKUpdates(Box<ChildFailure>),
+    SDKAppliedUpdate(Box<ChildFailure>),
+    SDKQualify(Box<ChildFailure>),
+    FetchRootAccept(Box<ChildFailure>),
+    FetchCompleted(Box<ChildFailure>),
+    FetchCursorProjection(Box<ChildFailure>),
+    FetchNativeIntake(Box<ChildFailure>),
+    FetchStateUpdate(Box<ChildFailure>),
+    FetchCursorHook(Box<ChildFailure>),
+    FetchLegacyIntake(Box<ChildFailure>),
+    FetchLegacyAssetRejected,
+    FetchCoreApply(Box<ChildFailure>),
     FetchCompletion(Box<ChildFailure>, Box<ChildFailure>),
     RuntimeTracking(StoreFailure),
     RuntimeEngine(EngineFailure),
@@ -462,6 +497,20 @@ fn write_frame<T: Serialize>(s: &mut UnixStream, value: &T) -> Result<()> {
 fn read_frame<T: DeserializeOwned>(s: &mut UnixStream) -> Result<T> {
     let mut header = [0; 4];
     s.read_exact(&mut header)?;
+    read_frame_body(s, header)
+}
+fn read_idle_command<T: DeserializeOwned>(s: &mut UnixStream) -> Result<T> {
+    let timeout = s.read_timeout()?;
+    s.set_read_timeout(None)?;
+    let mut header = [0; 4];
+    let first = s.read_exact(&mut header[..1]);
+    // Restore before propagating EOF/errors or reading any remaining frame bytes.
+    s.set_read_timeout(timeout)?;
+    first?;
+    s.read_exact(&mut header[1..])?;
+    read_frame_body(s, header)
+}
+fn read_frame_body<T: DeserializeOwned>(s: &mut UnixStream, header: [u8; 4]) -> Result<T> {
     let n = u32::from_be_bytes(header) as usize;
     if n > FRAME {
         return Err(failure());
@@ -480,8 +529,59 @@ pub struct ChildDriver {
     suspended_work: Vec<(Vec<u8>, Option<IncomingStage>)>,
     completed_work: Vec<(Vec<u8>, std::result::Result<serde_json::Value, ChildFailure>)>,
     paused_work: Option<IncomingStage>,
+    fetched_sources: BTreeMap<Vec<u8>, Vec<tempfile::NamedTempFile>>,
 }
 impl ChildDriver {
+    pub(crate) fn stage_fetched(
+        &mut self,
+        instance: String,
+        records: Vec<super::Record>,
+        zone: String,
+        serialization: Vec<u8>,
+        exchange: Option<u64>,
+    ) -> Result<FetchedCallback> {
+        let mut files = Vec::new();
+        let mut inputs = Vec::new();
+        for record in records {
+            let Some(super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                return Err(Box::new(std::io::Error::other("fetched callback: envelope shape")));
+            };
+            let asset_path = match record.fields.get("pa") {
+                Some(super::Field::Asset(asset)) => {
+                    let mut file = tempfile::NamedTempFile::new()
+                        .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: asset create"))?;
+                    file.write_all(asset.bytes())
+                        .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: asset write"))?;
+                    file.as_file()
+                        .sync_all()
+                        .map_err(|error| std::io::Error::new(error.kind(), "fetched callback: asset sync"))?;
+                    let path = file.path().to_path_buf();
+                    files.push(file);
+                    Some(path)
+                }
+                None => None,
+                _ => return Err(Box::new(std::io::Error::other("fetched callback: asset shape"))),
+            };
+            inputs.push(FetchedAssetRecord {
+                record: Saved {
+                    name: record.name,
+                    envelope: envelope.clone(),
+                    system_fields: record.system_fields.bytes().to_vec(),
+                },
+                asset_path,
+            });
+        }
+        let callback = FetchedCallback {
+            instance,
+            records: inputs,
+            zone,
+            serialization,
+            exchange,
+        };
+        let key = serde_json::to_vec(&Input::Fetched(callback.clone()))?;
+        self.fetched_sources.insert(key, files);
+        Ok(callback)
+    }
     pub fn apply_intents(&mut self, binding: core::BindingId) -> Result<Vec<ApplyIntent>> {
         self.call(Input::IncomingIntents(binding))
     }
@@ -495,6 +595,9 @@ impl ChildDriver {
         self.call(Input::BindingEntity(binding, name.into()))
     }
     pub fn deliver_collection_records(&mut self, records: &[super::Record]) -> Result<()> {
+        if records.iter().any(|record| record.fields.contains_key("pa")) {
+            return self.call(Input::DeliverCollectionAssets(records.to_vec()));
+        }
         let records = records
             .iter()
             .map(|r| {
@@ -581,6 +684,7 @@ impl ChildDriver {
             ChildMessage::Reply(reply) => {
                 self.paused_work = None;
                 let key = self.pending_work.take().ok_or_else(failure)?;
+                self.fetched_sources.remove(&key);
                 self.completed_work.push((key, reply));
                 if let Some((key, paused)) = self.suspended_work.pop() {
                     self.pending_work = Some(key);
@@ -716,6 +820,7 @@ impl ChildDriver {
             suspended_work: Vec::new(),
             completed_work: Vec::new(),
             paused_work: None,
+            fetched_sources: BTreeMap::new(),
         };
         driver.call::<()>(Input::Boot(boot))?;
         Ok(driver)
@@ -739,6 +844,7 @@ impl ChildDriver {
             input,
             Input::Fetched(..)
                 | Input::DeliverCollection(..)
+                | Input::DeliverCollectionAssets(..)
                 | Input::DrainIncoming(..)
                 | Input::Reconcile
                 | Input::Build(..)
@@ -763,7 +869,10 @@ impl ChildDriver {
         }
         write_frame(&mut self.stream, &input)?;
         match self.next_message()? {
-            ChildMessage::Reply(reply) => Ok(serde_json::from_value(reply.map_err(ChildFailure::into_error)?)?),
+            ChildMessage::Reply(reply) => {
+                self.fetched_sources.remove(&key);
+                Ok(serde_json::from_value(reply.map_err(ChildFailure::into_error)?)?)
+            }
             ChildMessage::Paused(stage) => {
                 if let Some(pending) = self.pending_work.take() {
                     self.suspended_work.push((pending, self.paused_work));
@@ -882,6 +991,10 @@ impl ChildDriver {
     pub fn sign_out_for_testing(&mut self) -> Result<()> {
         self.call(Input::SignOut)
     }
+    /// Journal a real Card data edit through the normal host writer.
+    pub fn write_card_data(&mut self, id: i64, data: String) -> Result<()> {
+        self.call(Input::WriteCardData(id, data))
+    }
     pub fn reopen_for_testing(&mut self) -> Result<String> {
         self.call(Input::Reopen)
     }
@@ -911,6 +1024,22 @@ impl ChildDriver {
         fields: Vec<u8>,
     ) -> Result<bool> {
         self.call(Input::RootRead(instance, id, envelope, fields, false))
+    }
+    /// The child allocator must be installed by the integration test binary.
+    pub fn payload_memory_reset(&mut self) -> Result<usize> {
+        self.call(Input::PayloadMemoryReset)
+    }
+    pub fn payload_memory_peak(&mut self) -> Result<(usize, usize)> {
+        self.call(Input::PayloadMemoryPeak)
+    }
+    pub fn payload_record_limit(&mut self, limit: usize) -> Result<()> {
+        self.call(Input::PayloadRecordLimit(limit))
+    }
+    pub fn edit_generated_payload(&mut self, id: i64, bytes: usize, seed: u64) -> Result<PayloadProof> {
+        self.call(Input::EditGeneratedPayload(id, bytes, seed))
+    }
+    pub fn payload_proof(&mut self, name: &str) -> Result<PayloadProof> {
+        self.call(Input::PayloadProof(name.into()))
     }
     pub fn last_capture_body_reads(&mut self) -> Result<usize> {
         self.call(Input::BodyReads)
@@ -1211,11 +1340,64 @@ impl Device {
             sidecar_clean: false,
         })
     }
+    fn payload_proof(&self, name: &str) -> Result<PayloadProof> {
+        self.runtime()?.payload_proof_for_testing(name)?.ok_or_else(failure)
+    }
     fn handle(&mut self, input: Input) -> Result<serde_json::Value> {
         fn value<T: Serialize>(v: T) -> Result<serde_json::Value> {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::PayloadMemoryReset => {
+                use crate::bench::peak_alloc::PeakAlloc;
+                if !PeakAlloc::is_installed() {
+                    return Err(failure());
+                }
+                PeakAlloc::reset_peak();
+                value(PeakAlloc::current())
+            }
+            Input::PayloadMemoryPeak => value((
+                crate::bench::peak_alloc::PeakAlloc::peak(),
+                crate::bench::peak_alloc::PeakAlloc::current(),
+            )),
+            Input::PayloadRecordLimit(limit) => {
+                self.runtime()?.set_collection_record_limit_for_testing(limit)?;
+                value(())
+            }
+            Input::PayloadProof(name) => value(self.payload_proof(&name)?),
+            Input::EditGeneratedPayload(id, bytes, seed) => {
+                use meguri_model::rng::RandomSource;
+                let rng = meguri_model::rng::SeededRandom::new(seed);
+                let mut back = String::with_capacity(bytes);
+                while back.len() < bytes {
+                    for byte in rng.next_u64().to_le_bytes() {
+                        if back.len() == bytes {
+                            break;
+                        }
+                        back.push((b'a' + byte % 26) as char);
+                    }
+                }
+                let c = self.host.collection()?;
+                let result = meguri_engine::notes::update(
+                    &c,
+                    meguri_engine::notes::UpdateNote {
+                        id: NoteId(id),
+                        fields: vec!["Synthetic front".into(), back],
+                        tags: Vec::new(),
+                    },
+                    OpSource::UserUndoable,
+                )?;
+                let proof = self
+                    .runtime()?
+                    .capture_proof(result.seq, result.generation)
+                    .ok_or_else(failure)?;
+                if !proof.persisted {
+                    return Err(failure());
+                }
+                let binding = self.runtime()?.status()?.binding.ok_or_else(failure)?;
+                let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))?;
+                value(self.payload_proof(&name)?)
+            }
             Input::Undo => {
                 self.host.review().restore_controlled(
                     meguri_engine::undo::UndoScope::Global,
@@ -1264,6 +1446,17 @@ impl Device {
             }
             Input::DeleteNote(id) => {
                 meguri_engine::notes::delete(&self.host.collection()?, vec![NoteId(id)], OpSource::UserUndoable)?;
+                value(())
+            }
+            Input::WriteCardData(id, data) => {
+                self.host.collection()?.run(
+                    meguri_engine::OpSpec::named("fixture card data edit", OpSource::UserUndoable),
+                    move |ctx| {
+                        ctx.scope()
+                            .put_card_data(CardId(id), &meguri_model::card_data::CardData::parse(&data))?;
+                        Ok(())
+                    },
+                )?;
                 value(())
             }
             Input::BuryCard(id) => {
@@ -1524,7 +1717,11 @@ impl Device {
                 self.runtime()?.fail_next_media_io_for_testing();
                 value(())
             }
-            Input::Updates(i) => value(self.runtime()?.take_pending_updates(&i)?),
+            Input::Updates(i) => value(
+                self.runtime()?
+                    .take_pending_updates(&i)
+                    .map_err(|error| ChildFailure::SDKUpdates(Box::new(ChildFailure::classify(Box::new(error)))))?,
+            ),
             Input::Transition(i, k, p) => value(self.runtime()?.pending_transition(&i, k, p)?),
             Input::Sendables => value(self.runtime()?.tracking_sendables()),
             Input::Build(i, names) => value(self.runtime()?.build_collection_batch(
@@ -1543,7 +1740,9 @@ impl Device {
                 value(())
             }
             Input::AppliedUpdate(i, id, names) => {
-                self.runtime()?.sdk_update_applied(&i, id, &names)?;
+                self.runtime()?.sdk_update_applied(&i, id, &names).map_err(|error| {
+                    ChildFailure::SDKAppliedUpdate(Box::new(ChildFailure::classify(Box::new(error))))
+                })?;
                 value(())
             }
             Input::SavedRemoved(i, id, names) => {
@@ -1551,19 +1750,31 @@ impl Device {
                 value(())
             }
             Input::Qualify(i) => {
-                self.runtime()?.sdk_fetch_completed_without_root(&i)?;
+                self.runtime()?
+                    .sdk_fetch_completed_without_root(&i)
+                    .map_err(|error| ChildFailure::SDKQualify(Box::new(ChildFailure::classify(Box::new(error)))))?;
                 value(())
             }
             Input::RootRead(i, id, e, tags, lost) => value(self.runtime()?.accept_root_read(&i, id, &e, &tags, lost)?),
-            Input::RootFetch(i, e, completed, id) => {
-                value(self.runtime()?.accept_root_fetch(&i, e.as_ref(), completed, id)?)
-            }
+            Input::RootFetch(i, e, completed, id) => value(
+                self.runtime()?
+                    .accept_root_fetch(&i, e.as_ref(), completed, id)
+                    .map_err(|error| {
+                        ChildFailure::FetchRootAccept(Box::new(ChildFailure::classify(Box::new(error))))
+                    })?,
+            ),
             Input::ReadDue => value(self.runtime()?.root_read_due()?),
             Input::RootEpoch => value(self.runtime()?.accepted_root_epoch()?),
-            Input::SyncNow(i) => value(self.runtime()?.sync_now(&i, &self.host.collection()?)?),
+            Input::SyncNow(i) => value(
+                self.runtime()?
+                    .sync_now(&i, &self.host.collection()?)
+                    .map_err(|error| ChildFailure::SDKSyncNow(Box::new(ChildFailure::classify(Box::new(error)))))?,
+            ),
             Input::FetchDue => value(self.runtime()?.exchange_fetch_due()),
             Input::FetchCompleted(i, phase, seen) => {
-                self.runtime()?.exchange_fetch_completed(&i, phase, &seen)?;
+                self.runtime()?
+                    .exchange_fetch_completed(&i, phase, &seen)
+                    .map_err(|error| ChildFailure::FetchCompleted(Box::new(ChildFailure::classify(Box::new(error)))))?;
                 value(())
             }
             Input::IncomingIntents(b) => value(self.runtime()?.apply_intents(b)?),
@@ -1613,7 +1824,7 @@ impl Device {
                 self.host.collection()?.pause_automatic_wal_flush_for_testing(paused);
                 value(())
             }
-            Input::Fetched(..) => Err(failure()),
+            Input::Fetched(..) | Input::DeliverCollectionAssets(..) => Err(failure()),
             Input::SendsFinished(i) => {
                 self.runtime()?.exchange_sends_finished(&i)?;
                 value(())
@@ -1834,9 +2045,10 @@ pub fn child_entry() -> Result<()> {
             return Err(failure());
         }
     };
-    // Each command completes synchronously; EOF/timeouts unwind and close the host.
+    // The parent may be busy with a sibling until a new command begins.
+    // EOF and partial-frame timeouts still unwind and close the host.
     for _ in 0..100_000 {
-        let input: Input = read_frame(&mut stream)?;
+        let input: Input = read_idle_command(&mut stream)?;
         let Some(input) = incoming_driver::dispatch(&mut device, input, &mut stream)? else {
             continue;
         };
@@ -1950,3 +2162,50 @@ mod publication_driver;
 
 #[path = "incoming_driver.rs"]
 mod incoming_driver;
+
+#[cfg(test)]
+#[path = "child_fetched_sources_tests.rs"]
+mod fetched_sources_tests;
+
+#[cfg(test)]
+mod idle_command_tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn partial_frames_and_eof_remain_errors_after_idle_admission() {
+        for eof in [false, true] {
+            let partials: &[&[u8]] = if eof {
+                &[&[], &[0], &[0, 0, 0, 4, b'n']]
+            } else {
+                &[&[0], &[0, 0, 0, 4, b'n']]
+            };
+            for bytes in partials {
+                let (mut child, mut parent) = UnixStream::pair().unwrap();
+                child.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+                let timeout = child.read_timeout().unwrap();
+                parent.write_all(bytes).unwrap();
+                if eof {
+                    parent.shutdown(std::net::Shutdown::Write).unwrap();
+                }
+                let error = read_idle_command::<serde_json::Value>(&mut child).unwrap_err();
+                let kind = error.downcast_ref::<std::io::Error>().unwrap().kind();
+                if eof {
+                    assert_eq!(kind, ErrorKind::UnexpectedEof);
+                } else {
+                    assert!(matches!(kind, ErrorKind::WouldBlock | ErrorKind::TimedOut));
+                }
+                assert_eq!(child.read_timeout().unwrap(), timeout);
+            }
+        }
+
+        let (mut child, mut parent) = UnixStream::pair().unwrap();
+        child.set_read_timeout(Some(IPC_TIMEOUT)).unwrap();
+        write_frame(&mut parent, &serde_json::Value::Null).unwrap();
+        assert_eq!(
+            read_idle_command::<serde_json::Value>(&mut child).unwrap(),
+            serde_json::Value::Null
+        );
+        assert_eq!(child.read_timeout().unwrap(), Some(IPC_TIMEOUT));
+    }
+}

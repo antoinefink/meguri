@@ -70,12 +70,63 @@ pub enum Observation {
         request_id: u64,
     },
 }
+/// Historical images stay binding-local references until a specific ACK or
+/// reconciliation needs their bytes. Legacy payload JSON remains readable.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FlightPayload {
+    Image {
+        kind: c::Kind,
+        key: Vec<u8>,
+        digest: [u8; 32],
+    },
+    Canonical(c::Payload),
+}
+impl From<c::Payload> for FlightPayload {
+    fn from(payload: c::Payload) -> Self {
+        Self::Canonical(payload)
+    }
+}
+impl FlightPayload {
+    pub(crate) fn identity(&self) -> Result<(c::Kind, Vec<u8>), Error> {
+        match self {
+            Self::Canonical(p) => Ok((p.kind(), super::row_payload::payload_key(p)?)),
+            Self::Image { kind, key, .. } => Ok((*kind, key.clone())),
+        }
+    }
+    pub fn canonical(&self) -> Option<&c::Payload> {
+        match self {
+            Self::Canonical(p) => Some(p),
+            Self::Image { .. } => None,
+        }
+    }
+}
+impl PartialEq<c::Payload> for FlightPayload {
+    fn eq(&self, payload: &c::Payload) -> bool {
+        self.canonical() == Some(payload)
+    }
+}
+/// Compact test evidence; historical images never cross this API.
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PayloadTrackingProof {
+    pub name: String,
+    pub local_rev: u64,
+    pub acked_rev: u64,
+    pub server_erev: u64,
+    pub dirty: bool,
+    pub flights: usize,
+    pub payload_digest: [u8; 32],
+    pub acked_payload_digest: [u8; 32],
+    pub system_fields: Vec<u8>,
+    pub envelope: Vec<u8>,
+}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Flight {
     pub local_rev: u64,
     pub payload_digest: [u8; 32],
     pub row_digest: [u8; 32],
-    pub payload: c::Payload,
+    pub payload: FlightPayload,
     pub erev: u64,
     #[serde(default)]
     pub image_seq: u64,
@@ -163,8 +214,7 @@ impl EntityFacts {
                 && (!matches!(self.kind, c::Kind::Note | c::Kind::Card)
                     || flight.row_digest != c::sha256(&[])
                     || flight.payload_digest != c::sha256(&[])
-                    || flight.payload.kind() != self.kind
-                    || super::row_payload::payload_key(&flight.payload)? != self.key)
+                    || flight.payload.identity()? != (self.kind, self.key.clone()))
             {
                 return Err(Error::InvalidData);
             }
@@ -290,6 +340,8 @@ pub struct SaveInput {
     pub name: String,
     pub envelope: Vec<u8>,
     pub system_fields: Option<Vec<u8>>,
+    #[serde(default)]
+    pub asset_path: Option<String>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuiltBatch {
@@ -301,6 +353,12 @@ pub struct Saved {
     pub name: String,
     pub envelope: Vec<u8>,
     pub system_fields: Vec<u8>,
+}
+/// Disposable transport input. Only intake may turn this path into owned bytes;
+/// Saved acknowledgements never use a caller's asset path.
+pub struct FetchedRecord {
+    pub record: Saved,
+    pub asset_path: Option<std::path::PathBuf>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SendError {
@@ -353,6 +411,7 @@ pub(crate) struct HandedSave {
     pub erev: u64,
     pub payload_digest: [u8; 32],
     pub tombstone: bool,
+    pub envelope_digest: [u8; 32],
 }
 pub(crate) enum MissingSaveDisposition {
     Outstanding,
@@ -361,6 +420,9 @@ pub(crate) enum MissingSaveDisposition {
 #[derive(Default)]
 pub(crate) struct Actions {
     pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
+    pub payload_uploads: BTreeMap<(String, u64), Vec<tempfile::TempPath>>,
+    pub payload_upload_sends: BTreeMap<(String, u64), BTreeSet<u64>>,
+    pub payload_handlers_returned: BTreeSet<(String, u64)>,
     pub media_upload: Option<(String, super::media::Work)>,
     pub media_batches: BTreeMap<(String, u64), super::media::Work>,
     pub desired: BTreeMap<String, PendingChange>,
@@ -387,6 +449,23 @@ impl Actions {
             record_limit: 250,
             byte_limit: 1_572_864,
             ..Self::default()
+        }
+    }
+    /// Resume resets scheduling, but an original SDK can still own sends and
+    /// callbacks. Caller/SDK guards remain the authority for using these facts.
+    pub fn rebind(&mut self, retained_sdk: bool) {
+        let mut old = std::mem::replace(self, Self::new());
+        if retained_sdk {
+            self.request_flights = std::mem::take(&mut old.request_flights);
+            self.payload_uploads = std::mem::take(&mut old.payload_uploads);
+            self.payload_upload_sends = std::mem::take(&mut old.payload_upload_sends);
+            self.payload_handlers_returned = std::mem::take(&mut old.payload_handlers_returned);
+            self.calls = std::mem::take(&mut old.calls);
+            self.batch = old.batch;
+            self.next = old.next;
+            self.handler = old.handler;
+            self.saved_callbacks = std::mem::take(&mut old.saved_callbacks);
+            self.automatic = old.automatic;
         }
     }
     pub fn update(&mut self, kind: UpdateKind, snapshot: PendingSnapshot, force: BTreeSet<String>) -> PendingUpdate {

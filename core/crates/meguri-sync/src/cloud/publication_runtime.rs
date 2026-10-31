@@ -1408,6 +1408,7 @@ impl Runtime {
                         }
                         for entity in page {
                             after = Some(entity.key.clone());
+                            let entity = store.entity_dump(binding.id, &entity.name)?.ok_or(Error::InvalidData)?;
                             entities.insert(entity.name.clone(), entity);
                         }
                     }

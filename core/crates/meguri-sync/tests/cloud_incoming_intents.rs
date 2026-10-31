@@ -89,7 +89,12 @@ fn envelope(record: &Record) -> codec::Entity {
 
 fn body(record: &Record) -> Payload {
     let entity = envelope(record);
-    Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap()
+    let bytes = entity.payload.as_deref().unwrap_or_else(|| match &record.fields["pa"] {
+        Field::Asset(asset) => asset.bytes(),
+        _ => panic!("Service payload asset"),
+    });
+    assert_eq!(codec::sha256(bytes), entity.payload_sha256);
+    Payload::decode(entity.fields.kind, bytes).unwrap()
 }
 
 struct NoReopenKeys;
@@ -1723,6 +1728,10 @@ fn incoming_note_tombstone_side_effect_cards_settle_against_actual_server_tombst
 }
 
 fn mixed_live_card_then_note_tombstone(new_card: bool) {
+    mixed_live_card_then_note_tombstone_with_asset(new_card, false);
+}
+
+fn mixed_live_card_then_note_tombstone_with_asset(new_card: bool, large: bool) {
     use meguri_testkit::cloud::{Mutation, Operation};
 
     let mut pair = Pair::adopted();
@@ -1746,6 +1755,15 @@ fn mixed_live_card_then_note_tombstone(new_card: bool) {
             .driver()
             .add_note(existing.mid, old_card.did, &["new remote", "back"])
             .unwrap();
+        if large {
+            pair.sender
+                .driver()
+                .write_card_data(
+                    added.cards[0].id,
+                    format!(r#"{{"fixture":"{}"}}"#, "c".repeat(codec::INLINE_ENVELOPE_BYTES + 1)),
+                )
+                .unwrap();
+        }
         pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
         let note_key = name(&pair, codec::Kind::Note, added.note.id);
         // Download the real Note alone; its Card has never had tracking here.
@@ -1780,6 +1798,15 @@ fn mixed_live_card_then_note_tombstone(new_card: bool) {
     let live = envelope(&live_card);
     assert!(!live.fields.tombstone);
     let server_payload = body(&live_card);
+    if large {
+        assert!(new_card);
+        assert!(live.payload.is_none());
+        assert!(server_payload.encode().unwrap().len() > codec::INLINE_ENVELOPE_BYTES);
+        let Field::Asset(asset) = &live_card.fields["pa"] else {
+            panic!("real Service pa")
+        };
+        assert_eq!(asset.bytes(), server_payload.encode().unwrap());
+    }
 
     pair.sender.driver().delete_note(id).unwrap();
     pair.sender.hold(Point::BeforeCollectionSave).unwrap();
@@ -1886,6 +1913,11 @@ fn live_tracked_card_and_note_tombstone_settle_then_save_real_conditional_card_t
 #[test]
 fn live_new_card_and_note_tombstone_settle_then_save_real_conditional_card_tombstone() {
     mixed_live_card_then_note_tombstone(true);
+}
+
+#[test]
+fn live_new_pa_card_and_note_tombstone_settle_then_save_real_conditional_card_tombstone() {
+    mixed_live_card_then_note_tombstone_with_asset(true, true);
 }
 
 fn lost_note_tombstone() -> (Pair, i64, String, Record) {

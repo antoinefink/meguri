@@ -643,6 +643,8 @@ impl PublicationRig {
                 response.request_id,
                 ResponseBatch {
                     instance: String::new(),
+                    // Publication-owned operations have no SDK collection batch.
+                    backend_batch_id: 0,
                     mutations,
                     response,
                 },

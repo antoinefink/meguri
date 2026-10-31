@@ -568,10 +568,17 @@ impl Runtime {
             };
             state.last_session = None;
         }
+        let retained_sdk = state.adapter.sdk.is_some();
+        let flights = std::mem::take(&mut state.policy.flights);
         state.policy = super::policy::RuntimeEvidenceState::default();
+        if retained_sdk {
+            state.policy.flights = flights;
+        }
         state.cloud.flagged.clear();
         state.cloud.acked_images.clear();
-        state.cloud.handed_images.clear();
+        if !retained_sdk {
+            state.cloud.handed_images.clear();
+        }
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;
@@ -585,7 +592,7 @@ impl Runtime {
         state.publication.running = None;
         state.publication.zones_created = false;
         state.publication.own_epoch_read = false;
-        state.actions = super::workflow::Actions::new();
+        state.actions.rebind(retained_sdk);
         state.incoming.failed_this_open.clear();
         state.incoming.retry_granted = false;
         with_tracking_access(|| -> Result<(), RuntimeError> {

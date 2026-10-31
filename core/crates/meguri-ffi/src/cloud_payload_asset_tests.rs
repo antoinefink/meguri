@@ -470,3 +470,150 @@ fn ordinary_pa_failed_durable_intake_cannot_advance_cursor() {
             .is_none()
     );
 }
+
+// The original native SDK operation is retained here, including its batch and
+// callback; no SendCall is created for an automatic SDK operation.
+fn held_automatic_pa_after_resume(disposition: u8) {
+    let (fixture, sdk) = published();
+    fixture.workflow.core.set_automatic(&sdk.instance_id, true).unwrap();
+    let (id, original) = add_note(&fixture, "a".repeat(800_000));
+    let pending = fixture
+        .workflow
+        .tracking_sendables()
+        .unwrap()
+        .into_iter()
+        .filter(|(name, _)| name == &original.name)
+        .collect();
+    let batch = fixture
+        .workflow
+        .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), pending)
+        .unwrap()
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    let handed = &batch.saves[0];
+    let path = handed.asset_path.as_ref().unwrap();
+    let bytes = original.payload.encode().unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    // Hold the actual Service Saved callback across suspension. This is the
+    // original automatic operation, with no explicit network-call counter.
+    let mut input = RecordInput::encrypted(&handed.name, "MGEntity", handed.envelope.clone());
+    input.fields.insert(
+        "pa".into(),
+        Field::Asset(Asset::synthetic(std::fs::read(path).unwrap())),
+    );
+    let saved = save(&fixture, &sdk, input, handed.system_fields.clone());
+    let download = tempfile::tempdir().unwrap();
+    let callback = callback_record(&saved, &sdk.collection_zone, download.path());
+    let calls = fixture.workflow.core.send_calls().len();
+    fixture.workflow.host.engine().flush_for_background().unwrap();
+    assert_eq!(
+        fixture.workflow.host.engine().suspend(Duration::from_secs(5)).unwrap(),
+        meguri_engine::SuspendOutcome::Suspended
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    fixture.workflow.host.engine().resume().unwrap();
+    assert!(fixture.workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+    fixture.workflow.core.refresh_identity().unwrap();
+    fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+
+    let collection = fixture.workflow.host.collection().unwrap();
+    let edited = meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id,
+            fields: vec!["Question".into(), "b".repeat(800_001)],
+            tags: vec![],
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, edited.seq.0)
+        .unwrap();
+    let later = note_facts(&fixture, id);
+    assert!(later.local_rev > original.local_rev);
+    assert_eq!(fixture.workflow.core.send_calls().len(), calls);
+
+    if disposition == 0 {
+        fixture
+            .workflow
+            .sent(sdk.instance_id.clone(), batch.id, vec![callback], vec![], 1)
+            .unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        let acked = note_facts(&fixture, id);
+        assert_eq!(acked.acked_rev, original.local_rev);
+        assert_eq!(acked.local_rev, later.local_rev);
+        assert!(acked.payload == later.payload && acked.mark.is_some());
+        assert!(acked.acked_payload == Some(original.payload));
+        fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+        assert!(!std::path::Path::new(path).exists());
+    } else {
+        if disposition == 2 {
+            fixture
+                .workflow
+                .account_changed(
+                    None,
+                    CloudAccountStatus::Available,
+                    Some(b"synthetic-different-owner".to_vec()),
+                )
+                .unwrap();
+            assert!(
+                fixture
+                    .workflow
+                    .sent(sdk.instance_id.clone(), batch.id, vec![callback.clone()], vec![], 1)
+                    .is_err()
+            );
+        }
+        fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        assert!(fixture.workflow.register_sdk(true).is_err());
+        assert!(
+            fixture
+                .workflow
+                .sent(sdk.instance_id.clone(), batch.id, vec![callback.clone()], vec![], 1)
+                .is_err()
+        );
+        assert_eq!(note_facts(&fixture, id).acked_rev, original.acked_rev);
+        // Native SDK release confirms cancellation and completion of outstanding work.
+        // Retiring that SDK must preserve the upload path while it still owns it.
+        fixture.workflow.release_sdk(sdk.instance_id.clone()).unwrap();
+        assert!(!std::path::Path::new(path).exists());
+        if disposition == 1 {
+            fixture
+                .workflow
+                .core
+                .reconcile_binding(
+                    &collection,
+                    &fixture.workflow.host.media().unwrap(),
+                    Duration::from_secs(5),
+                )
+                .unwrap();
+            let successor = fixture.workflow.register_sdk(true).unwrap();
+            assert_ne!(successor.instance_id, sdk.instance_id);
+            assert!(
+                fixture
+                    .workflow
+                    .sent(successor.instance_id, batch.id, vec![callback], vec![], 1)
+                    .is_err()
+            );
+            assert_eq!(note_facts(&fixture, id).acked_rev, original.acked_rev);
+        }
+    }
+}
+
+#[test]
+fn original_automatic_pa_sdk_survives_real_suspend_resume_and_acks_only_handed_revision() {
+    held_automatic_pa_after_resume(0);
+}
+
+#[test]
+fn retired_sdk_keeps_upload_until_release_and_rejects_replacement_callback() {
+    held_automatic_pa_after_resume(1);
+}
+
+#[test]
+fn original_automatic_pa_sdk_account_change_refuses_ack_and_retains_file_until_cancel_drain() {
+    held_automatic_pa_after_resume(2);
+}

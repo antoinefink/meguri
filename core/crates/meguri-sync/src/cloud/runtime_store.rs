@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 4;
+const VERSION: i64 = 5;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -38,7 +38,7 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         let versions = statement
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [2] && versions != [3] && versions != [VERSION] {
+        if versions != [1] && versions != [2] && versions != [3] && versions != [4] && versions != [VERSION] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
     } else {
@@ -65,14 +65,9 @@ impl TrackingStore {
             transaction.execute_batch(SCHEMA)?;
             transaction.commit()?;
         }
-        // V4 adds ordinary deletion/flight facts. Earlier readers must refuse
-        // them. Preserve the V3 absence tables and upgrade the marker atomically.
         let transaction = self.connection.transaction()?;
         super::adapter_store::install(&transaction)?;
-        transaction.execute(
-            "UPDATE cloud_runtime_schema SET version=?1 WHERE version IN (1,2,3)",
-            [VERSION],
-        )?;
+        super::tracking_payload::migrate(&transaction, &self.scope)?;
         transaction.commit()?;
         self.install_workflow()?;
         self.install_publication()?;
@@ -90,16 +85,24 @@ impl TrackingStore {
             value.validate()?;
         }
         let mut statement = self.connection.prepare(
-            "SELECT r.id,r.content FROM cloud_runtime_notes r JOIN bindings b ON b.id=r.binding
+            "SELECT r.id,r.content,r.binding FROM cloud_runtime_notes r JOIN bindings b ON b.id=r.binding
              WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0",
         )?;
         let mut rows = statement.query(params![self.scope.container.as_str(), self.scope.environment.code()])?;
         while let Some(row) = rows.next()? {
-            let value: NoteTracking = decode(&row.get::<_, String>(1)?)?;
+            let owner = super::store::binding_id(row.get(2)?)?;
+            let value = super::tracking_payload::load_note(&self.connection, owner, &row.get::<_, String>(1)?)?;
             if value.id != row.get::<_, i64>(0)? {
                 return Err(Error::InvalidData);
             }
             value.validate()?;
+            super::tracking_payload::validate_flights(
+                &self.connection,
+                owner,
+                codec::Kind::Note,
+                &codec::id_key(value.id),
+                &value.in_flight,
+            )?;
         }
         Ok(())
     }
@@ -174,7 +177,16 @@ impl TrackingStore {
 
     pub fn tracked_note(&self, binding: BindingId, id: i64) -> Result<Option<NoteTracking>, Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
-        note(&self.connection, binding, id)
+        let text: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1 AND id=?2",
+                params![binding.0.as_slice(), id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        text.map(|text| super::tracking_payload::dump_note(&self.connection, binding, &text))
+            .transpose()
     }
 
     pub(super) fn capture_runtime_notes(
@@ -246,6 +258,8 @@ impl TrackingStore {
                         |row| row.get(0),
                     )
                     .map_err(Error::from)
+                    .and_then(|text: String| super::tracking_payload::load_note(&self.connection, binding, &text))
+                    .and_then(|n| encode(&n))
             })
             .collect()
     }
@@ -427,10 +441,10 @@ impl TrackingStore {
         };
         // Do not allow a fixture to erase pending facts or rewrite a baseline.
         let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO cloud_runtime_notes(binding,id,content) VALUES (?1,?2,?3)",
-            params![binding.0.as_slice(), value.id, encode(&value)?],
-        )?;
+        if note(&transaction, binding, value.id)?.is_some() {
+            return Err(Error::Constraint);
+        }
+        super::tracking_payload::put_note(&transaction, binding, &value)?;
         transaction.commit()?;
         Ok(())
     }
@@ -456,14 +470,13 @@ pub(super) fn note(
             |row| row.get(0),
         )
         .optional()?;
-    value.map(|content| decode(&content)).transpose()
+    value
+        .map(|content| super::tracking_payload::load_note(connection, binding, &content))
+        .transpose()
 }
 pub(super) fn put_note(transaction: &Transaction<'_>, binding: BindingId, value: &NoteTracking) -> Result<(), Error> {
     value.validate()?;
-    transaction.execute(
-        "UPDATE cloud_runtime_notes SET content=?3 WHERE binding=?1 AND id=?2",
-        params![binding.0.as_slice(), value.id, encode(value)?],
-    )?;
+    super::tracking_payload::put_note(transaction, binding, value)?;
     Ok(())
 }
 pub(super) fn put_binding(

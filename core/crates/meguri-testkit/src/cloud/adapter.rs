@@ -1,7 +1,7 @@
 //! Deterministic SDK stand-in. Policy, capture, actions and acknowledgements run
 //! in the production runtime in the shared CoreHost child.
 use super::{
-    child_driver::{ChildDriver, Input},
+    child_driver::{ChildDriver, FetchedCallback, Input},
     devices::{IdentityReads, PreboundDevice, Result, failure},
     *,
 };
@@ -35,7 +35,7 @@ struct FetchWork {
     page: Option<FetchPage>,
 }
 struct FetchPage {
-    entities: Vec<Saved>,
+    callback: Option<FetchedCallback>,
     token: Token,
     more: bool,
     request_id: u64,
@@ -50,6 +50,8 @@ pub struct BatchAttempt {
 #[derive(Clone, Debug)]
 pub struct ResponseBatch {
     pub instance: String,
+    /// Core authority; response.request_id remains the external Service receipt.
+    pub backend_batch_id: u64,
     pub mutations: Vec<Mutation>,
     pub response: Response,
 }
@@ -225,8 +227,10 @@ impl SDKRig {
         while *remaining > 0 {
             *remaining -= 1;
             let r = service.request(&self.files.scope, self.caller(), Operation::FetchDatabase { token })?;
-            let Ok(Reply::DatabaseChanges(page)) = r.result else {
-                return Err(failure());
+            let page = match r.result {
+                Ok(Reply::DatabaseChanges(page)) => page,
+                Ok(_) => return Err(Box::new(std::io::Error::other("qualify: Service reply shape"))),
+                Err(_) => return Err(Box::new(std::io::Error::other("qualify: Service error reply"))),
             };
             // Persist actual zone announcements through the runtime, independently
             // of root facts or the Service inspection API.
@@ -243,7 +247,7 @@ impl SDKRig {
             }
             token = Some(page.token);
         }
-        Err(failure())
+        Err(Box::new(std::io::Error::other("qualify: step budget exhausted")))
     }
     fn fetch_exchange(&mut self, service: &mut Service<SeededRandom>, remaining: &mut usize) -> Result<()> {
         let mut fetch = match self.fetch.take() {
@@ -272,19 +276,14 @@ impl SDKRig {
         }
         result
     }
-    fn fetched_input(&self, page: &FetchPage) -> Result<Input> {
+    fn fetched_callback(&mut self, records: Vec<Record>, token: &Token) -> Result<FetchedCallback> {
         let zone = self.files.collection_zone.clone();
         let serialization = serde_json::to_vec(&SDKSerialization {
             collection_zone: zone.clone(),
-            collection_cursor: page.token.clone(),
+            collection_cursor: token.clone(),
         })?;
-        Ok(Input::Fetched(
-            self.instance.clone(),
-            page.entities.clone(),
-            zone,
-            serialization,
-            self.exchange,
-        ))
+        self.driver
+            .stage_fetched(self.instance.clone(), records, zone, serialization, self.exchange)
     }
     /// Finish only this SDK's original callback before any new trigger. Direct
     /// grants keep their replies in ChildDriver for their own callers.
@@ -296,7 +295,7 @@ impl SDKRig {
             self.fetch = Some(fetch);
             return Ok(());
         };
-        let input = self.fetched_input(page)?;
+        let input = Input::Fetched(page.callback.as_ref().ok_or_else(failure)?.clone());
         if !self.driver.has_incoming_reply(&input)? {
             self.fetch = Some(fetch);
             return Ok(());
@@ -348,7 +347,9 @@ impl SDKRig {
                 self.files.collection_zone.clone()
             };
             if fetch.page.is_none() {
-                *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
+                *remaining = remaining
+                    .checked_sub(1)
+                    .ok_or_else(|| std::io::Error::other("fetch pages: step budget exhausted"))?;
                 let response = service.request(
                     &self.files.scope,
                     self.caller(),
@@ -357,8 +358,22 @@ impl SDKRig {
                         token: fetch.token.clone(),
                     },
                 )?;
-                let Ok(Reply::ZoneChanges(page)) = response.result else {
-                    return Err(failure());
+                let page = match response.result {
+                    Ok(Reply::ZoneChanges(page)) => page,
+                    Ok(_) => {
+                        return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                            "root fetch: Service reply shape"
+                        } else {
+                            "collection fetch: Service reply shape"
+                        })));
+                    }
+                    Err(_) => {
+                        return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                            "root fetch: Service error reply"
+                        } else {
+                            "collection fetch: Service error reply"
+                        })));
+                    }
                 };
                 let mut entities = Vec::new();
                 for change in page.changes {
@@ -367,7 +382,7 @@ impl SDKRig {
                             if fetch.root_zone && record.name == "active" && record.record_type == "MGActive" =>
                         {
                             let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
-                                return Err(failure());
+                                return Err(Box::new(std::io::Error::other("root fetch: envelope shape")));
                             };
                             fetch.active = Some(Saved {
                                 name: record.name.clone(),
@@ -376,44 +391,67 @@ impl SDKRig {
                             });
                         }
                         RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEntity" => {
-                            let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
-                                return Err(failure());
-                            };
+                            if !matches!(record.fields.get("e"), Some(Field::EncryptedBytes(_))) {
+                                return Err(Box::new(std::io::Error::other("collection fetch: envelope shape")));
+                            }
                             fetch.seen.insert(record.name.clone());
-                            entities.push(Saved {
-                                name: record.name.clone(),
-                                envelope: e.clone(),
-                                system_fields: record.system_fields.bytes().to_vec(),
-                            });
+                            entities.push(record);
                         }
                         RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {}
-                        _ => return Err(failure()),
+                        _ => {
+                            return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                                "root fetch: change shape"
+                            } else {
+                                "collection fetch: change shape"
+                            })));
+                        }
                     }
                 }
                 // Retain the original page and callback command across a child
                 // pause. Neither Service nor the receive handler is resubmitted.
+                let callback = if fetch.root_zone {
+                    None
+                } else {
+                    Some(self.fetched_callback(entities, &page.token)?)
+                };
                 fetch.page = Some(FetchPage {
-                    entities,
+                    callback,
                     token: page.token,
                     more: page.more,
                     request_id: response.request_id,
                 });
             }
-            let page = fetch.page.as_ref().ok_or_else(failure)?;
+            let page = fetch
+                .page
+                .as_ref()
+                .ok_or_else(|| std::io::Error::other("fetch pages: missing page"))?;
             if fetch.root_zone {
                 if !page.more {
                     self.driver.call::<bool>(Input::RootFetch(
                         self.instance.clone(),
-                        Some(fetch.active.clone().ok_or_else(failure)?),
+                        Some(
+                            fetch
+                                .active
+                                .clone()
+                                .ok_or_else(|| std::io::Error::other("root fetch: missing active"))?,
+                        ),
                         true,
                         page.request_id,
                     ))?;
                 }
             } else {
-                let input = self.fetched_input(page)?;
+                let input = Input::Fetched(
+                    page.callback
+                        .as_ref()
+                        .ok_or_else(|| std::io::Error::other("collection fetch: missing callback"))?
+                        .clone(),
+                );
                 self.driver.call::<()>(input)?;
             }
-            let page = fetch.page.take().ok_or_else(failure)?;
+            let page = fetch
+                .page
+                .take()
+                .ok_or_else(|| std::io::Error::other("fetch pages: missing consumed page"))?;
             if page.more {
                 fetch.token = Some(page.token);
                 continue;
@@ -510,18 +548,31 @@ impl SDKRig {
         let mutations = b
             .saves
             .iter()
-            .map(|s| Mutation::Save {
-                record: RecordInput::encrypted(&s.name, "MGEntity", s.envelope.clone()),
-                if_unchanged: s.system_fields.clone().map(SystemFields::from_bytes),
+            .map(|s| {
+                let mut record = RecordInput::encrypted(&s.name, "MGEntity", s.envelope.clone());
+                if let Some(path) = &s.asset_path {
+                    record
+                        .fields
+                        .insert("pa".into(), Field::Asset(Asset::synthetic(std::fs::read(path)?)));
+                }
+                Ok(Mutation::Save {
+                    record,
+                    if_unchanged: s.system_fields.clone().map(SystemFields::from_bytes),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         // Building can emit removals for held/deferred images even when it
         // returns no saves. Apply the real ordered updates after handler return
         // before reporting SDK pending state or selecting another batch.
         self.updates()?;
         Ok((b, mutations))
     }
-    fn send(&mut self, service: &mut Service<SeededRandom>, mutations: Vec<Mutation>) -> Result<ResponseBatch> {
+    fn send(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        built: &BuiltBatch,
+        mutations: Vec<Mutation>,
+    ) -> Result<ResponseBatch> {
         let response = service.request(
             &self.files.scope,
             self.caller(),
@@ -533,6 +584,7 @@ impl SDKRig {
         )?;
         let batch = ResponseBatch {
             instance: self.instance.clone(),
+            backend_batch_id: built.id,
             mutations,
             response,
         };
@@ -541,14 +593,14 @@ impl SDKRig {
         Ok(batch)
     }
     pub fn request_collection_batch(&mut self, service: &mut Service<SeededRandom>) -> Result<BatchAttempt> {
-        let (_, mutations) = self.build()?;
+        let (built, mutations) = self.build()?;
         if mutations.is_empty() {
             return Ok(BatchAttempt {
                 mutations,
                 request_ids: Vec::new(),
             });
         }
-        let b = self.send(service, mutations)?;
+        let b = self.send(service, &built, mutations)?;
         let attempt = BatchAttempt {
             mutations: b.mutations.clone(),
             request_ids: vec![b.response.request_id],
@@ -558,21 +610,72 @@ impl SDKRig {
         self.updates()?;
         Ok(attempt)
     }
+    /// Real handed request whose SDK reply is lost. End the physical send,
+    /// without a fabricated result callback or ACK; durable flights survive.
+    pub fn lose_collection_batch_reply(&mut self, service: &mut Service<SeededRandom>) -> Result<ResponseBatch> {
+        if self.handler.is_some() || self.waiting.is_some() {
+            return Err(failure());
+        }
+        let (built, mutations) = self.build()?;
+        if mutations.is_empty() {
+            return Err(failure());
+        }
+        let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
+        let call = call.ok_or_else(failure)?;
+        let batch = self.send(service, &built, mutations)?;
+        self.driver
+            .call::<()>(Input::RecordCall(self.instance.clone(), call.id, built.id))?;
+        self.driver
+            .call::<()>(Input::FinishCall(self.instance.clone(), call.id))?;
+        self.waiting = None;
+        self.sent.remove(&batch.response.request_id);
+        self.refresh()?;
+        Ok(batch)
+    }
+    pub fn reopen_after_lost_replies(&mut self) -> Result<()> {
+        let instance = self.driver.reopen_for_testing()?;
+        self.install_instance(instance, self.files.collection_zone.clone());
+        Ok(())
+    }
+    /// Register after the reopened host's reconciliation, before receiving assets.
+    pub fn reconcile_register_and_confirm_root(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        steps: usize,
+    ) -> Result<()> {
+        if steps < 4 {
+            return Err(failure());
+        }
+        self.driver.call::<()>(Input::Identity(None))?;
+        self.driver.call::<()>(Input::Reconcile)?;
+        let (instance, _serialization, zone): (String, Option<Vec<u8>>, String) =
+            self.driver.call(Input::RegisterSDK(None))?;
+        self.install_instance(instance, zone);
+        // This rig deliberately performs full fetches, even with saved SDK state.
+        // confirm_root_read also completes the actual no-state zone listing.
+        self.confirm_root_read(service, &mut (steps - 3))
+    }
+    /// Fetch actual Service evidence without proceeding to a new save.
+    pub fn fetch_recovery_exchange(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
+        self.sync_now()?;
+        let mut remaining = steps;
+        self.fetch_exchange(service, &mut remaining)
+    }
     pub fn drive_until_response(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<ResponseBatch> {
         if steps < 3 || self.handler.is_some() || self.waiting.is_some() {
             return Err(failure());
         }
         let mut remaining = steps - 3;
         self.fetch_exchange(service, &mut remaining)?;
-        let (_, mutations) = self.build()?;
+        let (built, mutations) = self.build()?;
         if mutations.is_empty() {
             return Err(failure());
         }
         let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
         let call = call.ok_or_else(failure)?;
-        let b = self.send(service, mutations)?;
+        let b = self.send(service, &built, mutations)?;
         self.driver
-            .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.response.request_id))?;
+            .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.backend_batch_id))?;
         self.calls.insert(b.response.request_id, call.id);
         self.refresh()?;
         Ok(b)
@@ -620,7 +723,7 @@ impl SDKRig {
                 self.refresh()?;
                 return Ok(());
             }
-            let (_, mutations) = self.build()?;
+            let (built, mutations) = self.build()?;
             if mutations.is_empty() {
                 if media && self.drive_cloud_media(service, remaining)? {
                     continue;
@@ -635,9 +738,9 @@ impl SDKRig {
                 self.refresh()?;
                 return Ok(());
             };
-            let b = self.send(service, mutations)?;
+            let b = self.send(service, &built, mutations)?;
             self.driver
-                .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.response.request_id))?;
+                .call::<()>(Input::RecordCall(self.instance.clone(), call.id, b.backend_batch_id))?;
             self.calls.insert(b.response.request_id, call.id);
         }
         Err(failure())
@@ -676,7 +779,7 @@ impl SDKRig {
         let batch = self.sent.get(&response.request_id).ok_or_else(failure)?.clone();
         self.sdk_drop_nonretry_failures(response)?;
         self.driver
-            .call::<()>(Input::EnterHandler(batch.instance.clone(), response.request_id))?;
+            .call::<()>(Input::EnterHandler(batch.instance.clone(), batch.backend_batch_id))?;
         self.handler = Some(response.request_id);
         let mut saved = Vec::new();
         let mut failed = Vec::new();
@@ -716,7 +819,7 @@ impl SDKRig {
         }
         self.driver.call::<()>(Input::Sent(
             batch.instance.clone(),
-            response.request_id,
+            batch.backend_batch_id,
             saved,
             failed,
             batch.mutations.len(),
@@ -743,7 +846,8 @@ impl SDKRig {
             .unwrap_or_else(|| self.instance.clone());
         let returned: u64 = self.driver.call(Input::ReturnHandler(instance.clone()))?;
         self.handler = None;
-        if id != returned {
+        let backend = self.sent.get(&id).map_or(id, |batch| batch.backend_batch_id);
+        if backend != returned {
             return Err(failure());
         }
         if let Some(batch) = self.sent.get(&id) {
@@ -757,7 +861,7 @@ impl SDKRig {
                 }
             }
             self.driver
-                .call::<()>(Input::SavedRemoved(instance.clone(), id, removed))?;
+                .call::<()>(Input::SavedRemoved(instance.clone(), backend, removed))?;
         }
         if self.waiting == Some(id) {
             self.waiting = None;
