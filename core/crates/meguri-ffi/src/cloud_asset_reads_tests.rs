@@ -229,6 +229,105 @@ fn owned_retry_read_intake_drives_existing_guarded_writer_and_wal() {
 }
 
 #[test]
+fn one_actual_retry_pass_completes_two_entries_through_normal_writer_and_wal() {
+    let (fixture, sdk) = published();
+    let first = waiting_note(&fixture, &sdk);
+    let second = waiting_note(&fixture, &sdk);
+    assert_ne!(first.0.name, second.0.name);
+    assert_ne!(first.1, second.1);
+    let binding = fixture.workflow.core.status().unwrap().binding.unwrap().id;
+    let entries = fixture.workflow.core.inbox_entries(binding).unwrap();
+    assert_eq!(entries.len(), 2);
+    for (server, _, _) in [&first, &second] {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.entry.record_name == server.name)
+            .unwrap();
+        assert_eq!(entry.entry.reason, c::InboxReason::Asset);
+        assert_eq!(entry.entry.source, c::InboxSource::Fetch);
+        assert_eq!(entry.entry.retry_count, 0);
+        let c::InboxValue::Record {
+            envelope, staged_asset, ..
+        } = &entry.entry.value
+        else {
+            panic!("actual asset entry");
+        };
+        let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&envelope.0).unwrap() else {
+            panic!("actual pa entity");
+        };
+        assert!(entity.payload.is_none() && entity.fields.generation.is_none());
+        assert!(staged_asset.is_none());
+    }
+    // Keep this one drain-issued execution/pass across both normal writer calls.
+    let pass = retry_pass(&fixture, &sdk);
+    let queue = Queue::new(true);
+    let mut completed = std::collections::BTreeSet::new();
+    for count in 1..=2 {
+        let work = pass.clone().next().unwrap().unwrap();
+        let (server, id, bytes) = [&first, &second]
+            .into_iter()
+            .find(|(server, _, _)| server.name == work.name)
+            .expect("selected one of the two original entries");
+        assert!(completed.insert(work.name.clone()));
+        assert_eq!(work.kind, CloudAssetReadKind::Retry);
+        assert_eq!(work.zone, sdk.collection_zone);
+        assert!(pass.submit(work.handle.clone(), queue.clone()).unwrap());
+        assert_eq!(queue.calls.load(Ordering::SeqCst), count);
+        assert_eq!(attempts(&fixture, &server.name), 1);
+        let download = tempfile::tempdir().unwrap();
+        let callback = callback_record(
+            &read(&fixture, &sdk, &server.name),
+            &sdk.collection_zone,
+            download.path(),
+        );
+        assert!(pass.complete(work.handle, Some(callback)).unwrap().intake_accepted);
+        let note = fixture
+            .workflow
+            .host
+            .collection()
+            .unwrap()
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .note(*id)
+            .unwrap()
+            .unwrap();
+        let codec::Payload::Note(payload) = codec::Payload::decode(codec::Kind::Note, bytes).unwrap() else {
+            panic!("note");
+        };
+        assert!(note.fields.as_bytes() == payload.flds);
+        let facts = note_facts(&fixture, *id);
+        assert_eq!(facts.acked_payload_digest, codec::sha256(bytes));
+        assert_eq!(facts.acked_system_fields, server.system_fields.bytes());
+        assert!(facts.acked_payload.as_ref() == Some(&codec::Payload::Note(payload)));
+        assert!(
+            !fixture
+                .workflow
+                .durable_snapshot()
+                .unwrap()
+                .inbox_names
+                .contains(&server.name)
+        );
+        let runs = fixture.workflow.core.incoming_runs();
+        let run = runs.iter().find(|run| run.changed_keys.contains(&server.name)).unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.entry.record_name == server.name)
+            .unwrap();
+        assert!(run.entry_ids.contains(&entry.id));
+        assert!(
+            fixture.workflow.core.incoming_wal_receipts().iter().any(|receipt| {
+                receipt.identity().generation().0 == run.generation && receipt.through().0 >= run.seq
+            })
+        );
+    }
+    assert_eq!(completed.len(), 2);
+    assert!(pass.clone().next().unwrap().is_none());
+    pass.finish().unwrap();
+    assert!(fixture.workflow.core.inbox_entries(binding).unwrap().is_empty());
+    assert_eq!(queue.calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn owned_read_refusal_and_unstarted_cancel_are_uncharged() {
     let (fixture, sdk) = published();
     let (server, _, _) = waiting_note(&fixture, &sdk);
@@ -499,7 +598,112 @@ fn accepted_original_terminal_cleans_up_after_account_generation_or_close() {
 #[test]
 fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_return() {
     let (fixture, sdk) = published();
-    let (id, original) = add_note(&fixture, "local".repeat(160_000));
+    let (id, original) = add_note(&fixture, "Base back".into());
+    for update in fixture.workflow.take_pending_updates(sdk.instance_id.clone()).unwrap() {
+        fixture
+            .workflow
+            .update_applied(
+                sdk.instance_id.clone(),
+                update.id,
+                update.adds.keys().cloned().collect(),
+            )
+            .unwrap();
+    }
+    let baseline_batch = fixture
+        .workflow
+        .build_batch(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            fixture
+                .workflow
+                .tracking_sendables()
+                .unwrap()
+                .into_iter()
+                .filter(|(name, _)| name == &original.name)
+                .collect(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(baseline_batch.saves.len(), 1);
+    let baseline_handed = &baseline_batch.saves[0];
+    let baseline = save(
+        &fixture,
+        &sdk,
+        RecordInput::encrypted(&baseline_handed.name, "MGEntity", baseline_handed.envelope.clone()),
+        baseline_handed.system_fields.clone(),
+    );
+    let baseline_download = tempfile::tempdir().unwrap();
+    fixture
+        .workflow
+        .sent(
+            sdk.instance_id.clone(),
+            baseline_batch.id,
+            vec![callback_record(
+                &baseline,
+                &sdk.collection_zone,
+                baseline_download.path(),
+            )],
+            vec![],
+            1,
+        )
+        .unwrap();
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    fixture
+        .workflow
+        .core
+        .sdk_saved_removed(
+            &sdk.instance_id,
+            baseline_batch.id,
+            std::slice::from_ref(&baseline.name),
+        )
+        .unwrap();
+    for update in fixture.workflow.take_pending_updates(sdk.instance_id.clone()).unwrap() {
+        fixture
+            .workflow
+            .update_applied(
+                sdk.instance_id.clone(),
+                update.id,
+                update.adds.keys().cloned().collect(),
+            )
+            .unwrap();
+    }
+    let acked = note_facts(&fixture, id);
+    assert!(acked.acked_payload.as_ref() == Some(&original.payload));
+    assert_eq!(
+        acked.acked_payload_digest,
+        codec::sha256(&original.payload.encode().unwrap())
+    );
+    assert_eq!(acked.acked_system_fields, baseline.system_fields.bytes());
+    assert_eq!(acked.acked_rev, original.local_rev);
+    assert!(acked.in_flight.is_empty());
+    assert!(
+        !fixture
+            .workflow
+            .tracking_sendables()
+            .unwrap()
+            .contains_key(&original.name)
+    );
+
+    // Disjoint edits from a real Saved base force local-front + remote-back.
+    let local_front = "local".repeat(160_000);
+    let remote_back = "remote".repeat(160_000);
+    let collection = fixture.workflow.host.collection().unwrap();
+    let edited = meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id,
+            fields: vec![local_front.clone(), "Base back".into()],
+            tags: vec![],
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, edited.seq.0)
+        .unwrap();
+    let local = note_facts(&fixture, id);
+    assert!(local.base_payload.as_ref() == Some(&original.payload));
     let batch = fixture
         .workflow
         .build_batch(
@@ -515,24 +719,32 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
         )
         .unwrap()
         .unwrap();
+    assert_eq!(batch.saves.len(), 1);
     let handed = &batch.saves[0];
-    let codec::DecodeOutcome::Supported(envelope) = codec::Entity::decode(&handed.envelope).unwrap() else {
-        panic!("actual handed entity")
+    assert!(std::fs::read(handed.asset_path.as_ref().unwrap()).unwrap() == local.payload.encode().unwrap());
+    assert_eq!(handed.system_fields.as_deref(), Some(baseline.system_fields.bytes()));
+    let baseline_value = publication_control_record(&baseline).unwrap();
+    let codec::DecodeOutcome::Supported(envelope) = codec::Entity::decode(&baseline_value.encrypted.unwrap()).unwrap()
+    else {
+        panic!("actual Saved base entity")
     };
     let codec::Payload::Note(mut remote) = original.payload.clone() else {
         panic!("note")
     };
-    remote.flds = format!("Question\u{1f}{}", "remote".repeat(160_000)).into_bytes();
+    remote.flds = format!("Question\u{1f}{remote_back}").into_bytes();
     let bytes = codec::Payload::Note(remote).encode().unwrap();
     let mut fields = envelope.fields;
     fields.writer = [84; 16];
+    fields.erev += 1;
+    fields.base_sha256 = Some(acked.acked_payload_digest);
     let remote = codec::Entity::build(fields, &bytes).unwrap();
     assert!(remote.payload.is_none());
     let mut input = RecordInput::encrypted(&handed.name, "MGEntity", remote.encode().unwrap());
     input
         .fields
         .insert("pa".into(), Field::Asset(Asset::synthetic(bytes.clone())));
-    save(&fixture, &sdk, input, None);
+    let concurrent = save(&fixture, &sdk, input, Some(baseline.system_fields.bytes().to_vec()));
+    assert_ne!(concurrent.system_fields.bytes(), baseline.system_fields.bytes());
     let mut input = RecordInput::encrypted(&handed.name, "MGEntity", handed.envelope.clone());
     input.fields.insert(
         "pa".into(),
@@ -565,6 +777,7 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
     let error = items.pop().unwrap().result.err().unwrap();
     assert_eq!(error.code, ErrorCode::ServerRecordChanged);
     let server = error.server_record.unwrap();
+    assert_eq!(server.system_fields.bytes(), concurrent.system_fields.bytes());
     let value = publication_control_record(&server).unwrap();
     let collection = fixture.workflow.host.collection().unwrap();
     // Exercise the existing narrow core intake with the actual original handed
@@ -602,14 +815,20 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
     let work = first.clone().next().unwrap().unwrap();
     assert_eq!(work.name, original.name);
     assert_eq!(work.kind, CloudAssetReadKind::SaveConflictFirst);
-    assert!(!first.submit(work.handle, Queue::new(false)).unwrap());
+    assert_eq!(attempts(&fixture, &server.name), 0);
+    let refused = Queue::new(false);
+    assert!(!first.submit(work.handle, refused.clone()).unwrap());
+    assert_eq!(refused.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(attempts(&fixture, &server.name), 0);
     first.finish().unwrap();
     let first = fixture
         .workflow
         .begin_first_asset_read_pass(sdk.instance_id.clone())
         .unwrap();
     let work = first.clone().next().unwrap().unwrap().handle;
-    assert!(first.submit(work.clone(), Queue::new(true)).unwrap());
+    let accepted = Queue::new(true);
+    assert!(first.submit(work.clone(), accepted.clone()).unwrap());
+    assert_eq!(accepted.calls.load(Ordering::SeqCst), 1);
     assert_eq!(attempts(&fixture, &server.name), 0);
     assert!(!first.cancel(work.clone()).unwrap());
     first.finish().unwrap();
@@ -620,6 +839,10 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
         download.path(),
     );
     assert!(first.complete(work, Some(callback)).unwrap().intake_accepted);
+    assert_eq!(accepted.calls.load(Ordering::SeqCst), 1);
+    let merged_fields = format!("{local_front}\u{1f}{remote_back}").into_bytes();
+    let note = collection.reader(ReaderRole::Query).unwrap().note(id).unwrap().unwrap();
+    assert!(note.fields.as_bytes() == merged_fields);
     assert!(
         fixture
             .workflow
@@ -632,6 +855,26 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
     let facts = note_facts(&fixture, id);
     assert_eq!(facts.acked_payload_digest, codec::sha256(&bytes));
     assert_eq!(facts.acked_system_fields, server.system_fields.bytes());
+    assert_eq!(facts.server_erev, remote.fields.erev);
+    assert!(facts.acked_payload.as_ref() == Some(&codec::Payload::decode(codec::Kind::Note, &bytes).unwrap()));
+    let codec::Payload::Note(merged) = &facts.payload else {
+        panic!("merged note");
+    };
+    assert!(merged.flds == merged_fields);
+    assert!(facts.mark.is_some());
+    assert!(facts.in_flight.is_empty());
+    assert!(matches!(
+        fixture.workflow.tracking_sendables().unwrap().get(&server.name),
+        Some(CloudPendingChange::Save)
+    ));
+    assert!(
+        fixture
+            .workflow
+            .take_pending_updates(sdk.instance_id.clone())
+            .unwrap()
+            .iter()
+            .any(|update| matches!(update.adds.get(&server.name), Some(CloudPendingChange::Save)))
+    );
     assert!(
         !fixture
             .workflow

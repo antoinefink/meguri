@@ -17,8 +17,17 @@ admission remains blocked.
 - `private/20261031T215353Z-76343`: pass.
 - `core-lint/20261031T215035Z-74751`: pass before the fixture-only corrections.
 
-The conflict case needs an actual initial Saved ACK and edits to separate fields.
-The next test also covers two entries in one pass.
+The conflict fixture now starts with an actual Saved ACK, then changes separate
+local and remote fields. It verifies the merged values, remote ACK and pending
+local resend. A second test completes two entries through the same retained pass
+and normal writer/WAL calls. No production scheduling change was needed.
+
+- Filtered fixer export: `cleanroom/20261031T220027Z-77609`.
+- Independent round 3 review: no findings requiring repair.
+- `core-test/20261031T220542Z-79455`: all 12 asset-read FFI tests pass.
+- `core-test/20261031T220652Z-79972`: all 184 FFI library tests pass; none skipped.
+- `private/20261031T220657Z-80261`: pass.
+- `core-lint/20261031T221007Z-81007`: pass, including formatting and layering.
 
 Native Swift transport and scheduling, generic conflict receipt handling,
 cross-device proof and the batch gate remain outstanding. This is WIP;
