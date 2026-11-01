@@ -96,15 +96,14 @@ impl Header {
         Ok(header)
     }
     pub fn message_with(&self, bodies: Option<&[Vec<u8>]>) -> Result<Value, &'static str> {
-        if let Some(bodies) = bodies {
-            if bodies.len() != self.lengths.len()
+        if let Some(bodies) = bodies
+            && (bodies.len() != self.lengths.len()
                 || bodies
                     .iter()
                     .zip(&self.lengths)
-                    .any(|(body, length)| body.len() != *length)
-            {
-                return Err(BAD);
-            }
+                    .any(|(body, length)| body.len() != *length))
+        {
+            return Err(BAD);
         }
         let mut message = self.message.clone();
         let mut used = vec![false; self.lengths.len()];
