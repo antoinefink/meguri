@@ -1649,18 +1649,34 @@ fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
         accept_root(&media, &sdk);
         let name = metadata.name(&[47; 32]);
         let read = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
-        assert!(matches!(&read.request, CloudMediaRequest::Read { name: n } if n == &name));
-        media
-            .reply(
-                read.handle,
+        // ResumeMedia starts a batched metadata round before selecting downloads.
+        let reply = match read.request {
+            CloudMediaRequest::Reads { names } => {
+                assert!(
+                    names.as_slice() == std::slice::from_ref(&name),
+                    "only the original blob metadata"
+                );
+                CloudMediaReply::BlobReads {
+                    results: vec![CloudMediaBlobRead {
+                        name,
+                        result: CloudMediaBlobResult::Present {
+                            envelope: metadata.encode().unwrap(),
+                        },
+                    }],
+                }
+            }
+            CloudMediaRequest::Read { name: requested } => {
+                assert!(requested == name, "only the original blob metadata");
                 CloudMediaReply::Record {
-                    name,
+                    name: requested,
                     record_type: "MGBlob".into(),
                     envelope: metadata.encode().unwrap(),
                     asset_path: None,
-                },
-            )
-            .unwrap();
+                }
+            }
+            _ => panic!("expected original blob metadata read"),
+        };
+        media.reply(read.handle, reply).unwrap();
         let retained = retain_download.then(|| {
             let work = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
             assert!(matches!(work.request, CloudMediaRequest::Download { .. }));

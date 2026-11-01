@@ -272,3 +272,41 @@ Verification setup integration:
 - similarity/20261101T092316Z-27792: PASS.
 - private/20261101T092057Z-26406: source files passed; the log passed after
   rewrite in private/20261101T092156Z-27311.
+
+## R6 metadata response fixture repair
+
+Session: s-20261025T162405Z-9dc656e4.
+Repair base: ef3501bb49a8dd021aaa611da1f78b471a7429b5.
+Unit start: 3f241c19b77db754b71c0d8c433f25fd674903ae.
+Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+
+The FFI fixture now answers the metadata operation selected after ResumeMedia
+and the accepted root. The policy enables batched reads; cloud_media_work selects
+Reads for unknown blob metadata before downloads. The typed Reads branch requires
+exactly the original blob name and returns BlobReads with its original metadata
+envelope. The single Read branch also requires that exact name and returns a
+Record without an asset. Neither branch accepts unrelated names or prints them.
+
+Only the existing unsyncable-file test and this log changed. Candidate and retained
+admission rejection, zero enqueue, original nonempty live ACK and equality, empty
+first-file preservation, retired Running reset and second-name download checks
+remain unchanged. These later assertions remain unrun in the focused failure;
+this repair claims no test pass. Production selection and guards are unchanged.
+
+One bounded source consistency check completed in the filtered fixer session.
+Fresh source verification, focused MG execution and independent review are pending
+with root. The original core-test/20261101T091323Z-22902 receipt remains 105/107;
+the later core-test/20261101T092132Z-26723 receipt remains 21/22, with all nine
+malformed-record refusal/preservation cases and all twenty policy tests passing.
+Prior lint, privacy and similarity receipts above apply to the earlier source.
+No unit acceptance or batch gate acceptance is claimed.
+
+Metadata fixture verification:
+- Independent review: no P0-P2 finding.
+- core-format/20261101T092701Z-31606: PASS.
+- core-test/20261101T092726Z-32146: 1/1 PASS. Both fixture modes complete
+  the existing function, including its ACK and file integrity assertions.
+- private/20261101T092706Z-31873: PASS.
+- similarity/20261101T092836Z-32886: PASS.
+The earlier failed broad receipts remain retained; these focused results cover
+their corrected fixture paths. Native reopen and the required gate remain open.
