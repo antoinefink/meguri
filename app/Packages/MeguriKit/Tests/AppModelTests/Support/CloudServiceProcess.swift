@@ -7,7 +7,7 @@ import Synchronization
 // JSONSerialization's Any values nor ServiceSystemFields enter CoreBridge.
 nonisolated enum CloudServiceProcessFailure: Error {
     case configuration, launch, closed, input, output, malformedReply
-    case fixtureInputLimit, fixtureReplyLimit, fixtureDiagnosticLimit
+    case fixtureInputLimit, fixtureReplyLimit, fixtureDiagnosticLimit, fixtureAttachmentLimit
 }
 
 nonisolated struct CloudServiceProcessExit: Sendable, Equatable, CustomStringConvertible {
@@ -22,16 +22,19 @@ nonisolated struct CloudServiceProcessExit: Sendable, Equatable, CustomStringCon
 
 nonisolated final class CloudServiceProcess: Sendable {
     private let worker: CloudServiceProcessWorker
+    private let transport: CloudServiceTransport
 
-    private init(worker: CloudServiceProcessWorker) { self.worker = worker }
+    private init(worker: CloudServiceProcessWorker, transport: CloudServiceTransport) {
+        self.worker = worker; self.transport = transport
+    }
 
-    static func open(stateDirectory: URL) async throws -> CloudServiceProcess {
+    static func open(stateDirectory: URL, transport: CloudServiceTransport = .legacy) async throws -> CloudServiceProcess {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global().async {
                 do {
-                    let worker = try CloudServiceProcessWorker(stateDirectory: stateDirectory)
+                    let worker = try CloudServiceProcessWorker(stateDirectory: stateDirectory, transport: transport)
                     worker.startDiagnostics()
-                    continuation.resume(returning: CloudServiceProcess(worker: worker))
+                    continuation.resume(returning: CloudServiceProcess(worker: worker, transport: transport))
                 } catch { continuation.resume(throwing: error) }
             }
         }
@@ -42,9 +45,10 @@ nonisolated final class CloudServiceProcess: Sendable {
     // Test barriers expose admission and a write with its reply still pending.
     func request(_ frame: Data, afterEnqueue: (@Sendable () -> Void)? = nil,
                  afterWrite: (@Sendable () -> Void)? = nil) async throws -> Data {
+        let packet = try CloudServiceBinary.prepare(frame, transport: transport)
         let reply: Data = try await withCheckedThrowingContinuation { continuation in
             worker.queue.async { [worker] in
-                do { continuation.resume(returning: try worker.exchange(frame, afterWrite: afterWrite)) }
+                do { continuation.resume(returning: try worker.exchange(packet, afterWrite: afterWrite)) }
                 catch { continuation.resume(throwing: error) }
             }
             afterEnqueue?()
@@ -55,16 +59,17 @@ nonisolated final class CloudServiceProcess: Sendable {
 
     // Own/media submit guards need synchronous acceptance by the actual stdio
     // queue. Preparation owns the exact frame and buffered original reply.
-    func prepare(_ frame: Data) throws -> CloudServicePreparedFrame {
-        guard frame.count <= 1_048_576 else { throw CloudServiceProcessFailure.fixtureInputLimit }
-        guard !frame.contains(10) else { throw CloudServiceProcessFailure.input }
+    func prepare(_ frame: Data, afterWrite: (@Sendable () -> Void)? = nil) throws -> CloudServicePreparedFrame {
+        let packet = try CloudServiceBinary.prepare(frame, transport: transport)
         return CloudServicePreparedFrame { [worker] finish in
             worker.queue.async {
-                do { finish(.success(try worker.exchange(frame, afterWrite: nil))) }
+                do { finish(.success(try worker.exchange(packet, afterWrite: afterWrite))) }
                 catch { finish(.failure(error)) }
             }
         }
     }
+
+    func transportExchanges() -> [CloudServiceExchange] { worker.exchanges.withLock { $0 } }
 
     func close() async -> CloudServiceProcessExit {
         await withCheckedContinuation { continuation in
@@ -148,11 +153,14 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
     private var pending = Data()
     private var result: CloudServiceProcessExit?
     private var inputClosed = false
+    private let transport: CloudServiceTransport
+    let exchanges = Mutex<[CloudServiceExchange]>([])
     // Small synthetic IPC fixture limits, independent of production budgets.
     private let frameLimit = 1_048_576
     private let diagnosticLimit = 16_384
 
-    init(stateDirectory: URL) throws {
+    init(stateDirectory: URL, transport: CloudServiceTransport) throws {
+        self.transport = transport
         guard let path = ProcessInfo.processInfo.environment["MEGURI_CLOUD_SERVICE_CLI"],
               path.hasPrefix("/"),
               let attributes = try? FileManager.default.attributesOfItem(atPath: path),
@@ -162,6 +170,7 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
               stateDirectory.isFileURL else { throw CloudServiceProcessFailure.configuration }
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = ["internal-cloud-service", stateDirectory.path, "18446744073709551615"]
+        if case .binaryAssetsV1 = transport { process.arguments?.append("--binary-assets-v1") }
         process.standardInput = input
         process.standardOutput = output
         process.standardError = error
@@ -199,29 +208,33 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
 
     func stop() { if process.isRunning { process.terminate() } }
 
-    func exchange(_ frame: Data, afterWrite: (@Sendable () -> Void)?) throws -> Data {
+    func exchange(_ packet: CloudServicePacket, afterWrite: (@Sendable () -> Void)?) throws -> Data {
         guard result == nil else { throw CloudServiceProcessFailure.closed }
         do {
-            guard frame.count <= frameLimit else { throw CloudServiceProcessFailure.fixtureInputLimit }
-            guard !frame.contains(10) else { throw CloudServiceProcessFailure.input }
-            var line = frame
+            var line = packet.header
             line.append(10)
-            try line.withUnsafeBytes { bytes in
-                var offset = 0
-                while offset < bytes.count {
-                    let count = Darwin.write(input.fileHandleForWriting.fileDescriptor,
-                                             bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
-                    if count < 0 && errno == EINTR { continue }
-                    guard count > 0 else { throw CloudServiceProcessFailure.input }
-                    offset += count
-                }
-            }
+            try write(line)
+            for body in packet.bodies { try write(body) }
             afterWrite?()
             guard let reply = try readFrame() else { throw CloudServiceProcessFailure.output }
             guard (try? JSONSerialization.jsonObject(with: reply)) != nil else {
                 throw CloudServiceProcessFailure.malformedReply
             }
-            return reply
+            let response: CloudServicePacket
+            let logical: Data
+            if case .binaryAssetsV1 = transport,
+               (try? JSONDecoder().decode(ServiceJSON.self, from: reply))?["protocol_error"] == nil {
+                let header = try CloudServiceBinary.replyHeader(reply)
+                var bodies: [Data] = []
+                for length in header.lengths { bodies.append(try readBody(length)) }
+                response = .init(header: reply, bodies: bodies)
+                logical = try header.logical(bodies).encoded()
+            } else {
+                response = .init(header: reply, bodies: [])
+                logical = reply
+            }
+            exchanges.withLock { $0.append(.init(request: packet, response: response)) }
+            return logical
         } catch {
             let exit = finish(terminate: true)
             if exit.diagnosticLimitExceeded { throw CloudServiceProcessFailure.fixtureDiagnosticLimit }
@@ -229,7 +242,52 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
         }
     }
 
+    private func write(_ data: Data) throws {
+        try data.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(input.fileHandleForWriting.fileDescriptor,
+                    bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw CloudServiceProcessFailure.input }
+                offset += count
+            }
+        }
+    }
+
+    private func readBody(_ length: Int) throws -> Data {
+        var body = Data(count: length)
+        try body.withUnsafeMutableBytes { bytes in
+            var offset = 0
+            while offset < length {
+                let count = Darwin.read(output.fileHandleForReading.fileDescriptor,
+                    bytes.baseAddress!.advanced(by: offset), length - offset)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw CloudServiceProcessFailure.output }
+                offset += count
+            }
+        }
+        return body
+    }
+
     private func readFrame() throws -> Data? {
+        // Read the binary header without reading any body until validation.
+        if case .binaryAssetsV1 = transport {
+            var header = Data()
+            var byte: UInt8 = 0
+            while true {
+                let count = Darwin.read(output.fileHandleForReading.fileDescriptor, &byte, 1)
+                if count < 0 && errno == EINTR { continue }
+                guard count >= 0 else { throw CloudServiceProcessFailure.output }
+                if count == 0 {
+                    guard header.isEmpty else { throw CloudServiceProcessFailure.malformedReply }
+                    return nil
+                }
+                if byte == 10 { return header }
+                guard header.count < frameLimit else { throw CloudServiceProcessFailure.fixtureReplyLimit }
+                header.append(byte)
+            }
+        }
         var bytes = [UInt8](repeating: 0, count: 4096)
         while true {
             if let newline = pending.firstIndex(of: 10) {

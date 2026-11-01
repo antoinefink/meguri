@@ -35,12 +35,22 @@ struct Client {
     child: Child,
     input: Option<ChildStdin>,
     output: BufReader<ChildStdout>,
+    binary: bool,
 }
 impl Client {
     fn open(directory: &Path) -> Self {
-        let mut child = command()
-            .arg(directory)
-            .arg("18446744073709551615")
+        Self::open_transport(directory, false)
+    }
+    fn open_binary(directory: &Path) -> Self {
+        Self::open_transport(directory, true)
+    }
+    fn open_transport(directory: &Path, binary: bool) -> Self {
+        let mut command = command();
+        command.arg(directory).arg("18446744073709551615");
+        if binary {
+            command.arg("--binary-assets-v1");
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -50,6 +60,7 @@ impl Client {
             input: child.stdin.take(),
             output: BufReader::new(child.stdout.take().unwrap()),
             child,
+            binary,
         }
     }
     fn write(&mut self, bytes: &[u8]) {
@@ -64,10 +75,77 @@ impl Client {
         line
     }
     fn response(&mut self, operation: Operation) -> Response {
+        if self.binary {
+            return self.binary_response(operation);
+        }
         let mut bytes = serde_json::to_vec(&envelope(operation)).unwrap();
         bytes.push(b'\n');
         self.write(&bytes);
         serde_json::from_str(&self.line()).unwrap()
+    }
+    fn binary_response(&mut self, operation: Operation) -> Response {
+        let mut message = envelope(operation);
+        let mut bodies = Vec::new();
+        if let Some(changes) = message["operation"]["Modify"]["changes"].as_array_mut() {
+            for change in changes {
+                if let Some(fields) = change["Save"]["record"]["fields"].as_object_mut() {
+                    for field in fields.values_mut() {
+                        if let Some(asset) = field.get_mut("Asset") {
+                            let body: Vec<u8> = serde_json::from_value(asset["bytes"].take()).unwrap();
+                            asset["bytes"] = json!({"attachment": bodies.len()});
+                            bodies.push(body);
+                        }
+                    }
+                }
+            }
+        }
+        let mut header = serde_json::to_vec(&json!({"version": 1,
+            "lengths": bodies.iter().map(Vec::len).collect::<Vec<_>>(), "message": message}))
+        .unwrap();
+        assert!(header.len() <= FRAME_BYTES);
+        header.push(b'\n');
+        self.write(&header);
+        for body in bodies {
+            self.write(&body);
+        }
+        let line = self.line();
+        assert!(line.len() <= FRAME_BYTES + 1);
+        let mut header: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(header["version"], 1);
+        let lengths: Vec<usize> = serde_json::from_value(header["lengths"].take()).unwrap();
+        assert!(lengths.len() <= 16 && lengths.iter().sum::<usize>() <= 8 * FRAME_BYTES);
+        let mut bodies: Vec<Option<Vec<u8>>> = lengths
+            .into_iter()
+            .map(|length| {
+                assert!(length <= 4 * FRAME_BYTES);
+                let mut body = vec![0; length];
+                self.output.read_exact(&mut body).unwrap();
+                Some(body)
+            })
+            .collect();
+        fn restore(value: &mut Value, bodies: &mut [Option<Vec<u8>>]) {
+            if let Some(index) = value.get("attachment").and_then(Value::as_u64) {
+                assert_eq!(value.as_object().unwrap().len(), 1);
+                *value = json!(bodies[index as usize].take().unwrap());
+            } else {
+                match value {
+                    Value::Array(values) => {
+                        for value in values {
+                            restore(value, bodies);
+                        }
+                    }
+                    Value::Object(values) => {
+                        for value in values.values_mut() {
+                            restore(value, bodies);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        restore(&mut header["message"], &mut bodies);
+        assert!(bodies.iter().all(Option::is_none));
+        serde_json::from_value(header["message"].take()).unwrap()
     }
     fn call(&mut self, operation: Operation) -> Reply {
         self.response(operation).result.unwrap()
@@ -549,4 +627,131 @@ fn stdio_all_zone_inventory_returns_original_complete_service_response() {
             .unwrap();
         assert_eq!(outcome.result, Ok(expected));
     }
+}
+
+#[test]
+fn binary_assets_v1_large_arbitrary_pa_conditional_save_read_fetch_and_request_ids() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = Client::open_binary(directory.path());
+    client.create("z");
+    // Every byte value, including zero and LF; validity cannot depend on compression.
+    let mut record = input("large", &[0, 255, 10]);
+    record.fields.insert(
+        "pa".into(),
+        Field::Asset(Asset::synthetic((0..960_000).map(|i| (i % 256) as u8).collect())),
+    );
+    let first = saved(&client.modify(true, vec![save(record.clone(), None)])[0]);
+    matches_input(&first, &record);
+    assert_eq!(client.read("large"), first);
+    record.fields.insert(
+        "pa".into(),
+        Field::Asset(Asset::synthetic(
+            (0..1_000_000).map(|i| (255 - i % 256) as u8).collect(),
+        )),
+    );
+    let updated = saved(&client.modify(true, vec![save(record.clone(), Some(first.system_fields.clone()))])[0]);
+    matches_input(&updated, &record);
+    let conflict = client.modify(true, vec![save(record, Some(first.system_fields))]);
+    assert_eq!(
+        conflict[0].result.as_ref().unwrap_err().server_record.as_deref(),
+        Some(&updated)
+    );
+    assert_eq!(client.read("large"), updated);
+    assert_eq!(client.page(None).changes, vec![RecordChange::Saved(updated.clone())]);
+    let response = client.response(read_operation("large"));
+    assert_eq!(response.result, Ok(Reply::Record(updated.clone())));
+    assert!(client.finish(0).is_empty());
+    let service = Service::open(directory.path(), Config::default(), SeededRandom::new(3)).unwrap();
+    let logs = service.request_log().unwrap();
+    assert_eq!(logs.len(), 8); // Exactly one dispatch per original frame, including conflict.
+    assert!(logs.windows(2).all(|pair| pair[0].request_id < pair[1].request_id));
+    assert_eq!(logs.last().unwrap().request_id, response.request_id);
+    drop(service);
+    // Binary is opt-in; the same durable state still opens with legacy framing.
+    let mut legacy = Client::open(directory.path());
+    assert_eq!(legacy.call(Operation::FetchAllZones), Reply::AllZones(vec!["z".into()]));
+    assert!(legacy.finish(0).is_empty());
+}
+
+#[test]
+fn binary_assets_v1_refuses_invalid_headers_limits_and_truncation_before_dispatch() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut baseline = Client::open(directory.path());
+    baseline.create("z");
+    let kept = saved(&baseline.modify(true, vec![save(input("keep", &[42]), None)])[0]);
+    assert!(baseline.finish(0).is_empty());
+    let mut message = envelope(Operation::Modify {
+        zone: "z".into(),
+        atomic: true,
+        changes: vec![save(
+            input("keep", SENTINEL.as_bytes()),
+            Some(kept.system_fields.clone()),
+        )],
+    });
+    let fields = &mut message["operation"]["Modify"]["changes"][0]["Save"]["record"]["fields"];
+    fields["pa"] = json!({"Asset": {"bytes": {"attachment": 0}, "sha256": vec![0; 32]}});
+    let base = json!({"version": 1, "lengths": [3], "message": message});
+    let mut cases = Vec::new();
+    for index in [json!(-1), json!(1), json!(0.5), json!(true)] {
+        let mut h = base.clone();
+        h["message"]["operation"]["Modify"]["changes"][0]["Save"]["record"]["fields"]["pa"]["Asset"]["bytes"]["attachment"] =
+            index;
+        cases.push((h, "malformed-attachments"));
+    }
+    let mut duplicate = base.clone();
+    duplicate["message"]["operation"]["Modify"]["changes"][0]["Save"]["record"]["fields"]["a"] =
+        duplicate["message"]["operation"]["Modify"]["changes"][0]["Save"]["record"]["fields"]["pa"].clone();
+    cases.push((duplicate, "malformed-attachments"));
+    let mut escaped = base.clone();
+    escaped["message"]["caller"]["instance"] = json!({"attachment": 0});
+    cases.push((escaped, "malformed-attachments"));
+    for (lengths, kind) in [
+        (json!([1, 1]), "malformed-attachments"),
+        (json!([4 * FRAME_BYTES + 1]), "attachment-limit"),
+        (json!(vec![0; 17]), "attachment-limit"),
+        (json!([4 * FRAME_BYTES, 4 * FRAME_BYTES, 1]), "attachment-limit"),
+    ] {
+        let mut h = base.clone();
+        h["lengths"] = lengths;
+        cases.push((h, kind));
+    }
+    let mut version = base.clone();
+    version["version"] = json!(2);
+    cases.push((version, "malformed-attachments"));
+    for (header, kind) in cases {
+        let mut client = Client::open_binary(directory.path());
+        let mut bytes = serde_json::to_vec(&header).unwrap();
+        bytes.push(b'\n');
+        client.write(&bytes); // No body/EOF: validation must refuse without waiting for either.
+        assert_eq!(client.line(), format!("{{\"protocol_error\":\"{kind}\"}}\n"));
+        assert_eq!(client.finish(2), format!("cloud service protocol-error: {kind}\n"));
+    }
+    let mut truncated = Client::open_binary(directory.path());
+    let mut bytes = serde_json::to_vec(&base).unwrap();
+    bytes.push(b'\n');
+    truncated.write(&bytes);
+    truncated.write(&[10]);
+    drop(truncated.input.take());
+    assert_eq!(truncated.line(), "{\"protocol_error\":\"truncated-attachment\"}\n");
+    assert_eq!(
+        truncated.finish(2),
+        "cloud service protocol-error: truncated-attachment\n"
+    );
+    let mut oversized = Client::open_binary(directory.path());
+    oversized.write(&vec![b' '; FRAME_BYTES + 1]);
+    assert_eq!(oversized.line(), "{\"protocol_error\":\"frame-too-large\"}\n");
+    assert_eq!(oversized.finish(2), "cloud service protocol-error: frame-too-large\n");
+    let service = Service::open(directory.path(), Config::default(), SeededRandom::new(3)).unwrap();
+    assert_eq!(service.request_log().unwrap().len(), 2);
+    drop(service);
+    let mut client = Client::open_binary(directory.path());
+    let mut exact =
+        serde_json::to_vec(&json!({"version": 1, "lengths": [], "message": envelope(read_operation("keep"))})).unwrap();
+    exact.resize(FRAME_BYTES, b' ');
+    exact.push(b'\n');
+    client.write(&exact);
+    let h: Value = serde_json::from_str(&client.line()).unwrap();
+    let response: Response = serde_json::from_value(h["message"].clone()).unwrap();
+    assert_eq!(response.result, Ok(Reply::Record(kept)));
+    assert!(client.finish(0).is_empty());
 }

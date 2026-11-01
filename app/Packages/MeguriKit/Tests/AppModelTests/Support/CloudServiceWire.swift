@@ -46,6 +46,9 @@ nonisolated enum ServiceWorkflowFailure: Error { case wire, unsupported, notQueu
 nonisolated func serviceRequired<T>(_ v: T?) throws -> T {
     guard let v else { throw ServiceWorkflowFailure.wire }; return v
 }
+// Original logical Service request/response JSON. In binaryAssetsV1 these are
+// normalized after attachment reconstruction, not the bytes on the pipe. Raw
+// headers/bodies belong to CloudServiceProcess.transportExchanges().
 nonisolated struct ServiceOriginalReply: Sendable {
     let originalRequestJSON: Data
     let originalResponseJSON: Data

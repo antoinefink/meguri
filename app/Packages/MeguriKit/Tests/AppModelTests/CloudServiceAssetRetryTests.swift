@@ -19,7 +19,7 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let serviceDirectory = root.appending(path: "service")
         try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, transport: .binaryAssetsV1)
         var active: ServiceAppHarness?
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))

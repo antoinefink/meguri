@@ -5,8 +5,11 @@ use serde_json::Value;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-// JSON bytes before LF, including whitespace. This is a small-fixture IPC cap,
-// not a change to the Service's limits or to production sync budgets.
+#[path = "cloud_service_binary.rs"]
+mod binary;
+
+// JSON bytes before LF, including whitespace; unchanged in either transport.
+// This fixture cap does not change Service or production sync budgets.
 const FRAME_BYTES: usize = 1_048_576;
 
 pub fn main(args: &[String]) -> i32 {
@@ -21,7 +24,8 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("cloud service startup-error: arguments");
         return 1;
     };
-    if args.len() != 2 || args[0].is_empty() {
+    let binary_assets = args.get(2).is_some_and(|arg| arg == binary::FLAG);
+    if !(args.len() == 2 || (args.len() == 3 && binary_assets)) || args[0].is_empty() {
         eprintln!("cloud service startup-error: arguments");
         return 1;
     }
@@ -31,7 +35,7 @@ pub fn main(args: &[String]) -> i32 {
     };
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
-    match serve(&mut service, &mut input, &mut output) {
+    match serve(&mut service, &mut input, &mut output, binary_assets) {
         Ok(()) => 0,
         Err(kind) => {
             // Fixed classifications only: never format an input, path or serde/IO error.
@@ -47,12 +51,26 @@ fn serve(
     service: &mut Service<SeededRandom>,
     input: &mut impl BufRead,
     output: &mut impl Write,
+    binary_assets: bool,
 ) -> Result<(), &'static str> {
     while let Some(frame) = read_frame(input)? {
-        let (scope, caller, operation) = request(&frame)?;
+        let (scope, caller, operation) = if binary_assets {
+            let header = binary::Header::parse(&frame)?;
+            // Check the real request schema/allowlist before reading any body.
+            request_value(header.message_with(None)?)?;
+            let bodies = header.read_bodies(input)?;
+            request_value(header.message_with(Some(&bodies))?)?
+        } else {
+            request(&frame)?
+        };
         let response = service.request(&scope, caller, operation).map_err(|_| "storage")?;
-        serde_json::to_writer(&mut *output, &response).map_err(|_| "output")?;
-        output.write_all(b"\n").map_err(|_| "output")?;
+        if binary_assets {
+            // Extract only from this actual, single Service.request return value.
+            binary::write(serde_json::to_value(&response).map_err(|_| "output")?, output)?;
+        } else {
+            serde_json::to_writer(&mut *output, &response).map_err(|_| "output")?;
+            output.write_all(b"\n").map_err(|_| "output")?;
+        }
         output.flush().map_err(|_| "output")?;
     }
     output.flush().map_err(|_| "output")
@@ -90,7 +108,10 @@ fn object_fields(value: &Value, allowed: &[&str]) -> bool {
 }
 
 fn request(frame: &[u8]) -> Result<(Scope, Caller, Operation), &'static str> {
-    let mut value: Value = serde_json::from_slice(frame).map_err(|_| "malformed-frame")?;
+    request_value(serde_json::from_slice(frame).map_err(|_| "malformed-frame")?)
+}
+
+fn request_value(mut value: Value) -> Result<(Scope, Caller, Operation), &'static str> {
     if !object_fields(&value, &["scope", "caller", "operation"])
         || !object_fields(&value["scope"], &["container", "environment", "account"])
         || !object_fields(&value["caller"], &["device", "instance", "own_operation"])
