@@ -30,7 +30,7 @@ import AppKit
         guard build.hasHooks else { throw XCTSkip("Requires Debug/test hooks") }
         let bundle = try build.bundleIdentifier
         let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
         addTeardownBlock { @MainActor in app.terminate() }
         app.launch()
 
@@ -81,7 +81,7 @@ import AppKit
         guard build.hasHooks else { throw XCTSkip("Requires Debug/test hooks") }
         let bundle = try build.bundleIdentifier
         let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
         addTeardownBlock { @MainActor in app.terminate() }
         app.launch()
 
@@ -135,7 +135,7 @@ import AppKit
         let bundle = try build.bundleIdentifier
         // The leased-VM controller stages only its reserved media files. A
         // MeguriFixture launch would replace Collection, including activation.
-        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         #if os(iOS)
@@ -194,7 +194,7 @@ import AppKit
         try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-import-real-review-saved")
         app.terminate()
-        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
         app.launch()
         try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-review-durable-after-restart")
@@ -398,7 +398,7 @@ import AppKit
             attachSuccess(app, name + "-native-cancel-drained-durable-partial-history-preserved")
 
             app.terminate()
-            app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false).arguments
+            app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
             app.launch()
             try completeOptionalFsrsAdmission(app, bundle)
             try openSettings(app, bundle)

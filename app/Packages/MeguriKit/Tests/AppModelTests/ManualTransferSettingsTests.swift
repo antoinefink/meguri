@@ -4,6 +4,11 @@ import Testing
 @testable import AppModel
 
 @Suite @MainActor struct ManualTransferSettingsTests {
+    @Test func ankiServerStaysOutOfSettingsUnlessATestAsksForIt() {
+        #expect(SettingsPage.showsAnkiServer == false)
+        #expect(SettingsPage.visible == [.accountSync, .collection])
+    }
+
     @Test func offlineLoadingNeverLogsInOrTransfers() async {
         let service = SettingsTransferService()
         let keys = SettingsTransferKeys()

@@ -26,6 +26,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Temporary macOS-first pass (Antoine, 2026-10-25): use Xcode MCP on this Mac for Meguri build/run/debug and UI feedback. Defer VM and mobile iteration checks during this pass; retain their required integration and final evidence. This explicitly overrides the VM-only and MG-only rules for that local feedback loop, not clean-room or privacy rules.
 
+- Anki server sync is hidden from the interface for now; iCloud is the only sync offered (Antoine, 2026-11-01). Keep its code and tests; don't add new UI for it. See `docs/design/native-interface-contract.md` N12.4.
+
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
 - Never perform the one-time user steps (`docs/process/one-time-setup.md`); `tools/mg doctor` lists the missing ones.
 

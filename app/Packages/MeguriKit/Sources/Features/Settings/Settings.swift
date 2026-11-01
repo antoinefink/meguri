@@ -9,7 +9,7 @@ public struct SettingsView: View {
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         List {
-            ForEach(SettingsPage.allCases, id: \.self) { page in
+            ForEach(SettingsPage.visible, id: \.self) { page in
                 NavigationLink(value: Destination.settingsPage(page)) {
                     SettingsPageLabel(page: page)
                 }
@@ -42,7 +42,9 @@ public struct SettingsPageView: View {
             Form {
                 if page == .collection {
                     SettingsCollectionFilesSection(collection: collection)
-                    ManualTransferSections(model: collection.manualTransfers, area: .transfers)
+                    if SettingsPage.showsAnkiServer {
+                        ManualTransferSections(model: collection.manualTransfers, area: .transfers)
+                    }
                 } else {
                     ManualTransferSections(model: collection.manualTransfers, area: .connection)
                     Section {
@@ -137,7 +139,7 @@ public struct MacSettingsView: View {
     public var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: Binding<String?>(get: { selectedSection }, set: { if let value = $0, value != selectedSection { selectedSection = value } })) {
-                ForEach(SettingsPage.allCases.filter(matchesSearch), id: \.self) { page in
+                ForEach(SettingsPage.visible.filter(matchesSearch), id: \.self) { page in
                     SettingsPageLabel(page: page)
                         .tag(page.rawValue)
                         .accessibilityIdentifier("settings.root.\(page.rawValue)")
@@ -148,14 +150,15 @@ public struct MacSettingsView: View {
             .background(SettingsSearchIdentifiers())
             .sidebarColumnChrome()
             .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 260)
         } detail: {
-            if selectedSection == "accountSync" {
+            if section == "accountSync" {
                 AccountSyncView(collection: collection, host: .settings)
             } else {
               Form {
-                if selectedSection == "collection" {
+                if section == "collection" {
                     SettingsCollectionFilesSection(collection: collection, present: present)
-                    serverActions
+                    if SettingsPage.showsAnkiServer { serverActions }
                 } else {
                     ManualTransferSections(model: collection.manualTransfers, area: .connection)
                     if hasActiveTransfer { continueTransfer }
@@ -173,20 +176,23 @@ public struct MacSettingsView: View {
                 }
             }
             .formStyle(.grouped)
-            .frame(maxWidth: ContentWidth.readable)
-            .frame(maxWidth: .infinity)
+            .navigationTitle(Text(section == "collection" ? "Collection" : "Anki Server", bundle: .module))
             .detailColumnChrome()
             }
         }
         .onAppear {
             if selectedSection == "connection" { selectedSection = "ankiServer" }
-            if SettingsPage(rawValue: selectedSection) == nil { selectedSection = "accountSync" }
+            if !SettingsPage.visible.contains(where: { $0.rawValue == selectedSection }) { selectedSection = "accountSync" }
             consumeAccountRequest()
         }
         .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeAccountRequest() }
         .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
+    }
+    /// A saved section that is now hidden shows Account & Sync, from the first render.
+    private var section: String {
+        SettingsPage.visible.contains { $0.rawValue == selectedSection } ? selectedSection : "accountSync"
     }
     private func consumeAccountRequest() {
         guard collection.syncPresentation.settingsRequest != nil else { return }
