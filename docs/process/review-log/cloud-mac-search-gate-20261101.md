@@ -37,3 +37,42 @@ Next: getter-availability booleans through NSObject/responds/perform, followed
 by the original role, label, identifier and identity checks. Keep both mounts
 and the search-text assertions. Use modern public getter selectors only.
 The re-key implementation takes priority while this test stays failed.
+
+## Public-getter test diagnostic packet
+
+Fixer session: `s-20261025T162405Z-9dc656e4`.
+Packet base: `54af9f9a5cfdb815f61645961e63bc5a111d4551`.
+Original U113 start: `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`.
+Original batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+The test now traverses actual NSObject accessibility children through
+`responds(to:)` and `perform` of modern public role, label, identifier and
+children getters. Navigation children remain diagnostic only. Child NSArrays
+stay retained during enumeration; identity guards and the existing diagnostic
+record/depth budgets remain. Leaf diagnostics report getter availability and
+allowlisted public classes/roles, flags and counts only, with no raw labels,
+identifiers or private runtime class names.
+
+Functional matching still requires the exact native button role and exact
+localized label supplied by the native search cell. Both mounts retain the
+single-match, exact identifier, duplicate-ID, object-identity, field-identifier
+and search-text assertions, window visibility and synchronous layout.
+Production `SettingsSearchIdentifiers` is unchanged; its full protocol cast
+may still prevent identifier assignment. An actual selected-method run must
+distinguish a test bridge problem from a missing product identifier.
+
+Result: pending. One bounded source consistency check only; no build or test
+run in this filtered fixer packet. Root owns MG build/test, independent review,
+privacy, provenance and similarity verification. All original failed receipts
+above remain retained; this packet grants no acceptance.
+
+Public getter result:
+- native_bounds_review: no P0-P2 source findings.
+- private/20261101T101730Z-72615 and similarity/20261101T101729Z-72379: PASS.
+- mac-hosted-test/20261101T101731Z-72877: FAIL, zero matches. The window is
+  visible and field attached, but its visible rectangle remains empty.
+- The field reports AXUnknown and its cell reports AXTextField. The native
+  leaves expose none of the tested modern getters. No label or identifier
+  values were printed. Product behavior is still unproven by this test.
+- Window/layout and native-leaf representation need a bounded diagnosis.
+  No product change, suppression or acceptance is claimed.
