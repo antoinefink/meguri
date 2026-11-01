@@ -339,3 +339,42 @@ Decided by Antoine in chat on 2026-11-01. Where earlier text differs, this secti
 - The code, its tests and the `settings/anki-transfer/*` routes stay. UI suites that open the hidden screens launch with `-ShowAnkiServerInterface YES`.
 - Pauses N5's Connection section, N6, N7 and N11.4's Anki Server section until Antoine brings the feature back. R118's Anki Transfers actions and the requirements behind them are not met while it is hidden.
 
+## N13. iPhone and iPhone Duo design (2026-11-01)
+
+Decided by Antoine in chat on 2026-11-01, from captures on the iPhone Duo simulator (iOS 27.1). Where earlier text differs, this section wins. Sizes in points: outer display 466 × 678; inner display 951 × 669 held wide and 669 × 951 held tall, with a 40-point fold through the middle.
+
+### N13.1 Layout
+
+- The iPhone Duo uses the tab layout on both displays: the system places the tabs and toolbars for each position, with no overrides. Replaces R4's "unfolded foldable iPhone" and AE7's and R576's switch to the sidebar layout. iPad keeps the sidebar layout (R4).
+- The shell chooses by interface idiom: an iPhone keeps the tab layout at any width (R3). A size-class-and-fold test would pass through the sidebar layout for a frame while unfolding, dismissing the review's cover.
+- The answer row reads the fold from `reservedRegions(kind: .division, options: .includeInactive)`. `.includeInactive` matters: without it a fully open display reports no fold.
+- Inner display held wide: Decks shows the deck list beside the deck page. Held tall: one stack, list then page. The system hides a split view's list behind a toggle when held tall, which leaves "Select a Deck" as the first screen.
+- Unfolded, Go to Deck and Create Deck stay with the list and don't repeat on the deck page.
+
+### N13.2 Decks
+
+- Touch toolbar items have a symbol and a title. Text-only items stay in a horizontal bar on the Duo.
+- Touch deck rows: the name and one trailing secondary number, new + learning + to review, hidden at zero. The accessibility value keeps all three counts. Replaces N11.5's row counts on touch.
+- Deck actions are a long press on touch; the row has no … button. Apple reserves the ellipsis for overflow.
+- On a stack, a subdeck on the deck page pushes, so Back returns to its parent.
+- The Decks root has no list header on touch either (N12.1).
+- The touch deck page is N12.1's album page, in a plain list on white, with a standard-size Study button.
+
+### N13.3 Review
+
+- Close, Undo, Redo and the status icon are system toolbar items, so they follow each position. A touch review has a white page. Replaces N11.1's custom corners on touch; the Close symbol and name are unchanged.
+- The counts and thin progress bar sit at the top of the content, with the timer beside them.
+- Answers are one row at the bottom in every fold position: standard rounded-rectangle buttons, name over a small interval, Again, Hard, Good, Easy. Replaces N11.2's prominent Good on touch.
+- Held wide unfolded, the row splits at the fold: Again and Hard on one side, Good and Easy on the other, in every hinge position, so nothing moves when the phone opens further. Held tall the fold crosses the card, not the row. Nothing interactive sits on the fold (R9).
+- Show Answer takes the trailing half of the row, over Good and Easy. It's smaller than a full-width button and keeps the thumb in place. Replaces N11.2's prominent Show Answer on touch. At accessibility text sizes the answers stack; with a fold in the row, they stack in two columns either side of it.
+- One view structure holds the card in every fold position, so folding never recreates its page (R576).
+- Not chosen, after captures: a book layout (card on one side of the fold, answers on the other), an answer column at the side, and, held tall, a 2 × 2 grid or answers filling the lower half.
+
+- The touch-target check leaves navigation bar buttons to the system's hit-region audit. iOS draws them 36 points tall and forcing 44 would override the system bar. Replaces the "app's own bar buttons are measured" rule.
+
+### N13.4 Not covered yet
+
+- U168's UI tests: nothing in `simctl` or XCUITest can change the fold position, so positions are checked by hand in Device Hub. `FoldAvoidingRow` has unit tests. Its code is in DesignSystem, not U168's `app/Meguri/Shell/FoldAwareLayout.swift`, because review and the shell both need it.
+- Foldable snapshot cells stay deferred until the snapshot job renders on the foldable lane's iOS 27.1 runtime.
+- A card's own background doesn't yet reach the toolbar and answer row (N11.1, R335).
+
