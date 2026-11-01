@@ -45,6 +45,47 @@ fn same(a: Option<&codec::MediaName>, b: Option<&codec::MediaName>) -> bool {
     a == b
 }
 impl Runtime {
+    #[cfg(feature = "test-hooks")]
+    pub fn cleanup_observation_for_testing(
+        &self,
+        sdk: &str,
+    ) -> Result<crate::cloud::testing::CleanupObservation, RuntimeError> {
+        use crate::cloud::testing::{CleanupBlobObservation, CleanupObservation};
+        let s = self.state();
+        let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let ledger = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.media_ledger(binding))?;
+        let drain = s.publication.cleanup_drain.as_ref();
+        Ok(CleanupObservation {
+            sdk_current: Self::sdk_locked(&s, sdk).is_ok(),
+            drain_present: drain.is_some(),
+            drain_sdk_matches: drain.is_some_and(|(_, owner, _)| owner == sdk),
+            drain_guard_matches: drain.is_some_and(|(guard, _, _)| *guard == Self::adapter_guard_locked(&s)),
+            drain_at_ms: drain.map(|(_, _, at)| *at),
+            cached_now_ms: self.pending_clock.load(std::sync::atomic::Ordering::Relaxed),
+            media_observed_now_ms: s.media.observed_now_ms,
+            last_cleanup_ms: s.publication.last_cleanup_ms,
+            root_confirmed: s.root_confirmed,
+            gate_open: Self::gate_locked(&s).is_ok(),
+            publication_sending: Self::publication_allows_send_locked(&s),
+            media_enabled: s.media.enabled,
+            media_paused: s.media.paused,
+            media_root_checked: s.media.root_checked,
+            ledger_cleanup_drain_ms: ledger.cleanup_drain_ms,
+            zone_missing: ledger.zone_missing,
+            blobs: ledger
+                .blobs
+                .values()
+                .map(|blob| CleanupBlobObservation {
+                    server: blob.server,
+                    upload: blob.upload,
+                    download: blob.download,
+                    staged: blob.staged.is_some(),
+                    unreferenced_since_ms: blob.unreferenced_since_ms,
+                    deletion_due_ms: blob.deletion_due_ms,
+                })
+                .collect(),
+        })
+    }
     /// Read the persisted blob ledger without advancing media work or policy.
     #[cfg(feature = "test-hooks")]
     pub fn media_blobs_for_testing(&self) -> Result<BTreeMap<String, BlobState>, RuntimeError> {
@@ -2048,7 +2089,7 @@ impl Runtime {
         Self::check_media_locked(&s, &work.authority)?;
         if s.media.pending.as_ref() != Some(work)
             && s.media.metadata_pending.as_ref() != Some(work)
-            && !s.actions.media_batches.values().any(|original| original == work)
+            && !s.actions.media_batches.values().any(|original| &original.work == work)
             && !s
                 .actions
                 .media_upload

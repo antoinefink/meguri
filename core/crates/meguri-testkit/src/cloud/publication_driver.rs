@@ -324,13 +324,18 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
             value(())
         }
         Input::CollectionDrained => {
-            device.runtime()?.publication_collection_drained(
-                &device
-                    .runtime()?
-                    .incoming_sdk_instance_for_testing()
-                    .ok_or_else(failure)?,
-                &collection,
-            )?;
+            let runtime = device.runtime()?;
+            let sdk = runtime.incoming_sdk_instance_for_testing().ok_or_else(failure)?;
+            let before = runtime.cleanup_observation_for_testing(&sdk)?;
+            eprintln!("cloud-cleanup before={before:?}");
+            let result = runtime.publication_collection_drained(&sdk, &collection);
+            let after = runtime.cleanup_observation_for_testing(&sdk);
+            match &after {
+                Ok(facts) => eprintln!("cloud-cleanup after={facts:?}"),
+                Err(_) => eprintln!("cloud-cleanup after=projection_failed"),
+            }
+            result?;
+            after?;
             value(())
         }
         Input::DeletionGuard => {

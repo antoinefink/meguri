@@ -274,7 +274,7 @@ pub(crate) enum Input {
     Reconcile,
     MediaWork,
     MediaQueue(core::media::Work),
-    MediaBuild(BTreeSet<String>),
+    MediaBuild(BTreeMap<String, PendingChange>),
     MediaAdmit(u64),
     MediaSent(
         String,
@@ -1198,7 +1198,7 @@ impl ChildDriver {
             .env("MEGURI_CLOUD_CHILD_FD", fd.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::inherit());
         // Only the selected socket survives exec; all other descriptors retain CLOEXEC.
         unsafe {
             command.pre_exec(move || {
@@ -1240,6 +1240,31 @@ impl ChildDriver {
         }
     }
     pub(crate) fn call<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
+        let label = match &input {
+            Input::Reconcile => "Reconcile",
+            Input::Build(..) => "Build",
+            Input::Fetched(..) => "Fetched",
+            Input::DeliverCollection(..) => "DeliverCollection",
+            Input::DeliverCollectionAssets(..) => "DeliverCollectionAssets",
+            Input::DeliverCollectionDownload(..) => "DeliverCollectionDownload",
+            Input::DrainIncoming(..) => "DrainIncoming",
+            Input::AssetReadResult(..) => "AssetReadResult",
+            Input::MediaWork => "MediaWork",
+            Input::MediaQueue(..) => "MediaQueue",
+            Input::MediaBuild(..) => "MediaBuild",
+            Input::MediaAdmit(..) => "MediaAdmit",
+            Input::MediaReply(..) => "MediaReply",
+            Input::MediaSent(..) => "MediaSent",
+            Input::CollectionDrained => "CollectionDrained",
+            _ => "Other",
+        };
+        let result = self.call_inner(input);
+        if result.is_err() {
+            eprintln!("cloud-child input_failed={label}");
+        }
+        result
+    }
+    fn call_inner<T: DeserializeOwned>(&mut self, input: Input) -> Result<T> {
         let key = serde_json::to_vec(&input)?;
         // Reap a released worker before admitting another incoming command.
         // Keep its reply under its original key; queries never advance it.
@@ -2262,12 +2287,12 @@ impl Device {
                 runtime.queue_cloud_media_upload(&sdk, &self.host.collection()?, &work)?;
                 value(true)
             }
-            Input::MediaBuild(names) => {
+            Input::MediaBuild(requested) => {
                 let runtime = self.runtime()?;
                 let Some(sdk) = runtime.incoming_sdk_instance_for_testing() else {
                     return value(None::<(u64, core::media::Work)>);
                 };
-                value(runtime.build_cloud_media_batch(&sdk, &self.host.collection()?, &names)?)
+                value(runtime.build_cloud_media_batch(&sdk, &self.host.collection()?, &requested)?)
             }
             Input::MediaAdmit(id) => {
                 let runtime = self.runtime()?;

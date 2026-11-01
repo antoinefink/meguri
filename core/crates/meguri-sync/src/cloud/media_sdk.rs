@@ -1,6 +1,14 @@
 //! One-engine media send bridge. Scheduling and file decisions stay in Runtime.
 use super::*;
 
+fn check_requested_action(work: &Work, requested: workflow::PendingChange) -> Result<(), RuntimeError> {
+    match (&work.request, requested) {
+        (Request::Upload { .. }, workflow::PendingChange::Save)
+        | (Request::Delete { .. }, workflow::PendingChange::Delete) => Ok(()),
+        _ => Err(Error::InvalidData.into()),
+    }
+}
+
 impl Runtime {
     pub fn validate_cloud_media_admission(
         &self,
@@ -29,13 +37,15 @@ impl Runtime {
     ) -> Result<Work, RuntimeError> {
         let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
-        let work = self
+        let retained = self
             .state()
             .actions
             .media_batches
             .get(&(sdk.to_owned(), batch))
             .cloned()
             .ok_or(RuntimeError::StaleIncarnation)?;
+        check_requested_action(&retained.work, retained.requested)?;
+        let work = retained.work;
         self.validate_cloud_media_admission(sdk, collection, &work)?;
         if let Request::Delete { name } = &work.request {
             let now = self.adapter_now()?;
@@ -107,13 +117,25 @@ impl Runtime {
         &self,
         sdk: &str,
         collection: &Collection,
-        requested: &BTreeSet<String>,
+        requested: &BTreeMap<String, workflow::PendingChange>,
     ) -> Result<Option<(u64, Work)>, RuntimeError> {
         let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
         // Selection is only a hint. Re-read eligibility with a fresh clock and
         // retain this exact work through final admission and the SDK callback.
         self.consume_media_feed(collection, &self.media_service(collection)?)?;
+        let queued = self
+            .state()
+            .actions
+            .media_upload
+            .clone()
+            .filter(|(owner, _)| owner == sdk);
+        if let Some((_, work)) = &queued
+            && let Request::Upload { name, .. } = &work.request
+            && let Some(action) = requested.get(name)
+        {
+            check_requested_action(work, *action)?;
+        }
         let now = self.adapter_now()?;
         let authority = self.media_authority(collection, true)?;
         {
@@ -133,14 +155,21 @@ impl Runtime {
                     .media_deletions(authority.binding, now, allowed)
             })?;
             if let Some(name) = due
-                .intersection(requested)
+                .iter()
+                .filter(|name| requested.contains_key(*name))
                 .find(|name| !s.policy.parked.contains(*name))
                 .cloned()
             {
-                for ((owner, id), work) in &s.actions.media_batches {
-                    if matches!(&work.request,Request::Delete{name:n} if n==&name) {
+                let action = requested[&name];
+                if action != workflow::PendingChange::Delete {
+                    return Err(Error::InvalidData.into());
+                }
+                for ((owner, id), retained) in &s.actions.media_batches {
+                    if matches!(&retained.work.request,Request::Delete{name:n} if n==&name) {
+                        check_requested_action(&retained.work, action)?;
+                        check_requested_action(&retained.work, retained.requested)?;
                         return if owner == sdk {
-                            Ok(Some((*id, work.clone())))
+                            Ok(Some((*id, retained.work.clone())))
                         } else {
                             Err(RuntimeError::StaleIncarnation)
                         };
@@ -153,7 +182,13 @@ impl Runtime {
                     authority: authority.clone(),
                     request: Request::Delete { name: name.clone() },
                 };
-                s.actions.media_batches.insert((sdk.into(), id), work.clone());
+                s.actions.media_batches.insert(
+                    (sdk.into(), id),
+                    workflow::MediaBatch {
+                        requested: action,
+                        work: work.clone(),
+                    },
+                );
                 s.actions.observations.push(workflow::Observation::BatchBuilt {
                     names: BTreeSet::from([name]),
                     batch_id: id,
@@ -162,17 +197,17 @@ impl Runtime {
             }
             self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
         }
-        let queued = self.state().actions.media_upload.clone();
-        let Some((owner, work)) = queued.filter(|(owner, _)| owner == sdk) else {
+        let Some((owner, work)) = queued else {
             return Ok(None);
         };
         self.validate_cloud_media_work(collection, &work)?;
         let Request::Upload { name, envelope, staged } = &work.request else {
             return Err(Error::InvalidData.into());
         };
-        if !requested.contains(name) {
+        let Some(action) = requested.get(name).copied() else {
             return Ok(None);
-        }
+        };
+        check_requested_action(&work, action)?;
         {
             let s = self.state();
             if s.media.enabled.is_some()
@@ -197,12 +232,15 @@ impl Runtime {
         if s.actions.media_upload.as_ref() != Some(&(owner, work.clone())) || s.policy.parked.contains(name) {
             return Ok(None);
         }
-        for ((original_sdk, id), original) in &s.actions.media_batches {
+        for ((original_sdk, id), retained) in &s.actions.media_batches {
+            let original = &retained.work;
             if let Request::Upload {
                 name: original_name, ..
             } = &original.request
                 && original_name == name
             {
+                check_requested_action(original, action)?;
+                check_requested_action(original, retained.requested)?;
                 if original_sdk == sdk && original == &work {
                     return Ok(Some((*id, original.clone())));
                 }
@@ -211,7 +249,13 @@ impl Runtime {
         }
         s.actions.batch = s.actions.batch.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.actions.batch;
-        s.actions.media_batches.insert((sdk.into(), id), work.clone());
+        s.actions.media_batches.insert(
+            (sdk.into(), id),
+            workflow::MediaBatch {
+                requested: action,
+                work: work.clone(),
+            },
+        );
         s.actions.observations.push(workflow::Observation::BatchBuilt {
             names: BTreeSet::from([name.clone()]),
             batch_id: id,
@@ -237,9 +281,11 @@ impl Runtime {
         let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
         let key = (sdk.to_owned(), request_id);
-        let Some(work) = self.state().actions.media_batches.get(&key).cloned() else {
+        let Some(retained) = self.state().actions.media_batches.get(&key).cloned() else {
             return Ok(false);
         };
+        check_requested_action(&retained.work, retained.requested)?;
+        let work = retained.work;
         self.validate_cloud_media_work(collection, &work)?;
         if let Request::Delete { name } = &work.request {
             if !saved.is_empty()
@@ -367,7 +413,7 @@ impl Runtime {
             || s.actions
                 .media_batches
                 .values()
-                .any(|work| &work.authority == authority)
+                .any(|batch| &batch.work.authority == authority)
     }
 
     pub fn cloud_media_downloads_blocked(&self) -> bool {

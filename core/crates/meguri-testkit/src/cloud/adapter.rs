@@ -632,8 +632,7 @@ impl SDKRig {
     /// retained value again before submitting its Service operation.
     pub fn select_media_batch(&mut self) -> Result<Option<(u64, cloud::media::Work)>> {
         self.updates()?;
-        let names = self.pending.keys().cloned().collect();
-        let selected = self.driver.call(Input::MediaBuild(names))?;
+        let selected = self.driver.call(Input::MediaBuild(self.pending.clone()))?;
         self.updates()?;
         Ok(selected)
     }

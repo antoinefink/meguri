@@ -612,7 +612,10 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.build_batch");
         self.core.validate_sdk(&sdk).map_err(cloud_error)?;
         if zone == "meguri-media" {
-            let requested = pending.into_keys().collect();
+            let requested = pending
+                .into_iter()
+                .map(|(name, action)| (name, action.into()))
+                .collect();
             let Some((id, work)) = self
                 .core
                 .build_cloud_media_batch(&sdk, &self.host.collection()?, &requested)

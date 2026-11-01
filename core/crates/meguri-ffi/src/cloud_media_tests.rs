@@ -299,6 +299,18 @@ fn real_nonempty_upload_is_pending_until_original_sdk_saved_callback() {
     }
     let pending = fixture.workflow.tracking_sendables().unwrap();
     assert!(matches!(pending.get(name), Some(CloudPendingChange::Save)));
+    let observations = fixture.workflow.core.observations().len();
+    assert!(
+        fixture
+            .workflow
+            .build_batch(
+                sdk.instance_id.clone(),
+                "meguri-media".into(),
+                HashMap::from([(name.clone(), CloudPendingChange::Delete)]),
+            )
+            .is_err()
+    );
+    assert_eq!(fixture.workflow.core.observations().len(), observations);
     let batch = fixture
         .workflow
         .build_batch(sdk.instance_id.clone(), "meguri-media".into(), pending)
@@ -328,6 +340,20 @@ fn real_nonempty_upload_is_pending_until_original_sdk_saved_callback() {
             )
             .is_err()
     );
+    let retained = fixture
+        .workflow
+        .build_batch(
+            sdk.instance_id.clone(),
+            "meguri-media".into(),
+            HashMap::from([(name.clone(), CloudPendingChange::Save)]),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.id, batch.id);
+    assert!(matches!(
+        fixture.workflow.tracking_sendables().unwrap().get(name),
+        Some(CloudPendingChange::Save)
+    ));
     let admission = Arc::new(ReadQueue(AtomicUsize::new(0)));
     assert!(
         fixture
@@ -2494,6 +2520,17 @@ fn delayed_cleanup_command_is_rejected_and_new_fetch_is_checked_once() {
             Some(at)
         );
         assert!(driver.compute_qualified_local_cleanup(&fresh, &collection).is_err());
+        let observations = f.workflow.core.observations().len();
+        assert!(
+            f.workflow
+                .build_batch(
+                    sdk.instance_id.clone(),
+                    "meguri-media".into(),
+                    HashMap::from([(blob.clone(), CloudPendingChange::Save)]),
+                )
+                .is_err()
+        );
+        assert_eq!(f.workflow.core.observations().len(), observations);
         let batch = f
             .workflow
             .build_batch(
@@ -2504,6 +2541,25 @@ fn delayed_cleanup_command_is_rejected_and_new_fetch_is_checked_once() {
             .unwrap()
             .unwrap();
         assert_eq!(batch.deletes, vec![blob.clone()]);
+        assert!(
+            f.workflow
+                .build_batch(
+                    sdk.instance_id.clone(),
+                    "meguri-media".into(),
+                    HashMap::from([(blob.clone(), CloudPendingChange::Save)]),
+                )
+                .is_err()
+        );
+        let retained = f
+            .workflow
+            .build_batch(
+                sdk.instance_id.clone(),
+                "meguri-media".into(),
+                HashMap::from([(blob.clone(), CloudPendingChange::Delete)]),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.id, batch.id);
         let queue = Arc::new(ReadQueue(AtomicUsize::new(0)));
         assert!(
             f.workflow

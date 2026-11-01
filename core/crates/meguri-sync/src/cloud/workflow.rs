@@ -417,6 +417,11 @@ pub(crate) enum MissingSaveDisposition {
     Outstanding,
     TerminalAbsence { local_rev: u64 },
 }
+#[derive(Clone)]
+pub(crate) struct MediaBatch {
+    pub requested: PendingChange,
+    pub work: super::media::Work,
+}
 #[derive(Default)]
 pub(crate) struct Actions {
     pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
@@ -424,7 +429,7 @@ pub(crate) struct Actions {
     pub payload_upload_sends: BTreeMap<(String, u64), BTreeSet<u64>>,
     pub payload_handlers_returned: BTreeSet<(String, u64)>,
     pub media_upload: Option<(String, super::media::Work)>,
-    pub media_batches: BTreeMap<(String, u64), super::media::Work>,
+    pub media_batches: BTreeMap<(String, u64), MediaBatch>,
     pub desired: BTreeMap<String, PendingChange>,
     pub queue: VecDeque<PendingUpdate>,
     pub emitted: Vec<u64>,

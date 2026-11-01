@@ -16,6 +16,37 @@ impl std::fmt::Debug for PublicationControl {
     }
 }
 
+/// Scalar-only observation of the real collection-drain cleanup boundary.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CleanupObservation {
+    pub sdk_current: bool,
+    pub drain_present: bool,
+    pub drain_sdk_matches: bool,
+    pub drain_guard_matches: bool,
+    pub drain_at_ms: Option<i64>,
+    pub cached_now_ms: i64,
+    pub media_observed_now_ms: i64,
+    pub last_cleanup_ms: Option<i64>,
+    pub root_confirmed: bool,
+    pub gate_open: bool,
+    pub publication_sending: bool,
+    pub media_enabled: Option<bool>,
+    pub media_paused: bool,
+    pub media_root_checked: bool,
+    pub ledger_cleanup_drain_ms: Option<i64>,
+    pub zone_missing: bool,
+    pub blobs: Vec<CleanupBlobObservation>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CleanupBlobObservation {
+    pub server: super::media::ServerState,
+    pub upload: super::media::Transfer,
+    pub download: super::media::Transfer,
+    pub staged: bool,
+    pub unreferenced_since_ms: Option<i64>,
+    pub deletion_due_ms: Option<i64>,
+}
+
 /// Cumulative workflow payload body materializations on the calling thread.
 pub fn entity_body_reads() -> usize {
     super::workflow_store::body_reads()

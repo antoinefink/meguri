@@ -93,10 +93,35 @@ continuation, full application Service evidence and milestone/final gates.
 | core-test/20261101T075807Z-75267 | Compile failed |
 | core-format/20261101T080210Z-77185 | Pass |
 | core-test/20261101T080235Z-77497 | 69 pass, 11 fail; FFI filter matched none |
-| core-test/20261101T080537Z-79006 | 59 pass, 2 fail; FFI media_port selected |
-| private/20261101T080500Z-78633 | Notes pass; source scan 080239 had only notes flagged |
+| core-test/20261101T080537Z-79006 | 61 selected, 59 pass, 2 fail; actual FFI `sync::tests::media_port` |
+| swift-test/20261101T080938Z-80368 | Native/bridge compiled; all 25 focused CloudMediaTests pass |
+| private/20261101T080500Z-78633 | Source and notes pass after notes repair; source scan 080239 had only notes flagged |
 | similarity/20261101T075815Z-75899 | Pass before final source edits |
 
 The final source pass adds cleanup_drain: None to STOP commands and changes
 test names and comments. Test assertions stay enabled. Native cleanup and the
 full app sync tests remain open. No Unit trailer is added.
+
+## Request action repair
+
+Repair base: 6363dda2226652919d5705cbdf87fd7072c888a5.
+Fixer session: s-20261025T162405Z-9dc656e4.
+Source: cleanroom/20261101T081230Z-82608. Review round 3: clear of required fixes.
+
+Save and Delete stay attached to the original media batch through admission
+and results. The existing mismatch assertion passes. The removal test checks
+the original SDK request and unchanged ACK. Its later checks stay enabled.
+
+| Check | Result |
+| --- | --- |
+| core-format/20261101T082139Z-84939 | Pass |
+| core-test/20261101T082233Z-85372 | 1 pass, 4 fail |
+| similarity/20261101T082808Z-86749 | Pass |
+
+The read-only output shows no drain receipt before or after cleanup. The gate
+is open, media is not paused, and the old blob has an age. No cleanup ran.
+The test harness must forward actual fetch callbacks. MediaReply and another
+input still return InvalidData. Their causes remain open.
+
+Native cleanup, Driver execution and the full app tests still need proof.
+No unit is accepted. Lint and the full batch gate remain required.

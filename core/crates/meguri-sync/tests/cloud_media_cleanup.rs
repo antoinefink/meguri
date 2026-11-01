@@ -174,20 +174,46 @@ fn exercise_delayed_ack(tombstone: bool) {
     }
     let failed_after = cursor(&pair);
     sync(&mut pair);
-    assert!(
-        pair.service
-            .request_log()
-            .unwrap()
-            .iter()
-            .any(|r| r.request_id > failed_after
-                && r.records.iter().any(|record| (if tombstone {
-                    record.name == initial.name
-                } else {
-                    record.name == initial.name || r.zone.as_deref() == Some(MEDIA) && record.name != blob
-                }) && record.outcome
-                    == LogOutcome::Failure(ErrorCode::QuotaExceeded))),
-        "the retiring tombstone save or replacement upload/save must really fail quota"
-    );
+    let failed = pair
+        .service
+        .request_log()
+        .unwrap()
+        .into_iter()
+        .find(|r| {
+            r.request_id > failed_after
+                && r.records.iter().any(|record| {
+                    (if tombstone {
+                        record.name == initial.name
+                    } else {
+                        record.name == initial.name || r.zone.as_deref() == Some(MEDIA) && record.name != blob
+                    }) && record.outcome == LogOutcome::Failure(ErrorCode::QuotaExceeded)
+                })
+        })
+        .expect("the retiring tombstone save or replacement upload/save must really fail quota");
+    if tombstone {
+        let attempted = pair.sender.sent_request(failed.request_id).unwrap();
+        assert!(attempted.backend_batch_id > 0);
+        let key = pair.sender.facts().unwrap().current.unwrap().facts.record_key;
+        assert!(
+            attempted.mutations.iter().any(|mutation| {
+                let Mutation::Save { record, .. } = mutation else {
+                    return false;
+                };
+                if record.name != initial.name {
+                    return false;
+                }
+                let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                    return false;
+                };
+                codec::receive(&key.0, &record.name, envelope, codec::AssetInput::Absent)
+                    .expect("original attempted MediaName envelope")
+                    .entity
+                    .fields
+                    .tombstone
+            }),
+            "the original SDK request attempted the pending media removal"
+        );
+    }
     // Exercise the actual drain and persisted acknowledgement boundary.
     for _ in 0..31 {
         pair.sender.advance_clock_ms(DAY).unwrap();
@@ -195,7 +221,6 @@ fn exercise_delayed_ack(tombstone: bool) {
         let pending = name(&pair.sender);
         assert_eq!(pending.acked_envelope, initial.acked_envelope);
         assert!(pending.local_rev > pending.acked_rev);
-        assert_eq!(pending.tombstone_at.is_some(), tombstone);
         assert!(!ack_tombstone(&pending));
         assert_retained(&mut pair, &blob, &original);
     }
