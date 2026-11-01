@@ -86,8 +86,8 @@ enum Transparency: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// Device classes (R1971). Foldable cells stay deferred until a foldable
-/// simulator exists (U252); the other iOS classes render on the pool's
+/// Device classes (R1971). Foldable cells stay deferred until the snapshot job
+/// renders on the foldable lane's own runtime (U252); the other iOS classes render on the pool's
 /// simulator of their kind (`target`), at their size, with their size
 /// classes. The small iPhone class is the iPhone 17e's screen, so its cells
 /// get that screen's safe area.
@@ -120,8 +120,8 @@ enum DeviceClass: String, CaseIterable, Codable, Sendable {
         case .iphoneSmall: CGSize(width: 390, height: 844)
         case .iphoneLarge: CGSize(width: 440, height: 956)
         case .iphoneResizable: CGSize(width: 540, height: 720)
-        case .foldableOuter: CGSize(width: 390, height: 844)
-        case .foldableInner: CGSize(width: 720, height: 860)
+        case .foldableOuter: CGSize(width: 466, height: 678)
+        case .foldableInner: CGSize(width: 951, height: 669)
         case .ipadCompact: CGSize(width: 507, height: 1376)
         case .ipadRegular: CGSize(width: 1032, height: 1376)
         case .macMinimum: CGSize(width: 800, height: 560)
@@ -140,7 +140,7 @@ enum DeviceClass: String, CaseIterable, Codable, Sendable {
     /// Why no simulator can show this class, if none can.
     var deferredReason: String? {
         switch self {
-        case .foldableOuter, .foldableInner: "no foldable iPhone simulator before the 27.1 SDK (U252)"
+        case .foldableOuter, .foldableInner: "the snapshot job doesn't render on the foldable lane's iOS 27.1 runtime yet (U252)"
         default: nil
         }
     }

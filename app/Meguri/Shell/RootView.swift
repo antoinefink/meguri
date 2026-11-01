@@ -22,6 +22,7 @@ struct RootView: View {
     @State private var linkRefusal: DeepLinkRefusal?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.layoutFollowsForcedSizeClass) private var layoutFollowsForcedSizeClass
     #else
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -44,7 +45,9 @@ struct RootView: View {
 
     private var layout: ShellLayout {
         #if os(iOS)
-        sizeClass == .compact ? .compact : .sidebar
+        // An iPhone keeps the tab layout at any width, unfolded included (R3, N13).
+        (UIDevice.current.userInterfaceIdiom == .phone && !layoutFollowsForcedSizeClass) || sizeClass == .compact
+            ? .compact : .sidebar
         #else
         .sidebar
         #endif
@@ -60,7 +63,8 @@ struct RootView: View {
                 switch layout {
                 case .compact:
                     #if os(iOS)
-                    CompactRootView(navigation: navigation, features: features, configuration: configuration)
+                    CompactRootView(navigation: navigation, features: features, configuration: configuration,
+                        hasDecks: collection?.decks.isEmpty == false)
                     #endif
                 case .sidebar:
                     SidebarRootView(navigation: navigation, features: features, configuration: configuration)

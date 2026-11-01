@@ -558,7 +558,6 @@ final class LocalReviewJourneyTests: XCTestCase {
     }
 
     private func waitForDeckCounts(_ app: XCUIApplication, due: Int) -> Bool {
-        #if os(macOS)
         var ready = true
         for (name, label, value) in [("new", "New", 0), ("learning", "Learning", 0), ("due", "To Review", due)] {
             let fields = app.staticTexts.matching(identifier: "home.deck.counts.\(name)")
@@ -569,9 +568,6 @@ final class LocalReviewJourneyTests: XCTestCase {
             ready = ready && matched
         }
         return ready
-        #else
-        return waitForText(element(app, "home.deck.counts"), "0 new · 0 learning · \(due) due")
-        #endif
     }
 
     private func waitForText(_ element: XCUIElement, _ text: String) -> Bool {

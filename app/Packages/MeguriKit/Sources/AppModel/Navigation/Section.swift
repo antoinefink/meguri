@@ -86,4 +86,6 @@ nonisolated public enum ShellLayout: Sendable {
 extension EnvironmentValues {
     /// The live presenting shell layout, supplied by RootView independently of sheet traits.
     @Entry public var shellLayout: ShellLayout = .sidebar
+    /// Test hooks force a layout through the size class (`-MeguriSizeClass`), on iPhone too.
+    @Entry public var layoutFollowsForcedSizeClass = false
 }

@@ -11,6 +11,9 @@ struct CompactRootView: View {
     let navigation: AppNavigation
     let features: ShellFeatures
     let configuration: LaunchConfiguration
+    let hasDecks: Bool
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var isUpright = false
 
     var body: some View {
         // The setter also runs when the selected tab is tapped again: that
@@ -28,6 +31,7 @@ struct CompactRootView: View {
                 .accessibilityIdentifier("shell.root.tab.\(tab.rawValue)")
             }
         }
+        .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
         .fullScreenCover(item: Binding(get: { navigation.review }, set: { if $0 == nil { navigation.endReview() } })) { review in
             features.review(review, navigation)
                 .modifier(LaunchEnvironment(configuration: configuration))
@@ -36,7 +40,48 @@ struct CompactRootView: View {
         }
     }
 
-    private func stack(_ tab: CompactTab) -> some View {
+    /// Unfolded and held wide, Decks shows the list beside the deck. Held tall the
+    /// system would hide the list behind a toggle, so it keeps its stack (N13).
+    @ViewBuilder private func stack(_ tab: CompactTab) -> some View {
+        if tab == .decks, sizeClass == .regular, !isUpright {
+            NavigationSplitView(columnVisibility: .constant(.doubleColumn)) {
+                decksList
+                    .navigationSplitViewColumnWidth(min: 280, ideal: 475, max: 475)
+                    .toolbar(removing: .sidebarToggle)
+            } detail: {
+                deckDetail
+            }
+            .navigationSplitViewStyle(.balanced)
+        } else {
+            singleStack(tab)
+        }
+    }
+
+    private var decksList: some View {
+        NavigationStack {
+            SectionDestinationView(screen: .root(.home), navigation: navigation, features: features)
+                .toolbar { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
+        }
+    }
+
+    private var deckDetail: some View {
+        NavigationStack(path: Binding(get: { navigation.path(.home) }, set: { navigation.setPath($0, for: .home) })) {
+            Group {
+                if let deck = navigation.homeDeckPage {
+                    SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
+                } else if hasDecks {
+                    ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack")
+                }
+            }
+            .navigationDestination(for: Destination.self) { destination in
+                SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+            }
+        }
+        // A new deck starts from its own top, as a new sidebar selection does.
+        .id(navigation.homeDeckPage)
+    }
+
+    private func singleStack(_ tab: CompactTab) -> some View {
         NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { navigation.setCompactPath($0, for: tab) })) {
             SectionDestinationView(screen: .root(tab.section), navigation: navigation, features: features)
                 .toolbar {

@@ -2,6 +2,11 @@
   "version": 1,
   "suppressions": [
     {
+      "identifier": "home.deck.study",
+      "auditType": "contrast",
+      "reason": "R1977, N13: white text on the system's own blue prominent button, the standard primary action; the audit calls it nearly passing. Also reported before the redesign (run 20261101T202247Z-74923). A larger button or custom tint would override the system style."
+    },
+    {
       "identifier": "settings.importExport.explanation",
       "auditType": "contrast",
       "reason": "R1977: iPad run 20261023T041457Z-97877 reports whole-frame contrast for Explanation above the conservative viewport at log lines 676, 896 and 1160. ContrastTests checks textPrimary/backgroundPrimary (R1979). CollectionExportAccessibilityTests removes this exact contrast exception whenever the full frame is visible for the supplemental all-types audit; continuous paragraph coverage remains required. Native verification is pending."

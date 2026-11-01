@@ -227,7 +227,7 @@ mg_doctor() {
   fi
   if [ -n "$xversion" ] && { [ "$xmajor" -lt 27 ] || { [ "$xmajor" -eq 27 ] && [ "$xminor" -lt 1 ]; }; }; then
     mg_user_step xcode-27-1 missing false "Install Xcode 27.1 when it ships" \
-      "Install Xcode 27.1 once released; it adds the foldable iPhone simulator (R1962). Until then foldable layouts are approximated."
+      "Install Xcode 27.1 or newer and the iOS 27.1 simulator runtime (tools/vm/add-sim-runtime.sh --foldable); they add the iPhone Duo simulator (R1962). The app needs its 27.1 SDK to build."
   fi
 
   # Xcode license

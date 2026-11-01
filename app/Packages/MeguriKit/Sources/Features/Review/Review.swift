@@ -131,7 +131,6 @@ struct ReviewLayout<Card: View>: View {
     var status: AnyView? = nil
     var timerText: (() -> String)? = nil
     @Environment(\.appClock) var clock
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
@@ -173,18 +172,51 @@ struct ReviewLayout<Card: View>: View {
         .accessibilityAction(named: Text("Redo Answer", bundle: .module)) { if canRedo { redo() } }
     }
     #else
+    /// System bars hold the corners, so they move to the side on a foldable (R10).
+    /// One container in every fold position keeps the card's page alive through a fold (R576).
     private var touchBody: some View {
-        VStack(spacing: 0) {
-            header
-                .buttonStyle(.borderless)
-                .controlSize(.regular)
-                .padding(.horizontal, Spacing.small)
-                .fixedSize(horizontal: false, vertical: true)
-                .layoutPriority(1)
-            cardRegion
-            ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+        NavigationStack {
+            VStack(spacing: 0) {
+                VStack(spacing: Spacing.xSmall) {
+                    HStack(spacing: Spacing.small) {
+                        sessionProgress
+                        timer
+                    }
+                    .padding(.horizontal, Spacing.medium)
+                    cardRegion
+                }
+                ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+            }
+            .background(.token(.cardPage))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: close) {
+                        Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
+                    }
+                    .help(Text("Close Review", bundle: .module))
+                    .accessibilityIdentifier("review.session.close")
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { if canUndo { undo() } } label: {
+                        Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
+                    }
+                    .disabled(!canUndo)
+                    .help(undoDescription)
+                    .accessibilityIdentifier("review.session.back")
+                    if canRedo {
+                        Button { if canRedo { redo() } } label: {
+                            Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
+                        }
+                        .help(Text("Redo Answer", bundle: .module))
+                        .accessibilityIdentifier("review.session.redo")
+                    }
+                }
+                if let status {
+                    ToolbarItem(placement: .primaryAction) { status }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .background(.token(.backgroundPrimary))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.screen")
     }
@@ -209,40 +241,6 @@ struct ReviewLayout<Card: View>: View {
             }
         }
     }
-    @ViewBuilder private var header: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: Spacing.xxSmall) {
-                HStack(spacing: Spacing.small) {
-                    closeButton
-                    Spacer(minLength: Spacing.small)
-                    timer
-                    backButton
-                    redoButton
-                }
-                sessionProgress
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            HStack(spacing: Spacing.small) {
-                closeButton
-                sessionProgress
-                timer
-                backButton
-                redoButton
-            }
-        }
-    }
-    private var closeButton: some View {
-        Button(action: close) {
-            Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
-                .labelStyle(.iconOnly)
-        }
-        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
-        .accessibilityLabel(Text("Close Review", bundle: .module))
-        .help(Text("Close Review", bundle: .module))
-        .accessibilityIdentifier("review.session.close")
-    }
     private var sessionProgress: some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
             Text(verbatim: remaining).font(.caption)
@@ -266,49 +264,21 @@ struct ReviewLayout<Card: View>: View {
             }
         }
     }
-    private var backButton: some View {
-        Button {
-            guard canUndo else { return }
-            undo()
-        } label: {
-            Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
-                .labelStyle(.iconOnly)
-        }
-        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
-        .accessibilityLabel(undoDescription)
-        .help(undoDescription)
-        .accessibilityIdentifier("review.session.back")
-        .disabled(!canUndo)
-    }
-    @ViewBuilder private var redoButton: some View {
-        if canRedo {
-            Button {
-                guard canRedo else { return }
-                redo()
-            } label: {
-                Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
-                    .labelStyle(.iconOnly)
-            }
-            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-            .contentShape(Rectangle())
-            .accessibilityLabel(Text("Redo Answer", bundle: .module))
-            .help(Text("Redo Answer", bundle: .module))
-            .accessibilityIdentifier("review.session.redo")
-            .disabled(!canRedo)
-        }
-    }
-
 }
 
 /// One reserved bottom region for question, answer and transition; terminal states need none.
 public struct ReviewAnswerBar: View {
+    #if !os(macOS)
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
     public let phase: ReviewCoordinator.Phase
     public let states: ReviewSchedulingStates?
     public let enabled: Bool
     public let reveal: () -> Void
     public let rate: (ReviewRating) -> Void
+    #if !os(macOS)
+    @State private var fold = FoldGeometry()
+    #endif
     public init(phase: ReviewCoordinator.Phase, states: ReviewSchedulingStates?, enabled: Bool,
                 reveal: @escaping () -> Void, rate: @escaping (ReviewRating) -> Void) {
         self.phase = phase; self.states = states; self.enabled = enabled; self.reveal = reveal; self.rate = rate
@@ -365,6 +335,8 @@ public struct ReviewAnswerBar: View {
         .frame(maxWidth: .infinity)
     }
     #endif
+    #if !os(macOS)
+    /// The answers either side of a fold running through the row (R9, N13).
     @ViewBuilder private var touchBar: some View {
         if phase == .question || phase == .answer || phase == .transition {
             ZStack {
@@ -377,53 +349,54 @@ public struct ReviewAnswerBar: View {
                         .accessibilityHidden(true)
                 }
                 if phase == .question {
-                    Button(action: reveal) {
-                        Text("Show Answer", bundle: .module)
-                            #if !os(macOS)
-                            .font(.headline)
-                            #endif
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.center)
-                            #if os(macOS)
-                            .frame(maxWidth: .infinity)
-                            #else
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            #endif
+                    if dynamicTypeSize.isAccessibilitySize, fold.acrossWidth == nil {
+                        revealButton
+                    } else {
+                        FoldAvoidingRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) {
+                            Color.clear.frame(height: 0)
+                            revealButton
+                        }
                     }
-                        .buttonStyle(.bordered)
-                        #if os(macOS)
-                        .controlSize(.regular)
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #else
-                        .tint(ColorToken.textPrimary.color)
-                        .controlSize(.large)
-                        #endif
-                        .disabled(!enabled)
-                        .accessibilityIdentifier("review.session.reveal")
                 }
             }
+            .onGeometryChange(for: FoldGeometry.self) { FoldGeometry($0) } action: { fold = $0 }
             .padding(Spacing.small)
-            .frame(maxWidth: ContentWidth.readable)
+            .frame(maxWidth: fold.acrossWidth == nil ? ContentWidth.readable : nil)
             .frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
         }
     }
+    private var revealButton: some View {
+        Button(action: reveal) {
+            Text("Show Answer", bundle: .module)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle)
+        .tint(ColorToken.textPrimary.color)
+        .disabled(!enabled)
+        .accessibilityIdentifier("review.session.reveal")
+    }
     @ViewBuilder private var ratings: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: Spacing.xSmall) {
-                rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
-                rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
-                rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
-                rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+        let again = rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
+        let hard = rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
+        let good = rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
+        let easy = rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+        if dynamicTypeSize.isAccessibilitySize, fold.acrossWidth == nil {
+            VStack(spacing: Spacing.xSmall) { again; hard; good; easy }
+        } else if dynamicTypeSize.isAccessibilitySize {
+            FoldAvoidingRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) {
+                VStack(spacing: Spacing.xSmall) { again; hard }
+                VStack(spacing: Spacing.xSmall) { good; easy }
             }
         } else {
-            HStack(spacing: Spacing.xSmall) {
-                rating(.again, title: "Again", label: states?.again.label, color: .ratingAgain)
-                rating(.hard, title: "Hard", label: states?.hard.label, color: .textPrimary)
-                rating(.good, title: "Good", label: states?.good.label, color: .ratingGood)
-                rating(.easy, title: "Easy", label: states?.easy.label, color: .textPrimary)
+            FoldAvoidingRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) {
+                HStack(spacing: Spacing.xSmall) { again; hard }
+                HStack(spacing: Spacing.xSmall) { good; easy }
             }
         }
     }
@@ -432,40 +405,33 @@ public struct ReviewAnswerBar: View {
             Group {
                 if dynamicTypeSize.isAccessibilitySize {
                     HStack(spacing: Spacing.small) {
-                        Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
+                        Text(LocalizedStringKey(title), bundle: .module).font(.headline)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Spacing.small)
-                        Text(LocalizedStringKey(title), bundle: .module).font(.caption)
+                        Text(verbatim: label.map(Self.interval) ?? "—").font(.caption).foregroundStyle(.token(.textPrimary))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
-                    VStack(spacing: Spacing.xxSmall) {
-                        Text(verbatim: label.map(Self.interval) ?? "—").font(.headline)
+                    VStack(spacing: 0) {
+                        Text(LocalizedStringKey(title), bundle: .module).font(.headline)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(LocalizedStringKey(title), bundle: .module).font(.caption)
+                        Text(verbatim: label.map(Self.interval) ?? "—").font(.caption).foregroundStyle(.token(.textPrimary))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .multilineTextAlignment(.center)
                 }
             }
             .foregroundStyle(.token(color))
-            #if os(macOS)
-            .frame(maxWidth: .infinity)
-            #else
-            .frame(maxWidth: .infinity, minHeight: 44)
-            #endif
+            .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
             .fixedSize(horizontal: false, vertical: true)
         }
         .buttonStyle(.bordered)
-        #if os(macOS)
-        .controlSize(.regular)
-        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
-        #endif
+        .buttonBorderShape(.roundedRectangle)
         .disabled(!enabled || phase != .answer)
         .accessibilityLabel("\(title), \(label.map(Self.interval) ?? "")")
         .accessibilityIdentifier("review.session.rate.\(ReviewCoordinator.name(rating))")
     }
+    #endif
     public static func interval(_ label: ReviewAnswerLabel) -> String {
         let suffix: String
         switch label.unit {

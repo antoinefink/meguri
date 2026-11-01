@@ -112,6 +112,7 @@ enum TestHooks {
                 }
                 #if os(iOS)
                 .background(SizeClassOverride(sizeClass: session.options.sizeClass))
+                .environment(\.layoutFollowsForcedSizeClass, session.options.sizeClass != nil)
                 #endif
                 .modifier(AppearanceOverrides(options: session.options))
             }

@@ -12,6 +12,10 @@ public struct HomeView: View {
     #if os(macOS)
     @State private var isVisible = false
     @FocusState private var homeFocused: Bool
+    #else
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.shellLayout) private var shellLayout
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #endif
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
@@ -27,18 +31,18 @@ public struct HomeView: View {
                     collection.navigation.select(.deck(DeckID(id)))
                 }
             } else {
-                #if os(macOS)
-                if let deck = macDeckPage {
+                if let deck = deckPageDetail {
                     // Keeps the screen's and the page's identifiers on separate elements.
                     GeometryReader { _ in deckPage(deck) }
                 } else {
+                    #if os(macOS)
                     GeometryReader { geometry in
                         scrollContent(availableHeight: geometry.size.height)
                     }
+                    #else
+                    scrollContent()
+                    #endif
                 }
-                #else
-                scrollContent()
-                #endif
             }
         }
         .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
@@ -62,20 +66,22 @@ public struct HomeView: View {
             }
             #else
             ToolbarItem(placement: .primaryAction) {
-                if collection.review == nil, collection.navigation.review == nil {
+                if collection.review == nil, collection.navigation.review == nil, showsCollectionActions {
                     Button { collection.presentGoToDeck() } label: {
-                        Text("Go to Deck…", bundle: .module)
+                        Label { Text("Go to Deck…", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
                     }
                     .disabled(!collection.canPresentGoToDeck())
                     .accessibilityIdentifier("home.collection.goToDeck")
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { collection.deckActions.present(.create) } label: {
-                    Text("Create Deck", bundle: .module)
+                if showsCollectionActions {
+                    Button { collection.deckActions.present(.create) } label: {
+                        Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "plus") }
+                    }
+                    .disabled(!collection.deckActions.canPresent(.create))
+                    .accessibilityIdentifier("home.collection.createDeck")
                 }
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.collection.createDeck")
             }
             #endif
         }
@@ -108,6 +114,12 @@ public struct HomeView: View {
         }
         .accessibilityIdentifier("home.collection.screen")
     }
+    #if !os(macOS)
+    /// On an unfolded foldable the deck list beside the page already has them (N13).
+    private var showsCollectionActions: Bool {
+        !(deckID != nil && shellLayout == .compact && sizeClass == .regular)
+    }
+    #endif
     #if os(macOS)
     private var homeKeyboardActive: Bool {
         isVisible && collection.navigation.section == .home &&
@@ -168,43 +180,14 @@ public struct HomeView: View {
             ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: message),
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
         case .ready:
-            if let deckID, let deck = collection.deckPage(deckID) {
-                #if !os(macOS)
-                VStack(spacing: Spacing.large) {
-                    Text(verbatim: deck.name)
-                        .font(.largeTitle.bold())
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                    DeckCounts(counts: deck.counts)
-                        .accessibilityIdentifier("home.deck.counts")
-                    Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
-                        Label {
-                            Text("Study", bundle: .module)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } icon: { Image(systemName: "play.fill") }
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .frame(maxWidth: ContentWidth.primaryAction)
-                    .disabled(!collection.canStudy)
-                    .accessibilityIdentifier("home.deck.study")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Spacing.xxLarge)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home.deck.page.\(deck.id)")
-                #endif
-            } else if collection.decks.isEmpty {
+            if deckPageDetail == nil, collection.decks.isEmpty {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",
                     description: Text("This collection has no decks to study.", bundle: .module))
             }
         }
     }
 
-    #if os(macOS)
-    private var macDeckPage: ReviewCollection.DeckPageDetail? {
+    private var deckPageDetail: ReviewCollection.DeckPageDetail? {
         guard case .ready = collection.state else { return nil }
         return deckID.flatMap { collection.deckPage($0) }
     }
@@ -225,19 +208,29 @@ public struct HomeView: View {
                 Text(verbatim: path.last ?? deck.name)
                     .font(.largeTitle.bold())
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: Spacing.xxSmall) {
+                // One line would clip at the largest text sizes.
+                let stacksCounts = countsStack
+                (stacksCounts ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout(spacing: Spacing.xxSmall))) {
                     countText("\(deck.counts.new) new", label: "New", value: deck.counts.new, id: "new")
-                    Text(verbatim: "·").accessibilityHidden(true)
+                    if !stacksCounts { countSeparator }
                     countText("\(deck.counts.learning) learning", label: "Learning", value: deck.counts.learning, id: "learning")
-                    Text(verbatim: "·").accessibilityHidden(true)
+                    if !stacksCounts { countSeparator }
                     countText("\(deck.counts.review) to review", label: "To Review", value: deck.counts.review, id: "due")
                 }
                 .font(.title3)
+                #if os(macOS)
                 .foregroundStyle(.secondary)
+                #else
+                .foregroundStyle(.token(.textSecondary))
+                #endif
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home.deck.counts")
                 Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
+                    #if os(macOS)
                     Label { Text("Study", bundle: .module) } icon: { Image(systemName: "play.fill") }
+                    #else
+                    Text("Study", bundle: .module).font(.headline)
+                    #endif
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(minHeight: ControlMetrics.minimumTarget)
@@ -248,18 +241,26 @@ public struct HomeView: View {
             }
             .padding(.vertical)
             .listRowSeparator(.hidden)
+            #if !os(macOS)
+            // A touch List takes the screen's identifier, so the page's goes here.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home.deck.page.\(deck.id)")
+            #endif
             if !subdecks.isEmpty {
                 Section {
                     ForEach(subdecks, id: \.id) { node in
                         HomeDeckBranch(node: node, collection: collection, ancestors: path, depth: 0,
-                            select: { collection.openDeckPage(deckID: $0) },
+                            select: openSubdeck,
                             isExpanded: { collection.studyExpanded(deckID: $0) },
                             isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                             setExpanded: { id, expanded, descendants in
                                 collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
                             }, frameChanged: { _, _ in })
                     }
-                } header: { Text("Subdecks", bundle: .module) }
+                } header: {
+                    Text("Subdecks", bundle: .module)
+                        .accessibilityIdentifier("home.deck.subdecksHeader")
+                }
             }
             if let error = collection.error {
                 Text(verbatim: error).foregroundStyle(.token(.statusError))
@@ -269,11 +270,44 @@ public struct HomeView: View {
                 Section {
                     Text("\(record.answers.count) answers recorded", bundle: .module)
                         .accessibilityIdentifier("home.session.recorded")
-                } header: { Text("Previous Session", bundle: .module) }
+                } header: {
+                    Text("Previous Session", bundle: .module)
+                        .accessibilityIdentifier("home.deck.previousSessionHeader")
+                }
             }
         }
+        #if os(macOS)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.deck.page.\(deck.id)")
+        #else
+        .listStyle(.plain)
+        #endif
+    }
+    private var countsStack: Bool {
+        #if os(macOS)
+        false
+        #else
+        dynamicTypeSize.isAccessibilitySize
+        #endif
+    }
+    @ViewBuilder private var countSeparator: some View {
+        #if os(macOS)
+        Text(verbatim: "·").accessibilityHidden(true)
+        #else
+        // A drawn dot: the contrast and text-size audits read a text one as content.
+        Circle().frame(width: Spacing.xxSmall, height: Spacing.xxSmall).accessibilityHidden(true)
+        #endif
+    }
+    /// A stack pushes the subdeck, so Back returns to its parent; the sidebar selects it.
+    private func openSubdeck(_ id: Int64) {
+        #if !os(macOS)
+        if shellLayout == .compact {
+            let navigation = collection.navigation
+            navigation.setPath(navigation.path(.home) + [.deckPage(DeckID(id))], for: .home)
+            return
+        }
+        #endif
+        collection.openDeckPage(deckID: id)
     }
     private func countText(_ text: LocalizedStringKey, label: LocalizedStringKey, value: UInt32, id: String) -> some View {
         Text(text, bundle: .module)
@@ -281,7 +315,6 @@ public struct HomeView: View {
             .accessibilityValue(Text(value, format: .number))
             .accessibilityIdentifier("home.deck.counts.\(id)")
     }
-    #endif
 }
 
 struct HomeCollectionEmptyContent: View {
@@ -353,24 +386,11 @@ public struct HomeDeckTree: View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 List {
-                    #if os(macOS)
                     ForEach(nodes, id: \.id) { node in
                         HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
                             isExpanded: isExpanded, isExpansionPending: isExpansionPending,
                             setExpanded: setExpanded, frameChanged: recordFrame)
                     }
-                    #else
-                    Section {
-                        ForEach(nodes, id: \.id) { node in
-                            HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
-                                isExpanded: isExpanded, isExpansionPending: isExpansionPending,
-                                setExpanded: setExpanded, frameChanged: recordFrame)
-                        }
-                    } header: {
-                        Text("Decks", bundle: .module)
-                            .accessibilityIdentifier("home.deck.header")
-                    }
-                    #endif
                     if let error {
                         Section {
                             Text(verbatim: error)
@@ -460,7 +480,9 @@ private struct HomeDeckBranch: View {
     let isExpansionPending: ((Int64) -> Bool)?
     let setExpanded: ((Int64, Bool, Bool) -> Void)?
     let frameChanged: (Int64, CGRect?) -> Void
+    #if os(macOS)
     @Environment(\.locale) private var locale
+    #endif
 
     private var path: String {
         node.name.contains("::") ? node.name : (ancestors + [node.name]).joined(separator: "::")
@@ -515,9 +537,9 @@ private struct HomeDeckBranch: View {
             .fixedSize(horizontal: true, vertical: false)
             .contentShape(Rectangle())
             .accessibilityRepresentation {
-                Button { expanded.wrappedValue.toggle() } label: {
-                    Text(verbatim: path)
-                }
+                // The name as a label: as text it would count as clipped in this control's frame.
+                Button { expanded.wrappedValue.toggle() } label: { Color.clear }
+                .accessibilityLabel(Text(verbatim: path))
                 .accessibilityValue(disclosureValue)
                 .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
             }
@@ -551,22 +573,22 @@ private struct HomeDeckBranch: View {
                         .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
                 }
                 #else
-                VStack(alignment: .leading) {
-                    Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
-                        .font(.body)
-                        .accessibilityIdentifier("home.deck.name.\(node.id)")
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
-                    }
+                Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
+                    .accessibilityIdentifier("home.deck.name.\(node.id)")
+                Spacer()
+                if node.counts.total > 0 {
+                    Text(node.counts.total, format: .number)
+                        .foregroundStyle(.token(.textSecondary))
+                        .monospacedDigit()
+                        .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
                 }
-                .fixedSize(horizontal: false, vertical: true)
                 #endif
             }
             #if os(macOS)
             .frame(minHeight: ControlMetrics.minimumTarget)
+            #else
+            // A childless row's button fills its cell; one beside a disclosure doesn't.
+            .frame(minHeight: node.children.isEmpty ? nil : ControlMetrics.minimumTarget)
             #endif
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -586,6 +608,7 @@ private struct HomeDeckBranch: View {
         .deckMenu(collection: collection, deck: node)
     }
 
+    #if os(macOS)
     /// N11.5: non-zero counts as trailing secondary text, without colours.
     private var plainCounts: String? {
         let new = node.counts.new.formatted(.number.locale(locale))
@@ -596,44 +619,12 @@ private struct HomeDeckBranch: View {
                      node.counts.review == 0 ? nil : String(localized: "\(review) to review", bundle: .module)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
-
-    private var subtitle: AttributedString? {
-        let new = node.counts.new.formatted(.number.locale(locale))
-        let learning = node.counts.learning.formatted(.number.locale(locale))
-        let due = node.counts.review.formatted(.number.locale(locale))
-        let parts: [AttributedString?] = [
-            node.counts.new == 0 ? nil : countSubtitle(String(localized: "\(new) new", bundle: .module),
-                number: new, token: .countNew),
-            node.counts.learning == 0 ? nil : countSubtitle(String(localized: "\(learning) learning", bundle: .module),
-                number: learning, token: .countLearn),
-            node.counts.review == 0 ? nil : countSubtitle(String(localized: "\(due) due", bundle: .module),
-                number: due, token: .countDue),
-        ]
-        let visible = parts.compactMap { $0 }
-        guard var result = visible.first else { return nil }
-        for part in visible.dropFirst() {
-            result.append(AttributedString(" · "))
-            result.append(part)
-        }
-        return result
-    }
-
-    private func countSubtitle(_ label: String, number: String, token: ColorToken) -> AttributedString {
-        var result = AttributedString(label)
-        if let range = result.range(of: number) {
-            result[range].foregroundColor = token.color
-        }
-        return result
-    }
+    #endif
 }
 
-public struct DeckCounts: View {
-    public let counts: ReviewCounts
-    public init(counts: ReviewCounts) { self.counts = counts }
-    public var body: some View {
-        Text("\(Text(counts.new, format: .number).foregroundStyle(.token(.countNew))) new · \(Text(counts.learning, format: .number).foregroundStyle(.token(.countLearn))) learning · \(Text(counts.review, format: .number).foregroundStyle(.token(.countDue))) due", bundle: .module)
-            .font(.subheadline)
-    }
+private extension ReviewCounts {
+    /// Everything left to study today, as one number (N13).
+    var total: UInt32 { new + learning + review }
 }
 
 public struct HomeSidebarDecks: View {
@@ -714,9 +705,14 @@ private struct HomeSidebarBranch: View {
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
-            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            HStack {
                 Text(verbatim: name)
-                DeckCounts(counts: node.counts)
+                Spacer()
+                if node.counts.total > 0 {
+                    // Primary text: secondary falls short of 4.5:1 on the sidebar.
+                    Text(node.counts.total, format: .number)
+                        .monospacedDigit()
+                }
             }
             .foregroundStyle(.token(.textPrimary))
             .lineLimit(nil)
@@ -725,6 +721,7 @@ private struct HomeSidebarBranch: View {
             .listRowBackground(ColorToken.surface.color)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: path))
+            .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
             #endif
         }
         #if !os(macOS)

@@ -1222,8 +1222,8 @@ import notify
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
         let study = deckPage.buttons["home.deck.study"].firstMatch
         try waitForStudyReady(study, app)
-        let counts = deckPage.descendants(matching: .any)["home.deck.counts"].firstMatch
-        let before = text(counts)
+        let counts = ["new", "learning", "due"].map { deckPage.descendants(matching: .any)["home.deck.counts.\($0)"].firstMatch }
+        let before = counts.map(text)
         try click(study, app, bundle)
         let reveal = element(app, "review.session.reveal")
         XCTAssertTrue(reveal.waitForExistence(timeout: 20), "Public package must provide a real reviewable card: \(app.debugDescription)")
@@ -1257,7 +1257,7 @@ import notify
         try click(close, app, bundle)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        let after = text(counts)
+        let after = counts.map(text)
         capture(app, "entry-saved-answer")
         app.terminate()
         // Reopen the installed collection without fixture/source/route setup.
@@ -1273,10 +1273,10 @@ import notify
             try click(retainedDeck, app, bundle)
         }
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForText(counts, after))
+        for (count, value) in zip(counts, after) { XCTAssertTrue(waitForText(count, value)) }
         XCTAssertFalse(element(app, "home.collection.error").exists)
         capture(app, "entry-restart-durable-answer")
-        XCTAssertFalse(before.isEmpty)
+        XCTAssertFalse(before.contains(""))
     }
     private func pick(_ source: URL, _ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)

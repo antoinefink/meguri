@@ -33,11 +33,14 @@ struct DeckMenu: View {
 private struct DeckMenuAffordances: ViewModifier {
     let collection: ReviewCollection?
     let deck: CountedDeckNode
+    #if os(macOS)
     @State private var hovering = false
     @FocusState private var menuFocused: Bool
+    #endif
 
     func body(content: Content) -> some View {
         if let collection {
+            #if os(macOS)
             HStack {
                 content
                 Menu { DeckMenu(collection: collection, deck: deck) } label: {
@@ -46,15 +49,16 @@ private struct DeckMenuAffordances: ViewModifier {
                 }
                 .focused($menuFocused)
                 .accessibilityIdentifier("home.deckMenu.open.\(deck.id)")
-                #if os(macOS)
                 .menuStyle(.button)
                 .buttonStyle(.borderless)
                 .opacity(hovering || menuFocused ? 1 : 0)
                 .help(Text("Deck Actions", bundle: .module))
-                #endif
             }
             .contextMenu { DeckMenu(collection: collection, deck: deck) }
             .onHover { hovering = $0 }
+            #else
+            content.contextMenu { DeckMenu(collection: collection, deck: deck) }
+            #endif
         } else { content }
     }
 }
