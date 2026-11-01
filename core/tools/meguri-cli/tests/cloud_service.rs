@@ -86,13 +86,24 @@ impl Client {
     fn binary_response(&mut self, operation: Operation) -> Response {
         let mut message = envelope(operation);
         let mut bodies = Vec::new();
-        if let Some(changes) = message["operation"]["Modify"]["changes"].as_array_mut() {
+        if let Some(changes) = message
+            .get_mut("operation")
+            .and_then(|operation| operation.get_mut("Modify"))
+            .and_then(|modify| modify.get_mut("changes"))
+            .and_then(Value::as_array_mut)
+        {
             for change in changes {
-                if let Some(fields) = change["Save"]["record"]["fields"].as_object_mut() {
+                if let Some(fields) = change
+                    .get_mut("Save")
+                    .and_then(|save| save.get_mut("record"))
+                    .and_then(|record| record.get_mut("fields"))
+                    .and_then(Value::as_object_mut)
+                {
                     for field in fields.values_mut() {
-                        if let Some(asset) = field.get_mut("Asset") {
-                            let body: Vec<u8> = serde_json::from_value(asset["bytes"].take()).unwrap();
-                            asset["bytes"] = json!({"attachment": bodies.len()});
+                        if let Some(asset) = field.get_mut("Asset").and_then(Value::as_object_mut) {
+                            let bytes = asset.get_mut("bytes").unwrap();
+                            let body: Vec<u8> = serde_json::from_value(bytes.take()).unwrap();
+                            *bytes = json!({"attachment": bodies.len()});
                             bodies.push(body);
                         }
                     }

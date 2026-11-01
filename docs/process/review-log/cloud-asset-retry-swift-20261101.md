@@ -145,3 +145,62 @@ failed at its first response header. Independent review confirmed that the
 test helper's mutable JSON indexing inserts a Modify branch into CreateZone.
 Use checked mutable lookups for existing Modify and Save fields. Keep all
 positive assertions and the actual Service dispatch. Swift remains UNRUN.
+
+## Protocol helper P2 repair — source-only handoff
+
+Role: fixer under implementer clean-room rules. Supplied current master
+`4fa09dad`; original U113 start
+`1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a` and original batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` remain authoritative.
+
+The supplied execution `core-test/20261101T134456Z-90223` compiled and passed
+7/8 tests. The positive binary test failed at line 114 with a null
+`header.version` on its first CreateZone. Independent review confirmed that
+`message["operation"]["Modify"]["changes"].as_array_mut()` inserts
+`Modify: {changes: null}` beside CreateZone. The server rejects this two-variant
+Operation with its plain malformed-frame response, so no version is present.
+The nested mutable `change["Save"]["record"]["fields"]` probe likewise
+inserts Save into non-Save mutations.
+
+Authored repair (UNRUN): `Client::binary_response` now uses `get_mut` /
+`and_then` chains through existing operation/Modify/changes and
+Save/record/fields. It requires an existing Asset object and bytes member
+before replacing bytes with an attachment reference. Missing variants are
+left untouched. Only this test helper and this log changed; all assertions,
+actual Service protocol/limits, single-dispatch checks and CLI flag/default
+remain intact. The existing positive case covers CreateZone, Read and
+FetchZone, so no additional test was authored. No production/parser change.
+
+One source consistency check is recorded below. No compilation, tests, gates,
+Git/history, network or forbidden-source access occurred in this filtered
+session. Root must run all eight CLI protocol tests, then Swift Process,
+automatic asset retry and review/media verification, plus independent review
+and required provenance/privacy/similarity and batch gates. No passing gate,
+unit or milestone closure is claimed.
+
+Single source consistency check passed: exact checked-lookup replacement;
+all source outside the helper traversal unchanged against the session
+snapshot, including all eight tests and their assertions; final newlines,
+whitespace and conflict markers checked in both owned files. This is
+source evidence only. Authored repair remains UNRUN; no build/test or
+gate result is inferred. Export ready.
+
+## Root protocol verification after helper repair
+
+`core-test/20261101T134932Z-92399`: PASS8/8. This covers the unchanged
+legacy protocol and the opt-in binary Save, Read, FetchZone, conflict, exact
+request IDs, header/body limits and malformed/truncated input cases. The
+previous failed protocol run remains retained. Independent review of the
+checked-lookups correction found no findings requiring repair.
+
+`core-test/20261101T134745Z-91787`: PASS420/420 for the CloudKit sync/host
+selection, including the new tombstone workflow. Swift verification is running
+separately; neither this result nor the protocol pass establishes live CloudKit.
+No P24 item or Unit is accepted by these receipts alone.
+
+## First native compilation
+
+`swift-test/20261101T134953Z-92923` failed compilation at the new workflow's
+row comparison: the FFI observation returns optional Data, while the test
+compares it with a byte array. No native test ran. Preserve the assertion by
+using the correct Data representation, then rerun the selected native checks.
