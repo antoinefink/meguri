@@ -4,26 +4,29 @@ import Foundation
 import Testing
 
 @Suite nonisolated struct CloudServiceProcessTests {
-    @Test func binaryAssetsPreparedCancellationDrainsBodiesAndConcurrentFramesStayAligned() async throws {
+    @Test(arguments: [false, true])
+    func binaryAssetsPreparedCancellationDrainsBodiesAndConcurrentFramesStayAligned(typed: Bool) async throws {
         try await withService(transport: .binaryAssetsV1) { client in
             try await createZone(client)
             let payload = Data((0..<960_000).map { UInt8($0 % 256) })
-            let saveRequest = try assetFrame(payload)
-            let upload = try client.prepare(saveRequest)
+            let saveRequest = assetMessage(payload)
+            let upload = try prepare(client, message: saveRequest, typed: typed)
             #expect(upload.enqueue())
             #expect(!upload.enqueue())
-            let savedData = try await upload.reply()
-            let savedReply = try serviceOriginalReply(request: saveRequest, response: savedData)
+            let savedReply = try serviceOriginalReply(request: saveRequest, response: await reply(upload, typed: typed))
             let raw = try serviceRequired(try savedReply.ok()["Modified"]?.items?.first?["result"]?["Ok"]?["Saved"])
             let saved = try ServiceRecordBytes(raw)
             #expect(try saved.asset("pa") == payload)
-            #expect(savedData.count > CloudServiceBinary.headerLimit) // Logical JSON, not pipe bytes.
+            if !typed {
+                #expect(try savedReply.originalResponseJSON.count > CloudServiceBinary.headerLimit) // Logical JSON, not pipe bytes.
+            }
             _ = try await save(client, name: "next", bytes: [1, 128, 0])
 
             let (written, signal) = AsyncStream<Void>.makeStream()
             let release = DispatchSemaphore(value: 0)
             defer { release.signal(); signal.finish() }
-            let prepared = try client.prepare(readFrame("large"), afterWrite: {
+            let readMessage = try JSONDecoder().decode(ServiceJSON.self, from: readFrame("large"))
+            let prepared = try prepare(client, message: readMessage, typed: typed, afterWrite: {
                 signal.yield(())
                 release.wait()
             })
@@ -32,23 +35,25 @@ import Testing
             var iterator = written.makeAsyncIterator()
             _ = await iterator.next()
             prepared.cancel() // Already accepted: the entire original body still belongs to the queue.
-            let following = try client.prepare(readFrame("next"))
+            let nextMessage = try JSONDecoder().decode(ServiceJSON.self, from: readFrame("next"))
+            let following = try prepare(client, message: nextMessage, typed: typed)
             #expect(following.enqueue())
             release.signal()
             do {
-                _ = try await prepared.reply()
+                _ = try await reply(prepared, typed: typed)
                 Issue.record("cancelled prepared exchange returned success")
             } catch is CancellationError {} catch { throw error }
-            let drained = try await prepared.reply(preservingCancelledResult: true)
-            let read = try serviceOriginalReply(request: readFrame("large"), response: drained)
+            let drained = try await reply(prepared, typed: typed, preservingCancelledResult: true)
+            let read = try serviceOriginalReply(request: readMessage, response: drained)
             #expect(try ServiceRecordBytes(serviceRequired(try read.ok()["Record"])).asset("pa") == payload)
-            let next = try decode(ServiceResponse<RecordReply>.self, await following.reply())
-            #expect(next.result.Ok?.Record.name == "next")
+            let next = try serviceOriginalReply(request: nextMessage, response: await reply(following, typed: typed))
+            #expect(try next.ok()["Record"]?["name"]?.text == "next")
             try await withThrowingTaskGroup(of: Bool.self) { group in
                 for name in ["large", "next", "large", "next"] {
                     group.addTask {
-                        let request = try readFrame(name)
-                        let reply = try serviceOriginalReply(request: request, response: await client.request(request))
+                        let message = try JSONDecoder().decode(ServiceJSON.self, from: readFrame(name))
+                        let response = try await request(client, message: message, typed: typed)
+                        let reply = try serviceOriginalReply(request: message, response: response)
                         let row = try ServiceRecordBytes(serviceRequired(try reply.ok()["Record"]))
                         let asset = try row.asset("pa")
                         return row.name == name && (name != "large" || asset == payload)
@@ -56,7 +61,7 @@ import Testing
                 }
                 for try await matched in group { #expect(matched) }
             }
-            let refused = try client.prepare(readFrame("large"))
+            let refused = try prepare(client, message: readMessage, typed: typed)
             refused.cancel()
             #expect(!refused.enqueue())
             let ledger = client.transportExchanges()
@@ -74,24 +79,24 @@ import Testing
         }
     }
 
-    @Test func binaryAssetsPreparationRejectsBoundsBeforeAcceptanceOrIO() async throws {
+    @Test(arguments: [false, true])
+    func binaryAssetsPreparationRejectsBoundsBeforeAcceptanceOrIO(typed: Bool) async throws {
         try await withService(transport: .binaryAssetsV1) { client in
-            let fixtureInput = try assetFrame(Data([0, 10, 255]))
-            let decodedInput = try JSONDecoder().decode(ServiceJSON.self, from: fixtureInput)
+            let decodedInput = assetMessage(Data([0, 10, 255]))
             let assetValue = try serviceRequired(decodedInput["operation"]?["Modify"]?["changes"]?.items?.first?["Save"]?["record"]?["fields"]?["pa"])
             let repeatedFields = Dictionary(uniqueKeysWithValues: (0..<17).map { ("asset\($0)", assetValue) })
-            let recordInput: [String: Any] = [
-                "name": "large", "record_type": "MGEntity",
-                "fields": try JSONSerialization.jsonObject(with: ServiceJSON.object(repeatedFields).encoded()),
-            ]
-            let requestWithSeventeenBodies = try frame(["Modify": [
-                "zone": "z", "atomic": true,
-                "changes": [["Save": ["record": recordInput, "if_unchanged": NSNull()]]],
-            ]])
+            let requestWithSeventeenBodies = assetMessage(Data(), fields: repeatedFields)
             do {
-                _ = try client.prepare(requestWithSeventeenBodies)
+                _ = try prepare(client, message: requestWithSeventeenBodies, typed: typed)
                 Issue.record("accepted too many attachment bodies")
             } catch CloudServiceProcessFailure.fixtureAttachmentLimit {} catch { throw error }
+            if typed {
+                let payload = Data(count: CloudServiceBinary.bodyLimit + 1)
+                do {
+                    _ = try prepare(client, message: assetMessage(payload), typed: typed)
+                    Issue.record("accepted oversized attachment body")
+                } catch CloudServiceProcessFailure.fixtureAttachmentLimit {} catch { throw error }
+            }
             // Validate the exact shared bounds without allocating advertised bodies.
             for lengths in [[CloudServiceBinary.bodyLimit + 1],
                             [CloudServiceBinary.bodyLimit, CloudServiceBinary.bodyLimit, 1]] {
@@ -106,6 +111,104 @@ import Testing
             #expect(noIO)
             try await createZone(client) // This same process can still handle a valid request.
             #expect(client.transportExchanges().count == 1)
+        }
+    }
+
+    @Test func typedAndDataAPIsPreserveOneMiBAssetsAndConditionalSavedReceipts() async throws {
+        try await withService(transport: .binaryAssetsV1) { client in
+            try await createZone(client)
+            let payload = Data((0..<1_048_576).map { UInt8(truncatingIfNeeded: $0) })
+            let message = assetMessage(payload)
+            let typedPacket = try CloudServiceBinary.prepare(message: message, transport: .binaryAssetsV1)
+            let dataPacket = try CloudServiceBinary.prepare(message.encoded(), transport: .binaryAssetsV1)
+            #expect(typedPacket.bodies == [payload] && typedPacket.bodies == dataPacket.bodies)
+            let typedHeader = try JSONDecoder().decode(ServiceJSON.self, from: typedPacket.header)
+            let dataHeader = try JSONDecoder().decode(ServiceJSON.self, from: dataPacket.header)
+            #expect(try normalized(typedHeader) == normalized(dataHeader))
+            let headerRecord = try serviceRequired(typedHeader["message"]?["operation"]?["Modify"]?["changes"]?.items?.first?["Save"]?["record"])
+            #expect(try headerRecord["fields"]?["e"]?["EncryptedBytes"]?.bytes() == Data([0, 255, 10]))
+            #expect(try headerRecord["fields"]?["pa"]?["Asset"]?["sha256"]?.bytes() == Data(SHA256.hash(data: payload)))
+
+            let saved = try serviceOriginalReply(request: message, response: await client.request(message: message))
+            let savedRow = try ServiceRecordBytes(serviceRequired(try saved.ok()["Modified"]?.items?.first?["result"]?["Ok"]?["Saved"]))
+            #expect(try savedRow.asset("pa") == payload)
+            let readRequest = try readFrame("large")
+            let oldRead = try serviceOriginalReply(request: readRequest, response: await client.request(readRequest))
+            let oldRow = try ServiceRecordBytes(serviceRequired(try oldRead.ok()["Record"]))
+            #expect(try oldRow.asset("pa") == payload)
+            #expect(try normalized(savedRow.raw) == normalized(oldRow.raw))
+            let conditional = assetMessage(payload, ifUnchanged: savedRow.systemFields)
+            let updated = try serviceOriginalReply(request: conditional, response: await client.request(message: conditional))
+            let updatedRow = try ServiceRecordBytes(serviceRequired(try updated.ok()["Modified"]?.items?.first?["result"]?["Ok"]?["Saved"]))
+            #expect(try updatedRow.asset("pa") == payload)
+            #expect(updatedRow.systemFields != savedRow.systemFields)
+            let receiptRequest = try JSONDecoder().decode(ServiceJSON.self, from: updated.originalRequestJSON)
+            let condition = try serviceRequired(receiptRequest["operation"]?["Modify"]?["changes"]?.items?.first?["Save"]?["if_unchanged"])
+            #expect(try condition.bytes() == savedRow.systemFields)
+            let receiptResponse = try JSONDecoder().decode(ServiceJSON.self, from: updated.originalResponseJSON)
+            #expect(receiptResponse["request_id"]?.number == updated.requestID)
+            #expect(saved.requestID < oldRead.requestID && oldRead.requestID < updated.requestID)
+            let ledger = client.transportExchanges()
+            #expect(ledger.count == 4)
+            let ids = try ledger.map { try serviceRequired(CloudServiceBinary.replyHeader($0.response.header).message["request_id"]?.number) }
+            #expect(ids == ids.sorted() && Set(ids).count == ids.count)
+            #expect(ledger[1].request.bodies == [payload] && ledger[1].response.bodies == [payload])
+            #expect(ledger[2].response.bodies == [payload] && ledger[3].response.bodies == [payload])
+        }
+        // Default legacy transport also accepts typed calls without changing JSON semantics.
+        try await withService { client in
+            try await createZone(client)
+            let message = assetMessage(Data([0, 10, 255]))
+            let saved = try serviceOriginalReply(request: message, response: await client.request(message: message))
+            let row = try ServiceRecordBytes(serviceRequired(try saved.ok()["Modified"]?.items?.first?["result"]?["Ok"]?["Saved"]))
+            #expect(try row.asset("pa") == Data([0, 10, 255]))
+            #expect(client.transportExchanges().allSatisfy { $0.request.bodies.isEmpty && $0.response.bodies.isEmpty })
+        }
+    }
+
+    @Test func binaryAssetsRejectMalformedReferencesAndKeepBuffersAsOrdinaryJSONOutsideAssets() throws {
+        let buffer = ServiceJSON.bytes(Data([0, 10, 128, 255]))
+        #expect(try buffer.bytes() == Data([0, 10, 128, 255]))
+        #expect(try buffer.encoded() == Data("[0,10,128,255]".utf8))
+        let index: ServiceJSON = .object(["attachment": .integer(0)])
+        func response(_ assets: [ServiceJSON]) -> ServiceJSON {
+            .object(["result": .object(["Ok": .object(["Record": .object(["fields": .object(
+                Dictionary(uniqueKeysWithValues: assets.enumerated().map { ("a\($0.offset)", .object(["Asset": .object(["bytes": $0.element])])) })
+            )])])])])
+        }
+        let malformed: [(ServiceJSON, [Int])] = [
+            (response([index, index]), [1]), // duplicate
+            (response([index]), []), // missing/out-of-range
+            (response([]), [1]), // unused
+            (response([.object(["attachment": .string("0")])]), [1]),
+            (response([.object(["attachment": .integer(0), "extra": .null])]), [1]),
+            (.object(["result": .object(["attachment": .integer(0)])]), [1]), // forbidden path
+        ]
+        for (message, lengths) in malformed {
+            let header = try ServiceJSON.object(["version": .integer(1),
+                "lengths": .array(lengths.map { .integer(Int64($0)) }), "message": message]).encoded()
+            do {
+                _ = try CloudServiceBinary.replyHeader(header)
+                Issue.record("accepted malformed attachment reference")
+            } catch CloudServiceProcessFailure.malformedReply {} catch { throw error }
+        }
+        let validHeader = try ServiceJSON.object(["version": .integer(1), "lengths": .array([.integer(4)]), "message": response([index])]).encoded()
+        let header = try CloudServiceBinary.replyHeader(validHeader)
+        let logical = try header.logical([Data([0, 10, 128, 255])])
+        guard case .byteBuffer(let bytes)? = logical["result"]?["Ok"]?["Record"]?["fields"]?["a0"]?["Asset"]?["bytes"] else {
+            Issue.record("binary reply expanded its asset into integer nodes"); return
+        }
+        #expect(bytes == Data([0, 10, 128, 255]))
+        do {
+            _ = try header.logical([Data([0])])
+            Issue.record("accepted mismatched body length")
+        } catch CloudServiceProcessFailure.malformedReply {} catch { throw error }
+        for message in [ServiceJSON.object(["attachment": .integer(0)]),
+                        assetMessage(Data(), fields: ["pa": .object(["Asset": .object(["bytes": index])])])] {
+            do {
+                _ = try CloudServiceBinary.prepare(message: message, transport: .binaryAssetsV1)
+                Issue.record("accepted caller-supplied attachment reference")
+            } catch CloudServiceProcessFailure.input {} catch CloudServiceProcessFailure.malformedReply {} catch { throw error }
         }
     }
 
@@ -300,13 +403,39 @@ private nonisolated func createZone(_ client: CloudServiceProcess) async throws 
                              await client.request(frame(["CreateZone": ["zone": "z"]])))
     #expect(response.result.Ok == "Done")
 }
-private nonisolated func assetFrame(_ payload: Data) throws -> Data {
-    try frame(["Modify": ["zone": "z", "atomic": true, "changes": [["Save": [
-        "record": ["name": "large", "record_type": "MGEntity", "fields": [
-            "e": ["EncryptedBytes": [0, 255, 10]],
-            "pa": ["Asset": ["bytes": Array(payload), "sha256": Array(SHA256.hash(data: payload))]],
-        ]], "if_unchanged": NSNull(),
-    ]]]]])
+private nonisolated func assetMessage(_ payload: Data, fields: [String: ServiceJSON]? = nil,
+    ifUnchanged: Data? = nil) -> ServiceJSON {
+    .object([
+        "scope": .object(["container": .string("fixture-container"), "environment": .string("development"), "account": .string("fixture-account")]),
+        "caller": .object(["device": .string("fixture-device"), "instance": .string("fixture-instance"), "own_operation": .string("fixture-operation")]),
+        "operation": .object(["Modify": .object(["zone": .string("z"), "atomic": .bool(true), "changes": .array([
+            .object(["Save": .object([
+                "record": .object(["name": .string("large"), "record_type": .string("MGEntity"), "fields": .object(fields ?? [
+                    "e": .object(["EncryptedBytes": .bytes(Data([0, 255, 10]))]),
+                    "pa": .object(["Asset": .object(["bytes": .bytes(payload), "sha256": .bytes(Data(SHA256.hash(data: payload)))])]),
+                ])]), "if_unchanged": ifUnchanged.map(ServiceJSON.bytes) ?? .null,
+            ])]),
+        ])])]),
+    ])
+}
+private nonisolated func prepare(_ client: CloudServiceProcess, message: ServiceJSON, typed: Bool,
+    afterWrite: (@Sendable () -> Void)? = nil) throws -> CloudServicePreparedFrame {
+    if typed { return try client.prepare(message: message, afterWrite: afterWrite) }
+    return try client.prepare(message.encoded(), afterWrite: afterWrite)
+}
+private nonisolated func reply(_ frame: CloudServicePreparedFrame, typed: Bool,
+    preservingCancelledResult: Bool = false) async throws -> ServiceJSON {
+    if typed { return try await frame.logicalReply(preservingCancelledResult: preservingCancelledResult) }
+    return try JSONDecoder().decode(ServiceJSON.self, from: await frame.reply(preservingCancelledResult: preservingCancelledResult))
+}
+private nonisolated func request(_ client: CloudServiceProcess, message: ServiceJSON, typed: Bool) async throws -> ServiceJSON {
+    if typed { return try await client.request(message: message) }
+    return try JSONDecoder().decode(ServiceJSON.self, from: await client.request(message.encoded()))
+}
+private nonisolated func normalized(_ value: ServiceJSON) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return try encoder.encode(value)
 }
 private nonisolated func saveFrame(name: String, bytes: [UInt8], ifUnchanged: [UInt8]? = nil) throws -> Data {
     try frame(["Modify": ["zone": "z", "atomic": true, "changes": [["Save": [

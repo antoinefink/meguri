@@ -71,13 +71,22 @@ nonisolated enum CloudServiceBinary {
         let message: ServiceJSON
         do { message = try JSONDecoder().decode(ServiceJSON.self, from: frame) }
         catch { throw CloudServiceProcessFailure.input }
+        return try prepare(message: message, transport: transport)
+    }
+    static func prepare(message: ServiceJSON, transport: CloudServiceTransport) throws -> CloudServicePacket {
+        if case .legacy = transport { return try prepare(message.encoded(), transport: transport) }
         var lengths: [Int] = []
         _ = try walk(message) { value in
-            guard let array = value.items else { throw CloudServiceProcessFailure.input }
-            lengths.append(array.count)
+            switch value {
+            case .byteBuffer(let data): lengths.append(data.count)
+            case .array(let array):
+                lengths.append(array.count)
+            default: throw CloudServiceProcessFailure.input
+            }
             try bounds(lengths)
             // Validate every byte before acceptance or body allocation.
-            guard array.allSatisfy({ value in value.number.flatMap { UInt8(exactly: $0) } != nil }) else {
+            if case .array(let array) = value,
+               !array.allSatisfy({ $0.number.flatMap { UInt8(exactly: $0) } != nil }) {
                 throw CloudServiceProcessFailure.input
             }
             return value

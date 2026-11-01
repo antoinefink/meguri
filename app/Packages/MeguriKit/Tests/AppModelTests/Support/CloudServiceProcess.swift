@@ -3,8 +3,8 @@ import Darwin
 import Foundation
 import Synchronization
 
-// Headless host test support only. Data is the concurrency boundary: neither
-// JSONSerialization's Any values nor ServiceSystemFields enter CoreBridge.
+// Headless host test support only. Sendable packets and typed fixture values
+// cross the queue; neither untyped JSON nor ServiceSystemFields enter CoreBridge.
 nonisolated enum CloudServiceProcessFailure: Error {
     case configuration, launch, closed, input, output, malformedReply
     case fixtureInputLimit, fixtureReplyLimit, fixtureDiagnosticLimit, fixtureAttachmentLimit
@@ -46,7 +46,18 @@ nonisolated final class CloudServiceProcess: Sendable {
     func request(_ frame: Data, afterEnqueue: (@Sendable () -> Void)? = nil,
                  afterWrite: (@Sendable () -> Void)? = nil) async throws -> Data {
         let packet = try CloudServiceBinary.prepare(frame, transport: transport)
-        let reply: Data = try await withCheckedThrowingContinuation { continuation in
+        return try await request(packet, afterEnqueue: afterEnqueue, afterWrite: afterWrite).data()
+    }
+
+    func request(message: ServiceJSON, afterEnqueue: (@Sendable () -> Void)? = nil,
+                 afterWrite: (@Sendable () -> Void)? = nil) async throws -> ServiceJSON {
+        let packet = try CloudServiceBinary.prepare(message: message, transport: transport)
+        return try await request(packet, afterEnqueue: afterEnqueue, afterWrite: afterWrite).message()
+    }
+
+    private func request(_ packet: CloudServicePacket, afterEnqueue: (@Sendable () -> Void)?,
+                         afterWrite: (@Sendable () -> Void)?) async throws -> CloudServiceProcessReply {
+        let reply: CloudServiceProcessReply = try await withCheckedThrowingContinuation { continuation in
             worker.queue.async { [worker] in
                 do { continuation.resume(returning: try worker.exchange(packet, afterWrite: afterWrite)) }
                 catch { continuation.resume(throwing: error) }
@@ -57,11 +68,15 @@ nonisolated final class CloudServiceProcess: Sendable {
         return reply
     }
 
-    // Own/media submit guards need synchronous acceptance by the actual stdio
-    // queue. Preparation owns the exact frame and buffered original reply.
+    // Both APIs use the same one-shot owner and actual stdio queue acceptance.
     func prepare(_ frame: Data, afterWrite: (@Sendable () -> Void)? = nil) throws -> CloudServicePreparedFrame {
-        let packet = try CloudServiceBinary.prepare(frame, transport: transport)
-        return CloudServicePreparedFrame { [worker] finish in
+        try prepare(CloudServiceBinary.prepare(frame, transport: transport), afterWrite: afterWrite)
+    }
+    func prepare(message: ServiceJSON, afterWrite: (@Sendable () -> Void)? = nil) throws -> CloudServicePreparedFrame {
+        try prepare(CloudServiceBinary.prepare(message: message, transport: transport), afterWrite: afterWrite)
+    }
+    private func prepare(_ packet: CloudServicePacket, afterWrite: (@Sendable () -> Void)?) -> CloudServicePreparedFrame {
+        CloudServicePreparedFrame { [worker] finish in
             worker.queue.async {
                 do { finish(.success(try worker.exchange(packet, afterWrite: afterWrite))) }
                 catch { finish(.failure(error)) }
@@ -90,16 +105,36 @@ nonisolated final class CloudServiceProcess: Sendable {
     }
 }
 
+// Legacy replies retain exact pipe JSON. Binary replies retain validated logical
+// values; only an explicit Data accessor materializes integer-array asset JSON.
+nonisolated enum CloudServiceProcessReply: Sendable {
+    case raw(Data), logical(ServiceJSON)
+    func data() throws -> Data {
+        switch self {
+        case .raw(let data): return data
+        case .logical(let value): return try value.encoded()
+        }
+    }
+    func message() throws -> ServiceJSON {
+        switch self {
+        case .logical(let value): return value
+        case .raw(let data):
+            do { return try JSONDecoder().decode(ServiceJSON.self, from: data) }
+            catch { throw CloudServiceProcessFailure.malformedReply }
+        }
+    }
+}
+
 nonisolated final class CloudServicePreparedFrame: Sendable {
     private struct State {
         var queued = false
         var cancelled = false
-        var result: Result<Data, any Error>?
-        var waiter: CheckedContinuation<Data, any Error>?
+        var result: Result<CloudServiceProcessReply, any Error>?
+        var waiter: CheckedContinuation<CloudServiceProcessReply, any Error>?
     }
     private let state = Mutex(State())
-    private let schedule: @Sendable (@escaping @Sendable (Result<Data, any Error>) -> Void) -> Void
-    init(schedule: @escaping @Sendable (@escaping @Sendable (Result<Data, any Error>) -> Void) -> Void) {
+    private let schedule: @Sendable (@escaping @Sendable (Result<CloudServiceProcessReply, any Error>) -> Void) -> Void
+    init(schedule: @escaping @Sendable (@escaping @Sendable (Result<CloudServiceProcessReply, any Error>) -> Void) -> Void) {
         self.schedule = schedule
     }
     func enqueue() -> Bool {
@@ -111,9 +146,9 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
         }
     }
     func cancel() { state.withLock { $0.cancelled = true } }
-    private func finish(_ result: Result<Data, any Error>) {
+    private func finish(_ result: Result<CloudServiceProcessReply, any Error>) {
         let waiter = state.withLock { value in
-            guard value.result == nil else { return Optional<CheckedContinuation<Data, any Error>>.none }
+            guard value.result == nil else { return Optional<CheckedContinuation<CloudServiceProcessReply, any Error>>.none }
             value.result = result
             let waiter = value.waiter; value.waiter = nil
             return waiter
@@ -121,8 +156,14 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
         waiter?.resume(with: result)
     }
     func reply(preservingCancelledResult: Bool = false) async throws -> Data {
-        let data: Data = try await withCheckedThrowingContinuation { continuation in
-            let ready = state.withLock { value -> Result<Data, any Error>? in
+        try await completed(preservingCancelledResult: preservingCancelledResult).data()
+    }
+    func logicalReply(preservingCancelledResult: Bool = false) async throws -> ServiceJSON {
+        try await completed(preservingCancelledResult: preservingCancelledResult).message()
+    }
+    private func completed(preservingCancelledResult: Bool) async throws -> CloudServiceProcessReply {
+        let reply: CloudServiceProcessReply = try await withCheckedThrowingContinuation { continuation in
+            let ready = state.withLock { value -> Result<CloudServiceProcessReply, any Error>? in
                 guard value.queued else { return .failure(CloudServiceProcessFailure.input) }
                 if let result = value.result { return result }
                 guard value.waiter == nil else { return .failure(CloudServiceProcessFailure.input) }
@@ -136,7 +177,7 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
             if state.withLock({ $0.cancelled }) { throw CancellationError() }
             try Task.checkCancellation()
         }
-        return data
+        return reply
     }
 }
 
@@ -208,7 +249,7 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
 
     func stop() { if process.isRunning { process.terminate() } }
 
-    func exchange(_ packet: CloudServicePacket, afterWrite: (@Sendable () -> Void)?) throws -> Data {
+    func exchange(_ packet: CloudServicePacket, afterWrite: (@Sendable () -> Void)?) throws -> CloudServiceProcessReply {
         guard result == nil else { throw CloudServiceProcessFailure.closed }
         do {
             var line = packet.header
@@ -221,17 +262,17 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
                 throw CloudServiceProcessFailure.malformedReply
             }
             let response: CloudServicePacket
-            let logical: Data
+            let logical: CloudServiceProcessReply
             if case .binaryAssetsV1 = transport,
                (try? JSONDecoder().decode(ServiceJSON.self, from: reply))?["protocol_error"] == nil {
                 let header = try CloudServiceBinary.replyHeader(reply)
                 var bodies: [Data] = []
                 for length in header.lengths { bodies.append(try readBody(length)) }
                 response = .init(header: reply, bodies: bodies)
-                logical = try header.logical(bodies).encoded()
+                logical = .logical(try header.logical(bodies))
             } else {
                 response = .init(header: reply, bodies: [])
-                logical = reply
+                logical = .raw(reply)
             }
             exchanges.withLock { $0.append(.init(request: packet, response: response)) }
             return logical

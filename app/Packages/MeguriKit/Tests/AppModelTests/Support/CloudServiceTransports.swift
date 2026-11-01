@@ -9,13 +9,13 @@ import Synchronization
 private nonisolated final class ServicePreparedFrames: Sendable {
     private struct State { var queued = false; var cancelled = false }
     private let state = Mutex(State())
-    private let frames: [(Data, CloudServicePreparedFrame)]
+    private let frames: [(ServiceJSON, CloudServicePreparedFrame)]
     private let preserveReplies: Bool
     init(process: CloudServiceProcess, operations: [ServiceJSON], preserveReplies: Bool = false, ownOperation: String? = nil) throws {
         self.preserveReplies = preserveReplies
         frames = try operations.map { operation in
-            let frame = try serviceRequestFrame(operation, ownOperation: ownOperation)
-            return (frame, try process.prepare(frame))
+            let message = serviceRequestMessage(operation, ownOperation: ownOperation)
+            return (message, try process.prepare(message: message))
         }
     }
     func enqueue() -> Bool {
@@ -37,7 +37,7 @@ private nonisolated final class ServicePreparedFrames: Sendable {
             var replies: [ServiceOriginalReply] = []
             var firstFailure: (any Error)?
             for (frame, original) in frames {
-                do { replies.append(try serviceOriginalReply(request: frame, response: await original.reply(preservingCancelledResult: preserveReplies))) }
+                do { replies.append(try serviceOriginalReply(request: frame, response: await original.logicalReply(preservingCancelledResult: preserveReplies))) }
                 catch { if firstFailure == nil { firstFailure = error } }
             }
             // Join ALL accepted frames even after cancellation or a first error.

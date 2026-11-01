@@ -7,6 +7,7 @@ import Foundation
 // opaque transport values; none of these bytes are CKRecord archives.
 nonisolated enum ServiceJSON: Codable, Sendable {
     case object([String: Self]), array([Self]), string(String), integer(Int64), bool(Bool), null
+    case byteBuffer(Data)
     init(from decoder: any Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
@@ -25,6 +26,7 @@ nonisolated enum ServiceJSON: Codable, Sendable {
         case .string(let v): try c.encode(v)
         case .array(let v): try c.encode(v)
         case .object(let v): try c.encode(v)
+        case .byteBuffer(let v): try c.encode(Array(v)) // Explicit JSON stays an integer array, never base64.
         }
     }
     subscript(_ key: String) -> Self? { if case .object(let v) = self { v[key] } else { nil } }
@@ -32,8 +34,9 @@ nonisolated enum ServiceJSON: Codable, Sendable {
     var text: String? { if case .string(let v) = self { v } else { nil } }
     var flag: Bool? { if case .bool(let v) = self { v } else { nil } }
     var number: Int64? { if case .integer(let v) = self { v } else { nil } }
-    static func bytes(_ v: Data) -> Self { .array(v.map { .integer(Int64($0)) }) }
+    static func bytes(_ v: Data) -> Self { .byteBuffer(v) }
     func bytes() throws -> Data {
+        if case .byteBuffer(let data) = self { return data }
         guard let items else { throw ServiceWorkflowFailure.wire }
         return try Data(items.map { value in
             guard let n = value.number, let b = UInt8(exactly: n) else { throw ServiceWorkflowFailure.wire }
@@ -50,8 +53,10 @@ nonisolated func serviceRequired<T>(_ v: T?) throws -> T {
 // normalized after attachment reconstruction, not the bytes on the pipe. Raw
 // headers/bodies belong to CloudServiceProcess.transportExchanges().
 nonisolated struct ServiceOriginalReply: Sendable {
-    let originalRequestJSON: Data
-    let originalResponseJSON: Data
+    let originalRequest: ServiceJSON
+    let originalResponse: ServiceJSON
+    var originalRequestJSON: Data { get throws { try originalRequest.encoded() } }
+    var originalResponseJSON: Data { get throws { try originalResponse.encoded() } }
     let requestID: Int64
     let result: ServiceJSON
     func ok() throws -> ServiceJSON {
@@ -106,17 +111,23 @@ nonisolated struct ServiceRecordBytes: Sendable {
     }
 }
 
-nonisolated func serviceRequestFrame(_ operation: ServiceJSON, instance: String? = nil, ownOperation: String? = nil) throws -> Data {
-    try ServiceJSON.object([
+nonisolated func serviceRequestMessage(_ operation: ServiceJSON, instance: String? = nil, ownOperation: String? = nil) -> ServiceJSON {
+    .object([
         "scope": .object(["container": .string("synthetic-initial-app"), "environment": .string("development"), "account": .string("synthetic-initial-account")]),
         "caller": .object(["device": .string("synthetic-app-workflow"), "instance": instance.map(ServiceJSON.string) ?? .null, "own_operation": ownOperation.map(ServiceJSON.string) ?? .null]),
         "operation": operation,
-    ]).encoded()
+    ])
+}
+nonisolated func serviceRequestFrame(_ operation: ServiceJSON, instance: String? = nil, ownOperation: String? = nil) throws -> Data {
+    try serviceRequestMessage(operation, instance: instance, ownOperation: ownOperation).encoded()
+}
+nonisolated func serviceOriginalReply(request: ServiceJSON, response: ServiceJSON) throws -> ServiceOriginalReply {
+    try .init(originalRequest: request, originalResponse: response,
+        requestID: serviceRequired(response["request_id"]?.number), result: serviceRequired(response["result"]))
 }
 nonisolated func serviceOriginalReply(request: Data, response: Data) throws -> ServiceOriginalReply {
-    let root = try JSONDecoder().decode(ServiceJSON.self, from: response)
-    return try .init(originalRequestJSON: request, originalResponseJSON: response,
-        requestID: serviceRequired(root["request_id"]?.number), result: serviceRequired(root["result"]))
+    try serviceOriginalReply(request: JSONDecoder().decode(ServiceJSON.self, from: request),
+        response: JSONDecoder().decode(ServiceJSON.self, from: response))
 }
 
 // Failure diagnostics inspect only completed raw packet headers. Never rebuild
@@ -204,9 +215,9 @@ actor ServiceWorkflowWire {
         staging = try CloudMediaStaging(directory: directory.appending(path: "leases"))
     }
     func call(_ operation: ServiceJSON, instance: String? = nil) async throws -> ServiceOriginalReply {
-        let frame = try serviceRequestFrame(operation, instance: instance)
-        let data = try await process.request(frame)
-        return try serviceOriginalReply(request: frame, response: data)
+        let message = serviceRequestMessage(operation, instance: instance)
+        let response = try await process.request(message: message)
+        return try serviceOriginalReply(request: message, response: response)
     }
 
     func createZone(_ zone: String) async throws {
