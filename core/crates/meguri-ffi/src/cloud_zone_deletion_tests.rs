@@ -514,3 +514,6 @@ fn pause_while_original_deletion_reply_is_held_consumes_once_without_mutating_cu
         Some(CloudZoneDeletionDiagnostic::Deleted { .. })
     ));
 }
+
+#[path = "cloud_cleanup_tests.rs"]
+mod cleanup;

@@ -208,6 +208,7 @@ pub(super) fn outcome(c: &Connection, response: &Response) -> Result<OutcomeRefe
         Err(e) => Err(error_reference(c, e)?),
         Ok(reply) => Ok(match reply {
             Reply::Done => ReplyReference::Done,
+            Reply::AllZones(zones) => ReplyReference::AllZones(zones.clone()),
             Reply::Record(r) => ReplyReference::Record(reference(c, r)?),
             Reply::Modified(items) => ReplyReference::Modified(
                 items

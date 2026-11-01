@@ -108,6 +108,7 @@ fn request(frame: &[u8]) -> Result<(Scope, Caller, Operation), &'static str> {
         | Operation::CreateZone { .. }
         | Operation::Modify { .. }
         | Operation::Read { .. }
+        | Operation::FetchAllZones
         | Operation::FetchDatabase { .. }
         | Operation::FetchZone { .. } => Ok((scope, caller, operation)),
         _ => Err("unsupported-operation"),

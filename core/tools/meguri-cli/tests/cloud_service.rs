@@ -363,7 +363,11 @@ fn refused_frames_do_not_dispatch_mutate_or_echo_bodies_and_cap_is_checked_befor
         Operation::SetQuota { bytes: Some(0) },
         Operation::DeleteZone {
             zone: "z".into(),
-            cause: RemovalCause::Deleted,
+            cause: RemovalCause::Purged,
+        },
+        Operation::DeleteZone {
+            zone: "z".into(),
+            cause: RemovalCause::EncryptedDataReset,
         },
     ] {
         cases.push((
@@ -436,4 +440,113 @@ fn startup_errors_are_classified_without_paths_or_input_and_command_is_internal(
             .unwrap()
             .contains("internal-cloud-service")
     );
+}
+
+#[test]
+fn stdio_all_zone_inventory_returns_original_complete_service_response() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = Client::open(directory.path());
+    client.create("z");
+    client.create("a");
+    let scoped_response = |client: &mut Client, scope: &Scope, operation: Operation| -> Response {
+        let mut bytes =
+            serde_json::to_vec(&json!({"scope": scope, "caller": caller(), "operation": operation})).unwrap();
+        bytes.push(b'\n');
+        client.write(&bytes);
+        serde_json::from_str(&client.line()).unwrap()
+    };
+    let mut other = scope();
+    other.account = "fixture-other-account".into();
+    let created = scoped_response(&mut client, &other, Operation::CreateZone { zone: "z".into() });
+    assert_eq!(created.result, Ok(Reply::Done));
+    let original = client.response(Operation::FetchAllZones);
+    assert_eq!(original.result, Ok(Reply::AllZones(vec!["a".into(), "z".into()])));
+    let deleted = client.response(Operation::DeleteZone {
+        zone: "z".into(),
+        cause: RemovalCause::Deleted,
+    });
+    assert_eq!(deleted.result, Ok(Reply::Done));
+    let absent = client.response(Operation::FetchAllZones);
+    assert_eq!(absent.result, Ok(Reply::AllZones(vec!["a".into()])));
+    let foreign = scoped_response(&mut client, &other, Operation::FetchAllZones);
+    assert_eq!(foreign.result, Ok(Reply::AllZones(vec!["z".into()])));
+    let recreated = client.response(Operation::CreateZone { zone: "z".into() });
+    assert_eq!(recreated.result, Ok(Reply::Done));
+    let fresh = client.response(Operation::FetchAllZones);
+    assert_eq!(fresh.result, Ok(Reply::AllZones(vec!["a".into(), "z".into()])));
+    assert!(client.finish(0).is_empty());
+
+    let service = Service::open(directory.path(), Config::default(), SeededRandom::new(3)).unwrap();
+    let logs = service.request_log().unwrap();
+    let outcomes = service.outcomes().unwrap();
+    assert_eq!(logs.len(), 9);
+    assert_eq!(outcomes.len(), logs.len());
+    assert!(logs.windows(2).all(|pair| pair[0].request_id < pair[1].request_id));
+    for (response, scope, kind, zone, expected) in [
+        (
+            created,
+            other.clone(),
+            RequestKind::CreateZone,
+            Some("z"),
+            ReplyReference::Done,
+        ),
+        (
+            original,
+            scope(),
+            RequestKind::FetchAllZones,
+            None,
+            ReplyReference::AllZones(vec!["a".into(), "z".into()]),
+        ),
+        (
+            deleted,
+            scope(),
+            RequestKind::DeleteZone,
+            Some("z"),
+            ReplyReference::Done,
+        ),
+        (
+            absent,
+            scope(),
+            RequestKind::FetchAllZones,
+            None,
+            ReplyReference::AllZones(vec!["a".into()]),
+        ),
+        (
+            foreign,
+            other,
+            RequestKind::FetchAllZones,
+            None,
+            ReplyReference::AllZones(vec!["z".into()]),
+        ),
+        (
+            recreated,
+            scope(),
+            RequestKind::CreateZone,
+            Some("z"),
+            ReplyReference::Done,
+        ),
+        (
+            fresh,
+            scope(),
+            RequestKind::FetchAllZones,
+            None,
+            ReplyReference::AllZones(vec!["a".into(), "z".into()]),
+        ),
+    ] {
+        assert!(response.request_id > 0);
+        let entry = logs
+            .iter()
+            .find(|entry| entry.request_id == response.request_id)
+            .unwrap();
+        assert_eq!(entry.scope, scope);
+        assert_eq!(entry.caller, caller());
+        assert_eq!(entry.kind, kind);
+        assert_eq!(entry.zone.as_deref(), zone);
+        assert_eq!(entry.outcome, LogOutcome::Success);
+        let outcome = outcomes
+            .iter()
+            .find(|entry| entry.request_id == response.request_id)
+            .unwrap();
+        assert_eq!(outcome.result, Ok(expected));
+    }
 }

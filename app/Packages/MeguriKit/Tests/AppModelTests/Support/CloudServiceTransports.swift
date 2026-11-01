@@ -11,10 +11,10 @@ private nonisolated final class ServicePreparedFrames: Sendable {
     private let state = Mutex(State())
     private let frames: [(Data, CloudServicePreparedFrame)]
     private let preserveReplies: Bool
-    init(process: CloudServiceProcess, operations: [ServiceJSON], preserveReplies: Bool = false) throws {
+    init(process: CloudServiceProcess, operations: [ServiceJSON], preserveReplies: Bool = false, ownOperation: String? = nil) throws {
         self.preserveReplies = preserveReplies
         frames = try operations.map { operation in
-            let frame = try serviceRequestFrame(operation)
+            let frame = try serviceRequestFrame(operation, ownOperation: ownOperation)
             return (frame, try process.prepare(frame))
         }
     }
@@ -56,7 +56,7 @@ nonisolated struct ServiceOwnTransport: CloudOwnTransport {
     func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         let operations: [ServiceJSON]
         switch command {
-        case .zoneInventory: throw ServiceWorkflowFailure.unsupported
+        case .zoneInventory: operations = [.string("FetchAllZones")]
         case .read(let target), .publication(.read(let target)):
             operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
         case .zoneDeletionActiveRead(let target):
@@ -85,8 +85,10 @@ private nonisolated final class ServicePreparedOwn: CloudPreparedOwnOperation, S
     init(wire: ServiceWorkflowWire, command: CloudOwnTransportCommand, operations: [ServiceJSON]) throws {
         self.wire = wire; self.command = command
         let preserve: Bool
-        switch command { case .zoneDeletionActiveRead, .deleteZones: preserve = true; default: preserve = false }
-        originals = try ServicePreparedFrames(process: wire.process, operations: operations, preserveReplies: preserve)
+        switch command { case .zoneInventory, .zoneDeletionActiveRead, .deleteZones: preserve = true; default: preserve = false }
+        let ownOperation: String?
+        if case .zoneInventory = command { ownOperation = "cleanup-inventory" } else { ownOperation = nil }
+        originals = try ServicePreparedFrames(process: wire.process, operations: operations, preserveReplies: preserve, ownOperation: ownOperation)
     }
     func enqueue() -> Bool { originals.enqueue() }
     func cancel() { originals.cancel() }

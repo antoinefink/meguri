@@ -31,6 +31,7 @@ pub struct CloudPolicyExecution {
     command: Arc<CloudPolicyCommand>,
     original_sdk: Option<String>,
     registration: Mutex<Registration>,
+    pub(crate) cleanup_begun: std::sync::atomic::AtomicBool,
     pub(crate) zone_deletion_begun: std::sync::atomic::AtomicBool,
 }
 
@@ -140,6 +141,7 @@ impl CloudPolicy {
             | p::ActionKind::ResumeMedia
             | p::ActionKind::PauseMedia
             | p::ActionKind::ReadBlobs { .. }
+            | p::ActionKind::RunCleanup
             | p::ActionKind::DeleteZones
             | p::ActionKind::RetryAssetEntries
             | p::ActionKind::PrioritizeMedia { .. }
@@ -167,6 +169,7 @@ impl CloudPolicy {
             command,
             original_sdk,
             registration: Mutex::new(Registration::default()),
+            cleanup_begun: std::sync::atomic::AtomicBool::new(false),
             zone_deletion_begun: std::sync::atomic::AtomicBool::new(false),
         })))
     }

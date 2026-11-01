@@ -1351,3 +1351,51 @@ fn q3_invalid_sql_integers_are_rejected() {
     assert_eq!(s.outcomes_page(u64::MAX, 1), Err(StorageError::Exhausted));
     assert_eq!(s.request_log_page(u64::MAX, 1), Err(StorageError::Exhausted));
 }
+
+#[test]
+fn zone_list_requests_record_original_results() {
+    let (_directory, mut service) = cloud(Config {
+        page_size: 1,
+        ..Config::default()
+    });
+    let scope = scope();
+    let mut other = scope.clone();
+    other.account = "other-account".into();
+    create(&mut service, &scope, "z");
+    create(&mut service, &scope, "a");
+    create(&mut service, &other, "foreign");
+    call(
+        &mut service,
+        &scope,
+        Operation::DeleteZone {
+            zone: "z".into(),
+            cause: RemovalCause::Deleted,
+        },
+    )
+    .unwrap();
+    let caller = Caller {
+        own_operation: Some("all-zone-inventory".into()),
+        ..Caller::default()
+    };
+    let original = service
+        .request(&scope, caller.clone(), Operation::FetchAllZones)
+        .unwrap();
+    assert_eq!(original.result, Ok(Reply::AllZones(vec!["a".into()])));
+    create(&mut service, &scope, "z");
+    let fresh = service
+        .request(&scope, caller.clone(), Operation::FetchAllZones)
+        .unwrap();
+    assert_eq!(fresh.result, Ok(Reply::AllZones(vec!["a".into(), "z".into()])));
+    let log = service.request_log().unwrap();
+    let entry = log.iter().find(|e| e.request_id == original.request_id).unwrap();
+    assert_eq!(entry.kind, RequestKind::FetchAllZones);
+    assert_eq!(entry.caller, caller);
+    assert_eq!(entry.zone, None);
+    let outcome = service
+        .outcomes()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.request_id == original.request_id)
+        .unwrap();
+    assert_eq!(outcome.result, Ok(ReplyReference::AllZones(vec!["a".into()])));
+}

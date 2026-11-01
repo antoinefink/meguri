@@ -209,6 +209,15 @@ fn live_zone(c: &Connection, key: &str, zone: &str) -> Result<u64, Failure> {
 }
 fn dispatch(c: &Connection, key: &str, scope: &Scope, request: u64, op: Operation, entropy: u64) -> Dispatch {
     match op {
+        Operation::FetchAllZones => {
+            // One actual request transaction captures every live zone in this
+            // scope, without pagination or incremental-feed inference.
+            let mut query = c.prepare("SELECT zone FROM zones WHERE scope=?1 AND removed IS NULL ORDER BY zone")?;
+            let zones = query
+                .query_map([key], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Reply::AllZones(zones))
+        }
         Operation::Configure(config) => {
             if !config.valid() {
                 return Err(error(ErrorCode::InvalidArguments).into());
@@ -782,6 +791,7 @@ fn tag(version: u64, entropy: u64) -> [u8; 32] {
 
 fn request_log(request_id: u64, scope: &Scope, caller: Caller, op: &Operation) -> RequestLog {
     let (kind, zone) = match op {
+        Operation::FetchAllZones => (RequestKind::FetchAllZones, None),
         Operation::CreateZone { zone } => (RequestKind::CreateZone, Some(zone)),
         Operation::DeleteZone { zone, .. } => (RequestKind::DeleteZone, Some(zone)),
         Operation::Modify { zone, .. } => (RequestKind::Modify, Some(zone)),

@@ -12,6 +12,7 @@ mod callback;
 pub mod cancel;
 pub mod changes;
 pub mod cloud_asset_reads;
+pub mod cloud_cleanup;
 pub mod cloud_connection;
 pub mod cloud_media;
 pub mod cloud_policy;

@@ -207,6 +207,8 @@ pub struct Token {
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Operation {
+    /// Authoritative current private-database inventory, independent of change tokens.
+    FetchAllZones,
     CreateZone {
         zone: String,
     },
@@ -297,6 +299,7 @@ pub struct Page<T> {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reply {
+    AllZones(Vec<String>),
     Done,
     Modified(Vec<MutationResult>),
     Record(Record),
@@ -323,6 +326,7 @@ pub struct RecordSummary {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestKind {
+    FetchAllZones,
     CreateZone,
     DeleteZone,
     Modify,
@@ -458,6 +462,7 @@ pub enum ChangeReference {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplyReference {
+    AllZones(Vec<String>),
     Done,
     Modified(Vec<MutationReference>),
     Record(RecordReference),

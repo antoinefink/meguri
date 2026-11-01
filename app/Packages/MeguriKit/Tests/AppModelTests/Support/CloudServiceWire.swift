@@ -95,10 +95,10 @@ nonisolated struct ServiceRecordBytes: Sendable {
     }
 }
 
-nonisolated func serviceRequestFrame(_ operation: ServiceJSON, instance: String? = nil) throws -> Data {
+nonisolated func serviceRequestFrame(_ operation: ServiceJSON, instance: String? = nil, ownOperation: String? = nil) throws -> Data {
     try ServiceJSON.object([
         "scope": .object(["container": .string("synthetic-initial-app"), "environment": .string("development"), "account": .string("synthetic-initial-account")]),
-        "caller": .object(["device": .string("synthetic-app-workflow"), "instance": instance.map(ServiceJSON.string) ?? .null, "own_operation": .null]),
+        "caller": .object(["device": .string("synthetic-app-workflow"), "instance": instance.map(ServiceJSON.string) ?? .null, "own_operation": ownOperation.map(ServiceJSON.string) ?? .null]),
         "operation": operation,
     ]).encoded()
 }
@@ -186,7 +186,12 @@ actor ServiceWorkflowWire {
         // method only projects those original outcomes; it issues no request.
         let reply = try serviceRequired(replies.first)
         switch command {
-        case .zoneInventory: throw ServiceWorkflowFailure.unsupported
+        case .zoneInventory:
+            guard replies.count == 1 else { throw ServiceWorkflowFailure.wire }
+            let values = try serviceRequired(try reply.ok()["AllZones"]?.items)
+            let zones = try values.map { try serviceRequired($0.text) }
+            guard zones == zones.sorted(), Set(zones).count == zones.count else { throw ServiceWorkflowFailure.wire }
+            return .zoneInventory(zones: zones)
         case .zoneDeletionActiveRead:
             if let error = reply.result["Err"] {
                 let failure = try deletionFailure(error)

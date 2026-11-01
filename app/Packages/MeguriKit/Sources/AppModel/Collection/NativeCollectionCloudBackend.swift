@@ -124,6 +124,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         guard !closed else { return }
         await accounts.close()
         await own?.close()
+        await executor.drainCleanups()
         await executor.drainZoneDeletions()
         var replaced = false
         do { _ = try await policy.status() }

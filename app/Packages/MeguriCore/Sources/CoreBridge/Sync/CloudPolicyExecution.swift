@@ -119,8 +119,9 @@ public struct CloudPolicyNativeResult: Sendable {
     public let deferred: Bool
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil) {
-        self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError
+    public let cleanupInventoryError: (any Error)?
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil) {
+        self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
     }
 }
 public protocol CloudPolicyNativeExecuting: Sendable {
@@ -149,6 +150,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private var mediaDrains: [String: Task<Void, Never>] = [:]
     private var heldMediaResume: [String: (CloudPolicyCommand, CoreCloudPolicyExecution)] = [:]
     private var mediaHookInstalled = false
+    private let cleanupWorker: CloudCleanupExecutor?
+    private var cleanupRun: Task<CloudPolicyNativeResult, Never>?
+    private var cleanupSDK: String?
     private let zoneDeletionWorker: CloudZoneDeletionExecutor?
     private var zoneDeletionRun: Task<CloudPolicyNativeResult, Never>?
     private var zoneDeletionSDK: String?
@@ -159,6 +163,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }) {
         self.policy = policy; self.adapter = adapter; self.exchangeGate = exchangeGate; self.readinessClock = readinessClock
         self.mediaService = mediaService; self.mediaTransport = mediaTransport
+        self.cleanupWorker = ownTransport.map { CloudCleanupExecutor(transport: $0) }
         self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0) }
         self.flushDeadline = flushDeadline
     }
@@ -167,6 +172,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         if !mediaHookInstalled {
             mediaHookInstalled = true
             await adapter.setOriginalMediaDrain { [weak self] sdk in
+                await self?.drainCleanups(sdk: sdk)
                 await self?.drainZoneDeletions(sdk: sdk)
                 await self?.drainOriginalMedia(sdk)
             }
@@ -195,6 +201,15 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 outputs.append(try await policy.input(.refresh(.cloud)))
+            case .runCleanup:
+                guard cleanupRun == nil else { throw CloudOwnTransportFailure.busy }
+                let task = Task { await self.performCleanup(command) }
+                cleanupRun = task
+                defer { cleanupRun = nil; cleanupSDK = nil }
+                return await withTaskCancellationHandler {
+                    if Task.isCancelled { task.cancel() }
+                    return await task.value
+                } onCancel: { task.cancel() }
             case .deleteZones:
                 // An action emitted during a run adds no work, even a rerun.
                 guard zoneDeletionRun == nil else { return .init(outputs: [], error: nil, deferred: false) }
@@ -280,8 +295,6 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             case .cancelExchange(let id):
                 let execution = try await policy.prepareExecution(command)
                 if execution != nil, exchange == id { nativeExchangeTask?.cancel(); await adapter.cancelPolicyExchange() }
-            default:
-                throw BridgeError.cloudPolicy(.coreCapabilityUnavailable)
             }
             return .init(outputs: outputs, error: nil, deferred: false)
         } catch {
@@ -290,6 +303,39 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             if let followup = try? await policy.input(.refresh(.cloud)) { outputs.append(followup) }
             return .init(outputs: outputs, error: error, deferred: false)
         }
+    }
+    private func performCleanup(_ command: CloudPolicyCommand) async -> CloudPolicyNativeResult {
+        do {
+            try Task.checkCancellation()
+            guard let worker = cleanupWorker else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
+            guard let permit = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
+            cleanupSDK = try await permit.originalSDK()
+            try Task.checkCancellation()
+            // A failure here is a required-computation failure. Only a pass
+            // returned by this exact qualified port permits the observation.
+            let pass = try await permit.beginCleanupPass()
+            var inventoryFailure: (any Error)?
+            do { try await worker.run(pass) }
+            catch { inventoryFailure = error }
+            let projection = try await policy.input(.refresh(.cloud))
+            return .init(outputs: [projection], error: nil, deferred: false, cleanupInventoryError: inventoryFailure)
+        } catch {
+            CloudCleanupDiagnostics.record(error)
+            // A failed required computation may have stopped tracking. Return
+            // its actual projection so lifecycle follow-ups can still drain.
+            let followup = try? await policy.input(.refresh(.cloud))
+            return .init(outputs: followup.map { [$0] } ?? [], error: error, deferred: false)
+        }
+    }
+    private func drainCleanups(sdk: String) async {
+        guard cleanupSDK == nil || cleanupSDK == sdk else { return }
+        await drainCleanups()
+    }
+    public func drainCleanups() async {
+        let original = cleanupRun
+        original?.cancel()
+        await cleanupWorker?.interruptAndDrain()
+        _ = await original?.value
     }
     private func performZoneDeletion(_ command: CloudPolicyCommand, worker: CloudZoneDeletionExecutor?) async -> CloudPolicyNativeResult {
         var failure: (any Error)?

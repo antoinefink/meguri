@@ -1149,9 +1149,10 @@ impl CloudPolicy {
         callback::enter("CloudPolicy.submit_native");
         self.owns(&command)?;
         match &command.command.action.kind {
-            // These actions require guarded result ports not yet supplied by
-            // this packet. Admission cannot stand in for applying their results.
-            p::ActionKind::ReadBlobs { .. }
+            // These actions use dedicated retained execution/result ports.
+            // General queue admission cannot substitute for those capabilities.
+            p::ActionKind::RunCleanup
+            | p::ActionKind::ReadBlobs { .. }
             | p::ActionKind::RetryAssetEntries
             | p::ActionKind::ResumeMedia
             | p::ActionKind::DeleteZones => {
@@ -1159,7 +1160,6 @@ impl CloudPolicy {
             }
             p::ActionKind::UpdatePending(_)
             | p::ActionKind::ApplyReady { .. }
-            | p::ActionKind::RunCleanup
             | p::ActionKind::RecordExchange(_)
             | p::ActionKind::RecordQuietPoint { .. }
             | p::ActionKind::ProbeTracking

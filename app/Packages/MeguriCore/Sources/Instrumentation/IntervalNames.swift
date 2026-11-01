@@ -371,6 +371,10 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyExecutionBeginAssetReadPass = BridgeCall("CloudPolicyExecution.begin_asset_read_pass")
     public static let testCloudZoneDeletionFixture = BridgeCall("test_cloud_zone_deletion_fixture")
     public static let testCloudZoneDeletionRows = BridgeCall("test_cloud_zone_deletion_rows")
+    public static let cloudPolicyExecutionBeginCleanupPass = BridgeCall("CloudPolicyExecution.begin_cleanup_pass")
+    public static let cloudCleanupPassSubmitInventory = BridgeCall("CloudCleanupPass.submit_inventory")
+    public static let cloudCleanupPassCompleteInventory = BridgeCall("CloudCleanupPass.complete_inventory")
+    public static let cloudCleanupPassFinish = BridgeCall("CloudCleanupPass.finish")
     public static let cloudPolicyExecutionBeginZoneDeletionPass = BridgeCall("CloudPolicyExecution.begin_zone_deletion_pass")
     public static let cloudZoneDeletionPassActiveTarget = BridgeCall("CloudZoneDeletionPass.active_target")
     public static let cloudZoneDeletionPassSubmitRead = BridgeCall("CloudZoneDeletionPass.submit_read")
@@ -457,6 +461,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
+        cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
