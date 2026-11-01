@@ -309,3 +309,33 @@ Decided 2026-10-27 (screen contract `stats.heatmapSettings`):
 - Settings › Heatmap (N11.4) holds R1339's group, First day of week (`editor/config-keys` K5) and R1342's device toggles in their own On This Device group.
 - Calendar mode is a segmented picker. The day limits are written when their field commits, not per keystroke. Turning Ignore data before on starts at the collection's creation date, which `stats/heatmap-addon` A2.2 ignores, so nothing changes until a later date is chosen.
 - Replaces: U229's identifier pattern `settings.heatmap.*` (now `stats.heatmapSettings.*`).
+
+## N12. Mac redesign decisions (2026-11-01)
+
+Decided by Antoine in chat on 2026-11-01. Where earlier text differs, this section wins.
+
+### N12.1 Deck page
+
+- The Mac deck page is the album page: leading large title, one line of counts ("20 new · 3 learning · 72 to review"), a Study button, then Subdecks, the deck's error and its previous session in one native List.
+- All three counts stay visible, including zeros, in plain secondary text. VoiceOver reads each as New, Learning or To Review with its number.
+- The Decks root has no list header and the sidebar has no "Decks" header. Its first row is "All Decks".
+- Replaces on Mac: N2's centred deck and centred Study, N11.5's coloured counts on the deck page.
+
+### N12.2 Buttons
+
+- No large capsule buttons in app content. Use standard Mac control sizes and shapes; window toolbar items keep the system's own shape.
+
+### N12.3 Review
+
+- The default light card page is white (`render/card-runtime` C4.3). A template's own background still wins, and `--canvas` keeps its value for templates that read it.
+- Back to Decks and the status icon are real window toolbar items, with no window title. The window behind them uses the default card page colour.
+- Back to Decks is a round icon-only toolbar button (`chevron.backward`). "Back to Decks" stays its accessible name and hover help. Replaces N3's and N11.1's visible label on Mac.
+- Answer buttons are standard-height Mac buttons with the name and interval on one line, four equal widths, Good prominent.
+
+### N12.4 Anki server sync
+
+- Anki server sync is hidden from the interface on every platform; iCloud is the only sync offered. Settings shows no Anki Server section and Collection shows no Server Transfers.
+- `.colpkg` file import and export stay.
+- The code, its tests and the `settings/anki-transfer/*` routes stay. UI suites that open the hidden screens launch with `-ShowAnkiServerInterface YES`.
+- Pauses N5's Connection section, N6, N7 and N11.4's Anki Server section until Antoine brings the feature back. R118's Anki Transfers actions and the requirements behind them are not met while it is hidden.
+
