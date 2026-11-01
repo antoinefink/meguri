@@ -186,6 +186,21 @@ actor ServiceWorkflowWire {
         // method only projects those original outcomes; it issues no request.
         let reply = try serviceRequired(replies.first)
         switch command {
+        case .zoneDeletionActiveRead:
+            if let error = reply.result["Err"] {
+                let failure = try deletionFailure(error)
+                let read: CloudControlRead = failure.code == 11 ? .missing : (failure.code == 26 ? .zoneMissing : .failed)
+                return .zoneDeletionActiveRead(.init(read: read, failure: failure))
+            }
+            return .zoneDeletionActiveRead(.init(read: try controlRead(reply)))
+        case .deleteZones(let batch):
+            guard replies.count == batch.zones.count else { throw ServiceWorkflowFailure.wire }
+            let results = try zip(batch.zones, replies).map { zone, reply -> CloudZoneDeletionResult in
+                if let error = reply.result["Err"] { return .init(zone: zone, failure: try deletionFailure(error)) }
+                guard try reply.ok().text == "Done" else { throw ServiceWorkflowFailure.wire }
+                return .init(zone: zone, failure: nil)
+            }
+            return .deletedZones(.init(results: results))
         case .read: return .read(try controlRead(reply))
         case .publication(.read): return .publication(.read(try controlRead(reply)))
         case .publication(.createZones(let zones)):
@@ -222,6 +237,22 @@ actor ServiceWorkflowWire {
             let lease = try retainAsset(row.asset("pa"), payload: true)
             return .assetRead(try .init(record: row.record(zone: zone, lease: lease), asset: lease))
         }
+    }
+    private func deletionFailure(_ error: ServiceJSON) throws -> CloudZoneDeletionFailure {
+        let code: Int64
+        switch try serviceRequired(error["code"]?.text) {
+        case "UnknownItem": code = 11
+        case "ZoneNotFound": code = 26
+        case "UserDeletedZone": code = 28
+        case "ServerRecordChanged": code = 14
+        case "InvalidArguments": code = 12
+        case "LimitExceeded": code = 27
+        case "QuotaExceeded": code = 25
+        case "BatchRequestFailed": code = 22
+        case "ChangeTokenExpired": code = 21
+        default: throw ServiceWorkflowFailure.wire
+        }
+        return .init(code: code, encryptedDataReset: error["encrypted_data_reset"]?.flag == true)
     }
     private func controlRead(_ reply: ServiceOriginalReply) throws -> CloudControlRead {
         if let error = reply.result["Err"] {

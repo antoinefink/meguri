@@ -9,6 +9,9 @@ use meguri_testkit::cloud::{
     coordinator::{execute_publication_request, publication_control_record},
 };
 
+#[path = "cloud_zone_deletion_tests.rs"]
+mod zone_deletion;
+
 #[path = "cloud_payload_asset_tests.rs"]
 mod payload_assets;
 

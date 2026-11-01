@@ -115,7 +115,7 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
         }
         waiter?.resume(with: result)
     }
-    func reply() async throws -> Data {
+    func reply(preservingCancelledResult: Bool = false) async throws -> Data {
         let data: Data = try await withCheckedThrowingContinuation { continuation in
             let ready = state.withLock { value -> Result<Data, any Error>? in
                 guard value.queued else { return .failure(CloudServiceProcessFailure.input) }
@@ -127,8 +127,10 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
             if let ready { continuation.resume(with: ready) }
         }
         // Cancellation never truncates a frame or leaves its reply in stdout.
-        if state.withLock({ $0.cancelled }) { throw CancellationError() }
-        try Task.checkCancellation()
+        if !preservingCancelledResult {
+            if state.withLock({ $0.cancelled }) { throw CancellationError() }
+            try Task.checkCancellation()
+        }
         return data
     }
 }

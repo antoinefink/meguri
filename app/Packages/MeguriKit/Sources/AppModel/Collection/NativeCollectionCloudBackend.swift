@@ -51,7 +51,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
             assetReadDidFinish: persisted, exchangeDidJoin: persisted,
             appOwnsAccountObservation: true, accountReadRequested: persisted)
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
-            mediaService: media, mediaTransport: mediaTransport)
+            mediaService: media, mediaTransport: mediaTransport, ownTransport: ownTransport)
         let own = CloudOwnExecutor(core: connection, transport: ownTransport)
         return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)
@@ -86,7 +86,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         async let native = executor.execute(command)
         if case .cancelBackgroundFlush = command.action { await own?.interruptAndDrain() }
         let result = await native
-        return .init(outputs: result.outputs, error: result.error, deferred: result.deferred)
+        return SyncCommandResult(result)
     }
     func beginAccountRead(transition: Bool) async throws -> UInt64 {
         try await accounts.begin(transition: transition)
@@ -124,6 +124,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         guard !closed else { return }
         await accounts.close()
         await own?.close()
+        await executor.drainZoneDeletions()
         var replaced = false
         do { _ = try await policy.status() }
         catch BridgeError.cloudPolicy(.generationChanged) { replaced = true }
@@ -156,6 +157,14 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         let root = directory.appending(path: "cloud-native-staging", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return try CloudMediaStaging(directory: root)
+    }
+}
+#endif
+
+#if canImport(CloudKit)
+extension SyncCommandResult {
+    init(_ result: CloudPolicyNativeResult) {
+        self.init(outputs: result.outputs, error: result.error, deferred: result.deferred)
     }
 }
 #endif

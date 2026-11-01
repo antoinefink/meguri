@@ -744,3 +744,38 @@ pub fn test_physical_review_rows(
     callback::enter("test_physical_review_rows");
     crate::physical_review_rows::observe(&runtime::host()?.collection()?, card_id, revlog_id)
 }
+
+/// Real synthetic retained rows only. Production still issues/guards every pass.
+#[uniffi::export]
+pub fn test_cloud_zone_deletion_fixture(sdk: String) -> Result<Vec<String>, CoreError> {
+    callback::enter("test_cloud_zone_deletion_fixture");
+    let host = runtime::host()?;
+    host.cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud fixture unavailable"))?
+        .prepare_zone_deletion_fixture_for_testing(&sdk)
+        .map_err(crate::sync::cloud_error)
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudZoneDeletionFixtureRow {
+    pub zone: String,
+    pub due: bool,
+}
+#[uniffi::export]
+pub fn test_cloud_zone_deletion_rows() -> Result<Vec<CloudZoneDeletionFixtureRow>, CoreError> {
+    callback::enter("test_cloud_zone_deletion_rows");
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud fixture unavailable"))?;
+    Ok(core
+        .publication_control_for_testing()
+        .map_err(crate::sync::cloud_error)?
+        .zones
+        .into_iter()
+        .map(|(zone, row)| CloudZoneDeletionFixtureRow {
+            zone,
+            due: row.deletion_due,
+        })
+        .collect())
+}

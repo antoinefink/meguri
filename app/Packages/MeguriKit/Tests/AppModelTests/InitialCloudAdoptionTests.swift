@@ -157,6 +157,66 @@ extension ReviewCollectionStartupTests {
         } catch { await harness.cleanup(); throw error }
     }
 
+    @Test func failedIssuedZoneDeletionDoesNotEnterCoordinatorFailureCycleOrChangeExchange() async throws {
+        let fixture = try InitialCloudFixture.load()
+        let harness = try InitialCloudHarness(fixture: fixture, automatic: true)
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        let boundary = SyncOwnerFake()
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in boundary }, defaults: nil)
+        do {
+            try await harness.beginAndWaitForPage()
+            harness.page.finish(fixture.page)
+            await harness.joinOriginal()
+            await harness.sync.waitForReplacement()
+            await harness.owner.waitForCloudActivation()
+            await harness.sync.prepareConnectionAuthority()
+            let backend = try #require(harness.backends.last)
+            try await backend.waitForStart()
+            // Capture an actual drain-issued command from the existing app fixture.
+            // The original workflow still executes every action, including RunCleanup.
+            let command = try await backend.waitForZoneDeletion()
+            let policy = try await backend.workflow.policy()
+            let native = NativeCloudPolicyExecutor(policy: policy,
+                adapter: CloudKitSyncAdapter(core: backend.workflow, engineFactory: harness.factory))
+            var originalFailure: (any Error)?
+            await sync.preparePlatform()
+            await sync.completeOpenedHost(generation: harness.owner.generation)
+            await sync.prepareConnectionAuthority()
+            boundary.nextCommands = [try #require(backend.lastStatusCommand)]
+            sync.receive(.refresh(.cloud))
+            await boundary.waitForExecution()
+            await sync.waitForInputs()
+            boundary.executeCommand = { command in
+                let result = await native.execute(command)
+                if case .deleteZones = command.action { originalFailure = result.zoneDeletionError }
+                return SyncCommandResult(result)
+            }
+            let before = try await policy.status()
+            let appStatus = try #require(sync.status?.state)
+            let revision = sync.failureRevision
+            try #require(!sync.operationFailed)
+            boundary.nextCommands = [command]
+            sync.receive(.refresh(.cloud))
+            await boundary.waitForExecution()
+            await sync.waitForInputs()
+            #expect(originalFailure as? BridgeError == .cloudPolicy(.coreCapabilityUnavailable))
+            #expect(!sync.operationFailed && sync.status?.state == appStatus)
+            let afterRevision = sync.failureRevision
+            #expect(afterRevision == revision)
+            let after = try await policy.status()
+            #expect(after.state == before.state && after.asOfMilliseconds == before.asOfMilliseconds)
+            #expect(after.lastAttempt?.exchange == before.lastAttempt?.exchange)
+            #expect(after.lastCompleted?.exchange == before.lastCompleted?.exchange)
+            #expect(after.lastAttempt?.endedMilliseconds == before.lastAttempt?.endedMilliseconds)
+            #expect(after.lastCompleted?.endedMilliseconds == before.lastCompleted?.endedMilliseconds)
+            #expect(CloudZoneDeletionDiagnostics.localFailures().contains {
+                if case .localFailure(.capabilityUnavailable, let facts) = $0 { facts.code == nil } else { false }
+            })
+            #expect(await sync.cancelAndDrain())
+            #expect(await harness.owner.close())
+        } catch { _ = await sync.cancelAndDrain(); await harness.cleanup(); throw error }
+    }
+
     @Test func automaticInitialAdoptionStartsCursorlessSDKAndFetchesRealCloudRows() async throws {
         let fixture = try InitialCloudFixture.load()
         let harness = try InitialCloudHarness(fixture: fixture, automatic: true)
@@ -611,6 +671,10 @@ private nonisolated final class InitialCloudTransport: CloudOwnTransport, Sendab
             let entities = records.filter { $0.zone == zone && $0.recordType == "MGEntity" }
                 .map { CloudStagingRecord(name: $0.name, recordType: $0.recordType, record: $0.control) }
             return InitialCloudImmediateReply(.page(records: entities, deleted: [], next: nil))
+        case .zoneDeletionActiveRead(let target):
+            let record = records.first { $0.zone == target.zone && $0.name == target.name && $0.recordType == target.recordType }
+            return InitialCloudImmediateReply(.zoneDeletionActiveRead(.init(read: record.map { .found($0.control) } ?? .missing)))
+        case .deleteZones: throw CloudOwnTransportFailure.unexpectedReply
         case .assetRead: throw CloudOwnTransportFailure.unexpectedReply
         case .publication: throw CloudOwnTransportFailure.unexpectedReply
         }
@@ -660,6 +724,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     private let startup: AsyncStream<Void>
     private let startupFinished: AsyncStream<Void>.Continuation
     private(set) var starts: [(automatic: Bool, succeeded: Bool)] = []
+    private(set) var lastStatusCommand: CloudPolicyCommand?
     private var lastPolicyStatus: CloudPolicyStatus?
     private var lastRead = "not-called"
     private var lastReadError = "none"
@@ -692,6 +757,12 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     func waitForStart() async throws {
         try await initialCloudSignal(startup, stage: "backend-start") { [self] in await startDiagnostics }
         try #require(starts.last?.succeeded == true, "\(startDiagnostics)")
+    }
+    private let zoneDeletions = AsyncStream<Void>.makeStream()
+    private var lastZoneDeletion: CloudPolicyCommand?
+    func waitForZoneDeletion() async throws -> CloudPolicyCommand {
+        try await initialCloudSignal(zoneDeletions.stream, stage: "issued-zone-deletion")
+        return try #require(lastZoneDeletion)
     }
     private let exchanges: AsyncStream<Void>
     private let exchangeFinished: AsyncStream<Void>.Continuation
@@ -729,6 +800,8 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
             catch { Issue.record("Original exchange observation failed: \(String(describing: error))") }
         }
         let result = await backend.execute(command)
+        if case .deleteZones = command.action { lastZoneDeletion = command; zoneDeletions.continuation.yield(()) }
+        if case .statusChanged = command.action { lastStatusCommand = command }
         lastExecute = "\(stage): returned; deferred=\(result.deferred); failed=\(result.error != nil)"
         if let error = result.error { lastExecuteError = String(describing: error) }
         observe(result.outputs)
@@ -757,6 +830,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     func resumeAfterCoreResume() async { await backend.resumeAfterCoreResume() }
     func close() async throws {
         try await backend.close()
+        zoneDeletions.continuation.finish()
         closeCount = 1
     }
 }

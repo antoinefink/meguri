@@ -83,6 +83,7 @@ pub(crate) struct FetchCall {
 #[derive(Default)]
 pub(crate) struct AdapterState {
     pub sdk: Option<SDKAuthority>,
+    pub zone_deletions: Vec<super::zone_deletion::Diagnostic>,
     pub sdk_retrying: bool,
     pub next_sdk: u64,
     pub token: u64,

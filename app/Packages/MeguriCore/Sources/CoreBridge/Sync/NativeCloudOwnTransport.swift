@@ -181,21 +181,30 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
 }
 
 public struct NativeCloudOwnTransport: CloudOwnTransport {
-    private let queue: any NativeCloudDatabaseQueue
+    let queue: any NativeCloudDatabaseQueue
     private let staging: CloudMediaStaging?
+    let zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     public init(database: CKDatabase) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
+        zoneDeletionTerminalHandlerInstalled = nil
     }
     public init(database: CKDatabase, staging: CloudMediaStaging) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         self.staging = staging
+        zoneDeletionTerminalHandlerInstalled = nil
     }
-    init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil) { self.queue = queue; self.staging = staging }
+    init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil,
+         zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil) {
+        self.queue = queue; self.staging = staging
+        self.zoneDeletionTerminalHandlerInstalled = zoneDeletionTerminalHandlerInstalled
+    }
     public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         switch command {
+        case .zoneDeletionActiveRead(let target): return try prepareZoneDeletionRead(target)
+        case .deleteZones(let batch): return try prepareZoneDeletion(batch)
         case .read(let target): return read(target, publication: false)
         case .assetRead(let zone, let name): return try assetRead(zone: zone, name: name)
         case .publication(.read(let target)): return read(target, publication: true)

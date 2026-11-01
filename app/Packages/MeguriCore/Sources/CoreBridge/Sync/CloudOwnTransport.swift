@@ -9,18 +9,22 @@ public enum CloudOwnTransportCommand: Sendable {
     /// The core supplies the work for this read.
     /// Its submit guards must pass before the operation can start.
     case assetRead(zone: String, name: String)
+    case zoneDeletionActiveRead(CloudControlTarget)
+    case deleteZones(CloudZoneDeletionBatch)
     case adoptionPage(zone: String, cursor: Data?)
 }
 public enum CloudOwnTransportReply: Sendable {
     case publication(CloudPublicationResult)
     case read(CloudControlRead)
     case assetRead(CloudAssetReadResult)
+    case zoneDeletionActiveRead(CloudZoneDeletionRead)
+    case deletedZones(CloudZoneDeletionReply)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
 }
 public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
-public protocol CloudPreparedOwnOperation: CloudPublicationQueue, CloudAssetReadQueue {
+public protocol CloudPreparedOwnOperation: CloudPublicationQueue, CloudAssetReadQueue, CloudZoneDeletionQueue {
     /// The original operation's terminal callback, buffered even if it arrives
     /// during Rust submission. Cancellation must drain this same callback.
     func reply() async throws -> CloudOwnTransportReply

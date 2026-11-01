@@ -134,7 +134,10 @@ public struct CloudDurableSnapshot: Sendable, Equatable {
     public let trackingStopped: Bool; public let absencePassCompleted: Bool
 }
 public struct CloudFetchDrain: Sendable, Equatable { public let zone: String; public let fetched: Bool }
-public struct CloudWorkflowDiagnostics: Sendable, Equatable { public let missingDidFetchEvents: UInt64 }
+public struct CloudWorkflowDiagnostics: Sendable, Equatable {
+    public let missingDidFetchEvents: UInt64
+    public let zoneDeletions: [CloudZoneDeletionDiagnostic]
+}
 public struct CloudWorkflowStatus: Sendable, Equatable { public let syncingCollection: Bool }
 public enum CloudWaitingReason: Sendable, Equatable { case noAccount }
 public enum CloudCollectionOutcome: Sendable, Equatable { case succeeded, waiting(CloudWaitingReason), incomplete, failed, cancelled }

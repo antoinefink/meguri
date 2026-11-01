@@ -140,7 +140,7 @@ public final class SyncCoordinator {
     private var closeTask: Task<Bool, Never>?
     private var attachmentTask: Task<Void, Never>?
     private var hostRevision: UInt64 = 0
-    private var failureRevision: UInt64 = 0
+    private(set) var failureRevision: UInt64 = 0
     private var commandSequence: UInt64 = 0
     private var timerSequence: UInt64 = 0
     private var statusSequence: UInt64 = 0

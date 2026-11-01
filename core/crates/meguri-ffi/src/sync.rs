@@ -178,6 +178,7 @@ pub struct CloudFetchDrain {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudWorkflowDiagnostics {
     pub missing_did_fetch_events: u64,
+    pub zone_deletions: Vec<crate::cloud_zone_deletion::CloudZoneDeletionDiagnostic>,
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudWorkflowStatus {
@@ -490,6 +491,12 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.diagnostics");
         Ok(CloudWorkflowDiagnostics {
             missing_did_fetch_events: self.core.adapter_missing_did(),
+            zone_deletions: self
+                .core
+                .zone_deletion_diagnostics()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         })
     }
     pub fn status(&self) -> Result<CloudWorkflowStatus, CoreError> {

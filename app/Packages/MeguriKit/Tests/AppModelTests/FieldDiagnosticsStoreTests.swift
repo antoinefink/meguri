@@ -1,3 +1,4 @@
+import CoreBridge
 import Foundation
 import Instrumentation
 import MetricKit
@@ -217,10 +218,54 @@ import AppModel
         #expect(RequestRecorder.requests.withLock { $0 }.isEmpty, "field diagnostics never leave the device")
     }
 
+    @Test func debugInfoExportsBoundedReadDeletionAndLocalFailureFacts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "FieldCloudDiagnostics-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let diagnostics: [CloudZoneDeletionDiagnostic] = [
+            .read(found: false, allowed: 0, failure: .init(code: 6, retryAfterMilliseconds: 123_000), terminal: .init(code: 2)),
+            .deleted(results: [
+                .init(zone: "private-zone-one", failure: nil),
+                .init(zone: "private-zone-two", failure: .init(code: 26, encryptedDataReset: true)),
+                .init(zone: "private-zone-three", failure: .init(code: 7, retryAfterMilliseconds: 456_000))
+            ], terminal: .init(code: 2, retryAfterMilliseconds: 456_000)),
+            .localFailure(category: .queueRejected, failure: .init(code: nil))
+        ]
+        let store = FieldDiagnosticsStore(directory: directory, zoneDeletionDiagnostics: { diagnostics })
+        let bytes = try await store.debugInfo()
+        let json = try JSONSerialization.jsonObject(with: bytes)
+        let info = try #require(json as? [String: Any])
+        let exported = try #require(info["zoneDeletions"] as? [[String: Any]])
+        #expect(exported.count == 3)
+        #expect(exported[0]["kind"] as? String == "read")
+        let read = try #require(exported[0]["failure"] as? [String: Any])
+        #expect(read["code"] as? Int == 6 && read["retryAfterMilliseconds"] as? Int == 123_000)
+        #expect((exported[0]["terminal"] as? [String: Any])?["code"] as? Int == 2)
+        let results = try #require(exported[1]["results"] as? [[String: Any]])
+        #expect(results.count == 3 && results[0]["failure"] == nil)
+        let reset = try #require(results[1]["failure"] as? [String: Any])
+        #expect(reset["code"] as? Int == 26 && reset["encryptedDataReset"] as? Bool == true)
+        let deletion = try #require(results[2]["failure"] as? [String: Any])
+        #expect(deletion["code"] as? Int == 7 && deletion["retryAfterMilliseconds"] as? Int == 456_000)
+        #expect((exported[1]["terminal"] as? [String: Any])?["retryAfterMilliseconds"] as? Int == 456_000)
+        #expect(exported[2]["category"] as? String == "queueRejected")
+        #expect((exported[2]["failure"] as? [String: Any])?["code"] == nil)
+        let text = String(decoding: bytes, as: UTF8.self)
+        #expect(!text.contains("private-zone") && !text.contains("account") && !text.contains("settings") && !text.contains("systemFields"))
+        let bounded = FieldDiagnosticsStore(directory: directory, zoneDeletionDiagnostics: {
+            Array(repeating: diagnostics[0], count: 200)
+        })
+        let boundedBytes = try await bounded.debugInfo()
+        let boundedJSON = try JSONSerialization.jsonObject(with: boundedBytes)
+        let boundedInfo = try #require(boundedJSON as? [String: Any])
+        #expect((boundedInfo["zoneDeletions"] as? [Any])?.count == 128)
+    }
+
     @Test func debugInfoHoldsEverythingStored() async throws {
         let store = try temporaryStore()
         let empty = try await store.debugInfo()
         #expect(try JSONSerialization.jsonObject(with: empty) as? [String: Any] != nil)
+        let emptyInfo = try #require(JSONSerialization.jsonObject(with: empty) as? [String: Any])
+        #expect((emptyInfo["zoneDeletions"] as? [Any])?.isEmpty == true)
         try await deliver([Self.metricReport()], [Self.hangDiagnostic()], to: store)
         let stored = try await store.debugInfo()
         let info = try #require(JSONSerialization.jsonObject(with: stored) as? [String: Any])

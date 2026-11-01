@@ -97,7 +97,10 @@ public actor CoreCloudWorkflowService {
     }
     public func diagnostics() async throws -> CloudWorkflowDiagnostics {
         let raw = try await owner()
-        return try await MaintenanceLane.shared.call(.cloudWorkflowDiagnostics) { CloudWorkflowDiagnostics(missingDidFetchEvents: try raw.diagnostics().missingDidFetchEvents) }
+        return try await MaintenanceLane.shared.call(.cloudWorkflowDiagnostics) {
+            let value = try raw.diagnostics()
+            return CloudWorkflowDiagnostics(missingDidFetchEvents: value.missingDidFetchEvents, zoneDeletions: value.zoneDeletions.map(CloudZoneDeletionDiagnostic.init))
+        }
     }
     public func status() async throws -> CloudWorkflowStatus {
         let raw = try await owner()

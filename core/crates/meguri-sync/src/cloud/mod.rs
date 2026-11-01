@@ -20,6 +20,7 @@ pub mod row_payload;
 pub mod runtime;
 pub mod workflow;
 mod workflow_store;
+pub mod zone_deletion;
 
 pub mod incoming;
 mod incoming_merge;

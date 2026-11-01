@@ -10,7 +10,9 @@ private nonisolated final class ServicePreparedFrames: Sendable {
     private struct State { var queued = false; var cancelled = false }
     private let state = Mutex(State())
     private let frames: [(Data, CloudServicePreparedFrame)]
-    init(process: CloudServiceProcess, operations: [ServiceJSON]) throws {
+    private let preserveReplies: Bool
+    init(process: CloudServiceProcess, operations: [ServiceJSON], preserveReplies: Bool = false) throws {
+        self.preserveReplies = preserveReplies
         frames = try operations.map { operation in
             let frame = try serviceRequestFrame(operation)
             return (frame, try process.prepare(frame))
@@ -35,12 +37,12 @@ private nonisolated final class ServicePreparedFrames: Sendable {
             var replies: [ServiceOriginalReply] = []
             var firstFailure: (any Error)?
             for (frame, original) in frames {
-                do { replies.append(try serviceOriginalReply(request: frame, response: await original.reply())) }
+                do { replies.append(try serviceOriginalReply(request: frame, response: await original.reply(preservingCancelledResult: preserveReplies))) }
                 catch { if firstFailure == nil { firstFailure = error } }
             }
             // Join ALL accepted frames even after cancellation or a first error.
             if let firstFailure { throw firstFailure }
-            try Task.checkCancellation()
+            if !preserveReplies { try Task.checkCancellation() }
             return replies
         } onCancel: { self.cancel() }
     }
@@ -56,6 +58,11 @@ nonisolated struct ServiceOwnTransport: CloudOwnTransport {
         switch command {
         case .read(let target), .publication(.read(let target)):
             operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
+        case .zoneDeletionActiveRead(let target):
+            operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
+        case .deleteZones(let batch):
+            guard !batch.zones.isEmpty else { throw ServiceWorkflowFailure.unsupported }
+            operations = batch.zones.map { .object(["DeleteZone": .object(["zone": .string($0), "cause": .string("Deleted")])]) }
         case .assetRead(let zone, let name): operations = [serviceReadOperation(zone: zone, name: name, fields: nil)]
         case .adoptionPage(let zone, let cursor):
             let token = try cursor.map { try JSONDecoder().decode(ServiceJSON.self, from: $0) } ?? .null
@@ -76,7 +83,9 @@ private nonisolated final class ServicePreparedOwn: CloudPreparedOwnOperation, S
     private let originals: ServicePreparedFrames
     init(wire: ServiceWorkflowWire, command: CloudOwnTransportCommand, operations: [ServiceJSON]) throws {
         self.wire = wire; self.command = command
-        originals = try ServicePreparedFrames(process: wire.process, operations: operations)
+        let preserve: Bool
+        switch command { case .zoneDeletionActiveRead, .deleteZones: preserve = true; default: preserve = false }
+        originals = try ServicePreparedFrames(process: wire.process, operations: operations, preserveReplies: preserve)
     }
     func enqueue() -> Bool { originals.enqueue() }
     func cancel() { originals.cancel() }

@@ -369,6 +369,15 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudWorkflowMedia = BridgeCall("CloudWorkflow.media")
     public static let cloudWorkflowBeginFirstAssetReadPass = BridgeCall("CloudWorkflow.begin_first_asset_read_pass")
     public static let cloudPolicyExecutionBeginAssetReadPass = BridgeCall("CloudPolicyExecution.begin_asset_read_pass")
+    public static let testCloudZoneDeletionFixture = BridgeCall("test_cloud_zone_deletion_fixture")
+    public static let testCloudZoneDeletionRows = BridgeCall("test_cloud_zone_deletion_rows")
+    public static let cloudPolicyExecutionBeginZoneDeletionPass = BridgeCall("CloudPolicyExecution.begin_zone_deletion_pass")
+    public static let cloudZoneDeletionPassActiveTarget = BridgeCall("CloudZoneDeletionPass.active_target")
+    public static let cloudZoneDeletionPassSubmitRead = BridgeCall("CloudZoneDeletionPass.submit_read")
+    public static let cloudZoneDeletionPassCompleteRead = BridgeCall("CloudZoneDeletionPass.complete_read")
+    public static let cloudZoneDeletionPassSubmitDeletion = BridgeCall("CloudZoneDeletionPass.submit_deletion")
+    public static let cloudZoneDeletionPassCompleteDeletion = BridgeCall("CloudZoneDeletionPass.complete_deletion")
+    public static let cloudZoneDeletionPassFinish = BridgeCall("CloudZoneDeletionPass.finish")
     public static let cloudAssetReadPassNext = BridgeCall("CloudAssetReadPass.next")
     public static let cloudAssetReadPassSubmit = BridgeCall("CloudAssetReadPass.submit")
     public static let cloudAssetReadPassComplete = BridgeCall("CloudAssetReadPass.complete")
@@ -447,6 +456,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
+        cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,

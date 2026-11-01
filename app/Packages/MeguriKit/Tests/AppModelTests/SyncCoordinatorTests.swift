@@ -243,6 +243,10 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var closeCount = 0
     var persistedReads = 0
     var inputError: (any Error)?
+    var nextCommands: [CloudPolicyCommand] = []
+    var executeCommand: (@MainActor (CloudPolicyCommand) async -> SyncCommandResult)?
+    private let executions = AsyncStream<Void>.makeStream()
+    func waitForExecution() async { for await _ in executions.stream { return } }
     var onClose: (@MainActor () async throws -> Void)?
     private var account: CheckedContinuation<Void, Never>?
     private var accountStarted: CheckedContinuation<Void, Never>?
@@ -261,9 +265,15 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
             if cause == .local { localRefreshCount += 1; localRefreshWaiter?.resume(); localRefreshWaiter = nil }
         default: break
         }
-        return .commands([])
+        let commands = nextCommands
+        nextCommands = []
+        return .commands(commands)
     }
-    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
+    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        let result = await executeCommand?(command) ?? .init(outputs: [], error: nil, deferred: false)
+        executions.continuation.yield(())
+        return result
+    }
     func beginAccountRead(transition: Bool) async throws -> UInt64 { UInt64(accountReads + 1) }
     func readAccount(_ read: UInt64) async -> SyncCommandResult {
         accountReads += 1

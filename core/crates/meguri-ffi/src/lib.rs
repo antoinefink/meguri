@@ -15,6 +15,7 @@ pub mod cloud_asset_reads;
 pub mod cloud_connection;
 pub mod cloud_media;
 pub mod cloud_policy;
+pub mod cloud_zone_deletion;
 pub mod collection;
 pub mod collection_entry;
 pub mod collection_export;

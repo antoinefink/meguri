@@ -1185,7 +1185,7 @@ impl Runtime {
             account,
         })
     }
-    fn validate_zone_deletion_guard(
+    pub(super) fn validate_zone_deletion_guard(
         &self,
         guard: &ZoneDeletionGuard,
         collection: &Collection,

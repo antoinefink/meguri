@@ -87,6 +87,11 @@ impl Runtime {
                     .filter(|n| !held.contains(*n) && !s.policy.parked.contains(*n))
                     .count() as u64;
                 summary.parked = pending.intersection(&s.policy.parked).count() as u64;
+                summary.zone_deletions_due = store
+                    .retained_zones(b.binding.id)?
+                    .values()
+                    .filter(|row| row.deletion_due)
+                    .count() as u64;
                 let current = s
                     .adapter
                     .sdk

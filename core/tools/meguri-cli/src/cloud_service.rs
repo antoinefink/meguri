@@ -101,7 +101,11 @@ fn request(frame: &[u8]) -> Result<(Scope, Caller, Operation), &'static str> {
     let caller: Caller = serde_json::from_value(value["caller"].take()).map_err(|_| "malformed-frame")?;
     let operation: Operation = serde_json::from_value(value["operation"].take()).map_err(|_| "malformed-frame")?;
     match operation {
-        Operation::CreateZone { .. }
+        Operation::DeleteZone {
+            cause: meguri_testkit::cloud::RemovalCause::Deleted,
+            ..
+        }
+        | Operation::CreateZone { .. }
         | Operation::Modify { .. }
         | Operation::Read { .. }
         | Operation::FetchDatabase { .. }

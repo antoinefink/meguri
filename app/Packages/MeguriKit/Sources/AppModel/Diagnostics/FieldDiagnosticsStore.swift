@@ -1,3 +1,4 @@
+import CoreBridge
 import Foundation
 import Instrumentation
 import MetricKit
@@ -32,13 +33,21 @@ public actor FieldDiagnosticsStore {
 
     public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
-    public init(directory: URL) {
+    private let zoneDeletionDiagnostics: @Sendable () async -> [CloudZoneDeletionDiagnostic]
+
+    public init(directory: URL, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] }) {
         self.directory = directory
+        self.zoneDeletionDiagnostics = zoneDeletionDiagnostics
     }
 
     /// `<Application Support>/Diagnostics/` in the app's container.
     public nonisolated static var standard: FieldDiagnosticsStore {
-        FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory))
+        let workflow = CoreCloudWorkflowService()
+        return FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory), zoneDeletionDiagnostics: {
+            // No open collection is a normal state for Copy Debug Info.
+            let core = try? await workflow.diagnostics()
+            return (core?.zoneDeletions ?? []) + CloudZoneDeletionDiagnostics.localFailures()
+        })
     }
 
     // MARK: Writing
@@ -109,13 +118,14 @@ public actor FieldDiagnosticsStore {
 
     /// Everything stored, as one JSON object (`metrics`, `diagnostics`,
     /// `signposts` by name) for Copy Debug Info.
-    public func debugInfo() throws -> Data {
+    public func debugInfo() async throws -> Data {
         var signposts: [String: [FieldSignpost]] = [:]
         for interval in IntervalNames.all {
             let stored = try self.signposts(named: interval.name)
             if !stored.isEmpty { signposts[interval.name] = stored }
         }
-        return try Self.encoder.encode(DebugInfo(metrics: try metrics(), diagnostics: try diagnostics(), signposts: signposts))
+        let zoneDeletions = await zoneDeletionDiagnostics().suffix(128).map(ZoneDeletionDebugInfo.init)
+        return try Self.encoder.encode(DebugInfo(metrics: try metrics(), diagnostics: try diagnostics(), signposts: signposts, zoneDeletions: zoneDeletions))
     }
 
     // MARK: What is kept
@@ -197,6 +207,32 @@ public actor FieldDiagnosticsStore {
         let metrics: [FieldMetrics]
         let diagnostics: [FieldDiagnostic]
         let signposts: [String: [FieldSignpost]]
+        let zoneDeletions: [ZoneDeletionDebugInfo]
+    }
+
+    /// Keep callback ordering and error facts, excluding zone names and payloads.
+    private struct ZoneDeletionDebugInfo: Encodable {
+        let kind: String
+        var found: Bool?
+        var allowed: UInt64?
+        var failure: CloudZoneDeletionFailure?
+        var terminal: CloudZoneDeletionFailure?
+        var results: [Result]?
+        var category: CloudZoneDeletionLocalFailure?
+        struct Result: Encodable {
+            let failure: CloudZoneDeletionFailure?
+        }
+        init(_ diagnostic: CloudZoneDeletionDiagnostic) {
+            switch diagnostic {
+            case .read(let found, let allowed, let failure, let terminal):
+                kind = "read"; self.found = found; self.allowed = allowed
+                self.failure = failure; self.terminal = terminal
+            case .deleted(let results, let terminal):
+                kind = "deleted"; self.results = results.map { Result(failure: $0.failure) }; self.terminal = terminal
+            case .localFailure(let category, let failure):
+                kind = "localFailure"; self.category = category; self.failure = failure
+            }
+        }
     }
 }
 

@@ -34,6 +34,8 @@ mod policy_impl;
 mod publication_impl;
 #[path = "workflow_runtime.rs"]
 mod workflow_impl;
+#[path = "zone_deletion_runtime.rs"]
+mod zone_deletion_impl;
 pub use super::publication::{KeyByteSource, KeySourceError};
 
 // Serialize probes, writes and connection drops across runtime owners.

@@ -122,6 +122,7 @@ pub struct Driver {
     runtime: Arc<Runtime>,
     clock: Arc<dyn Clock>,
     inner: Mutex<Owned>,
+    pub(super) zone_deletion: Mutex<std::sync::Weak<crate::cloud::zone_deletion::Pass>>,
 }
 #[cfg(feature = "test-hooks")]
 pub struct ExchangeObservation {
@@ -157,6 +158,7 @@ impl Driver {
             runtime,
             clock,
             inner: Mutex::new(Owned::default()),
+            zone_deletion: Mutex::new(std::sync::Weak::new()),
         }
     }
     pub fn status(&self) -> Status {
@@ -759,3 +761,6 @@ fn lifecycle_kind(lifecycle: &LifecycleState) -> Lifecycle {
 
 #[path = "native_execution.rs"]
 mod native_execution;
+
+#[path = "zone_deletion.rs"]
+mod zone_deletion;

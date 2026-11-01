@@ -63,6 +63,8 @@ import Testing
             "ManualTransferResult.request_stop",
         ]
         #expect(BridgeCall.all.map(\.name) == [
+            "test_cloud_zone_deletion_fixture", "test_cloud_zone_deletion_rows",
+            "CloudPolicyExecution.begin_zone_deletion_pass", "CloudZoneDeletionPass.active_target", "CloudZoneDeletionPass.submit_read", "CloudZoneDeletionPass.complete_read", "CloudZoneDeletionPass.submit_deletion", "CloudZoneDeletionPass.complete_deletion", "CloudZoneDeletionPass.finish",
             "CloudWorkflow.begin_first_asset_read_pass", "CloudPolicyExecution.begin_asset_read_pass", "CloudAssetReadPass.next", "CloudAssetReadPass.submit", "CloudAssetReadPass.complete", "CloudAssetReadPass.cancel", "CloudAssetReadPass.finish", "CloudAssetReadPass.operation_activity",
             "CloudWorkflow.media", "CloudWorkflow.submit_media_batch", "CloudMedia.downloads_blocked", "CloudPolicyExecution.begin_media", "CloudPolicyExecution.continue_media_after_send", "CloudMedia.next_work", "CloudMedia.submit_read", "CloudMedia.queue_upload", "CloudMedia.reply",
             "CloudWorkflow.policy", "CloudPolicy.input", "CloudPolicy.refresh_account", "CloudPolicy.project_identity_read", "CloudPolicy.status", "CloudPolicy.execute_core", "CloudPolicy.submit_native", "CloudPolicy.capture_exchange", "CloudPolicy.complete_exchange", "CloudPolicy.end_before_capture",
