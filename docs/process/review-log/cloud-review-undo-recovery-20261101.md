@@ -289,3 +289,24 @@ review-log evidence are preserved. This is source evidence only.
 `core-test/20261101T124409Z-59735` PASS2/2 corrected cases. Independent final
 review found no P0–P1 needing repair and no new P2. Scoped similarity passes.
 The full 419-case run remains failed until the corrected suite is verified.
+
+## Clean-commit regression and native app proof
+
+All three receipts below identify clean commit
+`015807f3bedef3514c83d22ebf58feeb4e1d1d55`:
+
+| Check | Receipt | Result |
+|---|---|---|
+| Selected complete CloudKit Rust binaries and cloud unit tests for sync/host | `core-test/20261101T124456Z-61192` | 419/419 PASS |
+| Formatting, clippy, layering and binary policy | `core-lint/20261101T124630Z-61657` | 4/4 PASS |
+| Native Swift app-model/CoreBridge review, registered media, reopen and fresh adoption | `swift-test/20261101T124657Z-62079` | 1/1 PASS |
+
+The native test uses a synthetic Service and exact row/media receipts. It does
+not establish live CloudKit SDK behavior or mobile device behavior. The failed
+419-case result is retained and superseded for this corrected test input.
+No test was disabled, no limit changed and no assertion was waived.
+
+U113/U114 remain unaccepted. Other P24 requirements and integration/milestone
+checks still need their own evidence. The original batch base and failed full
+gate remain in force; these scoped passes do not replace that gate or the
+remaining required device and acceptance work.
