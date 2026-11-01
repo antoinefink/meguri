@@ -4,6 +4,12 @@
 import Foundation
 import Testing
 
+nonisolated enum ServiceAppExchangePhase: String {
+    case aBaseline = "A-baseline", bBaseline = "B-baseline"
+    case bRemoteSave = "B-remote-save", aMergedSave = "A-merged-save"
+}
+nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000_000 }
+
 // Observes the original production backend's command completion. It does not
 // drive policy, acknowledge records, or implement a second coordinator.
 @MainActor final class ServiceAppBackend: SyncCoordinatorBackend {
@@ -30,12 +36,20 @@ import Testing
     private var diagnosticEntries: [DiagnosticEntry] = []
     private var diagnosticSequence: UInt64 = 0
     private var diagnosticBaseline: UInt64 = 0
+    private var commandSequence: UInt64 = 0
     var diagnostics: [String] { diagnosticEntries.map(\.message) }
     var exchangeDiagnostics: [String] {
         diagnosticEntries.filter { $0.sequence > diagnosticBaseline }.map(\.message)
     }
     // Sequence survives buffer trimming; a retained-array index does not.
     func markDiagnosticBaseline() { diagnosticBaseline = diagnosticSequence }
+    func trace(_ message: String, emit: Bool = false) {
+        diagnosticSequence += 1
+        let entry = "at_ms=\(serviceAppUptimeMilliseconds()) \(message)"
+        if diagnosticEntries.count == 32 { diagnosticEntries.removeFirst() }
+        diagnosticEntries.append(DiagnosticEntry(sequence: diagnosticSequence, message: entry))
+        if emit { print("Service app \(entry)") }
+    }
     private let wire: ServiceWorkflowWire
     private let mediaCompletions: AsyncStream<ServiceMediaCompletion>
     private let mediaCompleted: AsyncStream<ServiceMediaCompletion>.Continuation
@@ -71,9 +85,7 @@ import Testing
         }
         let actionTag = action.map { " action=\(actionLabel($0))" } ?? ""
         let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag)"
-        diagnosticSequence += 1
-        if diagnosticEntries.count == 16 { diagnosticEntries.removeFirst() }
-        diagnosticEntries.append(DiagnosticEntry(sequence: diagnosticSequence, message: diagnostic))
+        trace(diagnostic)
         return diagnostic
     }
     private func actionLabel(_ action: CloudPolicyAction) -> String {
@@ -124,8 +136,14 @@ import Testing
         }
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        commandSequence += 1
+        let sequence = commandSequence
+        let start = serviceAppUptimeMilliseconds()
+        let label = actionLabel(command.action)
+        trace("command.begin ordinal=\(sequence) action=\(label) elapsed_ms=0")
         if case .retryAssetEntries = command.action { assetRetryStarted += 1 }
         let result = await production.execute(command)
+        trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)")
         for output in result.outputs { capture(output, stage: .executeOutputs) }
         switch command.action {
         case .startEngine: started.yield(result.error == nil && !result.deferred)
@@ -190,12 +208,16 @@ import Testing
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }
     func resumeAfterCoreResume() async { await production.resumeAfterCoreResume() }
     func close() async throws {
+        let start = serviceAppUptimeMilliseconds()
+        trace("backend.close.begin elapsed_ms=0", emit: true)
         closeEntered += 1
         do { try await production.close() }
         catch {
             closeFailure = capture(error, stage: .closeThrow)
+            trace("backend.close.end elapsed_ms=\(serviceAppUptimeMilliseconds() - start) success=false", emit: true)
             throw error
         }
+        trace("backend.close.end elapsed_ms=\(serviceAppUptimeMilliseconds() - start) success=true", emit: true)
         closeReturned += 1
         closed = true
         started.finish(); exchanged.finish(); mediaCompleted.finish(); assetRetried.finish()
@@ -291,15 +313,59 @@ private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: St
         try await backend.waitForStart()
         try backend.markDiagnosticBaseline()
     }
-    func exchange() async throws {
+    func exchange(phase: ServiceAppExchangePhase? = nil) async throws {
         let original = try backend
-        sync.receive(.network(reachable: true)); sync.syncNow()
-        try await original.waitForExchange()
-        await sync.waitForInputs()
-        let exchangeSucceeded = !sync.operationFailed
-        let diagnostics = original.exchangeDiagnostics.joined(separator: " | ")
-        try #require(exchangeSucceeded, "Service app exchange: backend diagnostics=[\(diagnostics)]")
+        let label = phase?.rawValue ?? "unspecified"
+        let start = serviceAppUptimeMilliseconds()
+        let completedBefore = wire.process.transportExchanges().count
+        original.trace("exchange.begin phase=\(label) elapsed_ms=0", emit: true)
+        var succeeded = false
+        defer {
+            original.trace("exchange.end phase=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) success=\(succeeded)", emit: true)
+            if !succeeded {
+                print("Service app exchange phase=\(label) \(serviceTransportSummary(wire.process, after: completedBefore))")
+            }
+        }
+        do {
+            sync.receive(.network(reachable: true)); sync.syncNow()
+            try await original.waitForExchange()
+            await sync.waitForInputs()
+            let diagnostics = original.exchangeDiagnostics.joined(separator: " | ")
+            try #require(!sync.operationFailed, "Service app exchange phase=\(label): backend diagnostics=[\(diagnostics)]")
+            succeeded = true
+        } catch is ServiceAppTimeout {
+            let elapsed = serviceAppUptimeMilliseconds() - start
+            original.trace("exchange.timeout phase=\(label) elapsed_ms=\(elapsed)", emit: true)
+            throw ServiceAppTimeout(stage: "Sync Now exchange phase=\(label) elapsed_ms=\(elapsed)")
+        }
     }
     func cleanup() async { _ = await owner.close() }
+
+    // Only the failing asset fixture owns this process and may interrupt it.
+    // Join it before the single final owner close so accepted IPC can finish.
+    func cleanupAfterServiceFailure() async {
+        let start = serviceAppUptimeMilliseconds()
+        func record(_ message: String) {
+            let entry = "\(message) elapsed_ms=\(serviceAppUptimeMilliseconds() - start)"
+            if let backend = backends.last { backend.trace(entry, emit: true) }
+            else { print("Service app at_ms=\(serviceAppUptimeMilliseconds()) \(entry)") }
+        }
+        func reportTrace() {
+            for (index, backend) in backends.enumerated() {
+                print("Service app backend ordinal=\(index) trace=[\(backend.diagnostics.joined(separator: " | "))]")
+            }
+        }
+        reportTrace()
+        record("cleanup.process.cancel.begin")
+        let exit = await wire.process.cancel()
+        record("cleanup.process.cancel.end joined=\(exit.joined) status=\(exit.status) io_failed=\(exit.ioFailed)")
+        #expect(exit.joined, "Failing asset fixture must join its owned Service process")
+        record("cleanup.owner.close.begin")
+        let closed = await owner.close()
+        record("cleanup.owner.close.end closed=\(closed)")
+        #expect(closed, "Failing asset fixture final owner.close returned false; host may remain retained")
+        reportTrace()
+        print(serviceTransportSummary(wire.process))
+    }
 }
 #endif

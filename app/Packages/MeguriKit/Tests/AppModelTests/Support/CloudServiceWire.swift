@@ -119,6 +119,52 @@ nonisolated func serviceOriginalReply(request: Data, response: Data) throws -> S
         requestID: serviceRequired(root["request_id"]?.number), result: serviceRequired(root["result"]))
 }
 
+// Failure diagnostics inspect only completed raw packet headers. Never rebuild
+// logical asset JSON or render record fields, identifiers, tokens or envelopes.
+nonisolated func serviceTransportSummary(_ process: CloudServiceProcess, after completedBefore: Int = 0) -> String {
+    let exchanges = process.transportExchanges().dropFirst(completedBefore)
+    let allowedKinds = ["CreateZone", "DeleteZone", "FetchDatabase", "FetchZone", "Modify", "Read"]
+    var kinds: [String: Int] = [:]
+    var saved = 0
+    var unreadableHeaders = 0
+    var requestSizes = ServiceTransportSizes(), responseSizes = ServiceTransportSizes()
+    for exchange in exchanges {
+        let request = requestSizes.observe(exchange.request.header)
+        let response = responseSizes.observe(exchange.response.header)
+        if request == nil { unreadableHeaders += 1 }
+        if response == nil { unreadableHeaders += 1 }
+        let operation = request?["operation"] as? [String: Any]
+        let kind = allowedKinds.first { operation?[$0] != nil } ?? "other"
+        kinds[kind, default: 0] += 1
+        let result = response?["result"] as? [String: Any]
+        let ok = result?["Ok"] as? [String: Any]
+        for mutation in ok?["Modified"] as? [[String: Any]] ?? [] {
+            let result = mutation["result"] as? [String: Any]
+            let ok = result?["Ok"] as? [String: Any]
+            if ok?["Saved"] != nil { saved += 1 }
+        }
+    }
+    let counts = kinds.keys.sorted().map { "\($0)=\(kinds[$0]!)" }.joined(separator: ",")
+    return "Service transport completed_before=\(completedBefore) completed_count=\(exchanges.count) kinds=[\(counts)] saved_count=\(saved) unreadable_headers=\(unreadableHeaders) request=[\(requestSizes.summary)] response=[\(responseSizes.summary)]"
+}
+private nonisolated struct ServiceTransportSizes {
+    var headerTotal = 0, headerMax = 0, bodyCount = 0, bodyTotal = 0, bodyMax = 0
+    mutating func observe(_ header: Data) -> [String: Any]? {
+        headerTotal += header.count
+        headerMax = max(headerMax, header.count)
+        guard let root = (try? JSONSerialization.jsonObject(with: header)) as? [String: Any] else { return nil }
+        if let lengths = root["lengths"] as? [Int] {
+            bodyCount += lengths.count
+            bodyTotal += lengths.reduce(0, +)
+            bodyMax = max(bodyMax, lengths.max() ?? 0)
+        }
+        return root["message"] as? [String: Any] ?? root
+    }
+    var summary: String {
+        "header_bytes_total=\(headerTotal) header_bytes_max=\(headerMax) body_count=\(bodyCount) body_bytes_total=\(bodyTotal) body_bytes_max=\(bodyMax)"
+    }
+}
+
 actor ServiceWorkflowWire {
     let process: CloudServiceProcess
     let staging: CloudMediaStaging

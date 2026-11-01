@@ -32,7 +32,7 @@ extension ReviewCollectionStartupTests {
             try await wire.seed(fixture)
             active = a
             try await a.adopt()
-            try await a.exchange()
+            try await a.exchange(phase: .aBaseline)
             try #require(!a.sync.settings.automatic && !a.sync.settings.paused)
             let baseline = try #require(try await a.backend.workflow.entityFacts(name: name))
             let initialRead = try await wire.read(zone: zone, name: name, all: true)
@@ -58,13 +58,13 @@ extension ReviewCollectionStartupTests {
             // and server base through the public editor and real conditional save.
             active = b
             try await b.adopt()
-            try await b.exchange()
+            try await b.exchange(phase: .bBaseline)
             let bNote = try await CoreNoteService().readNote(id: seed.id)
             try #require(bNote.fields == original.fields && bNote.guid == original.guid)
             let remoteField = String(repeating: "remote", count: 160_000)
             let bReceiptsBefore = await wire.receipts.count
             try await assetRetryEdit(b, note: bNote, fields: [original.fields[0], remoteField])
-            try await b.exchange()
+            try await b.exchange(phase: .bRemoteSave)
             let bReceipts = Array(await wire.receipts.dropFirst(bReceiptsBefore))
             let remoteReceipt = try #require(bReceipts.last { $0.zone == zone && $0.record.name == name })
             let remoteSaved = try assetRetrySavedBytes(remoteReceipt)
@@ -159,7 +159,7 @@ extension ReviewCollectionStartupTests {
 
             // Only the ordinary policy/builder and Service Saved callback settle
             // the merged local edit. An accepted read alone is not an ACK.
-            try await a.exchange()
+            try await a.exchange(phase: .aMergedSave)
             let mergedReceipts = Array(await wire.receipts.dropFirst(receiptsBeforeRetries))
             let savedReceipt = try #require(mergedReceipts.last { $0.zone == zone && $0.record.name == name })
             let saved = try assetRetrySavedBytes(savedReceipt)
@@ -190,8 +190,15 @@ extension ReviewCollectionStartupTests {
             try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
             try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
         } catch {
-            await active?.cleanup()
-            _ = await process.cancel()
+            print(serviceTransportSummary(process))
+            if let active { await active.cleanupAfterServiceFailure() }
+            else {
+                let start = serviceAppUptimeMilliseconds()
+                print("Service app cleanup.process.cancel.begin at_ms=\(start) elapsed_ms=0")
+                let exit = await process.cancel()
+                print("Service app cleanup.process.cancel.end at_ms=\(serviceAppUptimeMilliseconds()) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) joined=\(exit.joined)")
+                #expect(exit.joined, "Failing asset fixture must join its owned Service process")
+            }
             throw error
         }
     }

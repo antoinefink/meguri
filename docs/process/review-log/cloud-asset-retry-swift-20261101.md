@@ -238,3 +238,35 @@ assertions and deadlines are byte-for-byte unchanged. This log preserves its
 prior contents and appends only this handoff. Both owned files retain final
 newlines and contain no trailing whitespace or conflict markers. Source
 export is ready; the compile correction remains UNRUN.
+
+## Native timeout diagnostics and fixture cleanup repair — UNRUN
+Role: fixer; supplied current `ba52768d`; original U113 and batch bases above unchanged.
+Root receipt `swift-test/20261101T135454Z-97651`: compiled, 18/20 passed.
+Automatic asset workflow timed out at Sync Now exchange after 16.481s; late runExchange staleCommand followed matching generation/binding guards.
+The following existing real-review/media case found another collection host busy; lifecycle audit found discarded close Bool and missing exchange phase.
+Authored UNRUN: fixed A-baseline/B-baseline/B-remote-save/A-merged-save phases; monotonic begin/end/timeout and fixed command action timings in a 32-entry backend trace.
+Failure summaries use completed raw packet headers only: fixed operation counts, actual Saved count, header/body length totals/maxima; failed-phase delta and pre/post-cleanup totals.
+Failure cleanup now records entry, interrupts/joins this fixture's Service FIRST, then calls owner.close exactly once and records/expects its actual Bool; original error is rethrown.
+No production guards/close, protocol, deadlines, retries, fixture payload or retry/cap/reopen/merge/durable-ACK assertions changed.
+One source consistency check is recorded in the filtered handoff; no builds/tests/history/network/forbidden-source reads in this session.
+Root: review source, run only the new workflow with this diagnostic delta first; retain failed evidence and all independent/provenance/privacy/similarity/batch gates.
+No native pass, cleanup success or acceptance claimed; preceding Rust 420/420 and CLI 8/8 receipts remain as supplied.
+
+## Root diagnostic execution
+
+`swift-test/20261101T140513Z-968` compiled and failed the single selected
+workflow with four issues. Both baseline exchanges passed. B's remote save
+took 9391 ms; A's merged save took 9310 ms. All five failed reads, cap, actual
+reopen and first-drain retry/merge/conditional Saved ACK assertions were
+reached successfully before the final reopen assertion failed. This is
+partial native evidence, not a passing workflow.
+
+Two resumeMedia errors occurred during normal close, one updatePending was
+rejected as stale, and final reopen failed its ready/no-operation-error check.
+The exact cause remains under review; no production guard has changed. The
+large-asset fixture has little margin under the existing 10-second barrier.
+Failure cleanup did join the Service and returned owner.close=true. The
+previous 18/20 native result remains failed and the original review/media
+case still needs an uncontaminated passing run after the cause is repaired.
+Privacy/similarity for the diagnostic source pass; independent source review
+found no P0–P2. U113/U114, P24/Q11 and the full batch gate remain open.
