@@ -90,3 +90,32 @@ then has no usable binding and its observer returns before capture. The repair
 must preserve only the settled, intent-free adoption for these two uncertain
 account results, leave the current identity Unknown and retain all remote gates.
 Signed-out, switched and differing accounts keep their mismatch handling.
+
+
+## Uncertain-startup admission repair — fixer handoff
+
+- Role: fixer; session `s-20261025T162405Z-9dc656e4`.
+- Original U113 start: `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`; original batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9` (supplied, no Git/history lookup).
+- Owned paths: `core/crates/meguri-host/src/open.rs` and this log only.
+
+The single startup match arm now handles `IdentityStatus::ReadFailed | IdentityStatus::TemporarilyUnavailable`, setting the existing `startup_identity_read_failed` preservation flag while returning `AccountBinding::Unknown`. This implements the supplied independent review diagnosis for K10.2/K11.1/K11.4 and K22.2. It supplies no stored account and changes no engine/runtime gate: the existing settled CloudAdopt, no-outstanding-intent restriction remains; unfinished adoption still needs real proof. SignedOut, SwitchedAccounts and available different identities retain their handling. Runtime identity verification and send/apply/purge/engine gates are unchanged.
+
+Own-code provenance: independently edited Meguri's existing host startup arm from the supplied reviewed correction and inspected own source only. No forbidden sources, history, network, Git or build access; no policy/spec edits, test changes, retries, limit changes or flag/module refactoring. Earlier review evidence and concurrent work are preserved.
+
+One bounded source-only consistency check: **PASS**. Reversing this exact arm replacement reproduces the pre-edit source byte-for-byte; the log is append-only with its previous contents intact. This is not compilation or runtime evidence.
+
+Compilation and both named `cloud_media_roundtrip` offline cases: **UNRUN** in this filtered fixer session. Runner/root owns compile, focused verification, independent review, provenance/privacy/similarity checks and required gates. The supplied prior receipt `core-test/20261101T120600Z-35794` remains ReadFailed PASS / TemporarilyUnavailable RED; no post-fix pass, acceptance, P24 closure or milestone completion is claimed.
+
+## Post-repair integrator verification
+
+`core-test/20261101T121029Z-39656`: 29/29 PASS. This includes all 27 recovery
+checks and both full offline-review cases, with their unchanged pending-state,
+second-reopen, identity gate, accepted Service save, exact peer and media checks.
+The earlier failed receipts remain retained. No retry policy was introduced.
+
+Independent reviewer `native_bounds_review` found no P0–P2 findings in the
+production branch repair. The settled adoption/no-intent restriction, Unknown
+account input and signed-out/different-account boundaries remain intact.
+`similarity/20261101T121024Z-39364` passes for the production change. The scoped
+privacy guard also passed before commit. The original batch base stays in force;
+this evidence accepts no unit, full gate, signed SDK run, device check or trial.

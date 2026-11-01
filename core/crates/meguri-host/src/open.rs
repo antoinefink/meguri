@@ -348,7 +348,7 @@ impl CoreHost {
                     },
                     _ => AccountBinding::Unknown,
                 },
-                IdentityStatus::ReadFailed => {
+                IdentityStatus::ReadFailed | IdentityStatus::TemporarilyUnavailable => {
                     startup_identity_read_failed = true;
                     AccountBinding::Unknown
                 }
