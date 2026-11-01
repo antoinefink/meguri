@@ -28,6 +28,8 @@ import Testing
             var visited: Set<ObjectIdentifier> = []
             let buttons = accessibilityButtons(in: field, visited: &visited)
             let matches = buttons.filter { $0.accessibilityLabel() == searchLabel }
+            recordSearchAccessibilityDiagnostic(window: window, field: field, cell: cell,
+                expectedLabel: searchLabel, matchCount: matches.count)
             try #require(matches.count == 1)
             let search = try #require(matches.first)
             #expect(search.accessibilityIdentifier() == "settings.root.searchButton")
@@ -45,6 +47,94 @@ import Testing
         if let field = view as? NSSearchField { return [field] }
         return view.subviews.flatMap { searchFields(in: $0) }
     }
+
+    // Diagnostic only: preserve the failing matcher. Never emit UI strings or
+    // runtime class names outside this exact public-AppKit allowlist.
+    private func recordSearchAccessibilityDiagnostic(window: NSWindow, field: NSSearchField,
+        cell: NSSearchFieldCell, expectedLabel: String, matchCount: Int) {
+        print("settingsSearchAX windowContentAttached=\(window.contentView != nil)"
+            + " windowVisible=\(window.isVisible) windowMiniaturized=\(window.isMiniaturized)"
+            + " fieldAttached=\(field.window === window) fieldHidden=\(field.isHidden)"
+            + " fieldHiddenBySelfOrAncestor=\(field.isHiddenOrHasHiddenAncestor)"
+            + " fieldVisibleRectEmpty=\(field.visibleRect.isEmpty)"
+            + " cellAttached=\(cell.controlView === field) matches=\(matchCount)")
+
+        let publicClasses: [(AnyClass, String)] = [
+            (NSAccessibilityElement.self, "NSAccessibilityElement"),
+            (NSSearchField.self, "NSSearchField"), (NSSearchFieldCell.self, "NSSearchFieldCell"),
+            (NSButtonCell.self, "NSButtonCell"), (NSActionCell.self, "NSActionCell"),
+            (NSTextFieldCell.self, "NSTextFieldCell"), (NSCell.self, "NSCell"),
+            (NSButton.self, "NSButton"), (NSTextField.self, "NSTextField"), (NSView.self, "NSView")
+        ]
+        let publicRoles: [NSAccessibility.Role] = [
+            .button, .textField, .group, .image, .staticText, .unknown, .window, .cell
+        ]
+        // Separate budgets and identity maps for the field (root=0) and cell
+        // (root=1). Edge 0 is the root, 1 direct children, 2 navigation children.
+        // IDs are local integers, never addresses. Repeated edges consume budget
+        // too, since navigation children can merely reorder the same objects.
+        for (root, element) in [field as AnyObject, cell as AnyObject].enumerated() {
+            let maxRecords = 32
+            let maxDepth = 3
+            var identities: [ObjectIdentifier: Int] = [:]
+            var records = 0
+            var nodeLimitReached = false
+            var depthLimitReached = false
+            func visit(_ object: AnyObject, parent: Int, edge: Int, index: Int, depth: Int) {
+                guard records < maxRecords else { nodeLimitReached = true; return }
+                records += 1
+                // Classify the actual class before attempting protocol conformance;
+                // subclasses not exactly in the public allowlist become "other".
+                let publicClass = publicClasses.first { type(of: object) == $0.0 }?.1 ?? "other"
+                let identity = ObjectIdentifier(object)
+                let repeated = identities[identity] != nil
+                let node = identities[identity] ?? identities.count
+                identities[identity] = node
+                let accessibility = object as? any NSAccessibilityProtocol
+                print("settingsSearchAX root=\(root) parent=\(parent) edge=\(edge) index=\(index)"
+                    + " depth=\(depth) node=\(node) repeated=\(repeated) class=\(publicClass)"
+                    + " conformsToNSAccessibility=\(accessibility != nil)")
+                guard let accessibility else { return }
+                let role = accessibility.accessibilityRole()
+                let publicRole = publicRoles.first { $0 == role }?.rawValue ?? "otherOrAbsent"
+                let identifier = accessibility.accessibilityIdentifier()
+                // Identifier classification: 0 absent, 1 one of the two known
+                // static Settings IDs already asserted here, 2 other. No raw IDs.
+                let identifierClass: Int
+                if let identifier, !identifier.isEmpty {
+                    identifierClass = ["settings.root.search", "settings.root.searchButton"].contains(identifier) ? 1 : 2
+                } else {
+                    identifierClass = 0
+                }
+                print("settingsSearchAX root=\(root) node=\(node) role=\(publicRole)"
+                    + " rolePresent=\(role != nil)"
+                    + " identifierClass=\(identifierClass)"
+                    + " labelMatchesExpected=\(accessibility.accessibilityLabel() == expectedLabel)"
+                    + " axElement=\(accessibility.isAccessibilityElement())")
+                guard !repeated else { return }
+                let direct = accessibility.accessibilityChildren() ?? []
+                let navigation = accessibility.accessibilityChildrenInNavigationOrder() ?? []
+                print("settingsSearchAX root=\(root) node=\(node)"
+                    + " directChildren=\(direct.count) navigationChildren=\(navigation.count)")
+                guard depth < maxDepth else {
+                    depthLimitReached = depthLimitReached || !direct.isEmpty || !navigation.isEmpty
+                    return
+                }
+                for (childEdge, children) in [(1, direct), (2, navigation)] {
+                    for (childIndex, child) in children.enumerated() {
+                        guard records < maxRecords else { nodeLimitReached = true; break }
+                        visit(child as AnyObject, parent: node, edge: childEdge,
+                            index: childIndex, depth: depth + 1)
+                    }
+                }
+            }
+            visit(element, parent: -1, edge: 0, index: 0, depth: 0)
+            print("settingsSearchAX root=\(root) records=\(records) uniqueNodes=\(identities.count)"
+                + " maxRecords=\(maxRecords) maxDepth=\(maxDepth)"
+                + " nodeLimitReached=\(nodeLimitReached) depthLimitReached=\(depthLimitReached)")
+        }
+    }
+
     private func accessibilityButtons(in element: any NSAccessibilityProtocol,
                                       visited: inout Set<ObjectIdentifier>) -> [any NSAccessibilityProtocol] {
         guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { return [] }
