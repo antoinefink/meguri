@@ -1746,6 +1746,7 @@ impl Device {
         let account = Arc::new(Account(Mutex::new(match b.identity {
             IdentityReads::Available(a) => IdentityStatus::Available(core::OpaqueBytes(a.into_bytes())),
             IdentityReads::FailAllSession => IdentityStatus::ReadFailed,
+            IdentityReads::TemporarilyUnavailable => IdentityStatus::TemporarilyUnavailable,
         })));
         let mut options = devices::options(&b.directory, b.now, b.seed);
         options.clock = clock.clone();

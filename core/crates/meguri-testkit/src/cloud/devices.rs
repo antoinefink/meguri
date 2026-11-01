@@ -24,6 +24,7 @@ pub(crate) fn failure() -> Box<dyn std::error::Error + Send + Sync> {
 pub enum IdentityReads {
     Available(String),
     FailAllSession,
+    TemporarilyUnavailable,
 }
 pub use runtime::DirtySource;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
