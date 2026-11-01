@@ -157,3 +157,16 @@ App-package check:
   coordinator, adoption, presentation and local review lifecycle checks pass.
 - `private/20261101T001704Z-50047` and
   `similarity/20261101T001702Z-49780` pass for this test repair.
+
+Final component checks at `5923a52d`:
+
+- `core-test/20261101T001752Z-50564`: all 23 selected asset-pass, activity and
+  conflict tests pass with Apple builds idle.
+- `build-app/20261101T002014Z-51131`: the standalone Debug macOS app builds
+  and passes its artifact checks. The build does not launch the app. It uses
+  ad hoc signing and does not prove signed-account iCloud behavior.
+
+Master contains this component and its focused evidence. The original batch
+base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`. Its gate remains open;
+retain the earlier failure evidence and repair the pending technical checks.
+U113 and U114 have no acceptance trailers from this work.
