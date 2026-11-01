@@ -150,3 +150,10 @@ App-package check:
 - `swift-test/20261101T001322Z-45322` fails compilation before tests run:
   `InitialCloudAdoptionTests` has an own-transport fake whose switch lacks the
   new asset-read case. Update that fake, then run the selected app tests.
+- `cleanroom/20261101T001544Z-47534` adds an explicit unsupported-command
+  rejection to that fake. Independent review finds no required fixes.
+- `swift-test/20261101T001622Z-48054`: all 24 selected app tests pass, with
+  no skips or compiler warnings. The package compiles the native backend;
+  coordinator, adoption, presentation and local review lifecycle checks pass.
+- `private/20261101T001704Z-50047` and
+  `similarity/20261101T001702Z-49780` pass for this test repair.

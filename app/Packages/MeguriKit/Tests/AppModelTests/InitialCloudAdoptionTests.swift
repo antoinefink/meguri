@@ -611,6 +611,7 @@ private nonisolated final class InitialCloudTransport: CloudOwnTransport, Sendab
             let entities = records.filter { $0.zone == zone && $0.recordType == "MGEntity" }
                 .map { CloudStagingRecord(name: $0.name, recordType: $0.recordType, record: $0.control) }
             return InitialCloudImmediateReply(.page(records: entities, deleted: [], next: nil))
+        case .assetRead: throw CloudOwnTransportFailure.unexpectedReply
         case .publication: throw CloudOwnTransportFailure.unexpectedReply
         }
     }
