@@ -49,3 +49,19 @@ Focused: swift-test/20261101T144959Z-22621 compiled, 15/21 passed. Directory
 setup now succeeds. Six cases fail because the helper has no issued resumeMedia
 command. Replace its manual adapter setup with the proven ServiceAppHarness
 startup. Preserve opaque handles and all scheduler assertions.
+
+Helper replacement: integration start 71901282; filtered source start bd5c1d02.
+Retain swift-test/20261101T144959Z-22621: 6/21 fail at resumeMedia capture.
+Reuse ServiceAppHarness adopt/exchange; observe first real resumeMedia/updatePending.
+Read-only callback records/yields; existing ten-second signal waits for issuance.
+Copied handles enter only fake execution; actual host stays owned by the harness.
+Require actual owner close and clean Service exit; failure cancels/joins before close.
+Six native fixture cases are Mac-guarded; both pure-fake cases stay platform-generic.
+All eight test bodies are unchanged. Helper replacement UNRUN; no acceptance.
+Integrator owns all 21 focused cases, native two-case follow-up, review and guards.
+
+Real-command fixture run: swift-test/20261101T150338Z-27960, 19/23 passed.
+Four tests fail in actual native close: updatePending reaches a backend whose
+SDK has already stopped, and the original guard rejects it as stale. Both
+full review/media workflows pass. Required finalization must finish before
+SDK authority ends; the next repair is a two-phase native close.

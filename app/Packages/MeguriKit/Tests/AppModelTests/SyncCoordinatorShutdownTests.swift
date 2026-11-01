@@ -1,10 +1,9 @@
 import Foundation
-@testable import Instrumentation
-import func MeguriCoreBindings.testCloudPrepareAdapterBaseline
 import Testing
 @testable import AppModel
 @testable import CoreBridge
 
+#if os(macOS)
 extension ReviewCollectionStartupTests {
     @Test func ownedShutdownCancellationAcknowledgesOriginalMediaAndReopensHealthy() async throws {
         try await withShutdownCommands { media, _ in
@@ -200,6 +199,10 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+}
+#endif
+
+extension ReviewCollectionStartupTests {
     @Test func unownedAccountCancellationDuringCloseRemainsFailure() async {
         let backend = SyncOwnerFake()
         backend.holdAccount = true
@@ -224,6 +227,10 @@ extension ReviewCollectionStartupTests {
         #expect(sync.operationFailed && backend.closed && backend.closeCount == 1)
     }
 
+}
+
+#if os(macOS)
+extension ReviewCollectionStartupTests {
     @Test func replacedResultsAndSameGenerationRetiredCallbacksRemainFenced() async throws {
         try await withShutdownCommands { media, _ in
             // Reusing the local generation across close/reopen also exercises
@@ -265,40 +272,59 @@ extension ReviewCollectionStartupTests {
     }
 }
 
-// Uses the existing schema and Rust adapter baseline to obtain actual issued
-// commands; only their execution is replaced by SyncOwnerFake. No transport runs.
+// The real harness retains its host; only copied, observed opaque handles reach
+// SyncOwnerFake. Its scheduler assertions do not prove native SDK acceptance.
 @MainActor private func withShutdownCommands(
     _ body: (CloudPolicyCommand, CloudPolicyCommand) async throws -> Void
 ) async throws {
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    let fixture = try InitialCloudFixture.load()
+    let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-shutdown-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     defer { try? FileManager.default.removeItem(at: root) }
-    let collectionDirectory = root.appending(path: "collection")
-    let backups = root.appending(path: "backups")
-    try FileManager.default.createDirectory(at: collectionDirectory, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-    let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
-    try FileManager.default.copyItem(at: source, to: collectionDirectory.appending(path: "collection.anki2"))
-    try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development,
-        status: .available, identity: Data("synthetic-account-A".utf8))
-    let collection = CoreCollectionService()
+    let serviceDirectory = root.appending(path: "service")
+    try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, transport: .binaryAssetsV1)
+    var active: ServiceAppHarness?
     do {
-        try await collection.open(.init(collectionDirectory: collectionDirectory, backupsDirectory: backups,
-            appGroupSnapshot: root.appending(path: "widget.snapshot")), randomSeed: 114)
-        try await MaintenanceLane.shared.call(BridgeCall("testCloudPrepareAdapterBaseline")) { @Sendable in
-            _ = try testCloudPrepareAdapterBaseline(entityCount: 1, localRevision: 3,
-                savedEngineState: nil, failNextInboxCommit: false, failNextStateCommit: false)
+        let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+        let harness = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
+        active = harness
+        defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
+        try await wire.seed(fixture)
+        try await harness.adopt()
+        let backend = try harness.backend
+        let observed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { backend.onCommands = nil; observed.continuation.finish() }
+        var media: CloudPolicyCommand?, update: CloudPolicyCommand?
+        backend.onCommands = { commands in
+            for command in commands {
+                switch command.action {
+                case .resumeMedia where media == nil: media = command
+                case .updatePending where update == nil: update = command
+                default: break
+                }
+            }
+            if media != nil && update != nil {
+                observed.continuation.yield(true)
+                observed.continuation.finish()
+            }
         }
-        let workflow = CoreCloudWorkflowService(), policy = try await workflow.policy()
-        _ = try await workflow.registerSDK(automatic: true)
-        _ = try await policy.refreshAccount()
-        _ = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true)))
-        _ = try await policy.input(.network(reachable: true))
-        guard case .commands(let commands) = try await policy.input(.foreground) else {
-            throw BridgeError.internal("Expected baseline foreground commands")
+        try await harness.exchange(phase: .aBaseline)
+        // RecordExchange can issue ResumeMedia after exchange() returns.
+        try #require(try await serviceAppSignal(observed.stream, stage: "shutdown fixture issued commands"))
+        backend.onCommands = nil
+        try await body(try #require(media), try #require(update))
+        try #require(await harness.owner.close())
+        let exit = await process.close()
+        try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+        try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+    } catch {
+        if let active { await active.cleanupAfterServiceFailure() }
+        else {
+            let exit = await process.cancel()
+            #expect(exit.joined, "Shutdown fixture must join its owned Service process")
         }
-        let media = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
-        let update = try #require(commands.first { if case .updatePending = $0.action { true } else { false } })
-        try await body(media, update)
-        try await collection.close()
-    } catch { try? await collection.close(); throw error }
+        throw error
+    }
 }
+#endif

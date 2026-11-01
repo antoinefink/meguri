@@ -17,6 +17,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     let workflow: CoreCloudWorkflowService
     var connection: CoreCloudConnectionService? { production.connection }
     var own: CloudOwnExecutor? { production.own }
+    // Observation only: callbacks must record/yield without native calls or reentry.
+    var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? = nil
     private let starts: AsyncStream<Bool>
     private let started: AsyncStream<Bool>.Continuation
     private let exchanges: AsyncStream<Bool>
@@ -124,9 +126,12 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     }
     private func capture(_ output: CloudPolicyOutput, stage: DiagnosticStage) {
         switch output {
-        case .coreActionFailed(let error, _): capture(error, stage: stage, kind: .coreActionFailed)
+        case .coreActionFailed(let error, let commands):
+            capture(error, stage: stage, kind: .coreActionFailed)
+            onCommands?(commands)
+        case .commands(let commands): onCommands?(commands)
         case .applyDeferred(let error): capture(error, stage: stage, kind: .applyDeferred)
-        case .commands, .syncNowUnavailable: break
+        case .syncNowUnavailable: break
         }
     }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
@@ -234,7 +239,7 @@ private nonisolated struct ServiceMediaCompletion: Sendable {
     let receipts: [ServiceSavedReceipt]
 }
 private nonisolated struct ServiceAppTimeout: Error { let stage: String }
-private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) async throws -> Bool {
+nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) async throws -> Bool {
     try await withThrowingTaskGroup(of: Bool.self) { group in
         group.addTask {
             for await success in stream { return success }
