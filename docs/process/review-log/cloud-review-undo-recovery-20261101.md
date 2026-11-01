@@ -249,3 +249,43 @@ Independent reviewer native_conformance_lifecycle_audit found no P0–P1 needing
 repair and no new P2 in the final split. The original fixture finding is fixed.
 Scoped privacy and full change similarity checks pass. Original batch base stays
 unchanged. No unit, milestone, signed SDK result or release is accepted here.
+
+## Broader CloudKit regression fixture corrections — filtered fixer follow-up
+
+Fixer `s-20261025T162405Z-9dc656e4`; supplied clean base `a850ba0c`.
+Original U113 start `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a` and batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` are retained.
+
+Full CloudKit Rust regression `core-test/20261101T123524Z-56677` ran 419 tests:
+417 PASS, 2 FAIL. Independent reviewer `native_conformance_lifecycle_audit`
+diagnosed both as stale fixture expectations, with no production repair needed:
+
+- The rekey case now checks the stored handoff flag before and after upload.
+  Its expected image differs only in that flag and the separately checked flight.
+  A new record key must start unsent. All conflict and physical row checks remain.
+- `cloud_publication_submission::ordinary_partial_failure_keeps_a_sibling_saved_ack_and_the_failed_record_pending`
+  observed ACK revision 1 versus local revision 2. Its legacy StartSDK-only
+  setup leaves the caller unregistered; nonempty conflicts require `sdk_locked`
+  before any ACK commits and correctly return `StaleIncarnation`. Only this
+  fixture now uses existing `reconcile_register_and_confirm_root(service, steps)`.
+  Source inspection confirms real `RegisterSDK(None)` registration, production
+  `register_sdk`/`start_sdk_instance`, and installation of the returned instance.
+  Ordinary Note conflicts are supported, so sent-event delivery now requires
+  success. Actual partial Service outcomes, exact sibling ACK payload/system
+  fields, pending revision/mark, handler ordering, exactly-once SDK removal and
+  durable close/read assertions remain unchanged.
+
+Only the two named tests and this appended log changed; no helper or production
+change, seeded ACK/identity, spec/P24 change, retry, skip or limit change.
+Verification remains **UNRUN** here: one bounded source consistency check only,
+with no compilation, formatting, tests, builds, Git, history or network. Root
+owns the two focused tests, full CloudKit regression and final lint, plus required
+review/provenance/privacy/similarity evidence. No acceptance or Unit trailers.
+
+Source consistency result: PASS. Exact-delta comparison confirms that only
+the specified test bodies changed; every other test-file byte and all prior
+review-log evidence are preserved. This is source evidence only.
+
+`core-test/20261101T124409Z-59735` PASS2/2 corrected cases. Independent final
+review found no P0–P1 needing repair and no new P2. Scoped similarity passes.
+The full 419-case run remains failed until the corrected suite is verified.

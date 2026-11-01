@@ -566,6 +566,7 @@ fn actual_service_save_conflict_rekeys_before_old_key_apply() {
     let (mut pair, local, remote, key, record) = pending_note_collision();
     let b = binding(&pair);
     let old = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert!(!old.sent, "the local identity has not been handed off");
     // This helper sends the production-built flight to Service and forwards
     // Service's actual ServerRecordChanged reply through the SDK handler.
     let handoff = pair
@@ -573,6 +574,7 @@ fn actual_service_save_conflict_rekeys_before_old_key_apply() {
         .driver()
         .deliver_real_asset_save_conflict_with_small_handoff(&mut pair.service, &scope(), &key)
         .unwrap();
+    assert!(handoff.sent, "the real handoff durably records sent history");
     let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].source, InboxSource::SaveConflict);
@@ -585,12 +587,21 @@ fn actual_service_save_conflict_rekeys_before_old_key_apply() {
     assert_eq!(flight.row_digest, old.payload.row_digest().unwrap());
     assert_eq!(flight.payload_digest, old.payload.payload_digest().unwrap());
     assert!(!flight.tombstone);
-    assert!(metadata == old, "handoff changes only the retained flight");
+    let mut expected = old.clone();
+    expected.sent = true;
+    assert!(
+        metadata == expected,
+        "handoff changes only sent history and the retained flight"
+    );
     assert!(pair.receiver.facts().unwrap().entities[&key] == handoff);
     assert!(notes(&mut pair.receiver).contains(&local.note));
     pair.receiver.driver().drain_incoming(STEPS).unwrap();
     let new = local.note.id + 1;
     let new_key = name(&pair, codec::Kind::Note, new);
+    assert!(
+        !pair.receiver.facts().unwrap().entities[&new_key].sent,
+        "the rekeyed identity has not been handed off"
+    );
     assert!(notes(&mut pair.receiver).contains(&remote.note));
     assert_pending_new_identity(
         &pair.receiver.facts().unwrap().entities[&new_key],

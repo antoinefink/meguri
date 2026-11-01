@@ -294,7 +294,7 @@ fn ordinary_partial_failure_keeps_a_sibling_saved_ack_and_the_failed_record_pend
     let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(71)).unwrap();
     let files = PreboundDevice::arrange(&directory, &mut service, 71).unwrap();
     let mut rig = SDKRig::open(&files, true, NOW, 71).unwrap();
-    rig.reconcile_and_confirm_root(&mut service, STEPS).unwrap();
+    rig.reconcile_register_and_confirm_root(&mut service, STEPS).unwrap();
     let mut edits = BTreeMap::new();
     for note in files.notes() {
         let parent = codec::entity_name(
@@ -394,9 +394,9 @@ fn ordinary_partial_failure_keeps_a_sibling_saved_ack_and_the_failed_record_pend
             .iter()
             .any(|r| r.name == failed && r.outcome == LogOutcome::Failure(ErrorCode::ServerRecordChanged))
     );
-    // Conflict application remains unavailable. Its error must not erase a
-    // successful sibling's real acknowledgement or acknowledge the failed one.
-    assert!(rig.deliver_sent_event(&batch.response).is_err());
+    // The registered SDK accepts the ordinary Note conflict while committing
+    // the successful sibling's real acknowledgement and keeping the failed record pending.
+    rig.deliver_sent_event(&batch.response).unwrap();
     let ack = rig.entity_facts(&success).unwrap();
     assert_eq!(ack.acked_rev, ack.local_rev);
     assert!(ack.mark.is_none());
