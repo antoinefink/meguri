@@ -851,7 +851,12 @@ fn lost_review_undo_capture_recovers_absent_never_sent_revlog_after_crash() {
 }
 
 #[test]
-fn lost_review_undo_capture_keeps_absent_handed_revlog_guard_after_crash() {
+fn handed_review_undo_is_refused_and_live_history_survives_crash() {
+    review_undo_survives_crash(false, true);
+}
+
+#[test]
+fn core_writer_removal_of_handed_history_keeps_absence_guard_after_crash() {
     review_undo_survives_crash(true, true);
 }
 
@@ -985,6 +990,9 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
         tracking_before = pair.receiver.facts().unwrap().entities;
         let handed = &tracking_before[&revlog_name];
         assert!(handed.sent && handed.server_erev == 0 && !handed.in_flight.is_empty());
+        assert_eq!(handed.acked_rev, 0);
+        assert!(handed.acked_payload.is_none());
+        assert!(handed.acked_system_fields.is_empty() && handed.acked_envelope.0.is_empty());
         assert!(
             handed
                 .in_flight
@@ -992,9 +1000,165 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
                 .any(|f| f.payload_digest == received.entity.payload_sha256)
         );
         runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
-        // Only handed history has an actual Save before the Undo/crash boundary.
+        // Both handed cases start at the actual lost-reply Service boundary.
         server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
         request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
+        let handed_rows = pair.receiver.driver().collection_payloads().unwrap();
+        let handed_card = pair.receiver.driver().read_card(selected.id).unwrap();
+        let handed_revlog = pair.receiver.driver().read_revlog(answer.revlog_id).unwrap();
+        assert_eq!(handed_rows, answered);
+        assert_eq!(handed_rows[&card_name], Payload::Card(handed_card.clone()));
+        assert_eq!(handed_rows[&revlog_name], Payload::Revlog(handed_revlog.clone()));
+        let boundary = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+        assert_eq!(
+            pair.receiver.driver().peek_undo_reason().unwrap().as_deref(),
+            Some("upload_pending")
+        );
+
+        // The true branch is a LocalApi writer negative, never user Undo.
+        // Use the ordinary observer's handed-absence refusal, without a fault.
+        let remove_history_by_writer = lose_undo_capture;
+        let committed = if remove_history_by_writer {
+            let (seq, generation) = pair.receiver.driver().remove_revlog(answer.revlog_id).unwrap();
+            let committed = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+            assert_eq!((committed.seq, committed.generation), (seq, generation));
+            assert!(seq > boundary.seq);
+            let capture = pair.receiver.driver().capture_proof(seq, generation).unwrap();
+            assert_eq!((capture.observed_seq, capture.generation), (seq, generation));
+            assert!(capture.attempted && !capture.persisted);
+            assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+            assert_eq!(
+                pair.receiver.driver().stored_runtime_state().unwrap().change_counter,
+                runtime_before.change_counter
+            );
+            let scan = pair.receiver.driver().scan_state().unwrap();
+            assert!(scan.scan_required && scan.tracking_stopped && !scan.scan_running);
+            committed
+        } else {
+            let error = pair.receiver.driver().undo().unwrap_err();
+            assert_eq!(error.to_string(), "cloud device operation failed: Engine(Other)");
+            assert_eq!(
+                pair.receiver.driver().peek_undo_reason().unwrap().as_deref(),
+                Some("upload_pending")
+            );
+            assert_eq!(pair.receiver.driver().read_card(selected.id).unwrap(), handed_card);
+            assert_eq!(
+                pair.receiver.driver().read_revlog(answer.revlog_id).unwrap(),
+                handed_revlog
+            );
+            assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), handed_rows);
+            assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+            let unchanged = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+            assert_eq!(unchanged.seq, boundary.seq);
+            unchanged
+        };
+        assert_eq!(committed.generation, boundary.generation);
+        assert_eq!(committed.native_file, boundary.native_file);
+        let physical = pair.receiver.driver().collection_payloads().unwrap();
+        let physical_card = pair.receiver.driver().read_card(selected.id).unwrap();
+        assert_eq!(physical[&card_name], Payload::Card(physical_card.clone()));
+        if remove_history_by_writer {
+            assert_eq!(physical.len() + 1, handed_rows.len());
+            assert!(!physical.contains_key(&revlog_name));
+            assert!(pair.receiver.driver().read_revlog(answer.revlog_id).is_err());
+            // Removing history does not undo the answer. Projection derives
+            // last_review_id from the remaining real history for this Card.
+            let remaining_review = physical
+                .values()
+                .filter_map(|payload| match payload {
+                    Payload::Revlog(row) if row.cid == selected.id => Some(row.id),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            assert_eq!(
+                physical_card,
+                codec::Card {
+                    last_review_id: remaining_review,
+                    ..handed_card.clone()
+                }
+            );
+            for (name, payload) in &handed_rows {
+                if name != &revlog_name && name != &card_name {
+                    assert_eq!(physical.get(name), Some(payload));
+                }
+            }
+        } else {
+            assert_eq!(physical, handed_rows);
+        }
+        let receipt = pair.receiver.driver().wal_proof(committed.seq).unwrap();
+        assert!(receipt.through >= committed.seq);
+        assert_eq!(receipt.generation, committed.generation);
+        assert_eq!(receipt.native_file, committed.native_file);
+        assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+        assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+        assert_eq!(
+            pair.service.request_log().unwrap().last().unwrap().request_id,
+            request_before
+        );
+
+        // No additional drive/reconcile before SIGKILL: retain the real flight.
+        let killed = pair.receiver.kill().unwrap();
+        assert_eq!(killed.signal, Some(9));
+        assert!(!killed.clean_close);
+        pair.reopen_before_identity();
+        let reopened_facts = pair.receiver.facts().unwrap();
+        assert_eq!(reopened_facts.native_file, receipt.native_file);
+        assert_eq!(reopened_facts.current.as_ref(), Some(&binding));
+        assert_eq!(reopened_facts.entities, tracking_before);
+        assert_eq!(pair.receiver.driver().read_card(selected.id).unwrap(), physical_card);
+        assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), physical);
+        assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+        let scan = pair.receiver.driver().scan_state().unwrap();
+        assert!(scan.scan_required && !scan.scan_running && !scan.scan_completed_this_open);
+        pair.receiver.verify_identity(scope().account).unwrap();
+        assert!(pair.receiver.trace().iter().any(|event| matches!(
+            event,
+            meguri_sync::cloud::workflow::TraceEvent::IdentityVerified { account, .. }
+                if account == &scope().account
+        )));
+        if remove_history_by_writer {
+            let error = pair.receiver.driver().reconcile_binding().unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "cloud device operation failed: RuntimeIncompleteWholeBindingReconciliation"
+            );
+            let scan = pair.receiver.driver().scan_state().unwrap();
+            assert!(scan.scan_required && !scan.scan_running && !scan.scan_completed_this_open);
+            assert!(pair.receiver.driver().read_revlog(answer.revlog_id).is_err());
+        } else {
+            // Refused Undo leaves a live row; it never reaches the absence guard.
+            pair.receiver.driver().reconcile_binding().unwrap();
+            let scan = pair.receiver.driver().scan_state().unwrap();
+            assert!(!scan.scan_required && !scan.tracking_stopped && !scan.scan_running);
+            assert_eq!(
+                pair.receiver.driver().read_revlog(answer.revlog_id).unwrap(),
+                handed_revlog
+            );
+        }
+        let retained = pair.receiver.facts().unwrap().entities;
+        let history = &retained[&revlog_name];
+        let handed = &tracking_before[&revlog_name];
+        assert!(history.sent);
+        assert_eq!(history.payload, handed.payload);
+        assert_eq!(history.server_erev, 0);
+        assert_eq!(history.acked_rev, 0);
+        assert!(history.acked_payload.is_none());
+        assert!(history.acked_system_fields.is_empty() && history.acked_envelope.0.is_empty());
+        assert_eq!(history.in_flight, handed.in_flight);
+        assert!(!history.in_flight.is_empty());
+        assert_eq!(history.local_rev, handed.local_rev);
+        assert_eq!(history.mark, handed.mark);
+        assert_eq!(pair.receiver.driver().read_card(selected.id).unwrap(), physical_card);
+        assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), physical);
+        assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+        assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+        assert_eq!(
+            pair.service.request_log().unwrap().last().unwrap().request_id,
+            request_before
+        );
+        pair.close();
+        return;
     }
     if lose_undo_capture {
         pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
@@ -1075,20 +1239,6 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
             if account == &scope().account
     )));
     let reopened = pair.receiver.driver().incoming_observation(binding.id).unwrap();
-    if hand_history {
-        let error = pair.receiver.driver().reconcile_binding().unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "cloud device operation failed: RuntimeIncompleteWholeBindingReconciliation"
-        );
-        let retained = pair.receiver.facts().unwrap().entities;
-        assert!(retained[&revlog_name].sent);
-        assert!(retained[&revlog_name] == tracking_after[&revlog_name]);
-        assert!(pair.receiver.driver().scan_state().unwrap().scan_required);
-        assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
-        pair.close();
-        return;
-    }
     pair.receiver
         .driver()
         .reconcile_binding()

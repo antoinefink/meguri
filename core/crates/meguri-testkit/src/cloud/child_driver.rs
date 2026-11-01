@@ -307,7 +307,9 @@ pub(crate) enum Input {
     ArmAdoptionAccountChange(Option<String>),
     AdoptionCompletion(core::adoption::AdoptOp),
     Edit(i64, Vec<String>),
+    PeekUndoReason,
     Undo,
+    RemoveRevlog(i64),
     AddNote(i64, i64, Vec<String>),
     DeleteNote(i64),
     BuryCard(i64),
@@ -1032,6 +1034,12 @@ impl ChildDriver {
     }
     pub fn undo(&mut self) -> Result<()> {
         self.call(Input::Undo)
+    }
+    pub fn peek_undo_reason(&mut self) -> Result<Option<String>> {
+        self.call(Input::PeekUndoReason)
+    }
+    pub fn remove_revlog(&mut self, id: i64) -> Result<(u64, u64)> {
+        self.call(Input::RemoveRevlog(id))
     }
     pub fn add_note(&mut self, mid: i64, did: i64, fields: &[&str]) -> Result<AddedNote> {
         self.call(Input::AddNote(
@@ -1963,6 +1971,23 @@ impl Device {
                 let binding = self.runtime()?.status()?.binding.ok_or_else(failure)?;
                 let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))?;
                 value(self.payload_proof(&name)?)
+            }
+            Input::PeekUndoReason => value(
+                self.host
+                    .collection()?
+                    .peek_undo(meguri_engine::undo::UndoScope::Global)?
+                    .reason()
+                    .map(|reason| reason.to_string()),
+            ),
+            Input::RemoveRevlog(id) => {
+                let result = self.host.collection()?.run(
+                    meguri_engine::OpSpec::named("fixture remove review history", OpSource::LocalApi),
+                    move |ctx| {
+                        ctx.scope().remove_revlog(meguri_model::ids::RevlogId(id))?;
+                        Ok(())
+                    },
+                )?;
+                value((result.seq.0, result.generation.0))
             }
             Input::Undo => {
                 self.host.review().restore_controlled(

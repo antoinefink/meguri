@@ -196,3 +196,56 @@ The independent review confirms M9.6/M9.7 forbid Undo after the upload barrier
 flags its step Pending. A lost reply retains that refusal. The test must cover
 this real refusal without clearing flags. An absent-row scan check needs a
 separate actual writer removal, rather than claiming user Undo can create it.
+
+## Handed-history negatives split — filtered fixer follow-up
+
+Fixer `s-20261025T162405Z-9dc656e4`; original U113 start
+`1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`, batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` retained. Owned scope is this log,
+`cloud_media_roundtrip.rs` and testkit `cloud/child_driver.rs` only.
+
+Replaced the invalid handed-Undo negative with two named cases sharing the real
+publication/adoption/answer/End/lost-Save-reply setup. The refusal case reads
+`Collection::peek_undo(Global)` through a thin IPC command, requires the actual
+`upload_pending` reason, invokes existing actual Undo and requires refusal plus
+the same reason. It checks unchanged physical payloads/media and tracking, then
+SIGKILL/same-file reopen, verified identity and ordinary successful reconcile
+retaining the live history and outstanding flight. It exercises no absence guard.
+
+The separate core-writer negative uses a thin IPC command forwarding only
+`Collection::run` (`OpSource::LocalApi`) and `scope.remove_revlog`, returning the
+actual committed sequence/generation. No capture fault is injected: the ordinary
+handed-absence observer refusal must stop tracking while the physical commit
+stands. Assertions cover actual absence, unchanged tracking with sent history,
+zero ACK and matching real flight, WAL coverage, durable absence through SIGKILL
+and same-file reopen, verified identity and exact
+`RuntimeIncompleteWholeBindingReconciliation` refusal. Its actual Card snapshot
+retains the answer's fields with `last_review_id` derived from remaining history;
+it is never described as Undo restoration. Both cases retain unaffected rows,
+media and the Service state/request boundary after actual handoff.
+
+The original two never-sent tests and their executed path, and all earlier
+offline cases, are preserved byte for byte. No production, policy, engine or scan
+guard changes; no seeded tracking/ACK/sent values, raw SQL or cleared upload
+flags. One bounded source consistency check only; compilation, formatting,
+focused tests and gates remain **unrun here**. Root owns focused verification,
+independent review and the full gate. No acceptance claimed.
+
+Source consistency result: PASS. Exact comparison preserved the original
+never-sent tests and executed source, earlier offline cases and later helpers;
+the driver delta is confined to real peek-reason and writer forwarding.
+
+## Final focused integrator proof
+
+`core-test/20261101T123413Z-55159` PASS5/5: normal Undo; lost Undo capture with
+same-file crash recovery; handed Undo refused with its actual pending reason;
+handed history removed by a real writer and retained by the absence guard after
+crash; real SDK handoff/ACK/edit/reopen metadata persistence. Both former test
+failures remain retained. `core-test/20261101T122306Z-49220` PASS11/11 migration
+checks; `core-lint/20261101T122900Z-53600` passes before the last thin driver/test
+addition. The final broader CloudKit checks will cover that addition.
+
+Independent reviewer native_conformance_lifecycle_audit found no P0–P1 needing
+repair and no new P2 in the final split. The original fixture finding is fixed.
+Scoped privacy and full change similarity checks pass. Original batch base stays
+unchanged. No unit, milestone, signed SDK result or release is accepted here.
