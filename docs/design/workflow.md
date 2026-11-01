@@ -36,6 +36,8 @@ The task, saved data and action meanings stay the same as space changes. The vis
 
 Inspect controls in the native app. Check field alignment and labels in Forms. Size the interaction area on the Button rather than its Text. Check each action identifier after placing it in a group.
 
+Inspect text entry controls on each platform both empty and filled, including native clear buttons that appear on input.
+
 Native SwiftUI is the implementation medium. HTML can help choose hierarchy and behavior, but its CSS is not the source for native dimensions, materials or control styling. Keep card-template content separate from app chrome.
 
 ## Feedback and evidence

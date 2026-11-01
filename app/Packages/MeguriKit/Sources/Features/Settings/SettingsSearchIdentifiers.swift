@@ -34,24 +34,11 @@ struct SettingsSearchIdentifiers: NSViewRepresentable {
 
         private static func identify(_ field: NSSearchField) {
             field.setAccessibilityIdentifier("settings.root.search")
-            guard let cell = field.cell as? NSSearchFieldCell,
-                  let label = cell.searchButtonCell?.accessibilityLabel(), !label.isEmpty else { return }
-            var visited: Set<ObjectIdentifier> = []
-            let matches = accessibilityButtons(in: field, visited: &visited).filter { $0.accessibilityLabel() == label }
-            guard matches.count == 1, let search = matches.first else { return }
-            // The cell supplies the native localized label; only the actual
-            // AX descendant receives the identifier.
-            search.setAccessibilityIdentifier("settings.root.searchButton")
-        }
-
-        private static func accessibilityButtons(in element: any NSAccessibilityProtocol,
-                                                  visited: inout Set<ObjectIdentifier>) -> [any NSAccessibilityProtocol] {
-            guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { return [] }
-            let own: [any NSAccessibilityProtocol] = element.accessibilityRole() == .button ? [element] : []
-            return own + (element.accessibilityChildren() ?? []).flatMap { child -> [any NSAccessibilityProtocol] in
-                guard let child = child as? any NSAccessibilityProtocol else { return [] }
-                return accessibilityButtons(in: child, visited: &visited)
-            }
+            guard let cell = field.cell as? NSSearchFieldCell else { return }
+            // Set metadata on the native cells directly; their opaque AX proxies
+            // need not support an NSAccessibilityProtocol cast.
+            cell.searchButtonCell?.setAccessibilityIdentifier("settings.root.searchButton")
+            cell.cancelButtonCell?.setAccessibilityIdentifier("settings.root.searchClear")
         }
     }
 }

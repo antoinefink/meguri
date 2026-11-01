@@ -139,3 +139,65 @@ Production-window evidence:
 - This establishes a product metadata finding independent of the synthetic
   host. A public identifier-only repair and actual-window verification follow.
   The hosted and full integration gates remain open.
+
+## Native search-cell repair
+
+- Fixer: `s-20261025T162405Z-9dc656e4`.
+- Repair base: `9f187757ee007b3d0948855964db124fd0d0ceaa`.
+- U113 start: `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`.
+- Batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+The field identifier is retained. The native searchButtonCell receives
+settings.root.searchButton through its public setter. Unused descendant
+traversal is removed. Native label, role, action and style remain unchanged.
+Sidebar scope and mount/layout attachment are retained.
+
+Independent native_bounds_review clears P0-P2.
+private/20261101T111312Z-6814 passes source and flags two log paragraphs;
+this replacement removes those paragraphs. Runtime AX propagation, filtering
+and two fresh launches are being checked in the real VM window.
+No runtime result, hosted-gate pass or acceptance is claimed yet.
+
+## Native clear-cell repair
+
+- Fixer: `s-20261025T162405Z-9dc656e4`.
+- Current base: `9f187757ee007b3d0948855964db124fd0d0ceaa`, plus the seeded
+  native search-cell repair above.
+- Original U113 start: `1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`.
+- Original batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+Root reports actual VM drive `drive/20261101T111312Z-6761`: all 14 steps
+succeeded, with zero failed steps across two fresh launches. The actual Search
+button identifier propagates; clicking, typing iCloud and filtering work.
+The whole hierarchy check remains FAIL with 12 issues, solely the native
+cancel/clear button's missing identifier after typing. Independent
+native_bounds_review raises this remaining P2 metadata finding.
+
+This repair assigns settings.root.searchClear directly through the public
+NSButtonCell setter on NSSearchFieldCell.cancelButtonCell. Search and cancel
+cells are optional independently, so either available cell receives its own
+identifier. Native labels, roles, targets, actions, style, field identifier,
+sidebar ownership and mount/layout attachment are preserved. The workflow gains
+one cross-platform sentence about inspecting text entry empty and filled.
+
+One bounded source consistency check only; no build or runtime verification is
+performed in this filtered packet. Root owns extending the actual script on
+both mounts with clear activation, Collection-row restoration and refiltering,
+while retaining hierarchy checks. That extension and repair verification are
+pending, not runtime proof. Independent review, focused MG checks and
+privacy/provenance/similarity checks remain with root. Existing failed receipts
+remain open; no hosted/full gate pass or acceptance is claimed.
+
+Final native-cell verification:
+- native_bounds_review: no P0-P2 findings in either cell setter or the
+  cross-platform input-state instruction.
+- drive/20261101T111915Z-12585: PASS.
+- private/20261101T111915Z-12419: PASS.
+- similarity/20261101T111914Z-12154: PASS.
+- The actual VM drive completes all 26 steps with zero hierarchy issues.
+  Both fresh launches support Search activation, typing, clear activation,
+  restored Collection rows and filtering again. The final window was inspected.
+- The hierarchy exposes one field, one native Search button and one native
+  clear button with the expected identifiers; native labels and roles remain.
+- The hosted test, original full accessibility audit, required integration
+  gate and U113/U114 acceptance remain open. This component does not pass them.
