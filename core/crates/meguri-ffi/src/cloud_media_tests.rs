@@ -1597,11 +1597,56 @@ fn nonempty_download_waits_for_collection_drain_and_arrives_in_engine_media_stor
 
 #[test]
 fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
+    use crate::cloud_policy::*;
     for retain_download in [false, true] {
-        let (fixture, sdk) = published();
+        let (fixture, sdk) = published_with_initial_media(Some(("photo.jpg", b"synthetic server image")));
+        let record_name =
+            c::entity_codec::entity_name(&[31; 32], c::entity_codec::Kind::MediaName, b"photo.jpg").unwrap();
+        let initial = fixture.workflow.core.entity_facts(&record_name).unwrap().unwrap();
+        assert!(initial.acked_rev > 0 && !initial.acked_envelope.0.is_empty());
+        let Some(c::entity_codec::Payload::MediaName(local)) = &initial.acked_payload else {
+            panic!("published target ACK required")
+        };
+        let metadata = m::blob::Blob::from(local);
+        let service = fixture.workflow.host.media().unwrap();
+        let file = service.store().media_dir().join("photo.jpg");
+        // An external disappearance requests a download without a local tombstone.
+        std::fs::remove_file(&file).unwrap();
+        service.store().register_full(|_, _| true).unwrap();
+        fixture
+            .workflow
+            .core
+            .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &service)
+            .unwrap();
+        let policy = media_policy(&fixture);
+        assert!(policy.status().unwrap().media_paused);
+        let enabled = policy
+            .clone()
+            .input(CloudPolicyEvent::Settings {
+                settings: CloudPolicyDeviceSettings {
+                    enabled: true,
+                    paused: false,
+                    automatic: true,
+                    media: true,
+                },
+            })
+            .unwrap();
+        let mut resumed = settle_media_policy_core(&fixture, enabled);
+        assert_eq!(resumed.len(), 1);
+        let resume = resumed.pop().unwrap();
+        assert!(matches!(resume.action, CloudPolicyAction::ResumeMedia));
+        assert!(
+            policy
+                .clone()
+                .prepare_execution(resume.handle)
+                .unwrap()
+                .unwrap()
+                .begin_media()
+                .unwrap()
+        );
+        assert!(!policy.status().unwrap().media_paused);
         let media = fixture.workflow.media().unwrap();
         accept_root(&media, &sdk);
-        let metadata = incoming_media(&fixture, &sdk, "photo.jpg", b"synthetic server image");
         let name = metadata.name(&[47; 32]);
         let read = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
         assert!(matches!(&read.request, CloudMediaRequest::Read { name: n } if n == &name));
@@ -1634,8 +1679,6 @@ fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
             .core
             .entity_facts_page(c::entity_codec::Kind::MediaName, None)
             .unwrap();
-        let service = fixture.workflow.host.media().unwrap();
-        let file = service.store().media_dir().join("photo.jpg");
         std::fs::write(&file, b"").unwrap();
         service.store().register_full(|_, _| true).unwrap();
         fixture
@@ -1662,11 +1705,13 @@ fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
         }
         let target = after
             .iter()
-            .find(|entity| entity.key == b"photo.jpg")
-            .expect("incoming target ACK");
+            .find(|entity| entity.name == record_name && entity.key == b"photo.jpg")
+            .expect("published target ACK");
         let before = ack.iter().find(|entity| entity.name == target.name).unwrap();
         assert!(target.acked_rev > 0 && !target.acked_envelope.0.is_empty());
         assert_eq!(target.acked_envelope, before.acked_envelope);
+        assert_eq!(target.acked_envelope, initial.acked_envelope);
+        assert_eq!(target.acked_rev, initial.acked_rev);
         let c::entity_codec::DecodeOutcome::Supported(entity) =
             c::entity_codec::Entity::decode(&target.acked_envelope.0).unwrap()
         else {

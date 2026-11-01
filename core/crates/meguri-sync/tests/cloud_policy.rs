@@ -376,7 +376,8 @@ fn manual_exchange_completion_records_before_resuming_media_with_auto_off() {
 
 #[test]
 fn exchange_completion_requires_media_preference_and_current_open_gate_to_resume_media() {
-    let rows: &[(&str, fn(&mut State))] = &[
+    type GateCase = (&'static str, fn(&mut State));
+    let rows: &[GateCase] = &[
         ("media off", |s| s.settings.media = false),
         ("disabled", |s| s.settings.enabled = false),
         ("paused", |s| s.settings.paused = true),

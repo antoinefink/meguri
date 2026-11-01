@@ -230,3 +230,45 @@ R6 integration evidence on fa945 with this source applied:
   rewrite in private/20261101T091318Z-22658.
 Focused setup repairs, the shared lint issue and native reopen remain open.
 The batch gate and unit acceptance remain pending.
+
+## R6 verification setup repair
+
+Session: s-20261025T162405Z-9dc656e4.
+Repair base: 59e385ca37f95d67edd23bc59ea4384832745bd7.
+Unit start: 3f241c19b77db754b71c0d8c433f25fd674903ae.
+Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+
+The FFI test starts from Service publication with media off. External file
+removal is registered before the policy enables media. The original target ACK,
+download checks, queue rejection and second-file checks remain required.
+
+The invalid-record fixture uses the original ACK's system fields when replacing
+that same Service record. Changed record names still use creation. All nine
+malformed cases, Service mutation checks, adoption refusal and prior collection
+and file preservation checks remain. The codec can encode these variants, so no
+codec bypass is needed. The policy test uses a local type alias; its eighteen
+gate cases and loop assertions are unchanged.
+
+Only three test files and this log changed. Production behavior, Service checks,
+assertions, retry limits and budgets are unchanged. Independent R6 source review
+was clear of P0-P1 and new P2 findings before this setup repair. Native reopen
+diagnostics remain separately owned.
+
+Existing receipts remain core-test/20261101T091323Z-22902 (105/107 pass),
+core-lint/20261101T091328Z-23150 (type complexity failure),
+similarity/20261101T091346Z-23492 (pass) and
+private/20261101T091507Z-24077 (pass). One source consistency check completed in
+the filtered fixer session. Root owns MG execution and fresh receipts. No new
+test pass, unit acceptance or batch gate acceptance is claimed.
+
+Verification setup integration:
+- Independent review: no P0-P2 finding.
+- core-format/20261101T092053Z-26156: PASS.
+- core-test/20261101T092132Z-26723: 21/22 PASS. All nine malformed Service
+  records now reach refusal and preservation checks. The remaining FFI case
+  reaches its metadata read but expects the single-record request form; the
+  real enabled policy may issue its batched read round first. This remains open.
+- core-lint/20261101T092139Z-26991: PASS.
+- similarity/20261101T092316Z-27792: PASS.
+- private/20261101T092057Z-26406: source files passed; the log passed after
+  rewrite in private/20261101T092156Z-27311.

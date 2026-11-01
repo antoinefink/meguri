@@ -833,6 +833,8 @@ fn service_media_tombstone_adoption_refuses_invalid_records_without_replacing_lo
             &malformed.fields.key,
         )
         .unwrap();
+        let if_unchanged =
+            (record_name == original.name).then(|| SystemFields::from_bytes(original.acked_system_fields.clone()));
         let zone = pair.sender.collection_zone().unwrap();
         let response = pair
             .service
@@ -844,7 +846,7 @@ fn service_media_tombstone_adoption_refuses_invalid_records_without_replacing_lo
                     atomic: false,
                     changes: vec![Mutation::Save {
                         record: RecordInput::encrypted(record_name, "MGEntity", malformed.encode().unwrap()),
-                        if_unchanged: None,
+                        if_unchanged,
                     }],
                 },
             )
