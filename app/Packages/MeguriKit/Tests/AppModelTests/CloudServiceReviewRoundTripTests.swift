@@ -73,6 +73,9 @@ extension ReviewCollectionStartupTests {
             try #require(receipts.contains { $0.matchesEntity(kind: 2, key: serviceIDKey(cardID)) }, "No actual Card Saved receipt")
             try #require(receipts.contains { $0.matchesEntity(kind: 3, key: serviceIDKey(revlogID)) }, "No actual Revlog Saved receipt")
             let mediaA = try await serviceMediaProof(generation: a.owner.generation)
+            let mediaAFile = mediaA.root.appendingPathComponent(mediaName)
+            let mediaAFileExists = FileManager.default.fileExists(atPath: mediaAFile.path)
+            let mediaAExpectedBytesEqual = (try? Data(contentsOf: mediaAFile)) == mediaBytes
             let trackedName = try #require(mediaA.names.first { $0.name == mediaName })
             try #require(mediaA.bytes[mediaName] == mediaBytes)
             try #require(receipts.contains { $0.matchesEntity(kind: 9, key: Data(trackedName.caseKey.utf8)) }, "No actual MediaName Saved receipt")
@@ -89,7 +92,19 @@ extension ReviewCollectionStartupTests {
             try #require(reopenedA.generation > rowsA.generation)
             try comparePhysicalRows(expected: rowsA, actual: reopenedA, crossDevice: false)
             let mediaAReopen = try await serviceMediaProof(generation: a.owner.generation)
-            try #require(mediaAReopen.root == mediaA.root && mediaAReopen.names == mediaA.names && mediaAReopen.bytes == mediaA.bytes)
+            let rootEqual = mediaAReopen.root == mediaA.root
+            let rawPathEqual = mediaAReopen.root.path == mediaA.root.path
+            let standardizedPathEqual = mediaAReopen.root.standardizedFileURL.path == mediaA.root.standardizedFileURL.path
+            let initialNameCount = mediaA.names.count, reopenedNameCount = mediaAReopen.names.count
+            let nameSetEqual = Set(mediaAReopen.names.map(\.name)) == Set(mediaA.names.map(\.name))
+            let nameAndCaseKeyPairsEqual = mediaAReopen.names == mediaA.names
+            let byteKeySetEqual = Set(mediaAReopen.bytes.keys) == Set(mediaA.bytes.keys)
+            let exactBytesEqual = mediaAReopen.bytes == mediaA.bytes
+            let mediaAReopenFile = mediaAReopen.root.appendingPathComponent(mediaName)
+            let mediaAReopenFileExists = FileManager.default.fileExists(atPath: mediaAReopenFile.path)
+            let mediaAReopenExpectedBytesEqual = (try? Data(contentsOf: mediaAReopenFile)) == mediaBytes
+            try #require(mediaAReopen.root == mediaA.root && mediaAReopen.names == mediaA.names && mediaAReopen.bytes == mediaA.bytes,
+                "rootEqual=\(rootEqual) rawPathEqual=\(rawPathEqual) standardizedPathEqual=\(standardizedPathEqual) initialNameCount=\(initialNameCount) reopenedNameCount=\(reopenedNameCount) nameSetEqual=\(nameSetEqual) nameAndCaseKeyPairsEqual=\(nameAndCaseKeyPairsEqual) byteKeySetEqual=\(byteKeySetEqual) exactBytesEqual=\(exactBytesEqual) initialFileExists=\(mediaAFileExists) initialExpectedBytesEqual=\(mediaAExpectedBytesEqual) reopenedFileExists=\(mediaAReopenFileExists) reopenedExpectedBytesEqual=\(mediaAReopenExpectedBytesEqual)")
             try #require(await a.owner.close())
             // A is closed before B's absent collection enters the SAME app
             // adoption path against the SAME Service's actual current records.

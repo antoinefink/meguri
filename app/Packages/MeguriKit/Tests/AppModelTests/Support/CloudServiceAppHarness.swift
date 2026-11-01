@@ -16,6 +16,9 @@ import Testing
     private let exchanges: AsyncStream<Bool>
     private let exchanged: AsyncStream<Bool>.Continuation
     private(set) var closed = false
+    private(set) var closeEntered = 0
+    private(set) var closeReturned = 0
+    private(set) var closeFailure: String?
     private struct DiagnosticEntry {
         let sequence: UInt64
         let message: String
@@ -49,6 +52,7 @@ import Testing
         case input, inputThrow = "input.throw", executeOutputs = "execute.outputs", executeError = "execute.error"
         case beginAccountReadThrow = "beginAccountRead.throw", readAccountError = "readAccount.error"
         case readAccountOutputs = "readAccount.outputs"
+        case closeThrow = "close.throw"
     }
     private enum DiagnosticKind: String { case error, coreActionFailed, applyDeferred }
     @discardableResult
@@ -173,7 +177,17 @@ import Testing
     func takeAccountReadRequest() async -> Bool { await production.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }
     func resumeAfterCoreResume() async { await production.resumeAfterCoreResume() }
-    func close() async throws { try await production.close(); closed = true; started.finish(); exchanged.finish(); mediaCompleted.finish() }
+    func close() async throws {
+        closeEntered += 1
+        do { try await production.close() }
+        catch {
+            closeFailure = capture(error, stage: .closeThrow)
+            throw error
+        }
+        closeReturned += 1
+        closed = true
+        started.finish(); exchanged.finish(); mediaCompleted.finish()
+    }
 }
 private nonisolated struct ServiceMediaCompletion: Sendable {
     let proof: Result<ServiceMediaProof, any Error>
@@ -208,7 +222,15 @@ private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: St
                 status: .available, identity: Data("synthetic-initial-account".utf8))
         }, makeBackend: { [self] persisted in
             let allBackendsClosed: Bool = backends.allSatisfy { $0.closed }
-            try #require(allBackendsClosed)
+            let closeDiagnostics = backends.enumerated().prefix(16).map { index, backend in
+                let phases = backend.production.shutdownTrace
+                return "index=\(index) closed=\(backend.closed) close-entered=\(backend.closeEntered) "
+                    + "close-returned=\(backend.closeReturned) close-failure=\(backend.closeFailure ?? "none") "
+                    + "policy.status=\(phases.policyProbe.rawValue) adapter.stop=\(phases.adapterDrain.rawValue) "
+                    + "retained-instances=\(phases.retentionCheck.rawValue)"
+            }.joined(separator: " | ")
+            try #require(allBackendsClosed,
+                "Service app backend close: count=\(backends.count); first 16=[\(closeDiagnostics)]")
             let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted)
             backends.append(backend)
             return backend

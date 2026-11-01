@@ -197,22 +197,38 @@ public final class SyncCoordinator {
 
     /// Only ReviewCollection.completeOpenedHost calls this, after FFI retention.
     func completeOpenedHost(generation: UInt64) async {
-        if let attachmentTask { await attachmentTask.value; return }
-        guard !closing else { return }
+        while let original = replacementTask { await original.value }
+        guard !closing, !Task.isCancelled else { return }
+        if let original = attachmentTask {
+            if generation > self.generation { enqueue(.replaced(generation)) }
+            await original.value
+            return
+        }
         guard platformPrepared else {
             self.generation = max(self.generation, generation)
             return
         }
-        if backend != nil { enqueue(.replaced(generation)); return }
+        guard generation >= self.generation else { return }
+        if backend != nil || replacing { enqueue(.replaced(generation)); return }
+        hostRevision &+= 1
+        let revision = hostRevision
+        self.generation = generation
         let task = Task { [self] in
             defer { attachmentTask = nil }
-            hostRevision &+= 1
-            let revision = hostRevision
             do {
                 let value = try await self.makeBackend { [weak self] in
                     await self?.nativeEventPersisted(revision: revision)
                 }
-                backend = value; drained = false; self.generation = generation
+                // Even an obsolete factory result owns native resources. Keep
+                // it retained on close failure; the next lane must drain it.
+                backend = value
+                guard !closing, !Task.isCancelled, !replacing,
+                      revision == hostRevision, generation == self.generation else {
+                    try await value.close()
+                    backend = nil
+                    return
+                }
+                drained = false
                 setupState = .attached
                 enqueue(.policy(.settings(settings)))
                 enqueue(.policy(.refresh(.cloud)))
@@ -568,7 +584,8 @@ public final class SyncCoordinator {
             awaitingResumeProof = false
             flushTimer?.invalidate(); flushTimer = nil
             if replacementTask == nil {
-                replacementTask = Task { await replaceBackend() }
+                let originalAttachment = attachmentTask
+                replacementTask = Task { await replaceBackend(after: originalAttachment) }
             }
         case .lifecycle(let lifecycle):
             if case .ready(let next) = lifecycle, next < generation { return }
@@ -722,8 +739,9 @@ public final class SyncCoordinator {
             }
         }
     }
-    private func replaceBackend() async {
+    private func replaceBackend(after originalAttachment: Task<Void, Never>?) async {
         defer { replacementTask = nil }
+        await originalAttachment?.value
         guard platformPrepared else { return }
         for task in operationTasks.values { task.cancel() }
         accountTask?.cancel()

@@ -189,6 +189,185 @@ struct SyncCoordinatorTests {
         #expect(await sync.cancelAndDrain())
     }
 
+    @Test func attachmentBeforeReplacementClosesStaleCandidateBeforeNextFactory() async {
+        let stale = SyncOwnerFake(), latest = SyncOwnerFake()
+        let factory = SyncOwnerGate(), staleDrain = SyncOwnerGate(), finalDrain = SyncOwnerGate()
+        var callbacks: [@Sendable () async -> Void] = []
+        var constructing = 0, maximumConstructing = 0
+        stale.onClose = { await staleDrain.hold() }
+        latest.onClose = { await finalDrain.hold() }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { persisted in
+            constructing += 1
+            maximumConstructing = max(maximumConstructing, constructing)
+            defer { constructing -= 1 }
+            callbacks.append(persisted)
+            if callbacks.count == 1 {
+                await factory.hold()
+                return stale
+            }
+            #expect(stale.closed && stale.closeCount == 1)
+            return latest
+        }, defaults: nil)
+        await sync.preparePlatform()
+        let attachment = Task { await sync.completeOpenedHost(generation: 30) }
+        await factory.waitUntilHeld()
+        sync.receiveLifecycle(.ready(generation: 31))
+        sync.collectionReplaced(32)
+        sync.receiveLifecycle(.ready(generation: 32))
+        await sync.waitForInputs()
+        var repeated: Task<Void, Never>?
+        await withCheckedContinuation { started in
+            repeated = Task {
+                started.resume()
+                await sync.completeOpenedHost(generation: 30)
+            }
+        }
+        #expect(callbacks.count == 1 && constructing == 1)
+        factory.release()
+        await staleDrain.waitUntilHeld()
+        #expect(sync.generation == 32 && callbacks.count == 1)
+        #expect(stale.events.isEmpty && stale.accountReads == 0)
+        await callbacks[0]()
+        await sync.waitForInputs()
+        #expect(stale.persistedReads == 0)
+        staleDrain.release()
+        await attachment.value
+        await repeated?.value
+        await sync.waitForReplacement()
+        #expect(callbacks.count == 2 && maximumConstructing == 1 && constructing == 0)
+        #expect(sync.generation == 32 && sync.setupState == .attached && !sync.operationFailed)
+        var shutdownReturned = false
+        let shutdown = Task {
+            let result = await sync.cancelAndDrain()
+            shutdownReturned = true
+            return result
+        }
+        await finalDrain.waitUntilHeld()
+        #expect(!shutdownReturned && !latest.closed)
+        finalDrain.release()
+        #expect(await shutdown.value)
+        #expect(stale.closed && latest.closed && latest.closeCount == 1)
+    }
+
+    @Test func replacementBeforeCompleteOpenedHostJoinsOriginalFactory() async {
+        let original = SyncOwnerFake(), successor = SyncOwnerFake(), unexpected = SyncOwnerFake()
+        let factory = SyncOwnerGate()
+        var factories = 0, constructing = 0, maximumConstructing = 0
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            factories += 1
+            constructing += 1
+            maximumConstructing = max(maximumConstructing, constructing)
+            defer { constructing -= 1 }
+            if factories == 1 { return original }
+            #expect(factories == 2)
+            if factories > 2 { return unexpected }
+            #expect(original.closed && original.closeCount == 1)
+            await factory.hold()
+            return successor
+        }, defaults: nil)
+        await sync.preparePlatform()
+        await sync.completeOpenedHost(generation: 40)
+        sync.collectionReplaced(41)
+        await factory.waitUntilHeld()
+        var completion: Task<Void, Never>?
+        var completionReturned = false
+        await withCheckedContinuation { started in
+            completion = Task {
+                started.resume()
+                await sync.completeOpenedHost(generation: 41)
+                completionReturned = true
+            }
+        }
+        sync.receiveLifecycle(.ready(generation: 41))
+        sync.collectionReplaced(41)
+        await sync.waitForInputs()
+        #expect(factories == 2 && constructing == 1 && !completionReturned)
+        #expect(successor.events.isEmpty && sync.generation == 41)
+        factory.release()
+        await completion?.value
+        await sync.waitForReplacement()
+        // A late retention completion from the old Host cannot roll back or
+        // construct another backend after the replacement has attached.
+        await sync.completeOpenedHost(generation: 40)
+        #expect(factories == 2 && maximumConstructing == 1 && constructing == 0)
+        #expect(sync.generation == 41 && sync.setupState == .attached && !sync.operationFailed)
+        #expect(await sync.cancelAndDrain())
+        #expect(original.closed && successor.closed && successor.closeCount == 1)
+    }
+
+    @Test func cancelledAttachmentCallerAndShutdownJoinOriginalFactoryAndCandidateDrain() async {
+        let candidate = SyncOwnerFake()
+        let factoryGate = SyncOwnerGate(), closeGate = SyncOwnerGate()
+        var factories = 0, shutdownReturned = false, attachmentReturned = false
+        candidate.onClose = { await closeGate.hold() }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            factories += 1
+            await factoryGate.hold()
+            return candidate
+        }, defaults: nil)
+        await sync.preparePlatform()
+        let attachment = Task {
+            await sync.completeOpenedHost(generation: 50)
+            attachmentReturned = true
+        }
+        await factoryGate.waitUntilHeld()
+        attachment.cancel()
+        var shutdown: Task<Bool, Never>?
+        await withCheckedContinuation { started in
+            shutdown = Task {
+                started.resume()
+                let result = await sync.cancelAndDrain()
+                shutdownReturned = true
+                return result
+            }
+        }
+        #expect(!shutdownReturned && !attachmentReturned && factories == 1)
+        factoryGate.release()
+        await closeGate.waitUntilHeld()
+        #expect(!shutdownReturned && !attachmentReturned && !candidate.closed)
+        #expect(candidate.events.isEmpty && candidate.accountReads == 0)
+        closeGate.release()
+        await attachment.value
+        #expect(await shutdown?.value == true)
+        #expect(candidate.closed && candidate.closeCount == 1 && factories == 1)
+        #expect(await sync.cancelAndDrain())
+        #expect(candidate.closeCount == 1)
+    }
+
+    @Test func staleAttachmentCloseFailureRetainsOwnerUntilSuccessfulDrainBeforeNextFactory() async {
+        let stale = SyncOwnerFake(), latest = SyncOwnerFake()
+        let factory = SyncOwnerGate()
+        var factories = 0, closeAttempts = 0
+        stale.onClose = {
+            closeAttempts += 1
+            throw CloudOwnTransportFailure.unexpectedReply
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            factories += 1
+            if factories == 1 { await factory.hold(); return stale }
+            #expect(stale.closed && stale.closeCount == 1)
+            return latest
+        }, defaults: nil)
+        await sync.preparePlatform()
+        let attachment = Task { await sync.completeOpenedHost(generation: 60) }
+        await factory.waitUntilHeld()
+        sync.collectionReplaced(61)
+        await sync.waitForInputs()
+        factory.release()
+        await attachment.value
+        await sync.waitForReplacement()
+        #expect(closeAttempts == 2 && factories == 1 && !stale.closed)
+        #expect(sync.operationFailed && sync.setupState == .failed && sync.generation == 61)
+        #expect(stale.events.isEmpty && latest.events.isEmpty)
+        stale.onClose = nil
+        await sync.completeOpenedHost(generation: 61)
+        await sync.waitForReplacement()
+        #expect(stale.closed && factories == 2 && sync.setupState == .attached)
+        #expect(sync.operationFailed && sync.generation == 61)
+        #expect(await sync.cancelAndDrain())
+        #expect(latest.closed && latest.closeCount == 1)
+    }
+
     @Test func closeDuringSuccessorFactoryDrainsCandidateWithoutAttaching() async {
         let original = SyncOwnerFake(), candidate = SyncOwnerFake()
         let factory = SyncOwnerGate()

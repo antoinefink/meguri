@@ -16,6 +16,18 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     private let executor: NativeCloudPolicyExecutor
     private var closed = false
 
+    // Harness-only progress marks contain no native values or error text.
+    enum ShutdownMark: String {
+        case untouched, running, finished, superseded, failed
+        case releasedAfterSupersession, vacant, occupied
+    }
+    struct ShutdownTrace {
+        var policyProbe: ShutdownMark = .untouched
+        var adapterDrain: ShutdownMark = .untouched
+        var retentionCheck: ShutdownMark = .untouched
+    }
+    private(set) var shutdownTrace = ShutdownTrace()
+
     private init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService,
                  connection: CoreCloudConnectionService, own: CloudOwnExecutor,
                  factory: any CloudKitEngineFactory, adapter: CloudKitSyncAdapter,
@@ -122,21 +134,40 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     }
     func close() async throws {
         guard !closed else { return }
+        shutdownTrace = ShutdownTrace()
         await accounts.close()
         await own?.close()
         await executor.drainCleanups()
         await executor.drainZoneDeletions()
         var replaced = false
-        do { _ = try await policy.status() }
-        catch BridgeError.cloudPolicy(.generationChanged) { replaced = true }
-        catch { throw error }
-        do { try await adapter.stop() }
-        catch {
+        shutdownTrace.policyProbe = .running
+        do {
+            _ = try await policy.status()
+            shutdownTrace.policyProbe = .finished
+        } catch BridgeError.cloudPolicy(.generationChanged) {
+            shutdownTrace.policyProbe = .superseded
+            replaced = true
+        } catch {
+            shutdownTrace.policyProbe = .failed
+            throw error
+        }
+        shutdownTrace.adapterDrain = .running
+        do {
+            try await adapter.stop()
+            shutdownTrace.adapterDrain = .finished
+        } catch {
+            shutdownTrace.adapterDrain = .failed
             guard replaced, await adapter.retainedInstanceIDs().isEmpty else { throw error }
+            shutdownTrace.adapterDrain = .releasedAfterSupersession
         }
         // stop joins the original SDK handlers, operations and release; no
         // callbacks are allowed to outlive the Host which owns their handles.
-        guard await adapter.retainedInstanceIDs().isEmpty else { throw CloudOwnTransportFailure.busy }
+        shutdownTrace.retentionCheck = .running
+        guard await adapter.retainedInstanceIDs().isEmpty else {
+            shutdownTrace.retentionCheck = .occupied
+            throw CloudOwnTransportFailure.busy
+        }
+        shutdownTrace.retentionCheck = .vacant
         closed = true
     }
 

@@ -189,3 +189,66 @@ Quiet-observation integration evidence:
   an observation. The next reported failures are allBackendsClosed and reopen
   with operationFailed and generationChanged evidence. Lifecycle diagnosis is
   open; the full workflow remains unaccepted.
+
+Bounded close diagnostics, fixer s-20261025T162405Z-9dc656e4:
+- Source: cleanroom/20261101T091824Z-25252, base 59e385ca.
+- The native backend reports policy status, adapter stop and retained-instance
+  outcomes. The test records close entries, successful returns and fixed error
+  categories. Its existing closure assertion reports at most 16 backend states.
+- Original drain order, errors, assertions and budgets remain unchanged.
+- Independent native_bounds_review: no P0-P2 findings.
+- similarity/20261101T092517Z-30368: PASS.
+- private/20261101T092458Z-29062: FAIL in the enum/assignment regions and log.
+  The source regions require a filtered rewrite; no privacy exception is added.
+- swift-test/20261101T092502Z-29307: FAIL, zero build warnings.
+  closed=[true,true,true,false]; closeEntered=[1,1,1,0];
+  closeReturned=[1,1,1,0]. The fourth backend has no close call.
+- Independent source review found a P1 in SyncCoordinator: attachment and
+  replacement can call the factory concurrently and retain an unclosed owner.
+  A production repair and deterministic ordering tests are required.
+- The full App test and all closure, review, media and reopen checks remain.
+  No workflow or unit acceptance is claimed.
+
+Construction-lane repair, fixer s-20261025T162405Z-9dc656e4:
+- Source: cleanroom/20261101T093019Z-33928, base 3006cca4.
+- Attachment joins existing replacement. Replacement joins its captured
+  attachment. Original intent is checked after construction. Failed candidate
+  close retains ownership before any later factory.
+- Independent native_bounds_review: no P0-P2 findings.
+- swift-test/20261101T093645Z-36008: 13/13 coordinator checks PASS.
+- swift-test/20261101T093833Z-39015: FAIL, zero build warnings. Closure and
+  reopen authority checks complete; the media root/name/byte comparison at
+  CloudServiceReviewRoundTripTests.swift:92 fails. Independent comparison
+  flags are still needed to identify the changed field.
+- similarity/20261101T093708Z-37794: PASS.
+- private/20261101T093641Z-35724: FAIL in one comment, one local test naming
+  region and this log. A filtered rewrite is required; no guard is changed.
+- Full workflow and unit acceptance remain pending.
+
+Reopen comparison handoff, fixer s-20261025T162405Z-9dc656e4:
+- Base: 3006cca4cb8adbe83e8498ef67ebda7a0234d4c8 plus the five-file
+  construction-r1 seed. The construction repair and shutdown marks are retained.
+- swift-test/20261101T093645Z-36008 passed all 13 coordinator tests, including
+  the four new deterministic factory cases. Independent review cleared P0-P2.
+- swift-test/20261101T093833Z-39015 reached the original exact media comparison.
+  Its macro establishes only that root equality and name equality do not both
+  hold. It does not identify the differing field or establish media loss.
+- Added fixed flags/counts to that same assertion, with local file reads for
+  the registered synthetic media before and after reopen. The original exact
+  expression, other assertions, budgets and error propagation are retained.
+- Removed the reported comment and renamed both local gates in the reported
+  test. Privacy guards are unchanged. One bounded source consistency check
+  covered this delta; no builds or tests ran here. The new diagnostic is unrun.
+  Root owns MG verification. No workflow pass or unit acceptance is claimed.
+
+Diagnostic integration evidence:
+- native_bounds_review: no P0-P2 findings in the read-only comparison delta.
+- private/20261101T094700Z-44613: all six native packet files pass. The combined
+  scan fails only in the separate Rust packet and its log.
+- similarity/20261101T094659Z-44424: PASS for both integrated source packets.
+- swift-test/20261101T094621Z-42449: FAIL at the original exact comparison.
+  Root URL and raw path differ; standardized paths match. Both name counts
+  are one. Name sets, name/case pairs, byte keys and exact bytes all match.
+  Both physical files exist and contain the expected bytes.
+- Path representation is the remaining reported comparison failure. No media
+  loss is established. Full workflow and unit acceptance remain pending.
