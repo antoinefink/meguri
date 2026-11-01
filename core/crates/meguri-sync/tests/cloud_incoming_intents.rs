@@ -4244,6 +4244,228 @@ fn live_new_pa_card_and_note_tombstone_settle_then_save_real_conditional_card_to
     mixed_live_card_then_note_tombstone_with_asset(true, true);
 }
 
+#[test]
+fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durably() {
+    use meguri_testkit::cloud::{ErrorCode, LogOutcome, Mutation, Operation, RequestKind, TaggedMissing};
+    use std::collections::BTreeMap;
+
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    assert_eq!(
+        pair.service.config(&scope()).unwrap().tagged_missing,
+        TaggedMissing::UnknownItem
+    );
+    let original = pair.receiver.driver().collection_rows().unwrap();
+    let originals = notes(&mut pair.receiver);
+    let id = originals[0].id;
+    let unrelated = name(&pair, codec::Kind::Note, originals[1].id);
+    let unrelated_record = saved(&pair, &unrelated);
+    let acked = pair.receiver.facts().unwrap().entities;
+    let mut deleted = BTreeSet::from([name(&pair, codec::Kind::Note, id)]);
+    for row in &original {
+        if let Payload::Card(card) = row
+            && card.nid == id
+        {
+            deleted.insert(name(&pair, codec::Kind::Card, card.id));
+        }
+    }
+    assert!(deleted.len() > 1, "the acknowledged Note must have Cards");
+    let baselines: BTreeMap<_, _> = deleted.iter().map(|key| (key.clone(), saved(&pair, key))).collect();
+    for key in &deleted {
+        let entity = &acked[key];
+        assert!(entity.server_erev > 0 && entity.acked_rev > 0);
+        assert!(entity.mark.is_none() && entity.in_flight.is_empty() && entity.tombstone_at.is_none());
+        assert!(!envelope(&baselines[key]).fields.tombstone);
+        assert_eq!(entity.acked_system_fields, baselines[key].system_fields.bytes());
+    }
+
+    pair.receiver.driver().delete_note(id).unwrap();
+    hold_receive(&mut pair, Point::BeforeCollectionSave);
+    let request = pair.receiver.held_request().unwrap();
+    let Operation::Modify { zone, atomic, changes } = &request.operation else {
+        panic!("original production-built tombstone Save request")
+    };
+    assert_eq!(zone, &pair.receiver.collection_zone().unwrap());
+    assert!(!atomic);
+    let observation = pair.receiver.driver().incoming_observation(b).unwrap();
+    let instance = observation.engine_instance.clone().unwrap();
+    assert_eq!(request.caller.instance.as_deref(), Some(instance.as_str()));
+    assert!(request.caller.device.is_none() && request.caller.own_operation.is_none());
+    let handed = pair.receiver.facts().unwrap().entities;
+    assert!(handed[&unrelated] == acked[&unrelated]);
+    let mut sent_names = BTreeSet::new();
+    for change in changes {
+        let Mutation::Save { record, if_unchanged } = change else {
+            panic!("MGEntity deletion is a conditional Save, never a Delete")
+        };
+        assert!(sent_names.insert(record.name.clone()));
+        assert!(deleted.contains(&record.name));
+        assert_eq!(record.record_type, "MGEntity");
+        assert_eq!(if_unchanged.as_ref(), Some(&baselines[&record.name].system_fields));
+        let Field::EncryptedBytes(bytes) = &record.fields["e"] else {
+            panic!("actual handed envelope")
+        };
+        let codec::DecodeOutcome::Supported(sent) = codec::Entity::decode(bytes).unwrap() else {
+            panic!("supported actual handed envelope")
+        };
+        let entity = &handed[&record.name];
+        let before = envelope(&baselines[&record.name]);
+        assert!(matches!(sent.fields.kind, codec::Kind::Note | codec::Kind::Card));
+        assert_eq!(sent.fields.kind, entity.kind);
+        assert_eq!(sent.fields.origin, entity.origin);
+        assert_eq!(sent.fields.writer, b.0);
+        assert!(sent.fields.tombstone);
+        assert_eq!(sent.fields.erev, before.fields.erev + 1);
+        assert_eq!(sent.fields.base_sha256, Some(before.payload_sha256));
+        assert_eq!(sent.payload.as_deref(), Some([].as_slice()));
+        assert_eq!(sent.payload_sha256, codec::sha256(&[]));
+        assert!(!record.fields.contains_key("pa"));
+        assert!(entity.sent && entity.tombstone_at.is_some() && entity.mark.is_some());
+        assert_eq!(entity.acked_rev, acked[&record.name].acked_rev);
+        assert_eq!(entity.acked_envelope.0, acked[&record.name].acked_envelope.0);
+        assert_eq!(entity.in_flight.len(), 1);
+        let flight = &entity.in_flight[0];
+        assert!(flight.tombstone);
+        assert_eq!(flight.local_rev, entity.local_rev);
+        assert_eq!(flight.erev, sent.fields.erev);
+        assert_eq!(flight.payload_digest, codec::sha256(&[]));
+        assert_eq!(flight.row_digest, codec::sha256(&[]));
+        assert_eq!(flight.tombstone_envelope_digest, Some(codec::sha256(bytes)));
+        // This reads the actual Store, rather than a Rig-owned send model.
+        assert!(pair.receiver.driver().binding_entity(b, &record.name).unwrap().as_ref() == Some(entity));
+    }
+    assert_eq!(sent_names, deleted);
+    let absent = pair.receiver.driver().collection_rows().unwrap();
+    assert!(!absent.iter().any(|row| {
+        matches!(row, Payload::Note(n) if n.id == id) || matches!(row, Payload::Card(c) if c.nid == id)
+    }));
+    settled(&mut pair, b);
+
+    // Another Service client removes exactly these records while the original
+    // conditional Saves remain held. No reply or tracking state is injected.
+    let removed = pair
+        .service
+        .request(
+            &scope(),
+            Default::default(),
+            Operation::Modify {
+                zone: zone.clone(),
+                atomic: false,
+                changes: deleted
+                    .iter()
+                    .map(|key| Mutation::Delete { name: key.clone() })
+                    .collect(),
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Modified(items)) = &removed.result else {
+        panic!("actual independent Service removal")
+    };
+    assert_eq!(
+        items.iter().map(|item| item.name.clone()).collect::<BTreeSet<_>>(),
+        deleted
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(item.result, Ok(MutationSuccess::Deleted)))
+    );
+    let state = pair.service.inspect(&scope()).unwrap().unwrap();
+    assert!(deleted.iter().all(|key| !state.zones[zone].records.contains_key(key)));
+    assert_eq!(saved(&pair, &unrelated), unrelated_record);
+    let still_held = pair.receiver.held_request().unwrap();
+    assert_eq!(still_held.operation, request.operation);
+    assert_eq!(still_held.caller, request.caller);
+    assert!(pair.receiver.facts().unwrap().entities == handed);
+
+    // Block any later fetched deletion before intake: only the original Save
+    // result may account for the following tracking removal.
+    pair.receiver.hold(Point::FetchBeforeInbox).unwrap();
+    pair.receiver.release(Point::BeforeCollectionSave).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let log = pair.service.request_log().unwrap();
+    let sends: Vec<_> = log
+        .iter()
+        .filter(|entry| {
+            entry.request_id > removed.request_id && entry.kind == RequestKind::Modify && entry.caller == request.caller
+        })
+        .collect();
+    assert_eq!(sends.len(), 1, "submit the original request exactly once");
+    let receipt = sends[0];
+    assert_eq!(receipt.scope, scope());
+    assert_eq!(receipt.zone.as_ref(), Some(zone));
+    assert_eq!(receipt.records.len(), deleted.len());
+    assert!(receipt.records.iter().all(|record| {
+        deleted.contains(&record.name) && record.outcome == LogOutcome::Failure(ErrorCode::UnknownItem)
+    }));
+    let delivered = pair.receiver.sent_request(receipt.request_id).unwrap();
+    assert_eq!(delivered.instance, instance);
+    assert!(delivered.backend_batch_id > 0);
+    assert_eq!(&delivered.mutations, changes);
+    assert_eq!(delivered.response.request_id, receipt.request_id);
+    let Ok(Reply::Modified(items)) = &delivered.response.result else {
+        panic!("actual original Save response retained by normal transport")
+    };
+    assert_eq!(items.len(), deleted.len());
+    assert_eq!(
+        items.iter().map(|item| item.name.clone()).collect::<BTreeSet<_>>(),
+        deleted
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(&item.result, Err(error) if error.code == ErrorCode::UnknownItem))
+    );
+    for key in &deleted {
+        assert!(pair.receiver.driver().binding_entity(b, key).unwrap().is_none());
+        assert!(!pair.receiver.facts().unwrap().entities.contains_key(key));
+    }
+    assert!(pair.receiver.facts().unwrap().entities[&unrelated] == acked[&unrelated]);
+    settled(&mut pair, b);
+    assert!(pair.receiver.sdk_pending().is_empty());
+    assert!(pair.receiver.sdk_database_pending().is_empty());
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    let after = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(after.seq, observation.seq);
+    assert_eq!(after.native_file, observation.native_file);
+    assert_eq!(after.generation, observation.generation);
+    assert_eq!(after.col_mod, observation.col_mod);
+    assert_eq!(after.undo_depth, observation.undo_depth);
+    assert_eq!(after.change_events, observation.change_events);
+    assert_eq!(after.runs.len(), observation.runs.len());
+
+    pair.receiver.release(Point::FetchBeforeInbox).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    pair.receiver.close_clean().unwrap();
+    pair.reopen_before_identity();
+    // Read persisted tracking and physical rows before identity or any fetch.
+    assert_eq!(binding(&pair), b);
+    for key in &deleted {
+        assert!(pair.receiver.driver().binding_entity(b, key).unwrap().is_none());
+    }
+    assert!(pair.receiver.driver().binding_entity(b, &unrelated).unwrap().as_ref() == Some(&acked[&unrelated]));
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    settled(&mut pair, b);
+    pair.verify_and_drive();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
+    for key in &deleted {
+        assert!(pair.receiver.driver().binding_entity(b, key).unwrap().is_none());
+    }
+    settled(&mut pair, b);
+    assert!(pair.receiver.sdk_pending().is_empty());
+    assert!(pair.receiver.sdk_database_pending().is_empty());
+    assert!(pair.receiver.facts().unwrap().entities[&unrelated] == acked[&unrelated]);
+    assert_eq!(saved(&pair, &unrelated), unrelated_record);
+    assert!(!pair.service.request_log().unwrap().iter().any(|entry| {
+        entry.request_id > receipt.request_id
+            && entry.caller.instance.is_some()
+            && entry.kind == RequestKind::Modify
+            && entry.records.iter().any(|record| deleted.contains(&record.name))
+    }));
+    pair.close();
+}
+
 fn lost_note_tombstone() -> (Pair, i64, String, Record) {
     let mut pair = Pair::adopted();
     let id = notes(&mut pair.receiver)[0].id;
