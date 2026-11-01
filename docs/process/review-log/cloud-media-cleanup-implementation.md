@@ -310,3 +310,11 @@ Metadata fixture verification:
 - similarity/20261101T092836Z-32886: PASS.
 The earlier failed broad receipts remain retained; these focused results cover
 their corrected fixture paths. Native reopen and the required gate remain open.
+
+Consolidated verification, 2026-11-01:
+- At master f21aa4c8, core-test/20261101T095745Z-58379 passes 107/107
+  selected media-port, cleanup, tombstone, spool and policy tests.
+- This fresh run covers the two fixture repairs previously verified separately.
+  The original core-test/20261101T091323Z-22902 failure remains retained.
+- No assertion, enabled check, test budget or required gate was removed.
+  Live-service, device, batch and unit acceptance remain open.
