@@ -62,3 +62,31 @@ offline drive requested reconciliation and received `RuntimeIdentityUnverified`.
 TemporarilyUnavailable failed exact equality of the persisted and physical Card.
 That row difference needs field-level output from this synthetic fixture.
 Neither result proves the offline prerequisite complete.
+
+## Second-run assertion correction and diagnostics — fixer handoff
+
+- Role: fixer; session `s-20261025T162405Z-9dc656e4`. Starting commit and original batch base remain the supplied values above; no Git lookup performed.
+- Owned files for this patch: `core/crates/meguri-sync/tests/cloud_media_roundtrip.rs` and this offline review log only. No production changes.
+
+For `core-test/20261101T120028Z-32577`, ReadFailed passed the immediate persisted Card/Revlog observer proof and the Note capture/pending checks, then failed at the deliberately requested offline reconciliation. Both offline `drive_ready` calls now require an error whose complete display string is exactly `cloud device operation failed: RuntimeIdentityUnverified`. Inspected own-code mapping: `RuntimeError::IdentityUnverified` becomes `ChildFailure::RuntimeIdentityUnverified`, and `ChildFailure::into_error` formats that catalog tag with this exact prefix. Other errors and unexpected success fail. Both existing no-engine assertions and identical persisted entity comparisons remain; matching verification must still precede successful ordinary reconciliation.
+
+TemporarilyUnavailable failed the exact persisted-versus-physical Card payload equality before End. That equality now reports both complete serialized synthetic fixture rows, canonical encoded bytes, post-answer reader sequence, answer operation id, entity observed sequence/generation, current generation, change counter and optional mark/source. Diagnostic serialization/encoding results are printed without unwrapping, so diagnostics cannot replace the failing equality with a serialization panic. The Note last-capture lookup and all its existing assertions now report the expected edit sequence/generation, answer context and synthetic Note fields; returned proofs also print their actual fields. No inferred cause or production repair is claimed.
+
+Runtime/compilation status: **UNRUN**. Root owns running both focused cases and the next production decision. Step budgets, exact payload equality, unchanged Service assertions, final exact accepted-save and peer/reopen checks, and earlier crash tests are preserved. No retries, delays, skips, weakened comparisons, build, Git, network or forbidden-source access were introduced/performed. One source-only consistency check is recorded below; it is not runtime evidence.
+
+One source-only consistency check: **PASS**. Exact restoration of the four authorized assertion/diagnostic blocks reproduces the input test file byte-for-byte, preserving all other checks and earlier crash tests. Both offline error assertions match the inspected driver string; synthetic row and Note capture diagnostics retain their original equality/proof requirements. Compilation and both focused cases remain **UNRUN**.
+
+## Third execution and startup diagnosis
+
+`core-test/20261101T120600Z-35794`: ReadFailed PASS through the full workflow;
+TemporarilyUnavailable FAIL on the actual Card image comparison. Tracking still
+has the original new Card, observed seq/generation zero, no mark and counter
+zero; the physical Card has the answer and its new review id.
+
+Independent reviewer traced this to `meguri-host/src/open.rs`: only ReadFailed
+sets the uncertain-startup flag. With TemporarilyUnavailable, the engine treats
+Unknown as a mismatch and turns a settled adoption decision Pending. Runtime
+then has no usable binding and its observer returns before capture. The repair
+must preserve only the settled, intent-free adoption for these two uncertain
+account results, leave the current identity Unknown and retain all remote gates.
+Signed-out, switched and differing accounts keep their mismatch handling.

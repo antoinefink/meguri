@@ -111,7 +111,22 @@ fn offline_review_and_note_edit_survive_clean_reopen(identity: IdentityReads) {
         let entity = answer_entities
             .get(name)
             .expect("answer must persist actual Card and new Revlog entity facts before End or scan");
-        assert_eq!(entity.payload, payload);
+        assert_eq!(
+            entity.payload,
+            payload,
+            "synthetic answer row {name}: expected_json={:?}; actual_json={:?}; expected_canonical={:?}; actual_canonical={:?}; current_seq={} answer_op_id={} entity_observed_seq={} entity_generation={} current_generation={} change_counter={} mark={:?}",
+            serde_json::to_string(&payload),
+            serde_json::to_string(&entity.payload),
+            payload.encode(),
+            entity.payload.encode(),
+            answered.seq,
+            answer.op_id,
+            entity.observed_seq,
+            entity.observed_generation,
+            answered.generation,
+            answer_counter,
+            entity.mark,
+        );
         let mark = entity
             .mark
             .as_ref()
@@ -159,10 +174,28 @@ fn offline_review_and_note_edit_survive_clean_reopen(identity: IdentityReads) {
     assert!(edit.seq > answered.seq); // same engine lifetime only
     assert_eq!(edit.generation, answered.generation);
     assert_eq!(edit.native_file, native_file);
-    let capture = pair.receiver.driver().capture_proof(edit.seq, edit.generation).unwrap();
-    assert_eq!(capture.observed_seq, edit.seq);
-    assert_eq!(capture.generation, edit.generation);
-    assert!(capture.attempted && capture.persisted);
+    let capture_context = format!(
+        "Note last-capture proof: edit_seq={} edit_generation={} answer_op_id={} post_answer_seq={} expected_note_json={:?}",
+        edit.seq,
+        edit.generation,
+        answer.op_id,
+        answered.seq,
+        serde_json::to_string(&edit.note),
+    );
+    let capture = pair
+        .receiver
+        .driver()
+        .capture_proof(edit.seq, edit.generation)
+        .unwrap_or_else(|error| panic!("{capture_context}; lookup failed: {error:?}"));
+    assert_eq!(capture.observed_seq, edit.seq, "{capture_context}; actual={capture:?}");
+    assert_eq!(
+        capture.generation, edit.generation,
+        "{capture_context}; actual={capture:?}"
+    );
+    assert!(
+        capture.attempted && capture.persisted,
+        "{capture_context}; actual={capture:?}"
+    );
     let receipt = pair.receiver.driver().wal_proof(edit.seq).unwrap();
     assert!(receipt.through >= edit.seq);
     assert_eq!(receipt.generation, edit.generation);
@@ -212,7 +245,14 @@ fn offline_review_and_note_edit_survive_clean_reopen(identity: IdentityReads) {
             assert!(entity.acked_system_fields.is_empty() && entity.acked_envelope.0.is_empty());
         }
     }
-    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let error = pair
+        .receiver
+        .drive_ready(&mut pair.service, STEPS)
+        .expect_err("offline drive before close must retain the identity boundary");
+    assert_eq!(
+        error.to_string(),
+        "cloud device operation failed: RuntimeIdentityUnverified"
+    );
     assert_unverified_without_engine(&mut pair.receiver);
     assert_eq!(pair.receiver.facts().unwrap().entities, pending);
     assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
@@ -226,7 +266,14 @@ fn offline_review_and_note_edit_survive_clean_reopen(identity: IdentityReads) {
     assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
     assert_eq!(pair.receiver.facts().unwrap().entities, pending);
     assert!(!pair.receiver.driver().stored_runtime_state().unwrap().drained);
-    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let error = pair
+        .receiver
+        .drive_ready(&mut pair.service, STEPS)
+        .expect_err("offline drive after reopen must retain the identity boundary");
+    assert_eq!(
+        error.to_string(),
+        "cloud device operation failed: RuntimeIdentityUnverified"
+    );
     assert_unverified_without_engine(&mut pair.receiver);
     assert_eq!(pair.receiver.facts().unwrap().entities, pending);
     assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
