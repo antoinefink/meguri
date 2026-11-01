@@ -6,6 +6,9 @@ use crate::cloud_policy::*;
 #[path = "cloud_asset_read_activity_tests.rs"]
 mod activity;
 
+#[path = "cloud_asset_retry_reopen_tests.rs"]
+mod retry_reopen;
+
 fn waiting_note(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) -> (Record, NoteId, Vec<u8>) {
     let (input, bytes, id) = remote_note(fixture, true);
     let server = save(fixture, sdk, input, None);
