@@ -246,11 +246,24 @@ impl SDKRig {
         let mut token = None;
         while *remaining > 0 {
             *remaining -= 1;
-            let r = service.request(&self.files.scope, self.caller(), Operation::FetchDatabase { token })?;
+            self.driver.call::<()>(Input::BeginZoneListing(self.instance.clone()))?;
+            let r = match service.request(&self.files.scope, self.caller(), Operation::FetchDatabase { token }) {
+                Ok(response) => response,
+                Err(error) => {
+                    self.driver.call::<()>(Input::ZoneListingResult(None))?;
+                    return Err(error.into());
+                }
+            };
             let page = match r.result {
                 Ok(Reply::DatabaseChanges(page)) => page,
-                Ok(_) => return Err(Box::new(std::io::Error::other("qualify: Service reply shape"))),
-                Err(_) => return Err(Box::new(std::io::Error::other("qualify: Service error reply"))),
+                Ok(_) => {
+                    self.driver.call::<()>(Input::ZoneListingResult(None))?;
+                    return Err(Box::new(std::io::Error::other("qualify: Service reply shape")));
+                }
+                Err(_) => {
+                    self.driver.call::<()>(Input::ZoneListingResult(None))?;
+                    return Err(Box::new(std::io::Error::other("qualify: Service error reply")));
+                }
             };
             // Persist actual zone announcements through the runtime, independently
             // of root facts or the Service inspection API.
@@ -260,7 +273,7 @@ impl SDKRig {
                 .filter(|change| change.removed.is_none())
                 .map(|change| change.zone.clone())
                 .collect();
-            self.driver.call::<()>(Input::ZonesSeen(zones))?;
+            self.driver.call::<()>(Input::ZoneListingResult(Some(zones)))?;
             if !page.more {
                 self.driver.call::<()>(Input::Qualify(self.instance.clone()))?;
                 return Ok(());

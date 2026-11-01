@@ -67,10 +67,19 @@ fn due(f: &PublishedFixture, sdk: &CloudEngineRegistration) -> Vec<String> {
             .result
             .unwrap();
     }
-    f.workflow
+    // Fixture-only immediate observation of zones actually created above.
+    let collection = f.workflow.host.collection().unwrap();
+    let listing = f
+        .workflow
         .core
-        .publication_zones_seen(&sdk.instance_id, &names)
+        .begin_zone_listing(&sdk.instance_id, &collection)
         .unwrap();
+    assert!(
+        f.workflow
+            .core
+            .complete_zone_listing(listing, &collection, Some(&names))
+            .unwrap()
+    );
     f.clock.step_ms(30 * 86_400_000);
     f.workflow
         .core

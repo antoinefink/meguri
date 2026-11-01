@@ -309,10 +309,18 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                     .then_some(decision),
             })
         }
-        Input::ZonesSeen(zones) => {
+        Input::BeginZoneListing(instance) => {
+            if device.zone_listing.is_some() {
+                return Err(failure());
+            }
+            device.zone_listing = Some(device.runtime()?.begin_zone_listing(&instance, &collection)?);
+            value(())
+        }
+        Input::ZoneListingResult(zones) => {
+            let request = device.zone_listing.take().ok_or_else(failure)?;
             device
                 .runtime()?
-                .publication_zones_seen(&device.runtime()?.instance()?, &zones)?;
+                .complete_zone_listing(request, &collection, zones.as_deref())?;
             value(())
         }
         Input::CollectionDrained => {

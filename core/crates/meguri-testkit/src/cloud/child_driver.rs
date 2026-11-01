@@ -403,7 +403,8 @@ pub(crate) enum Input {
     PutMedia(String, Vec<u8>),
     MediaFiles,
     RecoveryState,
-    ZonesSeen(Vec<String>),
+    BeginZoneListing(String),
+    ZoneListingResult(Option<Vec<String>>),
     CollectionDrained,
     DeletionGuard,
     DeletionCheck(core::publication::RecordRead),
@@ -1618,6 +1619,7 @@ struct Device {
     clock: Arc<StepClock>,
     stable: Option<(i64, core::BindingId)>,
     deletion: Option<core::publication::ZoneDeletionGuard>,
+    zone_listing: Option<core::runtime::ZoneListingRequest>,
     session_started: BTreeMap<u64, i64>,
     closed: bool,
     incoming_worker: Option<incoming_driver::Work>,
@@ -1662,6 +1664,7 @@ impl Device {
             clock,
             stable: b.stable,
             deletion: None,
+            zone_listing: None,
             session_started: BTreeMap::new(),
             closed: false,
             incoming_worker: None,
@@ -2657,7 +2660,8 @@ impl Device {
             | Input::PutMedia(..)
             | Input::MediaFiles
             | Input::RecoveryState
-            | Input::ZonesSeen(..)
+            | Input::BeginZoneListing(..)
+            | Input::ZoneListingResult(..)
             | Input::CollectionDrained
             | Input::DeletionGuard
             | Input::DeletionCheck(..)) => publication_driver::handle(self, input),

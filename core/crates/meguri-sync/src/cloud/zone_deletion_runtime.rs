@@ -91,14 +91,16 @@ impl Runtime {
                 .is_some_and(|f| f.code == Some(26) && f.encrypted_data_reset)
         });
         with_tracking_access(|| -> Result<(), Error> {
-            let store = s.store.as_mut().ok_or(Error::Database)?;
             for result in results {
                 if result.failure.as_ref().is_none_or(|f| f.code == Some(26)) {
-                    store.remove_publication_zone(id, &result.zone)?;
+                    Self::remove_publication_zone_locked(&mut s, id, &result.zone)?;
                 }
             }
             if reset {
-                store.isolate_runtime_binding(id, IsolationReason::EncryptedDataReset)?;
+                s.store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .isolate_runtime_binding(id, IsolationReason::EncryptedDataReset)?;
             }
             Ok(())
         })?;

@@ -1120,18 +1120,118 @@ impl Runtime {
 }
 
 impl Runtime {
-    /// Actual database-zone announcements (not an inventory guessed from Active).
-    pub fn publication_zones_seen(&self, instance: &str, zones: &[String]) -> Result<(), RuntimeError> {
-        let now = self.adapter_now()?;
-        let mut s = self.state();
+    /// Capture before the actual own inventory fetch, retaining its original
+    /// engine, account, binding, file and lifecycle authority across the await.
+    pub fn begin_zone_listing(
+        &self,
+        instance: &str,
+        collection: &Collection,
+    ) -> Result<ZoneListingRequest, RuntimeError> {
+        let _lease = collection.reader(ReaderRole::Cloud)?;
+        let account = self.publication_account()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let decision = self.publication_decision()?;
+        let s = self.state();
         Self::caller_locked(&s, instance)?;
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        let request = ZoneListingRequest {
+            owner: Arc::downgrade(&self.state),
+            collection: collection.clone(),
+            scan: ScanGuard {
+                invalidation: s.invalidation,
+                binding: b.binding.id,
+                open: b.open_counter,
+                generation: b.evidence.generation,
+                file,
+                incarnation: s.incarnation,
+            },
+            adapter: Self::adapter_guard_locked(&s),
+            instance: instance.into(),
+            account,
+            decision,
+            deletion_fence: s.zone_listing_fence.clone(),
+        };
+        self.validate_zone_listing_locked(&s, &request, collection)?;
+        Ok(request)
+    }
+    fn validate_zone_listing_locked(
+        &self,
+        s: &State,
+        request: &ZoneListingRequest,
+        collection: &Collection,
+    ) -> Result<(), RuntimeError> {
+        Self::caller_locked(s, &request.instance)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if !request.owner.ptr_eq(&Arc::downgrade(&self.state))
+            || s.incarnation != request.scan.incarnation
+            || (b.binding.id, b.open_counter, b.evidence.generation, b.file)
+                != (
+                    request.scan.binding,
+                    request.scan.open,
+                    request.scan.generation,
+                    request.scan.file,
+                )
+            || b.binding.facts.account != request.account
+            || s.invalidation != request.scan.invalidation
+            || s.invalidation_exhausted
+            || Self::adapter_guard_locked(s) != request.adapter
+            || s.tracking_stopped
+            || s.adapter.paused
+            || s.store.is_none()
+            || request.scan.file.created_nanos >= 1_000_000_000
+            || !collection.is_current()
+            || !request.collection.is_current()
+            || collection.generation() != request.scan.generation
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(())
+    }
+    /// Only an actual successful inventory supplies names; None is a failed
+    /// fetch. False also discards a listing superseded by a zone deletion. A
+    /// request begun after that deletion can observe a genuinely recreated zone.
+    pub fn complete_zone_listing(
+        &self,
+        request: ZoneListingRequest,
+        collection: &Collection,
+        zones: Option<&[String]>,
+    ) -> Result<bool, RuntimeError> {
+        if !request.owner.ptr_eq(&Arc::downgrade(&self.state))
+            || !collection.is_current()
+            || !request.collection.is_current()
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let _lease = request.collection.reader(ReaderRole::Cloud)?;
+        let account = self.publication_account()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let decision = self.publication_decision()?;
+        let now = self.adapter_now()?;
+        if account != request.account || file != request.scan.file || decision != request.decision {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let mut s = self.state();
+        self.validate_zone_listing_locked(&s, &request, collection)?;
+        if !Arc::ptr_eq(&s.zone_listing_fence, &request.deletion_fence) {
+            return Ok(false);
+        }
+        let Some(zones) = zones else { return Ok(false) };
         with_tracking_access(|| {
             s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .record_publication_zones(b, zones, now)
+                .record_publication_zones(request.scan.binding, zones, now)
         })?;
+        Ok(true)
+    }
+    /// Caller holds state then tracking access. Fence each committed removal,
+    /// including a successful member preceding a failed batch member.
+    pub(super) fn remove_publication_zone_locked(s: &mut State, b: BindingId, zone: &str) -> Result<(), Error> {
+        s.store
+            .as_mut()
+            .ok_or(Error::Database)?
+            .remove_publication_zone(b, zone)?;
+        s.zone_listing_fence = Arc::new(());
         Ok(())
     }
     /// Called from a real collection drain; no timer makes a zone due.
@@ -1260,12 +1360,7 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        with_tracking_access(|| {
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .remove_publication_zone(b, zone)
-        })?;
+        with_tracking_access(|| Self::remove_publication_zone_locked(&mut s, b, zone))?;
         Ok(())
     }
 }

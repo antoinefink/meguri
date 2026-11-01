@@ -411,6 +411,8 @@ struct State {
     adapter: super::adapter::AdapterState,
     policy: super::policy::RuntimeEvidenceState,
     publication: super::publication::ProcessState,
+    // A successful zone removal supersedes all earlier inventory observations.
+    zone_listing_fence: Arc<()>,
     incoming: super::incoming::ProcessState,
     media: super::media::Process,
     #[cfg(feature = "test-hooks")]
@@ -461,6 +463,19 @@ struct ScanGuard {
     generation: Generation,
     file: NativeFileIdentity,
     incarnation: u64,
+}
+
+/// Original authority for one actual database inventory request. Not a set of
+/// names or a serializable grant; completion consumes it, including on failure.
+pub struct ZoneListingRequest {
+    owner: std::sync::Weak<Mutex<State>>,
+    collection: Collection,
+    scan: ScanGuard,
+    adapter: super::adapter::Guard,
+    instance: String,
+    account: OpaqueBytes,
+    decision: super::publication::DecisionSnapshot,
+    deletion_fence: Arc<()>,
 }
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

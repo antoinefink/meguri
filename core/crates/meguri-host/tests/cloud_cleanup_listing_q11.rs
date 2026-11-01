@@ -1,5 +1,5 @@
 //! Q11 / P24 confirmed: A21-false inventory must not undo a deletion result.
-//! Tests first; uses the existing names-only runtime callback, without a fix.
+//! Real Service replies retain their request authority through delivery.
 use meguri_engine::{device_state::DeviceState, ports::OpenStep};
 use meguri_host::CoreHost;
 use meguri_model::{
@@ -12,6 +12,7 @@ use meguri_sync::cloud::{
     publication::RecordRead,
     runtime::{
         CloudInputs, FileIdentityProvider, IdentityProvider, IdentityStatus, KeyByteSource, KeySourceError, Runtime,
+        RuntimeError,
     },
 };
 use meguri_testkit::{
@@ -25,7 +26,7 @@ use meguri_testkit::{
 use std::{
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -44,10 +45,10 @@ impl KeyByteSource for Keys {
         }))
     }
 }
-struct Account;
+struct Account(Mutex<IdentityStatus>);
 impl IdentityProvider for Account {
     fn read_identity(&self, _: &BuildScope) -> IdentityStatus {
-        IdentityStatus::Available(OpaqueBytes(scope().account.into_bytes()))
+        self.0.lock().unwrap().clone()
     }
 }
 fn scope() -> Scope {
@@ -98,10 +99,57 @@ fn listed_zones(response: &Response) -> Vec<String> {
         .collect()
 }
 
+fn open_runtime(directory: &Path, now: i64, keys: Arc<Keys>) -> (CoreHost, Runtime, Arc<Account>) {
+    let clock = Arc::new(FixedClock::new(now, UtcOffset::UTC));
+    let decision = DeviceState::for_collection(&directory.join("collection.anki2"))
+        .publication_decision()
+        .unwrap()
+        .unwrap();
+    let account = Arc::new(Account(Mutex::new(IdentityStatus::Available(OpaqueBytes(
+        scope().account.into_bytes(),
+    )))));
+    let mut config = options(directory, now, 82);
+    config.clock = clock.clone();
+    config.publication_binding = decision.publication.binding.clone();
+    let host = CoreHost::open(config).unwrap();
+    let collection = host.collection().unwrap();
+    let runtime = Runtime::new(
+        directory.to_path_buf(),
+        CloudInputs {
+            scope: BuildScope {
+                container: ContainerId::new(scope().container).unwrap(),
+                environment: Environment::Development,
+            },
+            identity: account.clone(),
+            files: Arc::new(NativeFiles),
+        },
+    );
+    runtime.attach_adapter_clock(clock);
+    runtime.attach_sources(Arc::new(SeededRandom::new(84)), Default::default());
+    runtime.attach_key_bytes(keys);
+    OpenStep::run(&runtime, &collection).unwrap();
+    runtime.refresh_identity().unwrap();
+    let media = host.media().unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    runtime
+        .reconcile_binding(&collection, &media, Duration::from_secs(30))
+        .unwrap();
+    runtime.start_sdk_instance(&runtime.instance().unwrap()).unwrap();
+    (host, runtime, account)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListingCase {
+    Original,
+    Batch,
+    Recreated,
+    AccountChanged,
+    Reopened,
+}
+
 /// conformance/cloudkit-acceptance#Q11 row 456; sync/policy#P10.3;
-/// sync/cloudkit-recovery#V26.1 A21 false. No timestamp or guard API is invented.
-#[test]
-fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_leaves_no_row() {
+/// sync/cloudkit-recovery#V26.1 A21 false.
+fn cleanup_listing_case(case: ListingCase) {
     let run = tempfile::tempdir().unwrap();
     let old_dir = run.path().join("old-publisher");
     let current_dir = run.path().join("current-publisher");
@@ -139,7 +187,6 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
     // production Runtime through its public lifecycle step. This is the same durable store,
     // not a model of the zone table or a replacement Service.
     let now = NOW + 30 * DAY;
-    let clock = Arc::new(FixedClock::new(now, UtcOffset::UTC));
     let path = current_dir.join("collection.anki2");
     let decision = DeviceState::for_collection(&path)
         .publication_decision()
@@ -147,38 +194,15 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
         .expect("the actual publication must have a durable decision");
     assert!(decision == published.decision);
     assert_eq!(NativeFiles.identity(&path).unwrap(), published.native_file);
-    let mut config = options(&current_dir, now, 82);
-    config.clock = clock.clone();
-    config.publication_binding = decision.publication.binding.clone();
-    let host = CoreHost::open(config).unwrap();
+    let (host, runtime, _) = open_runtime(&current_dir, now, current_keys.clone());
     assert_eq!(NativeFiles.identity(&path).unwrap(), published.native_file);
     let collection = host.collection().unwrap();
-    let runtime = Runtime::new(
-        current_dir.clone(),
-        CloudInputs {
-            scope: BuildScope {
-                container: ContainerId::new(scope().container).unwrap(),
-                environment: Environment::Development,
-            },
-            identity: Arc::new(Account),
-            files: Arc::new(NativeFiles),
-        },
-    );
-    runtime.attach_adapter_clock(clock);
-    runtime.attach_sources(Arc::new(SeededRandom::new(84)), Default::default());
-    runtime.attach_key_bytes(current_keys.clone());
-    OpenStep::run(&runtime, &collection).unwrap();
-    runtime.refresh_identity().unwrap();
     let media = host.media().unwrap();
-    media.store().register_full(|_, _| true).unwrap();
-    runtime
-        .reconcile_binding(&collection, &media, Duration::from_secs(30))
-        .unwrap();
     let instance = runtime.instance().unwrap();
-    runtime.start_sdk_instance(&instance).unwrap();
+    let initial_request = runtime.begin_zone_listing(&instance, &collection).unwrap();
     let initial = listing(&mut service);
     runtime
-        .publication_zones_seen(&instance, &listed_zones(&initial))
+        .complete_zone_listing(initial_request, &collection, Some(&listed_zones(&initial)))
         .unwrap();
     runtime.sdk_fetch_completed_without_root(&instance).unwrap();
     let read = service
@@ -218,6 +242,7 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
 
     // A21 false: an own all-zone inventory is captured now and kept verbatim.
     // No new fetch substitutes for this response after DeleteZones completes.
+    let held_request = runtime.begin_zone_listing(&instance, &collection).unwrap();
     let held_listing = listing(&mut service);
     let held_names = listed_zones(&held_listing);
     assert!(held_names.contains(&old_zone) && held_names.contains(&current_zone));
@@ -265,9 +290,22 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
         .unwrap();
     assert!(matches!(&deleted.result, Ok(Reply::Done)));
     assert!(held_listing.request_id < deleted.request_id);
-    runtime
-        .zone_deletion_result(&guard, &old_zone, true, &collection)
-        .unwrap();
+    if case == ListingCase::Batch {
+        runtime
+            .zone_deletion_batch_result(
+                &guard,
+                &collection,
+                &[meguri_sync::cloud::zone_deletion::ZoneResult {
+                    zone: old_zone.clone(),
+                    failure: None,
+                }],
+            )
+            .unwrap();
+    } else {
+        runtime
+            .zone_deletion_result(&guard, &old_zone, true, &collection)
+            .unwrap();
+    }
     assert!(
         !runtime
             .publication_control_for_testing()
@@ -276,14 +314,62 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
             .contains_key(&old_zone)
     );
 
-    // Existing API, same live binding/instance, actual earlier response.
-    // The names-only callback currently resurrects the old epoch here.
-    runtime.publication_zones_seen(&instance, &held_names).unwrap();
+    // Same live binding/instance and actual earlier response, with the original
+    // pre-fetch authority. The successful deletion supersedes this listing.
+    assert!(
+        !runtime
+            .complete_zone_listing(held_request, &collection, Some(&held_names))
+            .unwrap()
+    );
     let after = runtime.publication_facts(&collection).unwrap();
     let server = service.inspect(&scope()).unwrap().unwrap();
     assert!(server.zones[&old_zone].removed.is_some());
     assert!(server.zones[&current_zone].removed.is_none());
     assert_eq!(server.zones["meguri-root"].records["active"], *record);
+    if case == ListingCase::Recreated {
+        let created = service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::CreateZone { zone: old_zone.clone() },
+            )
+            .unwrap();
+        assert!(matches!(created.result, Ok(Reply::Done)));
+        let request = runtime.begin_zone_listing(&instance, &collection).unwrap();
+        let fresh_listing = listing(&mut service);
+        assert!(deleted.request_id < created.request_id && created.request_id < fresh_listing.request_id);
+        let names = listed_zones(&fresh_listing);
+        assert!(names.contains(&old_zone) && names.contains(&current_zone));
+        assert!(
+            runtime
+                .complete_zone_listing(request, &collection, Some(&names))
+                .unwrap()
+        );
+        let live = runtime.publication_facts(&collection).unwrap();
+        drop(runtime);
+        drop(media);
+        drop(collection);
+        host.close().unwrap();
+        drop(host);
+        let mut reopened = open(&current_dir, now, 82, current_keys.clone());
+        let durable = reopened.facts().unwrap();
+        for facts in [&live, &durable] {
+            assert_eq!(facts.zones[&old_zone].first_seen_ms, now);
+            assert!(!facts.zones[&old_zone].deletion_due);
+            assert!(!facts.zones.contains_key(&current_zone));
+            let binding = facts.current.as_ref().unwrap();
+            assert_eq!(binding.id, current_binding.id);
+            assert_eq!(binding.facts.epoch, current_binding.facts.epoch);
+            assert_eq!(binding.facts.state, BindingState::Active);
+        }
+        reopened.close_clean().unwrap();
+        let server = service.inspect(&scope()).unwrap().unwrap();
+        assert!(server.zones[&old_zone].removed.is_none());
+        assert!(server.zones[&current_zone].removed.is_none());
+        assert_eq!(server.zones["meguri-root"].records["active"], *record);
+        assert_eq!(current_keys.0.load(Ordering::SeqCst), 2);
+        return;
+    }
     drop(runtime);
     drop(media);
     drop(collection);
@@ -306,6 +392,101 @@ fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_l
         );
     }
     assert_eq!(current_keys.0.load(Ordering::SeqCst), 2);
+    if matches!(case, ListingCase::Original | ListingCase::Batch) {
+        return;
+    }
+
+    // The original Q11 absence has already survived a real close and reopen.
+    // Recreate the actual Service zone, without restoring a tracking row or ACK.
+    let created = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::CreateZone { zone: old_zone.clone() },
+        )
+        .unwrap();
+    assert!(matches!(created.result, Ok(Reply::Done)));
+    let (host, runtime, account) = open_runtime(&current_dir, now, current_keys.clone());
+    let collection = host.collection().unwrap();
+    let request = runtime
+        .begin_zone_listing(&runtime.instance().unwrap(), &collection)
+        .unwrap();
+    let fresh_listing = listing(&mut service);
+    assert!(deleted.request_id < created.request_id && created.request_id < fresh_listing.request_id);
+    let names = listed_zones(&fresh_listing);
+    assert!(names.contains(&old_zone) && names.contains(&current_zone));
+    if case == ListingCase::Reopened {
+        // An original result cannot acquire a replacement runtime/store's authority,
+        // even when reopened from the very same publication files and account.
+        drop(collection);
+        drop(runtime);
+        host.close().unwrap();
+        drop(host);
+        let (host, runtime, _) = open_runtime(&current_dir, now, current_keys.clone());
+        let collection = host.collection().unwrap();
+        let before = runtime.publication_facts(&collection).unwrap();
+        assert!(matches!(
+            runtime.complete_zone_listing(request, &collection, Some(&names)),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+        let after = runtime.publication_facts(&collection).unwrap();
+        assert_eq!(after.zones, before.zones);
+        assert_eq!(after.current.unwrap().id, before.current.unwrap().id);
+        drop(collection);
+        drop(runtime);
+        host.close().unwrap();
+    } else {
+        *account.0.lock().unwrap() = IdentityStatus::Available(OpaqueBytes(b"replacement-account".to_vec()));
+        runtime.refresh_identity().unwrap();
+        let before = runtime.publication_facts(&collection).unwrap();
+        assert!(matches!(
+            runtime.complete_zone_listing(request, &collection, Some(&names)),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+        let after = runtime.publication_facts(&collection).unwrap();
+        assert_eq!(after.zones, before.zones);
+        let binding = after.current.unwrap();
+        assert_eq!(binding.id, current_binding.id);
+        assert_eq!(
+            binding.facts.state,
+            BindingState::Isolated(meguri_sync::cloud::IsolationReason::AccountChanged)
+        );
+        drop(collection);
+        drop(runtime);
+        host.close().unwrap();
+    }
+    // Durable inspection does not infer any inventory from the current Active.
+    let mut reopened = open(&current_dir, now, 82, current_keys.clone());
+    let durable = reopened.facts().unwrap();
+    assert!(!durable.zones.contains_key(&old_zone));
+    assert!(!durable.zones.contains_key(&current_zone));
+    reopened.close_clean().unwrap();
+    let server = service.inspect(&scope()).unwrap().unwrap();
+    assert!(server.zones[&old_zone].removed.is_none());
+    assert!(server.zones[&current_zone].removed.is_none());
+    assert_eq!(server.zones["meguri-root"].records["active"], *record);
+    assert_eq!(current_keys.0.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn p24_q11_a21_false_listing_captured_before_delete_zones_handled_after_result_leaves_no_row() {
+    cleanup_listing_case(ListingCase::Original);
+}
+#[test]
+fn p24_q11_batch_deletion_supersedes_original_actual_listing() {
+    cleanup_listing_case(ListingCase::Batch);
+}
+#[test]
+fn p24_q11_fresh_actual_listing_records_recreated_zone_and_survives_reopen() {
+    cleanup_listing_case(ListingCase::Recreated);
+}
+#[test]
+fn p24_q11_actual_listing_after_account_replacement_mutates_no_rows() {
+    cleanup_listing_case(ListingCase::AccountChanged);
+}
+#[test]
+fn p24_q11_actual_listing_cannot_acquire_reopened_runtime_authority() {
+    cleanup_listing_case(ListingCase::Reopened);
 }
 
 #[test]
