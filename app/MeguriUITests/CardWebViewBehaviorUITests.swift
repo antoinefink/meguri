@@ -588,9 +588,46 @@ final class CardWebViewBehaviorUITests: XCTestCase {
         app.launchArguments = arguments.arguments
         app.launch()
         defer { app.terminate() }
+        func captureWindow(_ phase: String) {
+            let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+            shot.name = "card-contrast-probe-\(phase)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
         let anchor = app.descendants(matching: .any).matching(identifier: "card.behavior.state").firstMatch
+        func captureReadinessFailure(_ phase: String) -> String {
+            let anchorExists = anchor.exists
+            let currentState = anchorExists ? state(app) : ""
+            let questionExists = app.staticTexts["Behavior question"].exists
+            let surface = app.descendants(matching: .any).matching(identifier: "card.behavior.surface").firstMatch
+            let surfaceExists = surface.exists
+            let frame = surfaceExists ? surface.frame : .zero
+            let finiteFrame = [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+            let hittable = surfaceExists && surface.isHittable
+            let window = app.windows.firstMatch
+            let windowExists = window.exists
+            let bounds = windowExists ? window.frame : .zero
+            let fullyVisible = surfaceExists && finiteFrame && !frame.isEmpty
+                && !bounds.isEmpty && bounds.contains(frame) && hittable
+            var lines = [
+                "fixture=card/behaviors phase=\(phase)",
+                "stateAnchorExists=\(anchorExists) stateLength=\(currentState.count) stateFailed=\(currentState.hasPrefix("failed")) stateReady=\(currentState.hasPrefix("ready")) stateReadyCard1Question=\(currentState.hasPrefix("ready card=1 side=question"))",
+                "questionExists=\(questionExists) appWindowExists=\(windowExists)",
+                "card.behavior.surface exists=\(surfaceExists) frame=\(frame) finiteFrame=\(finiteFrame) hittable=\(hittable) fullyVisible=\(fullyVisible)",
+            ]
+            // This route loads only the known synthetic card fixture.
+            let failureState = currentState.hasPrefix("failed") ? ": state=\(currentState)" : ""
+            if !failureState.isEmpty { lines.append("failure\(failureState)") }
+            let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+            attachment.name = "card-contrast-probe-card-behaviors-\(phase)-state"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            if windowExists { captureWindow("card-behaviors-\(phase)") }
+            return failureState
+        }
         guard anchor.waitForExistence(timeout: 15) else {
-            throw AuditError(description: "Refresh contrast diagnostic: card.behavior.state did not appear")
+            let failureState = captureReadinessFailure("anchor-failure")
+            throw AuditError(description: "Refresh contrast diagnostic: card.behavior.state did not appear\(failureState)")
         }
         let ready = wait {
             let currentState = self.state(app)
@@ -598,7 +635,8 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             return currentState.hasPrefix("ready card=1 side=question") && app.staticTexts["Behavior question"].exists
         }
         guard ready, state(app).hasPrefix("ready card=1 side=question"), app.staticTexts["Behavior question"].exists else {
-            throw AuditError(description: "Refresh contrast diagnostic: card/behaviors question did not become ready")
+            let failureState = captureReadinessFailure("readiness-failure")
+            throw AuditError(description: "Refresh contrast diagnostic: card/behaviors question did not become ready\(failureState)")
         }
         let shown = try AccessibilityAudit.Appearance.shown(by: app)
         guard shown.dark == variant.dark else {
@@ -649,12 +687,6 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
             return refreshVisible
-        }
-        func captureWindow(_ phase: String) {
-            let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-            shot.name = "card-contrast-probe-\(phase)"
-            shot.lifetime = .keepAlways
-            add(shot)
         }
         captureWindow("before")
         guard recordGeometry("before") else {
