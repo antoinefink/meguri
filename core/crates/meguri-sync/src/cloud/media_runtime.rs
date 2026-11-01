@@ -383,7 +383,10 @@ impl Runtime {
                     flags.superseded = None;
                 }
                 if feed_state.adoption {
-                    if let Some(acked) = ack {
+                    if tracked.as_ref().is_some_and(|e| e.acked_media_tombstone()) {
+                        flags.withheld = Some(p.sha256);
+                        flags.superseded = None;
+                    } else if let Some(acked) = ack {
                         if acked.sha256 != p.sha256 {
                             flags.superseded = Some(p.sha256);
                         }
@@ -548,9 +551,26 @@ impl Runtime {
                     return Ok(Some(w));
                 }
                 let mut s = self.state();
-                if s.media.pending.as_ref() == Some(&w) {
-                    s.media.pending = None;
+                Self::check_media_locked(&s, &a)?;
+                if s.media.pending.as_ref() != Some(&w) {
+                    return Ok(None);
                 }
+                // Retire only this original work under its authority. Read and
+                // revision-check the ledger in the same tracking write scope.
+                let Request::Download { name } = &w.request else {
+                    return Err(Error::InvalidData.into());
+                };
+                let changed = with_tracking_access(|| -> Result<_, Error> {
+                    let store = s.store.as_mut().ok_or(Error::Database)?;
+                    let mut ledger = store.media_ledger(a.binding)?;
+                    let blob = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
+                    if blob.download == Transfer::Running {
+                        blob.download = Transfer::None;
+                    }
+                    store.put_media(a.binding, &ledger)
+                })?;
+                s.media.pending = None;
+                self.notify_media_pending_locked(&mut s, changed)?;
             }
         }
         let (mut ledger, key) = self.with_media(&a, |store| {

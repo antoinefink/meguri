@@ -715,3 +715,157 @@ fn account_change_during_held_service_callback_cannot_record_old_fetch_drain() {
     assert_eq!(pair.service.request_log().unwrap().len(), requests);
     pair.close();
 }
+
+#[test]
+fn service_media_tombstone_adoption_withholds_matching_and_differing_files_after_reopen() {
+    for bytes in [LOCAL, REMOTE] {
+        let mut pair = Pair::published();
+        let (blob, _, _) = publish_old(&mut pair);
+        pair.sender.driver().trash_media("photo.jpg").unwrap();
+        sync(&mut pair);
+        let tombstone = name(&pair.sender);
+        assert!(ack_tombstone(&tombstone));
+        let zone = pair.sender.collection_zone().unwrap();
+        let server = pair.service.inspect(&scope()).unwrap().unwrap();
+        let record = server.zones[&zone].records[&tombstone.name].clone();
+        let Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+            panic!("actual Service tombstone envelope")
+        };
+        assert_eq!(*envelope, tombstone.acked_envelope.0);
+        pair.receiver.driver().put_media("photo.jpg", bytes).unwrap();
+        let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+        let after = cursor(&pair);
+        pair.receiver.adopt_cloud(&preview).unwrap();
+        pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        for reopen in [false, true] {
+            if reopen {
+                pair.receiver.close_clean().unwrap();
+                pair.receiver = online(&pair.receiver_dir, false);
+                pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+            }
+            pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+            let adopted = name(&pair.receiver);
+            assert!(ack_tombstone(&adopted));
+            assert!(adopted.tombstone_at.is_none());
+            assert!(adopted.mark.is_none() && adopted.in_flight.is_empty());
+            assert!(adopted.acked_rev > 0);
+            assert_eq!(adopted.local_rev, adopted.acked_rev);
+            assert_eq!(adopted.server_erev, tombstone.server_erev);
+            assert_eq!(adopted.acked_envelope.0, *envelope);
+            assert_eq!(adopted.acked_system_fields, record.system_fields.bytes());
+            assert_eq!(adopted.acked_payload, tombstone.acked_payload);
+            assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], bytes);
+            assert_eq!(
+                pair.receiver.driver().collection_rows().unwrap(),
+                pair.sender.driver().collection_rows().unwrap()
+            );
+            assert!(pair.receiver.sdk_pending().is_empty());
+            assert!(
+                pair.receiver
+                    .driver()
+                    .media_blobs()
+                    .unwrap()
+                    .values()
+                    .all(|b| b.download == Transfer::None && b.upload == Transfer::None)
+            );
+            assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server.zones);
+            assert!(
+                !pair
+                    .service
+                    .request_log()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r.request_id > after && r.records.iter().any(|r| r.name == blob))
+            );
+        }
+        pair.close();
+    }
+}
+
+#[test]
+fn service_media_tombstone_adoption_refuses_invalid_records_without_replacing_local_data() {
+    for defect in [
+        "missing_payload",
+        "invalid_payload",
+        "key",
+        "hmac",
+        "revision",
+        "generation",
+        "digest",
+        "missing_asset",
+        "other_tombstone",
+    ] {
+        let mut pair = Pair::published();
+        publish_old(&mut pair);
+        pair.sender.driver().trash_media("photo.jpg").unwrap();
+        sync(&mut pair);
+        let original = name(&pair.sender);
+        assert!(ack_tombstone(&original));
+        let codec::DecodeOutcome::Supported(mut entity) = codec::Entity::decode(&original.acked_envelope.0).unwrap()
+        else {
+            panic!("actual Service tombstone")
+        };
+        let mut payload = entity.payload.clone().unwrap();
+        match defect {
+            "missing_payload" => payload.clear(),
+            "invalid_payload" => payload = vec![0xff],
+            "key" => entity.fields.key = b"other.jpg".to_vec(),
+            "revision" => entity.fields.erev = 0,
+            "generation" => entity.fields.generation = Some([73; 16]),
+            "other_tombstone" => {
+                entity.fields.kind = codec::Kind::Note;
+                entity.fields.key = codec::id_key(73).to_vec();
+                payload = Payload::Note(codec::Note::default()).encode().unwrap();
+            }
+            _ => {}
+        }
+        let mut malformed = codec::Entity::build(entity.fields, &payload).unwrap();
+        if defect == "digest" {
+            malformed.payload_sha256[0] ^= 1;
+        }
+        if defect == "missing_asset" {
+            malformed.payload = None;
+        }
+        let key = pair.sender.facts().unwrap().current.unwrap().facts.record_key;
+        let record_name = codec::entity_name(
+            if defect == "hmac" { &[74; 32] } else { &key.0 },
+            malformed.fields.kind,
+            &malformed.fields.key,
+        )
+        .unwrap();
+        let zone = pair.sender.collection_zone().unwrap();
+        let response = pair
+            .service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Modify {
+                    zone,
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: RecordInput::encrypted(record_name, "MGEntity", malformed.encode().unwrap()),
+                        if_unchanged: None,
+                    }],
+                },
+            )
+            .unwrap();
+        let Reply::Modified(results) = response.result.unwrap() else {
+            panic!("Service save")
+        };
+        assert!(results.iter().all(|result| result.result.is_ok()));
+        pair.receiver.driver().put_media("photo.jpg", REMOTE).unwrap();
+        let rows = pair.receiver.driver().collection_rows().unwrap();
+        let before = pair.receiver.facts().unwrap();
+        if let Ok(preview) = pair.receiver.preview(&mut pair.service, STEPS) {
+            pair.receiver.adopt_cloud(&preview).unwrap();
+            assert!(pair.receiver.drive_ready(&mut pair.service, STEPS).is_err(), "{defect}");
+        }
+        let after = pair.receiver.facts().unwrap();
+        assert!(after.current == before.current && after.decision == before.decision);
+        assert_eq!(after.native_file, before.native_file);
+        assert!(after.recovery_ops.is_empty());
+        assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+        assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], REMOTE);
+        pair.close();
+    }
+}

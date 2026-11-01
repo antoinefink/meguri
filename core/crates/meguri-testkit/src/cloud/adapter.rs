@@ -488,14 +488,13 @@ impl SDKRig {
                 eprintln!("cloud-child fetch_failure_stage=finish_failed");
             }
         }
-        if let Some(exchange) = fetch.exchange {
-            if self
+        if let Some(exchange) = fetch.exchange
+            && self
                 .driver
                 .call::<()>(Input::FetchFailed(fetch.instance.clone(), exchange))
                 .is_err()
-            {
-                eprintln!("cloud-child fetch_failure_stage=exchange_failed");
-            }
+        {
+            eprintln!("cloud-child fetch_failure_stage=exchange_failed");
         }
     }
     /// Original asynchronous SDK callback errors, consumed once by the caller.

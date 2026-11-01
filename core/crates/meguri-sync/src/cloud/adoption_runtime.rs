@@ -107,10 +107,10 @@ fn received_bytes(op: &AdoptOp, record: &StagedRecord, bytes: Option<&[u8]>) -> 
         bytes.map_or(codec::AssetInput::Absent, codec::AssetInput::Bytes),
     )
     .map_err(|_| refused())?;
-    // K19 and remote tombstone application require the next phase. Never
-    // expose a partially installed collection when these are encountered.
+    // K18.4 retains MediaName tombstones as ACKs with no collection row.
+    // Other tombstone kinds and K19 generations remain unsupported.
     if received.entity.fields.generation.is_some()
-        || received.entity.fields.tombstone
+        || (received.entity.fields.tombstone && received.entity.fields.kind != codec::Kind::MediaName)
         || received.payload.is_none()
         || received.entity.fields.erev == 0
         || record.system_fields.is_empty()
@@ -142,7 +142,6 @@ fn received_bytes(op: &AdoptOp, record: &StagedRecord, bytes: Option<&[u8]>) -> 
         return Err(refused());
     }
     if let Some(payload) = &received.payload
-        && payload.kind() != codec::Kind::MediaName
         && crate::cloud::row_payload::payload_key(payload)? != received.entity.fields.key
     {
         return Err(refused());
@@ -783,7 +782,7 @@ impl Runtime {
                                 adoption_stage!("payload_validation");
                                 if entity.payload.is_some()
                                     || entity.fields.generation.is_some()
-                                    || entity.fields.tombstone
+                                    || (entity.fields.tombstone && entity.fields.kind != codec::Kind::MediaName)
                                     || codec::entity_name(
                                         &epoch(&op)?.record_key,
                                         entity.fields.kind,
@@ -977,19 +976,17 @@ impl Runtime {
         let epoch = epoch(op)?;
         let paths = spool(&owner.directory)?;
         let mut keys = BTreeSet::new();
+        let mut live_keys = BTreeSet::new();
 
         for path in &paths {
             let record = saved(path)?;
             let received = received(&owner.directory, op, &record)?;
-            let payload = received.payload.ok_or_else(refused)?;
-            if payload.kind() == codec::Kind::MediaName {
-                if !keys.insert((received.entity.fields.kind, received.entity.fields.key)) {
-                    return Err(refused());
-                }
-                continue;
-            }
-            if !keys.insert((received.entity.fields.kind, received.entity.fields.key)) {
+            let key = (received.entity.fields.kind, received.entity.fields.key);
+            if !keys.insert(key.clone()) {
                 return Err(refused());
+            }
+            if !received.entity.fields.tombstone {
+                live_keys.insert(key);
             }
         }
         // Missing-notetype graphs fail here, even when media is also pending.
@@ -997,7 +994,7 @@ impl Runtime {
             let record = saved(path)?;
             let payload = received(&owner.directory, op, &record)?.payload.ok_or_else(refused)?;
             for reference in crate::cloud::publication_store::references(&payload)? {
-                if !keys.contains(&reference) {
+                if !live_keys.contains(&reference) {
                     return Err(refused());
                 }
             }
@@ -1333,5 +1330,97 @@ fn load_notetype(owner: &AdoptionOwner, op: &AdoptOp, id: i64) -> Result<codec::
     match payload {
         codec::Payload::Notetype(nt) => Ok(nt),
         _ => Err(refused()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn media_tombstone_received_validation_requires_original_system_fields_and_one_payload_form() {
+        use crate::cloud::control_codec::EpochReason;
+        let epoch = Epoch {
+            epoch_id: [11; 16],
+            record_key: [12; 32],
+            crt: 1,
+            ver: 18,
+            state: EpochState::Complete,
+            reason: EpochReason::Initial,
+            published_at_ms: 1,
+            counts: Vec::new(),
+        };
+        // Decoder input only: this operation is never installed or acknowledged.
+        let op = AdoptOp {
+            id: [13; 16],
+            step: AdoptStep::Staging,
+            binding_before: None,
+            binding_after: BindingId([14; 16]),
+            account: OpaqueBytes(vec![15]),
+            before: None,
+            file_before: None,
+            candidate: Publication {
+                identity: PublicationId::from_bytes([16; 16]),
+                binding: AccountBinding::LocalOnly,
+                decision: PublicationDecision::Clear,
+            },
+            active: ControlRecord {
+                encrypted: None,
+                system_fields: OpaqueBytes(vec![17]),
+            },
+            epoch: EpochId(epoch.epoch_id),
+            epoch_record: Some(ControlRecord {
+                encrypted: Some(epoch.encode().unwrap()),
+                system_fields: OpaqueBytes(vec![18]),
+            }),
+            media_root: None,
+            staging_name: ".meguri-stage-decoder".into(),
+            started_at_ms: 1,
+        };
+        let payload = codec::Payload::MediaName(codec::MediaName {
+            name: b"photo.jpg".to_vec(),
+            sha256: [19; 32],
+            sha1: [20; 20],
+            size: 21,
+        })
+        .encode()
+        .unwrap();
+        let entity = codec::Entity::build(
+            codec::EntityFields {
+                kind: codec::Kind::MediaName,
+                key: b"photo.jpg".to_vec(),
+                origin: [22; 16],
+                erev: 2,
+                generation: None,
+                tombstone: true,
+                deleted_at_ms: 3,
+                writer: [23; 16],
+                base_sha256: Some([24; 32]),
+            },
+            &payload,
+        )
+        .unwrap();
+        let mut record = StagedRecord {
+            name: codec::entity_name(&epoch.record_key, codec::Kind::MediaName, b"photo.jpg").unwrap(),
+            envelope: entity.encode().unwrap(),
+            system_fields: vec![25],
+            payload_file: None,
+        };
+        assert_eq!(received_bytes(&op, &record, None).unwrap().entity, entity);
+        assert!(received_bytes(&op, &record, Some(&payload)).is_err());
+        record.system_fields.clear();
+        assert!(received_bytes(&op, &record, None).is_err());
+        record.system_fields = vec![25];
+        let mut asset_entity = entity.clone();
+        asset_entity.payload = None;
+        record.envelope = asset_entity.encode().unwrap();
+        assert_eq!(
+            received_bytes(&op, &record, Some(&payload)).unwrap().entity,
+            asset_entity
+        );
+        assert!(received_bytes(&op, &record, None).is_err());
+        let mut damaged = payload;
+        damaged[0] ^= 1;
+        assert!(received_bytes(&op, &record, Some(&damaged)).is_err());
     }
 }

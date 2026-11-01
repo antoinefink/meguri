@@ -190,3 +190,43 @@ R5 integration evidence on a915 with this source applied:
   rewrite in private/20261101T090203Z-15877.
 - Independent R5 review: no P0-P1 finding. The Running transfer-state finding
   above remains open, together with the adoption and focused-check failures.
+
+## R6 source handoff
+
+Session: s-20261025T162405Z-9dc656e4.
+Source: cleanroom/20261101T090450Z-17162, base 8a52b651.
+Unit start: 3f241c19b77db754b71c0d8c433f25fd674903ae.
+Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+
+R6 adds validated MediaName tombstones to adoption and keeps their original
+ACK envelope and system fields. Local files remain withheld after reopen.
+MediaName has no collection row; tombstones cannot satisfy live references.
+Other unsupported tombstone kinds remain refused.
+
+Retiring an exact blocked download resets Running in the ledger transaction
+before releasing its pending slot. A second name can then download that blob.
+The first file and its ACK remain intact. The FFI test checks its actual target;
+all ACK equality checks remain. The adapter lint branch is collapsed.
+
+Focused tests cover Service tombstone adoption and reopen, matching and differing
+local files, invalid records, original system fields, payload form and the
+second-name download. The two original GC scenarios remain unchanged.
+Source checks completed; MG execution and independent R6 review are pending.
+No new pass, unit acceptance or gate acceptance is claimed.
+
+R6 integration evidence on fa945 with this source applied:
+- Independent R6 review: no P0-P1 finding or new P2 finding.
+- core-format/20261101T091246Z-22090: PASS.
+- core-test/20261101T091323Z-22902: 105/107 PASS. Both original fetched-name
+  GC cases now pass. Service tombstone adoption preserves matching and differing
+  files through reopen. Original-field and payload-form validation also passes.
+  Two new tests fail during setup: the FFI case finds no target ACK, and the
+  invalid-record case receives a failed Service mutation before adoption.
+  Their remaining assertions have not run and remain required.
+- core-lint/20261101T091328Z-23150: FAIL, type_complexity in the separate
+  manual-media policy test at cloud_policy.rs:379. Adapter lint is clear.
+- similarity/20261101T091346Z-23492: PASS.
+- private/20261101T091250Z-22338: source files passed. The log passed after
+  rewrite in private/20261101T091318Z-22658.
+Focused setup repairs, the shared lint issue and native reopen remain open.
+The batch gate and unit acceptance remain pending.

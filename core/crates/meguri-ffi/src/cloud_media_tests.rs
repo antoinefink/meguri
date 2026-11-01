@@ -1659,12 +1659,99 @@ fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
         for (before, after) in ack.iter().zip(&after) {
             assert_eq!(after.acked_envelope, before.acked_envelope);
             assert_eq!(after.acked_rev, before.acked_rev);
-            let c::entity_codec::DecodeOutcome::Supported(entity) =
-                c::entity_codec::Entity::decode(&after.acked_envelope.0).unwrap()
-            else {
-                panic!("supported ACK required")
-            };
-            assert!(!entity.fields.tombstone);
+        }
+        let target = after
+            .iter()
+            .find(|entity| entity.key == b"photo.jpg")
+            .expect("incoming target ACK");
+        let before = ack.iter().find(|entity| entity.name == target.name).unwrap();
+        assert!(target.acked_rev > 0 && !target.acked_envelope.0.is_empty());
+        assert_eq!(target.acked_envelope, before.acked_envelope);
+        let c::entity_codec::DecodeOutcome::Supported(entity) =
+            c::entity_codec::Entity::decode(&target.acked_envelope.0).unwrap()
+        else {
+            panic!("supported target ACK required")
+        };
+        assert_eq!(entity.fields.kind, c::entity_codec::Kind::MediaName);
+        assert_eq!(entity.fields.key, b"photo.jpg");
+        assert!(!entity.fields.tombstone);
+        if retain_download {
+            let blob_name = metadata.name(&[47; 32]);
+            assert_eq!(
+                fixture.workflow.core.media_blobs_for_testing().unwrap()[&blob_name].download,
+                m::Transfer::None,
+            );
+            // A later real incoming name can use the same content. Avoid a
+            // local metadata scratch file changing the blob's server state.
+            let payload = c::entity_codec::Payload::MediaName(metadata.media("second.jpg"));
+            let record_name =
+                c::entity_codec::entity_name(&[31; 32], c::entity_codec::Kind::MediaName, b"second.jpg").unwrap();
+            let envelope = c::entity_codec::Entity::build(
+                c::entity_codec::EntityFields {
+                    kind: c::entity_codec::Kind::MediaName,
+                    key: b"second.jpg".to_vec(),
+                    origin: [93; 16],
+                    erev: 1,
+                    generation: None,
+                    tombstone: false,
+                    deleted_at_ms: 0,
+                    writer: [94; 16],
+                    base_sha256: None,
+                },
+                &payload.encode().unwrap(),
+            )
+            .unwrap()
+            .encode()
+            .unwrap();
+            deliver_incoming(
+                &fixture,
+                &sdk,
+                w::Saved {
+                    name: record_name,
+                    envelope,
+                    system_fields: vec![1],
+                },
+                IncomingDelivery::FetchAndApply,
+            );
+            let download = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
+            assert!(matches!(&download.request, CloudMediaRequest::Download { name } if name == &blob_name));
+            fixture
+                .workflow
+                .core
+                .validate_cloud_media_work(
+                    &fixture.workflow.host.collection().unwrap(),
+                    download.handle.retained_for_test(),
+                )
+                .unwrap();
+            let stage = fixture._directory.path().join("shared-download-source");
+            std::fs::write(&stage, b"synthetic server image").unwrap();
+            media
+                .reply(
+                    download.handle,
+                    CloudMediaReply::Record {
+                        name: blob_name.clone(),
+                        record_type: "MGBlob".into(),
+                        envelope: metadata.encode().unwrap(),
+                        asset_path: Some(stage.to_string_lossy().into_owned()),
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                std::fs::read(service.store().media_dir().join("second.jpg")).unwrap(),
+                b"synthetic server image"
+            );
+            assert_eq!(
+                std::fs::read(service.store().media_dir().join("photo.jpg")).unwrap(),
+                b""
+            );
+            assert_eq!(
+                fixture.workflow.core.media_blobs_for_testing().unwrap()[&blob_name].download,
+                m::Transfer::Complete
+            );
+            let first = fixture.workflow.core.entity_facts(&target.name).unwrap().unwrap();
+            assert_eq!(first.acked_envelope, target.acked_envelope);
+            assert_eq!(first.acked_rev, target.acked_rev);
+            assert_eq!(first.acked_payload, target.acked_payload);
         }
     }
 }
