@@ -540,7 +540,17 @@ impl Runtime {
                 && s.media.root_checked
                 && let Some(w) = &s.media.pending
             {
-                return Ok(Some(w.clone()));
+                let w = w.clone();
+                drop(s);
+                if !matches!(&w.request, Request::Download { name }
+                    if self.media_download_blocked_by_unsyncable(&a, name)?)
+                {
+                    return Ok(Some(w));
+                }
+                let mut s = self.state();
+                if s.media.pending.as_ref() == Some(&w) {
+                    s.media.pending = None;
+                }
             }
         }
         let (mut ledger, key) = self.with_media(&a, |store| {
@@ -648,6 +658,13 @@ impl Runtime {
                         continue;
                     }
                     if let Some(codec::Payload::MediaName(p)) = r.payload {
+                        if ledger
+                            .names
+                            .get(&text(&p.name)?.to_lowercase())
+                            .is_some_and(|f| f.unsyncable)
+                        {
+                            continue;
+                        }
                         let metadata = blob::Blob::from(&p);
                         let name = metadata.name(&key.0);
                         live_blobs.insert(name.clone());
@@ -682,7 +699,9 @@ impl Runtime {
                     if flags.is_none_or(|f| !f.removal_held && f.tombstone_at.is_none() && f.withheld.is_none()) {
                         live_blobs.insert(blob::Blob::from(&p).name(&key.0));
                     }
-                    if e.mark.is_none() && flags.is_none_or(|f| f.local.as_ref().is_none_or(|l| l.sha256 != p.sha256)) {
+                    if e.mark.is_none()
+                        && flags.is_none_or(|f| !f.unsyncable && f.local.as_ref().is_none_or(|l| l.sha256 != p.sha256))
+                    {
                         let metadata = blob::Blob::from(&p);
                         let name = metadata.name(&key.0);
                         live_blobs.insert(name.clone());
@@ -782,6 +801,7 @@ impl Runtime {
                 if selection == Selection::Resume
                     && b.server == ServerState::Present
                     && b.download == Transfer::Queued
+                    && !self.media_download_blocked_by_unsyncable(&a, name)?
                     && !self.cloud_media_downloads_blocked()
                 {
                     if request.is_none() {
@@ -891,216 +911,364 @@ impl Runtime {
         work: &Work,
         reply: Reply,
     ) -> Result<(), RuntimeError> {
-        let a = &work.authority;
         #[cfg(feature = "test-hooks")]
-        if matches!(work.request, Request::Download { .. }) {
-            self.incoming_hooks
-                .hit(crate::cloud::testing::IncomingStage::MediaReplyBeforeApply);
-        }
-        self.validate_cloud_media_work(collection, work)?;
-        if self.publication_account()? != a.account {
-            return Err(RuntimeError::IdentityUnverified);
-        }
-        let mut current_authority = self.media_authority(collection, true)?;
-        if matches!(work.request, Request::Upload { .. }) {
-            current_authority.media_epoch = a.media_epoch;
-        }
-        if current_authority != *a {
-            return Err(RuntimeError::StaleIncarnation);
-        }
-        {
-            let s = self.state();
-            if s.media.pending.as_ref() != Some(work)
-                && s.media.metadata_pending.as_ref() != Some(work)
-                && !s
-                    .actions
-                    .media_upload
-                    .as_ref()
-                    .is_some_and(|(_, original)| original == work)
+        let request_label = match &work.request {
+            Request::Delete { .. } => "Delete",
+            Request::Root => "Root",
+            Request::Read { .. } => "Read",
+            Request::Reads { .. } => "Reads",
+            Request::Upload { .. } => "Upload",
+            Request::Download { .. } => "Download",
+        };
+        #[cfg(feature = "test-hooks")]
+        let reply_label = match &reply {
+            Reply::BlobReads { .. } => "BlobReads",
+            Reply::Record { .. } => "Record",
+            Reply::Saved { .. } => "Saved",
+            Reply::UnknownItem => "UnknownItem",
+            Reply::ZoneMissing => "ZoneMissing",
+            Reply::Failed { .. } => "Failed",
+        };
+        #[cfg(feature = "test-hooks")]
+        let mut stage = "authority_validation";
+        let result = (|| {
+            let a = &work.authority;
+            #[cfg(feature = "test-hooks")]
+            if matches!(work.request, Request::Download { .. }) {
+                self.incoming_hooks
+                    .hit(crate::cloud::testing::IncomingStage::MediaReplyBeforeApply);
+            }
+            self.validate_cloud_media_work(collection, work)?;
+            #[cfg(feature = "test-hooks")]
             {
+                stage = "account_validation";
+            }
+            if self.publication_account()? != a.account {
+                return Err(RuntimeError::IdentityUnverified);
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                stage = "authority_snapshot";
+            }
+            let mut current_authority = self.media_authority(collection, true)?;
+            if matches!(work.request, Request::Upload { .. }) {
+                current_authority.media_epoch = a.media_epoch;
+            }
+            if current_authority != *a {
                 return Err(RuntimeError::StaleIncarnation);
             }
-        }
-        let (mut ledger, key) = self.with_media(a, |store| {
-            Ok((store.media_ledger(a.binding)?, store.publication_media(a.binding)?))
-        })?;
-        let failed = matches!(&reply, Reply::Failed { .. })
-            || matches!(&reply, Reply::BlobReads { results } if results.iter().any(|r| matches!(r.result, BlobReadResult::Failed { .. })));
-        let mut staged_download = None;
-        match (&work.request, reply) {
-            (Request::Reads { names }, Reply::BlobReads { results }) => {
-                let expected: BTreeSet<_> = names.iter().cloned().collect();
-                if names.is_empty()
-                    || names.len() > 200
-                    || expected.len() != names.len()
-                    || results.len() != names.len()
-                    || results.iter().map(|r| r.name.clone()).collect::<BTreeSet<_>>() != expected
+            #[cfg(feature = "test-hooks")]
+            {
+                stage = "pending_validation";
+            }
+            {
+                let s = self.state();
+                if s.media.pending.as_ref() != Some(work)
+                    && s.media.metadata_pending.as_ref() != Some(work)
+                    && !s
+                        .actions
+                        .media_upload
+                        .as_ref()
+                        .is_some_and(|(_, original)| original == work)
                 {
-                    return Err(Error::InvalidData.into());
+                    return Err(RuntimeError::StaleIncarnation);
                 }
-                let key = key.as_ref().ok_or(Error::InvalidData)?.0.0;
-                for read in results {
-                    let b = ledger.blobs.get_mut(&read.name).ok_or(Error::InvalidData)?;
-                    match read.result {
-                        BlobReadResult::Present { envelope } => {
-                            let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
-                            if metadata != b.metadata || metadata.name(&key) != read.name {
-                                return Err(Error::InvalidData.into());
-                            }
-                            b.server = ServerState::Present;
-                        }
-                        BlobReadResult::UnknownItem => {
-                            b.server = ServerState::Deleted;
-                            if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
-                                b.upload = Transfer::None;
-                            }
-                        }
-                        BlobReadResult::ZoneMissing => ledger.zone_missing = true,
-                        BlobReadResult::Failed { .. } => {}
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                stage = "ledger_read";
+            }
+            let (mut ledger, key) = self.with_media(a, |store| {
+                Ok((store.media_ledger(a.binding)?, store.publication_media(a.binding)?))
+            })?;
+            let failed = matches!(&reply, Reply::Failed { .. })
+                || matches!(&reply, Reply::BlobReads { results } if results.iter().any(|r| matches!(r.result, BlobReadResult::Failed { .. })));
+            let mut staged_download = None;
+            #[cfg(feature = "test-hooks")]
+            {
+                stage = "reply_shape";
+            }
+            match (&work.request, reply) {
+                (Request::Reads { names }, Reply::BlobReads { results }) => {
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_reads_shape";
                     }
-                }
-            }
-            (_, Reply::ZoneMissing) => ledger.zone_missing = true,
-            (Request::Root, Reply::UnknownItem) => ledger.zone_missing = true,
-            (
-                Request::Root,
-                Reply::Record {
-                    name,
-                    record_type,
-                    envelope,
-                    asset: None,
-                },
-            ) if name == "root" && record_type == "MGMediaRoot" => {
-                let crate::cloud::control_codec::DecodeOutcome::Supported(root) =
-                    crate::cloud::control_codec::MediaRoot::decode(&envelope).map_err(|_| Error::InvalidData)?
-                else {
-                    return Err(Error::InvalidData.into());
-                };
-                if key
-                    .as_ref()
-                    .is_some_and(|(key, acked, _)| *acked && root.media_key != key.0)
-                {
-                    ledger.zone_missing = true;
-                } else if key.as_ref().is_none_or(|(_, acked, _)| !acked) {
-                    let crt = collection.reader(ReaderRole::Cloud)?.col()?.created.0;
-                    self.with_media(a, |store| store.accept_media_root(a.binding, root.media_key, crt))?;
-                }
-            }
-            (Request::Read { name } | Request::Download { name }, Reply::UnknownItem) => {
-                let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
-                b.server = ServerState::Deleted;
-                if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
-                    b.upload = Transfer::None;
-                }
-                if b.download == Transfer::Running {
-                    b.download = Transfer::Queued;
-                }
-            }
-            (
-                Request::Read { name } | Request::Download { name },
-                Reply::Record {
-                    name: actual,
-                    record_type,
-                    envelope,
-                    asset,
-                },
-            ) => {
-                if name != &actual || record_type != "MGBlob" {
-                    return Err(Error::InvalidData.into());
-                }
-                let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
-                let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
-                if metadata != b.metadata || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name {
-                    return Err(Error::InvalidData.into());
-                }
-                b.server = ServerState::Present;
-                if matches!(work.request, Request::Download { .. }) {
-                    let asset = asset.ok_or(Error::InvalidData)?;
-                    let (staged, found) = self.media_io(collection, a, || {
-                        Ok(m::io::stage(m::io::open(&asset)?, &self.cloud_staging())?)
-                    })?;
-                    if metadata != found {
-                        std::fs::remove_file(staged).map_err(Error::from)?;
+                    let expected: BTreeSet<_> = names.iter().cloned().collect();
+                    if names.is_empty()
+                        || names.len() > 200
+                        || expected.len() != names.len()
+                        || results.len() != names.len()
+                        || results.iter().map(|r| r.name.clone()).collect::<BTreeSet<_>>() != expected
+                    {
                         return Err(Error::InvalidData.into());
                     }
-                    b.download = Transfer::Staged;
-                    b.staged = Some(staged.clone());
-                    staged_download = Some((name.clone(), staged));
-                } else if asset.is_some() {
-                    return Err(Error::InvalidData.into());
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_reads_key";
+                    }
+                    let key = key.as_ref().ok_or(Error::InvalidData)?.0.0;
+                    for read in results {
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "blob_reads_ledger";
+                        }
+                        let b = ledger.blobs.get_mut(&read.name).ok_or(Error::InvalidData)?;
+                        match read.result {
+                            BlobReadResult::Present { envelope } => {
+                                #[cfg(feature = "test-hooks")]
+                                {
+                                    stage = "blob_reads_decode";
+                                }
+                                let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
+                                #[cfg(feature = "test-hooks")]
+                                {
+                                    stage = "blob_reads_validation";
+                                }
+                                if metadata != b.metadata || metadata.name(&key) != read.name {
+                                    return Err(Error::InvalidData.into());
+                                }
+                                b.server = ServerState::Present;
+                            }
+                            BlobReadResult::UnknownItem => {
+                                b.server = ServerState::Deleted;
+                                if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
+                                    b.upload = Transfer::None;
+                                }
+                            }
+                            BlobReadResult::ZoneMissing => ledger.zone_missing = true,
+                            BlobReadResult::Failed { .. } => {}
+                        }
+                    }
                 }
+                (_, Reply::ZoneMissing) => ledger.zone_missing = true,
+                (Request::Root, Reply::UnknownItem) => ledger.zone_missing = true,
+                (
+                    Request::Root,
+                    Reply::Record {
+                        name,
+                        record_type,
+                        envelope,
+                        asset: None,
+                    },
+                ) if name == "root" && record_type == "MGMediaRoot" => {
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "root_decode";
+                    }
+                    let crate::cloud::control_codec::DecodeOutcome::Supported(root) =
+                        crate::cloud::control_codec::MediaRoot::decode(&envelope).map_err(|_| Error::InvalidData)?
+                    else {
+                        return Err(Error::InvalidData.into());
+                    };
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "root_key_validation";
+                    }
+                    if key
+                        .as_ref()
+                        .is_some_and(|(key, acked, _)| *acked && root.media_key != key.0)
+                    {
+                        ledger.zone_missing = true;
+                    } else if key.as_ref().is_none_or(|(_, acked, _)| !acked) {
+                        let crt = collection.reader(ReaderRole::Cloud)?.col()?.created.0;
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "root_commit";
+                        }
+                        self.with_media(a, |store| store.accept_media_root(a.binding, root.media_key, crt))?;
+                    }
+                }
+                (Request::Read { name } | Request::Download { name }, Reply::UnknownItem) => {
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_ledger";
+                    }
+                    let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
+                    b.server = ServerState::Deleted;
+                    if !matches!(b.upload, Transfer::Running | Transfer::Queued) {
+                        b.upload = Transfer::None;
+                    }
+                    if b.download == Transfer::Running {
+                        b.download = Transfer::Queued;
+                    }
+                }
+                (
+                    Request::Read { name } | Request::Download { name },
+                    Reply::Record {
+                        name: actual,
+                        record_type,
+                        envelope,
+                        asset,
+                    },
+                ) => {
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_record_shape";
+                    }
+                    if name != &actual || record_type != "MGBlob" {
+                        return Err(Error::InvalidData.into());
+                    }
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_decode";
+                    }
+                    let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_ledger";
+                    }
+                    let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_validation";
+                    }
+                    if metadata != b.metadata || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name {
+                        return Err(Error::InvalidData.into());
+                    }
+                    b.server = ServerState::Present;
+                    if matches!(work.request, Request::Download { .. }) {
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "download_asset";
+                        }
+                        let asset = asset.ok_or(Error::InvalidData)?;
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "download_staging";
+                        }
+                        let (staged, found) = self.media_io(collection, a, || {
+                            Ok(m::io::stage(m::io::open(&asset)?, &self.cloud_staging())?)
+                        })?;
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "download_validation";
+                        }
+                        if metadata != found {
+                            std::fs::remove_file(staged).map_err(Error::from)?;
+                            return Err(Error::InvalidData.into());
+                        }
+                        b.download = Transfer::Staged;
+                        b.staged = Some(staged.clone());
+                        staged_download = Some((name.clone(), staged));
+                    } else if asset.is_some() {
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            stage = "read_asset_validation";
+                        }
+                        return Err(Error::InvalidData.into());
+                    }
+                }
+                (Request::Upload { name, .. }, Reply::Saved { name: actual, envelope }) => {
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_decode";
+                    }
+                    let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "blob_ledger";
+                    }
+                    let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        stage = "upload_validation";
+                    }
+                    if *name != actual
+                        || metadata != b.metadata
+                        || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name
+                    {
+                        return Err(Error::InvalidData.into());
+                    }
+                    b.server = ServerState::Present;
+                    b.upload = Transfer::Complete;
+                }
+                (_, Reply::Failed { .. }) => {}
+                _ => return Err(Error::InvalidData.into()),
             }
-            (Request::Upload { name, .. }, Reply::Saved { name: actual, envelope }) => {
-                let metadata = blob::Blob::decode(&envelope).map_err(|_| Error::InvalidData)?;
-                let b = ledger.blobs.get_mut(name).ok_or(Error::InvalidData)?;
-                if *name != actual
-                    || metadata != b.metadata
-                    || metadata.name(&key.as_ref().ok_or(Error::InvalidData)?.0.0) != *name
+            #[cfg(feature = "test-hooks")]
+            if matches!(work.request, Request::Download { .. }) {
+                self.incoming_hooks
+                    .hit(crate::cloud::testing::IncomingStage::MediaReplyBeforeTracking);
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                stage = "ledger_commit";
+            }
+            self.put_media_state(a, &ledger)?;
+            {
+                let mut s = self.state();
+                #[cfg(feature = "test-hooks")]
                 {
-                    return Err(Error::InvalidData.into());
+                    stage = "pending_commit";
                 }
-                b.server = ServerState::Present;
-                b.upload = Transfer::Complete;
-            }
-            (_, Reply::Failed { .. }) => {}
-            _ => return Err(Error::InvalidData.into()),
-        }
-        #[cfg(feature = "test-hooks")]
-        if matches!(work.request, Request::Download { .. }) {
-            self.incoming_hooks
-                .hit(crate::cloud::testing::IncomingStage::MediaReplyBeforeTracking);
-        }
-        self.put_media_state(a, &ledger)?;
-        {
-            let mut s = self.state();
-            Self::check_media_locked(&s, a)?;
-            if s.media.pending.as_ref() == Some(work) {
-                s.media.pending = None;
-            }
-            if s.media.metadata_pending.as_ref() == Some(work) {
-                s.media.metadata_pending = None;
-            }
-            if let Request::Read { name } = &work.request {
-                s.media.round_reads.insert(name.clone());
-            }
-            if let Request::Reads { names } = &work.request {
-                s.media.round_reads.extend(names.iter().cloned());
-            }
-            if matches!(work.request, Request::Root) && !failed {
-                s.media.root_checked = true;
+                Self::check_media_locked(&s, a)?;
+                if s.media.pending.as_ref() == Some(work) {
+                    s.media.pending = None;
+                }
+                if s.media.metadata_pending.as_ref() == Some(work) {
+                    s.media.metadata_pending = None;
+                }
+                if let Request::Read { name } = &work.request {
+                    s.media.round_reads.insert(name.clone());
+                }
+                if let Request::Reads { names } = &work.request {
+                    s.media.round_reads.extend(names.iter().cloned());
+                }
+                if matches!(work.request, Request::Root) && !failed {
+                    s.media.root_checked = true;
+                }
+                if failed {
+                    s.media.paused = true;
+                }
+                match &work.request {
+                    Request::Download { name } | Request::Upload { name, .. } => {
+                        s.media.attempted.insert(name.clone());
+                    }
+                    _ => {}
+                }
             }
             if failed {
-                s.media.paused = true;
-            }
-            match &work.request {
-                Request::Download { name } | Request::Upload { name, .. } => {
-                    s.media.attempted.insert(name.clone());
+                #[cfg(feature = "test-hooks")]
+                {
+                    stage = "request_failed";
                 }
-                _ => {}
+                return Err(Error::Io(std::io::ErrorKind::Other).into());
             }
-        }
-        if failed {
-            return Err(Error::Io(std::io::ErrorKind::Other).into());
-        }
-        if let Some((name, _)) = staged_download {
-            meguri_model::faultpoint!("cloud.media.after_download").map_err(Error::from)?;
-            let running = {
-                let mut s = self.state();
-                if s.incoming.running {
-                    return Err(EngineError::Busy {
-                        running_op: "cloud incoming".into(),
+            if let Some((name, _)) = staged_download {
+                #[cfg(feature = "test-hooks")]
+                {
+                    stage = "download_apply";
+                }
+                meguri_model::faultpoint!("cloud.media.after_download").map_err(Error::from)?;
+                let running = {
+                    let mut s = self.state();
+                    if s.incoming.running {
+                        return Err(EngineError::Busy {
+                            running_op: "cloud incoming".into(),
+                        }
+                        .into());
                     }
-                    .into());
+                    s.incoming.running = true;
+                    MediaRunning(self.state.clone(), self.incoming_idle.clone())
+                };
+                self.apply_staged_media(collection, media, a, &name)?;
+                drop(running);
+                #[cfg(feature = "test-hooks")]
+                {
+                    stage = "apply_commit";
                 }
-                s.incoming.running = true;
-                MediaRunning(self.state.clone(), self.incoming_idle.clone())
-            };
-            self.apply_staged_media(collection, media, a, &name)?;
-            drop(running);
-            self.finish_media_pending(a)?;
+                self.finish_media_pending(a)?;
+            }
+            Ok(())
+        })();
+        #[cfg(feature = "test-hooks")]
+        if result.is_err() {
+            eprintln!("cloud-media reply_failed request={request_label} reply={reply_label} stage={stage}");
         }
-        Ok(())
+        result
     }
+
     fn current_media(media: &MediaService, name: &str) -> Result<Option<codec::MediaName>, RuntimeError> {
         media.store().check_changes().map_err(media_error)?;
         let Some(actual) = media.store().lookup(name).map_err(media_error)? else {
@@ -1150,7 +1318,12 @@ impl Runtime {
             if r.entity.fields.tombstone {
                 continue;
             }
-            if server.sha256 != b.metadata.sha256 {
+            if server.sha256 != b.metadata.sha256
+                || ledger
+                    .names
+                    .get(&text(&server.name)?.to_lowercase())
+                    .is_some_and(|f| f.unsyncable)
+            {
                 continue;
             }
             let saved = workflow::Saved {
@@ -1184,6 +1357,10 @@ impl Runtime {
                     after = Some(e.key.clone());
                     if let codec::Payload::MediaName(p) = e.acked_payload.as_ref().unwrap_or(&e.payload)
                         && p.sha256 == b.metadata.sha256
+                        && !ledger
+                            .names
+                            .get(&text(&p.name)?.to_lowercase())
+                            .is_some_and(|f| f.unsyncable)
                         && Self::current_media(media, text(&p.name)?)?.as_ref() != Some(p)
                     {
                         self.begin_media_apply(
@@ -2077,6 +2254,53 @@ fn rewrite_note(
     Ok(note)
 }
 impl Runtime {
+    fn media_download_blocked_by_unsyncable(&self, a: &Authority, name: &str) -> Result<bool, RuntimeError> {
+        let (ledger, entities, inbox) = self.with_media(a, |store| {
+            Ok((
+                store.media_ledger(a.binding)?,
+                Self::cloud_media_entities(store, a.binding)?,
+                store.inbox(a.binding)?,
+            ))
+        })?;
+        let metadata = &ledger.blobs.get(name).ok_or(Error::InvalidData)?.metadata;
+        let key = self.media_record_key(a)?;
+        let mut blocked = false;
+        let mut allowed = false;
+        let mut target = |p: &codec::MediaName| -> Result<(), RuntimeError> {
+            if blob::Blob::from(p) == *metadata {
+                if ledger
+                    .names
+                    .get(&text(&p.name)?.to_lowercase())
+                    .is_some_and(|f| f.unsyncable)
+                {
+                    blocked = true;
+                } else {
+                    allowed = true;
+                }
+            }
+            Ok(())
+        };
+        for entity in entities {
+            if !entity.acked_media_tombstone()
+                && let codec::Payload::MediaName(p) = &entity.payload
+            {
+                target(p)?;
+            }
+        }
+        for entry in inbox {
+            let InboxValue::Record { envelope, .. } = &entry.entry.value else {
+                continue;
+            };
+            let received = codec::receive(&key, &entry.entry.record_name, &envelope.0, codec::AssetInput::Absent)
+                .map_err(|_| Error::InvalidData)?;
+            if !received.entity.fields.tombstone
+                && let Some(codec::Payload::MediaName(p)) = received.payload
+            {
+                target(&p)?;
+            }
+        }
+        Ok(blocked && !allowed)
+    }
     pub fn validate_cloud_media_work(&self, collection: &Collection, work: &Work) -> Result<(), RuntimeError> {
         let mut current = self.media_authority(collection, true)?;
         if matches!(work.request, Request::Upload { .. } | Request::Delete { .. }) {
@@ -2084,6 +2308,11 @@ impl Runtime {
         }
         if self.publication_account()? != work.authority.account || current != work.authority {
             return Err(RuntimeError::IdentityUnverified);
+        }
+        if let Request::Download { name } = &work.request
+            && self.media_download_blocked_by_unsyncable(&work.authority, name)?
+        {
+            return Err(RuntimeError::StaleIncarnation);
         }
         let s = self.state();
         Self::check_media_locked(&s, &work.authority)?;

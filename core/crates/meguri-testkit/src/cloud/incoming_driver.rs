@@ -229,6 +229,7 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     if !matches!(
         input,
         Input::Fetched(..)
+            | Input::FetchApply(..)
             | Input::DeliverCollection(..)
             | Input::DeliverCollectionAssets(..)
             | Input::DeliverCollectionDownload(..)
@@ -312,9 +313,11 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                             }
                             let records: Vec<_> = inputs.iter().map(|input| input.record.clone()).collect();
                             runtime.receive_collection_records(&instance, &records)?;
+                            failure_stage = ChildFailure::FetchCoreApply;
+                            runtime.drain_incoming(&collection, IPC_TIMEOUT)?;
                         }
-                        failure_stage = ChildFailure::FetchCoreApply;
-                        runtime.drain_incoming(&collection, IPC_TIMEOUT)?;
+                        // Native intake and state persistence return before the
+                        // SDK did-fetch event. ApplyReady is a separate command.
                         Ok(())
                     };
                     if let Err(error) = callback() {
@@ -338,6 +341,41 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                             }
                         }
                         return Err(Box::new(failure_stage(Box::new(ChildFailure::classify(error)))));
+                    }
+                    Ok(serde_json::Value::Null)
+                }
+                Input::FetchApply(instance, exchange) => {
+                    let result = runtime
+                        .drain_native_incoming(&collection, &instance, IPC_TIMEOUT)
+                        .and_then(|disposition| match disposition {
+                            core::incoming::IncomingDisposition::Progress(_) => Ok(()),
+                            core::incoming::IncomingDisposition::Deferred(error) => Err(error.into()),
+                        });
+                    if let Err(error) = result {
+                        if let Some(id) = exchange {
+                            let cancelled = matches!(
+                                error,
+                                runtime::RuntimeError::Engine(meguri_engine::EngineError::Cancelled)
+                            );
+                            let outcome = if cancelled {
+                                core::adapter::CollectionOutcome::Cancelled
+                            } else {
+                                core::adapter::CollectionOutcome::Failed
+                            };
+                            if let Err(completion) =
+                                runtime.adapter_complete_exchange(&instance, id, false, Some(outcome))
+                            {
+                                return Err(Box::new(ChildFailure::FetchCompletion(
+                                    Box::new(ChildFailure::FetchCoreApply(Box::new(ChildFailure::classify(
+                                        Box::new(error),
+                                    )))),
+                                    Box::new(ChildFailure::classify(Box::new(completion))),
+                                )));
+                            }
+                        }
+                        return Err(Box::new(ChildFailure::FetchCoreApply(Box::new(
+                            ChildFailure::classify(Box::new(error)),
+                        ))));
                     }
                     Ok(serde_json::Value::Null)
                 }

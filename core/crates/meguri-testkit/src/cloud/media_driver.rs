@@ -31,14 +31,14 @@ impl SDKRig {
             if matches!(work.request, MediaRequest::Delete { .. }) {
                 return self.send_pending_media(service);
             }
-            if matches!(work.request, MediaRequest::Upload { .. }) {
-                if self.driver.call::<bool>(Input::MediaQueue(work.clone()))? {
-                    self.updates()?;
-                    if self.send_pending_media(service)? {
-                        continue;
-                    }
-                    return Ok(false);
+            if matches!(work.request, MediaRequest::Upload { .. })
+                && self.driver.call::<bool>(Input::MediaQueue(work.clone()))?
+            {
+                self.updates()?;
+                if self.send_pending_media(service)? {
+                    continue;
                 }
+                return Ok(false);
             }
             self.driver.call::<()>(Input::MediaValidate(work.clone()))?;
             let operation = match &work.request {

@@ -1596,6 +1596,80 @@ fn nonempty_download_waits_for_collection_drain_and_arrives_in_engine_media_stor
 }
 
 #[test]
+fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
+    for retain_download in [false, true] {
+        let (fixture, sdk) = published();
+        let media = fixture.workflow.media().unwrap();
+        accept_root(&media, &sdk);
+        let metadata = incoming_media(&fixture, &sdk, "photo.jpg", b"synthetic server image");
+        let name = metadata.name(&[47; 32]);
+        let read = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
+        assert!(matches!(&read.request, CloudMediaRequest::Read { name: n } if n == &name));
+        media
+            .reply(
+                read.handle,
+                CloudMediaReply::Record {
+                    name,
+                    record_type: "MGBlob".into(),
+                    envelope: metadata.encode().unwrap(),
+                    asset_path: None,
+                },
+            )
+            .unwrap();
+        let retained = retain_download.then(|| {
+            let work = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
+            assert!(matches!(work.request, CloudMediaRequest::Download { .. }));
+            fixture
+                .workflow
+                .core
+                .validate_cloud_media_work(
+                    &fixture.workflow.host.collection().unwrap(),
+                    work.handle.retained_for_test(),
+                )
+                .unwrap();
+            work.handle
+        });
+        let ack = fixture
+            .workflow
+            .core
+            .entity_facts_page(c::entity_codec::Kind::MediaName, None)
+            .unwrap();
+        let service = fixture.workflow.host.media().unwrap();
+        let file = service.store().media_dir().join("photo.jpg");
+        std::fs::write(&file, b"").unwrap();
+        service.store().register_full(|_, _| true).unwrap();
+        fixture
+            .workflow
+            .core
+            .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &service)
+            .unwrap();
+        if let Some(work) = retained {
+            let queue = Arc::new(ReadQueue(AtomicUsize::new(0)));
+            assert!(media.submit_read(work, queue.clone()).is_err());
+            assert_eq!(queue.0.load(Ordering::SeqCst), 0);
+        }
+        assert!(media.clone().next_work(sdk.instance_id.clone()).unwrap().is_none());
+        assert_eq!(std::fs::read(file).unwrap(), b"");
+        let after = fixture
+            .workflow
+            .core
+            .entity_facts_page(c::entity_codec::Kind::MediaName, None)
+            .unwrap();
+        assert_eq!(after.len(), ack.len());
+        for (before, after) in ack.iter().zip(&after) {
+            assert_eq!(after.acked_envelope, before.acked_envelope);
+            assert_eq!(after.acked_rev, before.acked_rev);
+            let c::entity_codec::DecodeOutcome::Supported(entity) =
+                c::entity_codec::Entity::decode(&after.acked_envelope.0).unwrap()
+            else {
+                panic!("supported ACK required")
+            };
+            assert!(!entity.fields.tombstone);
+        }
+    }
+}
+
+#[test]
 fn policy_read_scope_preserves_missing_counts_and_visible_priority() {
     use crate::cloud_policy::*;
     let (fixture, sdk) = published();

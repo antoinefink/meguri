@@ -50,6 +50,12 @@ fn pass(f: &PublishedFixture, sdk: &CloudEngineRegistration) -> Arc<CloudZoneDel
         .unwrap()
 }
 fn due(f: &PublishedFixture, sdk: &CloudEngineRegistration) -> Vec<String> {
+    due_with_cleanup(f, sdk).0
+}
+fn due_with_cleanup(
+    f: &PublishedFixture,
+    sdk: &CloudEngineRegistration,
+) -> (Vec<String>, Vec<CloudPolicyIssuedCommand>) {
     let mut names: Vec<_> = [61, 62, 63]
         .map(|b| c::adapter::collection_zone(c::EpochId([b; 16])))
         .into();
@@ -81,18 +87,35 @@ fn due(f: &PublishedFixture, sdk: &CloudEngineRegistration) -> Vec<String> {
             .unwrap()
     );
     f.clock.step_ms(30 * 86_400_000);
-    let _commands = drain_commands(f, sdk);
-    f.workflow
-        .core
-        .publication_collection_drained(&sdk.instance_id, &collection)
+    let mut commands = drain_commands(f, sdk);
+    let cleanup = commands
+        .iter()
+        .find(|c| matches!(c.action, CloudPolicyAction::RunCleanup))
+        .expect("original drain issued cleanup");
+    f.policy
+        .clone()
+        .prepare_execution(cleanup.handle.clone())
+        .unwrap()
+        .unwrap()
+        .begin_cleanup_pass()
+        .unwrap()
+        .finish()
         .unwrap();
+    commands.extend(policy_commands(
+        f.policy
+            .clone()
+            .input(CloudPolicyEvent::Refresh {
+                cause: CloudPolicyChangeCause::Cloud,
+            })
+            .unwrap(),
+    ));
     let facts = f
         .workflow
         .core
         .publication_facts(&f.workflow.host.collection().unwrap())
         .unwrap();
     assert!(names.iter().all(|z| facts.zones[z].deletion_due));
-    names
+    (names, commands)
 }
 fn read(f: &PublishedFixture) -> CloudControlRead {
     let reply = f
@@ -194,10 +217,8 @@ fn issued_deletion_with_no_due_rows_prepares_no_network_pass() {
 #[test]
 fn later_drains_retry_real_due_rows_after_failure_until_deleted_without_repeating_daily_cleanup() {
     let (f, sdk) = published();
-    let names = due(&f, &sdk);
-    // Consume the real daily cleanup on this drain; the next two drains share
-    // its clock instant and must rely on actual retained rows instead.
-    let first = drain_commands(&f, &sdk);
+    // Execute the issued cleanup once; retries use its retained due rows.
+    let (names, first) = due_with_cleanup(&f, &sdk);
     assert!(first.iter().any(|c| matches!(c.action, CloudPolicyAction::RunCleanup)));
     assert!(first.iter().any(|c| matches!(c.action, CloudPolicyAction::DeleteZones)));
     let driver = f.workflow.host.cloud_policy_driver().unwrap();

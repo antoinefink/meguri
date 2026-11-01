@@ -346,6 +346,15 @@ pub(crate) enum Input {
     CollectionZone,
     SyncNow(String),
     FetchDue,
+    FetchLifecycle,
+    FetchValidate(String),
+    FetchBegin(String, Vec<String>),
+    FetchWill(String, String, bool),
+    FetchZone(String, String, bool, bool),
+    FetchDid(String, String, bool),
+    FetchFinish(String, u64),
+    FetchFailed(String, u64),
+    FetchApply(String, Option<u64>),
     FetchCompleted(String, FetchPhase, BTreeSet<String>),
     Fetched(FetchedCallback),
     IncomingIntents(core::BindingId),
@@ -1256,6 +1265,42 @@ impl ChildDriver {
             Input::MediaReply(..) => "MediaReply",
             Input::MediaSent(..) => "MediaSent",
             Input::CollectionDrained => "CollectionDrained",
+            Input::AdoptionConfirm(..) => "AdoptionConfirm",
+            Input::AdoptionReply(..) => "AdoptionReply",
+            Input::AdoptionLocal(..) => "AdoptionLocal",
+            Input::AdoptionCompletion(..) => "AdoptionCompletion",
+            Input::PublicationConfirm(..) => "PublicationConfirm",
+            Input::PublicationNext => "PublicationNext",
+            Input::PublicationLocal(..) => "PublicationLocal",
+            Input::PublicationExecute(..) => "PublicationExecute",
+            Input::PublicationCancel(..) => "PublicationCancel",
+            Input::PublicationTrigger => "PublicationTrigger",
+            Input::PublicationFacts => "PublicationFacts",
+            Input::PublicationControl => "PublicationControl",
+            Input::PreviewBegin => "PreviewBegin",
+            Input::PreviewActive(..) => "PreviewActive",
+            Input::PreviewEpoch(..) => "PreviewEpoch",
+            Input::PreviewCancel => "PreviewCancel",
+            Input::RegisterSDK(..) => "RegisterSDK",
+            Input::RootFetch(..) => "RootFetch",
+            Input::RootRead(..) => "RootRead",
+            Input::SyncNow(..) => "SyncNow",
+            Input::Poll(..) => "Poll",
+            Input::FetchLifecycle => "FetchLifecycle",
+            Input::FetchValidate(..) => "FetchValidate",
+            Input::FetchBegin(..) => "FetchBegin",
+            Input::FetchWill(..) => "FetchWill",
+            Input::FetchZone(..) => "FetchZone",
+            Input::FetchDid(..) => "FetchDid",
+            Input::FetchFinish(..) => "FetchFinish",
+            Input::FetchFailed(..) => "FetchFailed",
+            Input::FetchApply(..) => "FetchApply",
+            Input::FetchCompleted(..) => "FetchCompleted",
+            Input::Updates(..) => "Updates",
+            Input::AppliedUpdate(..) => "AppliedUpdate",
+            Input::SendsFinished(..) => "SendsFinished",
+            Input::StartCall(..) => "StartCall",
+            Input::FinishCall(..) => "FinishCall",
             _ => "Other",
         };
         let result = self.call_inner(input);
@@ -1271,6 +1316,7 @@ impl ChildDriver {
         if matches!(
             input,
             Input::Fetched(..)
+                | Input::FetchApply(..)
                 | Input::DeliverCollection(..)
                 | Input::DeliverCollectionAssets(..)
                 | Input::DeliverCollectionDownload(..)
@@ -1414,6 +1460,10 @@ impl ChildDriver {
             return Err(failure());
         }
         Ok(())
+    }
+    /// Read actual adapter receipts without driving or qualifying a fetch.
+    pub fn fetch_lifecycle_for_testing(&mut self) -> Result<(Vec<core::adapter::FetchDrain>, u64)> {
+        self.call(Input::FetchLifecycle)
     }
     pub fn set_account_for_testing(&mut self, account: String) -> Result<()> {
         self.call(Input::Identity(Some(account)))
@@ -2423,6 +2473,46 @@ impl Device {
                     .map_err(|error| ChildFailure::SDKSyncNow(Box::new(ChildFailure::classify(Box::new(error)))))?,
             ),
             Input::FetchDue => value(self.runtime()?.exchange_fetch_due()),
+            Input::FetchLifecycle => value((
+                self.runtime()?.adapter_fetch_drains(),
+                self.runtime()?.adapter_missing_did(),
+            )),
+            Input::FetchValidate(sdk) => {
+                self.runtime()?.validate_sdk(&sdk)?;
+                value(())
+            }
+            Input::FetchBegin(sdk, zones) => {
+                let runtime = self.runtime()?;
+                // Prebound legacy fixtures have no native SDK. They retain their
+                // old full-fetch path and cannot produce a native cleanup drain.
+                if runtime.incoming_sdk_instance_for_testing().is_none() {
+                    value(None::<u64>)
+                } else {
+                    value(Some(runtime.adapter_begin_fetch(&sdk, zones)?))
+                }
+            }
+            Input::FetchWill(sdk, group, manual) => {
+                self.runtime()?.adapter_will_fetch(&sdk, group, manual)?;
+                value(())
+            }
+            Input::FetchZone(sdk, zone, will, failed) => {
+                self.runtime()?.adapter_fetch_zone(&sdk, zone, will, failed)?;
+                value(())
+            }
+            Input::FetchDid(sdk, group, manual) => {
+                self.runtime()?.adapter_did_fetch(&sdk, &group, manual)?;
+                value(())
+            }
+            Input::FetchFinish(sdk, id) => value(self.runtime()?.adapter_finish_fetch(&sdk, id)?),
+            Input::FetchFailed(sdk, id) => {
+                self.runtime()?.adapter_complete_exchange(
+                    &sdk,
+                    id,
+                    false,
+                    Some(core::adapter::CollectionOutcome::Failed),
+                )?;
+                value(())
+            }
             Input::FetchCompleted(i, phase, seen) => {
                 self.runtime()?
                     .exchange_fetch_completed(&i, phase, &seen)
@@ -2559,6 +2649,7 @@ impl Device {
                 value(())
             }
             Input::Fetched(..)
+            | Input::FetchApply(..)
             | Input::DeliverCollectionAssets(..)
             | Input::DeliverCollectionDownload(..)
             | Input::AssetReadResult(..) => Err(failure()),

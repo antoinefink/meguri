@@ -307,6 +307,14 @@ fn empty_replacement_preserves_server_reference_across_daily_drains() {
         pair.sender.advance_clock_ms(DAY).unwrap();
         sync(&mut pair);
         assert_eq!(name(&pair.sender).acked_envelope, initial.acked_envelope);
+        assert_eq!(
+            std::fs::read(pair.root.path().join("sender/collection.media/photo.jpg")).unwrap(),
+            b""
+        );
+        assert_ne!(
+            pair.sender.driver().media_blobs().unwrap()[&blob].download,
+            Transfer::Running
+        );
         assert_retained(&mut pair, &blob, &original);
     }
     reopen(&mut pair, 31 * DAY);
@@ -654,4 +662,56 @@ fn other_build_copy_alone_preserves_a_real_retired_service_blob() {
     };
     assert_eq!(store.conflict_copies().unwrap()[0].copy, copy);
     assert_eq!(store.binding(owner.id).unwrap().unwrap(), owner);
+}
+
+#[test]
+fn held_final_service_callback_records_drain_once_without_refetching() {
+    let mut pair = Pair::adopted();
+    let (before, missing) = pair.receiver.driver().fetch_lifecycle_for_testing().unwrap();
+    pair.receiver.hold(Point::FetchAfterCursor).unwrap();
+    assert!(pair.receiver.fetch_without_sending(&mut pair.service, STEPS).is_err());
+    assert!(pair.receiver.is_held(Point::FetchAfterCursor));
+    assert_eq!(pair.receiver.driver().fetch_lifecycle_for_testing().unwrap().0, before);
+    let requests = pair.service.request_log().unwrap().len();
+    pair.receiver.release(Point::FetchAfterCursor).unwrap();
+    // Resume the retained callback with no budget for another Service request.
+    // The subsequent scheduler correctly reports its exhausted zero budget.
+    assert!(pair.receiver.drive_ready(&mut pair.service, 0).is_err());
+    assert!(pair.receiver.take_fetch_errors().is_empty());
+    let (after, missing_after) = pair.receiver.driver().fetch_lifecycle_for_testing().unwrap();
+    assert_eq!(missing_after, missing);
+    assert_eq!(after.len(), before.len() + 2);
+    assert!(after[before.len()..].iter().all(|drain| drain.fetched));
+    assert!(after[before.len()..].iter().any(|drain| drain.zone == "meguri-root"));
+    let zone = pair.receiver.collection_zone().unwrap();
+    assert!(after[before.len()..].iter().any(|drain| drain.zone == zone));
+    assert_eq!(pair.service.request_log().unwrap().len(), requests);
+    // Re-entering the bounded driver cannot finalize that callback twice.
+    assert!(pair.receiver.drive_ready(&mut pair.service, 0).is_err());
+    assert_eq!(pair.receiver.driver().fetch_lifecycle_for_testing().unwrap().0, after);
+    pair.close();
+}
+
+#[test]
+fn account_change_during_held_service_callback_cannot_record_old_fetch_drain() {
+    let mut pair = Pair::adopted();
+    pair.receiver.hold(Point::FetchAfterCursor).unwrap();
+    assert!(pair.receiver.fetch_without_sending(&mut pair.service, STEPS).is_err());
+    assert!(pair.receiver.is_held(Point::FetchAfterCursor));
+    pair.receiver
+        .driver()
+        .set_account_for_testing("other-synthetic-account".into())
+        .unwrap();
+    let before = pair.receiver.driver().fetch_lifecycle_for_testing().unwrap().0;
+    let requests = pair.service.request_log().unwrap().len();
+    pair.receiver.release(Point::FetchAfterCursor).unwrap();
+    assert!(pair.receiver.drive_ready(&mut pair.service, 0).is_err());
+    assert_eq!(
+        pair.receiver.take_fetch_errors().len(),
+        1,
+        "the old SDK callback must fail with its original authority"
+    );
+    assert_eq!(pair.receiver.driver().fetch_lifecycle_for_testing().unwrap().0, before);
+    assert_eq!(pair.service.request_log().unwrap().len(), requests);
+    pair.close();
 }

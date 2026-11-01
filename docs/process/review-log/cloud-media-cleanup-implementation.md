@@ -125,3 +125,68 @@ input still return InvalidData. Their causes remain open.
 
 Native cleanup, Driver execution and the full app tests still need proof.
 No unit is accepted. Lint and the full batch gate remain required.
+
+## R4 source handoff
+
+Session: s-20261025T162405Z-9dc656e4.
+Repair base: ecb521a0f4c089b9e9b0dc894e79926ee3d8abf4.
+Unit start: 3f241c19b77db754b71c0d8c433f25fd674903ae.
+Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
+
+The seven-file seed is retained. SDKRig forwards its original fetch callbacks,
+including held completion, to Core. Service I/O, SDK ownership and lifecycle
+errors remain in place. Media request/reply stage diagnostics remain enabled
+under test-hooks. The seed's source review R4 was CLEAR: no P0, P1 or new P2.
+That result predates this repair.
+
+Reported execution: 83 tests, 79 passed and 4 failed. The separate existing
+review/media/incoming selection passed 56/56. Cleanup qualification actually
+ran; the old mark and removal-age cases passed. Seven new FFI cleanup tests
+passed. The four failures were the empty replacement, the zone retry fixture,
+and two cases stopping in adoption before their GC assertions. These results
+remain recorded; this source does not replace them with passing evidence.
+
+This repair excludes unsyncable names from download candidates, checks retained
+download admission and preserves those files when a shared blob is applied for
+another name. The existing empty-replacement test keeps every prior assertion
+and adds local-file checks. A focused FFI test covers candidate selection and
+rejection of an already issued download before enqueue, with unchanged ACKs.
+
+The zone fixture now executes its issued RunCleanup via begin_cleanup_pass.
+Its retry test observes that original command and the resulting cleanup stamp.
+A policy refresh reads the due-zone facts after that computation.
+The retained-zone and retry assertions remain enabled. Driver policy, daily
+conditions, drain qualification and GC eligibility are unchanged.
+
+Adoption diagnostics add static task and stage labels. Page output contains
+static record kinds and validation booleans. Original error returns are kept.
+No adoption cause is asserted without execution. Labels: operation, owner,
+claim, authority, active_validation, epoch_shape, epoch_validation, epoch_write,
+media_root_shape, media_root_validation, media_root_write, media_root_epoch,
+media_root_stage_create, media_root_space, page_validation,
+page_record_validation, payload_decode, payload_validation, payload_read,
+payload_space, payload_stage, received, received_validation, received_stage,
+stage_row_write, page_record_space, page_space and page_stage_write.
+
+The upload/queue condition is collapsed with its short circuit and body intact.
+The flagged adapter comment is removed; this handoff replaces the appended
+prose. No privacy guard or exception is changed.
+
+The filtered source check completed. Root owns the pending MG checks and
+integration evidence. Source review R5 found no P0-P1 issue and one P2: retiring
+a blocked download must also reset its persisted Running state, so another
+name can later fetch the same blob. The repair and two-name test remain open.
+No unit is accepted.
+
+R5 integration evidence on a915 with this source applied:
+- core-format/20261101T090055Z-14744: PASS.
+- core-test/20261101T090129Z-15337: 101/104 PASS. Empty replacement and the
+  actual Driver cleanup/retry case now pass. Two cases stop at adoption's
+  received_validation for a MediaName tombstone. The new FFI test tries to
+  decode an empty ACK envelope; its candidate/admission checks ran first.
+- core-lint/20261101T090133Z-15586: FAIL, collapsible_if at adapter.rs:491.
+- similarity/20261101T090305Z-16348: PASS.
+- private/20261101T090059Z-15002: source files passed; this log passed after
+  rewrite in private/20261101T090203Z-15877.
+- Independent R5 review: no P0-P1 finding. The Running transfer-state finding
+  above remains open, together with the adoption and focused-check failures.

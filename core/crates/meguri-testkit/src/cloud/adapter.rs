@@ -29,6 +29,16 @@ pub(crate) fn collection_cursor_projection(bytes: &[u8]) -> Result<Option<Vec<u8
 }
 struct FetchWork {
     phase: FetchPhase,
+    instance: String,
+    scope: Scope,
+    collection_zone: String,
+    exchange: Option<u64>,
+    call: Option<u64>,
+    group: String,
+    manual: bool,
+    zone_started: bool,
+    lifecycle_finished: bool,
+    applying: bool,
     root_zone: bool,
     token: Option<Token>,
     seen: BTreeSet<String>,
@@ -165,7 +175,8 @@ impl SDKRig {
         self.waiting = None;
         self.handler = None;
         self.root = None;
-        self.fetch = None;
+        // A held reply still belongs to its retained SDK and call, even if the
+        // current registration changes before that reply returns.
         self.exchange = None;
         self.building = None;
     }
@@ -291,8 +302,24 @@ impl SDKRig {
             None => {
                 let phase: Option<FetchPhase> = self.driver.call(Input::FetchDue)?;
                 let Some(phase) = phase else { return Ok(()) };
+                let instance = self.instance.clone();
+                let collection_zone = self.files.collection_zone.clone();
+                let call: Option<u64> = self.driver.call(Input::FetchBegin(
+                    instance.clone(),
+                    vec!["meguri-root".into(), collection_zone.clone()],
+                ))?;
                 FetchWork {
                     phase,
+                    instance,
+                    scope: self.files.scope.clone(),
+                    collection_zone,
+                    exchange: self.exchange,
+                    call,
+                    group: format!("testkit-fetch-{}", call.unwrap_or(0)),
+                    manual: self.exchange.is_some(),
+                    zone_started: false,
+                    lifecycle_finished: false,
+                    applying: false,
                     root_zone: true,
                     token: None,
                     seen: BTreeSet::new(),
@@ -308,18 +335,19 @@ impl SDKRig {
         {
             self.fetch = Some(fetch);
         } else if result.is_err() {
+            self.fail_fetch(&fetch);
             self.exchange = None;
         }
         result
     }
-    fn fetched_callback(&mut self, records: Vec<Record>, token: &Token) -> Result<FetchedCallback> {
-        let zone = self.files.collection_zone.clone();
+    fn fetched_callback(&mut self, fetch: &FetchWork, records: Vec<Record>, token: &Token) -> Result<FetchedCallback> {
+        let zone = fetch.collection_zone.clone();
         let serialization = serde_json::to_vec(&SDKSerialization {
             collection_zone: zone.clone(),
             collection_cursor: token.clone(),
         })?;
         self.driver
-            .stage_fetched(self.instance.clone(), records, zone, serialization, self.exchange)
+            .stage_fetched(fetch.instance.clone(), records, zone, serialization, fetch.exchange)
     }
     /// Finish only this SDK's original callback before any new trigger. Direct
     /// grants keep their replies in ChildDriver for their own callers.
@@ -327,42 +355,146 @@ impl SDKRig {
         let Some(mut fetch) = self.fetch.take() else {
             return Ok(());
         };
-        let Some(page) = fetch.page.as_ref().filter(|_| !fetch.root_zone) else {
+        let input = if fetch.applying {
+            Input::FetchApply(fetch.instance.clone(), fetch.exchange)
+        } else if let Some(page) = fetch.page.as_ref().filter(|_| !fetch.root_zone) {
+            Input::Fetched(page.callback.as_ref().ok_or_else(failure)?.clone())
+        } else {
             self.fetch = Some(fetch);
             return Ok(());
         };
-        let input = Input::Fetched(page.callback.as_ref().ok_or_else(failure)?.clone());
         if !self.driver.has_incoming_reply(&input)? {
             self.fetch = Some(fetch);
             return Ok(());
         }
-        match self.driver.call::<()>(input) {
+        let result = (|| {
+            if fetch.applying {
+                self.complete_fetch(&mut fetch)
+            } else {
+                self.driver.call::<()>(input)?;
+                if self.consume_fetch_page(&mut fetch)? {
+                    self.complete_fetch(&mut fetch)
+                } else {
+                    Ok(())
+                }
+            }
+        })();
+        match result {
             Err(error) if super::child_driver::is_work_paused(error.as_ref()) => {
                 self.fetch = Some(fetch);
                 Err(error)
             }
             Err(error) => {
-                // The worker reported its terminal outcome through Runtime's
-                // exchange API. Retain the original callback error for inspection.
+                self.fail_fetch(&fetch);
                 self.fetch_errors.push(error);
                 self.exchange = None;
                 Ok(())
             }
-            Ok(()) => {
-                let page = fetch.page.take().ok_or_else(failure)?;
-                if page.more {
-                    fetch.token = Some(page.token);
-                    self.fetch = Some(fetch);
-                    Ok(())
-                } else {
-                    let after_send = fetch.phase == FetchPhase::AfterSend;
-                    self.driver
-                        .call::<()>(Input::FetchCompleted(self.instance.clone(), fetch.phase, fetch.seen))?;
-                    if after_send {
-                        self.exchange = None;
-                    }
-                    self.refresh()
+            Ok(()) if fetch.page.is_none() && !fetch.applying && fetch.token.is_some() => {
+                self.fetch = Some(fetch);
+                Ok(())
+            }
+            Ok(()) => Ok(()),
+        }
+    }
+    fn fetch_zone(fetch: &FetchWork) -> String {
+        if fetch.root_zone {
+            "meguri-root".into()
+        } else {
+            fetch.collection_zone.clone()
+        }
+    }
+    // Every final page must return from its durable intake callback before its
+    // zone closes. The same path consumes a normally delivered or held reply.
+    fn consume_fetch_page(&mut self, fetch: &mut FetchWork) -> Result<bool> {
+        let page = fetch.page.take().ok_or_else(failure)?;
+        if page.more {
+            fetch.token = Some(page.token);
+            return Ok(false);
+        }
+        if fetch.call.is_some() {
+            self.driver.call::<()>(Input::FetchZone(
+                fetch.instance.clone(),
+                Self::fetch_zone(fetch),
+                false,
+                false,
+            ))?;
+        }
+        fetch.zone_started = false;
+        fetch.token = None;
+        if fetch.root_zone {
+            fetch.root_zone = false;
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    }
+    fn complete_fetch(&mut self, fetch: &mut FetchWork) -> Result<()> {
+        if !fetch.lifecycle_finished {
+            if let Some(id) = fetch.call {
+                self.driver.call::<()>(Input::FetchDid(
+                    fetch.instance.clone(),
+                    fetch.group.clone(),
+                    fetch.manual,
+                ))?;
+                // Consume the original call exactly once, including a false result.
+                fetch.lifecycle_finished = true;
+                let completed: bool = self.driver.call(Input::FetchFinish(fetch.instance.clone(), id))?;
+                if !completed {
+                    return Err(Box::new(std::io::Error::other("fetch lifecycle: incomplete")));
                 }
+            } else {
+                fetch.lifecycle_finished = true;
+            }
+        }
+        if fetch.call.is_some() {
+            // Native delivery/persistence returns before ApplyReady. In particular,
+            // media downloads may be held until the collection drain above.
+            fetch.applying = true;
+            self.driver
+                .call::<()>(Input::FetchApply(fetch.instance.clone(), fetch.exchange))?;
+            fetch.applying = false;
+        }
+        self.driver.call::<()>(Input::FetchCompleted(
+            fetch.instance.clone(),
+            fetch.phase,
+            fetch.seen.clone(),
+        ))?;
+        if fetch.phase == FetchPhase::AfterSend {
+            self.exchange = None;
+        }
+        self.refresh()
+    }
+    fn fail_fetch(&mut self, fetch: &FetchWork) {
+        if let Some(id) = fetch.call.filter(|_| !fetch.lifecycle_finished) {
+            if fetch.zone_started
+                && self
+                    .driver
+                    .call::<()>(Input::FetchZone(
+                        fetch.instance.clone(),
+                        Self::fetch_zone(fetch),
+                        false,
+                        true,
+                    ))
+                    .is_err()
+            {
+                eprintln!("cloud-child fetch_failure_stage=zone_failed");
+            }
+            if self
+                .driver
+                .call::<bool>(Input::FetchFinish(fetch.instance.clone(), id))
+                .is_err()
+            {
+                eprintln!("cloud-child fetch_failure_stage=finish_failed");
+            }
+        }
+        if let Some(exchange) = fetch.exchange {
+            if self
+                .driver
+                .call::<()>(Input::FetchFailed(fetch.instance.clone(), exchange))
+                .is_err()
+            {
+                eprintln!("cloud-child fetch_failure_stage=exchange_failed");
             }
         }
     }
@@ -377,18 +509,41 @@ impl SDKRig {
         fetch: &mut FetchWork,
     ) -> Result<()> {
         loop {
-            let zone = if fetch.root_zone {
-                "meguri-root".to_owned()
-            } else {
-                self.files.collection_zone.clone()
-            };
+            if fetch.applying {
+                return self.complete_fetch(fetch);
+            }
+            let zone = Self::fetch_zone(fetch);
             if fetch.page.is_none() {
                 *remaining = remaining
                     .checked_sub(1)
                     .ok_or_else(|| std::io::Error::other("fetch pages: step budget exhausted"))?;
+                if !fetch.zone_started {
+                    if fetch.call.is_some() {
+                        if fetch.root_zone {
+                            self.driver.call::<()>(Input::FetchWill(
+                                fetch.instance.clone(),
+                                fetch.group.clone(),
+                                fetch.manual,
+                            ))?;
+                        }
+                        self.driver
+                            .call::<()>(Input::FetchZone(fetch.instance.clone(), zone.clone(), true, false))?;
+                    }
+                    fetch.zone_started = true;
+                }
+                // A resumed page may outlive its SDK or account. Check the
+                // original authority before another actual Service enqueue.
+                if fetch.call.is_some() {
+                    self.driver.call::<()>(Input::FetchValidate(fetch.instance.clone()))?;
+                } else {
+                    self.driver.call::<()>(Input::Validate(fetch.instance.clone()))?;
+                }
                 let response = service.request(
-                    &self.files.scope,
-                    self.caller(),
+                    &fetch.scope,
+                    Caller {
+                        instance: Some(fetch.instance.clone()),
+                        ..self.caller()
+                    },
                     Operation::FetchZone {
                         zone: zone.clone(),
                         token: fetch.token.clone(),
@@ -448,7 +603,7 @@ impl SDKRig {
                 let callback = if fetch.root_zone {
                     None
                 } else {
-                    Some(self.fetched_callback(entities, &page.token)?)
+                    Some(self.fetched_callback(fetch, entities, &page.token)?)
                 };
                 fetch.page = Some(FetchPage {
                     callback,
@@ -464,7 +619,7 @@ impl SDKRig {
             if fetch.root_zone {
                 if !page.more {
                     self.driver.call::<bool>(Input::RootFetch(
-                        self.instance.clone(),
+                        fetch.instance.clone(),
                         Some(
                             fetch
                                 .active
@@ -484,28 +639,9 @@ impl SDKRig {
                 );
                 self.driver.call::<()>(input)?;
             }
-            let page = fetch
-                .page
-                .take()
-                .ok_or_else(|| std::io::Error::other("fetch pages: missing consumed page"))?;
-            if page.more {
-                fetch.token = Some(page.token);
-                continue;
+            if self.consume_fetch_page(fetch)? {
+                return self.complete_fetch(fetch);
             }
-            if fetch.root_zone {
-                fetch.root_zone = false;
-                fetch.token = None;
-                continue;
-            }
-            self.driver.call::<()>(Input::FetchCompleted(
-                self.instance.clone(),
-                fetch.phase,
-                fetch.seen.clone(),
-            ))?;
-            if fetch.phase == FetchPhase::AfterSend {
-                self.exchange = None;
-            }
-            return self.refresh();
         }
     }
     pub fn reconcile_and_confirm_root(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {

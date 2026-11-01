@@ -116,6 +116,29 @@ fn received_bytes(op: &AdoptOp, record: &StagedRecord, bytes: Option<&[u8]>) -> 
         || record.system_fields.is_empty()
         || (bytes.is_some() && received.entity.payload.is_some())
     {
+        #[cfg(feature = "test-hooks")]
+        {
+            let kind = match received.entity.fields.kind {
+                codec::Kind::Note => "Note",
+                codec::Kind::Card => "Card",
+                codec::Kind::Revlog => "Revlog",
+                codec::Kind::Deck => "Deck",
+                codec::Kind::Preset => "Preset",
+                codec::Kind::Notetype => "Notetype",
+                codec::Kind::Tag => "Tag",
+                codec::Kind::Config => "Config",
+                codec::Kind::MediaName => "MediaName",
+            };
+            eprintln!(
+                "cloud-adoption stage=received_validation record_kind={kind} generation_absent={} tombstone_absent={} payload_present={} revision_valid={} system_fields_present={} payload_form_valid={}",
+                received.entity.fields.generation.is_none(),
+                !received.entity.fields.tombstone,
+                received.payload.is_some(),
+                received.entity.fields.erev != 0,
+                !record.system_fields.is_empty(),
+                !(bytes.is_some() && received.entity.payload.is_some()),
+            );
+        }
         return Err(refused());
     }
     if let Some(payload) = &received.payload
@@ -599,171 +622,248 @@ impl Runtime {
         collection: Option<&Collection>,
         space: &dyn SpaceProvider,
     ) -> Result<(), RuntimeError> {
-        let mut op = self
-            .adoption_op()?
-            .filter(|p| p.id == work.op)
-            .ok_or(RuntimeError::StaleIncarnation)?;
-        let owner = self.adoption_owner()?;
-        owner.claim(&work.task)?;
-        if matches!(
-            self.inputs.identity.read_identity(&self.inputs.scope),
-            IdentityStatus::ReadFailed
-                | IdentityStatus::TemporarilyUnavailable
-                | IdentityStatus::Restricted
-                | IdentityStatus::Configuration
-        ) {
-            owner.set_next(work.task.clone());
-            return Err(PublicationError::AccountUnavailable.into());
-        }
-        if self.check_adoption_before(&op, collection).is_err() {
-            return self.abort_adoption(&op, collection);
-        }
-        if matches!(&reply, AdoptionReply::Read(RecordRead::Failed)) {
-            owner.set_next(work.task.clone());
-            return Err(PublicationError::AccountUnavailable.into());
-        }
-        let outcome = (|| {
-            let next = match (&work.task, reply) {
-                (
-                    AdoptionTask::ReadActive | AdoptionTask::RecheckActive,
-                    AdoptionReply::Read(RecordRead::Found(record)),
-                ) => {
-                    if record != op.active {
-                        return Err(PublicationError::AuthorityChanged.into());
-                    }
-                    if work.task == AdoptionTask::ReadActive {
-                        AdoptionTask::ReadEpoch
-                    } else {
-                        AdoptionTask::Activate
-                    }
+        #[cfg(feature = "test-hooks")]
+        let task = match &work.task {
+            AdoptionTask::ReadActive => "ReadActive",
+            AdoptionTask::ReadEpoch => "ReadEpoch",
+            AdoptionTask::ReadMediaRoot => "ReadMediaRoot",
+            AdoptionTask::Fetch { .. } => "Fetch",
+            AdoptionTask::Validate => "Validate",
+            AdoptionTask::RecheckActive => "RecheckActive",
+            AdoptionTask::Activate => "Activate",
+        };
+        #[cfg(feature = "test-hooks")]
+        let mut stage = "operation";
+        #[cfg(feature = "test-hooks")]
+        let mut page = ("None", false, false, false, false, false);
+        macro_rules! adoption_stage {
+            ($value:literal) => {
+                #[cfg(feature = "test-hooks")]
+                {
+                    stage = $value;
                 }
-                (AdoptionTask::ReadEpoch, AdoptionReply::Read(RecordRead::Found(record))) => {
-                    if record.system_fields.0.is_empty() {
-                        return Err(refused());
-                    }
-                    op.epoch_record = Some(record);
-                    epoch(&op)?;
-                    self.write_adoption(&op)?;
-                    AdoptionTask::ReadMediaRoot
-                }
-                (AdoptionTask::ReadMediaRoot, AdoptionReply::Read(RecordRead::Found(record))) => {
-                    if record.system_fields.0.is_empty() {
-                        return Err(refused());
-                    }
-                    op.media_root = Some(record);
-                    root(&op)?;
-                    self.write_adoption(&op)?;
-                    let source = epoch(&op)?;
-                    let clock = self.adoption_clock()?;
-                    let now = EpochMillis(self.adapter_now()?);
-                    let col = Col {
-                        version: i64::from(source.ver),
-                        created: EpochSecs(source.crt),
-                        modified: now,
-                        schema_modified: now,
-                        ..Col::default()
-                    };
-                    meguri_storage::bootstrap::create::<RuntimeError>(
-                        &owner.directory.join("collection.anki2"),
-                        &col,
-                        &[],
-                        clock.as_ref(),
-                        |_| Ok(()),
-                    )?;
-                    check_space(space, &owner.directory)?;
-                    AdoptionTask::Fetch { cursor: None }
-                }
-                (AdoptionTask::Fetch { .. }, AdoptionReply::Page { records, deleted, next }) => {
-                    // A from-start snapshot may page while the server changes;
-                    // deletion/control changes invalidate the candidate as a whole.
-                    if !deleted.is_empty() {
-                        return Err(refused());
-                    }
-                    for item in records {
-                        if item.record_type == "MGEpoch" && item.name == "epoch" {
-                            if item.payload_file.is_some() || Some(&item.record) != op.epoch_record.as_ref() {
-                                return Err(refused());
-                            }
-                            continue;
+            };
+        }
+        let result = (|| {
+            let mut op = self
+                .adoption_op()?
+                .filter(|p| p.id == work.op)
+                .ok_or(RuntimeError::StaleIncarnation)?;
+            adoption_stage!("owner");
+            let owner = self.adoption_owner()?;
+            adoption_stage!("claim");
+            owner.claim(&work.task)?;
+            if matches!(
+                self.inputs.identity.read_identity(&self.inputs.scope),
+                IdentityStatus::ReadFailed
+                    | IdentityStatus::TemporarilyUnavailable
+                    | IdentityStatus::Restricted
+                    | IdentityStatus::Configuration
+            ) {
+                owner.set_next(work.task.clone());
+                return Err(PublicationError::AccountUnavailable.into());
+            }
+            adoption_stage!("authority");
+            if self.check_adoption_before(&op, collection).is_err() {
+                return self.abort_adoption(&op, collection);
+            }
+            if matches!(&reply, AdoptionReply::Read(RecordRead::Failed)) {
+                owner.set_next(work.task.clone());
+                return Err(PublicationError::AccountUnavailable.into());
+            }
+            let outcome = (|| {
+                let next = match (&work.task, reply) {
+                    (
+                        AdoptionTask::ReadActive | AdoptionTask::RecheckActive,
+                        AdoptionReply::Read(RecordRead::Found(record)),
+                    ) => {
+                        adoption_stage!("active_validation");
+                        if record != op.active {
+                            return Err(PublicationError::AuthorityChanged.into());
                         }
-                        if item.record_type != "MGEntity" {
+                        if work.task == AdoptionTask::ReadActive {
+                            AdoptionTask::ReadEpoch
+                        } else {
+                            AdoptionTask::Activate
+                        }
+                    }
+                    (AdoptionTask::ReadEpoch, AdoptionReply::Read(RecordRead::Found(record))) => {
+                        adoption_stage!("epoch_shape");
+                        if record.system_fields.0.is_empty() {
                             return Err(refused());
                         }
-                        let mut record = StagedRecord {
-                            name: item.name,
-                            envelope: item.record.encrypted.ok_or_else(refused)?,
-                            system_fields: item.record.system_fields.0,
-                            payload_file: None,
+                        op.epoch_record = Some(record);
+                        adoption_stage!("epoch_validation");
+                        epoch(&op)?;
+                        adoption_stage!("epoch_write");
+                        self.write_adoption(&op)?;
+                        AdoptionTask::ReadMediaRoot
+                    }
+                    (AdoptionTask::ReadMediaRoot, AdoptionReply::Read(RecordRead::Found(record))) => {
+                        adoption_stage!("media_root_shape");
+                        if record.system_fields.0.is_empty() {
+                            return Err(refused());
+                        }
+                        op.media_root = Some(record);
+                        adoption_stage!("media_root_validation");
+                        root(&op)?;
+                        adoption_stage!("media_root_write");
+                        self.write_adoption(&op)?;
+                        adoption_stage!("media_root_epoch");
+                        let source = epoch(&op)?;
+                        let clock = self.adoption_clock()?;
+                        let now = EpochMillis(self.adapter_now()?);
+                        let col = Col {
+                            version: i64::from(source.ver),
+                            created: EpochSecs(source.crt),
+                            modified: now,
+                            schema_modified: now,
+                            ..Col::default()
                         };
-                        // One source/image at a time. The caller retains its file
-                        // until this reply returns; only our copy is durable.
-                        if let Some(source) = item.payload_file {
-                            let codec::DecodeOutcome::Supported(entity) =
-                                codec::Entity::decode(&record.envelope).map_err(|_| refused())?
-                            else {
-                                return Err(refused());
-                            };
-                            if entity.payload.is_some()
-                                || entity.fields.generation.is_some()
-                                || entity.fields.tombstone
-                                || codec::entity_name(&epoch(&op)?.record_key, entity.fields.kind, &entity.fields.key)
-                                    .map_err(|_| refused())?
-                                    != record.name
+                        adoption_stage!("media_root_stage_create");
+                        meguri_storage::bootstrap::create::<RuntimeError>(
+                            &owner.directory.join("collection.anki2"),
+                            &col,
+                            &[],
+                            clock.as_ref(),
+                            |_| Ok(()),
+                        )?;
+                        adoption_stage!("media_root_space");
+                        check_space(space, &owner.directory)?;
+                        AdoptionTask::Fetch { cursor: None }
+                    }
+                    (AdoptionTask::Fetch { .. }, AdoptionReply::Page { records, deleted, next }) => {
+                        // A from-start snapshot may page while the server changes;
+                        // deletion/control changes invalidate the candidate as a whole.
+                        adoption_stage!("page_validation");
+                        if !deleted.is_empty() {
+                            return Err(refused());
+                        }
+                        for item in records {
+                            #[cfg(feature = "test-hooks")]
                             {
+                                stage = "page_record_validation";
+                                page = (
+                                    match item.record_type.as_str() {
+                                        "MGEntity" => "MGEntity",
+                                        "MGEpoch" => "MGEpoch",
+                                        _ => "Other",
+                                    },
+                                    item.payload_file.is_some(),
+                                    item.record.encrypted.is_some(),
+                                    !item.record.system_fields.0.is_empty(),
+                                    item.name == "epoch",
+                                    Some(&item.record) == op.epoch_record.as_ref(),
+                                );
+                            }
+                            if item.record_type == "MGEpoch" && item.name == "epoch" {
+                                if item.payload_file.is_some() || Some(&item.record) != op.epoch_record.as_ref() {
+                                    return Err(refused());
+                                }
+                                continue;
+                            }
+                            if item.record_type != "MGEntity" {
                                 return Err(refused());
                             }
-                            let bytes = super::payload_asset::read(&source)?;
-                            check_space_for(space, &owner.directory, bytes.len() as u64)?;
-                            let name = format!("{}.pa", record.name);
-                            let path = owner.directory.join("payloads").join(&name);
+                            let mut record = StagedRecord {
+                                name: item.name,
+                                envelope: item.record.encrypted.ok_or_else(refused)?,
+                                system_fields: item.record.system_fields.0,
+                                payload_file: None,
+                            };
+                            // One source/image at a time. The caller retains its file
+                            // until this reply returns; only our copy is durable.
+                            if let Some(source) = item.payload_file {
+                                adoption_stage!("payload_decode");
+                                let codec::DecodeOutcome::Supported(entity) =
+                                    codec::Entity::decode(&record.envelope).map_err(|_| refused())?
+                                else {
+                                    return Err(refused());
+                                };
+                                adoption_stage!("payload_validation");
+                                if entity.payload.is_some()
+                                    || entity.fields.generation.is_some()
+                                    || entity.fields.tombstone
+                                    || codec::entity_name(
+                                        &epoch(&op)?.record_key,
+                                        entity.fields.kind,
+                                        &entity.fields.key,
+                                    )
+                                    .map_err(|_| refused())?
+                                        != record.name
+                                {
+                                    return Err(refused());
+                                }
+                                adoption_stage!("payload_read");
+                                let bytes = super::payload_asset::read(&source)?;
+                                adoption_stage!("payload_space");
+                                check_space_for(space, &owner.directory, bytes.len() as u64)?;
+                                let name = format!("{}.pa", record.name);
+                                let path = owner.directory.join("payloads").join(&name);
+                                adoption_stage!("payload_stage");
+                                let mut file = AtomicFile::new(&path, Purpose::Stage)?;
+                                file.file_mut().write_all(&bytes).map_err(storage_io)?;
+                                file.publish(|_| Ok(()))?;
+                                record.payload_file = Some(name);
+                            }
+                            // Validate/decode the owned copy, never an SDK path.
+                            adoption_stage!("received");
+                            let incoming = received(&owner.directory, &op, &record)?;
+                            // receive checked the HMAC name before it becomes a path.
+                            adoption_stage!("received_stage");
+                            let path = owner.directory.join("incoming").join(&record.name);
+                            let bytes = serde_json::to_vec(&record).map_err(|_| refused())?;
                             let mut file = AtomicFile::new(&path, Purpose::Stage)?;
                             file.file_mut().write_all(&bytes).map_err(storage_io)?;
                             file.publish(|_| Ok(()))?;
-                            record.payload_file = Some(name);
+                            if let Some(payload) = incoming.payload
+                                && payload.kind() != codec::Kind::MediaName
+                            {
+                                adoption_stage!("stage_row_write");
+                                let clock = self.adoption_clock()?;
+                                let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
+                                meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(
+                                    stage.as_ref().ok_or_else(refused)?,
+                                    clock.as_ref(),
+                                    |scope| {
+                                        crate::cloud::row_payload::stage_payload(scope, &payload)?;
+                                        Ok(())
+                                    },
+                                )?;
+                            }
+                            adoption_stage!("page_record_space");
+                            check_space(space, &owner.directory)?;
                         }
-                        // Validate/decode the owned copy, never an SDK path.
-                        let incoming = received(&owner.directory, &op, &record)?;
-                        // receive checked the HMAC name before it becomes a path.
-                        let path = owner.directory.join("incoming").join(&record.name);
-                        let bytes = serde_json::to_vec(&record).map_err(|_| refused())?;
-                        let mut file = AtomicFile::new(&path, Purpose::Stage)?;
-                        file.file_mut().write_all(&bytes).map_err(storage_io)?;
-                        file.publish(|_| Ok(()))?;
-                        if let Some(payload) = incoming.payload
-                            && payload.kind() != codec::Kind::MediaName
-                        {
-                            let clock = self.adoption_clock()?;
-                            let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
-                            meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(
-                                stage.as_ref().ok_or_else(refused)?,
-                                clock.as_ref(),
-                                |scope| {
-                                    crate::cloud::row_payload::stage_payload(scope, &payload)?;
-                                    Ok(())
-                                },
-                            )?;
-                        }
+                        adoption_stage!("page_space");
                         check_space(space, &owner.directory)?;
+                        if let Some(cursor) = next {
+                            AdoptionTask::Fetch { cursor: Some(cursor) }
+                        } else {
+                            op.step = AdoptStep::Staged;
+                            adoption_stage!("page_stage_write");
+                            self.write_adoption(&op)?;
+                            AdoptionTask::Validate
+                        }
                     }
-                    check_space(space, &owner.directory)?;
-                    if let Some(cursor) = next {
-                        AdoptionTask::Fetch { cursor: Some(cursor) }
-                    } else {
-                        op.step = AdoptStep::Staged;
-                        self.write_adoption(&op)?;
-                        AdoptionTask::Validate
-                    }
-                }
-                _ => return Err(refused()),
-            };
-            owner.set_next(next);
+                    _ => return Err(refused()),
+                };
+                owner.set_next(next);
+                Ok(())
+            })();
+            if let Err(error) = outcome {
+                self.abort_adoption(&op, collection)?;
+                return Err(error);
+            }
             Ok(())
         })();
-        if let Err(error) = outcome {
-            self.abort_adoption(&op, collection)?;
-            return Err(error);
+        #[cfg(feature = "test-hooks")]
+        if result.is_err() {
+            eprintln!(
+                "cloud-adoption task={task} stage={stage} record_kind={} payload_source={} envelope_present={} system_fields_present={} epoch_name_valid={} epoch_record_matches={}",
+                page.0, page.1, page.2, page.3, page.4, page.5,
+            );
         }
-        Ok(())
+        result
     }
     fn abort_adoption(&self, op: &AdoptOp, collection: Option<&Collection>) -> Result<(), RuntimeError> {
         let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;

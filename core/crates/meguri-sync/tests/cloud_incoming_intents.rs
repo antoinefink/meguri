@@ -204,6 +204,7 @@ fn fetched_envelope_spool_failure_ends_original_exchange_without_intake_or_write
         let (mut pair, _, _, _, _) = changed_asset_note();
         let b = binding(&pair);
         let initial = pair.receiver.driver().incoming_observation(b).unwrap();
+        let (drains_before, missing_before) = pair.receiver.driver().fetch_lifecycle_for_testing().unwrap();
         let rows = pair.receiver.driver().collection_rows().unwrap();
         let entities = pair.receiver.facts().unwrap().entities;
         let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
@@ -226,6 +227,16 @@ fn fetched_envelope_spool_failure_ends_original_exchange_without_intake_or_write
         );
         let (active, completed) = pair.receiver.driver().fetched_exchange_for_testing(exchange).unwrap();
         assert!(!active, "the actual core exchange must terminate on hydration failure");
+        let (drains_after, missing_after) = pair.receiver.driver().fetch_lifecycle_for_testing().unwrap();
+        assert_eq!(
+            drains_after, drains_before,
+            "failed intake cannot certify a fetch drain"
+        );
+        assert_eq!(
+            missing_after,
+            missing_before + 1,
+            "the original unsuccessful fetch was consumed without did-fetch"
+        );
         let completed = completed.expect("actual completed original exchange");
         assert_eq!(completed.id, exchange);
         assert_eq!(completed.collection, CollectionOutcome::Failed);
