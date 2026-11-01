@@ -119,3 +119,21 @@ account input and signed-out/different-account boundaries remain intact.
 `similarity/20261101T121024Z-39364` passes for the production change. The scoped
 privacy guard also passed before commit. The original batch base stays in force;
 this evidence accepts no unit, full gate, signed SDK run, device check or trial.
+
+
+## Adoption account matrix repair — fixer handoff
+
+- Role: fixer; session `s-20261025T162405Z-9dc656e4`. Original U113 start and batch base remain as recorded above; no Git/history lookup.
+- Owned changes: `core/crates/meguri-host/tests/cloud_adoption_guards.rs` and this log only. No production, policy/spec or concurrent Sent/Undo changes.
+
+Supplied host-negative receipt `core-test/20261101T121151Z-40734` is 48/49 PASS: `initial_adoption_activation_crashes_relaunch_with_actual_proof_and_account_guards` retained the old ReadFailed-only finished-activation expectation. Per the supplied K10.2/V9.1/K22.2 and R6.6 correction, `preserves_finished` now requires `cloud.adopt.after_activation` and either `readfailed` or `unknown` (TemporarilyUnavailable). The same existing matrix adds explicit `SignedOut` and `SwitchedAccounts` labels mapped to their exact `IdentityStatus` variants; these still require Pending at both crash points.
+
+Unfinished `replace.after_rename` adoption remains Pending for every nonmatching/unavailable account. All existing actual activation proof, native-file identity, non-same-account unverified/send-error, final ReadFailed reopen with unchanged decision, persisted state and zero-backup assertions remain intact. No other test, assertion, retry, skip or time limit changed. The supplied 29/29 offline/recovery PASS receipt above remains prior integrator evidence.
+
+The filtered fixer checked the source delta and all 12 case expectations. It did not execute Rust tests. Root retained the failed receipt and owns runtime verification and acceptance.
+
+Expanded matrix verification: `core-test/20261101T121554Z-42616` PASS49/49,
+covering cloud_adoption_guards, cloud_publication_phase and backup provenance.
+The existing crash matrix now checks 12 combinations including SignedOut and
+SwitchedAccounts. Independent reviewer native_bounds_review found no P0–P2
+findings. The failed 48/49 result remains retained. Rust formatting followed.

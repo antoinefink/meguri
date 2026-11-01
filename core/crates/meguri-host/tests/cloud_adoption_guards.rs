@@ -1709,7 +1709,14 @@ fn initial_adoption_intent_crash_relaunch_restores_absence_and_optional_prior_si
 fn initial_adoption_activation_crashes_relaunch_with_actual_proof_and_account_guards() {
     use meguri_engine::device_state::PublicationDecision;
     for point in ["replace.after_rename", "cloud.adopt.after_activation"] {
-        for account in ["same", "other", "unknown", "readfailed"] {
+        for account in [
+            "same",
+            "other",
+            "unknown",
+            "readfailed",
+            "SignedOut",
+            "SwitchedAccounts",
+        ] {
             let mut pair = Pair::published();
             let expected = pair.sender.driver().collection_rows().unwrap();
             let directory = pair._root.path().join("initial");
@@ -1722,6 +1729,8 @@ fn initial_adoption_activation_crashes_relaunch_with_actual_proof_and_account_gu
                 "other" => cloud::runtime::IdentityStatus::Available(cloud::OpaqueBytes(b"other-account".to_vec())),
                 "unknown" => cloud::runtime::IdentityStatus::TemporarilyUnavailable,
                 "readfailed" => cloud::runtime::IdentityStatus::ReadFailed,
+                "SignedOut" => cloud::runtime::IdentityStatus::SignedOut,
+                "SwitchedAccounts" => cloud::runtime::IdentityStatus::SwitchedAccounts,
                 _ => unreachable!(),
             };
             let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
@@ -1743,7 +1752,8 @@ fn initial_adoption_activation_crashes_relaunch_with_actual_proof_and_account_gu
             let decision = device.publication_decision().unwrap().unwrap();
             assert_eq!(decision.publication.identity, op.candidate.identity);
             assert_eq!(decision.publication.binding, op.candidate.binding);
-            let preserves_finished = point == "cloud.adopt.after_activation" && account == "readfailed";
+            let preserves_finished =
+                point == "cloud.adopt.after_activation" && matches!(account, "readfailed" | "unknown");
             assert_eq!(
                 decision.publication.decision,
                 if account == "same" || preserves_finished {
