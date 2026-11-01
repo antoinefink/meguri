@@ -74,7 +74,15 @@ esac'
 cat "$6"'
   stub xcodebuild 'echo "xcodebuild $*" >>"$STUB_LOG"
 action="$1"; shift
-[ "$action" != -showBuildSettings ] || { cat "$FX_PERSONAL_SETTINGS"; exit 0; }
+if [ "$action" = -showBuildSettings ]; then
+  case "$*" in
+    *-derivedDataPath\ build/app/StandaloneDerivedData*)
+      jq --arg signing "${FX_RESOLVED_SIGNING:-${MEGURI_APP_SIGNING:-adhoc}}" \
+        "map(.buildSettings.MEGURI_SIGNING = \$signing)" "$FX_STANDALONE_SETTINGS"
+      exit "${FX_SETTINGS_RC:-0}" ;;
+    *) cat "$FX_PERSONAL_SETTINGS"; exit 0 ;;
+  esac
+fi
 dest=""; config=""; scheme=""; plan=""; result=""; dd=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -104,8 +112,10 @@ if [ "$action" = build ]; then
   echo "synthetic widget" >"$w/Contents/MacOS/MeguriWidget"
   echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev\",\"CFBundleExecutable\":\"Meguri\",\"MeguriCardInspectionBuild\":\"debug\",\"LSUIElement\":true}" >"$p/Contents/Info.plist"
   echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev.widget\",\"CFBundleExecutable\":\"MeguriWidget\"}" >"$w/Contents/Info.plist"
+  jq --slurpfile cloud "$FX_CLOUD_INFO" ". + \$cloud[0]" "$p/Contents/Info.plist" >"$p/Contents/cloud.json"
+  mv "$p/Contents/cloud.json" "$p/Contents/Info.plist"
   if [ "$config" = Release ]; then
-    jq ".MeguriCardInspectionBuild = \"personalRelease\" | .LSUIElement = false" "$p/Contents/Info.plist" >"$p/Contents/personal.json"
+    jq --slurpfile cloud "$FX_CLOUD_INFO" ". + \$cloud[0] | .MeguriCardInspectionBuild = \"personalRelease\" | .LSUIElement = false" "$p/Contents/Info.plist" >"$p/Contents/personal.json"
     mv "$p/Contents/personal.json" "$p/Contents/Info.plist"
     cp "$FX_APP_PROFILE" "$p/Contents/embedded.provisionprofile"
     [ "${FX_WIDGET_NO_PROFILE:-0}" = 1 ] || cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
@@ -276,6 +286,17 @@ EOF
 standalone_facts() {
   export FX_APP_ENT="$BATS_TEST_TMPDIR/app-entitlements.json"
   export FX_WIDGET_ENT="$BATS_TEST_TMPDIR/widget-entitlements.json"
+  export FX_STANDALONE_SETTINGS="$BATS_TEST_TMPDIR/standalone-settings.json"
+  export FX_CLOUD_INFO="$BATS_TEST_TMPDIR/cloud-info.json"
+  echo '{"MeguriCloudContainer":"iCloud.example.isolated","MeguriCloudEnvironment":"development","MeguriCloudSchemaConfigured":false}' >"$FX_CLOUD_INFO"
+  jq -n '[{target:"Meguri", buildSettings: {
+    CONFIGURATION:"Debug", MEGURI_BUNDLE_ID_SUFFIX:".dev", PRODUCT_BUNDLE_IDENTIFIER:"com.antoinefink.meguri.dev",
+    MEGURI_CLOUD_CONFIGURATION:"development", MEGURI_CLOUD_CONTAINER:"iCloud.example.isolated",
+    MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
+    MEGURI_CLOUD_ENVIRONMENT:"development", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Development", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
+    INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.isolated", INFOPLIST_KEY_MeguriCloudEnvironment:"development",
+    MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"NO", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
+    MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0"}}]' >"$FX_STANDALONE_SETTINGS"
   jq -n --arg fixture "$SB/" '{
     "com.apple.security.app-sandbox":true, "com.apple.security.get-task-allow":true,
     "com.apple.security.network.client":true, "com.apple.security.network.server":true,
@@ -311,16 +332,30 @@ case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo "${FX_ARCH:-arm64}"'
 }
 
+standalone_team_grants() {
+  jq '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated"]
+    | .["com.apple.developer.icloud-services"] = ["CloudKit"]
+    | .["com.apple.developer.icloud-container-environment"] = "Development"
+    | .["com.apple.developer.aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/team-app.json"
+  mv "$BATS_TEST_TMPDIR/team-app.json" "$FX_APP_ENT"
+}
+
 personal_facts() {
   standalone_facts
   export MEGURI_APP_SIGNING=team
   export FX_PERSONAL_SETTINGS="$BATS_TEST_TMPDIR/personal-settings.json"
+  export FX_CLOUD_INFO="$BATS_TEST_TMPDIR/cloud-info.json"
+  echo '{"MeguriCloudContainer":"iCloud.example.isolated","MeguriCloudEnvironment":"development","MeguriCloudSchemaConfigured":false}' >"$FX_CLOUD_INFO"
   export FX_APP_PROFILE="$BATS_TEST_TMPDIR/app-profile.plist" FX_WIDGET_PROFILE="$BATS_TEST_TMPDIR/widget-profile.plist"
   jq 'del(.["com.apple.security.get-task-allow"], .["com.apple.security.temporary-exception.files.absolute-path.read-only"], .["com.apple.private.security.storage.AppDataContainers"])
     | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
     | .["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"
     | .["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]
-    | .["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/personal-app.json"
+    | .["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]
+    | .["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated"]
+    | .["com.apple.developer.icloud-services"] = ["CloudKit"]
+    | .["com.apple.developer.icloud-container-environment"] = "Development"
+    | .["com.apple.developer.aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/personal-app.json"
   mv "$BATS_TEST_TMPDIR/personal-app.json" "$FX_APP_ENT"
   jq 'del(.["com.apple.security.get-task-allow"])
     | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
@@ -340,6 +375,12 @@ for source, target in zip(sys.argv[1::2], sys.argv[2::2]):
 PY
   jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target: $target, buildSettings: {
     CONFIGURATION:"Release", MEGURI_BUNDLE_ID_SUFFIX:".dev",
+    MEGURI_CLOUD_CONFIGURATION:"development", MEGURI_CLOUD_CONTAINER:"iCloud.example.isolated",
+    MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
+    MEGURI_CLOUD_ENVIRONMENT:"development", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Development", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
+    INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.isolated", INFOPLIST_KEY_MeguriCloudEnvironment:"development",
+    MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"NO", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
+    MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0",
     PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri.dev" + (if $target == "Meguri" then "" else ".widget" end)),
     MEGURI_CORE_FEATURES:"ankiweb", MEGURI_SWIFT_CONDITIONS:"ANKIWEB_ENABLED", SWIFT_ACTIVE_COMPILATION_CONDITIONS:"ANKIWEB_ENABLED",
     MEGURI_CARD_INSPECTION_BUILD:"personalRelease", MEGURI_MAC_UI_ELEMENT:"NO",
@@ -383,15 +424,16 @@ PY
     [ "$status" -eq 0 ] || cat "$STUB_LOG"
     [ "$status" -eq 0 ]
     [ "$(field .status)" = pass ]
-    called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev$'
+    called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
     called '^xcframework .* --configuration Release$'
     [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | cut -d: -f1)" ]
-    called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev$'
+    called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
     [ "$(field .details.build.personal_preview)" = true ]
     [ "$(field .details.build.standalone)" = false ]
     [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
     [ "$(field .details.personal_preview_product.test_hooks)" = false ]
+    [ "$(field .details.personal_preview_product.cloud_environment)" = development ]
     [ "$(field .details.personal_preview_product.card_inspection_build)" = personalRelease ]
     [ "$(field .details.personal_preview_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
     [ "$(field .details.personal_preview_product.provisioning_sha256.app)" = "$(shasum -a 256 "$FX_APP_PROFILE" | cut -c1-64)" ]
@@ -421,7 +463,13 @@ PY
     '.[0].buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ANKIWEB_ENABLED"' \
     '.[0].buildSettings.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = "-Dev"' \
     '.[1].buildSettings.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = "-AdHoc"' \
-    '.[0].buildSettings.MEGURI_CARD_INSPECTION_BUILD = "debug"'; do
+    '.[0].buildSettings.MEGURI_CARD_INSPECTION_BUILD = "debug"' \
+    '.[0].buildSettings.MEGURI_CLOUD_CONFIGURATION = "production"' \
+    '.[0].buildSettings.MEGURI_CLOUD_CONTAINER = "iCloud.example.daily"' \
+    '.[0].buildSettings.MEGURI_CLOUD_ENVIRONMENT = "production"' \
+    '.[0].buildSettings.MEGURI_CLOUD_PUSH_ENVIRONMENT = "production"' \
+    '.[0].buildSettings.MEGURI_BUNDLE_ID_SUFFIX = ""' \
+    '.[1].buildSettings.MEGURI_CLOUD_CONFIGURATION = "production"'; do
     jq "$mutation" "$BATS_TEST_TMPDIR/normal-settings.json" >"$FX_PERSONAL_SETTINGS"
     : >"$STUB_LOG"
     mg build-app --platform mac --personal-preview
@@ -433,17 +481,32 @@ PY
 }
 
 @test "personal preview rejects fixture scope debug grants stale core invalid provisioning and source changes" {
-  local fault
-  for fault in fixture debug keychain group stamp profile expired device grant platform certificates profile-debug signer source signature arch; do
+  local fault mutation
+  for fault in fixture debug keychain group stamp profile expired device grant platform certificates profile-debug signer source signature arch cloud-container cloud-environment cloud-push widget-cloud info-container info-environment info-string info-ready profile-cloud; do
     personal_facts
     case "$fault" in
       fixture) jq '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
       debug) jq '.["com.apple.security.get-task-allow"] = true' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
       keychain) jq '.["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
       group) jq '.["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      cloud-container) jq '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      cloud-environment) jq '.["com.apple.developer.icloud-container-environment"] = "Production"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      cloud-push) jq '.["com.apple.developer.aps-environment"] = "production"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
+      widget-cloud)
+        jq '.["com.apple.developer.icloud-services"] = ["CloudKit"]' "$FX_WIDGET_ENT" >"$BATS_TEST_TMPDIR/widget-fault.json"
+        mv "$BATS_TEST_TMPDIR/widget-fault.json" "$FX_WIDGET_ENT" ;;
+      info-container|info-environment|info-string|info-ready)
+        case "$fault" in
+          info-container) mutation='.MeguriCloudContainer = "iCloud.example.daily"' ;;
+          info-environment) mutation='.MeguriCloudEnvironment = "production"' ;;
+          info-string) mutation='.MeguriCloudSchemaConfigured = "NO"' ;;
+          info-ready) mutation='.MeguriCloudSchemaConfigured = true' ;;
+        esac
+        jq "$mutation" "$FX_CLOUD_INFO" >"$BATS_TEST_TMPDIR/cloud-fault.json"
+        mv "$BATS_TEST_TMPDIR/cloud-fault.json" "$FX_CLOUD_INFO" ;;
       stamp) sed 's/features=ankiweb/features=ankiweb,test-hooks/' "$SB/app/Packages/MeguriCore/Binaries/.stamp" >"$BATS_TEST_TMPDIR/stamp"; mv "$BATS_TEST_TMPDIR/stamp" "$SB/app/Packages/MeguriCore/Binaries/.stamp" ;;
       profile) echo invalid >"$FX_APP_PROFILE" ;;
-      expired|device|grant|platform|certificates|profile-debug)
+      expired|device|grant|platform|certificates|profile-debug|profile-cloud)
         python3 - "$FX_APP_PROFILE" "$fault" <<'PY'
 import datetime, plistlib, sys
 with open(sys.argv[1], "rb") as stream:
@@ -458,6 +521,8 @@ elif sys.argv[2] == "platform":
     profile["Platform"] = ["iOS"]
 elif sys.argv[2] == "certificates":
     profile["DeveloperCertificates"] = []
+elif sys.argv[2] == "profile-cloud":
+    profile["Entitlements"]["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]
 else:
     profile["Entitlements"]["get-task-allow"] = False
 with open(sys.argv[1], "wb") as stream:
@@ -520,6 +585,7 @@ PY
   local mode candidate="$SB/build/app/StandaloneDerivedData/Build/Products/Debug/Meguri.app"
   for mode in adhoc team; do
     export MEGURI_APP_SIGNING="$mode"
+    [ "$mode" != team ] || standalone_team_grants
     : >"$STUB_LOG"
     mg build-app --platform mac --config Debug --standalone
     [ "$status" -eq 0 ]
@@ -527,9 +593,11 @@ PY
     called '^lint$'
     called '^xcframework .* --configuration Debug$'
     called '^xcodebuild build -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData '
+    called '^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease)|xcrun (simctl|devicectl)'
     if [ "$mode" = team ]; then
       called '^xcodebuild build .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
+      called '^xcodebuild -showBuildSettings .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
     else
       not_called 'MEGURI_SIGNING=|allowProvisioning'
     fi
@@ -542,6 +610,7 @@ PY
     [ "$(field .details.build.standalone)" = true ]
     [ "$(field '.details.standalone_product.architecture | .app + "/" + .widget')" = arm64/arm64 ]
     [ "$(field .details.standalone_product.signature_verified)" = true ]
+    [ "$(field .details.standalone_product.cloud_configuration_verified)" = true ]
     [ "$(field .details.standalone_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
     [ "$(field '.details.standalone_product.normal_entitlements.app["com.apple.security.temporary-exception.files.absolute-path.read-only"][0]')" = "$SB/" ]
     [[ "$(field .details.input)" =~ ^[0-9a-f]{64}$ ]]
@@ -613,6 +682,53 @@ EOF
     [ "$(field '.failures[0].id')" = standalone-product ]
     [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
   done
+}
+
+@test "standalone cloud proof rejects built Info types destinations and protected app or widget grants" {
+  standalone_facts
+  cp "$FX_CLOUD_INFO" "$BATS_TEST_TMPDIR/cloud-normal.json"
+  local mutation target
+  for mutation in \
+    '.MeguriCloudSchemaConfigured = "NO"' \
+    '.MeguriCloudSchemaConfigured = 0' \
+    'del(.MeguriCloudSchemaConfigured)' \
+    '.MeguriCloudSchemaConfigured = true' \
+    '.MeguriCloudContainer = "iCloud.example.daily"' \
+    '.MeguriCloudEnvironment = "production"'; do
+    jq "$mutation" "$BATS_TEST_TMPDIR/cloud-normal.json" >"$FX_CLOUD_INFO"
+    mg build-app --platform mac --standalone
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+  done
+  cp "$BATS_TEST_TMPDIR/cloud-normal.json" "$FX_CLOUD_INFO"
+  for target in "$FX_APP_ENT" "$FX_WIDGET_ENT"; do
+    cp "$target" "$BATS_TEST_TMPDIR/grants-normal.json"
+    jq '.["com.apple.developer.icloud-services"] = ["CloudKit"]' "$target" >"$BATS_TEST_TMPDIR/grants-bad.json"
+    mv "$BATS_TEST_TMPDIR/grants-bad.json" "$target"
+    mg build-app --platform mac --standalone
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+    cp "$BATS_TEST_TMPDIR/grants-normal.json" "$target"
+  done
+  MEGURI_APP_SIGNING=team mg build-app --platform mac --standalone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = standalone-product ]
+  [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+}
+
+@test "standalone cloud proof uses effective signing and fails closed on unavailable settings" {
+  standalone_facts
+  standalone_team_grants
+  FX_RESOLVED_SIGNING=team mg build-app --platform mac --standalone
+  [ "$status" -eq 0 ]
+  [ "$(field .details.standalone_product.cloud_configuration_verified)" = true ]
+  not_called 'MEGURI_SIGNING=|allowProvisioning'
+  FX_SETTINGS_RC=1 mg build-app --platform mac --standalone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = standalone-product ]
+  [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
 }
 
 @test "app team opt-in keeps explicit physical build signing arguments single" {
@@ -2650,4 +2766,17 @@ with patch.object(capture, 'ROOT', root), patch.object(capture, 'revision', retu
     refuses()
 PY
   [ "$status" -eq 0 ]
+}
+
+@test "personal preview permits typed readiness after verified development setup" {
+  personal_facts
+  jq 'map(.buildSettings.MEGURI_CLOUD_SCHEMA_CONFIGURED_development = "YES"
+    | .buildSettings.MEGURI_CLOUD_SCHEMA_CONFIGURED = "YES"
+    | .buildSettings.MEGURI_CLOUD_SCHEMA_BOOLEAN = "1")' "$FX_PERSONAL_SETTINGS" >"$BATS_TEST_TMPDIR/ready-settings.json"
+  mv "$BATS_TEST_TMPDIR/ready-settings.json" "$FX_PERSONAL_SETTINGS"
+  jq '.MeguriCloudSchemaConfigured = true' "$FX_CLOUD_INFO" >"$BATS_TEST_TMPDIR/ready-info.json"
+  mv "$BATS_TEST_TMPDIR/ready-info.json" "$FX_CLOUD_INFO"
+  mg build-app --platform mac --personal-preview
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
 }

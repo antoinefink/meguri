@@ -51,6 +51,7 @@ setup() {
   SB="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App" "$SB/app/TestPlans"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
+  cp "$REPO_ROOT/tools/tests/cloud_build_configuration.py" "$SB/tools/tests/"
   cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$SB/tools/scripts/"
   cp "$REPO_ROOT/tools/scripts/performance-test-policy.py" "$SB/tools/scripts/"
   cp "$REPO_ROOT/app/TestPlans/Performance.xctestplan" "$SB/app/TestPlans/"

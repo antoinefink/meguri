@@ -74,8 +74,9 @@
 ## Signing and entitlements
 
 - `MEGURI_SIGNING` in `Config/Signing.xcconfig`: `adhoc` until the `xcode-account` user step, then `team`.
+- CloudKit destinations live in `Config/Cloud.xcconfig` and select isolated development for Debug/Profile and the explicit Mac Release.dev personal preview; normal Release/AppStore use production. Personal preview passes the development cloud setting as well as the bundle suffix; a suffix alone never grants production authority. Readiness defaults NO; ad-hoc always NO. Preserve the preprocessed Boolean Info element; generated custom Info keys are strings. Widgets have no cloud/push grants. Setup and schema proof are user steps, separate from packaging checks (`xcode-check --cloud-signing-matrix`).
 - Mac UI-test runners stay ad hoc via `Config/MeguriUITests.xcconfig`, even with `MEGURI_SIGNING=team`: they have no runner profile. Keep these overrides Mac-only and scoped to the UI-test target.
-- Mac entitlements are `Meguri-macOS[-Dev][-AdHoc].entitlements`: `-Dev` (hook builds) adds read-only access to the checkout, `-AdHoc` drops the App Group. Only team app variants have the private Keychain group `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`; ad-hoc and widget variants do not. Keep the other shared keys identical in all four. R2041/KTD22: capabilities are sandbox, network client and server, user-selected files and app-scope bookmarks, plus the App Group when signed and the team's private app Keychain group.
+- Mac entitlements are `Meguri-macOS[-Dev][-AdHoc].entitlements`: `-Dev` (hook builds) adds read-only access to the checkout, `-AdHoc` drops the App Group, Keychain and CloudKit/push grants. Only team app variants have the private Keychain group `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`; ad-hoc and widget variants do not. Keep sandbox/network/file keys identical in all four. R2041/KTD22 also requires configuration-isolated CloudKit container/services/environment and push grants on signed apps.
 
 ## Tests
 

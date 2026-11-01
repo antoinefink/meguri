@@ -129,7 +129,7 @@ mg_app_build_action() {
   if [ "$personal" = true ]; then
     # A command-line setting applies to every target before compilation/signing.
     # Do not change the Release defaults or export an override to nested jobs.
-    settings=(${settings[0]+"${settings[@]}"} MEGURI_BUNDLE_ID_SUFFIX=.dev)
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development)
   fi
   mg_lint_ui_first || return 1
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config" ${core_args[0]+"${core_args[@]}"}; then
@@ -170,6 +170,15 @@ mg_app_build_action() {
     mg_message "$MG_JOB: the $platform $config build failed; see $log"
     mg_status fail
     return 1
+  fi
+  if [ "$action/$personal" = build/false ]; then
+    # Resolve the preview with its build's destination, products and overrides.
+    if ! xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme "$scheme" -configuration "$config" \
+        -destination "$dest" -derivedDataPath "$MG_APP_DD" ${settings[0]+"${settings[@]}"} >"$MG_RUN_DIR/standalone-settings.json"; then
+      mg_failure standalone-product "normal Debug preview settings could not be resolved; see log.txt"
+      mg_status fail
+      return 1
+    fi
   fi
   if [ "$config" = Profile ] && [ "$plan" = Performance ]; then
     sdk=iphonesimulator
@@ -212,7 +221,7 @@ mg_app_input_digest() {
 }
 
 # Inspect resolved settings before any native app build. The suffix must reach
-# both targets, while Release keeps its native launch and production policies.
+# both targets, while Release keeps its native launch/core and uses isolated development cloud.
 mg_app_personal_settings() {
   local settings="$MG_RUN_DIR/personal-preview-settings.json"
   xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget \
@@ -224,6 +233,10 @@ mg_app_personal_settings() {
     all(.[] | select(.target == "Meguri" or .target == "MeguriWidget");
       .target as $target | .buildSettings |
       .CONFIGURATION == "Release" and .MEGURI_BUNDLE_ID_SUFFIX == ".dev" and
+      .MEGURI_CLOUD_CONFIGURATION == "development" and
+      .MEGURI_CLOUD_ENVIRONMENT == "development" and
+      .MEGURI_CLOUD_CONTAINER == .MEGURI_CLOUD_CONTAINER_development and
+      .MEGURI_CLOUD_CONTAINER != .MEGURI_CLOUD_CONTAINER_production and
       .PRODUCT_BUNDLE_IDENTIFIER == (if $target == "Meguri" then "com.antoinefink.meguri.dev" else "com.antoinefink.meguri.dev.widget" end) and
       .MEGURI_CORE_FEATURES == "ankiweb" and .MEGURI_SWIFT_CONDITIONS == "ANKIWEB_ENABLED" and
       ((.SWIFT_ACTIVE_COMPILATION_CONDITIONS // "" | test("(^|[ ,])DEBUG|MEGURI_TEST_HOOKS")) | not) and
@@ -233,7 +246,9 @@ mg_app_personal_settings() {
       (.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX // "") == "" and (.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX // "") == "" and
       .CODE_SIGN_ENTITLEMENTS == (if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end) and
       .ENABLE_TESTABILITY == "NO" and .ENABLE_DEBUG_DYLIB == "NO" and .ENABLE_HARDENED_RUNTIME == "YES")
-  ' "$settings" >/dev/null
+  ' "$settings" >/dev/null || return 1
+  python3 "$MG_TOOLS/tests/cloud_build_configuration.py" --settings "$settings" \
+    --configuration Release --platform mac --signing team --personal-preview
 }
 
 # Profiles are checked in memory and never published. Validate the signed
@@ -267,6 +282,10 @@ try:
     assert all(grants[key] is True for key in ("get-task-allow", "com.apple.security.get-task-allow") if key in grants), "development profile"
     assert profile["ExpirationDate"] > datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None), "expiry"
     assert sys.argv[2] in profile["ProvisionedDevices"], "device coverage"
+    if "com.apple.developer.icloud-container-identifiers" in signed:
+        assert grants.get("com.apple.developer.icloud-container-identifiers") == signed["com.apple.developer.icloud-container-identifiers"], "isolated cloud container grant"
+        for key in ("com.apple.developer.icloud-services", "com.apple.developer.icloud-container-environment", "com.apple.developer.aps-environment"):
+            assert grants.get(key) == signed[key], "cloud/push grant"
     for key in ("keychain-access-groups", "com.apple.security.application-groups"):
         for value in signed.get(key, []):
             assert any(fnmatch.fnmatchcase(value, grant) for grant in grants.get(key, [])), "signed group grant"
@@ -284,6 +303,7 @@ except (KeyError, TypeError, ValueError, OSError, plistlib.InvalidFileException)
 
 mg_app_personal_check() {
   local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info team="" identity
+  local app_ent widget_ent app_info
   local hardware stamp hash slices app_hash widget_hash app_profile_hash widget_profile_hash="" digest signed_info cert_dir widget_provision=not_embedded
   codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
   hardware="$(system_profiler SPHardwareDataType -json | jq -er '.SPHardwareDataType[0] |
@@ -314,6 +334,7 @@ mg_app_personal_check() {
         .["com.apple.security.files.user-selected.read-write"] == true and .["com.apple.security.files.bookmarks.app-scope"] == true
       ' <<<"$ent" >/dev/null || return 1
       mg_app_personal_profile "$bundle" "$ent" "$hardware" || return 1
+      app_ent="$ent"
     else
       # Native Mac widgets need no profile/identity entitlement for their App
       # Group. Their signed metadata and certificate still bind them to the app.
@@ -322,6 +343,7 @@ mg_app_personal_check() {
         (.["com.apple.developer.team-identifier"] // $team) == $team and
         (.["com.apple.application-identifier"] // .["application-identifier"] // ($team + "." + $identity)) == ($team + "." + $identity)
       ' <<<"$ent" >/dev/null || return 1
+      widget_ent="$ent"
       if [ -f "$bundle/Contents/embedded.provisionprofile" ]; then
         mg_app_personal_profile "$bundle" "$ent" "$hardware" || return 1
         widget_provision=verified
@@ -330,11 +352,22 @@ mg_app_personal_check() {
     info="$(plutil -convert json -o - "$bundle/Contents/Info.plist")" || return 1
     jq -e --arg identity "$identity" '.CFBundleIdentifier == $identity' <<<"$info" >/dev/null || return 1
     if [ "$bundle" = "$app" ]; then
+      app_info="$info"
       jq -e '.CFBundleExecutable == "Meguri" and .MeguriCardInspectionBuild == "personalRelease" and .LSUIElement == false' <<<"$info" >/dev/null || return 1
     else
       jq -e '.CFBundleExecutable == "MeguriWidget"' <<<"$info" >/dev/null || return 1
     fi
   done
+  # Use the same cloud policy for resolved settings and signed product facts.
+  python3 -B - "$MG_TOOLS/tests" "$MG_RUN_DIR/personal-preview-settings.json" "$app_info" "$app_ent" "$widget_ent" <<'PY_CLOUD' || return 1
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from cloud_build_configuration import check
+settings = json.loads(Path(sys.argv[2]).read_text())
+app = next(target["buildSettings"] for target in settings if target["target"] == "Meguri")
+check(app, "Release", "mac", "team", *(json.loads(value) for value in sys.argv[3:]), personal_preview=True)
+PY_CLOUD
   cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-widget-signer.XXXXXX")" || return 1
   if ! codesign -d --extract-certificates="$cert_dir/app" "$app" >/dev/null ||
       ! codesign -d --extract-certificates="$cert_dir/widget" "$widget" >/dev/null ||
@@ -367,7 +400,7 @@ mg_app_personal_check() {
      provisioning: {app: "verified", widget: $widget_provision}, widget_signer_matches_app: true,
      provisioning_sha256: {app: $app_profile, widget: (if $widget_profile == "" then null else $widget_profile end)},
      bundle_id: "com.antoinefink.meguri.dev", widget_bundle_id: "com.antoinefink.meguri.dev.widget",
-     card_inspection_build: "personalRelease", native_visible_application: true, fixture_read_scope: false, test_hooks: false,
+     cloud_environment: "development", card_inspection_build: "personalRelease", native_visible_application: true, fixture_read_scope: false, test_hooks: false,
      core: {hash: $core_hash, configuration: "Release", profile: "release", features: "ankiweb", slices: $slices}}')"
 }
 
@@ -376,7 +409,7 @@ mg_app_personal_check() {
 # without that script's ad-hoc-only key inventory: team/profile/Keychain/App
 # Group keys must survive. No test runner or xctestrun is needed here.
 mg_app_standalone_check() {
-  local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info app_ent="" widget_ent=""
+  local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info app_info app_ent="" widget_ent=""
   local stamp hash slices executable_hash widget_hash
   codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
   for bundle in "$app" "$widget"; do
@@ -407,9 +440,20 @@ mg_app_standalone_check() {
   info="$(plutil -convert json -o - "$app/Contents/Info.plist")" || return 1
   jq -e '.CFBundleIdentifier == "com.antoinefink.meguri.dev" and .CFBundleExecutable == "Meguri"
     and .MeguriCardInspectionBuild == "debug" and .LSUIElement == true' <<<"$info" >/dev/null || return 1
+  app_info="$info"
   info="$(plutil -convert json -o - "$widget/Contents/Info.plist")" || return 1
   jq -e '.CFBundleIdentifier == "com.antoinefink.meguri.dev.widget" and .CFBundleExecutable == "MeguriWidget"' \
     <<<"$info" >/dev/null || return 1
+  python3 -B - "$MG_TOOLS/tests" "$MG_RUN_DIR/standalone-settings.json" "$app_info" "$app_ent" "$widget_ent" <<'PY_CLOUD' || return 1
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from cloud_build_configuration import check, require
+settings = json.loads(Path(sys.argv[2]).read_text())
+apps = [target["buildSettings"] for target in settings if target["target"] == "Meguri"]
+require(len(apps) == 1, "expected exactly one Meguri target in resolved settings")
+check(apps[0], "Debug", "mac", apps[0]["MEGURI_SIGNING"], *(json.loads(value) for value in sys.argv[3:]))
+PY_CLOUD
   stamp="$(cat "$MG_ROOT/app/Packages/MeguriCore/Binaries/.stamp")" || return 1
   grep -qx 'configuration=Debug' <<<"$stamp" && grep -qx 'profile=dev' <<<"$stamp" &&
     grep -qx 'features=ankiweb,test-hooks' <<<"$stamp" || return 1
@@ -425,7 +469,7 @@ mg_app_standalone_check() {
     --arg core_hash "$hash" --arg slices "$slices" --argjson app "$app_ent" --argjson widget "$widget_ent" '
     def normal: with_entries(select(.key | startswith("com.apple.security.")))
       | del(.["com.apple.security.application-groups"]);
-    {signature_verified: true, architecture: {app: "arm64", widget: "arm64"},
+    {signature_verified: true, cloud_configuration_verified: true, architecture: {app: "arm64", widget: "arm64"},
      executable_sha256: $hash, widget_executable_sha256: $widget_hash,
      bundle_id: "com.antoinefink.meguri.dev", card_inspection_build: "debug",
      core: {hash: $core_hash, configuration: "Debug", profile: "dev", features: "ankiweb,test-hooks", slices: $slices},

@@ -1,0 +1,24 @@
+// CloudKit identity is independent of bundle suffixes (R2065, KTD22).
+// These are requested identifiers, not evidence of portal/schema setup.
+// Verify/replace them through docs/process/one-time-setup.md before team use.
+MEGURI_CLOUD_CONTAINER_development = iCloud.com.antoinefink.meguri.dev
+MEGURI_CLOUD_CONTAINER_production = iCloud.com.antoinefink.meguri
+MEGURI_CLOUD_SCHEMA_CONFIGURED_development = NO
+MEGURI_CLOUD_SCHEMA_CONFIGURED_production = NO
+
+// Debug/Profile select development explicitly; Release/AppStore production.
+// Personal-preview Mac Release.dev explicitly overrides this to development.
+MEGURI_CLOUD_CONTAINER = $(MEGURI_CLOUD_CONTAINER_$(MEGURI_CLOUD_CONFIGURATION))
+MEGURI_CLOUD_ENVIRONMENT = $(MEGURI_CLOUD_CONFIGURATION)
+MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT_development = Development
+MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT_production = Production
+MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT = $(MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT_$(MEGURI_CLOUD_CONFIGURATION))
+MEGURI_CLOUD_PUSH_ENVIRONMENT = $(MEGURI_CLOUD_CONFIGURATION)
+
+// Ad-hoc previews never claim readiness, including after team setup.
+MEGURI_CLOUD_SCHEMA_CONFIGURED_adhoc = NO
+MEGURI_CLOUD_SCHEMA_CONFIGURED_team = $(MEGURI_CLOUD_SCHEMA_CONFIGURED_$(MEGURI_CLOUD_CONFIGURATION))
+MEGURI_CLOUD_SCHEMA_CONFIGURED = $(MEGURI_CLOUD_SCHEMA_CONFIGURED_$(MEGURI_SIGNING))
+MEGURI_CLOUD_SCHEMA_BOOLEAN_NO = 0
+MEGURI_CLOUD_SCHEMA_BOOLEAN_YES = 1
+MEGURI_CLOUD_SCHEMA_BOOLEAN = $(MEGURI_CLOUD_SCHEMA_BOOLEAN_$(MEGURI_CLOUD_SCHEMA_CONFIGURED))

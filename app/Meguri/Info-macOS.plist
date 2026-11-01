@@ -35,6 +35,16 @@
 	<string>$(MEGURI_APP_GROUP)</string>
 	<key>MeguriCardInspectionBuild</key>
 	<string>$(MEGURI_CARD_INSPECTION_BUILD)</string>
+	<key>MeguriCloudContainer</key>
+	<string>$(MEGURI_CLOUD_CONTAINER)</string>
+	<key>MeguriCloudEnvironment</key>
+	<string>$(MEGURI_CLOUD_ENVIRONMENT)</string>
+	<key>MeguriCloudSchemaConfigured</key>
+#if MEGURI_CLOUD_SCHEMA_BOOLEAN
+	<true/>
+#else
+	<false/>
+#endif
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>

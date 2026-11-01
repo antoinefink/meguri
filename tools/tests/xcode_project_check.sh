@@ -3,7 +3,8 @@
 # prints TAP.
 #
 # usage: xcode_project_check.sh <work dir> [--phase builds|devices [--continue-from N]]
-#          [--iphone UDID] [--ipad UDID] [--no-ui] [--vm-ssh <wrapper> --vm-name <name> | --no-sims]
+#          [--iphone UDID] [--ipad UDID] [--no-ui] [--cloud-signing-matrix]
+#          [--vm-ssh <wrapper> --vm-name <name> | --no-sims]
 #
 # Builds every configuration for the Mac and the iPhone and iPad simulators
 # into <work dir>/DerivedData and checks build settings, zero warnings, the
@@ -57,6 +58,7 @@ UI=true
 VM_SSH=""
 VM_NAME="the test VM"
 SIMS=true
+CLOUD_SIGNING_MATRIX=false
 PHASE=all
 FIRST=0
 while [ "$#" -gt 0 ]; do
@@ -67,6 +69,7 @@ while [ "$#" -gt 0 ]; do
     --vm-ssh) VM_SSH="${2:?}" && shift ;;
     --vm-name) VM_NAME="${2:?}" && shift ;;
     --no-sims) SIMS=false ;;
+    --cloud-signing-matrix) CLOUD_SIGNING_MATRIX=true ;;
     --phase)
       case "${2:-}" in builds | devices) PHASE="$2" ;; *) echo "xcode_project_check: --phase takes builds or devices" >&2 && exit 2 ;; esac
       shift
@@ -253,6 +256,53 @@ expect_info() { # expect_info <app> <key> <JSON value, null when absent>: the Ma
   [ "$actual" = "$3" ] || { echo "$2 is $actual, expected $3" && return 1; }
 }
 
+# Validate settings before inspecting products. Development/test cloud is isolated;
+# personal preview requests development explicitly as well as a dev bundle ID.
+# Other builds retain the destinations assigned to their configurations.
+cloud_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-preview]
+  local config="$1" sdk="$2" signing="$3" suffix="$4" output="$5" platform=ios preview_args=()
+  [ "$sdk" != macosx ] || platform=mac
+  # A run-owned override keeps this independent of the normal settings cache.
+  printf 'MEGURI_SIGNING = %s\nMEGURI_BUNDLE_ID_SUFFIX = %s\n' "$signing" "$suffix" >"$output.xcconfig" || return 1
+  if [ "${6:-}" = personal-preview ]; then
+    printf 'MEGURI_CLOUD_CONFIGURATION = development\n' >>"$output.xcconfig" || return 1
+    preview_args=(--personal-preview)
+  fi
+  xcodebuild -showBuildSettings -json -project "$PROJECT" -scheme Meguri -configuration "$config" -sdk "$sdk" \
+    -derivedDataPath "$DD" -xcconfig "$output.xcconfig" >"$output" || return 1
+  python3 "$REPO/tools/tests/cloud_build_configuration.py" --settings "$output" \
+    --configuration "$config" --platform "$platform" --signing "$signing" ${preview_args[0]+"${preview_args[@]}"}
+}
+
+# Entitlements come from the signature on real products, or the simulator's
+# embedded section. Do not substitute expanded source plists for these artifacts.
+cloud_artifacts() { # <config> <sdk> <signing> <app> <suffix>
+  local config="$1" sdk="$2" signing="$3" app="$4" suffix="$5" platform=ios info widget
+  local proof="$WORK/cloud-$1-$2-$3"
+  mkdir -p "$proof" || return 1
+  cloud_settings "$config" "$sdk" "$signing" "$suffix" "$proof/settings.json" || return 1
+  case "$sdk" in
+    macosx)
+      platform=mac info="$app/Contents/Info.plist" widget="$app/Contents/PlugIns/MeguriWidget.appex"
+      codesign -d --entitlements - --xml "$app" >"$proof/app.plist" 2>"$proof/app-codesign.log" || return 1
+      codesign -d --entitlements - --xml "$widget" >"$proof/widget.plist" 2>"$proof/widget-codesign.log" || return 1 ;;
+    iphonesimulator)
+      info="$app/Info.plist" widget="$app/PlugIns/MeguriWidget.appex"
+      rm -f "$proof/app.plist" "$proof/widget.plist"
+      segedit "$app/Meguri" -extract __TEXT __entitlements "$proof/app.plist" || return 1
+      segedit "$widget/MeguriWidget" -extract __TEXT __entitlements "$proof/widget.plist" || return 1 ;;
+    iphoneos)
+      info="$app/Info.plist" widget="$app/PlugIns/MeguriWidget.appex"
+      codesign -d --entitlements - --xml "$app" >"$proof/app.plist" 2>"$proof/app-codesign.log" || return 1
+      codesign -d --entitlements - --xml "$widget" >"$proof/widget.plist" 2>"$proof/widget-codesign.log" || return 1 ;;
+    *) return 1 ;;
+  esac
+  cp "$info" "$proof/Info.plist" || return 1
+  python3 "$REPO/tools/tests/cloud_build_configuration.py" --settings "$proof/settings.json" \
+    --configuration "$config" --platform "$platform" --signing "$signing" \
+    --info "$proof/Info.plist" --entitlements "$proof/app.plist" --widget-entitlements "$proof/widget.plist"
+}
+
 # R523/R2040: inspectability uses this native build policy, never DEBUG alone.
 card_inspection_build() {
   case "$1" in
@@ -321,6 +371,17 @@ if builds_phase; then
       Release) hooks=no ankiweb=yes features=ankiweb id=com.antoinefink.meguri ;;
       AppStore) hooks=no ankiweb=no features="" id=com.antoinefink.meguri ;;
     esac
+    for sdk in macosx iphoneos; do
+      for signing in adhoc team; do
+        case "$config" in Debug | Profile) suffix=.dev ;; *) suffix="" ;; esac
+        check "$config $sdk $signing: CloudKit isolation and readiness settings" \
+          cloud_settings "$config" "$sdk" "$signing" "$suffix" "$WORK/cloud-settings-$config-$sdk-$signing.json"
+        if [ "$config/$sdk/$signing" = Release/macosx/team ]; then
+          check "personal preview Release.dev: isolated development CloudKit settings" \
+            cloud_settings Release macosx team .dev "$WORK/cloud-settings-personal-preview.json" personal-preview
+        fi
+      done
+    done
     for sdk in macosx iphonesimulator; do
       check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
       check "$config $sdk: core features '$features'" expect_setting "$config" "$sdk" MEGURI_CORE_FEATURES "$features"
@@ -371,9 +432,10 @@ fi
 # sets BUILT to the products directory.
 build() {
   local name="$1" config="$2" dest="$3" result="$WORK/$1.xcresult" counts
+  shift 3
   rm -rf "$result"
   xcodebuild build -project "$PROJECT" -scheme Meguri -configuration "$config" -destination "$dest" \
-    -derivedDataPath "$DD" -resultBundlePath "$result" >"$LOGS/$name.log" 2>&1
+    -derivedDataPath "$DD" -resultBundlePath "$result" ${1+"$@"} >"$LOGS/$name.log" 2>&1
   local rc=$?
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -r '"\(.errorCount) \(.warningCount) \([.warnings[]?.message] | join(" | "))"')"
@@ -414,6 +476,8 @@ if builds_phase; then
     esac
     build "mac-$config" "$config" "platform=macOS,arch=arm64" || { forget_mac_app "$config"; continue; }
     app="$DD/Build/Products/$config/Meguri.app"
+    case "$config" in Debug | Profile) cloud_suffix=.dev ;; *) cloud_suffix="" ;; esac
+    check "mac-$config built CloudKit Info and ad-hoc grants" cloud_artifacts "$config" macosx adhoc "$app" "$cloud_suffix"
     check "mac-$config links the $config core (features '$features')" stamp_is "$config" "$features" mac
     case "$config" in
       Debug)
@@ -482,6 +546,32 @@ if builds_phase; then
     check "adding it needed no project change" git -C "$REPO" diff --quiet -- app/Meguri.xcodeproj
   fi
   rm -f "$REPO/app/Meguri/App/$probe.swift"
+
+  # Opt-in signed matrix consumes profiles already installed for these grants.
+  # It leaves accounts, portal configuration and provisioning untouched.
+  # The ordinary Mac checks retain their ad-hoc signing policy.
+  cloud_signing_matrix() {
+    # Keep team artifacts out of both the ad-hoc launch products and their
+    # incremental signing/copy cache, including embedded widgets.
+    local DD="$WORK/DerivedData-cloud-team"
+    rm -rf "$DD/Build/Products"
+    for config in $CONFIGS; do
+      case "$config" in Debug | Profile) cloud_suffix=.dev ;; *) cloud_suffix="" ;; esac
+      for sdk in macosx iphoneos iphonesimulator; do
+        case "$sdk" in
+          macosx) cloud_dest="platform=macOS,arch=arm64" cloud_product="$config" ;;
+          iphoneos) cloud_dest="generic/platform=iOS" cloud_product="$config-iphoneos" ;;
+          iphonesimulator) cloud_dest="generic/platform=iOS Simulator" cloud_product="$config-iphonesimulator" ;;
+        esac
+        if build "cloud-$sdk-$config-team" "$config" "$cloud_dest" MEGURI_SIGNING=team; then
+          check "$sdk-$config built CloudKit Info and team grants" cloud_artifacts "$config" "$sdk" team \
+            "$DD/Build/Products/$cloud_product/Meguri.app" "$cloud_suffix"
+        fi
+        [ "$sdk" != macosx ] || forget_mac_app "$config"
+      done
+    done
+  }
+  [ "$CLOUD_SIGNING_MATRIX" != true ] || cloud_signing_matrix
 fi
 
 # --- VM execution (the devices phase) ---------------------------------------
@@ -948,6 +1038,8 @@ if devices_phase; then
     skip "lease the iPhone and iPad simulators" "queued: no test VM (user step mac-vm)"
   fi
   if { [ -n "$IPHONE" ] || [ "$SIMS" = false ]; } && build "iphone-Debug" Debug "$(sim_dest "$IPHONE")"; then
+    check "iphone-Debug built CloudKit Info and simulator grants" cloud_artifacts Debug iphonesimulator adhoc \
+      "$DD/Build/Products/Debug-iphonesimulator/Meguri.app" .dev
     check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
     check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
       com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'

@@ -33,6 +33,55 @@ whether the account is present; it does not establish profile validity.
 `ui-test --physical-device <identifier>` uses team signing and lets Xcode refresh
 profiles. Preserve the app and widget's shared-group entitlements.
 
+### `cloudkit-setup`
+
+Only Antoine configures containers, capabilities, profiles and schema promotion
+(R2065). `tools/mg doctor` does not verify this step. Packaging checks are not
+evidence of a working account or encrypted schema.
+
+Review the proposed container IDs in `app/Config/Cloud.xcconfig`:
+`MEGURI_CLOUD_CONTAINER_development` is `iCloud.com.antoinefink.meguri.dev`;
+`MEGURI_CLOUD_CONTAINER_production` is `iCloud.com.antoinefink.meguri`.
+Verify their existence during setup and use separate private databases.
+Development and test configurations use the isolated container. The Mac
+personal preview also requests development explicitly, together with `.dev`;
+the suffix by itself supplies no cloud selection or permission. Ordinary
+Release and AppStore builds use the production container.
+
+Assign only the isolated development container to development app profiles;
+keep daily-driver container access out of those profiles. Enable CloudKit and
+push for the app's Mac/iOS identities, with the selected container, CloudKit
+service, `Development`/`Production` iCloud environment and
+`development`/`production` push environment. Mac uses
+`com.apple.developer.aps-environment`; iOS uses `aps-environment`. Preserve
+existing App Groups, private app Keychain and sandbox grants. Widgets receive
+no CloudKit or push grants. Personal Release.dev uses development-only
+container/environment authorization, just like other development/test profiles.
+Refresh the appropriate profiles and verify their grants, signer, device
+coverage and expiry before signed builds. Ad-hoc Mac previews need none of
+these grants and always report schema readiness false.
+
+Create and inspect the encrypted record schema in
+[`sync/cloudkit-records` K2–K5](../../specs/sync/cloudkit-records.md): the six
+record types use encrypted `e` values and only the specified asset fields;
+collection content must not become plaintext custom fields. Verify the isolated
+development schema, explicitly promote/verify the daily-driver production schema,
+and retain separate environment/container evidence from signed multi-device runs.
+Only after each environment's actual identifiers, profile grants and encrypted
+schema are verified may its `MEGURI_CLOUD_SCHEMA_CONFIGURED_development` or
+`MEGURI_CLOUD_SCHEMA_CONFIGURED_production` change from `NO` to `YES`. Never
+enable readiness to satisfy a build check. The packaged
+`MeguriCloudContainer`, `MeguriCloudEnvironment` and Boolean
+`MeguriCloudSchemaConfigured` must match that verified setup.
+
+The integrator can check packaging with
+`tools/mg xcode-check --no-ui --cloud-signing-matrix` once profiles exist. This
+adds team Mac/device/simulator builds for every configuration without launching
+them or requesting provisioning updates; it retains resolved settings, generated
+Info and signed/embedded entitlements under `build/xcode-check/cloud-*`. It
+does not certify portal configuration, schema encryption/promotion, push delivery
+or signed multi-device sync. Those external checks remain required.
+
 
 ### `docker-resources`
 

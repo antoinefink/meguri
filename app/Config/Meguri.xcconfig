@@ -16,6 +16,14 @@ INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
 INFOPLIST_KEY_CFBundleDisplayName = Meguri
 // Explicit distribution policy, including personal Release without hooks.
 INFOPLIST_KEY_MeguriCardInspectionBuild = $(MEGURI_CARD_INSPECTION_BUILD)
+INFOPLIST_KEY_MeguriCloudContainer = $(MEGURI_CLOUD_CONTAINER)
+INFOPLIST_KEY_MeguriCloudEnvironment = $(MEGURI_CLOUD_ENVIRONMENT)
+// The source Info plists use a preprocessed element, not a generated string
+// key: Bundle's Bool loader requires a real <false/> or <true/> value.
+// Traditional preprocessing preserves URL/path text containing double slashes.
+INFOPLIST_PREPROCESS = YES
+INFOPLIST_OTHER_PREPROCESSOR_FLAGS = $(inherited) -traditional
+INFOPLIST_PREPROCESSOR_DEFINITIONS = $(inherited) MEGURI_CLOUD_SCHEMA_BOOLEAN=$(MEGURI_CLOUD_SCHEMA_BOOLEAN)
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
 // Debug builds start every Mac launch as a UI element (no Dock tile, never
 // reported Foreground); MeguriApp gives a launch the regular policy unless it
