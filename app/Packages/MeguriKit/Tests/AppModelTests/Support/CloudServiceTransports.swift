@@ -56,6 +56,7 @@ nonisolated struct ServiceOwnTransport: CloudOwnTransport {
     func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         let operations: [ServiceJSON]
         switch command {
+        case .zoneInventory: throw ServiceWorkflowFailure.unsupported
         case .read(let target), .publication(.read(let target)):
             operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
         case .zoneDeletionActiveRead(let target):

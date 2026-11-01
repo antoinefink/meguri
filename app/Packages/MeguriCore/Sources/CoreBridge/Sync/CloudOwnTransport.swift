@@ -11,6 +11,8 @@ public enum CloudOwnTransportCommand: Sendable {
     case assetRead(zone: String, name: String)
     case zoneDeletionActiveRead(CloudControlTarget)
     case deleteZones(CloudZoneDeletionBatch)
+    /// Fetch every zone in the private database, without a guessed zone list.
+    case zoneInventory
     case adoptionPage(zone: String, cursor: Data?)
 }
 public enum CloudOwnTransportReply: Sendable {
@@ -19,6 +21,9 @@ public enum CloudOwnTransportReply: Sendable {
     case assetRead(CloudAssetReadResult)
     case zoneDeletionActiveRead(CloudZoneDeletionRead)
     case deletedZones(CloudZoneDeletionReply)
+    /// Complete, validated private-owner names from the original successful
+    /// all-zones terminal callback, sorted deterministically. Empty is success.
+    case zoneInventory(zones: [String])
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
 }
 public enum CloudOwnTransportFailure: Error, Sendable {

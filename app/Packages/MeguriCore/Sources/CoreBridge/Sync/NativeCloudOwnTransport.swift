@@ -144,8 +144,11 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
     private let queue: any NativeCloudDatabaseQueue
     private let stream: AsyncStream<Result<CloudOwnTransportReply, any Error>>
     private let continuation: AsyncStream<Result<CloudOwnTransportReply, any Error>>.Continuation
-    init(operation: CKDatabaseOperation, queue: any NativeCloudDatabaseQueue) {
+    private let originalReplyWaiting: (@Sendable () -> Void)?
+    init(operation: CKDatabaseOperation, queue: any NativeCloudDatabaseQueue,
+         originalReplyWaiting: (@Sendable () -> Void)? = nil) {
         self.operation = operation; self.queue = queue
+        self.originalReplyWaiting = originalReplyWaiting
         (stream, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
     var cancelled: Bool { state.withLock { $0.cancelled } }
@@ -171,9 +174,11 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
     }
     func reply() async throws -> CloudOwnTransportReply {
         let stream = self.stream
+        let originalReplyWaiting = self.originalReplyWaiting
         // Join the original callback even when the waiting task is cancelled.
         return try await Task.detached {
             var iterator = stream.makeAsyncIterator()
+            originalReplyWaiting?()
             guard let reply = await iterator.next() else { throw CloudOwnTransportFailure.missingReply }
             return try reply.get()
         }.value
@@ -184,27 +189,43 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
     let queue: any NativeCloudDatabaseQueue
     private let staging: CloudMediaStaging?
     let zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
+    let zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)?
+    let zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
+    let zoneInventoryOriginalReplyWaiting: (@Sendable () -> Void)?
     public init(database: CKDatabase) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
         zoneDeletionTerminalHandlerInstalled = nil
+        zoneInventoryPerZoneHandlerInstalled = nil
+        zoneInventoryTerminalHandlerInstalled = nil
+        zoneInventoryOriginalReplyWaiting = nil
     }
     public init(database: CKDatabase, staging: CloudMediaStaging) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         self.staging = staging
         zoneDeletionTerminalHandlerInstalled = nil
+        zoneInventoryPerZoneHandlerInstalled = nil
+        zoneInventoryTerminalHandlerInstalled = nil
+        zoneInventoryOriginalReplyWaiting = nil
     }
     init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil,
-         zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil) {
+         zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
+         zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)? = nil,
+         zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
+         zoneInventoryOriginalReplyWaiting: (@Sendable () -> Void)? = nil) {
         self.queue = queue; self.staging = staging
         self.zoneDeletionTerminalHandlerInstalled = zoneDeletionTerminalHandlerInstalled
+        self.zoneInventoryPerZoneHandlerInstalled = zoneInventoryPerZoneHandlerInstalled
+        self.zoneInventoryTerminalHandlerInstalled = zoneInventoryTerminalHandlerInstalled
+        self.zoneInventoryOriginalReplyWaiting = zoneInventoryOriginalReplyWaiting
     }
     public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         switch command {
         case .zoneDeletionActiveRead(let target): return try prepareZoneDeletionRead(target)
         case .deleteZones(let batch): return try prepareZoneDeletion(batch)
+        case .zoneInventory: return prepareZoneInventory()
         case .read(let target): return read(target, publication: false)
         case .assetRead(let zone, let name): return try assetRead(zone: zone, name: name)
         case .publication(.read(let target)): return read(target, publication: true)

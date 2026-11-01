@@ -186,6 +186,7 @@ actor ServiceWorkflowWire {
         // method only projects those original outcomes; it issues no request.
         let reply = try serviceRequired(replies.first)
         switch command {
+        case .zoneInventory: throw ServiceWorkflowFailure.unsupported
         case .zoneDeletionActiveRead:
             if let error = reply.result["Err"] {
                 let failure = try deletionFailure(error)

@@ -663,6 +663,7 @@ private nonisolated final class InitialCloudTransport: CloudOwnTransport, Sendab
     func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         requests.record(command)
         switch command {
+        case .zoneInventory: throw CloudOwnTransportFailure.unexpectedReply
         case .read(let target):
             let record = records.first { $0.zone == target.zone && $0.name == target.name && $0.recordType == target.recordType }
             return InitialCloudImmediateReply(.read(record.map { .found($0.control) } ?? .missing))
