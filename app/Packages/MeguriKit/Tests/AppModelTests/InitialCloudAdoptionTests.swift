@@ -829,6 +829,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     func takeAccountReadRequest() async -> Bool { await backend.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await backend.freezeForSuspend() }
     func resumeAfterCoreResume() async { await backend.resumeAfterCoreResume() }
+    func quiesce() async throws { try await backend.quiesce() }
     func close() async throws {
         try await backend.close()
         zoneDeletions.continuation.finish()

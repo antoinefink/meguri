@@ -150,6 +150,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private var mediaDrains: [String: Task<Void, Never>] = [:]
     private var heldMediaResume: [String: (CloudPolicyCommand, CoreCloudPolicyExecution)] = [:]
     private var mediaHookInstalled = false
+    private var quiescing = false
     private let cleanupWorker: CloudCleanupExecutor?
     private var cleanupRun: Task<CloudPolicyNativeResult, Never>?
     private var cleanupSDK: String?
@@ -167,6 +168,14 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0) }
         self.flushDeadline = flushDeadline
     }
+    public func quiesce() async throws {
+        quiescing = true
+        heldMediaResume.removeAll()
+        async let adapterDrain: Void = adapter.quiesce()
+        await drainCleanups()
+        await drainZoneDeletions()
+        try await adapterDrain
+    }
     public func execute(_ command: CloudPolicyCommand) async -> CloudPolicyNativeResult {
         var outputs: [CloudPolicyOutput] = []
         if !mediaHookInstalled {
@@ -179,6 +188,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         }
         do {
             switch command.action {
+            case .updatePending, .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged,
+                 .stopEngine, .cancelExchange, .cancelBackgroundFlush, .pauseMedia, .cancelFlushTimer, .quitNow:
+                break
+            default:
+                guard !quiescing else { throw CancellationError() }
+            }
+            switch command.action {
             case .updatePending, .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged:
                 outputs.append(try await policy.executeCore(command))
             case .startEngine, .stopEngine, .configureAutomatic:
@@ -189,7 +205,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     heldConfigure = (command, execution)
                     return .init(outputs: [], error: nil, deferred: true)
                 }
-                try await adapter.executePolicyLifecycle(command, execution: execution)
+                if try await adapter.executePolicyLifecycle(command, execution: execution, policy: policy) {
+                    return .init(outputs: [], error: nil, deferred: true)
+                }
                 outputs.append(try await policy.input(.refresh(.cloud)))
             case .requestFetch(let zones), .requestSend(let zones):
                 if zones.contains(.media), mediaService == nil || mediaTransport == nil { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
@@ -240,6 +258,8 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 } else {
                     guard let instance else { throw BridgeError.cloudPolicy(.staleCommand) }
                     if let joining = mediaDrains[instance] { await joining.value }
+                    guard !quiescing else { throw CancellationError() }
+                    try Task.checkCancellation()
                     if mediaRuns[instance] != nil {
                         if case .resumeMedia = command.action { heldMediaResume[instance] = (command, permit) }
                         return .init(outputs: [], error: nil, deferred: true)
@@ -570,8 +590,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 heldConfigure = nil
                 do {
                     let adapter = self.adapter
-                    let configure = Task { try await adapter.executePolicyLifecycle(held.0, execution: held.1) }
-                    try await configure.value
+                    let policy = self.policy
+                    let configure = Task { try await adapter.executePolicyLifecycle(held.0, execution: held.1, policy: policy) }
+                    _ = try await configure.value
                     outputs.append(try await policy.input(.refresh(.cloud)))
                 } catch { if failure == nil { failure = error } }
             }

@@ -19,6 +19,12 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     var own: CloudOwnExecutor? { production.own }
     // Observation only: callbacks must record/yield without native calls or reentry.
     var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? = nil
+    var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
+    // A focused shutdown regression can hold delivery of an actual completed
+    // command result; it never substitutes execution or issues a capability.
+    var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?
+    private(set) var quiesced = false
+    private let quiescences = AsyncStream<Bool>.makeStream()
     private let starts: AsyncStream<Bool>
     private let started: AsyncStream<Bool>.Continuation
     private let exchanges: AsyncStream<Bool>
@@ -151,7 +157,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let label = actionLabel(command.action)
         trace("command.begin ordinal=\(sequence) action=\(label) elapsed_ms=0")
         if case .retryAssetEntries = command.action { assetRetryStarted += 1 }
+        await beforeExecution?(command)
         let result = await production.execute(command)
+        await afterExecution?(command, result)
         trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)")
         for output in result.outputs { capture(output, stage: .executeOutputs) }
         switch command.action {
@@ -218,6 +226,14 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     func takeAccountReadRequest() async -> Bool { await production.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }
     func resumeAfterCoreResume() async { await production.resumeAfterCoreResume() }
+    func quiesce() async throws {
+        try await production.quiesce()
+        quiesced = true
+        quiescences.continuation.yield(true)
+    }
+    func waitForQuiesce() async throws {
+        try #require(try await serviceAppSignal(quiescences.stream, stage: "backend quiesce"))
+    }
     func close() async throws {
         let start = serviceAppUptimeMilliseconds()
         trace("backend.close.begin elapsed_ms=0", emit: true)

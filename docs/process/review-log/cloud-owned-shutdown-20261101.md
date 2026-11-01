@@ -65,3 +65,44 @@ Four tests fail in actual native close: updatePending reaches a backend whose
 SDK has already stopped, and the original guard rejects it as stale. Both
 full review/media workflows pass. Required finalization must finish before
 SDK authority ends; the next repair is a two-phase native close.
+
+Two-phase native close, integration start cf4dbe76.
+The original U113 and batch starts above remain unchanged.
+Filtered exports: cleanroom/20261101T152322Z-61413 (initial quiesce),
+20261101T153454Z-69044 (deferred stop), 20261101T155104Z-77178
+(compiler capture), and 20261101T160018Z-83654 (fixture corrections).
+
+The coordinator quiesces native transports, joins original results and required
+control effects, then retires/releases the original SDK. Deferred StopEngine
+keeps the accepted Core command and SDK until close completes.
+A stop error keeps both objects for retry. New work is fenced; original callback
+bookkeeping stays valid. Production guards and deadlines remain enabled.
+
+R1 P1: StopEngine ended SDK authority before required commands completed.
+R2 resolved it; R3 found no P0-P1 or other P2 issues.
+Tests run issued commands through the production Service.
+
+Retain swift-test/20261101T153544Z-70301, the failed Sendable capture build.
+The correction captures the immutable Sendable engine, not its mutable Instance.
+Retain swift-test/20261101T155312Z-78666: 58/62 passed. Four new fixtures had
+incorrect token assumptions. Settings deliberately revoked the old token;
+tracking-failure/probe recovery now supplies the intended same-authority path.
+A changed adapter guard precedes the stale-command test.
+Retain swift-test/20261101T155628Z-81179: 23/24 passed. The settled exchange did
+not guarantee the new fixture's UpdatePending. The repair commits a real Note
+edit, flushes and awaits tracking, then gates its actual command before execution.
+The result and command gates release after quiescence, including failure cleanup.
+
+swift-test/20261101T160732Z-87035 PASS24/24: all previous focused app checks,
+review/media persistence, automatic asset retry/reopen, cancellation provenance,
+error state, close retry, old-owner rejection and native command completion.
+private/20261101T160719Z-86742 PASS on the final staged source.
+
+Adapter: swift-test/20261101T161014Z-90282 PASS7/7, all new quiesce and
+stop regressions, including the four corrected cases. The unchanged 58 checks
+from the earlier run are retained separately; no fresh PASS62/62 is claimed.
+Similarity: similarity/20261101T161114Z-93561 PASS on all changed code.
+
+No Unit trailer or U113/U114,
+batch, milestone or release acceptance. Live signed CloudKit, mobile and final
+human evidence remain required. The original failed integration gate stays open.

@@ -419,6 +419,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var accountReads = 0
     var holdAccount = false
     var accountResult: SyncCommandResult?
+    var quiesced = false
     var closed = false
     var closeCount = 0
     var persistedReads = 0
@@ -429,6 +430,9 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     func waitForExecution() async { for await _ in executions.stream { return } }
     private let closes = AsyncStream<Void>.makeStream()
     func waitForClose() async { for await _ in closes.stream { return } }
+    private let quiescences = AsyncStream<Void>.makeStream()
+    func waitForQuiesce() async { for await _ in quiescences.stream { return } }
+    var onQuiesce: (@MainActor () async throws -> Void)?
     var onClose: (@MainActor () async throws -> Void)?
     private var account: CheckedContinuation<Void, Never>?
     private var accountStarted: CheckedContinuation<Void, Never>?
@@ -476,7 +480,13 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
         await withCheckedContinuation { accountStarted = $0 }
     }
     func releaseAccount() { account?.resume(); account = nil }
+    func quiesce() async throws {
+        guard !quiesced else { return }
+        try await onQuiesce?(); quiesced = true; releaseAccount()
+        quiescences.continuation.yield(())
+    }
     func close() async throws {
+        try await quiesce()
         try await onClose?(); closed = true; closeCount += 1; releaseAccount()
         closes.continuation.yield(())
     }

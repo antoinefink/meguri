@@ -140,6 +140,7 @@ struct CloudKitBridgeFixture: Sendable {
     static func open(count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
                      savedState: Data? = Data([0x73, 0x64, 0x6b]),
                      failInbox: Bool = false, failState: Bool = false, startAdapter: Bool = true,
+                     delegateWorkValidated: @escaping @Sendable () async -> Void = {},
                      connectedPolicyOpening: Bool = false) async throws -> Self {
         try #require(!connectedPolicyOpening || !startAdapter,
                      "Connected policy fixtures must start only through policy Start actions")
@@ -175,7 +176,8 @@ struct CloudKitBridgeFixture: Sendable {
             let factory = CloudKitEngineFakeFactory(a23: a23, keepAlive: keepAlive)
             let probe = CloudPersistedEventProbe()
             let adapter = CloudKitSyncAdapter(core: core, engineFactory: factory,
-                                             eventDidPersist: { await probe.didPersist($0) })
+                                             eventDidPersist: { await probe.didPersist($0) },
+                                             delegateWorkValidated: delegateWorkValidated)
             if startAdapter {
                 try await adapter.start(automaticallySync: false)
                 try await adapter.waitForIdle()
@@ -216,11 +218,13 @@ func withCloudKitFixture(
     count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
     savedState: Data? = Data([0x73, 0x64, 0x6b]), failInbox: Bool = false, failState: Bool = false,
     startAdapter: Bool = true,
+    delegateWorkValidated: @escaping @Sendable () async -> Void = {},
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
     let fixture = try await CloudKitBridgeFixture.open(
         count: count, a23: a23, keepAlive: keepAlive, savedState: savedState,
-        failInbox: failInbox, failState: failState, startAdapter: startAdapter
+        failInbox: failInbox, failState: failState, startAdapter: startAdapter,
+        delegateWorkValidated: delegateWorkValidated
     )
     do { try await body(fixture) }
     catch { await fixture.close(); throw error }
@@ -229,9 +233,10 @@ func withCloudKitFixture(
 
 /// The native policy owns SDK startup; pure adapter fixtures keep their defaults.
 func withNativePolicyFixture(
+    keepAlive: Bool = false,
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
-    let fixture = try await CloudKitBridgeFixture.open(startAdapter: false, connectedPolicyOpening: true)
+    let fixture = try await CloudKitBridgeFixture.open(keepAlive: keepAlive, startAdapter: false, connectedPolicyOpening: true)
     do { try await body(fixture) }
     catch { await fixture.close(); throw error }
     await fixture.close()

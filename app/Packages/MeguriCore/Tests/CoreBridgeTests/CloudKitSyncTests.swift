@@ -788,6 +788,277 @@ extension EventTests {
         }
     }
 
+    /// Owner shutdown closes admission before retiring the original SDK.
+    /// This fake exercises Rust authority and SDK callback ordering, not Apple CloudKit.
+    @Test func cloudKitQuiescePreservesOriginalCallbackAuthorityUntilFinalStop() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let engine = try await f.engine()
+            let originalGuard = try await f.core.currentGuard()
+            let callback = CloudCallbackGate(), cancel = CloudCallbackGate()
+            let cursor = Data([0x71, 0x75, 0x69, 0x65, 0x73, 0x63, 0x65])
+            await engine.pauseNextCallback(callback)
+            await engine.pauseCancellation(cancel)
+            try await withCloudTask(gates: [callback, cancel], expectedArrivals: [callback], operation: {
+                await engine.emitRetained(.stateUpdate(cursor), label: "originalClosingState")
+            }, whileRunning: {
+                try await callback.waitForArrival()
+                try await withCloudTask(gates: [callback, cancel], expectedArrivals: [cancel], operation: {
+                    // Concurrent callers join the same original transport drain.
+                    async let first: Void = f.adapter.quiesce()
+                    async let second: Void = f.adapter.quiesce()
+                    try await first
+                    try await second
+                }, whileRunning: {
+                    try await cancel.waitForArrival()
+                    try await f.core.validateSDK(engine.instanceID)
+                    #expect(try await f.core.currentGuard() == originalGuard)
+                    #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                    #expect(!(await engine.recordedTrace()).contains(.released))
+                    let calls = engine.acceptedNetworkCalls.value
+                    do { try await f.adapter.requestSend(zones: [f.zone]); Issue.record("Quiesced send admitted") }
+                    catch is CancellationError { }
+                    do { try await f.adapter.requestFetch(zones: [f.zone]); Issue.record("Quiesced fetch admitted") }
+                    catch is CancellationError { }
+                    do { try await f.adapter.configureAutomatic(true); Issue.record("Unexpected SDK configuration") }
+                    catch is CancellationError { }
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                    #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+                    await callback.open()
+                    await cancel.open()
+                })
+            })
+            try await f.adapter.quiesce()
+            try await f.adapter.consumePendingUpdates()
+            try await f.core.validateSDK(engine.instanceID)
+            #expect(try await f.core.currentGuard() == originalGuard)
+            #expect(try await f.core.durableSnapshot().serialization == cursor)
+            #expect(!(await engine.recordedTrace()).contains(.released))
+            try await f.adapter.stop()
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await engine.recordedTrace().contains(.released))
+            #expect(try await f.core.currentGuard() != originalGuard)
+            let retired = try await f.core.durableSnapshot()
+            await engine.emitRetained(.stateUpdate(Data([0xff])), label: "retiredClosingState")
+            #expect(try await f.core.durableSnapshot() == retired)
+        }
+    }
+
+    /// Real Rust-issued StopEngine must return while quiesce and a required
+    /// RecordExchange acknowledgement are held. The fake supplies SDK timing only.
+    @Test(.timeLimit(.minutes(1)))
+    func cloudKitIssuedStopDefersUntilOriginalRequiredFinalizationDrains() async throws {
+        try await withNativePolicyFixture(keepAlive: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let originalGuard = try await f.core.currentGuard()
+            let native = CloudCallbackGate(), cancel = CloudCallbackGate(), finalization = CloudCallbackGate()
+            await engine.pauseNativeReturnedWork(native)
+            await engine.pauseCancellation(cancel)
+            let request = try await policy.input(.syncNowRequested(.command))
+            let issued = try shutdownPolicyCommands(request)
+            let exchange = try #require(issued.first { if case .runExchange = $0.action { true } else { false } })
+            guard case .runExchange(let exchangeID, _) = exchange.action else { return }
+            try await withCloudTask(gates: [native, cancel, finalization], expectedArrivals: [native, finalization], operation: {
+                let result = await executor.execute(exchange)
+                #expect(result.error != nil)
+                let required = try result.outputs.flatMap(shutdownPolicyCommands)
+                let record = try #require(required.first { if case .recordExchange = $0.action { true } else { false } })
+                await finalization.enter()
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                let acknowledged = await executor.execute(record)
+                #expect(acknowledged.error == nil && !acknowledged.deferred)
+                #expect(try await policy.status().lastAttempt?.exchange == exchangeID)
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(!(await engine.recordedTrace()).contains(.released))
+            }, whileRunning: {
+                try await native.waitForArrival()
+                try await withCloudTask(gates: [native, cancel], expectedArrivals: [cancel], operation: {
+                    try await executor.quiesce()
+                }, whileRunning: {
+                    try await cancel.waitForArrival()
+                    let output = try await policy.input(.trackingWriteFailed(noSpace: false))
+                    try #require(try await f.core.currentGuard() == originalGuard)
+                    let stop = try #require(try shutdownPolicyCommands(output).first { if case .stopEngine = $0.action { true } else { false } })
+                    // This returns BEFORE either transport quiescence or the
+                    // coordinator's required-effect drain can finish.
+                    // Bound a broken implementation's wait and release its
+                    // gates before joining it. Final stop here is failure-only
+                    // recovery for an implementation awaiting its own close.
+                    let returned = CloudPolicyReadinessDecision()
+                    let watchdog = Task {
+                        do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                        if returned.expire() {
+                            await native.open(); await cancel.open(); await finalization.open()
+                            try? await f.adapter.stop()
+                        }
+                    }
+                    defer { watchdog.cancel() }
+                    let result = await executor.execute(stop)
+                    #expect(returned.observeReady(), "StopEngine awaited a later shutdown phase")
+                    #expect(result.deferred && result.error == nil && result.outputs.isEmpty)
+                    try await f.core.validateSDK(engine.instanceID)
+                    #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                    #expect(!(await engine.recordedTrace()).contains(.released))
+                    await native.open(); await cancel.open()
+                })
+                try await finalization.waitForArrival()
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                let recovery = try await policy.input(.foreground)
+                let probe = try #require(try shutdownPolicyCommands(recovery).first { if case .probeTracking = $0.action { true } else { false } })
+                let recovered = await executor.execute(probe)
+                #expect(recovered.error == nil && !recovered.deferred)
+                try #require(try await f.core.currentGuard() == originalGuard)
+                let updateOutput = try await policy.input(.refresh(.local))
+                let update = try #require(try shutdownPolicyCommands(updateOutput).first { if case .updatePending = $0.action { true } else { false } })
+                let before = Set(try await f.core.emittedUpdateIDs())
+                let updated = await executor.execute(update)
+                #expect(updated.error == nil && !updated.deferred)
+                try await f.adapter.consumePendingUpdates()
+                let emitted = Set(try await f.core.emittedUpdateIDs()).subtracting(before)
+                #expect(!emitted.isEmpty)
+                #expect(await engine.recordedTrace().contains { if case .pendingApplied(let id, _, _) = $0 { emitted.contains(id) } else { false } })
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(await f.factory.engines().count == 1)
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                await finalization.open()
+            })
+            // No command waited for final close. Only now may the owner retire
+            // the exact deferred execution (policy stop must not bump Core's guard).
+            async let first: Void = f.adapter.stop()
+            async let second: Void = f.adapter.stop()
+            try await first; try await second
+            try await f.adapter.stop()
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            try #require(try await f.core.currentGuard() == originalGuard)
+            #expect(await engine.recordedTrace().filter { $0 == .released }.count == 1)
+            await #expect(throws: (any Error).self) { try await f.core.validateSDK(engine.instanceID) }
+            let retired = try await f.core.durableSnapshot()
+            await engine.emitRetained(.stateUpdate(Data([0xff])), label: "afterDeferredStop")
+            #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+            #expect(try await f.core.durableSnapshot() == retired)
+        }
+    }
+
+    @Test func cloudKitIssuedStopOutsideQuiesceRetiresImmediately() async throws {
+        try await withNativePolicyFixture(keepAlive: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let output = try await policy.input(.settings(.init(enabled: false, paused: false, automatic: false, media: false)))
+            let originalGuard = try await f.core.currentGuard()
+            let stop = try #require(try shutdownPolicyCommands(output).first { if case .stopEngine = $0.action { true } else { false } })
+            let result = await executor.execute(stop)
+            #expect(!result.deferred && result.error == nil && !result.outputs.isEmpty)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await engine.recordedTrace().filter { $0 == .released }.count == 1)
+            try #require(try await f.core.currentGuard() == originalGuard)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func cloudKitIssuedStopMeetingQuiesceDuringDrainRetainsExactExecution() async throws {
+        try await withNativePolicyFixture(keepAlive: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let originalGuard = try await f.core.currentGuard()
+            let media = CloudCallbackGate(), cancel = CloudCallbackGate()
+            await f.adapter.setOriginalMediaDrain { _ in await media.enter() }
+            await engine.pauseCancellation(cancel)
+            let output = try await policy.input(.trackingWriteFailed(noSpace: false))
+            try #require(try await f.core.currentGuard() == originalGuard)
+            let stop = try #require(try shutdownPolicyCommands(output).first { if case .stopEngine = $0.action { true } else { false } })
+            try await withCloudTask(gates: [media, cancel], expectedArrivals: [media], operation: {
+                let result = await executor.execute(stop)
+                #expect(result.deferred && result.error == nil && result.outputs.isEmpty)
+            }, whileRunning: {
+                try await media.waitForArrival()
+                try await withCloudTask(gates: [media, cancel], expectedArrivals: [cancel], operation: {
+                    try await executor.quiesce()
+                }, whileRunning: {
+                    try await cancel.waitForArrival()
+                    try await f.core.validateSDK(engine.instanceID)
+                    #expect(!(await engine.recordedTrace()).contains(.released))
+                    let cursor = Data([0x64, 0x72, 0x61, 0x69, 0x6e])
+                    await engine.emitRetained(.stateUpdate(cursor), label: "duringTransferredStop")
+                    #expect(try await f.core.durableSnapshot().serialization == cursor)
+                    await media.open(); await cancel.open()
+                })
+            })
+            try await f.core.validateSDK(engine.instanceID)
+            #expect(!(await engine.recordedTrace()).contains(.released))
+            try await f.adapter.stop()
+            try #require(try await f.core.currentGuard() == originalGuard)
+            #expect(await engine.recordedTrace().filter { $0 == .released }.count == 1)
+        }
+    }
+
+    /// A real authority rejection must remain an error on explicit close and
+    /// retry; neither may replace the retained command with an unguarded stop.
+    @Test func cloudKitDeferredStopRetirementFailureRetainsOriginalForExplicitRetry() async throws {
+        try await withNativePolicyFixture(keepAlive: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            try await executor.quiesce()
+            let output = try await policy.input(.settings(.init(enabled: false, paused: false, automatic: false, media: false)))
+            let stop = try #require(try shutdownPolicyCommands(output).first { if case .stopEngine = $0.action { true } else { false } })
+            let deferred = await executor.execute(stop)
+            #expect(deferred.deferred && deferred.error == nil && deferred.outputs.isEmpty)
+            // Actual Core token transition revokes the issued stop. It cannot
+            // be repaired by native inferring a new current SDK/control guard.
+            let beforeRevocation = try await f.core.currentGuard()
+            try await f.core.setPaused(false)
+            let revoked = try await f.core.currentGuard()
+            try #require(revoked != beforeRevocation)
+            for _ in 0..<2 {
+                do { try await f.adapter.stop(); Issue.record("Unexpected stop result") }
+                catch BridgeError.cloudPolicy(.staleCommand) { }
+                #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                #expect(try await f.core.currentGuard() == revoked)
+                #expect(await f.adapter.lastFailure != nil)
+            }
+        }
+    }
+
+    @Test func cloudKitQuiescedCallbackFailureCannotRetireBeforeFinalStop() async throws {
+        try await withCloudKitFixture(keepAlive: true, failState: true) { f in
+            let engine = try await f.engine()
+            try await f.adapter.quiesce()
+            await engine.emitRetained(.stateUpdate(Data([0x01])), label: "failedQuiescedState")
+            #expect(await f.adapter.lastFailure != nil)
+            #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(!(await engine.recordedTrace()).contains(.released))
+            try await f.adapter.stop()
+            #expect(await engine.recordedTrace().filter { $0 == .released }.count == 1)
+            #expect(await f.adapter.lastFailure != nil)
+        }
+    }
+
+    /// Hold the delegate immediately after successful original validation,
+    /// then install the quiesce fence before it can offer any new SDK work.
+    @Test(arguments: [false, true])
+    func cloudKitDelegateNewWorkRechecksQuiesceAfterValidation(batch: Bool) async throws {
+        let validated = CloudCallbackGate()
+        try await withCloudKitFixture(keepAlive: true, delegateWorkValidated: { await validated.enter() }) { f in
+            let engine = try await f.engine()
+            try await withCloudTask(gates: [validated], operation: {
+                if batch { #expect(await engine.requestRetainedBatch(zone: f.zone) == nil) }
+                else {
+                    let options = await engine.scheduledFetchOptions(.init(zones: ["meguri-root", f.zone], priorityZones: [f.zone], groupID: "closing-options"))
+                    #expect(options.zones.isEmpty && options.priorityZones.isEmpty && options.groupID == "closing-options")
+                }
+            }, whileRunning: {
+                try await validated.waitForArrival()
+                try await f.adapter.quiesce()
+                try await f.core.validateSDK(engine.instanceID)
+                await validated.open()
+            })
+            #expect(!(await engine.recordedTrace()).contains { if case .handed = $0 { true } else { false } })
+            try await f.adapter.stop()
+        }
+    }
+
     /// P4/V3.4: origin is captured before suspension; resumed old callbacks
     /// cannot acquire the current guard/instance. No second SDK before cancel
     /// completion, even with keep-alive after release.
@@ -861,6 +1132,11 @@ extension EventTests {
             #expect(await f.adapter.retainedInstanceIDs().isEmpty)
         }
     }
+}
+
+private func shutdownPolicyCommands(_ output: CloudPolicyOutput) throws -> [CloudPolicyCommand] {
+    guard case .commands(let commands) = output else { throw BridgeError.internal("Unexpected shutdown policy output") }
+    return commands
 }
 
 enum CloudFenceTransition: CaseIterable, Sendable {

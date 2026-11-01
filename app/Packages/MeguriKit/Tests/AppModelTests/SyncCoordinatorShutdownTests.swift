@@ -17,7 +17,7 @@ extension ReviewCollectionStartupTests {
                 returnedCancelled = Task.isCancelled
                 return .init(outputs: [.commands([media])], error: CancellationError(), deferred: false)
             }
-            original.onClose = { await closeGate.hold() }
+            original.onQuiesce = { await closeGate.hold() }
             let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
                 attachments += 1; return attachments == 1 ? original : successor
             }, defaults: nil)
@@ -30,8 +30,8 @@ extension ReviewCollectionStartupTests {
             await closeGate.waitUntilHeld()
             #expect(!closeReturned && !returnedCancelled)
             closeGate.release()
-            await original.waitForClose()
-            #expect(original.closed && !closeReturned && !returnedCancelled)
+            await original.waitForQuiesce()
+            #expect(original.quiesced && !original.closed && !closeReturned && !returnedCancelled)
             commandGate.release()
             #expect(await close.value)
             #expect(returnedCancelled && closeReturned && executions == 1)
@@ -64,12 +64,12 @@ extension ReviewCollectionStartupTests {
                             return .init(outputs: [], error: nil, deferred: false)
                         }
                         #expect(executions == 2 && !Task.isCancelled)
-                        #expect(backend.closed == lateDelivery)
+                        #expect(backend.quiesced == lateDelivery && !backend.closed)
                         await requiredGate.hold()
                         let error: (any Error)? = requiredFailure ? BridgeError.internal("synthetic-required-effect-failure") : nil
                         return .init(outputs: [.commands([media])], error: error, deferred: false)
                     }
-                    backend.onClose = { await closeGate.hold() }
+                    backend.onQuiesce = { await closeGate.hold() }
                     let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
                     await sync.preparePlatform(); await sync.completeOpenedHost(generation: 150)
                     await sync.prepareConnectionAuthority()
@@ -77,12 +77,12 @@ extension ReviewCollectionStartupTests {
                     await commandGate.waitUntilHeld()
                     let close = Task { let result = await sync.cancelAndDrain(); closeReturned = true; return result }
                     await closeGate.waitUntilHeld()
-                    if lateDelivery { closeGate.release(); await backend.waitForClose() }
+                    if lateDelivery { closeGate.release(); await backend.waitForQuiesce() }
                     commandGate.release()
                     await requiredGate.waitUntilHeld()
                     #expect(!closeReturned && executions == 2)
-                    if !lateDelivery { closeGate.release(); await backend.waitForClose() }
-                    #expect(backend.closed && !closeReturned)
+                    if !lateDelivery { closeGate.release(); await backend.waitForQuiesce() }
+                    #expect(backend.quiesced && !backend.closed && !closeReturned)
                     requiredGate.release()
                     #expect(await close.value)
                     #expect(closeReturned && executions == 2 && backend.closeCount == 1)
@@ -109,7 +109,7 @@ extension ReviewCollectionStartupTests {
                 #expect(context?.shutdownCancellationRequested == false)
                 return .init(outputs: [], error: CancellationError(), deferred: false)
             }
-            backend.onClose = { await closeGate.hold() }
+            backend.onQuiesce = { await closeGate.hold() }
             let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
             await sync.preparePlatform(); await sync.completeOpenedHost(generation: 175)
             await sync.prepareConnectionAuthority()
@@ -120,8 +120,8 @@ extension ReviewCollectionStartupTests {
             await cancelledGate.waitUntilHeld()
             let close = Task { let result = await sync.cancelAndDrain(); closeReturned = true; return result }
             await closeGate.waitUntilHeld()
-            closeGate.release(); await backend.waitForClose()
-            #expect(backend.closed && !closeReturned && !returnedCancelled)
+            closeGate.release(); await backend.waitForQuiesce()
+            #expect(backend.quiesced && !backend.closed && !closeReturned && !returnedCancelled)
             cancelledGate.release()
             #expect(await close.value)
             #expect(returnedCancelled && closeReturned && backend.closeCount == 1)
@@ -141,7 +141,7 @@ extension ReviewCollectionStartupTests {
                         await gate.hold(); cancelled = Task.isCancelled
                         return .init(outputs: [], error: error, deferred: false)
                     }
-                    backend.onClose = { gate.release() }
+                    backend.onQuiesce = { gate.release() }
                     let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
                     await sync.preparePlatform(); await sync.completeOpenedHost(generation: 200)
                     await sync.prepareConnectionAuthority()
@@ -181,7 +181,7 @@ extension ReviewCollectionStartupTests {
                 #expect(!Task.isCancelled)
                 return .init(outputs: [], error: CancellationError(), deferred: false)
             }
-            backend.onClose = { await closeGate.hold() }
+            backend.onQuiesce = { await closeGate.hold() }
             let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
             await sync.preparePlatform(); await sync.completeOpenedHost(generation: 250)
             await sync.prepareConnectionAuthority()
@@ -243,7 +243,7 @@ extension ReviewCollectionStartupTests {
                     executions += 1; await gate.hold()
                     return .init(outputs: [.commands([media])], error: BridgeError.cloudPolicy(.staleCommand), deferred: false)
                 }
-                original.onClose = { gate.release() }
+                original.onQuiesce = { gate.release() }
                 let sync = SyncCoordinator(bootstrap: {}, makeBackend: { persisted in
                     callbacks.append(persisted)
                     attachments += 1; return attachments == 1 ? original : successor
@@ -272,26 +272,105 @@ extension ReviewCollectionStartupTests {
     }
 }
 
+extension ReviewCollectionStartupTests {
+    @Test func genuineShutdownResultFinalizesOnOriginalAuthorityBeforeNativeClose() async throws {
+        try await withShutdownHarness { harness in
+            let backend = try harness.backend
+            let engine = try #require(await harness.factory.engines.last)
+            let originalGuard = try await backend.workflow.currentGuard()
+            let resultGate = SyncOwnerGate(), updateGate = SyncOwnerGate()
+            let exchangeHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let updateHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var updateContext: SyncCommandTaskContext?
+            var finalizedUpdates = 0, heldUpdateFinalized = false
+            backend.afterExecution = { command, result in
+                if case .runExchange = command.action {
+                    #expect(!Task.isCancelled && result.error == nil && !result.deferred)
+                    exchangeHeld.continuation.yield(true)
+                    await resultGate.hold()
+                    #expect(Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == true)
+                }
+                if case .updatePending = command.action, backend.quiesced {
+                    finalizedUpdates += 1
+                    #expect(result.error == nil && !result.deferred)
+                    if let updateContext, SyncCommandTaskContext.current === updateContext {
+                        heldUpdateFinalized = true
+                        #expect(Task.isCancelled && updateContext.shutdownCancelled)
+                        #expect(updateContext.generation == harness.owner.generation)
+                    } else {
+                        #expect(!Task.isCancelled)
+                    }
+                    #expect(!backend.closed && backend.closeEntered == 0)
+                    do {
+                        try await backend.workflow.validateSDK(engine.instanceID)
+                        #expect(try await backend.workflow.currentGuard() == originalGuard)
+                    } catch { Issue.record("Original SDK validation failed") }
+                }
+            }
+            defer {
+                resultGate.release(); updateGate.release()
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                exchangeHeld.continuation.finish(); updateHeld.continuation.finish()
+            }
+            var close: Task<Bool, Never>?
+            do {
+                harness.sync.receive(.network(reachable: true))
+                harness.sync.syncNow()
+                try #require(try await serviceAppSignal(exchangeHeld.stream, stage: "shutdown exchange result held"))
+                backend.beforeExecution = { command in
+                    if case .updatePending = command.action, updateContext == nil {
+                        let context = SyncCommandTaskContext.current
+                        #expect(context != nil && context?.generation == harness.owner.generation)
+                        #expect(!Task.isCancelled)
+                        updateContext = context
+                        updateHeld.continuation.yield(true)
+                        await updateGate.hold()
+                        #expect(Task.isCancelled && context?.shutdownCancelled == true)
+                        #expect(backend.quiesced && !backend.closed && backend.closeEntered == 0)
+                    }
+                }
+                let fixture = try InitialCloudFixture.load()
+                let seed = try #require(fixture.notes.sorted { $0.id < $1.id }.first { !$0.fields.isEmpty })
+                let note = try await CoreNoteService().readNote(id: seed.id)
+                var fields = note.fields
+                fields[0] += " Synthetic shutdown edit"
+                let mutation = try await CoreNoteService().updateNote(.init(id: note.id, fields: fields, tags: note.tags))
+                try #require(mutation.written && mutation.id == note.id)
+                try await CoreCollectionService().flushForBackground()
+                try await backend.workflow.awaitTracking(generation: mutation.summary.generation, seq: mutation.summary.seq)
+                await harness.sync.waitForInputs()
+                harness.sync.receive(.refresh(.local))
+                await harness.sync.waitForInputs()
+                try #require(try await serviceAppSignal(updateHeld.stream, stage: "shutdown pending update held"))
+                close = Task { await harness.owner.close() }
+                try await backend.waitForQuiesce()
+                #expect(!backend.closed && backend.closeEntered == 0)
+                try await backend.workflow.validateSDK(engine.instanceID)
+                #expect(try await backend.workflow.currentGuard() == originalGuard)
+            } catch {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                resultGate.release(); updateGate.release()
+                if let close { _ = await close.value }
+                else { _ = await harness.owner.close() }
+                throw error
+            }
+            resultGate.release(); updateGate.release()
+            let closing = try #require(close)
+            #expect(await closing.value)
+            #expect(finalizedUpdates > 0)
+            #expect(heldUpdateFinalized)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            #expect(backend.closed && backend.closeEntered == 1 && backend.closeReturned == 1)
+        }
+    }
+}
+
 // The real harness retains its host; only copied, observed opaque handles reach
 // SyncOwnerFake. Its scheduler assertions do not prove native SDK acceptance.
 @MainActor private func withShutdownCommands(
     _ body: (CloudPolicyCommand, CloudPolicyCommand) async throws -> Void
 ) async throws {
-    let fixture = try InitialCloudFixture.load()
-    let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-shutdown-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let serviceDirectory = root.appending(path: "service")
-    try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-    let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, transport: .binaryAssetsV1)
-    var active: ServiceAppHarness?
-    do {
-        let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-        let harness = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
-        active = harness
-        defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
-        try await wire.seed(fixture)
-        try await harness.adopt()
+    try await withShutdownHarness { harness in
         let backend = try harness.backend
         let observed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { backend.onCommands = nil; observed.continuation.finish() }
@@ -314,6 +393,28 @@ extension ReviewCollectionStartupTests {
         try #require(try await serviceAppSignal(observed.stream, stage: "shutdown fixture issued commands"))
         backend.onCommands = nil
         try await body(try #require(media), try #require(update))
+    }
+}
+
+@MainActor private func withShutdownHarness(
+    _ body: (ServiceAppHarness) async throws -> Void
+) async throws {
+    let fixture = try InitialCloudFixture.load()
+    let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-shutdown-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let serviceDirectory = root.appending(path: "service")
+    try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, transport: .binaryAssetsV1)
+    var active: ServiceAppHarness?
+    do {
+        let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+        let harness = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
+        active = harness
+        defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
+        try await wire.seed(fixture)
+        try await harness.adopt()
+        try await body(harness)
         try #require(await harness.owner.close())
         let exit = await process.close()
         try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)

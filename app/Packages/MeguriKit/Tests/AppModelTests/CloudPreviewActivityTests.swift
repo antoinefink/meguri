@@ -149,5 +149,6 @@ private nonisolated final class PreviewReadTransport: CloudOwnTransport, Sendabl
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
     func beginAccountRead(transition: Bool) async throws -> UInt64 { 1 }
     func readAccount(_ read: UInt64) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
+    func quiesce() async throws { await own?.close() }
     func close() async throws { await own?.close() }
 }

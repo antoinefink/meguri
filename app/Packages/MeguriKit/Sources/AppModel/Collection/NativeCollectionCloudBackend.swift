@@ -15,6 +15,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     private let adapter: CloudKitSyncAdapter
     private let executor: NativeCloudPolicyExecutor
     private var closed = false
+    private var quiesceTask: Task<Void, any Error>?
 
     // Harness-only progress marks contain no native values or error text.
     enum ShutdownMark: String {
@@ -132,13 +133,22 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         // owns the actual read and opens SDK delivery only after fresh proof.
         accounts.resumeAfterCoreResume()
     }
+    func quiesce() async throws {
+        if let quiesceTask { try await quiesceTask.value; return }
+        let task = Task {
+            async let nativeDrain: Void = executor.quiesce()
+            await accounts.close()
+            await own?.close()
+            try await nativeDrain
+        }
+        quiesceTask = task
+        do { try await task.value }
+        catch { quiesceTask = nil; throw error }
+    }
     func close() async throws {
         guard !closed else { return }
+        try await quiesce()
         shutdownTrace = ShutdownTrace()
-        await accounts.close()
-        await own?.close()
-        await executor.drainCleanups()
-        await executor.drainZoneDeletions()
         var replaced = false
         shutdownTrace.policyProbe = .running
         do {

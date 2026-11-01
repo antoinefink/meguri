@@ -38,6 +38,7 @@ protocol SyncCoordinatorBackend: AnyObject {
     func takeAccountReadRequest() async -> Bool
     func freezeForSuspend() async throws
     func resumeAfterCoreResume() async
+    func quiesce() async throws
     func close() async throws
 }
 extension SyncCoordinatorBackend {
@@ -646,6 +647,7 @@ public final class SyncCoordinator {
         }
     }
     private func policy(_ event: CloudPolicyEvent) async {
+        guard !closing else { return }
         if case .network(let value) = event { reachable = value }
         if awaitingResumeProof, !suspended {
             switch event {
@@ -780,11 +782,12 @@ public final class SyncCoordinator {
         if activatingInitialAdoption { await ownTask?.value }
         else { ownTask?.cancel() }
         do {
-            try await backend?.close()
-            backendRetired = true
+            try await backend?.quiesce()
             await accountTask?.value
             await ownTask?.value
             await drainOperations()
+            try await backend?.close()
+            backendRetired = true
             backend = nil
             while !closing {
                 // generation/revision retain the newest event's successor intent
@@ -898,7 +901,9 @@ public final class SyncCoordinator {
                     initialAdoptionCancelled = true
                     try await own.cancel(operation)
                 }
-                try await backend?.close()
+                // Cancel/join native transports without retiring the original
+                // SDK capability needed by returned control effects.
+                try await backend?.quiesce()
                 await accountTask?.value
                 await networkTask?.value
                 await accountEventsTask?.value
@@ -908,6 +913,7 @@ public final class SyncCoordinator {
                 // Reconciliation can issue required finalization too. Keep the
                 // original backend until all results have been acknowledged.
                 await drainOperations()
+                try await backend?.close()
                 backendRetired = true
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
                 hasDeferredNativeWork = false
