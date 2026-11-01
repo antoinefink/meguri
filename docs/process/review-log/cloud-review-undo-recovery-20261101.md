@@ -162,3 +162,37 @@ error: after its actual lost-reply save, the negative case must refresh its
 server image and request cursor before asserting no further writes. Preserve
 the pre-handoff boundary in both never-sent cases. No further P0–P2 source
 findings; runtime and migration verification are still required.
+
+## Negative fixture repair — filtered fixer follow-up
+
+Fixer `s-20261025T162405Z-9dc656e4`; original U113 start
+`1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`, batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` retained.
+
+Replaced the invalid `Record.envelope` access with a typed match of the actual
+Service Record's `e` field, requiring `Field::EncryptedBytes` and panicking for
+a missing or wrong field. Those exact bytes go to `codec::receive`. Only the
+handed-history branch refreshes the now-mutable server/request baselines, after
+proving the saved payload matches the actual new history and tracking retains
+`sent=true`, zero server revision and its matching flight. Both never-sent
+branches retain their original baseline and no-Service-attempt assertions.
+The negative case now requires the exact existing driver error message for
+`WholeBindingReconciliation`, retaining its tracking and physical-row checks.
+Physical Undo, failed capture, WAL, SIGKILL, reopen, account and scan assertions
+remain intact. Earlier offline tests and production files are unchanged.
+
+Verification: one bounded source consistency check only; compilation, formatting,
+runtime tests and gates are **unrun here**. Root owns migration library tests,
+Root must verify the final fixture and all required guards. No acceptance claimed.
+
+Source consistency result: PASS. Exact-delta comparison confirmed only the
+specified helper edits, unchanged earlier offline tests and other test-file
+bytes, and handed-only baseline refresh after all required handoff proofs.
+
+`core-test/20261101T122306Z-49220` PASS11/11 migration checks.
+`core-test/20261101T122450Z-50298`: both original Undo cases and the real SDK
+handoff/ACK/reopen test PASS; the new handed case fails at Undo, before crash.
+The independent review confirms M9.6/M9.7 forbid Undo after the upload barrier
+flags its step Pending. A lost reply retains that refusal. The test must cover
+this real refusal without clearing flags. An absent-row scan check needs a
+separate actual writer removal, rather than claiming user Undo can create it.

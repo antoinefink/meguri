@@ -895,8 +895,8 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
         0,
         &[(card_name.clone(), Payload::Card(selected.clone()))],
     );
-    let server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
-    let request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
+    let mut server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
+    let mut request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
     let session = pair.receiver.driver().review_begin(selected.nid).unwrap();
     let question = pair.receiver.driver().review_start(session).unwrap();
     assert_eq!(question.id, selected.id);
@@ -970,10 +970,14 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
             .driver()
             .lose_named_save_reply(&mut pair.service, &scope(), &revlog_name)
             .unwrap();
+        let envelope = match landed.fields.get("e") {
+            Some(Field::EncryptedBytes(bytes)) => bytes,
+            _ => panic!("saved Revlog must contain encrypted envelope bytes"),
+        };
         let received = codec::receive(
             &binding.facts.record_key.0,
             &revlog_name,
-            &landed.envelope,
+            envelope,
             codec::AssetInput::Absent,
         )
         .unwrap();
@@ -988,6 +992,9 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
                 .any(|f| f.payload_digest == received.entity.payload_sha256)
         );
         runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+        // Only handed history has an actual Save before the Undo/crash boundary.
+        server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
+        request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
     }
     if lose_undo_capture {
         pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
@@ -1070,7 +1077,10 @@ fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
     let reopened = pair.receiver.driver().incoming_observation(binding.id).unwrap();
     if hand_history {
         let error = pair.receiver.driver().reconcile_binding().unwrap_err();
-        assert!(format!("{error:?}").contains("RuntimeIncompleteWholeBindingReconciliation"));
+        assert_eq!(
+            error.to_string(),
+            "cloud device operation failed: RuntimeIncompleteWholeBindingReconciliation"
+        );
         let retained = pair.receiver.facts().unwrap().entities;
         assert!(retained[&revlog_name].sent);
         assert!(retained[&revlog_name] == tracking_after[&revlog_name]);
