@@ -471,7 +471,7 @@ private nonisolated struct InitialCloudFixture: Sendable {
         }, makeBackend: { [self] persisted in
             #expect(backends.allSatisfy { $0.closeCount == 1 })
             let backend = try await InitialCloudBackend.make(transport: InitialCloudTransport(fixture: fixture, page: page, requests: requests),
-                factory: factory, persisted: persisted)
+                mediaTransport: InitialCloudMediaTransport(), factory: factory, persisted: persisted)
             backends.append(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
@@ -624,6 +624,15 @@ private nonisolated final class InitialCloudImmediateReply: CloudPreparedOwnOper
     func reply() async throws -> CloudOwnTransportReply { value }
 }
 
+// This receive-only fixture has no media service. A request must fail rather
+// than supplying empty data that could masquerade as a successful sync.
+private nonisolated struct InitialCloudMediaTransport: CloudMediaTransport {
+    func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead {
+        throw InitialCloudMediaFailure.unsupported
+    }
+}
+private nonisolated enum InitialCloudMediaFailure: Error { case unsupported }
+
 private nonisolated struct InitialCloudExchangeObservation: Sendable {
     let policy: UInt64
     let mapped: UInt64?
@@ -640,14 +649,12 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     }
 }
 
+// Diagnostics wrap the same composition used by the app; only transports differ.
 @MainActor private final class InitialCloudBackend: SyncCoordinatorBackend {
-    let connection: CoreCloudConnectionService?
-    let own: CloudOwnExecutor?
+    private let backend: NativeCollectionCloudBackend
+    var connection: CoreCloudConnectionService? { backend.connection }
+    var own: CloudOwnExecutor? { backend.own }
     let workflow: CoreCloudWorkflowService
-    let policy: CoreCloudPolicyService
-    let adapter: CloudKitSyncAdapter
-    let accounts: CloudAppAccountReader
-    let executor: NativeCloudPolicyExecutor
     private(set) var closeCount = 0
     private(set) var localRefreshes = 0
     private let startup: AsyncStream<Void>
@@ -690,27 +697,21 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     private let exchangeFinished: AsyncStream<Void>.Continuation
     private(set) var exchangeObservations: [(InitialCloudExchangeObservation, InitialCloudExchangeObservation)] = []
     func waitForExchange() async throws { try await initialCloudSignal(exchanges, stage: "exchange") }
-    static func make(transport: any CloudOwnTransport, factory: InitialCloudSDKFactory,
+    static func make(transport: any CloudOwnTransport, mediaTransport: any CloudMediaTransport, factory: InitialCloudSDKFactory,
                      persisted: @escaping @Sendable () async -> Void) async throws -> InitialCloudBackend {
         let workflow = CoreCloudWorkflowService()
-        let policy = try await workflow.policy()
-        let connection = try await workflow.connection()
-        let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
-            eventDidPersist: { _ in await persisted() }, exchangeDidJoin: persisted,
-            appOwnsAccountObservation: true, accountReadRequested: persisted)
-        return InitialCloudBackend(workflow: workflow, connection: connection, own: CloudOwnExecutor(core: connection, transport: transport),
-            policy: policy, adapter: adapter, accounts: CloudAppAccountReader(workflow: workflow, policy: policy, factory: factory, adapter: adapter))
+        let backend = try await NativeCollectionCloudBackend.make(workflow: workflow, factory: factory,
+            ownTransport: transport, mediaTransport: mediaTransport, persisted: persisted)
+        return InitialCloudBackend(workflow: workflow, backend: backend)
     }
-    private init(workflow: CoreCloudWorkflowService, connection: CoreCloudConnectionService, own: CloudOwnExecutor, policy: CoreCloudPolicyService,
-                 adapter: CloudKitSyncAdapter, accounts: CloudAppAccountReader) {
-        self.workflow = workflow; self.connection = connection; self.own = own; self.policy = policy; self.adapter = adapter; self.accounts = accounts
+    private init(workflow: CoreCloudWorkflowService, backend: NativeCollectionCloudBackend) {
+        self.workflow = workflow; self.backend = backend
         (exchanges, exchangeFinished) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (startup, startupFinished) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
-        executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter)
     }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+        let output = try await backend.input(event)
         if case .refresh(.local) = event { localRefreshes += 1 }
-        let output = try await policy.input(event)
         observe([output])
         return output
     }
@@ -727,9 +728,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
             do { before = try await InitialCloudExchangeObservation.read(command) }
             catch { Issue.record("Original exchange observation failed: \(String(describing: error))") }
         }
-        async let native = executor.execute(command)
-        if case .cancelBackgroundFlush = command.action { await own?.interruptAndDrain() }
-        let result = await native
+        let result = await backend.execute(command)
         lastExecute = "\(stage): returned; deferred=\(result.deferred); failed=\(result.error != nil)"
         if let error = result.error { lastExecuteError = String(describing: error) }
         observe(result.outputs)
@@ -742,55 +741,23 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
             catch { Issue.record("Original exchange observation failed: \(String(describing: error))") }
             exchangeFinished.yield(())
         }
-        return .init(outputs: result.outputs, error: result.error, deferred: result.deferred)
+        return result
     }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { try await accounts.begin(transition: transition) }
+    func beginAccountRead(transition: Bool) async throws -> UInt64 { try await backend.beginAccountRead(transition: transition) }
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
         lastRead = "account-read: awaiting"
-        let result = await accounts.read(id)
-        lastRead = "account-read: returned; verified=\(result.verified); failed=\(result.error != nil)"
+        let result = await backend.readAccount(id)
+        lastRead = "account-read: returned; verified=\(result.accountVerified); failed=\(result.error != nil)"
         if let error = result.error { lastReadError = String(describing: error) }
         observe(result.outputs)
-        guard result.verified, result.error == nil, closeCount == 0, !Task.isCancelled else {
-            lastRead += "; preparation-skipped; closeCount=\(closeCount); cancelled=\(Task.isCancelled)"
-            return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
-        }
-        do {
-            lastRead = "verified-read: lifecycle"
-            let lifecycle: CollectionLifecycle = try await CoreCollectionService().lifecycle()
-            if case .ready = lifecycle {
-                lastRead = "verified-read: policy-status"
-                let status: CloudPolicyStatus = try await policy.status()
-                lastPolicyStatus = status
-                if status.controls.bindingUsable == true {
-                    lastRead = "verified-read: prepareRuntimeBeforePolicy"
-                    try await workflow.prepareRuntimeBeforePolicy()
-                    lastRead = "verified-read: refresh-cloud"
-                    let refreshed = try await policy.input(.refresh(.cloud))
-                    observe([refreshed])
-                    lastRead = "verified-read: preparation-and-refresh-complete"
-                    return .init(outputs: result.outputs + [refreshed], error: nil, deferred: false, accountVerified: true)
-                }
-                lastRead = "verified-read: preparation-skipped-binding-unusable"
-            } else {
-                lastRead = "verified-read: preparation-skipped-lifecycle-not-ready"
-            }
-            return .init(outputs: result.outputs, error: nil, deferred: false, accountVerified: true)
-        } catch {
-            lastRead += ": failed"
-            lastReadError = String(describing: error)
-            return .init(outputs: result.outputs, error: error, deferred: false)
-        }
+        return result
     }
-    func takeAccountReadRequest() async -> Bool { await adapter.takeAccountReadRequest() }
-    func freezeForSuspend() async throws { await accounts.freeze(); try await adapter.freezeForSuspend() }
-    func resumeAfterCoreResume() async { accounts.resumeAfterCoreResume() }
+    func takeAccountReadRequest() async -> Bool { await backend.takeAccountReadRequest() }
+    func freezeForSuspend() async throws { try await backend.freezeForSuspend() }
+    func resumeAfterCoreResume() async { await backend.resumeAfterCoreResume() }
     func close() async throws {
-        guard closeCount == 0 else { return }
-        await accounts.close(); await own?.close()
-        do { try await adapter.stop() }
-        catch { guard await adapter.retainedInstanceIDs().isEmpty else { throw error } }
-        closeCount += 1
+        try await backend.close()
+        closeCount = 1
     }
 }
 

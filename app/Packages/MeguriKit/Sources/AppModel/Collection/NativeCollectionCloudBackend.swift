@@ -18,7 +18,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
 
     private init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService,
                  connection: CoreCloudConnectionService, own: CloudOwnExecutor,
-                 factory: NativeCloudKitEngineFactory, adapter: CloudKitSyncAdapter,
+                 factory: any CloudKitEngineFactory, adapter: CloudKitSyncAdapter,
                  executor: NativeCloudPolicyExecutor) {
         self.workflow = workflow; self.policy = policy; self.connection = connection; self.own = own
         self.accounts = CloudAppAccountReader(workflow: workflow, policy: policy, factory: factory, adapter: adapter)
@@ -28,9 +28,6 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     static func make(configuration: CloudBuildConfiguration, directory: URL,
                      persisted: @escaping @Sendable () async -> Void) async throws -> NativeCollectionCloudBackend {
         let workflow = CoreCloudWorkflowService()
-        let policy = try await workflow.policy()
-        let connection = try await workflow.connection()
-        let media = try await workflow.media()
         let container = CKContainer(identifier: configuration.container)
         let database = container.privateCloudDatabase
         let factory = NativeCloudKitEngineFactory(database: database, accountResolver: {
@@ -38,11 +35,21 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         })
         let staging = try await makeStaging(directory: directory)
         let ownTransport = try NativeCloudOwnTransport(database: database, staging: staging)
+        let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
+        return try await make(workflow: workflow, factory: factory, ownTransport: ownTransport,
+            mediaTransport: mediaTransport, persisted: persisted)
+    }
+
+    static func make(workflow: CoreCloudWorkflowService, factory: any CloudKitEngineFactory,
+                     ownTransport: any CloudOwnTransport, mediaTransport: any CloudMediaTransport,
+                     persisted: @escaping @Sendable () async -> Void) async throws -> NativeCollectionCloudBackend {
+        let policy = try await workflow.policy()
+        let connection = try await workflow.connection()
+        let media = try await workflow.media()
         let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
             eventDidPersist: { _ in await persisted() }, assetReadTransport: ownTransport,
             assetReadDidFinish: persisted, exchangeDidJoin: persisted,
             appOwnsAccountObservation: true, accountReadRequested: persisted)
-        let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
             mediaService: media, mediaTransport: mediaTransport)
         let own = CloudOwnExecutor(core: connection, transport: ownTransport)
