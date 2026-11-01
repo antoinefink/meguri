@@ -1,7 +1,7 @@
 //! K22.2 retryable fetch assets: real Service, drained policy actions and host reopen.
 //! This is the Rust/FFI native delivery port, not Swift or Apple SDK acceptance.
 use super::*;
-use meguri_testkit::cloud::{RecordChange, Token};
+use meguri_testkit::cloud::{RecordChange, RequestKind, Token};
 
 fn refresh(fixture: &PublishedFixture) -> Vec<CloudPolicyIssuedCommand> {
     policy_commands(
@@ -271,7 +271,21 @@ fn reopen_host(mut fixture: PublishedFixture) -> PublishedFixture {
 
 // Start the reopened native port using only the real policy's issued action.
 // Network delivery of later collection work is driven explicitly by the test.
-fn start_reopened(fixture: &PublishedFixture) -> CloudEngineRegistration {
+fn start_reopened(fixture: &PublishedFixture, name: &str, id: NoteId) -> CloudEngineRegistration {
+    let inbox = entry(fixture, name);
+    assert_eq!(inbox.entry.retry_count, 0);
+    let pending = note_facts(fixture, id);
+    assert!(pending.mark.is_some() && pending.in_flight.is_empty());
+    let requests = fixture.server.lock().unwrap().request_log().unwrap();
+    fixture.workflow.prepare_runtime().unwrap();
+    assert!(
+        entry(fixture, name) == inbox,
+        "preparation preserves the original inbox id and version"
+    );
+    assert_eq!(attempts(fixture, name), 0);
+    same_pending_note(&note_facts(fixture, id), &pending);
+    assert!(fixture.server.lock().unwrap().request_log().unwrap() == requests);
+
     let mut commands = Vec::new();
     commands.extend(policy_commands(
         fixture
@@ -331,6 +345,16 @@ fn start_reopened(fixture: &PublishedFixture) -> CloudEngineRegistration {
         .unwrap();
     assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), fetch).unwrap());
     no_retry(&refresh(fixture));
+    assert_eq!(attempts(fixture, name), 0);
+    let after_start = fixture.server.lock().unwrap().request_log().unwrap();
+    assert!(
+        after_start[requests.len()..].iter().all(|request| {
+            request.kind != RequestKind::Read
+                && !(request.kind == RequestKind::FetchZone
+                    && request.zone.as_deref() == Some(sdk.collection_zone.as_str()))
+        }),
+        "startup leaves the first actual collection fetch and asset read untouched"
+    );
     sdk
 }
 
@@ -534,7 +558,8 @@ fn five_failed_drain_retries_then_actual_reopen_first_drain_merges_and_service_a
     assert_eq!(attempts(&fixture, &server.name), 0);
     same_pending_note(&note_facts(&fixture, id), &local);
     assert_eq!(physical_fields(&fixture, id), local_fields);
-    let reopened_sdk = start_reopened(&fixture);
+    let reopened_sdk = start_reopened(&fixture, &server.name, id);
+    assert_eq!(queue.calls.load(Ordering::SeqCst), 5);
     assert_ne!(reopened_sdk.instance_id, sdk.instance_id);
     assert_eq!(reopened_sdk.collection_zone, sdk.collection_zone);
     // This is the first collection drain of the new host/SDK, using a fresh

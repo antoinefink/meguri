@@ -61,3 +61,22 @@ Reviewer native_conformance_lifecycle_audit identified a test setup omission.
 Invoke `workflow.prepare_runtime()` before reading issued commands, as the app
 does. Keep the first fetch untouched and verify that no retry was admitted.
 The production path needs no change for this failure.
+
+## Startup preparation fixture correction
+
+Fixer session `s-20261025T162405Z-9dc656e4`; original U113 start
+`1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a`, batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+The helper now invokes `workflow.prepare_runtime()` at startup. It verifies
+unchanged inbox contents, pending Note data and zero charged reads. Service logs
+must contain no new collection fetch or read before the test's first drain.
+The test still requires the issued startup handle and all later merge and save
+checks. The existing callback reentry probes remain enabled.
+
+One source consistency check only. Compile/test: UNRUN; root owns focused
+verification, independent review and integration gates. No acceptance claimed.
+
+Root result: `core-test/20261101T131902Z-75815` PASS1/1 after the setup fix.
+The full five-failure/reopen/first-drain/merge/Service-ACK path now passes.
+Independent review found no P0–P2 in the correction. The native Swift layer and
+remaining required regression checks are still separate obligations.
