@@ -1,4 +1,4 @@
-use super::*;
+use super::{super::adapter_store::AdapterCommitOptions, *};
 use crate::cloud::{adapter::*, workflow::*};
 use std::collections::{BTreeMap, BTreeSet};
 impl Runtime {
@@ -78,6 +78,13 @@ impl Runtime {
             ))
         })?;
         s.adapter.durable = durable;
+        if let Some(pending) = &s.adapter.durable.epoch_verification {
+            let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if pending.binding != bound.binding || pending.file != bound.file {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            s.root_confirmed = false;
+        }
         s.adapter.next_sdk = s.adapter.next_sdk.checked_add(1).ok_or(Error::InvalidData)?;
         let id = format!("sdk:{host}:{}", s.adapter.next_sdk);
         if s.adapter.next_sdk > 1 {
@@ -85,6 +92,10 @@ impl Runtime {
         }
         s.adapter.cursorless_first_zone = serialization.is_none();
         s.adapter.no_state = serialization.is_none();
+        s.adapter.no_state_creation = serialization.is_none();
+        s.adapter.zone_wills.clear();
+        s.adapter.decided_zones.clear();
+        s.adapter.fetch_groups.clear();
         s.adapter.no_state_point += 1;
         s.adapter.fetch = None;
         s.adapter.scheduled = None;
@@ -152,6 +163,68 @@ impl Runtime {
     /// Re-creation invalidates the SDK authority without changing the policy guard.
     pub fn retire_sdk(&self, sdk: &str, policy_stop: bool) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        if !s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk) {
+            return Ok(());
+        }
+        if s.adapter
+            .pending_collection_loss
+            .as_ref()
+            .is_some_and(|read| read.sdk == sdk)
+        {
+            // Probe outside both writer guards, then recheck the original
+            // binding/incarnation under the same lock that retires authority.
+            drop(s);
+            let path = self.directory.join("collection.anki2");
+            let file = self.inputs.files.identity(&path)?;
+            let publication = meguri_engine::device_state::DeviceState::for_collection(&path).publication()?;
+            s = self.state();
+            if !s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk) {
+                return Ok(());
+            }
+            if let Some(read) = s
+                .adapter
+                .pending_collection_loss
+                .as_ref()
+                .filter(|read| read.sdk == sdk)
+                .cloned()
+            {
+                let scan = &read.scan;
+                let original = s.incarnation == scan.incarnation
+                    && s.invalidation == scan.invalidation
+                    && !s.invalidation_exhausted
+                    && file == scan.file
+                    && file.created_nanos < 1_000_000_000
+                    && s.bound.as_ref().is_some_and(|b| {
+                        (b.binding.id, b.open_counter, b.evidence.generation, b.file)
+                            == (scan.binding, scan.open, scan.generation, scan.file)
+                            && b.binding.facts.state == BindingState::Active
+                            && publication.as_ref().is_some_and(|p| {
+                                p.identity == b.binding.facts.publication
+                                    && p.decision == meguri_engine::device_state::PublicationDecision::Clear
+                            })
+                    });
+                if original {
+                    // Existing isolation precedence and triggers preserve pending
+                    // local rows and clear absence state. Never overwrite a
+                    // stronger current reason with this service fallback.
+                    let (binding, durable) = with_tracking_access(|| {
+                        let store = s.store.as_mut().ok_or(Error::Database)?;
+                        store.isolate_runtime_binding(scan.binding, IsolationReason::ZoneMissing)?;
+                        Ok::<_, Error>((
+                            store.binding(scan.binding)?.ok_or(Error::BindingNotFound)?,
+                            store.adapter_durable(scan.binding)?,
+                        ))
+                    })?;
+                    s.adapter.durable = durable;
+                    let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+                    b.binding = binding;
+                    b.usable = false;
+                    b.verified = false;
+                    s.root_confirmed = false;
+                }
+                s.adapter.pending_collection_loss = None;
+            }
+        }
         let authority = s
             .adapter
             .sdk
@@ -278,6 +351,12 @@ impl Runtime {
         }
         if same && sdk_event {
             s.adapter.no_state = true;
+            s.adapter.no_state_creation = false;
+            s.adapter.decided_zones.clear();
+            if let Some(call) = s.adapter.fetch.as_mut() {
+                call.drains.clear();
+                call.read_zones.clear();
+            }
             s.adapter.no_state_point += 1;
             self.emit_pending_locked(s, UpdateKind::Full, BTreeSet::new())?;
         }
@@ -334,14 +413,12 @@ impl Runtime {
     pub fn adapter_snapshot(&self) -> Result<Snapshot, RuntimeError> {
         Self::adapter_snapshot_locked(&self.state())
     }
-    fn adapter_commit_locked(
+    pub(super) fn adapter_commit_locked(
         s: &mut State,
         entries: &[InboxEntry],
         refused: &[super::super::incoming::RefusedEntry],
         serialization: Option<&[u8]>,
-        at_ms: i64,
-        fail: bool,
-        start_absence: bool,
+        options: AdapterCommitOptions,
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| {
@@ -352,11 +429,7 @@ impl Runtime {
                     refused,
                     serialization,
                     &s.adapter.durable,
-                    super::super::adapter_store::AdapterCommitOptions {
-                        at_ms,
-                        fail,
-                        start_absence,
-                    },
+                    options,
                 )
             }))
             .unwrap_or(Err(Error::Database))
@@ -374,7 +447,18 @@ impl Runtime {
         let fail = std::mem::take(&mut s.adapter.fail_state);
         #[cfg(not(feature = "test-hooks"))]
         let fail = false;
-        Self::adapter_commit_locked(&mut s, &[], &[], Some(serialization), at_ms, fail, false)
+        Self::adapter_commit_locked(
+            &mut s,
+            &[],
+            &[],
+            Some(serialization),
+            AdapterCommitOptions {
+                at_ms,
+                fail,
+                start_absence: false,
+                resolved_epoch: None,
+            },
+        )
     }
     pub fn adapter_fetched(
         &self,
@@ -502,7 +586,18 @@ impl Runtime {
                 s.adapter.durable.active = Some(record.clone());
             }
         }
-        if let Err(error) = Self::adapter_commit_locked(&mut s, &entries, &refused, None, at_ms, fail, false) {
+        if let Err(error) = Self::adapter_commit_locked(
+            &mut s,
+            &entries,
+            &refused,
+            None,
+            AdapterCommitOptions {
+                at_ms,
+                fail,
+                start_absence: false,
+                resolved_epoch: None,
+            },
+        ) {
             s.adapter.durable = previous;
             return Err(error);
         }
@@ -542,9 +637,13 @@ impl Runtime {
         }
         s.adapter.next_fetch += 1;
         let id = s.adapter.next_fetch;
+        let boundary = s.adapter.scheduled.take();
+        s.adapter.fetch_groups.insert(format!("meguri-{id}"));
         s.adapter.fetch = Some(FetchCall {
             id,
             scope: zones,
+            own_eligible: boundary.is_none(),
+            boundary,
             ..Default::default()
         });
         Ok(id)
@@ -552,9 +651,15 @@ impl Runtime {
     pub fn adapter_will_fetch(&self, sdk: &str, group: String, manual: bool) -> Result<(), RuntimeError> {
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
+        let owns_call = s.adapter.fetch.as_ref().is_some_and(|call| {
+            manual
+                && call.own_eligible
+                && (group == format!("meguri-{}", call.id) || !s.adapter.fetch_groups.contains(&group))
+        });
         let boundary = FetchBoundary {
             group,
             manual,
+            owns_call,
             ..Default::default()
         };
         if let Some(call) = s.adapter.fetch.as_mut() {
@@ -610,11 +715,31 @@ impl Runtime {
                 zone: zone.clone(),
                 started_at_ms: at_ms,
             });
-            if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false, true) {
+            if let Err(e) = Self::adapter_commit_locked(
+                &mut s,
+                &[],
+                &[],
+                None,
+                AdapterCommitOptions {
+                    at_ms,
+                    fail: false,
+                    start_absence: true,
+                    resolved_epoch: None,
+                },
+            ) {
                 s.adapter.durable = prior;
                 return Err(e);
             }
             s.adapter.cursorless_first_zone = false;
+        }
+        if will {
+            s.adapter.zone_wills.insert(zone.clone());
+        }
+        if !will
+            && failed
+            && let Some(call) = s.adapter.fetch.as_mut()
+        {
+            call.failed_zones.insert(zone.clone());
         }
         let point = s.adapter.no_state_point;
         let boundary = if let Some(call) = s.adapter.fetch.as_mut() {
@@ -633,8 +758,36 @@ impl Runtime {
     }
     pub fn adapter_did_fetch(&self, sdk: &str, group: &str, manual: bool) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
+        let verification_guard = {
+            let s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            s.adapter
+                .durable
+                .epoch_verification
+                .as_ref()
+                .map(|_| (Self::adapter_guard_locked(&s), s.adapter.no_state_point))
+        };
+        let verification_file = if verification_guard.is_some() {
+            let path = self.directory.join("collection.anki2");
+            Some((
+                self.inputs.files.identity(&path)?,
+                meguri_engine::device_state::DeviceState::for_collection(&path).publication()?,
+            ))
+        } else {
+            None
+        };
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
+        if verification_guard.as_ref().is_some_and(|(guard, point)| {
+            *guard != Self::adapter_guard_locked(&s) || *point != s.adapter.no_state_point
+        }) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        // While the loss obligation awaits its Active reply, a cached root or
+        // unchanged fetch cannot confirm it, record a drain, or finish absence.
+        if s.adapter.durable.collection_loss.is_some() {
+            return Ok(());
+        }
         let boundary = if s.adapter.fetch.is_some() {
             s.adapter.fetch.as_mut().and_then(|c| c.boundary.take())
         } else {
@@ -645,14 +798,17 @@ impl Runtime {
             return Ok(());
         }
         let scope = s.adapter.fetch.as_ref().map(|c| c.scope.clone());
-        let drains = if let Some(scope) = scope {
+        let owns_call = boundary.owns_call;
+        let drains = if let Some(scope) = scope.filter(|_| owns_call) {
             scope
                 .into_iter()
                 .filter_map(|zone| match boundary.zones.get(&zone) {
                     Some((started, true)) if *started == s.adapter.no_state_point => {
                         Some(FetchDrain { zone, fetched: true })
                     }
-                    None if !s.adapter.no_state => Some(FetchDrain { zone, fetched: false }),
+                    None if !s.adapter.no_state || s.adapter.decided_zones.contains(&zone) => {
+                        Some(FetchDrain { zone, fetched: false })
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -665,7 +821,39 @@ impl Runtime {
                 })
                 .collect()
         };
-        if drains.iter().any(|d| d.zone == "meguri-root") {
+        let resolved_epoch = if let Some(pending) = &s.adapter.durable.epoch_verification {
+            let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let zone = collection_zone(bound.binding.facts.epoch);
+            if !drains.iter().any(|d| d.zone == zone && d.fetched) {
+                if let Some(call) = s.adapter.fetch.as_mut() {
+                    call.completed = owns_call;
+                }
+                return Ok(());
+            }
+            if pending.binding != bound.binding
+                || pending.file != bound.file
+                || !verification_file.as_ref().is_some_and(|(file, publication)| {
+                    *file == pending.file
+                        && file.created_nanos < 1_000_000_000
+                        && publication.as_ref().is_some_and(|p| {
+                            p.identity == bound.binding.facts.publication
+                                && p.decision == meguri_engine::device_state::PublicationDecision::Clear
+                        })
+                })
+                || s.tracking_stopped
+                || s.adapter.paused
+                || !s.whole_complete
+                || s.scan_required
+                || s.scan_running
+                || Self::publication_allows_send_locked(&s)
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            Some(pending.clone())
+        } else {
+            None
+        };
+        if resolved_epoch.is_none() && drains.iter().any(|d| d.zone == "meguri-root") {
             let root = if s.adapter.durable.active_deleted {
                 None
             } else {
@@ -691,11 +879,28 @@ impl Runtime {
             Self::sdk_locked(&s, sdk)?;
         }
         let old = s.adapter.durable.clone();
+        if resolved_epoch.is_some() {
+            s.adapter.durable.epoch_verification = None;
+        }
         s.adapter.durable.drains.extend(drains.clone());
-        if let Err(e) = Self::adapter_commit_locked(&mut s, &[], &[], None, at_ms, false, false) {
+        if let Err(e) = Self::adapter_commit_locked(
+            &mut s,
+            &[],
+            &[],
+            None,
+            AdapterCommitOptions {
+                at_ms,
+                fail: false,
+                start_absence: false,
+                resolved_epoch,
+            },
+        ) {
             s.adapter.durable = old;
             return Err(e);
         }
+        s.adapter
+            .decided_zones
+            .extend(drains.iter().filter(|d| d.fetched).map(|d| d.zone.clone()));
         if let Some(binding) = s.bound.as_ref().map(|b| b.binding.clone()) {
             let zone = collection_zone(binding.facts.epoch);
             if drains.iter().any(|d| d.zone == zone) {
@@ -724,8 +929,10 @@ impl Runtime {
             }
         }
         if let Some(call) = s.adapter.fetch.as_mut() {
-            call.completed = true;
-            call.drains.extend(drains.into_iter().map(|d| d.zone));
+            call.completed = owns_call;
+            if owns_call {
+                call.drains.extend(drains.into_iter().map(|d| d.zone));
+            }
         }
         Ok(())
     }
@@ -1040,6 +1247,7 @@ impl Runtime {
                         at_ms: clock.now_ms(),
                         fail: false,
                         start_absence: false,
+                        resolved_epoch: None,
                     },
                 )?;
                 Ok(())
@@ -1191,6 +1399,12 @@ impl Runtime {
             }
             if origin_sdk.is_some() {
                 s.adapter.no_state = true;
+                s.adapter.no_state_creation = false;
+                s.adapter.decided_zones.clear();
+                if let Some(call) = s.adapter.fetch.as_mut() {
+                    call.drains.clear();
+                    call.read_zones.clear();
+                }
                 s.adapter.no_state_point += 1;
                 self.emit_pending_locked(s, UpdateKind::Full, BTreeSet::new())?;
             }

@@ -135,8 +135,24 @@ public struct CloudDurableSnapshot: Sendable, Equatable {
     public let trackingStopped: Bool; public let absencePassCompleted: Bool
 }
 public struct CloudFetchDrain: Sendable, Equatable { public let zone: String; public let fetched: Bool }
+public struct CloudRootReadDiagnostic: Sendable, Equatable, Encodable {
+    public let active: Bool
+    public let lostCollection: Bool
+    public let outcome: String
+    public let a7Failure: Bool
+    public let accepted: Bool
+    public let failure: CloudZoneDeletionFailure?
+    public let terminal: CloudZoneDeletionFailure?
+    init(_ value: MeguriCoreBindings.CloudRootReadDiagnostic) {
+        active = value.active; lostCollection = value.lostCollection
+        outcome = value.outcome; a7Failure = value.a7Failure; accepted = value.accepted
+        failure = value.failure.map(CloudZoneDeletionFailure.init)
+        terminal = value.terminal.map(CloudZoneDeletionFailure.init)
+    }
+}
 public struct CloudWorkflowDiagnostics: Sendable, Equatable {
     public let missingDidFetchEvents: UInt64
+    public let rootReads: [CloudRootReadDiagnostic]
     public let zoneDeletions: [CloudZoneDeletionDiagnostic]
 }
 public struct CloudWorkflowStatus: Sendable, Equatable { public let syncingCollection: Bool }

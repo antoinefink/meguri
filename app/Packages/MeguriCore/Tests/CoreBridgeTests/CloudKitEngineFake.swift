@@ -1,13 +1,11 @@
+import CloudKit
 import Foundation
 import Synchronization
 import Testing
 @testable import CoreBridge
 
-// U114 test-first SPI request. CloudKitEngine, CloudKitEngineDelegate and the
-// Cloud* DTOs below MUST be the production adapter's SDK seam, implemented later
-// by the CKSyncEngine wrapper. They intentionally do not exist yet. Do not move
-// an adapter, pending policy, scheduler or CloudKit service into this file to
-// make these enabled tests green. Names are scoped to CoreBridge, not bindings.
+// The fake supplies SDK facts through the production seam; Core owns pending
+// policy, authority, confirmation and all durable outcomes.
 //
 // Required DTO shapes (all Sendable; value DTOs Equatable):
 // CloudPendingChange: save | delete
@@ -103,6 +101,10 @@ actor CloudKitEngineFake: CloudKitEngine {
         // Manual overall will/did pair; only these zones get per-zone events.
         // An empty fetchedZones models a saved-state fetch with no changes.
         case manual(fetchedZones: [String], records: [CloudRecord], group: String?)
+        // Suspend outside the original serial callback, after its will/did
+        // handler returned, so an account event can interrupt this same call.
+        case manualPaused(fetchedZones: [String], records: [CloudRecord],
+                          pauseZone: String, afterDid: Bool, gate: CloudCallbackGate)
         case joined(group: String)
         case shortCircuited
         case missingDid(group: String)
@@ -111,6 +113,7 @@ actor CloudKitEngineFake: CloudKitEngine {
     enum Trace: Sendable, Equatable {
         case sendEntered(Int)
         case fetchEntered(String)
+        case fetchOptions(CloudFetchOptions)
         case batchRequested(String)
         case handed(UInt64, [String])
         case eventEntered(String)
@@ -371,6 +374,7 @@ actor CloudKitEngineFake: CloudKitEngine {
         guard networkEntryAllowed(), let delegate else { return }
         trace.append(.fetchEntered(options.groupID))
         let scoped = await delegate.nextFetchChangesOptions(options, engine: self)
+        trace.append(.fetchOptions(scoped))
         // Tests explicitly script which zones exist/change. This fake has no
         // database, no cursor decoder, and no fabricated no-state listing.
         let script = fetchScripts.isEmpty
@@ -383,19 +387,31 @@ actor CloudKitEngineFake: CloudKitEngine {
         case .missingDid(let group):
             await deliver(.willFetch(groupID: group, reason: .manual), label: "willFetch")
         case .manual(let zones, let records, let replacement):
-            let group = replacement ?? scoped.groupID
-            await deliver(.willFetch(groupID: group, reason: .manual), label: "willFetch")
-            for zone in zones where scoped.zones.contains(zone) {
-                await deliver(.willFetchZone(zone: zone), label: "willFetchZone")
-                let zoneRecords = records.filter { $0.zone == nil || $0.zone == zone }
-                if !zoneRecords.isEmpty {
-                    await deliver(.fetched(zone: zone, records: zoneRecords, deleted: []), label: "fetched")
-                }
-                await deliver(.didFetchZone(zone: zone, error: nil), label: "didFetchZone")
-            }
-            await deliver(.didFetch(groupID: group, reason: .manual), label: "didFetch")
+            await deliverManualFetch(scoped: scoped, zones: zones, records: records,
+                                     group: replacement ?? scoped.groupID)
+        case .manualPaused(let zones, let records, let pauseZone, let afterDid, let gate):
+            await deliverManualFetch(scoped: scoped, zones: zones, records: records,
+                                     group: scoped.groupID, pause: (pauseZone, afterDid, gate))
         }
         trace.append(.fetchReturned(options.groupID))
+    }
+
+    private func deliverManualFetch(
+        scoped: CloudFetchOptions, zones: [String], records: [CloudRecord], group: String,
+        pause: (zone: String, afterDid: Bool, gate: CloudCallbackGate)? = nil
+    ) async {
+        await deliver(.willFetch(groupID: group, reason: .manual), label: "willFetch")
+        for zone in zones where scoped.zones.contains(zone) {
+            await deliver(.willFetchZone(zone: zone), label: "willFetchZone")
+            if let pause, pause.zone == zone, !pause.afterDid { await waitInCall(pause.gate) }
+            let zoneRecords = records.filter { $0.zone == nil || $0.zone == zone }
+            if !zoneRecords.isEmpty {
+                await deliver(.fetched(zone: zone, records: zoneRecords, deleted: []), label: "fetched")
+            }
+            await deliver(.didFetchZone(zone: zone, error: nil), label: "didFetchZone")
+            if let pause, pause.zone == zone, pause.afterDid { await waitInCall(pause.gate) }
+        }
+        await deliver(.didFetch(groupID: group, reason: .manual), label: "didFetch")
     }
 
     func scheduledFetchOptions(_ options: CloudFetchOptions) async -> CloudFetchOptions {
@@ -496,4 +512,58 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
 
     func engines() -> [CloudKitEngineFake] { made }
     func resolvedAccountReadCount() -> Int { accountReadCalls }
+}
+
+/// Model a removed root through the callbacks captured by the native request.
+/// This fixture needs no CloudKit login and supplies no Core completion.
+final class CloudKitMissingActiveTransport: CloudOwnTransport, NativeCloudDatabaseQueue, Sendable {
+    static let active = CloudControlTarget(zone: "meguri-root", name: "active", recordType: "MGActive")
+    enum Trace: Sendable, Equatable {
+        case prepared(CloudControlTarget), enqueued(CloudControlTarget)
+        case unknownItem(CloudControlTarget), replied(CloudControlRead)
+    }
+    private let trace = Mutex<[Trace]>([])
+    func recordedTrace() -> [Trace] { trace.withLock { $0 } }
+
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        guard case .read(let target) = command else { throw CloudOwnTransportFailure.unexpectedReply }
+        trace.withLock { $0.append(.prepared(target)) }
+        try #require(target == Self.active)
+        let original = try NativeCloudOwnTransport(queue: self).prepare(command)
+        return RecordedOperation(original: original, transport: self)
+    }
+
+    func add(_ operation: CKDatabaseOperation) -> Bool {
+        guard let read = operation as? CKFetchRecordsOperation,
+              read.recordIDs == [NativeCloudOwnRecords.id(Self.active)],
+              read.desiredKeys == nil,
+              let receive = read.perRecordResultBlock,
+              let finish = read.fetchRecordsResultBlock else {
+            Issue.record("Expected the original full record-ID active read")
+            return false
+        }
+        trace.withLock { $0.append(.enqueued(Self.active)) }
+        // Queue admission is synchronous; the real prepared operation buffers
+        // this original callback until the guarded submission returns.
+        receive(NativeCloudOwnRecords.id(Self.active), .failure(CKError(.unknownItem)))
+        finish(.success(()))
+        trace.withLock { $0.append(.unknownItem(Self.active)) }
+        return true
+    }
+
+    private struct RecordedOperation: CloudPreparedOwnOperation {
+        let original: any CloudPreparedOwnOperation
+        let transport: CloudKitMissingActiveTransport
+        // These protocols expose only Bool admission, not the submitting SDK
+        // id or guard. Do not label this trace with guessed authority values.
+        func enqueue() -> Bool { original.enqueue() }
+        func cancel() { original.cancel() }
+        func controlReadEvidence() -> CloudZoneDeletionRead? { original.controlReadEvidence() }
+        func reply() async throws -> CloudOwnTransportReply {
+            let reply = try await original.reply()
+            guard case .read(let read) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+            transport.trace.withLock { $0.append(.replied(read)) }
+            return reply
+        }
+    }
 }

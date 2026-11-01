@@ -128,7 +128,10 @@ impl Runtime {
     }
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
         Self::capture_gate_locked(s)?;
-        if !s.root_confirmed && !Self::publication_allows_send_locked(s) {
+        if s.adapter.durable.collection_loss.is_some()
+            || s.adapter.durable.epoch_verification.is_some()
+            || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
+        {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())
@@ -849,7 +852,22 @@ impl Runtime {
         system_fields: &[u8],
         lost_zone: bool,
     ) -> Result<bool, RuntimeError> {
-        self.accept_active_proof(instance, request_id, envelope, system_fields, lost_zone, false)
+        self.accept_active_proof(instance, request_id, envelope, system_fields, lost_zone, (false, None))
+    }
+    pub(super) fn accept_fetch_root_read(
+        &self,
+        read: &super::super::adapter::FetchRead,
+        envelope: &[u8],
+        system_fields: &[u8],
+    ) -> Result<bool, RuntimeError> {
+        self.accept_active_proof(
+            &read.sdk,
+            read.fetch,
+            envelope,
+            system_fields,
+            read.lost_collection,
+            (false, Some(read)),
+        )
     }
     fn accept_active_proof(
         &self,
@@ -858,13 +876,17 @@ impl Runtime {
         envelope: &[u8],
         system_fields: &[u8],
         lost_zone: bool,
-        completed_fetch: bool,
+        source: (bool, Option<&super::super::adapter::FetchRead>),
     ) -> Result<bool, RuntimeError> {
+        let (completed_fetch, read) = source;
         let _ = self.adapter_now();
         let active = super::super::control_codec::Active::decode(envelope).map_err(|_| Error::InvalidData)?;
         let mut s = self.state();
         if Self::caller_locked(&s, instance).is_err() {
             return Ok(false);
+        }
+        if let Some(read) = read {
+            Self::fetch_read_locked(&s, read)?;
         }
         if !completed_fetch {
             s.trace.push(TraceEvent::RootReadRecorded {
@@ -879,6 +901,8 @@ impl Runtime {
         }
         if !b.verified
             || !b.usable
+            || (s.adapter.durable.collection_loss.is_some() && !lost_zone)
+            || (s.adapter.durable.epoch_verification.is_some() && read.is_none())
             || !s.whole_complete
             || s.scan_required
             || (!s.root_fetch_qualified && !lost_zone && !completed_fetch)
@@ -912,6 +936,9 @@ impl Runtime {
             b.usable = false;
             b.verified = false;
             b.binding = binding;
+            if read.is_some_and(|read| read.lost_collection) {
+                s.adapter.pending_collection_loss = None;
+            }
             return Ok(false);
         }
         let open = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter;
@@ -959,7 +986,7 @@ impl Runtime {
             &active.envelope,
             &active.system_fields,
             false,
-            true,
+            (true, None),
         )
     }
     pub fn build_collection_batch(

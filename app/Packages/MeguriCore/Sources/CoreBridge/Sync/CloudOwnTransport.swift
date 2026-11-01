@@ -34,6 +34,11 @@ public protocol CloudPreparedOwnOperation: CloudPublicationQueue, CloudAssetRead
     /// during Rust submission. Cancellation must drain this same callback.
     func reply() async throws -> CloudOwnTransportReply
     func cancel()
+    /// Original all-fields control-read errors, without retaining SDK objects.
+    func controlReadEvidence() -> CloudZoneDeletionRead?
+}
+extension CloudPreparedOwnOperation {
+    public func controlReadEvidence() -> CloudZoneDeletionRead? { nil }
 }
 public protocol CloudOwnTransport: Sendable {
     /// Construct the complete native operation and all reply handlers before
@@ -53,6 +58,10 @@ public final class CloudOwnWorkAdmission: Sendable {
     public init() {}
     public func setOpen(_ value: Bool) { open.withLock { $0 = value } }
     public func check() throws { if !open.withLock({ $0 }) { throw CancellationError() } }
+    /// Linearize final queue/result admission against lifecycle closure.
+    func withPermission<T>(_ body: (Bool) throws -> T) rethrows -> T {
+        try open.withLock { try body($0) }
+    }
     fileprivate func enqueue(_ operation: any CloudPublicationQueue) -> Bool {
         open.withLock { $0 && operation.enqueue() }
     }

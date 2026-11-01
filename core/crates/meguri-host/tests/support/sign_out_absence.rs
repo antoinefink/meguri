@@ -44,7 +44,7 @@ pub(super) fn generated(dir: &Path) {
     let recipe = Recipe::parse("recipe: resume-absence\ndescription: Public synthetic Resume regression\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Resume\n    notetype: basic\n    new: 1\n    due: 1\n    fields: [\"generic {n}\", \"back {n}\"]\n").unwrap();
     generate_recipe(&recipe, 91, dir).unwrap();
 }
-fn read_control(service: &mut Service<SeededRandom>, zone: &str, name: &str) -> RecordRead {
+pub(super) fn read_control(service: &mut Service<SeededRandom>, zone: &str, name: &str) -> RecordRead {
     read_control_for_scope(service, &scope(), zone, name)
 }
 fn read_control_for_scope(

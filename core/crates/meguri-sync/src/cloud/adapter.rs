@@ -40,11 +40,26 @@ pub struct CompletedExchange {
 pub(crate) struct Durable {
     pub active: Option<Saved>,
     pub active_deleted: bool,
+    pub collection_loss: Option<CollectionLoss>,
+    pub epoch_verification: Option<EpochVerification>,
     pub absence: Option<AbsenceLedger>,
     pub absence_sequence: u64,
     pub drains: Vec<FetchDrain>,
     pub exchanges: BTreeMap<u64, CompletedExchange>,
     pub exchange_ended_ms: BTreeMap<u64, i64>,
+}
+// Durable service evidence, never a reconstructed SDK/read authority. The
+// enclosing row and these facts restrict recovery to the original publication.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct CollectionLoss {
+    pub binding: Binding,
+    pub file: super::runtime::NativeFileIdentity,
+}
+// Pending verification is not a Service loss outcome or a live read authority.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct EpochVerification {
+    pub binding: Binding,
+    pub file: super::runtime::NativeFileIdentity,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct AbsenceLedger {
@@ -70,6 +85,7 @@ pub struct Snapshot {
 pub(crate) struct FetchBoundary {
     pub group: String,
     pub manual: bool,
+    pub owns_call: bool,
     pub zones: BTreeMap<String, (u64, bool)>,
 }
 #[derive(Default)]
@@ -78,6 +94,9 @@ pub(crate) struct FetchCall {
     pub scope: Vec<String>,
     pub boundary: Option<FetchBoundary>,
     pub completed: bool,
+    pub own_eligible: bool,
+    pub failed_zones: BTreeSet<String>,
+    pub read_zones: BTreeSet<String>,
     pub drains: BTreeSet<String>,
 }
 #[derive(Default)]
@@ -101,6 +120,13 @@ pub(crate) struct AdapterState {
     pub cursorless_first_zone: bool,
     pub no_state: bool,
     pub no_state_point: u64,
+    pub no_state_creation: bool,
+    pub zone_wills: BTreeSet<String>,
+    pub decided_zones: BTreeSet<String>,
+    pub fetch_groups: BTreeSet<String>,
+    pub root_reads: Vec<RootReadDiagnostic>,
+    // Accepted epoch loss belongs to this SDK/binding, not a transport handle.
+    pub pending_collection_loss: Option<FetchRead>,
     pub missing_did: u64,
     pub retain_inspection: bool,
     pub closed_snapshot: Option<Snapshot>,
@@ -126,4 +152,36 @@ pub fn collection_zone(epoch: EpochId) -> String {
         "c-{}",
         data_encoding::BASE32_NOPAD.encode(&epoch.0).to_ascii_lowercase()
     )
+}
+
+/// Issued only from the original completed scoped SDK fetch. Fields cannot be
+/// reconstructed by a transport caller to select a different zone or point.
+#[derive(Clone)]
+pub struct FetchRead {
+    pub(crate) sdk: String,
+    pub(super) scan: super::runtime::ScanGuard,
+    pub(crate) guard: Guard,
+    pub(crate) fetch: u64,
+    pub(crate) point: u64,
+    pub(crate) zone: String,
+    pub(crate) lost_collection: bool,
+    pub(crate) a7_failure: bool,
+}
+impl FetchRead {
+    pub fn zone(&self) -> &str {
+        &self.zone
+    }
+    pub fn is_active(&self) -> bool {
+        self.zone == "meguri-root"
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootReadDiagnostic {
+    pub active: bool,
+    pub lost_collection: bool,
+    pub outcome: String,
+    pub a7_failure: bool,
+    pub accepted: bool,
+    pub failure: Option<super::zone_deletion::FailureFacts>,
+    pub terminal: Option<super::zone_deletion::FailureFacts>,
 }

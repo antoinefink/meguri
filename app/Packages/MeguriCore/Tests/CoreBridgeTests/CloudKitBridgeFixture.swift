@@ -140,6 +140,7 @@ struct CloudKitBridgeFixture: Sendable {
     static func open(count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
                      savedState: Data? = Data([0x73, 0x64, 0x6b]),
                      failInbox: Bool = false, failState: Bool = false, startAdapter: Bool = true,
+                     assetReadTransport: (any CloudOwnTransport)? = nil,
                      delegateWorkValidated: @escaping @Sendable () async -> Void = {},
                      connectedPolicyOpening: Bool = false) async throws -> Self {
         try #require(!connectedPolicyOpening || !startAdapter,
@@ -177,6 +178,7 @@ struct CloudKitBridgeFixture: Sendable {
             let probe = CloudPersistedEventProbe()
             let adapter = CloudKitSyncAdapter(core: core, engineFactory: factory,
                                              eventDidPersist: { await probe.didPersist($0) },
+                                             assetReadTransport: assetReadTransport,
                                              delegateWorkValidated: delegateWorkValidated)
             if startAdapter {
                 try await adapter.start(automaticallySync: false)
@@ -218,12 +220,14 @@ func withCloudKitFixture(
     count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
     savedState: Data? = Data([0x73, 0x64, 0x6b]), failInbox: Bool = false, failState: Bool = false,
     startAdapter: Bool = true,
+    assetReadTransport: (any CloudOwnTransport)? = nil,
     delegateWorkValidated: @escaping @Sendable () async -> Void = {},
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
     let fixture = try await CloudKitBridgeFixture.open(
         count: count, a23: a23, keepAlive: keepAlive, savedState: savedState,
         failInbox: failInbox, failState: failState, startAdapter: startAdapter,
+        assetReadTransport: assetReadTransport,
         delegateWorkValidated: delegateWorkValidated
     )
     do { try await body(fixture) }

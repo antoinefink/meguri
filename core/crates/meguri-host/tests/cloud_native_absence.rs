@@ -1383,14 +1383,22 @@ struct Q6Child {
 }
 impl Q6Child {
     fn spawn(root: &Path) -> (Self, mpsc::Receiver<String>) {
+        Self::spawn_checkpoint(
+            root,
+            "cloud_q6_resume_absence_child_checkpoint",
+            Q6_CHILD_ENV,
+            Q6_CHECKPOINT,
+        )
+    }
+    fn spawn_checkpoint(
+        root: &Path,
+        entry: &str,
+        environment: &str,
+        prefix: &'static str,
+    ) -> (Self, mpsc::Receiver<String>) {
         let child = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "cloud_q6_resume_absence_child_checkpoint",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env(Q6_CHILD_ENV, root)
+            .args(["--exact", entry, "--nocapture", "--test-threads=1"])
+            .env(environment, root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -1407,7 +1415,7 @@ impl Q6Child {
             // is no detached writer or pipe thread at parent teardown.
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
-                if let Some((_, json)) = line.split_once(Q6_CHECKPOINT) {
+                if let Some((_, json)) = line.split_once(prefix) {
                     let _ = tx.send(json.to_owned());
                 }
             }
@@ -2115,4 +2123,829 @@ fn cloud_q6_resume_absence_child_checkpoint() {
     // Same post-cursor checkpoint seam as cloud_absence_child_checkpoint. The
     // apply and WAL receipt above are real; the seam only holds this process.
     runtime.incoming_stage_for_testing(IncomingStage::FetchAfterCursor);
+}
+
+const EPOCH_LOSS_CHILD_ENV: &str = "MEGURI_EPOCH_LOSS_CHILD";
+const EPOCH_LOSS_CHECKPOINT: &str = "EPOCH_LOSS_ACCEPTED_CHECKPOINT ";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EpochLossCheckpoint {
+    serialization: Vec<u8>,
+    binding: Vec<u8>,
+    entities: Vec<cloud::workflow::EntityFacts>,
+    root: Option<cloud::workflow::RootAcknowledgement>,
+    drains: Vec<cloud::adapter::FetchDrain>,
+}
+
+#[test]
+fn failed_inferred_epoch_read_then_real_collection_fetch_completes_cursorless_absence() {
+    use cloud::publication::RecordRead;
+    use sign_out_absence as actual;
+
+    struct OwnerCleanup<'a>(&'a CoreHost);
+    impl Drop for OwnerCleanup<'_> {
+        fn drop(&mut self) {
+            if let Some(runtime) = self.0.cloud_runtime()
+                && let Some(sdk) = runtime.incoming_sdk_instance_for_testing()
+            {
+                let _ = runtime.retire_sdk(&sdk, false);
+                let _ = runtime.release_sdk(&sdk);
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    actual::generated(&root.path().join("epoch-progress-a"));
+    let publisher = actual::open_actual(&root.path().join("epoch-progress-a"), Arc::new(Account));
+    let publisher_cleanup = OwnerCleanup(&publisher);
+    let mut service = service(root.path());
+    actual::publish(&publisher, &mut service);
+    let host = actual::adopt(&root.path().join("epoch-progress-b"), &mut service);
+    let owner_cleanup = OwnerCleanup(&host);
+    drop(publisher_cleanup);
+    publisher.close().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let (sdk, serialization, zone) = admit(&host);
+    assert!(serialization.is_none());
+    confirm_root(&host, &sdk, &mut service);
+    let before_rows = rows(&host);
+    let expected_names = actual::names(runtime);
+    assert!(!expected_names.is_empty());
+    let drains_before = runtime.adapter_fetch_drains();
+    assert!(logged(runtime).is_empty());
+
+    // A qualified owned fetch with no per-zone callbacks issues its real epoch
+    // verification. Service has no transient read-failure injection; only this
+    // initial negative result uses Runtime's defined failure-input seam.
+    let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    assert!(runtime.adapter_fetch_qualified(&sdk, fetch).unwrap());
+    let mut reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+    assert_eq!(reads.len(), 1);
+    let epoch = reads.remove(0);
+    assert!(!epoch.is_active() && epoch.zone() == zone);
+    let issued: serde_json::Value =
+        serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+    assert!(!issued[4]["epoch_verification"].is_null());
+    assert!(
+        runtime
+            .adapter_complete_fetch_read(&epoch, &collection, RecordRead::Failed, false, None, None)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!runtime.adapter_finish_fetch(&sdk, fetch).unwrap());
+    let failed: serde_json::Value =
+        serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+    assert_eq!(failed[4]["epoch_verification"], issued[4]["epoch_verification"]);
+    assert!(failed[4]["absence"].is_null());
+    assert_eq!(runtime.adapter_fetch_drains(), drains_before);
+    let diagnostic = runtime.adapter_root_read_diagnostics().pop().unwrap();
+    assert!(diagnostic.accepted && !diagnostic.active && diagnostic.outcome == "failed");
+    safe(&host, &before_rows);
+
+    // The next call really starts and finishes the collection zone at the same
+    // no-state point. Its page and any still-issued epoch read come from Service.
+    let fetch = begin(runtime, &sdk, &zone);
+    let pass = actual::running_pass(runtime);
+    let drains_before_success = runtime.adapter_fetch_drains();
+    let p = page(&mut service, &zone, None);
+    assert!(!p.more);
+    assert!(p.changes.iter().all(|c| matches!(c, RecordChange::Saved(_))));
+    let seen = deliver(&host, &sdk, &zone, &p, true);
+    assert!(expected_names.is_subset(&seen));
+    runtime.adapter_fetch_zone(&sdk, zone.clone(), false, false).unwrap();
+    runtime
+        .adapter_did_fetch(&sdk, &format!("absence-{fetch}"), true)
+        .unwrap();
+    assert!(runtime.adapter_fetch_qualified(&sdk, fetch).unwrap());
+    let reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+    assert!(reads.len() <= 1);
+    for epoch in reads {
+        assert!(!epoch.is_active() && epoch.zone() == zone);
+        let result = actual::read_control(&mut service, epoch.zone(), "epoch");
+        assert!(matches!(&result, RecordRead::Found(_)));
+        assert!(
+            runtime
+                .adapter_complete_fetch_read(&epoch, &collection, result, false, None, None)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let finished = runtime.adapter_finish_fetch(&sdk, fetch).unwrap();
+    let after = runtime.adapter_snapshot().unwrap();
+    let after_rows = rows(&host);
+    let drains = runtime.adapter_fetch_drains();
+    let completions = logged(runtime);
+    let binding = runtime.status().unwrap().binding.unwrap().id;
+    runtime.validate_sdk(&sdk).unwrap();
+    // Retire/release and close before the expected-red progress assertions.
+    runtime.retire_sdk(&sdk, false).unwrap();
+    runtime.release_sdk(&sdk).unwrap();
+    drop(owner_cleanup);
+    drop(collection);
+    host.close().unwrap();
+
+    assert_eq!(after_rows, before_rows);
+    assert!(after.inbox.iter().all(|e| !matches!(e.value, InboxValue::Deletion)));
+    assert_eq!(&drains[..drains_before_success.len()], &drains_before_success);
+    assert_eq!(
+        &drains[drains_before_success.len()..],
+        &[cloud::adapter::FetchDrain {
+            zone: zone.clone(),
+            fetched: true,
+        }],
+        "R5 P2: successful post-point zone callbacks must retain fetched:true across epoch verification"
+    );
+    assert!(finished);
+    assert!(
+        after.absence_pass_completed,
+        "R5 P2: the original cursorless pass must complete"
+    );
+    assert_eq!(completions, vec![(binding, zone, pass, 0, BTreeSet::new())]);
+}
+
+// Each case is independently selectable; a RED crash witness cannot hide the
+// other service outcome or the already-durable stronger account reasons.
+#[test]
+fn missing_epoch_unknown_item_sigkill_saved_state_reopen() {
+    epoch_loss_sigkill_reopen(false, "none");
+}
+#[test]
+fn missing_epoch_zone_not_found_sigkill_saved_state_reopen() {
+    epoch_loss_sigkill_reopen(true, "none");
+}
+#[test]
+fn missing_epoch_unknown_item_sigkill_preserves_signed_out() {
+    epoch_loss_sigkill_reopen(false, "signedOut");
+}
+#[test]
+fn missing_epoch_zone_not_found_sigkill_preserves_signed_out() {
+    epoch_loss_sigkill_reopen(true, "signedOut");
+}
+#[test]
+fn missing_epoch_unknown_item_sigkill_preserves_account_changed() {
+    epoch_loss_sigkill_reopen(false, "accountChanged");
+}
+#[test]
+fn missing_epoch_zone_not_found_sigkill_preserves_account_changed() {
+    epoch_loss_sigkill_reopen(true, "accountChanged");
+}
+
+fn epoch_loss_sigkill_reopen(zone_missing: bool, stronger: &str) {
+    use sign_out_absence as actual;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("epoch-loss-case.json"),
+        serde_json::to_vec(&(zone_missing, stronger)).unwrap(),
+    )
+    .unwrap();
+    let (mut child, rx) = Q6Child::spawn_checkpoint(
+        root.path(),
+        "cloud_missing_epoch_accepted_child_checkpoint",
+        EPOCH_LOSS_CHILD_ENV,
+        EPOCH_LOSS_CHECKPOINT,
+    );
+    let checkpoint = rx.recv_timeout(BUDGET);
+    // Never parse/assert before the process has been killed and reaped. Drop
+    // owns this same cleanup if receiving, parsing or a later assertion fails.
+    let (killed, reaped) = child.stop().unwrap();
+    killed.unwrap();
+    let status = reaped.unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(9), "actual SIGKILL at accepted epoch return");
+    }
+    let checkpoint: EpochLossCheckpoint = serde_json::from_str(
+        &checkpoint.expect("accepted missing epoch must return its real Active followup within BUDGET"),
+    )
+    .unwrap();
+    assert!(!checkpoint.serialization.is_empty());
+    assert!(
+        checkpoint
+            .entities
+            .iter()
+            .any(|e| e.mark.is_some() && e.local_rev > e.acked_rev)
+    );
+
+    // Reopen the actual adopted collection and its original tracking files.
+    // CoreHost's Drop closes on assertion/panic as well as explicit close below.
+    let host = actual::open_actual(&root.path().join("epoch-loss-b"), Arc::new(Account));
+    let runtime = host.cloud_runtime().unwrap();
+    let reopened = runtime.adapter_snapshot().unwrap();
+    let before_rows = rows(&host);
+    let mut service = service(root.path());
+    let mut owner = None;
+    let mut restored = None;
+    let drains_before;
+    if runtime.status().unwrap().binding.unwrap().facts.state == cloud::BindingState::Active {
+        let (sdk, serialization, zone) = admit(&host);
+        restored = serialization;
+        owner = Some(sdk.clone());
+        // Replay owned fetch boundaries for unchanged zones, with no record or
+        // zone callbacks. Reopen keeps the SDK bytes; no account event resets
+        // them. Any recovered loss evidence must come from production.
+        drains_before = runtime.adapter_fetch_drains();
+        for target in ["meguri-root", zone.as_str()] {
+            if runtime.validate_sdk(&sdk).is_err() {
+                break;
+            }
+            let fetch = runtime.adapter_begin_fetch(&sdk, vec![target.into()]).unwrap();
+            let group = format!("meguri-{fetch}");
+            runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+            let did = runtime.adapter_did_fetch(&sdk, &group, true);
+            if runtime.validate_sdk(&sdk).is_err() {
+                break;
+            }
+            did.unwrap();
+            let reads = runtime
+                .adapter_fetch_reads(&sdk, fetch, &host.collection().unwrap())
+                .unwrap();
+            for read in reads {
+                let result = actual::read_control(
+                    &mut service,
+                    read.zone(),
+                    if read.is_active() { "active" } else { "epoch" },
+                );
+                let followup = runtime
+                    .adapter_complete_fetch_read(&read, &host.collection().unwrap(), result, false, None, None)
+                    .unwrap();
+                if let Some(active) = followup {
+                    assert!(active.is_active());
+                    let result = actual::read_control(&mut service, active.zone(), "active");
+                    assert!(
+                        runtime
+                            .adapter_complete_fetch_read(
+                                &active,
+                                &host.collection().unwrap(),
+                                result,
+                                false,
+                                None,
+                                None
+                            )
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+            }
+            if runtime.validate_sdk(&sdk).is_ok() {
+                let _ = runtime.adapter_finish_fetch(&sdk, fetch).unwrap();
+            }
+        }
+    } else {
+        drains_before = runtime.adapter_fetch_drains();
+        assert!(
+            runtime.register_sdk(false).is_err(),
+            "durably isolated recovery must refuse SDK admission"
+        );
+    }
+    let had_owner = owner.is_some();
+    let confirmed = runtime.sdk_root_confirmed();
+    let confirmations = runtime
+        .trace()
+        .iter()
+        .filter(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+        .count();
+    let drains = runtime.adapter_fetch_drains();
+    let batch = owner.as_ref().and_then(|sdk| {
+        runtime
+            .build_collection_batch(sdk, &host.collection().unwrap(), &actual::names(runtime))
+            .ok()
+    });
+    let send_fenced = batch.as_ref().is_none_or(|b| b.id == 0 && b.saves.is_empty());
+    let after = runtime.adapter_snapshot().unwrap();
+    let state = runtime.status().unwrap().binding.unwrap().facts.state;
+    let unchanged_rows = rows(&host) == before_rows;
+    let no_absence_completion = logged(runtime).is_empty();
+    // Capture every outcome before cleanup can change authority or isolation.
+    if let Some(sdk) = owner {
+        runtime.retire_sdk(&sdk, false).unwrap();
+        runtime.release_sdk(&sdk).unwrap();
+    }
+    host.close().unwrap();
+
+    assert!(
+        reopened.serialization == Some(checkpoint.serialization.clone()),
+        "saved SDK state must survive SIGKILL"
+    );
+    if had_owner {
+        assert_eq!(restored, Some(checkpoint.serialization.clone()));
+    }
+    assert!(reopened.binding == checkpoint.binding && after.binding == checkpoint.binding);
+    for pending in checkpoint
+        .entities
+        .iter()
+        .filter(|e| e.mark.is_some() && e.local_rev > e.acked_rev)
+    {
+        if let Payload::Note(note) = &pending.payload {
+            let row = before_rows[&Table::Notes]
+                .iter()
+                .find(|row| row[0] == Cell::Integer(note.id))
+                .unwrap();
+            assert_eq!(
+                row[6],
+                Cell::Text(note.flds.clone()),
+                "pending local row must survive the process kill"
+            );
+        }
+        for snapshot in [&reopened, &after] {
+            let retained = snapshot.entities.iter().find(|e| e.name == pending.name).unwrap();
+            assert!(
+                retained.local_rev == pending.local_rev
+                    && retained.acked_rev == pending.acked_rev
+                    && retained.mark == pending.mark
+                    && retained.payload == pending.payload
+                    && retained.acked_payload == pending.acked_payload
+                    && retained.in_flight == pending.in_flight,
+                "actual pending entity must survive loss recovery without send/ACK"
+            );
+        }
+    }
+    assert!(unchanged_rows);
+    assert!(
+        after
+            .inbox
+            .iter()
+            .all(|entry| !matches!(entry.value, InboxValue::Deletion))
+    );
+    assert!(reopened.root == checkpoint.root && after.root == checkpoint.root);
+    assert!(
+        drains == drains_before,
+        "unchanged callbacks must not drain an accepted lost epoch"
+    );
+    assert!(
+        !confirmed && confirmations == 0,
+        "saved Active cannot confirm after accepted epoch loss"
+    );
+    assert!(send_fenced, "recovery must fence collection sends");
+    assert!(no_absence_completion && !after.absence_pass_completed);
+    let expected = match stronger {
+        "signedOut" => cloud::IsolationReason::SignedOut,
+        "accountChanged" => cloud::IsolationReason::AccountChanged,
+        "none" => cloud::IsolationReason::ZoneMissing,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        state,
+        cloud::BindingState::Isolated(expected),
+        "loss must settle without user confirmation"
+    );
+}
+
+/// Same Q6 child owner/pipe family; this checkpoint is an actual returned
+/// FetchRead, not a stage callback that invents acceptance or isolation.
+#[test]
+fn cloud_missing_epoch_accepted_child_checkpoint() {
+    use sign_out_absence as actual;
+    let Some(root) = std::env::var_os(EPOCH_LOSS_CHILD_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    let (zone_missing, stronger): (bool, String) =
+        serde_json::from_slice(&std::fs::read(root.join("epoch-loss-case.json")).unwrap()).unwrap();
+    actual::generated(&root.join("epoch-loss-a"));
+    let publisher = actual::open_actual(&root.join("epoch-loss-a"), Arc::new(Account));
+    let mut service = service(&root);
+    actual::publish(&publisher, &mut service);
+    let host = actual::adopt(&root.join("epoch-loss-b"), &mut service);
+    publisher.close().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let (old, _, zone) = admit(&host);
+    confirm_root(&host, &old, &mut service);
+    // Deliver a Service page and retain its cursor through the SDK state event.
+    // The replacement SDK loads those bytes before its real account callback
+    // establishes savedAccountReset; no tracking facts are supplied by hand.
+    let fetch = begin(runtime, &old, &zone);
+    let p = page(&mut service, &zone, None);
+    assert!(!p.more);
+    deliver(&host, &old, &zone, &p, true);
+    finish(runtime, &old, &zone, fetch, false);
+    runtime.retire_sdk(&old, false).unwrap();
+    runtime.release_sdk(&old).unwrap();
+    let (sdk, serialization, _) = admit(&host);
+    assert!(serialization.is_some());
+    runtime.adapter_account(Some(&sdk), identity()).unwrap();
+    let note = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = note.payload else {
+        panic!("actual adopted note required")
+    };
+    meguri_engine::notes::update(
+        &host.collection().unwrap(),
+        meguri_engine::notes::UpdateNote {
+            id: meguri_model::ids::NoteId(note.id),
+            fields: vec!["pending crash witness".into(), "retained back".into()],
+            tags: vec![],
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    runtime
+        .reconcile_binding(&host.collection().unwrap(), &host.media().unwrap(), BUDGET)
+        .unwrap();
+    let operation = if zone_missing {
+        Operation::DeleteZone {
+            zone: zone.clone(),
+            cause: meguri_testkit::cloud::RemovalCause::Deleted,
+        }
+    } else {
+        Operation::Modify {
+            zone: zone.clone(),
+            atomic: false,
+            changes: vec![Mutation::Delete { name: "epoch".into() }],
+        }
+    };
+    service
+        .request(&scope(), Caller::default(), operation)
+        .unwrap()
+        .result
+        .unwrap();
+    let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    let mut reads = runtime
+        .adapter_fetch_reads(&sdk, fetch, &host.collection().unwrap())
+        .unwrap();
+    assert_eq!(reads.len(), 1);
+    let epoch = reads.remove(0);
+    assert!(!epoch.is_active() && epoch.zone() == zone);
+    let result = actual::read_control(&mut service, &zone, "epoch");
+    assert!(matches!(
+        (&result, zone_missing),
+        (cloud::publication::RecordRead::Missing, false) | (cloud::publication::RecordRead::ZoneMissing, true)
+    ));
+    let active = runtime
+        .adapter_complete_fetch_read(&epoch, &host.collection().unwrap(), result, false, None, None)
+        .unwrap()
+        .expect("accepted epoch loss must return the original Active followup");
+    assert!(active.is_active() && active.zone() == "meguri-root");
+    let diagnostic = runtime.adapter_root_read_diagnostics().pop().unwrap();
+    assert!(diagnostic.accepted && !diagnostic.active && !diagnostic.lost_collection);
+    assert_eq!(
+        diagnostic.outcome,
+        if zone_missing { "zoneNotFound" } else { "unknownItem" }
+    );
+    // Apply the stronger account reasons through runtime events after the
+    // epoch result returns, keeping the original SDK and tracking ownership.
+    match stronger.as_str() {
+        "none" => {}
+        "signedOut" => runtime.adapter_account(None, IdentityStatus::SignedOut).unwrap(),
+        "accountChanged" => runtime
+            .adapter_account(
+                None,
+                IdentityStatus::Available(OpaqueBytes(b"synthetic-account-B".to_vec())),
+            )
+            .unwrap(),
+        _ => panic!("unknown synthetic case"),
+    }
+    let snapshot = runtime.adapter_snapshot().unwrap();
+    let checkpoint = EpochLossCheckpoint {
+        serialization: snapshot.serialization.unwrap(),
+        binding: snapshot.binding,
+        entities: snapshot.entities,
+        root: snapshot.root,
+        drains: runtime.adapter_fetch_drains(),
+    };
+    assert!(
+        checkpoint
+            .entities
+            .iter()
+            .any(|e| e.mark.is_some() && e.local_rev > e.acked_rev)
+    );
+    // Keep Active and Host alive. No completion, finish-fetch, retire, close or
+    // Drop runs between this real accepted return and the parent's SIGKILL.
+    println!("{EPOCH_LOSS_CHECKPOINT}{}", serde_json::to_string(&checkpoint).unwrap());
+    std::io::stdout().flush().unwrap();
+    let _ = std::io::stdin().read(&mut [0]);
+    panic!("parent must SIGKILL/reap before accepting Active or retiring SDK");
+}
+
+// K12.5/K22: characterize a returned storage failure before loss is durable.
+// Keep the two Service outcomes and two I/O kinds independently selectable.
+#[test]
+fn missing_epoch_unknown_item_obligation_commit_other_saved_state_reopen() {
+    epoch_loss_commit_error_reopen(false, std::io::ErrorKind::Other);
+}
+#[test]
+fn missing_epoch_unknown_item_obligation_commit_storage_full_saved_state_reopen() {
+    epoch_loss_commit_error_reopen(false, std::io::ErrorKind::StorageFull);
+}
+#[test]
+fn missing_epoch_zone_not_found_obligation_commit_other_saved_state_reopen() {
+    epoch_loss_commit_error_reopen(true, std::io::ErrorKind::Other);
+}
+#[test]
+fn missing_epoch_zone_not_found_obligation_commit_storage_full_saved_state_reopen() {
+    epoch_loss_commit_error_reopen(true, std::io::ErrorKind::StorageFull);
+}
+
+fn epoch_loss_commit_error_reopen(zone_missing: bool, kind: std::io::ErrorKind) {
+    use meguri_model::faultpoint::{self, Fault};
+    use sign_out_absence as actual;
+    const POINT: &str = "cloud.adapter.before_commit";
+    // Use the existing fault helpers with the same unwind-safe scope pattern
+    // as the I/O tests. Nothing except the completion runs while armed.
+    struct Disarm;
+    impl Drop for Disarm {
+        fn drop(&mut self) {
+            faultpoint::disarm(POINT);
+        }
+    }
+    // CoreHost already closes on unwind. End the actual occupied SDK slot
+    // first, including if admission or a later assertion panics.
+    struct OwnerCleanup<'a>(&'a CoreHost);
+    impl Drop for OwnerCleanup<'_> {
+        fn drop(&mut self) {
+            if let Some(runtime) = self.0.cloud_runtime()
+                && let Some(sdk) = runtime.incoming_sdk_instance_for_testing()
+            {
+                let _ = runtime.retire_sdk(&sdk, false);
+                let _ = runtime.release_sdk(&sdk);
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    actual::generated(&root.path().join("commit-loss-a"));
+    let publisher = actual::open_actual(&root.path().join("commit-loss-a"), Arc::new(Account));
+    let publisher_cleanup = OwnerCleanup(&publisher);
+    let mut service = service(root.path());
+    actual::publish(&publisher, &mut service);
+    let directory = root.path().join("commit-loss-b");
+    let host = actual::adopt(&directory, &mut service);
+    let owner_cleanup = OwnerCleanup(&host);
+    drop(publisher_cleanup);
+    publisher.close().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let (old, _, zone) = admit(&host);
+    confirm_root(&host, &old, &mut service);
+    // Match the crash fixture's savedAccountReset setup using actual pages,
+    // SDK events and account input. This reset occurs only BEFORE the fault.
+    let fetch = begin(runtime, &old, &zone);
+    let p = page(&mut service, &zone, None);
+    assert!(!p.more);
+    deliver(&host, &old, &zone, &p, true);
+    finish(runtime, &old, &zone, fetch, false);
+    runtime.retire_sdk(&old, false).unwrap();
+    runtime.release_sdk(&old).unwrap();
+    let (sdk, serialization, _) = admit(&host);
+    assert!(serialization.is_some());
+    runtime.adapter_account(Some(&sdk), identity()).unwrap();
+    let note = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = note.payload else {
+        panic!("actual adopted note required")
+    };
+    meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id: meguri_model::ids::NoteId(note.id),
+            fields: vec!["pending commit witness".into(), "retained back".into()],
+            tags: vec![],
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), BUDGET)
+        .unwrap();
+    let operation = if zone_missing {
+        Operation::DeleteZone {
+            zone: zone.clone(),
+            cause: meguri_testkit::cloud::RemovalCause::Deleted,
+        }
+    } else {
+        Operation::Modify {
+            zone: zone.clone(),
+            atomic: false,
+            changes: vec![Mutation::Delete { name: "epoch".into() }],
+        }
+    };
+    service
+        .request(&scope(), Caller::default(), operation)
+        .unwrap()
+        .result
+        .unwrap();
+    let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    let mut reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+    assert_eq!(reads.len(), 1);
+    let epoch = reads.remove(0);
+    assert!(!epoch.is_active() && epoch.zone() == zone);
+    let result = actual::read_control(&mut service, &zone, "epoch");
+    assert!(matches!(
+        (&result, zone_missing),
+        (cloud::publication::RecordRead::Missing, false) | (cloud::publication::RecordRead::ZoneMissing, true)
+    ));
+    let before = runtime.adapter_snapshot().unwrap();
+    let before_rows = rows(&host);
+    let drains_before = runtime.adapter_fetch_drains();
+    let absence_before = logged(runtime);
+    let confirmations_before = runtime
+        .trace()
+        .iter()
+        .filter(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+        .count();
+    let requests_before = service.request_log().unwrap();
+    let durable_before: serde_json::Value = serde_json::from_slice(&before.tracking_content).unwrap();
+    assert!(
+        before
+            .entities
+            .iter()
+            .any(|e| e.mark.is_some() && e.local_rev > e.acked_rev)
+    );
+    assert!(before.root.is_some() && before.serialization == serialization);
+    assert!(durable_before[4]["collection_loss"].is_null());
+    assert!(!runtime.sdk_root_confirmed());
+
+    let failed = {
+        let _disarm = Disarm;
+        faultpoint::arm(POINT, Fault::IoError(kind));
+        runtime.adapter_complete_fetch_read(&epoch, &collection, result, false, None, None)
+    }; // Disarm before assertions, snapshot reads, sends or owner cleanup.
+    assert!(
+        !matches!(&failed, Ok(Some(_))),
+        "a failed obligation commit must return no Active followup"
+    );
+    assert!(
+        matches!(failed, Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::Io(actual))) if actual == kind),
+        "the real completion must return the injected tracking I/O kind"
+    );
+    let status = runtime.status().unwrap();
+    assert!(
+        status.tracking_stopped && status.scan_required && !status.scan_completed_this_open && !status.scan_drained
+    );
+    let batch = runtime
+        .build_collection_batch(&sdk, &collection, &actual::names(runtime))
+        .unwrap();
+    assert_eq!(batch.id, 0);
+    assert!(batch.saves.is_empty());
+    let after = runtime.adapter_snapshot().unwrap();
+    let durable_after: serde_json::Value = serde_json::from_slice(&after.tracking_content).unwrap();
+    // Invalidation clears the runtime's drained flag separately. Compare the
+    // entire adapter row to prove the INSERT and its loss obligation rolled back.
+    assert_eq!(durable_after[4], durable_before[4]);
+    assert!(after.tracking_stopped && after.binding == before.binding);
+    assert!(after.entities == before.entities && after.inbox == before.inbox);
+    assert!(after.root == before.root && after.serialization == before.serialization);
+    assert_eq!(rows(&host), before_rows);
+    assert_eq!(runtime.adapter_fetch_drains(), drains_before);
+    assert!(logged(runtime) == absence_before);
+    assert_eq!(after.absence_pass_completed, before.absence_pass_completed);
+    assert!(!runtime.sdk_root_confirmed());
+    assert_eq!(
+        runtime
+            .trace()
+            .iter()
+            .filter(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+            .count(),
+        confirmations_before
+    );
+    assert!(service.request_log().unwrap() == requests_before);
+    // accepted is diagnostic validation recorded before the failing transaction.
+    let diagnostic = runtime.adapter_root_read_diagnostics().pop().unwrap();
+    assert!(diagnostic.accepted && !diagnostic.active && !diagnostic.lost_collection);
+    assert_eq!(
+        diagnostic.outcome,
+        if zone_missing { "zoneNotFound" } else { "unknownItem" }
+    );
+    runtime.retire_sdk(&sdk, false).unwrap();
+    runtime.release_sdk(&sdk).unwrap();
+    drop(owner_cleanup);
+    drop(collection);
+    host.close().unwrap();
+    drop(host);
+
+    let host = actual::open_actual(&directory, Arc::new(Account));
+    let owner_cleanup = OwnerCleanup(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    let reopened = runtime.adapter_snapshot().unwrap();
+    let (sdk, restored, restored_zone) = admit(&host);
+    assert_eq!(restored, before.serialization);
+    assert_eq!(restored_zone, zone);
+    let recovery_drains = runtime.adapter_fetch_drains();
+    // No account reset, state deletion, reseed, zone callbacks or records on
+    // reopen. Answer only the reads these unchanged owned fetches actually issue.
+    for target in ["meguri-root", zone.as_str()] {
+        if runtime.validate_sdk(&sdk).is_err() {
+            break;
+        }
+        let fetch = runtime.adapter_begin_fetch(&sdk, vec![target.into()]).unwrap();
+        let group = format!("meguri-{fetch}");
+        runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+        let did = runtime.adapter_did_fetch(&sdk, &group, true);
+        if runtime.validate_sdk(&sdk).is_err() {
+            break;
+        }
+        did.unwrap();
+        let reads = runtime
+            .adapter_fetch_reads(&sdk, fetch, &host.collection().unwrap())
+            .unwrap();
+        for read in reads {
+            let result = actual::read_control(
+                &mut service,
+                read.zone(),
+                if read.is_active() { "active" } else { "epoch" },
+            );
+            if let Some(active) = runtime
+                .adapter_complete_fetch_read(&read, &host.collection().unwrap(), result, false, None, None)
+                .unwrap()
+            {
+                assert!(active.is_active());
+                let result = actual::read_control(&mut service, active.zone(), "active");
+                assert!(
+                    runtime
+                        .adapter_complete_fetch_read(&active, &host.collection().unwrap(), result, false, None, None)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+        }
+        if runtime.validate_sdk(&sdk).is_ok() {
+            let _ = runtime.adapter_finish_fetch(&sdk, fetch).unwrap();
+        }
+    }
+    let confirmed = runtime.sdk_root_confirmed();
+    let confirmations = runtime
+        .trace()
+        .iter()
+        .filter(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+        .count();
+    let drains = runtime.adapter_fetch_drains();
+    let batch = runtime
+        .build_collection_batch(&sdk, &host.collection().unwrap(), &actual::names(runtime))
+        .unwrap();
+    let after = runtime.adapter_snapshot().unwrap();
+    let after_rows = rows(&host);
+    let absence = logged(runtime);
+    let requests = service.request_log().unwrap();
+    let binding_state = runtime.status().unwrap().binding.unwrap().facts.state;
+    // Preserve all observations, then release the real owner before asserting
+    // the recovery witness, including against unsafe existing behavior.
+    runtime.retire_sdk(&sdk, false).unwrap();
+    runtime.release_sdk(&sdk).unwrap();
+    drop(owner_cleanup);
+    host.close().unwrap();
+    assert!(reopened.serialization == before.serialization && after.serialization == before.serialization);
+    assert!(reopened.binding == before.binding && after.binding == before.binding);
+    assert!(reopened.root == before.root && after.root == before.root);
+    for pending in before
+        .entities
+        .iter()
+        .filter(|e| e.mark.is_some() && e.local_rev > e.acked_rev)
+    {
+        for snapshot in [&reopened, &after] {
+            let retained = snapshot.entities.iter().find(|e| e.name == pending.name).unwrap();
+            assert!(
+                retained.local_rev == pending.local_rev
+                    && retained.acked_rev == pending.acked_rev
+                    && retained.mark == pending.mark
+                    && retained.payload == pending.payload
+                    && retained.base_payload == pending.base_payload
+                    && retained.acked_payload == pending.acked_payload
+                    && retained.acked_system_fields == pending.acked_system_fields
+                    && retained.acked_envelope == pending.acked_envelope
+                    && retained.acked_row_digest == pending.acked_row_digest
+                    && retained.acked_payload_digest == pending.acked_payload_digest
+                    && retained.server_erev == pending.server_erev
+                    && retained.in_flight == pending.in_flight,
+                "reopen must preserve pending revisions, payloads, ACKs and flights"
+            );
+        }
+    }
+    assert_eq!(after_rows, before_rows);
+    assert!(
+        after
+            .inbox
+            .iter()
+            .all(|entry| !matches!(entry.value, InboxValue::Deletion))
+    );
+    assert!(absence.is_empty());
+    assert_eq!(
+        binding_state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing)
+    );
+    assert!(!after.absence_pass_completed);
+    let durable_after: serde_json::Value = serde_json::from_slice(&after.tracking_content).unwrap();
+    assert!(durable_after[4]["absence"].is_null());
+    assert!(
+        requests[requests_before.len()..]
+            .iter()
+            .all(|r| r.kind == meguri_testkit::cloud::RequestKind::Read)
+    );
+    assert!(
+        !confirmed && confirmations == 0,
+        "failed loss persistence must not let saved Active confirm on reopen"
+    );
+    assert_eq!(recovery_drains, drains_before);
+    assert_eq!(
+        drains, recovery_drains,
+        "unchanged recovery callbacks must remain fenced from drains"
+    );
+    assert_eq!(batch.id, 0, "recovery must keep collection sends fenced");
+    assert!(batch.saves.is_empty());
+    // If saved-state callbacks request no epoch read, there is no owned
+    // FetchRead available for another attempt. Leave loss, isolation and SDK state unchanged.
 }

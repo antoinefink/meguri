@@ -23,6 +23,8 @@ mod adapter_impl;
 mod adoption_impl;
 #[path = "asset_read_runtime.rs"]
 pub(super) mod asset_read_impl;
+#[path = "fetch_read_runtime.rs"]
+mod fetch_read_impl;
 pub use asset_read_impl::AssetReadActivityGuard;
 #[path = "conflict_cleanup_runtime.rs"]
 mod conflict_cleanup_impl;
@@ -468,7 +470,7 @@ pub struct Runtime {
     cloud_capture_hook: Mutex<Option<CloudCaptureHook>>,
 }
 #[derive(Clone, PartialEq, Eq)]
-struct ScanGuard {
+pub(super) struct ScanGuard {
     invalidation: u64,
     binding: BindingId,
     open: u64,
@@ -576,6 +578,10 @@ impl Runtime {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
     fn invalidate_locked(state: &mut State) {
+        with_tracking_access(|| Self::invalidate_tracking_locked(state));
+    }
+    // Caller holds both runtime state and tracking access.
+    fn invalidate_tracking_locked(state: &mut State) {
         match state.invalidation.checked_add(1) {
             Some(next) => state.invalidation = next,
             None => state.invalidation_exhausted = true,
@@ -584,13 +590,11 @@ impl Runtime {
         state.whole_complete = false;
         state.tracking_stopped = true;
         if let Some(id) = state.bound.as_ref().map(|b| b.binding.id) {
-            let _ = with_tracking_access(|| {
-                state
-                    .store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .set_workflow_drained(id, false, (0, 0))
-            });
+            let _ = state
+                .store
+                .as_mut()
+                .ok_or(Error::Database)
+                .and_then(|store| store.set_workflow_drained(id, false, (0, 0)));
         }
     }
     fn bind(&self, collection: &Collection) -> Result<(), RuntimeError> {
@@ -734,10 +738,34 @@ impl Runtime {
                 }
                 meguri_engine::device_state::AccountBinding::Unknown => false,
             });
+            let adapter_durable = store.adapter_durable(binding.id)?;
+            if binding.facts.state == BindingState::Active
+                && publication_matches
+                && publication_clear
+                && decision_matches
+                && adapter_durable
+                    .collection_loss
+                    .as_ref()
+                    .is_some_and(|loss| loss.binding == binding && loss.file == file)
+            {
+                // Reconstruct only the obligation, not process authority. The
+                // existing isolation transaction preserves serialization/ACKs
+                // and local rows; account/permanent reasons remain stronger.
+                store.isolate_runtime_binding(binding.id, IsolationReason::ZoneMissing)?;
+                binding = store.binding(binding.id)?.ok_or(Error::BindingNotFound)?;
+            }
+            state.adapter.durable = store.adapter_durable(binding.id)?;
             let usable = binding.facts.state == BindingState::Active
                 && publication_matches
                 && publication_clear
-                && decision_matches;
+                && decision_matches
+                && state.adapter.durable.collection_loss.is_none()
+                && state
+                    .adapter
+                    .durable
+                    .epoch_verification
+                    .as_ref()
+                    .is_none_or(|pending| pending.binding == binding && pending.file == file);
             let latest_mod = evidence.opened_mod;
             let latest_scm = evidence.opened_scm;
             state.publication.restarted_confirmed = restarted_confirmed;

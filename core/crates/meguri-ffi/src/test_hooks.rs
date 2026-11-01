@@ -779,3 +779,15 @@ pub fn test_cloud_zone_deletion_rows() -> Result<Vec<CloudZoneDeletionFixtureRow
         })
         .collect())
 }
+
+/// Inspect the occupied SDK slot even while its owner is stopping.
+/// The query leaves ownership and callback permissions unchanged.
+#[uniffi::export]
+pub fn test_cloud_installed_sdk_owner() -> Result<Option<String>, CoreError> {
+    callback::enter("test_cloud_installed_sdk_owner");
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud fixture unavailable"))?;
+    Ok(core.incoming_sdk_instance_for_testing())
+}

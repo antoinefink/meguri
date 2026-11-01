@@ -140,6 +140,9 @@ private struct PrivateCloudDatabaseQueue: NativeCloudDatabaseQueue {
 final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
     private struct State { var queued = false; var cancelled = false; var finished = false }
     private let state = Mutex(State())
+    private let readEvidence = Mutex<CloudZoneDeletionRead?>(nil)
+    func controlReadEvidence() -> CloudZoneDeletionRead? { readEvidence.withLock { $0 } }
+    func recordControlReadEvidence(_ value: CloudZoneDeletionRead) { readEvidence.withLock { $0 = value } }
     let operation: CKDatabaseOperation
     private let queue: any NativeCloudDatabaseQueue
     private let stream: AsyncStream<Result<CloudOwnTransportReply, any Error>>
@@ -259,8 +262,18 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
                 else if case .failure(let error) = result { read = NativeCloudOwnRecords.readError(error) }
                 else { throw CloudOwnTransportFailure.missingReply }
+                if !publication {
+                    let failure: CloudZoneDeletionFailure?
+                    if case .failure(let error)? = received { failure = .evidence(error) } else { failure = nil }
+                    let terminal: CloudZoneDeletionFailure?
+                    if case .failure(let error) = result { terminal = .evidence(error) } else { terminal = nil }
+                    prepared.recordControlReadEvidence(.init(read: read, failure: failure, terminal: terminal))
+                }
                 prepared.finish(.success(publication ? .publication(.read(read)) : .read(read)))
-            } catch { prepared.finish(.failure(error)) }
+            } catch {
+                prepared.recordControlReadEvidence(.init(read: .failed, terminal: .evidence(error)))
+                prepared.finish(.failure(error))
+            }
         }
         return prepared
     }

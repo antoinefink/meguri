@@ -10,6 +10,7 @@ pub(super) struct AdapterCommitOptions {
     pub at_ms: i64,
     pub fail: bool,
     pub start_absence: bool,
+    pub resolved_epoch: Option<super::adapter::EpochVerification>,
 }
 
 impl TrackingStore {
@@ -41,9 +42,18 @@ impl TrackingStore {
             at_ms,
             fail,
             start_absence,
+            resolved_epoch,
         } = options;
         let mut durable = durable.clone();
         let prior = self.adapter_durable(binding)?;
+        // Ordinary callbacks cannot forget accepted loss, including callbacks
+        // whose in-memory metadata predates its transaction.
+        durable.collection_loss = prior.collection_loss.or(durable.collection_loss);
+        durable.epoch_verification = match (prior.epoch_verification, resolved_epoch) {
+            (Some(pending), Some(resolved)) if pending == resolved => None,
+            (_, Some(_)) => return Err(Error::InvalidData),
+            (pending, None) => pending.or(durable.epoch_verification),
+        };
         // A state-deletion/isolation trigger may have ended the pass since the
         // Runtime last observed it. An ordinary callback cannot resurrect it.
         if !start_absence {
@@ -122,7 +132,10 @@ impl TrackingStore {
     pub(super) fn adapter_record_exchange(&mut self, binding: BindingId, durable: &Durable) -> Result<(), Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         let mut durable = durable.clone();
-        durable.absence = self.adapter_durable(binding)?.absence;
+        let prior = self.adapter_durable(binding)?;
+        durable.absence = prior.absence;
+        durable.collection_loss = prior.collection_loss.or(durable.collection_loss);
+        durable.epoch_verification = prior.epoch_verification.or(durable.epoch_verification);
         let tx = self.connection.transaction()?;
         tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![binding.0.as_slice(),encode(&durable)?])?;
         meguri_model::faultpoint!("cloud.adapter.before_commit")?;

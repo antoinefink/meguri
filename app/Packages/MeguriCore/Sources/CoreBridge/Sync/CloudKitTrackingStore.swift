@@ -99,7 +99,7 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowDiagnostics) {
             let value = try raw.diagnostics()
-            return CloudWorkflowDiagnostics(missingDidFetchEvents: value.missingDidFetchEvents, zoneDeletions: value.zoneDeletions.map(CloudZoneDeletionDiagnostic.init))
+            return CloudWorkflowDiagnostics(missingDidFetchEvents: value.missingDidFetchEvents, rootReads: value.rootReads.map(CloudRootReadDiagnostic.init), zoneDeletions: value.zoneDeletions.map(CloudZoneDeletionDiagnostic.init))
         }
     }
     public func status() async throws -> CloudWorkflowStatus {
@@ -240,6 +240,16 @@ extension CoreCloudWorkflowService {
     public static func configurePlatform(container: String, environment: CloudPlatformEnvironment, status: CloudAccountStatus, identity: Data?) async throws {
         try await MaintenanceLane.shared.call(.configureCloudPlatform) {
             try MeguriCoreBindings.configureCloudPlatform(container: container, environment: environment == .development ? .development : .production, status: status.raw, value: identity, keyBytes: SystemCloudKeyByteProvider())
+        }
+    }
+}
+
+extension CoreCloudWorkflowService {
+    func fetchReadPlan(sdk: String, id: UInt64) async throws -> CloudFetchReadPlan {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowFetchReadPlan) {
+            let plan = try raw.fetchReadPlan(sdk: sdk, id: id)
+            return CloudFetchReadPlan(qualified: plan.qualified, reads: plan.reads.map(CoreCloudFetchRead.init))
         }
     }
 }

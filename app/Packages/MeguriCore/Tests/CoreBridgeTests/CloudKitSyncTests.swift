@@ -2,12 +2,6 @@ import Foundation
 import Testing
 @testable import CoreBridge
 
-// Source-only first phase of U114. Enabled tests deliberately reference future
-// production APIs. Compile RED is required until the real bridge and adapter
-// implement them. No #if, skip, expected failure or fake core coverage.
-// Main base: 218ab2e2. Coherent Cloud batch base:
-// 1416a520542a8c5daa38a23bfe398da704c3d6c9. Runner Git base is synthetic.
-//
 // CoreCloudWorkflowService -> Rust provides every behavioral observation here.
 // In the two ordering cases, pendingTransition (Runtime::pending_transition)
 // supplies only synthetic pending-list input; it establishes no collection
@@ -192,6 +186,8 @@ extension EventTests {
             let guardBefore = try await f.core.currentGuard()
             let pending = await engine.pendingRecordZoneChanges()
             let updates = try await f.core.emittedUpdateIDs()
+            let name = try #require(f.names.first)
+            let original = try #require(try await f.core.entityFacts(name: name))
             let call = try await f.core.beginFetch(sdk: engine.instanceID, zones: [f.zone])
             await engine.emitRetained(.willFetch(groupID: "before-account-event", reason: .manual), label: "fetchBeforeAccountEvent")
             await engine.emitRetained(.willFetchZone(zone: f.zone), label: "zoneBeforeAccountEvent")
@@ -216,7 +212,31 @@ extension EventTests {
             try await f.adapter.requestFetch(zones: [f.zone])
             #expect(!(try await f.core.fetchDrains()).contains { $0.zone == f.zone && !$0.fetched })
             try await f.adapter.requestSend(zones: [f.zone])
-            let name = try #require(f.names.first)
+            let blocked = try #require(try await f.core.entityFacts(name: name))
+            #expect(blocked.ackedRev == original.ackedRev)
+            #expect(blocked.localRev == original.localRev)
+            #expect(blocked.inFlight == original.inFlight)
+            #expect(blocked.mark == original.mark)
+            #expect(await engine.pendingRecordZoneChanges() == pending)
+
+            // A real current-point collection fetch discharges verification.
+            let collectionDrainsBefore = try await f.core.fetchDrains()
+            await engine.appendFetchScripts([.manual(fetchedZones: [f.zone], records: [], group: nil)])
+            try await f.adapter.requestFetch(zones: [f.zone])
+            try await f.adapter.waitForIdle()
+            #expect((try await f.core.fetchDrains()).dropFirst(collectionDrainsBefore.count).contains {
+                $0.zone == f.zone && $0.fetched
+            })
+
+            // R6 skips root confirmation while discharging that marker.
+            let rootDrainsBefore = try await f.core.fetchDrains()
+            await engine.appendFetchScripts([.manual(fetchedZones: ["meguri-root"], records: [f.root], group: nil)])
+            try await f.adapter.requestFetch(zones: ["meguri-root"])
+            try await f.adapter.waitForIdle()
+            #expect((try await f.core.fetchDrains()).dropFirst(rootDrainsBefore.count).contains {
+                $0.zone == "meguri-root" && $0.fetched
+            })
+            try await f.adapter.requestSend(zones: [f.zone])
             #expect(try await f.core.entityFacts(name: name)?.ackedRev == 3)
         }
     }
@@ -715,6 +735,127 @@ extension EventTests {
             await engine.emitRetained(.didFetch(groupID: "scheduled-before-signin", reason: .scheduled), label: "didFetch")
             #expect(try await f.core.fetchDrains() == before)
             #expect(!(try await f.core.durableSnapshot()).absencePassCompleted)
+        }
+    }
+
+    /// Q11/P3/P12.3/K12.5/V26.1: a root will or did before signIn proves
+    /// no post-point root fetch. The original record-ID read's unknownItem
+    /// must isolate active_missing, with no root drain or absence completion.
+    @Test(arguments: [false, true])
+    func cloudKitManualSameIdentityNoStatePointRejectsEarlierRootFetch(afterRootDid: Bool) async throws {
+        let transport = CloudKitMissingActiveTransport()
+        try await withCloudKitFixture(assetReadTransport: transport) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.fetchDrains()
+            let guardBefore = try await f.core.currentGuard()
+            #expect(!(try await f.core.durableSnapshot()).absencePassCompleted)
+            let gate = CloudCallbackGate()
+            let scope = ["meguri-root", f.zone]
+            await engine.appendFetchScripts([
+                .manualPaused(fetchedZones: scope, records: [], pauseZone: "meguri-root",
+                              afterDid: afterRootDid, gate: gate),
+                .shortCircuited,
+            ])
+            try await withCloudTask(gates: [gate], operation: {
+                try await f.adapter.requestFetch(zones: scope)
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                let trace = await engine.recordedTrace()
+                #expect(trace.contains(.eventReturned("willFetchZone")))
+                #expect(trace.contains(.eventReturned("didFetchZone")) == afterRootDid)
+                await engine.signInSameSyntheticIdentity()
+                #expect(try await f.core.currentGuard() == guardBefore)
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                await gate.open()
+            })
+            try await f.adapter.waitForIdle()
+            let active = CloudKitMissingActiveTransport.active
+            try #require(transport.recordedTrace() == [
+                .prepared(active), .enqueued(active), .unknownItem(active), .replied(.missing),
+            ])
+            let drains = Array((try await f.core.fetchDrains()).dropFirst(before.count))
+            #expect(!drains.contains { $0.zone == "meguri-root" })
+            #expect(!(try await f.core.status()).syncingCollection)
+            let after = try await f.core.durableSnapshot()
+            #expect(!after.absencePassCompleted)
+            // adapter_snapshot_locked serializes the real stored binding as
+            // the first tuple, with BindingFacts last; no fake status trace.
+            let content = try #require(JSONSerialization.jsonObject(with: after.trackingContent) as? [Any])
+            let binding = try #require(content.first as? [Any])
+            let facts = try #require(binding.last as? [String: Any])
+            #expect(facts["state"] as? [String: String] == ["Isolated": "ActiveMissing"])
+            #expect(try await f.core.currentGuard() != guardBefore)
+            await #expect(throws: (any Error).self) { try await f.core.validateSDK(engine.instanceID) }
+            let trace = await engine.recordedTrace()
+            let options = trace.compactMap { if case .fetchOptions(let value) = $0 { value } else { nil } }
+            #expect(options.count == 1 && options.allSatisfy { $0.zones == scope })
+            let signIn = try #require(trace.firstIndex(of: .eventReturned("sameIdentitySignIn")))
+            let rootEvent = try #require(trace.firstIndex(of: .eventReturned(afterRootDid ? "didFetchZone" : "willFetchZone")))
+            let returned = try #require(trace.firstIndex { if case .fetchReturned = $0 { true } else { false } })
+            #expect(rootEvent < signIn && signIn < returned)
+            let callbacks = trace.compactMap { entry -> String? in
+                guard case .eventReturned(let name) = entry,
+                      ["willFetch", "willFetchZone", "didFetchZone", "didFetch", "sameIdentitySignIn"].contains(name)
+                else { return nil }
+                return name
+            }
+            let rootCallbacks = afterRootDid
+                ? ["willFetchZone", "didFetchZone", "sameIdentitySignIn"]
+                : ["willFetchZone", "sameIdentitySignIn", "didFetchZone"]
+            #expect(callbacks == ["willFetch"] + rootCallbacks + ["willFetchZone", "didFetchZone", "didFetch"])
+            #expect(await f.factory.engines().count == 1)
+            #expect(!trace.contains(.reentrantNetworkCall))
+        }
+    }
+
+    /// Q11/P3/K17.4: a real no-state creation starts the absence pass, whereas
+    /// a same-identity reset of a saved instance starts none. In either case a
+    /// pre-point zone will followed by its original did completes no pass.
+    @Test(arguments: [false, true])
+    func cloudKitManualPrePointCollectionFetchCompletesNoAbsencePass(createdWithoutState: Bool) async throws {
+        let savedState: Data? = createdWithoutState ? nil : Data([0x73, 0x64, 0x6b])
+        try await withCloudKitFixture(savedState: savedState) { f in
+            let engine = try await f.engine()
+            #expect(engine.restoredSerialization == savedState)
+            let before = try await f.core.fetchDrains()
+            let snapshotBefore = try await f.core.durableSnapshot()
+            #expect(!snapshotBefore.absencePassCompleted)
+            let guardBefore = try await f.core.currentGuard()
+            let gate = CloudCallbackGate()
+            await engine.appendFetchScripts([
+                .manualPaused(fetchedZones: [f.zone], records: [f.incoming], pauseZone: f.zone,
+                              afterDid: false, gate: gate),
+                .shortCircuited,
+            ])
+            try await withCloudTask(gates: [gate], operation: {
+                try await f.adapter.requestFetch(zones: [f.zone])
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                await engine.signInSameSyntheticIdentity()
+                #expect(try await f.core.currentGuard() == guardBefore)
+                #expect(!(try await f.core.durableSnapshot()).absencePassCompleted)
+                try await f.core.validateSDK(engine.instanceID)
+                await gate.open()
+            })
+            try await f.adapter.waitForIdle()
+            #expect(try await f.core.fetchDrains() == before)
+            let after = try await f.core.durableSnapshot()
+            #expect(!after.absencePassCompleted)
+            #expect(after.binding == snapshotBefore.binding)
+            #expect(after.rootEnvelope == snapshotBefore.rootEnvelope)
+            #expect(after.rootSystemFields == snapshotBefore.rootSystemFields)
+            try await expectAppliedCloudIncoming(f)
+            #expect(try await f.core.currentGuard() == guardBefore)
+            #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+            let trace = await engine.recordedTrace()
+            let will = try #require(trace.firstIndex(of: .eventReturned("willFetchZone")))
+            let signIn = try #require(trace.firstIndex(of: .eventReturned("sameIdentitySignIn")))
+            let records = try #require(trace.firstIndex(of: .eventReturned("fetched")))
+            let did = try #require(trace.firstIndex(of: .eventReturned("didFetchZone")))
+            let returned = try #require(trace.firstIndex { if case .fetchReturned = $0 { true } else { false } })
+            #expect(will < signIn && signIn < records && records < did && did < returned)
+            #expect(!trace.contains(.reentrantNetworkCall))
         }
     }
 

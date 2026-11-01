@@ -34,10 +34,13 @@ public actor FieldDiagnosticsStore {
     public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
     private let zoneDeletionDiagnostics: @Sendable () async -> [CloudZoneDeletionDiagnostic]
+    private let rootReadDiagnostics: @Sendable () async -> [CloudRootReadDiagnostic]
 
-    public init(directory: URL, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] }) {
+    public init(directory: URL, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] },
+                rootReadDiagnostics: @escaping @Sendable () async -> [CloudRootReadDiagnostic] = { [] }) {
         self.directory = directory
         self.zoneDeletionDiagnostics = zoneDeletionDiagnostics
+        self.rootReadDiagnostics = rootReadDiagnostics
     }
 
     /// `<Application Support>/Diagnostics/` in the app's container.
@@ -47,7 +50,7 @@ public actor FieldDiagnosticsStore {
             // No open collection is a normal state for Copy Debug Info.
             let core = try? await workflow.diagnostics()
             return (core?.zoneDeletions ?? []) + CloudZoneDeletionDiagnostics.localFailures()
-        })
+        }, rootReadDiagnostics: { (try? await workflow.diagnostics().rootReads) ?? [] })
     }
 
     // MARK: Writing
@@ -125,7 +128,8 @@ public actor FieldDiagnosticsStore {
             if !stored.isEmpty { signposts[interval.name] = stored }
         }
         let zoneDeletions = await zoneDeletionDiagnostics().suffix(128).map(ZoneDeletionDebugInfo.init)
-        return try Self.encoder.encode(DebugInfo(metrics: try metrics(), diagnostics: try diagnostics(), signposts: signposts, zoneDeletions: zoneDeletions))
+        let rootReads = Array(await rootReadDiagnostics().suffix(64))
+        return try Self.encoder.encode(DebugInfo(metrics: try metrics(), diagnostics: try diagnostics(), signposts: signposts, zoneDeletions: zoneDeletions, rootReads: rootReads))
     }
 
     // MARK: What is kept
@@ -208,6 +212,7 @@ public actor FieldDiagnosticsStore {
         let diagnostics: [FieldDiagnostic]
         let signposts: [String: [FieldSignpost]]
         let zoneDeletions: [ZoneDeletionDebugInfo]
+        let rootReads: [CloudRootReadDiagnostic]
     }
 
     /// Keep callback ordering and error facts, excluding zone names and payloads.
