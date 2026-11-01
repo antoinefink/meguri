@@ -1,11 +1,11 @@
 //! V8.1 file preservation and storage-only salvage. Caller ownership must
 //! exclude every other tracking open/write/checkpoint, across all builds.
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::unix::{
         ffi::OsStrExt,
-        fs::{DirBuilderExt, MetadataExt},
+        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -26,7 +26,7 @@ const PREFIX: &str = "meguri-cloud.db.damaged-";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NativeIdentity {
+pub(super) struct NativeIdentity {
     device: u64,
     inode: u64,
 }
@@ -43,7 +43,7 @@ struct MoveJournal {
 
 /// A pinned directory, not a lock. The precondition above covers path lookup
 /// and private SQLite copies as well as the noreplace rename operations.
-struct RecoveryDirectory {
+pub(super) struct RecoveryDirectory {
     path: PathBuf,
     file: File,
     identity: NativeIdentity,
@@ -54,12 +54,15 @@ struct RecoveryDirectory {
 }
 
 impl RecoveryDirectory {
-    fn open(path: &Path) -> Result<Self, Error> {
+    pub(super) fn open(path: &Path) -> Result<Self, Error> {
         let metadata = fs::symlink_metadata(path)?;
         if !metadata.is_dir() {
             return Err(Error::RecoveryRefused);
         }
-        let file = File::open(path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)?;
         let pinned = file.metadata()?;
         if (metadata.dev(), metadata.ino()) != (pinned.dev(), pinned.ino()) {
             return Err(Error::RecoveryRefused);
@@ -76,6 +79,67 @@ impl RecoveryDirectory {
             #[cfg(test)]
             fail_sync_at: std::cell::Cell::new(None),
         })
+    }
+
+    pub(super) fn native_identity(&self) -> NativeIdentity {
+        self.identity
+    }
+
+    /// Only single names in this pinned directory; never follow a link or FIFO.
+    pub(super) fn entry_identity(&self, name: &str) -> Result<Option<NativeIdentity>, Error> {
+        use std::{
+            ffi::CString,
+            os::fd::{AsRawFd, FromRawFd},
+        };
+        let mut parts = Path::new(name).components();
+        if !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
+            return Err(Error::RecoveryRefused);
+        }
+        self.check()?;
+        let name = CString::new(name).map_err(|_| Error::RecoveryRefused)?;
+        // SAFETY: a pinned live directory and a single NUL-terminated name.
+        let fd = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            let error = std::io::Error::last_os_error();
+            return if error.kind() == std::io::ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(error.into())
+            };
+        }
+        // SAFETY: openat returned a fresh descriptor, owned only by this File.
+        let file = unsafe { File::from_raw_fd(fd) };
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 {
+            return Err(Error::RecoveryRefused);
+        }
+        Ok(Some(NativeIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }))
+    }
+
+    /// Recovery evidence is retired only after the unlink's directory barrier.
+    /// Caller-held ownership excludes renames/writers between check and unlink.
+    pub(super) fn remove_owned(&self, name: &str, expected: NativeIdentity) -> Result<(), Error> {
+        use std::{ffi::CString, os::fd::AsRawFd};
+        if let Some(found) = self.entry_identity(name)? {
+            if found != expected {
+                return Err(Error::RecoveryRefused);
+            }
+            let name = CString::new(name).map_err(|_| Error::RecoveryRefused)?;
+            // SAFETY: the pinned directory owns this checked single name.
+            if unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        self.sync()
     }
 
     fn check(&self) -> Result<(), Error> {

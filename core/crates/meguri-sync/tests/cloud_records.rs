@@ -298,3 +298,299 @@ fn typed_conflict_storage_preserves_all_copy_fields_and_made_once_resolved_rows(
     );
     assert!(store.salvage_bindings().unwrap().is_empty());
 }
+
+const COPY_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+
+// Typed storage fixtures, including resolved timestamps, prove retention only;
+// they do not stand in for U161's actual resolve/unresolve operations.
+#[test]
+fn conflict_expiry_cutoff_unresolved_backward_and_overflow_are_conservative() {
+    let directory = tempfile::tempdir().unwrap();
+    let build = scope("test.container", Environment::Development);
+    let mut store = open(directory.path(), build.clone());
+    let binding = store
+        .create_binding(facts(BindingState::Active), &clock(1), &SeededRandom::new(39))
+        .unwrap();
+    for (id, resolved) in [
+        (1, Some(100)),
+        (2, None),
+        (3, Some(101)),
+        (4, Some(i64::MIN)),
+        (5, Some(i64::MAX)),
+    ] {
+        let mut copy = conflict(id);
+        copy.staged_path = None;
+        copy.resolved_at_ms = resolved;
+        store.store_conflict(binding.id, &copy).unwrap();
+    }
+    assert_eq!(store.expire_resolved_conflicts(99).unwrap(), 0);
+    assert_eq!(store.expire_resolved_conflicts(100 + COPY_RETENTION_MS - 1).unwrap(), 0);
+    assert_eq!(store.expire_resolved_conflicts(100 + COPY_RETENTION_MS).unwrap(), 1);
+    assert_eq!(store.expire_resolved_conflicts(101 + COPY_RETENTION_MS).unwrap(), 1);
+    let remaining: Vec<_> = store
+        .conflict_copies()
+        .unwrap()
+        .into_iter()
+        .map(|c| c.copy.id)
+        .collect();
+    assert_eq!(remaining, vec![CopyId([2; 16]), CopyId([4; 16]), CopyId([5; 16])]);
+    assert!(
+        store.binding(binding.id).unwrap().is_some(),
+        "active owner keeps its row"
+    );
+    drop(store);
+    let mut reopened = open(directory.path(), build);
+    assert_eq!(reopened.expire_resolved_conflicts(101 + COPY_RETENTION_MS).unwrap(), 0);
+    assert_eq!(reopened.conflict_copies().unwrap().len(), 3);
+}
+
+#[test]
+fn conflict_expiry_all_scopes_remove_only_last_copy_empty_isolated_owners() {
+    let directory = tempfile::tempdir().unwrap();
+    let build = scope("test.container", Environment::Development);
+    let mut store = open(directory.path(), build.clone());
+    let random = SeededRandom::new(40);
+    let active = store
+        .create_binding(facts(BindingState::Active), &clock(1), &random)
+        .unwrap();
+    let empty = store
+        .create_binding(
+            facts(BindingState::Isolated(IsolationReason::SignedOut)),
+            &clock(2),
+            &random,
+        )
+        .unwrap();
+    let keeps_copy = store
+        .create_binding(
+            facts(BindingState::Isolated(IsolationReason::SignedOut)),
+            &clock(3),
+            &random,
+        )
+        .unwrap();
+    for (index, owner) in [active.id, empty.id, keeps_copy.id].into_iter().enumerate() {
+        let mut copy = conflict(index as u8 + 1);
+        copy.staged_path = None;
+        store.store_conflict(owner, &copy).unwrap();
+    }
+    let mut unresolved = conflict(4);
+    unresolved.staged_path = None;
+    unresolved.resolved_at_ms = None;
+    store.store_conflict(keeps_copy.id, &unresolved).unwrap();
+    drop(store);
+    let foreign_build = scope("another.build", Environment::Production);
+    let mut foreign = open(directory.path(), foreign_build.clone());
+    let owner = foreign
+        .create_binding(facts(BindingState::Active), &clock(5), &random)
+        .unwrap();
+    let mut copy = conflict(5);
+    copy.staged_path = None;
+    foreign.store_conflict(owner.id, &copy).unwrap();
+    // Real inbox/cursor work, followed by the existing test-only isolation seam.
+    foreign
+        .commit_fetched(owner.id, &[record()], &OpaqueBytes(vec![7]), &clock(6))
+        .unwrap();
+    foreign
+        .isolate_runtime_binding_for_testing(owner.id, IsolationReason::SignedOut)
+        .unwrap();
+    let inbox = foreign.inbox(owner.id).unwrap();
+    let cursor = foreign.engine_state(owner.id).unwrap();
+    drop(foreign);
+    let mut store = open(directory.path(), build.clone());
+    assert_eq!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap(), 4);
+    assert!(store.binding(active.id).unwrap().is_some());
+    assert!(store.binding(empty.id).unwrap().is_none());
+    assert!(store.binding(keeps_copy.id).unwrap().is_some());
+    assert_eq!(store.conflict_copies().unwrap().len(), 1);
+    drop(store);
+    let foreign = open(directory.path(), foreign_build);
+    assert!(foreign.binding(owner.id).unwrap().is_some());
+    assert_eq!(foreign.inbox(owner.id).unwrap(), inbox);
+    assert_eq!(foreign.engine_state(owner.id).unwrap(), cursor);
+    drop(foreign);
+    assert!(open(directory.path(), build).binding(empty.id).unwrap().is_none());
+}
+
+fn expiry_media_fixture(directory: &Path) -> (TrackingStore, BindingId, std::path::PathBuf) {
+    let mut store = open(directory, scope("test.container", Environment::Development));
+    let owner = store
+        .create_binding(
+            facts(BindingState::Isolated(IsolationReason::SignedOut)),
+            &clock(1),
+            &SeededRandom::new(41),
+        )
+        .unwrap();
+    let staging = directory.join("meguri-cloud-staging");
+    fs::create_dir(&staging).unwrap();
+    let path = staging.join("asset-synthetic-copy");
+    fs::write(&path, b"synthetic staged losing media").unwrap();
+    let mut copy = conflict(1);
+    copy.kind = ConflictKind::MediaName;
+    copy.staged_path = Some(path.to_str().unwrap().into());
+    store.store_conflict(owner.id, &copy).unwrap();
+    (store, owner.id, path)
+}
+
+#[test]
+fn conflict_expiry_transaction_failure_keeps_rows_owner_and_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut store, owner, path) = expiry_media_fixture(directory.path());
+    let copies = store.conflict_copies().unwrap();
+    let db = rusqlite::Connection::open(directory.path().join(TRACKING_FILE)).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_expiry BEFORE DELETE ON bindings BEGIN SELECT RAISE(ABORT, 'synthetic transaction failure'); END;").unwrap();
+    assert!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).is_err());
+    assert_eq!(store.conflict_copies().unwrap(), copies);
+    assert!(store.binding(owner).unwrap().is_some());
+    store.finish_conflict_expiry().unwrap();
+    assert_eq!(fs::read(path).unwrap(), b"synthetic staged losing media");
+    db.execute_batch("DROP TRIGGER reject_expiry").unwrap();
+}
+
+#[test]
+fn conflict_expiry_commit_then_reopen_replays_owned_unlink_durably() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut store, owner, path) = expiry_media_fixture(directory.path());
+    assert_eq!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap(), 1);
+    assert!(path.exists(), "transaction never unlinks before COMMIT");
+    assert!(store.binding(owner).unwrap().is_none());
+    drop(store); // Explicitly simulate the committed/unlinked boundary, not a kill.
+    let mut store = open(directory.path(), scope("test.container", Environment::Development));
+    assert!(store.conflict_copies().unwrap().is_empty());
+    store.finish_conflict_expiry().unwrap();
+    assert!(!path.exists());
+    drop(store);
+    let mut store = open(directory.path(), scope("test.container", Environment::Development));
+    store.finish_conflict_expiry().unwrap();
+    assert!(store.conflict_copies().unwrap().is_empty());
+    assert!(store.binding(owner).unwrap().is_none());
+}
+
+#[test]
+fn conflict_expiry_failed_unlink_retains_evidence_and_refuses_replaced_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut store, _, path) = expiry_media_fixture(directory.path());
+    store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap();
+    let kept = directory.path().join("kept-original");
+    fs::rename(&path, &kept).unwrap();
+    fs::write(&path, b"replacement file must survive").unwrap();
+    assert!(store.finish_conflict_expiry().is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"replacement file must survive");
+    drop(store);
+    let mut store = open(directory.path(), scope("test.container", Environment::Development));
+    assert!(
+        store.finish_conflict_expiry().is_err(),
+        "failed evidence survives reopen"
+    );
+    fs::remove_file(&path).unwrap();
+    fs::rename(kept, &path).unwrap();
+    store.finish_conflict_expiry().unwrap();
+    assert!(!path.exists());
+}
+
+#[test]
+fn conflict_expiry_never_unlinks_arbitrary_paths_symlinks_or_shared_live_files() {
+    use std::os::unix::fs::symlink;
+    let directory = tempfile::tempdir().unwrap();
+    let (mut store, owner, path) = expiry_media_fixture(directory.path());
+    let private = directory.path().join("private-sentinel");
+    fs::write(&private, b"synthetic private sentinel").unwrap();
+    let link = path.parent().unwrap().join("asset-link");
+    symlink(&private, &link).unwrap();
+    for (id, staged) in [(2, private.clone()), (3, link.clone()), (4, path.clone())] {
+        let mut copy = conflict(id);
+        copy.kind = ConflictKind::MediaName;
+        copy.staged_path = Some(staged.to_str().unwrap().into());
+        if id == 4 {
+            copy.resolved_at_ms = None;
+        }
+        store.store_conflict(owner, &copy).unwrap();
+    }
+    assert_eq!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap(), 3);
+    store.finish_conflict_expiry().unwrap();
+    assert_eq!(fs::read(private).unwrap(), b"synthetic private sentinel");
+    assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+    assert!(path.exists(), "unresolved copy retains shared bytes");
+}
+
+#[test]
+fn conflict_expiry_retries_pending_bookkeeping_on_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut store, _, path) = expiry_media_fixture(directory.path());
+    store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join(TRACKING_FILE)).unwrap();
+    db.execute_batch("CREATE TRIGGER hold_pending_bookkeeping BEFORE DELETE ON cloud_conflict_unlinks BEGIN SELECT RAISE(ABORT, 'synthetic bookkeeping failure'); END;").unwrap();
+    assert!(store.finish_conflict_expiry().is_err());
+    assert!(
+        !path.exists(),
+        "unlink and directory barrier completed before bookkeeping"
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM cloud_conflict_unlinks", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(store);
+    db.execute_batch("DROP TRIGGER hold_pending_bookkeeping").unwrap();
+    drop(db);
+    let mut store = open(directory.path(), scope("test.container", Environment::Development));
+    store.finish_conflict_expiry().unwrap();
+    drop(store);
+    let db = rusqlite::Connection::open(directory.path().join(TRACKING_FILE)).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM cloud_conflict_unlinks", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn conflict_expiry_staging_directory_link_cannot_select_another_directory() {
+    use std::os::unix::fs::symlink;
+    let directory = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (mut store, _, path) = expiry_media_fixture(directory.path());
+    let staging = path.parent().unwrap();
+    fs::rename(staging, directory.path().join("original-staging")).unwrap();
+    let sentinel = elsewhere.path().join(path.file_name().unwrap());
+    fs::write(&sentinel, b"synthetic external bytes").unwrap();
+    symlink(elsewhere.path(), staging).unwrap();
+    assert!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).is_err());
+    assert_eq!(store.conflict_copies().unwrap().len(), 1);
+    assert_eq!(fs::read(sentinel).unwrap(), b"synthetic external bytes");
+}
+
+#[test]
+fn conflict_expiry_sigabrt_child() {
+    let Ok(directory) = std::env::var("MEGURI_CONFLICT_EXPIRY_CHILD") else {
+        return;
+    };
+    let mut store = open(Path::new(&directory), scope("test.container", Environment::Development));
+    assert_eq!(store.expire_resolved_conflicts(456 + COPY_RETENTION_MS).unwrap(), 1);
+    // Actual process death at the public transaction/finish boundary. This is
+    // not injection of an unlink, SQLite COMMIT or fsync syscall failure.
+    std::process::abort();
+}
+
+#[test]
+fn conflict_expiry_sigabrt_after_commit_recovers_only_owned_staged_file() {
+    use std::{os::unix::process::ExitStatusExt, process::Command};
+    let directory = tempfile::tempdir().unwrap();
+    let (store, owner, path) = expiry_media_fixture(directory.path());
+    drop(store);
+    let sentinel = directory.path().join("synthetic-live-media");
+    fs::write(&sentinel, b"live bytes remain").unwrap();
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "conflict_expiry_sigabrt_child", "--nocapture"])
+        .env("MEGURI_CONFLICT_EXPIRY_CHILD", directory.path())
+        .status()
+        .unwrap();
+    assert_eq!(status.signal(), Some(libc::SIGABRT));
+    assert!(path.exists());
+    let mut store = open(directory.path(), scope("test.container", Environment::Development));
+    assert!(store.conflict_copies().unwrap().is_empty());
+    assert!(store.binding(owner).unwrap().is_none());
+    store.finish_conflict_expiry().unwrap();
+    assert!(!path.exists());
+    assert_eq!(fs::read(sentinel).unwrap(), b"live bytes remain");
+}

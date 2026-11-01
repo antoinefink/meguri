@@ -1345,3 +1345,38 @@ decks:
 fn cloud_child_entry() {
     meguri_testkit::cloud::child_driver::child_entry().unwrap();
 }
+
+#[test]
+fn recovery_salvage_owner_row_disappears_with_its_last_expired_copy() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let mut store = open(source.path());
+    let owner = binding(&mut store);
+    let mut first = copy(1);
+    first.staged_path = None;
+    let mut last = copy(2);
+    last.staged_path = None;
+    last.resolved_at_ms = Some(201);
+    store.store_conflict(owner.id, &first).unwrap();
+    store.store_conflict(owner.id, &last).unwrap();
+    drop(store);
+    let salvaging = "meguri-cloud.db.damaged-2026-01-01-00.00.00.salvaging";
+    fs::copy(source.path().join(TRACKING_FILE), directory.path().join(salvaging)).unwrap();
+    let mut recovered = recover(directory.path(), &SeededRandom::new(944));
+    let owners = recovered.salvage_bindings().unwrap();
+    assert_eq!(owners.len(), 1);
+    assert_eq!(owners[0].source, salvaging);
+    assert!(
+        recovered.binding(owners[0].id).unwrap().is_none(),
+        "salvage is a distinct owner table"
+    );
+    let retention = 30 * 24 * 60 * 60 * 1_000;
+    assert_eq!(recovered.expire_resolved_conflicts(200 + retention).unwrap(), 1);
+    assert_eq!(recovered.salvage_bindings().unwrap(), owners);
+    assert_eq!(recovered.expire_resolved_conflicts(201 + retention).unwrap(), 1);
+    assert!(recovered.salvage_bindings().unwrap().is_empty());
+    drop(recovered);
+    let recovered = open(directory.path());
+    assert!(recovered.conflict_copies().unwrap().is_empty());
+    assert!(recovered.salvage_bindings().unwrap().is_empty());
+}

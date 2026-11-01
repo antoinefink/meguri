@@ -59,6 +59,27 @@ fn remove_op(tx: &Transaction<'_>, scope: &BuildScope, id: [u8; 16]) -> Result<(
     }
     Ok(())
 }
+// Binding work owned by the current storage representations (V17.6).
+// Expiry reads this same inventory; it must never call remove_work.
+pub(super) const WORK_TABLES: &[&str] = &[
+    "cloud_refused",
+    "cloud_absence_seen",
+    "cloud_absence_result",
+    "engine_state",
+    "inbox",
+    "cloud_runtime_notes",
+    "cloud_runtime_entities",
+    "cloud_runtime_payloads",
+    "cloud_runtime_payload_retired",
+    "cloud_runtime_payload_owners",
+    "cloud_media_state",
+    "cloud_runtime_bindings",
+    "cloud_adapter_state",
+    "cloud_publication_bindings",
+    "cloud_adoption_authority",
+    "cloud_publication_zones",
+];
+
 /// Remove work only from an ordinary binding already checked in this scope.
 pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
     // The recovery workflow must settle these first. Never erase their inbox,
@@ -66,24 +87,7 @@ pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Erro
     if !super::incoming_store::intents(tx, b)?.is_empty() {
         return Err(Error::RecoveryRefused);
     }
-    for table in [
-        "cloud_refused",
-        "cloud_absence_seen",
-        "cloud_absence_result",
-        "engine_state",
-        "inbox",
-        "cloud_runtime_notes",
-        "cloud_runtime_entities",
-        "cloud_runtime_payloads",
-        "cloud_runtime_payload_retired",
-        "cloud_runtime_payload_owners",
-        "cloud_media_state",
-        "cloud_runtime_bindings",
-        "cloud_adapter_state",
-        "cloud_publication_bindings",
-        "cloud_adoption_authority",
-        "cloud_publication_zones",
-    ] {
+    for table in WORK_TABLES {
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
             [table],

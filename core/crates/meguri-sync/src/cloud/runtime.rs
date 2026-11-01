@@ -24,6 +24,8 @@ mod adoption_impl;
 #[path = "asset_read_runtime.rs"]
 pub(super) mod asset_read_impl;
 pub use asset_read_impl::AssetReadActivityGuard;
+#[path = "conflict_cleanup_runtime.rs"]
+mod conflict_cleanup_impl;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
 #[path = "media_runtime.rs"]
@@ -732,7 +734,9 @@ impl Runtime {
                 latest_scm,
             });
             Ok(())
-        })
+        })?;
+        drop(state);
+        self.recover_conflict_staging_at_open()
     }
 
     /// An actor/host calls this off the writer at an actual account read point.

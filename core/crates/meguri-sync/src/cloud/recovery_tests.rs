@@ -396,3 +396,17 @@ fn symlinked_main_wal_and_journals_are_refused_without_touching_targets() {
         );
     }
 }
+
+#[test]
+fn owned_conflict_unlink_reuses_directory_sync_failure_injection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("asset-synthetic");
+    fs::write(&path, b"synthetic staged bytes").unwrap();
+    let directory = RecoveryDirectory::open(dir.path()).unwrap();
+    let expected = directory.entry_identity("asset-synthetic").unwrap().unwrap();
+    directory.fail_sync_at.set(Some(1));
+    assert!(directory.remove_owned("asset-synthetic", expected).is_err());
+    assert!(!path.exists(), "existing hook fails the directory barrier after unlink");
+    let recovered = RecoveryDirectory::open(dir.path()).unwrap();
+    recovered.remove_owned("asset-synthetic", expected).unwrap();
+}

@@ -809,3 +809,98 @@ fn delayed_media_notification_cannot_stop_a_reopened_runtime() {
     assert!(!runtime.status().unwrap().tracking_stopped);
     reopened.close().unwrap();
 }
+
+#[test]
+fn actual_local_only_collection_open_expires_copies_without_verified_identity_or_sdk() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountedIdentity {
+        provider: Arc<dyn IdentityProvider>,
+        reads: AtomicUsize,
+    }
+    impl IdentityProvider for CountedIdentity {
+        fn read_identity(&self, scope: &BuildScope) -> IdentityStatus {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.provider.read_identity(scope)
+        }
+    }
+
+    let mut fixture = Fixture::new(BindingState::Active);
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        store
+            .isolate_runtime_binding_for_testing(fixture.binding, IsolationReason::SignedOut)
+            .unwrap();
+    });
+    fixture.account.set(IdentityStatus::SignedOut);
+    let cloud = fixture.options.cloud.as_mut().unwrap();
+    let identity = Arc::new(CountedIdentity {
+        provider: cloud.identity.clone(),
+        reads: AtomicUsize::new(0),
+    });
+    cloud.identity = identity.clone();
+    let reads_before_open = identity.reads.load(Ordering::SeqCst);
+    let host = fixture.open();
+    let baseline_identity_reads = identity.reads.load(Ordering::SeqCst) - reads_before_open;
+    assert_eq!(
+        baseline_identity_reads, 1,
+        "startup publication ownership requires one identity read"
+    );
+    host.close().unwrap();
+
+    let now = fixture.options.clock.now_ms();
+    let retention = 30 * 24 * 60 * 60 * 1_000;
+    let staging = fixture.options.collection_directory.join("meguri-cloud-staging");
+    std::fs::create_dir_all(&staging).unwrap();
+    let path = staging.join("asset-expiry-host-fixture");
+    std::fs::write(&path, b"synthetic conflict bytes").unwrap();
+    let orphan = staging.join("asset-interrupted-stage");
+    std::fs::write(&orphan, b"synthetic incomplete stage").unwrap();
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        for (id, resolved) in [(201, Some(now - retention)), (202, None)] {
+            let copy = cloud::ConflictCopy {
+                id: cloud::CopyId([id; 16]),
+                kind: cloud::ConflictKind::MediaName,
+                key: OpaqueBytes(vec![id]),
+                reason: cloud::ConflictReason::MediaContent,
+                losing_envelope: OpaqueBytes(vec![id]),
+                losing_payload_digest: cloud::PayloadDigest([id; 32]),
+                winning_payload_digest: cloud::PayloadDigest([0; 32]),
+                field_names: None,
+                template_names: None,
+                note_deck: None,
+                staged_path: (id == 201).then(|| path.to_str().unwrap().into()),
+                created_at_ms: now - retention - 1,
+                resolved_at_ms: resolved,
+            };
+            store.store_conflict(fixture.binding, &copy).unwrap();
+        }
+    });
+    let reads_before_open = identity.reads.load(Ordering::SeqCst);
+    let host = fixture.open();
+    assert_eq!(
+        identity.reads.load(Ordering::SeqCst) - reads_before_open,
+        baseline_identity_reads,
+        "copy expiry must add no identity reads beyond startup ownership"
+    );
+    assert!(!host.cloud_runtime().unwrap().status().unwrap().identity_verified);
+    assert!(host.cloud_runtime().unwrap().require_collection_sending().is_err());
+    assert!(!path.exists());
+    assert!(!orphan.exists(), "V2.4 step 6 runs before local copy expiry");
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        let copies = store.conflict_copies().unwrap();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].copy.id, cloud::CopyId([202; 16]));
+    });
+    host.close().unwrap();
+    let reads_before_open = identity.reads.load(Ordering::SeqCst);
+    let host = fixture.open();
+    assert_eq!(
+        identity.reads.load(Ordering::SeqCst) - reads_before_open,
+        baseline_identity_reads,
+        "reopen cleanup must add no identity reads beyond startup ownership"
+    );
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        assert_eq!(store.conflict_copies().unwrap().len(), 1);
+    });
+    host.close().unwrap();
+}
