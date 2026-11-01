@@ -43,10 +43,11 @@ impl TrackingStore {
             start_absence,
         } = options;
         let mut durable = durable.clone();
+        let prior = self.adapter_durable(binding)?;
         // A state-deletion/isolation trigger may have ended the pass since the
         // Runtime last observed it. An ordinary callback cannot resurrect it.
         if !start_absence {
-            durable.absence = self.adapter_durable(binding)?.absence;
+            durable.absence = prior.absence;
         }
         if durable.active_deleted {
             durable.absence = None;
@@ -62,6 +63,13 @@ impl TrackingStore {
                 runtime.root_ack = None;
             }
         }
+        // Drains are appended only by the qualified adapter did-fetch path.
+        // Ignore remembered drains; both fetched flags count for media rechecks.
+        let recheck_media = facts.state == BindingState::Active
+            && durable.drains.get(prior.drains.len()..).is_some_and(|drains| {
+                let zone = super::adapter::collection_zone(facts.epoch);
+                drains.iter().any(|drain| drain.zone == zone)
+            });
         let tx = self.connection.transaction()?;
         if durable.active_deleted {
             tx.execute(
@@ -91,6 +99,9 @@ impl TrackingStore {
             tx.execute("INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3) ON CONFLICT(binding) DO UPDATE SET serialization=excluded.serialization,saved_at_ms=excluded.saved_at_ms",params![binding.0.as_slice(),state,at_ms])?;
         }
         tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![binding.0.as_slice(),encode(&durable)?])?;
+        if recheck_media {
+            super::media::store::recheck_after_drain(&tx, binding, at_ms)?;
+        }
         // Fixture faults are consumed by Runtime only after preparation and
         // fail this same transaction before commit, rolling every write back.
         if fail {

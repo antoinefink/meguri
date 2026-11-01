@@ -924,6 +924,7 @@ impl PublicationRig {
             if self.held.is_some() {
                 return self.refresh();
             }
+            self.sdk.get_mut().driver.call::<()>(Input::MediaResume)?;
             self.last_sync_phase = "drive_cloud_media";
             self.sdk.get_mut().drive_media_budget(service, &mut remaining)
         })();

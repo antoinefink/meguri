@@ -528,7 +528,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         } else {
             None
         };
-        let mut media_ledger = prior_media.as_ref().map(|_| self.media_ledger(b)).transpose()?;
+        let mut media_ledger = prior_media
+            .as_ref()
+            .map(|prior| self.media_ack_ledger(b, prior, received.payload.as_ref().ok_or(Error::InvalidData)?, now_ms))
+            .transpose()?;
         h.ack(index, saved)?;
         let media_removal_pending = media_ledger.as_ref().is_some_and(|ledger| {
             std::str::from_utf8(&h.facts.key)

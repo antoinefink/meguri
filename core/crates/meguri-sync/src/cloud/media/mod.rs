@@ -59,6 +59,13 @@ impl NameState {
             && self.media_changed.is_none()
     }
 }
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DeferredRecheck {
+    pub metadata: blob::Blob,
+    pub acked_at_ms: i64,
+    pub rechecked: bool,
+    pub final_rechecked: bool,
+}
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Ledger {
     #[serde(default)]
@@ -66,6 +73,9 @@ pub(crate) struct Ledger {
     pub feed: Option<([u8; 16], u64)>,
     pub names: BTreeMap<String, NameState>,
     pub blobs: BTreeMap<String, BlobState>,
+    // Content hashes, never record names made with an unacknowledged key.
+    #[serde(default)]
+    pub deferred_rechecks: BTreeMap<String, DeferredRecheck>,
     pub adoption: bool,
     pub zone_missing: bool,
     #[serde(default)]

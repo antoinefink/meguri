@@ -5,3 +5,6 @@
 - Typed work is transport only. Keep scheduling policy in `../policy`; native asset ownership and engine sends remain the native executor's responsibility.
 - Pause invalidates read work but keeps original upload ownership for late Saved. A new SDK adopts ledger staging only after the old SDK drains.
 - Policy read scopes are bounded groups; status counts the full live ledger, independent of the current selector. Prepared/Running alone proves no native transfer.
+
+- Both key roles use `RecordKey`: MGBlob names use the acknowledged shared media key from `publication_media`; MGEntity names use the collection key.
+- Media rechecks accept qualified collection drains with either `fetched` value. The true-only rule belongs to absence completion.

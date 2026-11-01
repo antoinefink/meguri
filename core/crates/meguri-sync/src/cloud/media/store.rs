@@ -40,7 +40,120 @@ pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &
     )?;
     Ok(())
 }
+// Called in the transaction that records an actual fetched collection drain,
+// before that drain can be projected to policy as FetchDrained.
+pub(crate) fn recheck_after_drain(tx: &rusqlite::Transaction<'_>, b: BindingId, now_ms: i64) -> Result<(), Error> {
+    let mut ledger = super::cleanup::ledger(tx, b)?;
+    let mut changed = false;
+    for state in ledger.blobs.values_mut() {
+        let Some(acked_at) = state.recheck_at else { continue };
+        let final_recheck = now_ms.checked_sub(acked_at).is_some_and(|age| age >= 86_400_000);
+        if !state.rechecked || final_recheck {
+            if state.server == ServerState::Present {
+                state.server = ServerState::Unknown;
+            }
+            state.rechecked = !final_recheck;
+            if final_recheck {
+                state.recheck_at = None;
+            }
+            changed = true;
+        }
+    }
+    for deferred in ledger.deferred_rechecks.values_mut() {
+        let final_recheck = now_ms
+            .checked_sub(deferred.acked_at_ms)
+            .is_some_and(|age| age >= 86_400_000);
+        if !deferred.rechecked || final_recheck && !deferred.final_rechecked {
+            deferred.rechecked = true;
+            deferred.final_rechecked |= final_recheck;
+            changed = true;
+        }
+    }
+    if changed {
+        put_ledger(tx, b, &ledger)?;
+    }
+    Ok(())
+}
+
+// The caller persists both the shared root authority and the resulting ledger
+// in one transaction, or invokes this before making any blob decision.
+pub(crate) fn materialize_rechecks(ledger: &mut Ledger, key: &[u8; 32]) -> bool {
+    if ledger.deferred_rechecks.is_empty() {
+        return false;
+    }
+    for (_, deferred) in std::mem::take(&mut ledger.deferred_rechecks) {
+        let state = ledger
+            .blobs
+            .entry(deferred.metadata.name(key))
+            .or_insert_with(|| BlobState {
+                metadata: deferred.metadata,
+                ..Default::default()
+            });
+        state.server = ServerState::Unknown;
+        if !deferred.final_rechecked {
+            // A later original ACK keeps the full 24-hour obligation for all
+            // names of this content; either outstanding first drain still runs.
+            state.rechecked = if state.recheck_at.is_some() {
+                state.rechecked && deferred.rechecked
+            } else {
+                deferred.rechecked
+            };
+            state.recheck_at = Some(
+                state
+                    .recheck_at
+                    .map_or(deferred.acked_at_ms, |at| at.max(deferred.acked_at_ms)),
+            );
+        }
+    }
+    true
+}
 impl TrackingStore {
+    // Only the validated local-flight ACK path calls this, before replacing its
+    // ACK image. Its caller persists this ledger in the entity ACK transaction.
+    pub(crate) fn media_ack_ledger(
+        &self,
+        b: BindingId,
+        prior: &workflow::EntityFacts,
+        payload: &c::Payload,
+        now_ms: i64,
+    ) -> Result<Ledger, Error> {
+        let mut ledger = self.media_ledger(b)?;
+        let c::Payload::MediaName(name) = payload else {
+            return Err(Error::InvalidData);
+        };
+        let ack_named_content = prior.server_erev > 0
+            && !prior.acked_media_tombstone()
+            && matches!(&prior.acked_payload, Some(c::Payload::MediaName(acked)) if acked.sha256 == name.sha256);
+        if !ack_named_content {
+            let metadata = blob::Blob::from(name);
+            if let Some((key, true, _)) = self.publication_media(b)? {
+                materialize_rechecks(&mut ledger, &key.0);
+                let state = ledger.blobs.entry(metadata.name(&key.0)).or_insert_with(|| BlobState {
+                    metadata,
+                    ..Default::default()
+                });
+                state.recheck_at = Some(state.recheck_at.map_or(now_ms, |at| at.max(now_ms)));
+                state.rechecked = false;
+            } else {
+                let content = data_encoding::BASE32_NOPAD.encode(&metadata.sha256);
+                ledger
+                    .deferred_rechecks
+                    .entry(content)
+                    .and_modify(|mark| {
+                        mark.acked_at_ms = mark.acked_at_ms.max(now_ms);
+                        mark.rechecked = false;
+                        mark.final_rechecked = false;
+                    })
+                    .or_insert(DeferredRecheck {
+                        metadata,
+                        acked_at_ms: now_ms,
+                        rechecked: false,
+                        final_rechecked: false,
+                    });
+            }
+        }
+        Ok(ledger)
+    }
     pub(crate) fn media_ledger(&self, b: BindingId) -> Result<Ledger, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let value: Option<String> = self
@@ -52,6 +165,16 @@ impl TrackingStore {
             )
             .optional()?;
         value.map(|v| decode(&v)).transpose().map(Option::unwrap_or_default)
+    }
+    pub(crate) fn materialize_media_rechecks(&mut self, b: BindingId) -> Result<(), Error> {
+        let Some((key, true, _)) = self.publication_media(b)? else {
+            return Ok(());
+        };
+        let mut ledger = self.media_ledger(b)?;
+        if materialize_rechecks(&mut ledger, &key.0) {
+            self.put_media(b, &ledger)?;
+        }
+        Ok(())
     }
     pub(crate) fn put_media(&mut self, b: BindingId, ledger: &Ledger) -> Result<bool, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
@@ -105,8 +228,8 @@ impl TrackingStore {
                 )?
             };
             let name = std::str::from_utf8(&key).map_err(|_| Error::InvalidData)?;
-            if next_ledger.names.get(name).is_some_and(|n| n.tombstone_at.is_some()) && !entity.acked_media_tombstone()
-            {
+            let local_tombstone = next_ledger.names.get(name).is_some_and(|n| n.tombstone_at.is_some());
+            if local_tombstone != entity.acked_media_tombstone() {
                 runtime.change_counter = runtime_store::next(runtime.change_counter)?;
                 entity.local_rev = runtime_store::next(entity.local_rev)?;
                 entity.mark = Some(runtime::DirtyMark {

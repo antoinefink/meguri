@@ -367,10 +367,23 @@ impl TrackingStore {
     }
     pub(super) fn accept_media_root(&mut self, id: BindingId, key: [u8; 32], crt: i64) -> Result<(), Error> {
         self.binding(id)?.ok_or(Error::BindingNotFound)?;
-        self.connection.execute(
+        let tx = self.connection.transaction()?;
+        tx.execute(
             "INSERT INTO cloud_publication_bindings(binding,media_key,root_acked,crt) VALUES(?1,?2,1,?3) ON CONFLICT(binding) DO UPDATE SET media_key=excluded.media_key,root_acked=1 WHERE root_acked=0",
             params![id.0.as_slice(), key.as_slice(), crt],
         )?;
+        // Use only the authority actually retained by the conditional write.
+        let retained: Vec<u8> = tx.query_row(
+            "SELECT media_key FROM cloud_publication_bindings WHERE binding=?1 AND root_acked=1",
+            [id.0.as_slice()],
+            |r| r.get(0),
+        )?;
+        let retained: [u8; 32] = retained.try_into().map_err(|_| Error::InvalidData)?;
+        let mut ledger = super::media::cleanup::ledger(&tx, id)?;
+        if super::media::store::materialize_rechecks(&mut ledger, &retained) {
+            super::media::store::put_ledger(&tx, id, &ledger)?;
+        }
+        tx.commit()?;
         Ok(())
     }
     pub(super) fn publication_ack_control(&mut self, op: &PublishOp) -> Result<(), Error> {
@@ -381,6 +394,12 @@ impl TrackingStore {
             "UPDATE cloud_publication_bindings SET media_key=?2,root_acked=?3 WHERE binding=?1",
             params![id.0.as_slice(), op.media_key.0.as_slice(), op.root_acked],
         )?;
+        if op.root_acked {
+            let mut ledger = super::media::cleanup::ledger(&tx, id)?;
+            if super::media::store::materialize_rechecks(&mut ledger, &op.media_key.0) {
+                super::media::store::put_ledger(&tx, id, &ledger)?;
+            }
+        }
         put_op(&tx, &self.scope, op)?;
         tx.commit()?;
         Ok(())

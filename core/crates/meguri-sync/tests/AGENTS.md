@@ -1,0 +1,1 @@
+- Sync integration tests cannot directly name `meguri_host`; hosted cases belong in `meguri-host/tests` or an existing testkit helper, never a cyclic Host dev dependency.

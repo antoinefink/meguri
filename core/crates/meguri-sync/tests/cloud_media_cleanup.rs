@@ -563,6 +563,319 @@ fn unreadable_service_version_in_refused_tracking_blocks_removal() {
     pair.close();
 }
 
+#[track_caller]
+fn assert_blob_read_after(pair: &Pair, blob: &str, after: u64, outcome: LogOutcome) {
+    assert!(
+        pair.service.request_log().unwrap().iter().any(|request| {
+            request.request_id > after
+                && request.zone.as_deref() == Some(MEDIA)
+                && request.kind == RequestKind::Read
+                && request
+                    .records
+                    .iter()
+                    .any(|record| record.name == blob && record.outcome == outcome)
+        }),
+        "the media round must actually read the blob from Service"
+    );
+}
+
+#[test]
+fn stale_present_reuse_repairs_remote_deletion_within_the_freshness_window() {
+    for deletion_order in ["before_reuse", "name_in_flight", "after_first_drain"] {
+        for return_after_ms in [30 * 60_000, 2 * 60 * 60_000] {
+            let mut pair = Pair::published();
+            let (blob, original) = hold_due_blob(&mut pair);
+            let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+            pair.receiver.adopt_cloud(&preview).unwrap();
+            pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+            pair.receiver.advance_clock_ms(30 * DAY).unwrap();
+            // Warm B's cache through a real name, read and ACK, then remove
+            // that name. A has not fetched any of B's subsequent versions.
+            pair.receiver.driver().put_media("reuse.jpg", LOCAL).unwrap();
+            let warm_after = cursor(&pair);
+            pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+            assert_blob_read_after(&pair, &blob, warm_after, LogOutcome::Success);
+            pair.receiver.driver().trash_media("reuse.jpg").unwrap();
+            pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+            assert_eq!(
+                pair.receiver.driver().media_blobs().unwrap()[&blob].server,
+                ServerState::Present
+            );
+
+            if deletion_order != "before_reuse" {
+                pair.receiver.driver().put_media("reuse.jpg", LOCAL).unwrap();
+                if deletion_order == "name_in_flight" {
+                    pair.receiver.hold(Point::BeforeCollectionSave).unwrap();
+                }
+                let named_after = cursor(&pair);
+                pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+                let facts = pair.receiver.facts().unwrap();
+                let naming = facts.entities.values().find(|e| e.key == b"reuse.jpg").unwrap();
+                if deletion_order == "name_in_flight" {
+                    assert!(pair.receiver.is_held(Point::BeforeCollectionSave));
+                    assert!(!naming.in_flight.is_empty());
+                    assert!(naming.local_rev > naming.acked_rev);
+                    // This retains the real naming flight. The public rig
+                    // cannot separately run its media read round while held,
+                    // so this leg does not prove a warm Present at that ACK.
+                    let request = pair.receiver.held_request().unwrap();
+                    assert!(matches!(request.operation, Operation::Modify { ref changes, .. }
+                        if changes.iter().any(|m| matches!(m, Mutation::Save { record, .. } if record.name == naming.name))));
+                } else {
+                    assert_eq!(naming.local_rev, naming.acked_rev);
+                    assert_blob_read_after(&pair, &blob, named_after, LogOutcome::Success);
+                    assert_eq!(
+                        pair.receiver.driver().media_blobs().unwrap()[&blob].server,
+                        ServerState::Present
+                    );
+                }
+            }
+
+            pair.sender.advance_clock_ms(return_after_ms).unwrap();
+            let deletion_after = cursor(&pair);
+            let selected = pair.sender.select_media_batch().unwrap();
+            let deleted = return_after_ms < 60 * 60_000;
+            if deleted {
+                let selected = selected.expect("30-minute-old deletion remains eligible");
+                assert!(
+                    matches!(&selected.1.request, meguri_sync::cloud::media::Request::Delete { name } if name == &blob)
+                );
+                let response = pair.sender.send_selected_media(&mut pair.service, selected).unwrap();
+                pair.sender.deliver_media_response(&response.response).unwrap();
+                assert_deleted_by_sdk(&mut pair, &blob, deletion_after);
+            } else {
+                assert!(selected.is_none(), "a two-hour-old deletion must never reach Service");
+                assert_eq!(
+                    cursor(&pair),
+                    deletion_after,
+                    "expired selection makes no Service request"
+                );
+                assert_eq!(pair.sender.driver().media_blobs().unwrap()[&blob].deletion_due_ms, None);
+                assert!(!pair.sender.sdk_pending().contains_key(&blob));
+            }
+
+            if deletion_order == "before_reuse" {
+                pair.receiver.driver().put_media("reuse.jpg", LOCAL).unwrap();
+            } else if deletion_order == "name_in_flight" {
+                pair.receiver.release(Point::BeforeCollectionSave).unwrap();
+            }
+            // The late deletion follows B's first drain. Only the qualified
+            // 24-hour drain can discover it without another local media edit.
+            pair.receiver
+                .advance_clock_ms(if deletion_order == "after_first_drain" {
+                    DAY
+                } else {
+                    return_after_ms
+                })
+                .unwrap();
+            let repair_after = cursor(&pair);
+            pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+            assert_blob_read_after(
+                &pair,
+                &blob,
+                repair_after,
+                if deleted {
+                    LogOutcome::Failure(ErrorCode::UnknownItem)
+                } else {
+                    LogOutcome::Success
+                },
+            );
+            let server = pair.service.inspect(&scope()).unwrap().unwrap();
+            let restored = &server.zones[MEDIA].records[&blob];
+            assert!(matches!(restored.fields.get("a"), Some(Field::Asset(asset)) if asset.bytes() == LOCAL));
+            if deleted {
+                let upload = pair
+                    .service
+                    .request_log()
+                    .unwrap()
+                    .into_iter()
+                    .find(|request| {
+                        request.request_id > repair_after
+                            && request.zone.as_deref() == Some(MEDIA)
+                            && request.kind == RequestKind::Modify
+                            && request.records.iter().any(|r| r.name == blob)
+                    })
+                    .expect("B must reupload the deleted content");
+                let sent = pair.receiver.sent_request(upload.request_id).unwrap();
+                assert!(sent.backend_batch_id > 0);
+                assert!(sent.mutations.iter().any(|m| matches!(m, Mutation::Save { record, .. }
+                    if record.name == blob && matches!(record.fields.get("a"), Some(Field::Asset(a)) if a.bytes() == LOCAL))));
+            } else {
+                assert_eq!(*restored, original);
+            }
+            pair.sender.release(Point::AfterCollectionCleanup).unwrap();
+            sync(&mut pair);
+            assert_eq!(pair.sender.driver().media_blobs().unwrap()[&blob].deletion_due_ms, None);
+            assert!(!pair.sender.sdk_pending().contains_key(&blob));
+            assert_eq!(pair.sender.driver().media_files().unwrap()["reuse.jpg"], LOCAL);
+            assert_eq!(pair.receiver.driver().media_files().unwrap()["reuse.jpg"], LOCAL);
+            pair.close();
+        }
+    }
+}
+
+#[test]
+fn format_inbox_protects_blob_at_new_batch_request() {
+    use meguri_sync::cloud::{
+        InboxReason,
+        runtime::{KeyByteSource, KeySourceError},
+    };
+    use meguri_testkit::cloud::devices::IdentityReads;
+    use std::sync::Arc;
+
+    struct NoReopenKeys;
+    impl KeyByteSource for NoReopenKeys {
+        fn draw_key(&self) -> std::result::Result<[u8; 32], KeySourceError> {
+            Err(KeySourceError::Unavailable)
+        }
+    }
+    for marked_before_fetch in [false, true] {
+        let mut pair = Pair::published();
+        pair.sender.close_clean().unwrap();
+        pair.sender = PublicationRig::open(
+            &pair.root.path().join("sender"),
+            &scope(),
+            IdentityReads::Available(scope().account),
+            true,
+            NOW,
+            808,
+            Arc::new(NoReopenKeys),
+        )
+        .unwrap();
+        pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+        let (blob, original) = if marked_before_fetch {
+            hold_due_blob(&mut pair)
+        } else {
+            let (blob, original, _) = publish_old(&mut pair);
+            pair.sender.driver().trash_media("photo.jpg").unwrap();
+            sync(&mut pair);
+            pair.sender.advance_clock_ms(30 * DAY).unwrap();
+            (blob, original)
+        };
+        if marked_before_fetch {
+            let selected = pair
+                .sender
+                .select_media_batch()
+                .unwrap()
+                .expect("real stale SDK deletion");
+            assert!(
+                matches!(&selected.1.request, meguri_sync::cloud::media::Request::Delete { name } if name == &blob)
+            );
+            assert_eq!(pair.sender.sdk_pending().get(&blob), Some(&PendingChange::Delete));
+            assert!(
+                pair.sender.driver().media_blobs().unwrap()[&blob]
+                    .deletion_due_ms
+                    .is_some()
+            );
+        }
+        let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+        pair.receiver.adopt_cloud(&preview).unwrap();
+        pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+        pair.receiver.driver().put_media("future.jpg", LOCAL).unwrap();
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        let entity = pair
+            .receiver
+            .facts()
+            .unwrap()
+            .entities
+            .into_values()
+            .find(|e| e.kind == codec::Kind::MediaName && e.key == b"future.jpg")
+            .unwrap();
+        let Some(Payload::MediaName(payload)) = &entity.acked_payload else {
+            panic!("real live media ACK")
+        };
+        assert_eq!(payload.sha256, codec::sha256(LOCAL));
+        let mut future = entity.acked_envelope.0;
+        assert_eq!(&future[..2], &[8, 1]);
+        future[1] = 2; // Only the format discriminator changes; the payload is intact.
+        assert!(matches!(
+            codec::Entity::decode(&future).unwrap(),
+            codec::DecodeOutcome::UnsupportedFormat(2)
+        ));
+        let response = pair
+            .service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Modify {
+                    zone: pair.receiver.collection_zone().unwrap(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: RecordInput::encrypted(&entity.name, "MGEntity", future),
+                        if_unchanged: Some(SystemFields::from_bytes(entity.acked_system_fields)),
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(
+            matches!(response.result, Ok(Reply::Modified(ref items)) if items.len() == 1 && items[0].result.is_ok())
+        );
+
+        pair.sender.release(Point::AfterCollectionCleanup).unwrap();
+        let drains_before = pair.sender.driver().fetch_lifecycle_for_testing().unwrap().0.len();
+        pair.sender.fetch_without_sending(&mut pair.service, STEPS).unwrap();
+        let facts = pair.sender.facts().unwrap();
+        assert!(facts.root_acked);
+        let binding = facts.current.unwrap().id;
+        let incoming = pair.sender.driver().incoming_observation(binding).unwrap();
+        let sdk = incoming.engine_instance.expect("current SDK after the real fetch");
+        assert!(pair.sender.trace().iter().any(|event|
+            matches!(event, meguri_sync::cloud::workflow::TraceEvent::RootConfirmed { instance } if instance == &sdk)));
+        let inbox = pair.sender.driver().inbox_entries(binding).unwrap();
+        assert!(
+            inbox
+                .iter()
+                .any(|entry| entry.record_name == entity.name && entry.reason == InboxReason::Format)
+        );
+        assert!(pair.sender.driver().refused_entries(binding).unwrap().is_empty());
+        assert!(pair.sender.driver().apply_intents(binding).unwrap().is_empty());
+        // Format stays durable without an apply intent. The public rig has no
+        // read-only incoming-writer flag; the fresh builder must pass its gate.
+        let zone = pair.sender.collection_zone().unwrap();
+        let drains = pair.sender.driver().fetch_lifecycle_for_testing().unwrap().0;
+        assert!(
+            drains[drains_before..]
+                .iter()
+                .any(|drain| drain.zone == zone && drain.fetched)
+        );
+        // This asks the SDK for a new batch, consuming the drain's real full
+        // UpdatePending before building; the Format entry remains unsettled.
+        // fetch_without_sending does not refresh the public observation cache,
+        // so Full emission cannot be separately observed here without driving
+        // another scheduler round before this fresh builder.
+        assert!(pair.sender.select_media_batch().unwrap().is_none());
+        assert_eq!(pair.sender.driver().media_blobs().unwrap()[&blob].deletion_due_ms, None);
+        assert!(
+            !pair.sender.sdk_pending().contains_key(&blob),
+            "the stale SDK Delete must leave pending"
+        );
+        assert_eq!(
+            pair.service.inspect(&scope()).unwrap().unwrap().zones[MEDIA]
+                .records
+                .get(&blob),
+            Some(&original)
+        );
+        sync(&mut pair);
+        assert!(
+            pair.sender
+                .driver()
+                .inbox_entries(binding)
+                .unwrap()
+                .iter()
+                .any(|entry| entry.record_name == entity.name && entry.reason == InboxReason::Format)
+        );
+        assert!(pair.sender.select_media_batch().unwrap().is_none());
+        assert_eq!(pair.sender.driver().media_blobs().unwrap()[&blob].deletion_due_ms, None);
+        assert_eq!(
+            pair.service.inspect(&scope()).unwrap().unwrap().zones[MEDIA]
+                .records
+                .get(&blob),
+            Some(&original)
+        );
+        pair.close();
+    }
+}
+
 #[test]
 fn cloud_child_entry() {
     meguri_testkit::cloud::child_driver::child_entry().unwrap();

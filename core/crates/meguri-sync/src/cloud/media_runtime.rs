@@ -425,7 +425,8 @@ impl Runtime {
                         ..Default::default()
                     });
                     if previous.local.as_ref().is_none_or(|v| v.sha256 != p.sha256)
-                        && ack.is_none_or(|v| v.sha256 != p.sha256)
+                        && (tracked.as_ref().is_some_and(|e| e.acked_media_tombstone())
+                            || ack.is_none_or(|v| v.sha256 != p.sha256))
                     {
                         bound.server = ServerState::Unknown;
                     }
@@ -590,12 +591,13 @@ impl Runtime {
             }
         }
         let (mut ledger, key) = self.with_media(&a, |store| {
+            store.materialize_media_rechecks(a.binding)?;
             Ok((store.media_ledger(a.binding)?, store.publication_media(a.binding)?))
         })?;
         if ledger.zone_missing {
             return Ok(None);
         }
-        let key = key.map(|(key, _, _)| key).unwrap_or(RecordKey([0; 32]));
+        let key = key.and_then(|(key, acked, _)| acked.then_some(key));
         if self.state().media.selection == Selection::Resume && !self.state().media.recovered {
             for blob in ledger.blobs.values_mut() {
                 if blob.download == Transfer::Running {
@@ -659,6 +661,7 @@ impl Runtime {
         let request = if !self.state().media.root_checked {
             Some(Request::Root)
         } else {
+            let key = key.ok_or(Error::InvalidData)?;
             let mut live_blobs = BTreeSet::new();
             for flags in ledger.names.values() {
                 if let Some(local) = &flags.local {
@@ -1113,6 +1116,7 @@ impl Runtime {
                             stage = "root_commit";
                         }
                         self.with_media(a, |store| store.accept_media_root(a.binding, root.media_key, crt))?;
+                        ledger = self.with_media(a, |store| store.media_ledger(a.binding))?;
                     }
                 }
                 (Request::Read { name } | Request::Download { name }, Reply::UnknownItem) => {
