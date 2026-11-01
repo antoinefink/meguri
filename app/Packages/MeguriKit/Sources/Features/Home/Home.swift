@@ -241,11 +241,9 @@ public struct HomeView: View {
             }
             .padding(.vertical)
             .listRowSeparator(.hidden)
-            #if !os(macOS)
-            // A touch List takes the screen's identifier, so the page's goes here.
+            // A List takes the screen's identifier, so the page's goes here.
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.deck.page.\(deck.id)")
-            #endif
             if !subdecks.isEmpty {
                 Section {
                     ForEach(subdecks, id: \.id) { node in
@@ -276,10 +274,7 @@ public struct HomeView: View {
                 }
             }
         }
-        #if os(macOS)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.deck.page.\(deck.id)")
-        #else
+        #if !os(macOS)
         .listStyle(.plain)
         #endif
     }
