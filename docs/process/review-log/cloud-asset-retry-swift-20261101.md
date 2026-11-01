@@ -270,3 +270,11 @@ previous 18/20 native result remains failed and the original review/media
 case still needs an uncontaminated passing run after the cause is repaired.
 Privacy/similarity for the diagnostic source pass; independent source review
 found no P0–P2. U113/U114, P24/Q11 and the full batch gate remain open.
+
+## Independent post-run diagnosis
+
+Review found that close cancels command tasks before the revision changes.
+Their results can still set operationFailed. Add a test that cancels a blocked
+command during close and checks reopen. Preserve true failures and require
+proof of cancellation before changing its handling. Add typed error diagnostics.
+The production repair is pending.
