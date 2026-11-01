@@ -64,6 +64,44 @@ mg__swift_initial_adoption_fixture() {
   export MEGURI_INITIAL_ADOPTION_FIXTURE="$fixture"
 }
 
+# Host-only synthetic Service helper for headless MeguriKit tests. Cargo owns
+# its normal native cache; tests execute an exclusive copy owned by this run.
+mg__swift_cloud_service_helper() {
+  local build="$MG_RUN_DIR/cloud-service-build.jsonl" executable published
+  unset MEGURI_CLOUD_SERVICE_CLI
+  if ! (cd "$MG_ROOT/core" && cargo build -q -p meguri-cli --message-format=json) >"$build"; then
+    mg_artifact log "$build" "cloud Service native Cargo build"
+    mg_failure cloud-service-helper "native helper build failed; Swift tests did not start"
+    mg_status fail
+    return 1
+  fi
+  mg_artifact log "$build" "cloud Service native Cargo build"
+  # Validate the complete JSON stream before publication; Cargo can succeed
+  # and produce an executable while still reporting compiler warnings.
+  if ! jq -es 'all(.[]; .reason != "compiler-message" or
+    (.message.level != "warning" and .message.level != "error"))' "$build" >/dev/null 2>&1; then
+    mg_failure cloud-service-helper "native helper build diagnostics rejected; Swift tests did not start"
+    mg_status fail
+    return 1
+  fi
+  if ! executable="$(jq -ers '[.[] | select(.reason=="compiler-artifact" and .target.name=="meguri-cli" and .executable!=null) | .executable]
+    | if length==1 then .[0] else error("expected one meguri-cli executable") end' "$build")" ||
+    ! published="$(python3 "$MG_ROOT/tools/scripts/swift-cloud-service-helper.py" "$MG_RUN_DIR" "$executable")"; then
+    mg_failure cloud-service-helper "native helper publication failed; Swift tests did not start"
+    mg_status fail
+    return 1
+  fi
+  if [ "$published" != "$MG_RUN_DIR/cloud-service-code/meguri-cli" ] || [ ! -x "$published" ] || [ -L "$published" ]; then
+    mg_failure cloud-service-helper "native helper publication lacks its owned executable"
+    mg_status fail
+    return 1
+  fi
+  mg_artifact executable "$published" "headless synthetic cloud Service helper"
+  mg_artifact json "$MG_RUN_DIR/cloud-service-code.json" "native helper publication receipt"
+  mg_detail cloud_service_helper "$(cat "$MG_RUN_DIR/cloud-service-code.json")"
+  export MEGURI_CLOUD_SERVICE_CLI="$published"
+}
+
 # tools/mg swift-test [--package NAME] [--config Debug|Profile] [-- swift test args]
 mg_swift_test() {
   local package=MeguriCore config=Debug spm_config=debug
@@ -147,6 +185,7 @@ mg_swift_test() {
   mg_lint_ui_first || return 0
   if [ "$package" = MeguriKit ]; then
     mg__swift_initial_adoption_fixture || return 0
+    mg__swift_cloud_service_helper || return 0
   fi
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
