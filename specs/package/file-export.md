@@ -56,6 +56,16 @@ fixed/sanitized suggested .colpkg name, and streaming SHA-256 identity of the co
 An artifact may provide a read-only file URL for native handoff; callers cannot choose its private path.
 The handle owns that immutable file independently of the source reader/collection lifetime.
 Keep at most one active export and one completed artifact per export flow; refuse duplicate starts.
+For an open Ready collection and a valid output location, an occupied fixed output slot
+without a durable safe-to-remove ownership proof is a `Busy` admission refusal.
+Check that condition read-only before the review flush, Maintenance reader acquisition,
+media/source validation or disk-capacity preflight for a new export. This ordering does
+not bypass lifecycle, cancellation or output-path safety checks. Do not mutate the
+slot, inspect its package as a new export source or start snapshot/capture work.
+An early check is not a reservation; retain the ownership recheck needed before any
+later cleanup or output write. A slot with a safe-to-remove proof follows normal
+admission: P10/P15 preflight and retained-output protection must pass before cleanup,
+and E2's review flush must still precede snapshot acquisition.
 The result owner retains ownership through job tracking, including setup failure and cancellation.
 Reuse Jobs.trackDraining/terminal-result patterns; never delete while a worker still writes or reads it.
 Provide idempotent discard; close handles before removing only the operation's files.
@@ -105,7 +115,8 @@ U32 still unconditionally sweeps its temporary snapshot/write staging at launch.
 The existing artifact owner handles its own output directory; add no general cleanup framework.
 Remove completed output only after provider ownership ends or an independent provider copy is confirmed.
 If that cannot be proven after process death, retain the Ready output outside the swept paths.
-Keep user files and backups. Limit new exports while owned outputs await safe removal.
+Keep user files and backups. Limit new exports while owned outputs await safe removal,
+using E3's Busy admission rule for a retained slot whose removal is not proved safe.
 
 ## E6. Reuse and focused acceptance
 
@@ -121,6 +132,11 @@ flush failure prevents a false Ready; concurrent writes do not falsify receipt i
 large/sparse fixture copy has bounded RSS and zero whole-package Swift allocations; destination aliases refused;
 existing destination preserved under copy/disk-full/pre-rename cancellation; uncertain post-rename failure is truthful;
 job-tracking failure drains before cleanup; delayed provider read outlives sheet dismissal; retry/discard/restart cleanup.
+A provider-owned or restart-ambiguous slot yields Busy even when the new export would
+otherwise fail media/source validation or capacity preflight, without changing its
+retained bytes or ownership evidence. A safe-to-remove slot is not removed when
+preflight or retained-output protection fails. With no retained slot, those failures
+keep their ordinary typed results and create no output.
 VM journeys: Mac Save/replace/cancel; iPhone Files; iPad native presentation.
 Retain RF2 re-import and durable review for empty-media, collection-only exports only.
 Media-bearing exports require E7.4’s independent archive and compatible-client import proof.
