@@ -56,6 +56,17 @@ nonisolated struct SyncCommandResult: Sendable {
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 
+// Inherited by native child work, but marked only when the coordinator cancels
+// its retained original command task for shutdown. Account reads have no context.
+@MainActor final class SyncCommandTaskContext {
+    @TaskLocal nonisolated static var current: SyncCommandTaskContext?
+    let generation: UInt64
+    let revision: UInt64
+    var shutdownCancellationRequested = false
+    var shutdownCancelled: Bool { shutdownCancellationRequested && Task.isCancelled }
+    init(generation: UInt64, revision: UInt64) { self.generation = generation; self.revision = revision }
+}
+
 @Observable @MainActor
 public final class SyncCoordinator {
     public enum SetupState: Equatable { case configurationUnavailable, prepared, attached, failed }
@@ -87,7 +98,7 @@ public final class SyncCoordinator {
         case persisted(revision: UInt64)
         case account(Bool)
         case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
-        case result(SyncCommandResult, generation: UInt64, revision: UInt64, acknowledged: CheckedContinuation<Void, Never>?)
+        case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool, acknowledged: CheckedContinuation<Void, Never>?)
         case barrier(CheckedContinuation<Void, Never>)
     }
     private struct Issued { let command: CloudPolicyCommand; let generation: UInt64; let sequence: UInt64 }
@@ -103,6 +114,8 @@ public final class SyncCoordinator {
     private var inputQueue: [Input] = []
     private var inputTask: Task<Void, Never>?
     private var operationTasks: [UUID: Task<Void, Never>] = [:]
+    private var operationContexts: [UUID: SyncCommandTaskContext] = [:]
+    private var backendRetired = false
     private var replacementTask: Task<Void, Never>?
     private var replacing = false
     private var suspended = false
@@ -222,6 +235,7 @@ public final class SyncCoordinator {
                 // Even an obsolete factory result owns native resources. Keep
                 // it retained on close failure; the next lane must drain it.
                 backend = value
+                backendRetired = false
                 guard !closing, !Task.isCancelled, !replacing,
                       revision == hostRevision, generation == self.generation else {
                     try await value.close()
@@ -554,19 +568,25 @@ public final class SyncCoordinator {
         guard inputTask == nil else { return }
         inputTask = Task {
             defer { inputTask = nil }
-            while !inputQueue.isEmpty { await reduce(inputQueue.removeFirst()) }
+            await SyncCommandTaskContext.$current.withValue(nil) {
+                while !inputQueue.isEmpty { await reduce(inputQueue.removeFirst()) }
+            }
         }
     }
     private func reduce(_ input: Input) async {
         switch input {
         case .barrier(let continuation): continuation.resume()
-        case .result(let result, let expected, let revision, let acknowledged):
+        case .result(let result, let expected, let revision, let shutdownCancelled, let acknowledged):
             if expected == generation, revision == hostRevision, !replacing, !suspended {
-                for output in result.outputs { consume(output, generation: expected) }
+                for output in result.outputs {
+                    consume(output, generation: expected)
+                }
                 if result.deferred { hasDeferredNativeWork = true }
-                if result.error != nil { operationFailed = true; failureRevision &+= 1 }
-                if result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
-                if initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
+                if let error = result.error, !(closing && shutdownCancelled && error is CancellationError) {
+                    operationFailed = true; failureRevision &+= 1
+                }
+                if !closing, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
+                if !closing, initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
                     await reconcileInitialAdoption(backend)
                 }
             }
@@ -673,10 +693,13 @@ public final class SyncCoordinator {
         case .applyDeferred: if expected == generation { operationFailed = true; failureRevision &+= 1 }; return
         case .syncNowUnavailable(let reason): if expected == generation { syncNowUnavailable = reason }; return
         }
-        guard let backend, !replacing else { return }
+        // Ordinary and failure outputs can both carry required finalization.
+        // The close filter below prevents either from starting a fresh cycle.
+        guard let backend, !replacing, !backendRetired else { return }
         let revision = hostRevision
         var ordered: [Issued] = []
         for command in issued {
+            if closing, !Self.requiredDuringClose(command.action) { continue }
             commandSequence &+= 1
             let value = Issued(command: command, generation: expected, sequence: commandSequence)
             switch command.action {
@@ -689,52 +712,57 @@ public final class SyncCoordinator {
     }
     private func startActions(_ issued: [Issued], backend: any SyncCoordinatorBackend, revision: UInt64, separateOperation: Bool = false) {
         let id = UUID()
+        let context = SyncCommandTaskContext(generation: generation, revision: revision)
+        operationContexts[id] = context
         operationTasks[id] = Task { [self] in
-            defer { operationTasks.removeValue(forKey: id) }
-            for value in issued {
-                let command = value.command
-                if replacing || revision != hostRevision { return }
-                if closing, !Self.requiredDuringClose(command.action) { continue }
-                if !separateOperation {
-                    switch command.action {
-                    case .runExchange, .backgroundFlush, .quitFlush:
-                        startActions([value], backend: backend, revision: revision, separateOperation: true)
-                        continue
-                    default: break
+            defer { operationTasks.removeValue(forKey: id); operationContexts.removeValue(forKey: id) }
+            await SyncCommandTaskContext.$current.withValue(context) {
+                for value in issued {
+                    let command = value.command
+                    if replacing || revision != hostRevision || backendRetired { return }
+                    if closing, !Self.requiredDuringClose(command.action) { continue }
+                    if !separateOperation {
+                        switch command.action {
+                        case .runExchange, .backgroundFlush, .quitFlush:
+                            startActions([value], backend: backend, revision: revision, separateOperation: true)
+                            continue
+                        default: break
+                        }
                     }
-                }
-                let result = await backend.execute(command)
-                // The native executor validates control capabilities as well
-                // as network work. UI effects occur only after that admission.
-                if result.error == nil, revision == hostRevision {
-                    switch command.action {
-                    case .armFlushTimer(let at):
-                        guard value.sequence > timerSequence else { break }
-                        timerSequence = value.sequence
-                        flushTimer?.invalidate()
-                        if !closing {
-                            self.flushTimer = Timer(fire: Date(timeIntervalSince1970: Double(at) / 1_000), interval: 0, repeats: false) { [weak self] _ in
-                                Task { @MainActor in self?.receive(.flushTimerFired) }
+                    let result = await backend.execute(command)
+                    // The native executor validates control capabilities as well
+                    // as network work. UI effects occur only after that admission.
+                    if result.error == nil, revision == hostRevision {
+                        switch command.action {
+                        case .armFlushTimer(let at):
+                            guard value.sequence > timerSequence else { break }
+                            timerSequence = value.sequence
+                            flushTimer?.invalidate()
+                            if !closing {
+                                self.flushTimer = Timer(fire: Date(timeIntervalSince1970: Double(at) / 1_000), interval: 0, repeats: false) { [weak self] _ in
+                                    Task { @MainActor in self?.receive(.flushTimerFired) }
+                                }
+                                if let flushTimer { RunLoop.main.add(flushTimer, forMode: .common) }
                             }
-                            if let flushTimer { RunLoop.main.add(flushTimer, forMode: .common) }
+                        case .cancelFlushTimer:
+                            if value.sequence > timerSequence {
+                                timerSequence = value.sequence; flushTimer?.invalidate(); flushTimer = nil
+                            }
+                        case .statusChanged(let snapshot):
+                            if !closing, value.sequence > statusSequence { statusSequence = value.sequence; status = snapshot }
+                        case .quitNow: quitCompletion?(); quitCompletion = nil
+                        case .quitFlush: quitCompletion?(); quitCompletion = nil
+                        default: break
                         }
-                    case .cancelFlushTimer:
-                        if value.sequence > timerSequence {
-                            timerSequence = value.sequence; flushTimer?.invalidate(); flushTimer = nil
-                        }
-                    case .statusChanged(let snapshot):
-                        if !closing, value.sequence > statusSequence { statusSequence = value.sequence; status = snapshot }
-                    case .quitNow: quitCompletion?(); quitCompletion = nil
-                    case .quitFlush: quitCompletion?(); quitCompletion = nil
-                    default: break
+                    } else if revision == hostRevision, case .quitFlush = command.action {
+                        // A failed send still returns control to the app quit owner
+                        // after the exact native operation has drained.
+                        quitCompletion?(); quitCompletion = nil
                     }
-                } else if revision == hostRevision, case .quitFlush = command.action {
-                    // A failed send still returns control to the app quit owner
-                    // after the exact native operation has drained.
-                    quitCompletion?(); quitCompletion = nil
-                }
-                await withCheckedContinuation { acknowledged in
-                    enqueue(.result(result, generation: value.generation, revision: revision, acknowledged: acknowledged))
+                    await withCheckedContinuation { acknowledged in
+                        enqueue(.result(result, generation: value.generation, revision: revision,
+                            shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
+                    }
                 }
             }
         }
@@ -753,6 +781,7 @@ public final class SyncCoordinator {
         else { ownTask?.cancel() }
         do {
             try await backend?.close()
+            backendRetired = true
             await accountTask?.value
             await ownTask?.value
             await drainOperations()
@@ -771,6 +800,7 @@ public final class SyncCoordinator {
                 // Retain even a stale candidate until its actual close succeeds.
                 // No later owner is constructed before that candidate drains.
                 backend = successor
+                backendRetired = false
                 guard !closing, expected == generation, revision == hostRevision else {
                     try await successor.close()
                     backend = nil
@@ -805,7 +835,7 @@ public final class SyncCoordinator {
                 pendingAccountRead = nil
                 let expected = generation, revision = hostRevision
                 let result = await backend.readAccount(read)
-                enqueue(.result(result, generation: expected, revision: revision, acknowledged: nil))
+                enqueue(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
                 if result.accountVerified { enqueue(.ownAccountProof(read, generation: expected, revision: revision)) }
             }
         }
@@ -853,7 +883,14 @@ public final class SyncCoordinator {
             if let accountObserver { NotificationCenter.default.removeObserver(accountObserver); self.accountObserver = nil }
             flushTimer?.invalidate(); flushTimer = nil
             await waitForInputs()
-            for task in operationTasks.values { task.cancel() }
+            for (id, task) in operationTasks {
+                // Preserve the first cancellation origin (for example expiry).
+                if !task.isCancelled, let context = operationContexts[id],
+                   context.generation == generation, context.revision == hostRevision {
+                    context.shutdownCancellationRequested = true
+                }
+                task.cancel()
+            }
             accountTask?.cancel(); ownTask?.cancel()
             do {
                 if initialAdoptionEnabledBefore != nil, !activatingInitialAdoption,
@@ -868,6 +905,10 @@ public final class SyncCoordinator {
                 await waitForInputs()
                 await drainOperations()
                 if let backend { await reconcileInitialAdoption(backend) }
+                // Reconciliation can issue required finalization too. Keep the
+                // original backend until all results have been acknowledged.
+                await drainOperations()
+                backendRetired = true
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; platformPrepared = false

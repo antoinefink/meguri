@@ -418,6 +418,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var localRefreshCount = 0
     var accountReads = 0
     var holdAccount = false
+    var accountResult: SyncCommandResult?
     var closed = false
     var closeCount = 0
     var persistedReads = 0
@@ -426,6 +427,8 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var executeCommand: (@MainActor (CloudPolicyCommand) async -> SyncCommandResult)?
     private let executions = AsyncStream<Void>.makeStream()
     func waitForExecution() async { for await _ in executions.stream { return } }
+    private let closes = AsyncStream<Void>.makeStream()
+    func waitForClose() async { for await _ in closes.stream { return } }
     var onClose: (@MainActor () async throws -> Void)?
     private var account: CheckedContinuation<Void, Never>?
     private var accountStarted: CheckedContinuation<Void, Never>?
@@ -462,7 +465,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
                 account = continuation
             }
         }
-        return .init(outputs: [.commands([])], error: nil, deferred: false, accountVerified: true)
+        return accountResult ?? .init(outputs: [.commands([])], error: nil, deferred: false, accountVerified: true)
     }
     func waitForLocalRefresh(after count: Int) async {
         if localRefreshCount > count { return }
@@ -473,10 +476,13 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
         await withCheckedContinuation { accountStarted = $0 }
     }
     func releaseAccount() { account?.resume(); account = nil }
-    func close() async throws { try await onClose?(); closed = true; closeCount += 1; releaseAccount() }
+    func close() async throws {
+        try await onClose?(); closed = true; closeCount += 1; releaseAccount()
+        closes.continuation.yield(())
+    }
 }
 
-@MainActor private final class SyncOwnerGate {
+@MainActor final class SyncOwnerGate {
     private var held = false
     private var continuation: CheckedContinuation<Void, Never>?
     private var observer: CheckedContinuation<Void, Never>?

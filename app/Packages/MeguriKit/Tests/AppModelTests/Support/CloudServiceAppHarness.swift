@@ -79,12 +79,16 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
                          action: CloudPolicyAction? = nil) -> String {
         let category: String
         switch error {
+        case is CancellationError: category = "cancellation"
         case BridgeError.cloudPolicy(let failure): category = "cloudPolicy.\(String(describing: failure))"
         case is BridgeError: category = "bridge"
         default: category = "other"
         }
         let actionTag = action.map { " action=\(actionLabel($0))" } ?? ""
-        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag)"
+        let taskState = Task.isCancelled ? "cancelled" : "active"
+        let closePhase = closed ? "returned" : closeFailure != nil ? "failed" : closeEntered > 0 ? "draining" : "notStarted"
+        let ownership = SyncCommandTaskContext.current?.shutdownCancelled == true ? "ownedShutdown" : "none"
+        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)"
         trace(diagnostic)
         return diagnostic
     }
@@ -163,7 +167,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         }
         if let error = result.error {
             let diagnostic = capture(error, stage: .executeError, action: command.action)
-            Issue.record("Service app command failed; \(diagnostic)")
+            if !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
+                Issue.record("Service app command failed; \(diagnostic)")
+            }
         }
         return result
     }
