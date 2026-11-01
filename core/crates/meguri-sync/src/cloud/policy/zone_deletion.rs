@@ -50,10 +50,10 @@ impl Driver {
         }
         let result = (|| {
             self.validate(&pass.command)?;
-            Ok(self.runtime.submit_zone_deletion(&pass.guard, collection, || {
+            self.runtime.submit_zone_deletion(&pass.guard, collection, || {
                 self.validate(&pass.command)?;
                 Ok::<bool, DriverError>(enqueue())
-            })??)
+            })?
         })();
         *pass.phase.lock().unwrap_or_else(PoisonError::into_inner) = if matches!(result, Ok(true)) {
             Phase::ReadQueued
@@ -129,12 +129,11 @@ impl Driver {
         };
         let result = (|| {
             self.validate(&pass.command)?;
-            Ok(self
-                .runtime
+            self.runtime
                 .submit_zone_deletion_batch(&pass.guard, collection, read, &zones, || {
                     self.validate(&pass.command)?;
                     Ok::<bool, DriverError>(enqueue())
-                })??)
+                })?
         })();
         *pass.phase.lock().unwrap_or_else(PoisonError::into_inner) = if matches!(result, Ok(true)) {
             Phase::DeleteQueued { zones }

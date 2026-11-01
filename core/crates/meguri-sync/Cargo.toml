@@ -50,7 +50,6 @@ zip.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]
-meguri-host.workspace = true
 # The scripted stub server (`sync_stub`). Through it every test build has this
 # crate's `test-hooks` and `ankiweb` features.
 meguri-testkit.workspace = true

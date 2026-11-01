@@ -87,3 +87,34 @@ the final core. core-lint/20261101T055607Z-7688 failed: two redundant Rust
 result wrappers, plus the earlier Q11 test's upward dev dependency. These
 technical failures remain open at this WIP checkpoint. The Q11 test will move
 to the Host test crate; its behavior assertion stays enabled.
+
+## Lint repair
+
+Starting commit: 2397f501abd6861e8a62602575e1b333ea288ff0.
+Source: cleanroom/20261101T055828Z-9560, fixer session
+s-20261025T162405Z-9dc656e4.
+
+The two Rust expressions now use the compiler's simpler return form. The Q11
+test moved unchanged to core/crates/meguri-host/tests/cloud_cleanup_listing_q11.rs.
+Removing its old dev dependency restores the established crate order. Its hash
+is cc64167ff811a38d07918a177c5b6927f7cf00e3a8af492bbea7d5f8693ccbdf.
+Reviewer native_conformance_lifecycle_audit found no required fix.
+
+| Run | Result |
+| --- | --- |
+| core-format/20261101T055933Z-10150 | Pass |
+| core-lint/20261101T055950Z-10526 | Pass |
+| core-test/20261101T060028Z-11477 | Pass, 28 tests |
+| private/20261101T060018Z-11228 | Pass |
+| similarity/20261101T060013Z-10877 | Pass |
+
+Swift source and executable behavior did not change in this repair. The earlier
+Swift receipts remain relevant. The relocation preserves the enabled Q11 failure;
+its result in the new test crate is recorded next. All remaining acceptance work
+listed above is still required.
+
+| Run | Result |
+| --- | --- |
+| core-test/20261101T060107Z-11865 | Fail, Q11 line 303; helper passed |
+
+The Q11 failure remains enabled at its new path. Its bytes are unchanged.
