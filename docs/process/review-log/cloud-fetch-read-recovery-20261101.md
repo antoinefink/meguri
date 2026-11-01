@@ -133,6 +133,15 @@ The six-round limit is reached. E-20261101T232833Z-dbc5 records blocked-red
 for U114 under docs/process/merge.md. The source and failure evidence are WIP;
 no extra repair round, unit acceptance or failure waiver is implied.
 
+Post-check review identifies P1 at SyncCoordinator.swift:643-650. Core rejects
+an old statusChanged command at validate.backend-guard; generation and binding
+still match, so the Runtime token is the changed guard component. That command
+does no write, but its rejection becomes a persistent UI operation failure.
+The exact token-changing event and Resume's second action are not yet known.
+The next limited cycle needs fixed action/guard-stage labels, a held-status
+test and a stale mutating-command control. An old status result must publish
+neither its UI data nor its failure; mutating errors must remain errors.
+
 Remaining coverage: the suspended beginIdentityRead return boundary; direct
 builder refusal while inference is held; a later collection-only C2 after
 isolation; and real Core A7 facts through Copy Debug Info. The resolver test
