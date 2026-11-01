@@ -189,10 +189,12 @@ enum AccessibilityAudit {
 
     /// Runs the audit; every issue comes back as a finding, suppressed when
     /// a suppression names its element and its type exactly, excluded when
-    /// it is the window's (`systemElement`).
+    /// it is the window's (`systemElement`). Optional diagnostics observe each
+    /// collected finding inside the issue handler, before its screenshot.
     @MainActor
     static func run(
-        _ app: XCUIApplication, variant: String, types: XCUIAccessibilityAuditType = .all, suppressions: [AuditSuppression]
+        _ app: XCUIApplication, variant: String, types: XCUIAccessibilityAuditType = .all, suppressions: [AuditSuppression],
+        onIssue: ((AuditFinding) -> Void)? = nil
     ) throws -> [AuditFinding] {
         var findings: [AuditFinding] = []
         try app.performAccessibilityAudit(for: types) { issue in
@@ -208,6 +210,7 @@ enum AccessibilityAudit {
                 excluded: systemElement(identifier: identifier, label: label)
             )
             findings.append(finding)
+            onIssue?(finding)
             if finding.counts {
                 // What the audit saw: the window, kept with the result.
                 let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())

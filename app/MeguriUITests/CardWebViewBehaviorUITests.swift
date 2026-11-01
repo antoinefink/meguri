@@ -570,6 +570,108 @@ final class CardWebViewBehaviorUITests: XCTestCase {
     }
     #endif
 
+    /// Diagnostic only: this single contrast audit never replaces the required full audit below.
+    func testCardActionsRefreshLightLargestContrastDiagnostic() throws {
+        #if os(macOS)
+        throw XCTSkip("Refresh contrast diagnostic is not applicable on Mac; it requires the iPhone/iPad native actions sheet and accessibility XXXL")
+        #else
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("this configuration has no fixture routes") }
+        let suppressions = try AuditSuppressions.bundled()
+        let appearance = XCUIDevice.shared.appearance
+        defer { XCUIDevice.shared.appearance = appearance }
+        let variant = AccessibilityAudit.Variant(largestText: true, dark: false)
+        variant.apply()
+        let app = XCUIApplication()
+        var arguments = MeguriLaunch(locale: "en_US", animations: false, route: "card/behaviors")
+        arguments.extra += variant.launchArguments
+        app.launchArguments = arguments.arguments
+        app.launch()
+        defer { app.terminate() }
+        let anchor = app.descendants(matching: .any).matching(identifier: "card.behavior.state").firstMatch
+        guard anchor.waitForExistence(timeout: 15) else {
+            throw AuditError(description: "Refresh contrast diagnostic: card.behavior.state did not appear")
+        }
+        let ready = wait {
+            let currentState = self.state(app)
+            if currentState.hasPrefix("failed") { return true }
+            return currentState.hasPrefix("ready card=1 side=question") && app.staticTexts["Behavior question"].exists
+        }
+        guard ready, state(app).hasPrefix("ready card=1 side=question"), app.staticTexts["Behavior question"].exists else {
+            throw AuditError(description: "Refresh contrast diagnostic: card/behaviors question did not become ready")
+        }
+        let shown = try AccessibilityAudit.Appearance.shown(by: app)
+        guard shown.dark == variant.dark else {
+            throw AuditError(description: "Refresh contrast diagnostic: light appearance did not apply")
+        }
+        let list = try openActions(in: app)
+        let close = app.buttons["card.behavior.actions.close"]
+        defer {
+            if close.exists { close.tap() }
+            XCTAssert(wait { !list.exists }, "Card actions did not close after contrast diagnostic")
+        }
+        let refresh = list.buttons["card.behavior.refresh"]
+        var positions = Set<[String]>()
+        var reachedRefresh = false
+        for _ in 0..<40 {
+            let bounds = visibleListBounds(list, in: app)
+            let signature = actionPositions(in: list, bounds: bounds)
+            guard positions.insert(signature).inserted else { break }
+            if fullyVisible(refresh, in: bounds) {
+                reachedRefresh = true
+                break
+            }
+            scrollActions(list, in: app)
+        }
+        guard reachedRefresh else {
+            throw AuditError(description: "Refresh contrast diagnostic: card.behavior.refresh never became fully visible and hittable")
+        }
+        // Fixed synthetic IDs only, even if the audit reports a different element.
+        func recordGeometry(_ phase: String) -> Bool {
+            let bounds = visibleListBounds(list, in: app)
+            var lines = ["phase=\(phase) visibleBounds=\(bounds)"]
+            var refreshVisible = false
+            for id in ["resize", "refresh", "suspend"] {
+                let row = list.buttons["card.behavior.\(id)"]
+                let exists = row.exists
+                let frame = exists ? row.frame : .zero
+                let hittable = exists && row.isHittable
+                let fullyVisible = exists && !frame.isEmpty
+                    && [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+                    && !bounds.isEmpty && bounds.contains(frame) && hittable
+                if id == "refresh" { refreshVisible = fullyVisible }
+                lines.append("card.behavior.\(id) frame=\(frame) exists=\(exists) hittable=\(hittable) fullyVisible=\(fullyVisible)")
+            }
+            let text = lines.joined(separator: "\n")
+            print("card-contrast-probe \(text)")
+            let attachment = XCTAttachment(string: text)
+            attachment.name = "card-contrast-probe-geometry-\(phase)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            return refreshVisible
+        }
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "card-contrast-probe-before"
+        shot.lifetime = .keepAlways
+        add(shot)
+        guard recordGeometry("before") else {
+            throw AuditError(description: "Refresh contrast diagnostic: card.behavior.refresh lost full visibility or hittability before audit")
+        }
+        var findings: [AuditFinding] = []
+        var issueNumber = 0
+        do {
+            defer { _ = recordGeometry("after") }
+            findings = try AccessibilityAudit.run(
+                app, variant: "diagnostic question sheet, \(variant)", types: .contrast, suppressions: suppressions,
+                onIssue: { _ in
+                    issueNumber += 1
+                    _ = recordGeometry("issue-\(issueNumber)")
+                })
+        }
+        AccessibilityAudit.assertClean(findings)
+        #endif
+    }
+
     func testCardSurfaceAccessibilityAudit() throws {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("this configuration has no fixture routes") }
