@@ -16,6 +16,7 @@ import Testing
         for _ in 0..<2 {
             let host = NSHostingView(rootView: MacSettingsView(collection: collection, present: { _ in }))
             window.contentView = host
+            window.orderFront(nil)
             window.layoutIfNeeded()
             host.layoutSubtreeIfNeeded()
             let fields = searchFields(in: host)
@@ -26,9 +27,9 @@ import Testing
             let searchLabel = try #require(cell.searchButtonCell?.accessibilityLabel())
             try #require(!searchLabel.isEmpty)
             var visited: Set<ObjectIdentifier> = []
-            let buttons = accessibilityButtons(in: field, visited: &visited)
+            let buttons = try accessibilityButtons(in: field, visited: &visited)
             let matches = buttons.filter { $0.accessibilityLabel() == searchLabel }
-            recordSearchAccessibilityDiagnostic(window: window, field: field, cell: cell,
+            try recordSearchAccessibilityDiagnostic(window: window, field: field, cell: cell,
                 expectedLabel: searchLabel, matchCount: matches.count)
             try #require(matches.count == 1)
             let search = try #require(matches.first)
@@ -48,10 +49,10 @@ import Testing
         return view.subviews.flatMap { searchFields(in: $0) }
     }
 
-    // Diagnostic only: preserve the failing matcher. Never emit UI strings or
+    // Diagnostic only: never emit UI strings or
     // runtime class names outside this exact public-AppKit allowlist.
     private func recordSearchAccessibilityDiagnostic(window: NSWindow, field: NSSearchField,
-        cell: NSSearchFieldCell, expectedLabel: String, matchCount: Int) {
+        cell: NSSearchFieldCell, expectedLabel: String, matchCount: Int) throws {
         print("settingsSearchAX windowContentAttached=\(window.contentView != nil)"
             + " windowVisible=\(window.isVisible) windowMiniaturized=\(window.isMiniaturized)"
             + " fieldAttached=\(field.window === window) fieldHidden=\(field.isHidden)"
@@ -80,7 +81,7 @@ import Testing
             var records = 0
             var nodeLimitReached = false
             var depthLimitReached = false
-            func visit(_ object: AnyObject, parent: Int, edge: Int, index: Int, depth: Int) {
+            func visit(_ object: AnyObject, parent: Int, edge: Int, index: Int, depth: Int) throws {
                 guard records < maxRecords else { nodeLimitReached = true; return }
                 records += 1
                 // Classify the actual class before attempting protocol conformance;
@@ -112,37 +113,52 @@ import Testing
                     + " labelMatchesExpected=\(accessibility.accessibilityLabel() == expectedLabel)"
                     + " axElement=\(accessibility.isAccessibilityElement())")
                 guard !repeated else { return }
-                let direct = accessibility.accessibilityChildren() ?? []
-                let navigation = accessibility.accessibilityChildrenInNavigationOrder() ?? []
+                let direct = try accessibilityChildArray(in: accessibility,
+                    selector: #selector(NSAccessibilityProtocol.accessibilityChildren))
+                let navigation = try accessibilityChildArray(in: accessibility,
+                    selector: #selector(NSAccessibilityProtocol.accessibilityChildrenInNavigationOrder))
                 print("settingsSearchAX root=\(root) node=\(node)"
                     + " directChildren=\(direct.count) navigationChildren=\(navigation.count)")
                 guard depth < maxDepth else {
-                    depthLimitReached = depthLimitReached || !direct.isEmpty || !navigation.isEmpty
+                    depthLimitReached = depthLimitReached || direct.count > 0 || navigation.count > 0
                     return
                 }
                 for (childEdge, children) in [(1, direct), (2, navigation)] {
-                    for (childIndex, child) in children.enumerated() {
+                    for childIndex in 0..<children.count {
                         guard records < maxRecords else { nodeLimitReached = true; break }
-                        visit(child as AnyObject, parent: node, edge: childEdge,
+                        try visit(children.object(at: childIndex) as AnyObject, parent: node, edge: childEdge,
                             index: childIndex, depth: depth + 1)
                     }
                 }
             }
-            visit(element, parent: -1, edge: 0, index: 0, depth: 0)
+            try visit(element, parent: -1, edge: 0, index: 0, depth: 0)
             print("settingsSearchAX root=\(root) records=\(records) uniqueNodes=\(identities.count)"
                 + " maxRecords=\(maxRecords) maxDepth=\(maxDepth)"
                 + " nodeLimitReached=\(nodeLimitReached) depthLimitReached=\(depthLimitReached)")
         }
     }
 
+    // Keep the Objective-C collection intact: typed Swift getter bridging can
+    // trap before traversal can inspect a native accessibility child.
+    private func accessibilityChildArray(in element: any NSAccessibilityProtocol,
+                                         selector: Selector) throws -> NSArray {
+        let object = try #require(element as? NSObject)
+        try #require(object.responds(to: selector))
+        guard let result = object.perform(selector)?.takeUnretainedValue() else { return NSArray() }
+        return try #require(result as? NSArray)
+    }
+
     private func accessibilityButtons(in element: any NSAccessibilityProtocol,
-                                      visited: inout Set<ObjectIdentifier>) -> [any NSAccessibilityProtocol] {
+                                      visited: inout Set<ObjectIdentifier>) throws -> [any NSAccessibilityProtocol] {
         guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { return [] }
-        let own: [any NSAccessibilityProtocol] = element.accessibilityRole() == .button ? [element] : []
-        return own + (element.accessibilityChildren() ?? []).flatMap { child -> [any NSAccessibilityProtocol] in
-            guard let child = child as? any NSAccessibilityProtocol else { return [] }
-            return accessibilityButtons(in: child, visited: &visited)
+        var buttons: [any NSAccessibilityProtocol] = element.accessibilityRole() == .button ? [element] : []
+        let children = try accessibilityChildArray(in: element,
+            selector: #selector(NSAccessibilityProtocol.accessibilityChildren))
+        for index in 0..<children.count {
+            guard let child = children.object(at: index) as? any NSAccessibilityProtocol else { continue }
+            buttons += try accessibilityButtons(in: child, visited: &visited)
         }
+        return buttons
     }
 }
 #endif
