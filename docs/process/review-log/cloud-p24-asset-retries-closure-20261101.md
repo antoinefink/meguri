@@ -25,7 +25,7 @@ The native test calls SDK fetch, not a retry or issued-command API. `ServiceAppB
 
 ## Retained runs and source limits
 
-- `build/mg/core-test/20261101T134745Z-91787/result.json`: clean `4fa09dad1b6eca37355ead52bf75a260b5d3aec9`, Docker, 420 passed, zero failed/skipped. Selection covers CloudKit tests in `meguri-sync` and `meguri-host`; it includes every Rust test named above.
+- `build/mg/core-test/20261101T134745Z-91787/result.json`: clean `4fa09dad1b6eca37355ead52bf75a260b5d3aec9`, Docker, 420 selected tests passed, zero failed/skipped. Its filter covers CloudKit tests in `meguri-sync` and `meguri-host`, not the whole workspace; it includes every Rust test named above.
 - `build/mg/swift-test/20261101T144749Z-20763/result.json`: clean `18ac384afc5993e0b0ce619f17725e995f395eeb`, 2 passed. Both the automatic asset test and `realServiceReviewAndRegisteredMediaSurviveReopenAndFreshAdoption` pass. The result retains the synthetic fixture hash, published Service helper hash and core artifact stamp. Production source for this proof remains unchanged through `71901282`; subsequent differences concern test layout and documentation.
 - `build/mg/core-test/20261101T131902Z-75815/result.json`: 1 passed, the FFI test `five_failed_drain_retries_then_actual_reopen_first_drain_merges_and_service_acks_local_edit`. It reports dirty inputs and is corroboration only, not a clean-commit receipt. It directly executes issued FFI commands; the later Swift test supplies automatic coordinator execution.
 
@@ -33,8 +33,8 @@ The rules agree across K13.1 and P4: retry budget belongs to each entry, resets 
 
 ## Wider failures remain open
 
-`build/mg/swift-test/20261101T150338Z-27960/result.json` remains failed: 19 of 23 passed, four failed, with one package warning. The two named full Service workflows pass in its log as well. That result is not a passing suite receipt.
+`build/mg/swift-test/20261101T150338Z-27960/result.json` remains failed: 19 of 23 passed, four failed, with one package warning for the unhandled `AppModelTests/AGENTS.md` file. The two named full Service workflows pass in its log as well. That result is not a passing suite receipt.
 
-Pending work: verify normal close for original commands and required `UpdatePending` outputs. The failed receipt retains four cases needing fixes. Another six scheduler cases need a fixture that starts the policy correctly. All of this work remains required outside the present prerequisite.
+The replacement suite starts policy through `ServiceAppHarness` for all six scheduler cases: two pass and four fail. It replaces the earlier manual setup. Current failures concern normal closure, where required `UpdatePending` results arrive after the SDK retires. Keep those failures open; acceptance of the larger workflow still waits for their repair.
 
 This closes only the asset retry prerequisite. Resume V9.2, other P24 items, U113/U114, the original batch gate and milestone acceptance remain open. The native test uses a registered fake SDK with the real Service and production coordinator; it is not a signed CloudKit run or device evidence. No live SDK assumption, rendered UI result, human approval or trial is inferred.
