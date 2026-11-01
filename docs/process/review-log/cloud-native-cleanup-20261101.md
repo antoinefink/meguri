@@ -62,3 +62,33 @@ Integration verification on a808 with this source applied:
   passes. The full review/media case reports generationChanged and then
   staleCommand for recordQuietPoint; its assertions remain enabled. Diagnosis
   is in progress. No full workflow, unit or release acceptance is claimed.
+
+Bounded rejection-diagnostic handoff, fixer s-20261025T162405Z-9dc656e4:
+- Canonical clean base: bb0a24f4. Original U113 and batch bases above remain.
+- The full test's earlier generationChanged diagnostic is lifetime evidence;
+  it does not prove the later recordQuietPoint rejection's cause.
+- Harness diagnostics now retain a per-backend sequence across the existing
+  16-entry buffer. Successful adoption/reopen records a sequence baseline;
+  exchange failure text uses only later retained entries on its original backend.
+  Exact event text, original command errors and exchange assertions remain.
+- Driver test-hooks stderr marks actual rejection under the existing lock:
+  validate.policy-guard, validate.original-owner, validate.backend-guard,
+  validate.automatic-setting, validate.generation-binding, or
+  execute.quiet-preconditions (all prefixed cloud-policy-rejection stage=).
+  Output is fixed tags plus equality/precondition booleans and queue counts;
+  no command, identity, timestamp, binding or payload values are emitted.
+- Error propagation, quiet qualification, scheduling and workflow behavior are
+  unchanged. Overlapping command batches remain an unproven candidate.
+- One bounded source consistency check covers this delta. No builds, tests,
+  Git, history or network operations ran in this filtered fixer session. Root
+  owns the next MG full Swift test, focused Rust checks and authoritative gates.
+  Runtime rejection cause and full workflow acceptance remain unproven.
+
+Diagnostic integration results:
+- native_bounds_review: no P0-P2 source findings.
+- private/20261101T084942Z-6957: PASS for these three files.
+- similarity/20261101T084934Z-6590: PASS for the pending source.
+- swift-test/20261101T084816Z-1955: compiled with zero warnings; FAIL at
+  the existing original-media-command timeout. No rejection tag appeared.
+  This different failure does not prove that the earlier quiet-point failure
+  is repaired. Both remain open; no retry or budget change was added.

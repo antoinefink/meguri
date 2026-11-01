@@ -521,10 +521,28 @@ impl Driver {
     }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
         let runtime = self.runtime.adapter_guard();
-        if owned.state.guard() != command.action.guard
-            || command.owner != self.runtime.instance().unwrap_or_default()
-            || runtime != command.backend_guard
-        {
+        if owned.state.guard() != command.action.guard {
+            #[cfg(feature = "test-hooks")]
+            eprintln!(
+                "cloud-policy-rejection stage=validate.policy-guard generation_matches={} binding_matches={} token_matches={}",
+                owned.state.guard().generation == command.action.guard.generation,
+                owned.state.guard().binding == command.action.guard.binding,
+                owned.state.guard().token == command.action.guard.token,
+            );
+            return Err(DriverError::StaleCommand);
+        }
+        if command.owner != self.runtime.instance().unwrap_or_default() {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloud-policy-rejection stage=validate.original-owner");
+            return Err(DriverError::StaleCommand);
+        }
+        if runtime != command.backend_guard {
+            #[cfg(feature = "test-hooks")]
+            eprintln!(
+                "cloud-policy-rejection stage=validate.backend-guard generation_matches={} binding_matches={}",
+                runtime.generation == command.backend_guard.generation,
+                runtime.binding == command.backend_guard.binding,
+            );
             return Err(DriverError::StaleCommand);
         }
         // Scheduling values are snapshots, unlike authority for manual work.
@@ -536,6 +554,8 @@ impl Driver {
             _ => None,
         };
         if automatic.is_some_and(|value| value != owned.state.automatic()) {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloud-policy-rejection stage=validate.automatic-setting");
             return Err(DriverError::StaleCommand);
         }
         // Unbound Runtime has no collection generation. Only Host control
@@ -550,6 +570,12 @@ impl Driver {
             && (command.backend_guard.generation != command.action.guard.generation
                 || runtime.binding != command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec()))
         {
+            #[cfg(feature = "test-hooks")]
+            eprintln!(
+                "cloud-policy-rejection stage=validate.generation-binding generation_matches={} binding_matches={}",
+                command.backend_guard.generation == command.action.guard.generation,
+                runtime.binding == command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec()),
+            );
             return Err(DriverError::StaleCommand);
         }
         Ok(())
@@ -611,6 +637,23 @@ impl Driver {
                     || summary.unsettled_intents > 0
                     || owned.state.drained != [true, true]
                 {
+                    #[cfg(feature = "test-hooks")]
+                    eprintln!(
+                        concat!(
+                            "cloud-policy-rejection stage=execute.quiet-preconditions ",
+                            "collection_known={} scan_clear={} pending={} in_flight={} ready={} ",
+                            "apply_in_progress={} unsettled_intents={} root_drained={} collection_drained={}"
+                        ),
+                        summary.collection_known,
+                        summary.scan == Scan::None,
+                        summary.pending_unheld,
+                        summary.in_flight,
+                        summary.ready,
+                        summary.apply_in_progress,
+                        summary.unsettled_intents,
+                        owned.state.drained[0],
+                        owned.state.drained[1],
+                    );
                     return Err(DriverError::StaleCommand);
                 }
                 self.runtime

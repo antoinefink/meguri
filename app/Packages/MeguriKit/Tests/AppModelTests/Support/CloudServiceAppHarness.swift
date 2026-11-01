@@ -16,7 +16,19 @@ import Testing
     private let exchanges: AsyncStream<Bool>
     private let exchanged: AsyncStream<Bool>.Continuation
     private(set) var closed = false
-    private(set) var diagnostics: [String] = []
+    private struct DiagnosticEntry {
+        let sequence: UInt64
+        let message: String
+    }
+    private var diagnosticEntries: [DiagnosticEntry] = []
+    private var diagnosticSequence: UInt64 = 0
+    private var diagnosticBaseline: UInt64 = 0
+    var diagnostics: [String] { diagnosticEntries.map(\.message) }
+    var exchangeDiagnostics: [String] {
+        diagnosticEntries.filter { $0.sequence > diagnosticBaseline }.map(\.message)
+    }
+    // Sequence survives buffer trimming; a retained-array index does not.
+    func markDiagnosticBaseline() { diagnosticBaseline = diagnosticSequence }
     private let wire: ServiceWorkflowWire
     private let mediaCompletions: AsyncStream<ServiceMediaCompletion>
     private let mediaCompleted: AsyncStream<ServiceMediaCompletion>.Continuation
@@ -50,8 +62,9 @@ import Testing
         }
         let actionTag = action.map { " action=\(actionLabel($0))" } ?? ""
         let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag)"
-        if diagnostics.count == 16 { diagnostics.removeFirst() }
-        diagnostics.append(diagnostic)
+        diagnosticSequence += 1
+        if diagnosticEntries.count == 16 { diagnosticEntries.removeFirst() }
+        diagnosticEntries.append(DiagnosticEntry(sequence: diagnosticSequence, message: diagnostic))
         return diagnostic
     }
     private func actionLabel(_ action: CloudPolicyAction) -> String {
@@ -232,6 +245,7 @@ private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: St
         let failureMessage = "Service app adopt: setupState=\(sync.setupState); backend diagnostics=[\(diagnostics)]"
         try #require(owner.state == .ready && !sync.operationFailed, "\(failureMessage)")
         try await backend.waitForStart()
+        try backend.markDiagnosticBaseline()
     }
     func reopen() async throws {
         await owner.start()
@@ -241,6 +255,7 @@ private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: St
         let failureMessage = "Service app reopen: setupState=\(sync.setupState); backend diagnostics=[\(diagnostics)]"
         try #require(owner.state == .ready && !sync.operationFailed, "\(failureMessage)")
         try await backend.waitForStart()
+        try backend.markDiagnosticBaseline()
     }
     func exchange() async throws {
         let original = try backend
@@ -248,7 +263,7 @@ private nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: St
         try await original.waitForExchange()
         await sync.waitForInputs()
         let exchangeSucceeded = !sync.operationFailed
-        let diagnostics = backends.flatMap { $0.diagnostics }.suffix(16).joined(separator: " | ")
+        let diagnostics = original.exchangeDiagnostics.joined(separator: " | ")
         try #require(exchangeSucceeded, "Service app exchange: backend diagnostics=[\(diagnostics)]")
     }
     func cleanup() async { _ = await owner.close() }
