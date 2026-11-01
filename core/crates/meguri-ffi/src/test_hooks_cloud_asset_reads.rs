@@ -5,7 +5,7 @@ use meguri_storage::{ReadRows, ReaderRole};
 use meguri_sync::cloud::{adapter::collection_zone, entity_codec as codec, row_payload};
 
 pub(super) fn remote(ordinal: u32) -> Result<CloudAssetReadRemoteFixture, CoreError> {
-    if !(1..=2).contains(&ordinal) {
+    if ordinal > 2 {
         return Err(cloud_error("unsupported synthetic asset ordinal"));
     }
     let host = runtime::host()?;
@@ -26,12 +26,40 @@ pub(super) fn remote(ordinal: u32) -> Result<CloudAssetReadRemoteFixture, CoreEr
             _ => None,
         })
         .ok_or_else(|| cloud_error("fixture requires a captured note"))?;
-    note.id = note
-        .id
-        .checked_add(1_000_000 + i64::from(ordinal))
-        .ok_or_else(|| cloud_error("fixture id overflow"))?;
-    note.guid = format!("synthetic-asset-executor-{ordinal}").into_bytes();
-    note.flds = format!("Synthetic remote {ordinal}\u{1f}{}", "r".repeat(800_000)).into_bytes();
+    let conflict = if ordinal == 0 {
+        let payload = codec::Payload::Note(note.clone());
+        let key = row_payload::payload_key(&payload).map_err(cloud_error)?;
+        let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Note, &key).map_err(cloud_error)?;
+        Some(
+            core.entity_facts(&name)
+                .map_err(cloud_error)?
+                .ok_or_else(|| cloud_error("missing fixture note"))?,
+        )
+    } else {
+        None
+    };
+    if let Some(base) = &conflict {
+        let Some(codec::Payload::Note(acked)) = &base.acked_payload else {
+            return Err(cloud_error("fixture needs actual acked note"));
+        };
+        if base.server_erev == 0 {
+            return Err(cloud_error("fixture needs actual server base"));
+        }
+        note = acked.clone();
+        let mut fields: Vec<_> = note.flds.split(|b| *b == 31).map(<[u8]>::to_vec).collect();
+        if fields.len() != 2 {
+            return Err(cloud_error("fixture needs two fields"));
+        }
+        fields[1] = "remote".repeat(160_000).into_bytes();
+        note.flds = fields.join(&31);
+    } else {
+        note.id = note
+            .id
+            .checked_add(1_000_000 + i64::from(ordinal))
+            .ok_or_else(|| cloud_error("fixture id overflow"))?;
+        note.guid = format!("synthetic-asset-executor-{ordinal}").into_bytes();
+        note.flds = format!("Synthetic remote {ordinal}\u{1f}{}", "r".repeat(800_000)).into_bytes();
+    }
     let note_id = note.id;
     let fields = note.flds.clone();
     let payload = codec::Payload::Note(note);
@@ -42,13 +70,17 @@ pub(super) fn remote(ordinal: u32) -> Result<CloudAssetReadRemoteFixture, CoreEr
         codec::EntityFields {
             kind: codec::Kind::Note,
             key,
-            origin: [83; 16],
-            erev: 1,
+            origin: conflict.as_ref().map_or([83; 16], |base| base.origin),
+            erev: conflict.as_ref().map_or(Ok(1), |base| {
+                base.server_erev
+                    .checked_add(1)
+                    .ok_or_else(|| cloud_error("fixture erev overflow"))
+            })?,
             generation: None,
             tombstone: false,
             deleted_at_ms: 0,
             writer: [84; 16],
-            base_sha256: None,
+            base_sha256: conflict.as_ref().map(|base| base.acked_payload_digest),
         },
         &bytes,
     )

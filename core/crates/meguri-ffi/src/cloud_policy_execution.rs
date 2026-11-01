@@ -61,7 +61,7 @@ impl CloudPolicyExecution {
             .ok_or_else(|| failure(CloudPolicyFailure::Closed))?;
         Ok((self.policy().host.clone(), core, collection, self.sdk()?))
     }
-    fn policy(&self) -> &Arc<CloudPolicy> {
+    pub(crate) fn policy(&self) -> &Arc<CloudPolicy> {
         &self.command.owner
     }
     fn check(&self) -> Result<(), CoreError> {
@@ -264,16 +264,7 @@ impl CloudPolicyExecution {
             }
             if !started && failed {
                 let code = code.unwrap_or(0);
-                let class = match code {
-                    3 | 4 => p::OperationError::Offline,
-                    6 | 7 | 23 => p::OperationError::Throttled,
-                    9 | 36 => p::OperationError::NoAccount,
-                    5 | 8 | 10 | 24 | 32 => p::OperationError::Configuration,
-                    25 => p::OperationError::QuotaFull,
-                    26 | 28 => p::OperationError::ConflictRecovery,
-                    18 => p::OperationError::UnsupportedSchema,
-                    _ => p::OperationError::Other,
-                };
+                let class = operation_error_class(code);
                 let output = self.policy().host.cloud_policy_input(p::DeviceEvent::OperationError {
                     instance: sdk.clone(),
                     operation,
@@ -359,5 +350,19 @@ impl CloudPolicyExecution {
             .driver()?
             .begin_native_send(&self.command.command, &self.sdk()?)
             .map_err(execution_error)
+    }
+}
+
+/// Shared P15 mapping for issued executions and original first-read passes.
+pub(crate) fn operation_error_class(code: i64) -> p::OperationError {
+    match code {
+        3 | 4 => p::OperationError::Offline,
+        6 | 7 | 23 => p::OperationError::Throttled,
+        9 | 36 => p::OperationError::NoAccount,
+        5 | 8 | 10 | 24 | 32 => p::OperationError::Configuration,
+        25 => p::OperationError::QuotaFull,
+        26 | 28 => p::OperationError::ConflictRecovery,
+        18 => p::OperationError::UnsupportedSchema,
+        _ => p::OperationError::Other,
     }
 }

@@ -373,6 +373,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudAssetReadPassSubmit = BridgeCall("CloudAssetReadPass.submit")
     public static let cloudAssetReadPassComplete = BridgeCall("CloudAssetReadPass.complete")
     public static let cloudAssetReadPassCancel = BridgeCall("CloudAssetReadPass.cancel")
+    public static let cloudAssetReadPassOperationActivity = BridgeCall("CloudAssetReadPass.operation_activity")
     public static let cloudAssetReadPassFinish = BridgeCall("CloudAssetReadPass.finish")
     public static let cloudWorkflowSubmitMediaBatch = BridgeCall("CloudWorkflow.submit_media_batch")
     public static let cloudMediaDownloadsBlocked = BridgeCall("CloudMedia.downloads_blocked")
@@ -446,7 +447,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
-        cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish,
+        cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,

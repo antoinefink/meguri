@@ -60,3 +60,93 @@ per-SDK executor, exact retry commands and original-pass activity reporting
 after the true native event-bookkeeping boundary. Signed cross-device
 collection/review/media proof, other open sync requirements and the batch gate
 remain required. U113 and U114 remain unaccepted.
+
+Follow-up diagnostics:
+
+- `cleanroom/20261031T232834Z-26813` replaces the five cloned-reference slices
+  and adds SDK callback characterization plus direct helper checks.
+- `core-lint/20261031T234254Z-30990`: all four checks pass.
+- `swift-test/20261031T233608Z-28746`: the direct helper preserves the exact
+  180000 and 240000 millisecond maxima. The SDK diagnostic fails because its
+  terminal failure capture is absent. This does not establish whether the
+  callback delivered success or did not run. Capture its invocation and branch
+  before correcting the fixture. Production arithmetic remains unchanged.
+- Independent read-only review agrees that the next diagnostic must observe
+  both callback branches. Keep the original strict assertions and the direct
+  nested-error coverage.
+
+Native integration, source base `dc7be3f7`:
+
+- `cleanroom/20261031T233356Z-27824` connects original-SDK asset work to the
+  private database, event bookkeeping, issued retry commands and lifecycle
+  drains. Original-pass activity shares the Rust error classifier.
+- `core-test/20261031T235355Z-34479`: all 456 selected tests pass.
+- `swift-test/20261031T235352Z-33601`: 58 of 59 pass, with no compiler warnings.
+  The first conflict download merges and queues its resend; accepted and
+  blocked lifecycle drains pass. The queued-retry case ends before its expected
+  transport arrival and remains failed.
+- Independent review R1 finds P1: the exchange can advance before its first
+  asset pass finishes. Its new test manually waits and sends again, so does not
+  prove that Sync Now performs the merge and resend within the same exchange.
+  Repair must join outside SDK event delivery and cover the actual exchange.
+- `private/20261031T235511Z-36233` flags three new comment spans in two files;
+  replace those comments without changing the privacy guard.
+- `doctor/20261031T235417Z-34932`: 11 pass, three warnings, no failures. Signing
+  and final device evidence remain pending. The dedicated VM is available.
+
+The R1 fixer uses the exact preserved source seed from this base. The original
+integration batch base and U113/U114 acceptance status remain unchanged.
+
+R1 repair and R2 review:
+
+- `cleanroom/20261031T235816Z-37321` joins asset work before send completion
+  and adds an actual Sync Now exchange test. The queued-retry test now waits
+  for each terminal within its owning execution; all three commands remain.
+- `swift-test/20261101T000327Z-38752`: all eight focused tests pass. Sync Now
+  stays unfinished while the asset terminal is held, then merges and resends
+  within that exchange and records the actual acknowledgement.
+- Installed SDK callbacks report code 11 at 120000 milliseconds, then terminal
+  success. The native converter receives no aggregate error in this case.
+  Direct recursive-error checks retain the 180000 and 240000 millisecond maxima.
+- `core-lint/20261101T000356Z-40370` and
+  `similarity/20261101T000352Z-39904` pass.
+- `private/20261101T000356Z-40175` still flags two rewritten comment lines;
+  remove the two comments. The other files pass.
+- Independent R2 review closes P1 but finds P2: cancelling the exchange does
+  not cancel its independent asset operation. Repair must cancel the original
+  prepared read, retain its completion drain and preserve unrelated retries.
+  Add a held-terminal cancellation case through the actual exchange.
+
+R2 repair and R3 review:
+
+- `cleanroom/20261101T000534Z-41128` captures first-read request identities
+  for the send join. Cancellation stops only that captured work and joins its
+  original completion. Queued retry commands retain their separate owners.
+- The actual exchange cancellation test holds the original terminal, cancels
+  through the issued policy command and requires prepared-read cancellation.
+  Only after terminal release may the exchange record cancellation; a late
+  successful read cannot produce a resend or successful exchange result.
+- The installed-callback fixture uses the same error for its per-record and
+  partial aggregate facts. Exact delay assertions and direct recursive-error
+  coverage remain intact. Production delay conversion is unchanged.
+- R3 review closes the known P2 and finds no new P0 or P1. Separate tests for
+  already-cancelled join entry and a queued first read behind an unrelated
+  retry remain absent; review found no source defect for those cases.
+- `private/20261101T001059Z-44121` and
+  `similarity/20261101T001103Z-44389` pass after the repair.
+- `swift-test/20261101T001042Z-42933`: all 75 affected native tests pass,
+  with no skips or compiler warnings. Both actual exchange tests, exact retry
+  ownership, lifecycle drains and all four installed delay cases pass.
+- Rust sources did not change in R1 or R2; their 456-test and lint receipts
+  above still cover those inputs.
+- `private/20261101T001311Z-45057` passes for the updated review log.
+
+These results close the findings in this wiring slice. They do not establish
+signed multi-device behavior, complete U113 or U114, or close the integration
+batch and milestone gates.
+
+App-package check:
+
+- `swift-test/20261101T001322Z-45322` fails compilation before tests run:
+  `InitialCloudAdoptionTests` has an own-transport fake whose switch lacks the
+  new asset-read case. Update that fake, then run the selected app tests.

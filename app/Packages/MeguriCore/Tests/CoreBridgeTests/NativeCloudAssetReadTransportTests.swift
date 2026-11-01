@@ -21,6 +21,36 @@ private final class NativeAssetReadHandlers: Sendable {
     }
 }
 
+private struct NativeAssetReadErrorNumbers: Sendable {
+    // Domain is 1 for CKErrorDomain, 0 otherwise; -1 denotes an absent value.
+    let domain: Int
+    let code: Int
+    let topRetry: Double
+    let partialCount: Int
+    let childDomain: Int
+    let childCode: Int
+    let childRetry: Double
+    let retryMilliseconds: UInt64?
+
+    init(_ error: any Error) {
+        let native = error as NSError
+        let partials = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any]
+        let child = (partials?.values.first as? any Error).map { $0 as NSError }
+        domain = native.domain == CKErrorDomain ? 1 : 0
+        code = native.code
+        topRetry = (native.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue ?? -1
+        partialCount = partials?.count ?? 0
+        childDomain = child.map { $0.domain == CKErrorDomain ? 1 : 0 } ?? -1
+        childCode = child?.code ?? -1
+        childRetry = (child?.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue ?? -1
+        retryMilliseconds = NativeCloudOwnRecords.retryDuration(error)
+    }
+
+    var diagnostic: String {
+        "\(domain),\(code),\(topRetry),\(partialCount),\(childDomain),\(childCode),\(childRetry),\(retryMilliseconds.map { String($0) } ?? "-1")"
+    }
+}
+
 /// Real installed CKFetchRecordsOperation handlers, captured once before any
 /// invocation: SDK getter round-trips can normalize callback results.
 private struct NativeAssetReadFixture: Sendable {
@@ -322,20 +352,81 @@ struct NativeCloudAssetReadTransportTests {
         #expect(try read.ownedFiles().isEmpty)
     }
 
+    @Test func sdkAssetReadTerminalErrorBridgeCharacterization() throws {
+        let target = CloudControlTarget(zone: "c-synthetic", name: "exact-entity", recordType: "MGEntity")
+        let id = NativeCloudOwnRecords.id(target)
+        let operation = CKFetchRecordsOperation(recordIDs: [id])
+        let perRecord = Mutex<(count: Int, branch: Int, facts: NativeAssetReadErrorNumbers?)>((0, 0, nil))
+        let terminal = Mutex<(count: Int, branch: Int, facts: NativeAssetReadErrorNumbers?)>((0, 0, nil))
+        operation.perRecordResultBlock = { _, result in
+            perRecord.withLock { value in
+                value.count += 1
+                switch result {
+                case .success: value.branch = 1; value.facts = nil
+                case .failure(let error): value.branch = 2; value.facts = NativeAssetReadErrorNumbers(error)
+                }
+            }
+        }
+        operation.fetchRecordsResultBlock = { result in
+            terminal.withLock { value in
+                value.count += 1
+                switch result {
+                case .success: value.branch = 1; value.facts = nil
+                case .failure(let error): value.branch = 2; value.facts = NativeAssetReadErrorNumbers(error)
+                }
+            }
+        }
+        let handlers = try NativeAssetReadHandlers(operation)
+        let cause = NSError(domain: CKErrorDomain, code: CKError.unknownItem.rawValue,
+                            userInfo: [CKErrorRetryAfterKey: 120])
+        let nested = NSError(domain: CKErrorDomain, code: CKError.serviceUnavailable.rawValue,
+                             userInfo: [CKErrorRetryAfterKey: 180])
+        let aggregate = NSError(domain: CKErrorDomain, code: CKError.partialFailure.rawValue,
+                               userInfo: [CKErrorRetryAfterKey: 30, CKPartialErrorsByItemIDKey: [id: nested]])
+        handlers.receive(id, .failure(cause))
+        handlers.finish(.failure(aggregate))
+        let deliveredPerRecord = perRecord.withLock { $0 }
+        let deliveredTerminal = terminal.withLock { $0 }
+        #expect(deliveredPerRecord.count == 1)
+        #expect(deliveredTerminal.count == 1)
+        // Count, branch (absent=0/success=1/failure=2), then failure numbers:
+        // domain, code, top seconds, partial count, child domain/code/seconds, ms.
+        let perFacts = deliveredPerRecord.facts.map { ",\($0.diagnostic)" } ?? ""
+        let terminalFacts = deliveredTerminal.facts.map { ",\($0.diagnostic)" } ?? ""
+        print("sdkAssetReadTerminalErrorBridgeCharacterization per=\(deliveredPerRecord.count),\(deliveredPerRecord.branch)\(perFacts) terminal=\(deliveredTerminal.count),\(deliveredTerminal.branch)\(terminalFacts)")
+    }
+
+    @Test func assetReadFailureDirectNestedDelay() throws {
+        let target = CloudControlTarget(zone: "c-synthetic", name: "exact-entity", recordType: "MGEntity")
+        let id = NativeCloudOwnRecords.id(target)
+        let nested = NSError(domain: CKErrorDomain, code: CKError.serviceUnavailable.rawValue,
+                             userInfo: [CKErrorRetryAfterKey: 180])
+        let terminal = NSError(domain: CKErrorDomain, code: CKError.partialFailure.rawValue,
+                               userInfo: [CKErrorRetryAfterKey: 30, CKPartialErrorsByItemIDKey: [id: nested]])
+        let cases: [(Int64, Int64)] = [(120_000, 180_000), (240_000, 240_000)]
+        for (perRecordDelay, expectedDelay) in cases {
+            let perRecord = CloudAssetReadFailureFacts(code: Int64(CKError.unknownItem.rawValue),
+                                                       retryAfterMilliseconds: perRecordDelay)
+            let result = NativeCloudOwnRecords.assetReadFailure(terminal, perRecord: perRecord)
+            #expect(result.record == nil)
+            let facts = try #require(result.failureFacts)
+            #expect(facts.code == Int64(CKError.unknownItem.rawValue))
+            #expect(facts.retryAfterMilliseconds == expectedDelay)
+        }
+    }
+
     @Test(arguments: [false, true], [false, true])
     func failedReadRetainsActualCodeAndLongestDelay(partialTerminal: Bool, perRecordLonger: Bool) async throws {
         let read = try NativeAssetReadFixture()
         defer { read.remove() }
         let id = NativeCloudOwnRecords.id(read.target)
         let cause = NSError(domain: CKErrorDomain, code: CKError.unknownItem.rawValue,
-                            userInfo: [CKErrorRetryAfterKey: perRecordLonger ? 240 : 120])
+                            userInfo: [CKErrorRetryAfterKey: perRecordLonger ? 240 : (partialTerminal ? 180 : 120)])
         read.perRecord(id, .failure(cause))
-        let nested = NSError(domain: CKErrorDomain, code: CKError.serviceUnavailable.rawValue,
-                             userInfo: [CKErrorRetryAfterKey: 180])
         let terminal = NSError(domain: CKErrorDomain,
                                code: partialTerminal ? CKError.partialFailure.rawValue : CKError.networkFailure.rawValue,
                                userInfo: partialTerminal
-                                   ? [CKErrorRetryAfterKey: 30, CKPartialErrorsByItemIDKey: [id: nested]]
+                                   ? [CKErrorRetryAfterKey: 30, CKPartialErrorsByItemIDKey: [id: cause]]
                                    : [CKErrorRetryAfterKey: 180])
         read.terminal(.failure(terminal))
         let result = try await read.result()

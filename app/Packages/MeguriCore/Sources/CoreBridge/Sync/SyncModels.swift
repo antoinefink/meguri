@@ -85,6 +85,8 @@ public protocol CloudKitEngine: Sendable {
     func pendingDatabaseChanges() async -> Set<String>
     func applyPendingUpdate(_ update: CloudPendingUpdate) async throws
     func removePendingDatabaseChanges() async
+    /// Joins the original serial event chain and its returned work.
+    func waitForEventBookkeeping() async throws
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue
     func sendChanges(zones: [String]) async throws
@@ -98,6 +100,8 @@ public protocol CloudKitEngineDelegate: Sendable {
     /// The SDK seam reports lifetime completion after the forwarding handler
     /// returns. The adapter never predicts this boundary by yielding or sleeping.
     func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async
+    /// Notification only: queue work and return; never join network work here.
+    func eventBookkeepingCompleted(_ event: CloudEngineEvent, engine: any CloudKitEngine) async
     func nextRecordZoneChangeBatch(pending: [String: CloudPendingChange], zone: String, engine: any CloudKitEngine) async -> CloudEngineBatch?
     func nextFetchChangesOptions(_ options: CloudFetchOptions, engine: any CloudKitEngine) async -> CloudFetchOptions
 }
@@ -208,4 +212,14 @@ extension CloudWorkflowObservation {
         case .mediaFeedDrained(let count, let feed, let cursor): self = .mediaFeedDrained(entryCount: count, feedID: feed, cursor: cursor)
         }
     }
+}
+
+public extension CloudKitEngineDelegate {
+    func eventBookkeepingCompleted(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {}
+}
+
+public extension CloudKitEngine {
+    /// Older non-reading test seams fail closed. Production and the modeled
+    /// SDK implement the real original event barrier, never a no-op fallback.
+    func waitForEventBookkeeping() async throws { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
 }

@@ -300,12 +300,15 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if let returnedWork { await returnedWork.value }
         if let failure { throw failure }
     }
-    private func prepareNetwork() async throws {
-        while activeEvent { await withCheckedContinuation { networkEventWaiters.append($0) } }
-        try await drainReturnedWork()
+    func waitForEventBookkeeping() async throws {
+        repeat {
+            while activeEvent { await withCheckedContinuation { networkEventWaiters.append($0) } }
+            try await drainReturnedWork()
+        } while activeEvent
+        try Task.checkCancellation()
     }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
-        try await prepareNetwork()
+        try await waitForEventBookkeeping()
         guard let sdk else { throw CancellationError() }
         let options = CKSyncEngine.SendChangesOptions(scope: .zoneIDs(zones.map(zone)))
         let lifetime = networkLifetime
@@ -328,7 +331,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         }
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
-        try await prepareNetwork()
+        try await waitForEventBookkeeping()
         guard let sdk else { throw CancellationError() }
         let group = CKOperationGroup(); group.name = options.groupID
         var native = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
@@ -469,6 +472,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             let pending = networkEventWaiters; networkEventWaiters.removeAll()
             for waiter in pending { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
+        await delegate.eventBookkeepingCompleted(event, engine: self)
     }
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard failure == nil, let collectionZone else { return nil }

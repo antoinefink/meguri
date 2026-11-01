@@ -36,20 +36,45 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         let factory = NativeCloudKitEngineFactory(database: database, accountResolver: {
             try await resolveAccount(container)
         })
-        let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
-            eventDidPersist: { _ in await persisted() }, exchangeDidJoin: persisted,
-            appOwnsAccountObservation: true, accountReadRequested: persisted)
         let staging = try await makeStaging(directory: directory)
+        let ownTransport = try NativeCloudOwnTransport(database: database, staging: staging)
+        let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
+            eventDidPersist: { _ in await persisted() }, assetReadTransport: ownTransport,
+            assetReadDidFinish: persisted, exchangeDidJoin: persisted,
+            appOwnsAccountObservation: true, accountReadRequested: persisted)
         let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
             mediaService: media, mediaTransport: mediaTransport)
-        let own = CloudOwnExecutor(core: connection, transport: try NativeCloudOwnTransport(database: database))
+        let own = CloudOwnExecutor(core: connection, transport: ownTransport)
         return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)
     }
 
     func takeAccountReadRequest() async -> Bool { await adapter.takeAccountReadRequest() }
-    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { try await policy.input(event) }
+    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+        let output = try await policy.input(event)
+        switch output {
+        case .syncNowUnavailable, .applyDeferred: return output
+        case .commands, .coreActionFailed: break
+        }
+        let activity = await adapter.takePolicyOperationOutputs()
+        guard !activity.isEmpty else { return output }
+        var commands: [CloudPolicyCommand] = []
+        var failure: BridgeError?
+        for value in activity + [output] {
+            switch value {
+            case .commands(let values): commands.append(contentsOf: values)
+            case .coreActionFailed(let error, let values): failure = failure ?? error; commands.append(contentsOf: values)
+            case .applyDeferred(let error): failure = failure ?? error
+            case .syncNowUnavailable(let reason):
+                // Activity inputs cannot emit an exchange-unavailable result.
+                // Keep an explicit failure if that contract ever changes.
+                failure = failure ?? .internal("Unexpected activity output: \(reason)")
+            }
+        }
+        if let failure { return .coreActionFailed(error: failure, commands: commands) }
+        return .commands(commands)
+    }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
         async let native = executor.execute(command)
         if case .cancelBackgroundFlush = command.action { await own?.interruptAndDrain() }

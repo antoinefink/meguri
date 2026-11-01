@@ -104,6 +104,15 @@ public struct CoreCloudAssetReadPass: Sendable {
     private let raw: MeguriCoreBindings.CloudAssetReadPass
     init(_ raw: MeguriCoreBindings.CloudAssetReadPass) { self.raw = raw }
 
+    func reportActivity(started: Bool, failures: [CloudAssetReadFailureFacts] = [], failed: Bool = false, appCancelled: Bool = false) async throws -> [CloudPolicyOutput] {
+        let raw = self.raw
+        return try await MaintenanceLane.shared.call(.cloudAssetReadPassOperationActivity) {
+            try raw.operationActivity(facts: .init(started: started,
+                failures: failures.map { .init(code: $0.code, retryAfterMs: $0.retryAfterMilliseconds) },
+                failed: failed, appCancelled: appCancelled)).map(CloudPolicyOutput.init)
+        }
+    }
+
     public func next() async throws -> CloudAssetReadIssuedWork? {
         let raw = self.raw
         return try await MaintenanceLane.shared.call(.cloudAssetReadPassNext) {

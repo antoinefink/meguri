@@ -183,6 +183,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 outputs.append(try await policy.input(.refresh(.cloud)))
+            case .retryAssetEntries:
+                guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
+                let result = await adapter.executePolicyAssetReads(command, execution: execution)
+                outputs.append(contentsOf: result.outputs)
+                outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                if let error = result.error { throw error }
             case .readBlobs, .resumeMedia, .pauseMedia, .prioritizeMedia:
                 guard let mediaService, let mediaTransport else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
                 guard let permit = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }

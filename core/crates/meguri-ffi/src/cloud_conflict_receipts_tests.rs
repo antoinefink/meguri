@@ -337,7 +337,7 @@ fn ffi_remote_pa_conflict_preflight_and_intake_materialize_no_retained_bodies() 
             "Local".into(),
         );
         let call = fixture.workflow.begin_send(sdk.instance_id.clone()).unwrap().unwrap();
-        let handed = build(&fixture, &sdk, &[original.name.clone()]);
+        let handed = build(&fixture, &sdk, std::slice::from_ref(&original.name));
         fixture
             .workflow
             .core
@@ -363,7 +363,7 @@ fn ffi_remote_pa_conflict_preflight_and_intake_materialize_no_retained_bodies() 
         8
     );
     edit(&fixture, id, "Current front".into(), "Current back".into());
-    let retry = build(&fixture, &sdk, &[original.name.clone()]);
+    let retry = build(&fixture, &sdk, std::slice::from_ref(&original.name));
     let codec::Payload::Note(mut remote) = original.payload else {
         panic!("note")
     };
@@ -390,7 +390,7 @@ fn ffi_remote_pa_conflict_preflight_and_intake_materialize_no_retained_bodies() 
             &sdk.instance_id,
             &fixture.workflow.host.collection().unwrap(),
             retry.id,
-            &[original.name.clone()],
+            std::slice::from_ref(&original.name),
         )
         .unwrap();
     assert_eq!(c::testing::entity_body_reads(), before);
@@ -407,7 +407,7 @@ fn ffi_historical_own_live_conflict_acks_lost_revision_without_writing_newer_loc
     edit(&fixture, id, "Lost save".into(), "Back".into());
     let lost = note_facts(&fixture, id);
     let call = fixture.workflow.begin_send(sdk.instance_id.clone()).unwrap().unwrap();
-    let original_batch = build(&fixture, &sdk, &[original.name.clone()]);
+    let original_batch = build(&fixture, &sdk, std::slice::from_ref(&original.name));
     fixture
         .workflow
         .core
@@ -427,7 +427,7 @@ fn ffi_historical_own_live_conflict_acks_lost_revision_without_writing_newer_loc
         )
         .unwrap();
     edit(&fixture, id, "Newer front".into(), "Newer back".into());
-    let retry = build(&fixture, &sdk, &[original.name.clone()]);
+    let retry = build(&fixture, &sdk, std::slice::from_ref(&original.name));
     let current = note_facts(&fixture, id);
     assert!(current.local_rev > lost.local_rev);
     let (saved, failed) = results(&fixture, &sdk, &retry);

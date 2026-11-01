@@ -3,6 +3,9 @@ use super::*;
 use crate::cloud_asset_reads::*;
 use crate::cloud_policy::*;
 
+#[path = "cloud_asset_read_activity_tests.rs"]
+mod activity;
+
 fn waiting_note(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) -> (Record, NoteId, Vec<u8>) {
     let (input, bytes, id) = remote_note(fixture, true);
     let server = save(fixture, sdk, input, None);

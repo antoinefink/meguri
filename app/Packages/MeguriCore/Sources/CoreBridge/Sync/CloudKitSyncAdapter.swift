@@ -12,6 +12,9 @@ private actor CloudSDKDelegate: CloudKitEngineDelegate {
     func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
         await adapter?.eventHandlerReturned(event, origin: origin)
     }
+    func eventBookkeepingCompleted(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
+        await adapter?.eventBookkeepingCompleted(event, origin: origin)
+    }
     func nextRecordZoneChangeBatch(pending: [String: CloudPendingChange], zone: String, engine: any CloudKitEngine) async -> CloudEngineBatch? {
         await adapter?.nextBatch(origin: origin, pending: pending, zone: zone)
     }
@@ -21,9 +24,39 @@ private actor CloudSDKDelegate: CloudKitEngineDelegate {
 }
 
 public actor CloudKitSyncAdapter {
+    private final class AssetReadRequest {
+        let id: UUID
+        let retry: (CloudPolicyCommand, CoreCloudPolicyExecution)?
+        let completion: CheckedContinuation<CloudPolicyNativeResult, Never>?
+        var cancelled = false
+        var drained = false
+        var joins: [CheckedContinuation<Void, Never>] = []
+        init(id: UUID = UUID(), retry: (CloudPolicyCommand, CoreCloudPolicyExecution)? = nil,
+             completion: CheckedContinuation<CloudPolicyNativeResult, Never>? = nil) {
+            self.id = id; self.retry = retry; self.completion = completion
+        }
+    }
+    private actor AssetReadActivity {
+        var started = false
+        var failures: [CloudAssetReadFailureFacts] = []
+        func observe(_ event: CloudAssetReadObservation) {
+            switch event {
+            case .started: started = true
+            case .failure(let facts): failures.append(facts)
+            }
+        }
+        func snapshot() -> (Bool, [CloudAssetReadFailureFacts]) { (started, failures) }
+    }
     private final class Instance {
         let engine: any CloudKitEngine
         let zone: String
+        var assetWorker: CloudAssetReadExecutor?
+        var assetQueue: [AssetReadRequest] = []
+        var assetDispatch: Task<Void, Never>?
+        var assetPass: (AssetReadRequest, Task<CloudPolicyNativeResult, Never>)?
+        var assetDrain: Task<Void, Never>?
+        var assetFirstReadJoins = 0
+        var assetClosed = false
         var stopping = false
         var authorityRetired = false
         var handlers = 0
@@ -37,6 +70,8 @@ public actor CloudKitSyncAdapter {
     }
     private let core: CoreCloudWorkflowService
     private let factory: any CloudKitEngineFactory
+    private let assetReadTransport: (any CloudOwnTransport)?
+    private let assetReadDidFinish: @Sendable () async -> Void
     private let appOwnsAccountObservation: Bool
     private let accountReadRequested: @Sendable () async -> Void
     private var accountReadPending = false
@@ -80,11 +115,14 @@ public actor CloudKitSyncAdapter {
 
     public init(core: CoreCloudWorkflowService, engineFactory: any CloudKitEngineFactory,
                 eventDidPersist: @escaping @Sendable (CloudEngineEvent) async -> Void = { _ in },
+                assetReadTransport: (any CloudOwnTransport)? = nil,
+                assetReadDidFinish: @escaping @Sendable () async -> Void = {},
                 exchangeDidJoin: @escaping @Sendable () async -> Void = {},
                 appOwnsAccountObservation: Bool = false,
                 accountReadRequested: @escaping @Sendable () async -> Void = {}) {
         self.core = core; factory = engineFactory; self.eventDidPersist = eventDidPersist
         self.exchangeDidJoin = exchangeDidJoin
+        self.assetReadTransport = assetReadTransport; self.assetReadDidFinish = assetReadDidFinish
         self.appOwnsAccountObservation = appOwnsAccountObservation
         self.accountReadRequested = accountReadRequested
     }
@@ -260,6 +298,7 @@ public actor CloudKitSyncAdapter {
     }
     private func drainInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution?) async throws {
         guard let instance = owned[origin] else { return }
+        await drainOriginalAssetReads(origin)
         await originalMediaDrain?(origin)
         var retirementError: (any Error)?
         do {
@@ -292,7 +331,7 @@ public actor CloudKitSyncAdapter {
         try await consumePendingUpdates(origin: origin)
     }
     public func waitForIdle() async throws {
-        while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying || $0.stopping || $0.failed }) || !stopTasks.isEmpty {
+        while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying || $0.stopping || $0.failed || $0.assetDispatch != nil }) || !stopTasks.isEmpty {
             let old = version; try await waitForChange(after: old)
         }
         try await executePendingActions()
@@ -421,6 +460,7 @@ public actor CloudKitSyncAdapter {
     public func freezeForSuspend() async throws {
         suspensionEpoch &+= 1
         suspending = true
+        for origin in Array(owned.keys) { await drainOriginalAssetReads(origin, permanently: false) }
         while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying }) {
             let old = version; try await waitForChange(after: old)
         }
@@ -443,6 +483,9 @@ public actor CloudKitSyncAdapter {
             guard owned.isEmpty else { return false }
         }
         guard !suspending, epoch == suspensionEpoch, ifPermitted(), !Task.isCancelled else { return false }
+        for instance in owned.values where !instance.stopping {
+            instance.assetClosed = false; instance.assetDrain = nil
+        }
         suspended = false; suspending = false; changed()
         return true
     }
@@ -524,9 +567,214 @@ public actor CloudKitSyncAdapter {
             }
         }
     }
+    // Runs only after the original engine has updated its event slot/lifetime.
+    // This notification only marks/enqueues; returnedWork must never join us.
+    fileprivate func eventBookkeepingCompleted(_ event: CloudEngineEvent, origin: String) {
+        guard case .sent = event, let instance = owned[origin], !instance.failed,
+              !instance.stopping, !instance.assetClosed, !suspended, !suspending,
+              current == origin, assetReadTransport != nil else { return }
+        if !instance.assetQueue.contains(where: { $0.retry == nil }) {
+            let request = AssetReadRequest()
+            assetRequestIDs[request.id] = (origin, request)
+            instance.assetQueue.append(request)
+        }
+        startAssetReads(origin, instance: instance)
+    }
+
+    private func startAssetReads(_ origin: String, instance: Instance) {
+        guard instance.assetDispatch == nil, !instance.assetClosed else { return }
+        instance.assetDispatch = Task { await self.runAssetReadQueue(origin, instance: instance) }
+        changed()
+    }
+
+    func executePolicyAssetReads(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) async -> CloudPolicyNativeResult {
+        do {
+            guard let origin = try await execution.originalSDK(), let instance = owned[origin],
+                  !suspended, !suspending, !instance.assetClosed, assetReadTransport != nil,
+                  await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+            try Task.checkCancellation()
+            guard owned[origin] === instance, !instance.stopping, !instance.assetClosed,
+                  !suspended, !suspending else { throw CancellationError() }
+            // Install before suspending, retaining THIS command and execution.
+            let requestID = UUID()
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { completion in
+                    let request = AssetReadRequest(id: requestID, retry: (command, execution), completion: completion)
+                    assetRequestIDs[requestID] = (origin, request)
+                    instance.assetQueue.append(request)
+                    changed()
+                    startAssetReads(origin, instance: instance)
+                }
+            } onCancel: { Task { await self.cancelAssetRequest(requestID) } }
+        } catch { return .init(outputs: [], error: error, deferred: false) }
+    }
+    private var assetRequestIDs: [UUID: (String, AssetReadRequest)] = [:]
+    private func cancelAssetRequest(_ id: UUID) {
+        guard let (origin, request) = assetRequestIDs[id], let instance = owned[origin] else { return }
+        request.cancelled = true
+        if instance.assetPass?.0 === request { instance.assetPass?.1.cancel() }
+        else if request.retry == nil, let index = instance.assetQueue.firstIndex(where: { $0 === request }) {
+            instance.assetQueue.remove(at: index)
+            assetRequestIDs.removeValue(forKey: id)
+            finishAssetRequest(request)
+            changed()
+        }
+    }
+    private func cancelAssetRequests(_ ids: [UUID]) {
+        for id in ids { cancelAssetRequest(id) }
+    }
+    private func finishAssetRequest(_ request: AssetReadRequest) {
+        request.drained = true
+        let joins = request.joins; request.joins.removeAll()
+        for join in joins { join.resume() }
+    }
+    private func joinOriginalFirstAssetReads(_ instance: Instance) async {
+        let requests = ([instance.assetPass?.0].compactMap { $0 } + instance.assetQueue).filter { $0.retry == nil }
+        guard !requests.isEmpty else { return }
+        let ids = requests.map(\.id)
+        instance.assetFirstReadJoins += 1; changed()
+        defer { instance.assetFirstReadJoins -= 1; changed() }
+        await withTaskCancellationHandler {
+            if Task.isCancelled { cancelAssetRequests(ids) }
+            for request in requests where !request.drained {
+                await withCheckedContinuation { request.joins.append($0) }
+            }
+        } onCancel: { Task { await self.cancelAssetRequests(ids) } }
+    }
+
+    // Deterministic owner observations for focused tests; these wait on actual
+    // queue/admission state and grant no Core or SDK authority.
+    func waitForQueuedAssetReads(sdk: String, count: Int) async throws {
+        while let instance = owned[sdk], instance.assetQueue.filter({ $0.retry != nil }).count < count {
+            let old = version; try await waitForChange(after: old)
+        }
+    }
+    func waitForAssetReadAdmissionClosed(sdk: String) async throws {
+        while let instance = owned[sdk], !instance.assetClosed {
+            let old = version; try await waitForChange(after: old)
+        }
+    }
+    func waitForFirstAssetReadJoin(sdk: String) async throws {
+        while let instance = owned[sdk], instance.assetFirstReadJoins == 0 {
+            let old = version; try await waitForChange(after: old)
+        }
+    }
+
+    private func runAssetReadQueue(_ origin: String, instance: Instance) async {
+        defer { instance.assetDispatch = nil; changed() }
+        while !instance.assetQueue.isEmpty {
+            let request = instance.assetQueue.removeFirst()
+            let result: CloudPolicyNativeResult
+            if request.cancelled || instance.assetClosed || instance.stopping || Task.isCancelled {
+                result = .init(outputs: [], error: CancellationError(), deferred: false)
+            } else {
+                let task = Task { await self.performAssetRead(origin, instance: instance, request: request) }
+                instance.assetPass = (request, task)
+                result = await task.value
+                instance.assetPass = nil
+            }
+            assetRequestIDs = assetRequestIDs.filter { $0.value.1 !== request }
+            request.completion?.resume(returning: result)
+            if request.retry == nil, let error = result.error { lastFailure = error }
+            // The normal coordinator lane consumes background activity outputs.
+            // It may queue a refresh, but this worker never starts a retry from it.
+            await assetReadDidFinish()
+            finishAssetRequest(request)
+        }
+    }
+
+    private func assetReadLive(_ origin: String, instance: Instance) -> Bool {
+        current == origin && owned[origin] === instance && !instance.stopping &&
+            !instance.assetClosed && !suspended && !suspending
+    }
+
+    private func performAssetRead(_ origin: String, instance: Instance, request: AssetReadRequest) async -> CloudPolicyNativeResult {
+        var pass: CoreCloudAssetReadPass?
+        let activity = AssetReadActivity()
+        var failure: (any Error)?
+        do {
+            try await instance.engine.waitForEventBookkeeping()
+            try Task.checkCancellation()
+            guard await valid(origin), assetReadLive(origin, instance: instance) else { throw CancellationError() }
+            try Task.checkCancellation()
+            if let (_, execution) = request.retry {
+                try await execution.validate()
+                guard await valid(origin), assetReadLive(origin, instance: instance) else { throw CancellationError() }
+                try Task.checkCancellation()
+                pass = try await execution.beginAssetReadPass()
+            } else { pass = try await core.beginFirstAssetReadPass(sdk: origin) }
+            guard let originalPass = pass else { throw BridgeError.cloudPolicy(.staleCommand) }
+            try Task.checkCancellation()
+            guard await valid(origin), assetReadLive(origin, instance: instance) else { throw CancellationError() }
+            try Task.checkCancellation()
+            let worker: CloudAssetReadExecutor
+            if let retained = instance.assetWorker { worker = retained }
+            else {
+                guard let assetReadTransport else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
+                worker = CloudAssetReadExecutor(transport: assetReadTransport)
+                instance.assetWorker = worker
+            }
+            _ = try await worker.run(originalPass) { event in
+                await activity.observe(event)
+                if case .started = event { await self.reportAssetReadStart(originalPass) }
+            }
+        } catch { failure = error }
+        // A pass can be cancelled after begin but before executor entry. Finish
+        // is idempotent and always addresses the original capability.
+        if let pass {
+            do { try await pass.finish() } catch { if failure == nil { failure = error } }
+            let (started, failures) = await activity.snapshot()
+            if started {
+                do {
+                    policyOperationOutputs.append(contentsOf: try await pass.reportActivity(started: false,
+                        failures: failures, failed: failure != nil,
+                        appCancelled: cloudOperationWasCancelled(failure) || Task.isCancelled || instance.assetClosed))
+                } catch { if failure == nil { failure = error } }
+            }
+        }
+        if await valid(origin), assetReadLive(origin, instance: instance) {
+            do { try await consumePendingUpdates(origin: origin) }
+            catch { if failure == nil { failure = error } }
+        }
+        return .init(outputs: [], error: failure, deferred: false)
+    }
+    private func reportAssetReadStart(_ pass: CoreCloudAssetReadPass) async {
+        do { policyOperationOutputs.append(contentsOf: try await pass.reportActivity(started: true)) }
+        catch { lastFailure = error }
+    }
+    private func drainOriginalAssetReads(_ origin: String, permanently: Bool = true) async {
+        guard let instance = owned[origin] else { return }
+        if let joining = instance.assetDrain {
+            await joining.value
+            if permanently { await instance.assetWorker?.close() }
+            return
+        }
+        instance.assetClosed = true; changed()
+        instance.assetPass?.1.cancel()
+        instance.assetDispatch?.cancel()
+        let dispatch = instance.assetDispatch
+        let worker = instance.assetWorker
+        let drain = Task {
+            if permanently { await worker?.close() }
+            else { await worker?.interruptAndDrain() }
+            await dispatch?.value
+        }
+        instance.assetDrain = drain
+        await drain.value
+    }
+
     fileprivate func nextBatch(origin: String, pending: [String: CloudPendingChange], zone: String) async -> CloudEngineBatch? {
         guard !suspended, !suspending, await valid(origin), let instance = owned[origin], (zone == instance.zone || zone == "meguri-media") else { return nil }
         do {
+            var pending = pending
+            if let reads = instance.assetDispatch {
+                await reads.value
+                guard await valid(origin), assetReadLive(origin, instance: instance) else { return nil }
+                try await consumePendingUpdates(origin: origin)
+                guard await valid(origin) else { return nil }
+                pending = await instance.engine.pendingRecordZoneChanges()
+                guard await valid(origin) else { return nil }
+            }
             let batch = try await core.buildBatch(sdk: origin, zone: zone, pending: pending)
             guard await valid(origin) else { return nil }
             if let batch { instance.batches[batch.id] = UInt32(batch.saves.count + batch.deletes.count) }
@@ -538,7 +786,7 @@ public actor CloudKitSyncAdapter {
         let allowed = Set(["meguri-root", instance.zone])
         return .init(zones: options.zones.filter { allowed.contains($0) }, priorityZones: options.priorityZones.filter { allowed.contains($0) }, groupID: options.groupID)
     }
-    func takePolicyOperationOutputs() -> [CloudPolicyOutput] {
+    public func takePolicyOperationOutputs() -> [CloudPolicyOutput] {
         let outputs = policyOperationOutputs; policyOperationOutputs.removeAll(); return outputs
     }
     private func reportOperation(_ execution: CoreCloudPolicyExecution?, zones: [CloudPolicyZone], kind: CloudPolicyOperationKind, started: Bool, error: (any Error)? = nil, saved: UInt64 = 0) async throws {
@@ -588,11 +836,20 @@ public actor CloudKitSyncAdapter {
         policyOperationOutputs.append(contentsOf: invocationOutputs.take())
 
         if sendError == nil { sendError = instance.mediaSendFailure }
+        // SDK delivery has returned. Join its original first-read/apply work
+        // before finishSend observes pending changes and decides another round.
+        await joinOriginalFirstAssetReads(instance)
+        if sendError == nil, Task.isCancelled { sendError = CancellationError() }
         if await valid(origin) {
             try await reportOperation(execution, zones: reportedZones, kind: .send, started: false, error: sendError, saved: instance.operationSaved)
         }
         guard await valid(origin) else { if let sendError { throw sendError }; return }
         try await waitForDeferredUpdates(origin: origin)
+        if let execution { try await execution.validate() }
+        guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+        try await waitForDeferredUpdates(origin: origin)
+        if let execution { try await execution.validate() }
+        guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
         let pending = await instance.engine.pendingRecordZoneChanges()
         guard await valid(origin) else { return }
         try await core.finishSend(sdk: origin, id: call, pending: pending)

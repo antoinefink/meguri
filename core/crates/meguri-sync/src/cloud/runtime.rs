@@ -23,6 +23,7 @@ mod adapter_impl;
 mod adoption_impl;
 #[path = "asset_read_runtime.rs"]
 pub(super) mod asset_read_impl;
+pub use asset_read_impl::AssetReadActivityGuard;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
 #[path = "media_runtime.rs"]

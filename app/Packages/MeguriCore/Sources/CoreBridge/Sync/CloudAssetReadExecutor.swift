@@ -35,6 +35,13 @@ public struct CloudAssetReadPassResult: Sendable, Equatable {
     public var outcome: Outcome { failures.isEmpty ? .succeeded : .failed }
 }
 
+/// Compact observations survive a later strict error or cancellation. The
+/// trusted observer must return without throwing; accepted cleanup always runs.
+enum CloudAssetReadObservation: Sendable {
+    case started
+    case failure(CloudAssetReadFailureFacts)
+}
+
 /// Drains one opaque Rust pass, without refreshing its owner or scheduling a
 /// replacement pass. Rust retains selection, retry and writer/WAL authority.
 public actor CloudAssetReadExecutor {
@@ -47,10 +54,14 @@ public actor CloudAssetReadExecutor {
 
     @discardableResult
     public func run(_ pass: CoreCloudAssetReadPass) async throws -> CloudAssetReadPassResult {
+        try await run(pass, observe: { _ in })
+    }
+
+    func run(_ pass: CoreCloudAssetReadPass, observe: @escaping @Sendable (CloudAssetReadObservation) async -> Void) async throws -> CloudAssetReadPassResult {
         guard !closed else { throw CloudOwnTransportFailure.closed }
         guard active == nil else { throw CloudOwnTransportFailure.busy }
         let id = UUID()
-        let task = Task { try await self.execute(pass) }
+        let task = Task { try await self.execute(pass, observe: observe) }
         active = (id, task)
         defer {
             if active?.id == id { active = nil; prepared = nil }
@@ -67,7 +78,7 @@ public actor CloudAssetReadExecutor {
         try Task.checkCancellation()
     }
 
-    private func execute(_ pass: CoreCloudAssetReadPass) async throws -> CloudAssetReadPassResult {
+    private func execute(_ pass: CoreCloudAssetReadPass, observe: @escaping @Sendable (CloudAssetReadObservation) async -> Void) async throws -> CloudAssetReadPassResult {
         var failure: (any Error)?
         var failures: [CloudAssetReadFailureFacts] = []
         var readCount = 0
@@ -75,7 +86,7 @@ public actor CloudAssetReadExecutor {
             while true {
                 try checkStopping()
                 guard let work = try await pass.next() else { break }
-                if let facts = try await execute(work, pass: pass) { failures.append(facts) }
+                if let facts = try await execute(work, pass: pass, startActivity: readCount == 0, observe: observe) { failures.append(facts) }
                 readCount += 1
             }
         } catch { failure = error }
@@ -87,7 +98,7 @@ public actor CloudAssetReadExecutor {
         return .init(readCount: readCount, failures: failures)
     }
 
-    private func execute(_ work: CloudAssetReadIssuedWork, pass: CoreCloudAssetReadPass) async throws -> CloudAssetReadFailureFacts? {
+    private func execute(_ work: CloudAssetReadIssuedWork, pass: CoreCloudAssetReadPass, startActivity: Bool, observe: @escaping @Sendable (CloudAssetReadObservation) async -> Void) async throws -> CloudAssetReadFailureFacts? {
         let operation: any CloudPreparedOwnOperation
         do {
             try checkStopping()
@@ -114,6 +125,7 @@ public actor CloudAssetReadExecutor {
                 throw submissionError ?? CloudOwnTransportFailure.queueRejected
             }
 
+            if startActivity { await observe(.started) }
             if submissionError != nil || closed || Task.isCancelled { operation.cancel() }
             // No cancellation check may skip completion of accepted work.
             // Native reply joins a detached original terminal and owns its file.
@@ -123,12 +135,16 @@ public actor CloudAssetReadExecutor {
             let facts: CloudAssetReadFailureFacts?
             switch reply {
             case .success(.assetRead(let result)):
-                _ = try await pass.complete(work.handle, result: result)
                 facts = result.failureFacts
+                if let facts { await observe(.failure(facts)) }
+                _ = try await pass.complete(work.handle, result: result)
             case .success:
                 _ = try await pass.complete(work.handle, result: .failed)
                 throw submissionError ?? CloudOwnTransportFailure.unexpectedReply
             case .failure(let error):
+                if let sdk = error as? CloudKitSDKOperationFailure {
+                    await observe(.failure(.init(code: sdk.code, retryAfterMilliseconds: sdk.retryAfterMilliseconds)))
+                }
                 _ = try await pass.complete(work.handle, result: .failed)
                 throw submissionError ?? error
             }
@@ -142,6 +158,11 @@ public actor CloudAssetReadExecutor {
     /// its accepted terminal and core completion drain before any close returns.
     public func close() async {
         closed = true
+        await interruptAndDrain()
+    }
+
+    /// Suspension joins this original run while retaining the same SDK worker.
+    public func interruptAndDrain() async {
         let original = active?.task
         original?.cancel()
         prepared?.cancel()

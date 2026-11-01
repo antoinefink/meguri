@@ -188,6 +188,11 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         queue = PrivateCloudDatabaseQueue(database: database)
         staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
     }
+    public init(database: CKDatabase, staging: CloudMediaStaging) throws {
+        guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
+        queue = PrivateCloudDatabaseQueue(database: database)
+        self.staging = staging
+    }
     init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil) { self.queue = queue; self.staging = staging }
     public func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         switch command {

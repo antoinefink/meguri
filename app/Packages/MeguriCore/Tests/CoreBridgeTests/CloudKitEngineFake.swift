@@ -96,6 +96,7 @@ actor CloudKitEngineFake: CloudKitEngine {
     enum SendReply: Sendable {
         case saved
         case failed(CloudEngineErrorCode)
+        case conflict(CloudRecord)
     }
 
     enum FetchScript: Sendable {
@@ -137,6 +138,7 @@ actor CloudKitEngineFake: CloudKitEngine {
     private var fetchScripts: [FetchScript] = []
     private var eventActive = false
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
+    private var eventQueueObservers: [CheckedContinuation<Void, Never>] = []
     private var sendCount = 0
     private var callGates: [CloudCallbackGate] = []
     private var cancelled = false
@@ -196,9 +198,13 @@ actor CloudKitEngineFake: CloudKitEngine {
 
     // Actor reentrancy is not event serialisation. Keep the SDK's serial
     // delivery slot across suspension in the delegate, without sleeps.
-    private func deliver(_ event: CloudEngineEvent, label: String) async {
+    private func deliver(_ event: CloudEngineEvent, label: String, notifyBookkeeping: Bool = true, savedToRemove: [String] = []) async {
         if eventActive {
-            await withCheckedContinuation { eventWaiters.append($0) }
+            await withCheckedContinuation {
+                eventWaiters.append($0)
+                let observers = eventQueueObservers; eventQueueObservers.removeAll()
+                for observer in observers { observer.resume() }
+            }
         } else {
             eventActive = true
             networkLifetime.beginEvent()
@@ -211,6 +217,7 @@ actor CloudKitEngineFake: CloudKitEngine {
         }
         if let delegate { await delegate.handleEvent(event, engine: self) }
         trace.append(.eventReturned(label))
+        if a23 { removeSaved(savedToRemove) }
         if let delegate { await delegate.eventHandlerReturned(event, engine: self) }
         // Transfer ownership directly. Clearing eventActive before resuming
         // would let a newly arriving event overtake the oldest queued one.
@@ -219,6 +226,12 @@ actor CloudKitEngineFake: CloudKitEngine {
             let pending = networkEventWaiters; networkEventWaiters.removeAll()
             for waiter in pending { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
+        if notifyBookkeeping, let delegate { await delegate.eventBookkeepingCompleted(event, engine: self) }
+    }
+
+    func waitForQueuedEvent() async {
+        if !eventWaiters.isEmpty { return }
+        await withCheckedContinuation { eventQueueObservers.append($0) }
     }
 
     private func waitInCall(_ gate: CloudCallbackGate) async {
@@ -230,6 +243,10 @@ actor CloudKitEngineFake: CloudKitEngine {
     func pauseNativeReturnedWork(_ gate: CloudCallbackGate) { nativeWorkPause = gate }
     func pauseNextOperationTask(_ gate: CloudCallbackGate) { operationTaskPause = gate }
     func failNextOperation(_ error: any Error) { nextOperationError = error }
+    func waitForEventBookkeeping() async throws {
+        repeat { await prepareNativeWork() } while eventActive
+        try Task.checkCancellation()
+    }
     private func prepareNativeWork() async {
         while eventActive { await withCheckedContinuation { networkEventWaiters.append($0) } }
         if let gate = nativeWorkPause { nativeWorkPause = nil; await gate.enter() }
@@ -298,14 +315,25 @@ actor CloudKitEngineFake: CloudKitEngine {
                                 systemFields: Data("sdk-fields-\(batch.id)-\($0.name)".utf8), recordType: $0.recordType, zone: $0.zone)
                 }
                 deleted = batch.deletes
+            case .conflict(let record):
+                for handed in batch.saves {
+                    if handed.name == record.name {
+                        failed.append(.init(name: handed.name, code: .serverRecordChanged, zone: zone,
+                                            nativeCode: 14, serverRecord: record))
+                        pending.removeValue(forKey: handed.name)
+                    } else {
+                        saved.append(CloudRecord(name: handed.name, envelope: handed.envelope,
+                            systemFields: Data("sdk-fields-\(batch.id)-\(handed.name)".utf8), recordType: handed.recordType, zone: handed.zone))
+                    }
+                }
             case .failed(let code):
                 failed = names.map { CloudRecordFailure(name: $0, code: code) }
                 if !Self.sdkRetains(code) {
                     for name in names { pending.removeValue(forKey: name) }
                 }
             }
-            await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted), label: "sent")
-            if a23 { removeSaved(saved.map(\.name) + deleted) }
+            let sent = CloudEngineEvent.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted)
+            await deliver(sent, label: "sent", notifyBookkeeping: false, savedToRemove: saved.map(\.name) + deleted)
             if let gate = afterSent { afterSent = nil; await waitInCall(gate) }
             if !a23 {
                 // A23=false: tests first await the adapter's deferred list,
@@ -313,6 +341,7 @@ actor CloudKitEngineFake: CloudKitEngine {
                 if let gate = lateRemoval { lateRemoval = nil; await waitInCall(gate) }
                 removeSaved(saved.map(\.name) + deleted)
             }
+            await delegate.eventBookkeepingCompleted(sent, engine: self)
             await deliver(.didSend(zone: zone), label: "didSend")
         }
         trace.append(.sendReturned(call))

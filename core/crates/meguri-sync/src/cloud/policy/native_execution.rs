@@ -166,10 +166,35 @@ impl Driver {
         let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         self.validate_locked(&owned, command)?;
         self.runtime.validate_sdk(sdk)?;
+        Self::cancel_activity(&mut owned, operation);
+        Ok(())
+    }
+
+    /// Only an actual original pass may cancel first-read activity. The retained
+    /// guard includes file/open/token/account and remains valid after finish.
+    pub fn cancel_original_asset_read_activity(
+        &self,
+        collection: &Collection,
+        guard: &crate::cloud::runtime::AssetReadActivityGuard,
+    ) -> Result<(), DriverError> {
+        // Full file/provider validation happens outside Driver authority.
+        self.runtime.validate_asset_read_activity(collection, guard)?;
+        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.runtime.validate_sdk(guard.sdk_instance())?;
+        Self::cancel_activity(
+            &mut owned,
+            Operation {
+                zone: Zone::Collection,
+                kind: OperationKind::Read,
+            },
+        );
+        Ok(())
+    }
+
+    fn cancel_activity(owned: &mut Owned, operation: Operation) {
         if let Some(cycle) = owned.state.cycles.get_mut(&operation) {
             cycle.active = false;
         }
-        Ok(())
     }
 
     pub fn native_origin(&self, command: &Command) -> Result<Option<String>, DriverError> {

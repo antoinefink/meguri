@@ -2,7 +2,7 @@
 //! Metadata is descriptive; no frontend id/token can create or rebind authority.
 use crate::{
     CoreError, callback,
-    cloud_policy::CloudPolicyExecution,
+    cloud_policy::{CloudPolicy, CloudPolicyExecution, CloudPolicyOutput, operation_error_class},
     sync::{CloudRecord, CloudWorkflow, cloud_error},
 };
 use meguri_sync::cloud::{incoming as i, runtime::Runtime, workflow::FetchedRecord};
@@ -40,6 +40,8 @@ pub struct CloudAssetReadPass {
     sdk: String,
     execution: Option<Arc<CloudPolicyExecution>>,
     pass: i::AssetReadPass,
+    policy: Arc<CloudPolicy>,
+    activity: meguri_sync::cloud::runtime::AssetReadActivityGuard,
 }
 
 #[derive(uniffi::Object)]
@@ -70,6 +72,21 @@ pub struct CloudAssetReadCompletion {
     pub intake_accepted: bool,
 }
 
+/// Raw SDK facts, never retained SDK errors, records or payloads.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudAssetReadFailureFacts {
+    pub code: Option<i64>,
+    pub retry_after_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudAssetReadActivityFacts {
+    pub started: bool,
+    pub failures: Vec<CloudAssetReadFailureFacts>,
+    pub failed: bool,
+    pub app_cancelled: bool,
+}
+
 #[uniffi::export]
 impl CloudWorkflow {
     /// Only K12.3's uncharged first reads. Runtime rejects an active SDK handler;
@@ -77,11 +94,21 @@ impl CloudWorkflow {
     pub fn begin_first_asset_read_pass(&self, sdk: String) -> Result<Arc<CloudAssetReadPass>, CoreError> {
         callback::enter("CloudWorkflow.begin_first_asset_read_pass");
         let collection = self.host.cloud_connection_collection()?;
+        let policy = CloudPolicy::for_workflow(self)?;
         let pass = self
             .core
             .begin_asset_read_pass(&sdk, &collection, i::AssetReadKind::SaveConflictFirst)
             .map_err(cloud_error)?;
+        let activity = match self.core.asset_read_activity_guard(&pass) {
+            Ok(activity) => activity,
+            Err(error) => {
+                self.core.cancel_asset_read_pass(&pass);
+                return Err(cloud_error(error));
+            }
+        };
         Ok(Arc::new(CloudAssetReadPass {
+            policy,
+            activity,
             host: self.host.clone(),
             core: self.core.clone(),
             collection,
@@ -102,7 +129,17 @@ impl CloudPolicyExecution {
         let pass = driver
             .begin_native_asset_read_pass(command, &sdk, &collection)
             .map_err(cloud_error)?;
+        let activity = match core.asset_read_activity_guard(&pass) {
+            Ok(activity) => activity,
+            Err(error) => {
+                core.cancel_asset_read_pass(&pass);
+                return Err(cloud_error(error));
+            }
+        };
+        let policy = self.policy().clone();
         Ok(Arc::new(CloudAssetReadPass {
+            policy,
+            activity,
             host,
             core,
             collection,
@@ -136,6 +173,73 @@ impl CloudAssetReadPass {
 
 #[uniffi::export]
 impl CloudAssetReadPass {
+    /// Activity belongs to this actual pass, including after finish. An empty
+    /// pass reports nothing. All raw errors precede the ONE ended round; cancel
+    /// clears active state without resetting or incrementing failing cycles.
+    pub fn operation_activity(&self, facts: CloudAssetReadActivityFacts) -> Result<Vec<CloudPolicyOutput>, CoreError> {
+        use meguri_sync::cloud::policy as p;
+        callback::enter("CloudAssetReadPass.operation_activity");
+        let current = self.host.cloud_connection_collection()?;
+        if current.generation() != self.collection.generation() || !self.collection.is_current() {
+            return Err(cloud_error("stale asset read activity host"));
+        }
+        self.core
+            .validate_asset_read_activity(&self.collection, &self.activity)
+            .map_err(cloud_error)?;
+        if let Some(execution) = &self.execution {
+            execution.validate_execution()?;
+        }
+        let operation = p::Operation {
+            zone: p::Zone::Collection,
+            kind: p::OperationKind::Read,
+        };
+        let mut outputs = Vec::new();
+        for failure in &facts.failures {
+            let code = failure.code.unwrap_or(0);
+            if code == 20 {
+                continue;
+            }
+            outputs.push(
+                self.policy
+                    .output(self.host.cloud_policy_input(p::DeviceEvent::OperationError {
+                        instance: self.sdk.clone(),
+                        operation,
+                        class: operation_error_class(code),
+                        code,
+                        retry_after_ms: failure.retry_after_ms,
+                    }))?,
+            );
+        }
+        if !facts.started && (facts.app_cancelled || facts.failures.iter().any(|f| f.code == Some(20))) {
+            self.host
+                .cloud_policy_driver()
+                .ok_or_else(|| cloud_error("asset activity driver closed"))?
+                .cancel_original_asset_read_activity(&self.collection, &self.activity)
+                .map_err(cloud_error)?;
+        } else {
+            outputs.push(
+                self.policy
+                    .output(self.host.cloud_policy_input(p::DeviceEvent::Operation {
+                        instance: self.sdk.clone(),
+                        operation,
+                        phase: if facts.started {
+                            p::Activity::Started
+                        } else {
+                            p::Activity::Ended {
+                                outcome: if facts.failed || facts.failures.iter().any(|f| f.code != Some(20)) {
+                                    p::Outcome::Failed
+                                } else {
+                                    p::Outcome::Ok
+                                },
+                                saved: 0,
+                            }
+                        },
+                    }))?,
+            );
+        }
+        Ok(outputs)
+    }
+
     pub fn next(self: Arc<Self>) -> Result<Option<CloudAssetReadIssuedWork>, CoreError> {
         callback::enter("CloudAssetReadPass.next");
         let request = if let Some(execution) = &self.execution {

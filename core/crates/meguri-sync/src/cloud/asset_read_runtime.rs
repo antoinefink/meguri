@@ -32,7 +32,43 @@ pub(crate) struct ReadPass {
     members: BTreeMap<i64, [u8; 32]>,
 }
 
+/// Retained only by an actual issued pass. Its full original guard survives
+/// finish so terminal activity never resolves a fresh SDK or file owner.
+pub struct AssetReadActivityGuard {
+    sdk: String,
+    guard: ScanGuard,
+}
+
+impl AssetReadActivityGuard {
+    pub fn sdk_instance(&self) -> &str {
+        &self.sdk
+    }
+}
+
 impl Runtime {
+    pub fn asset_read_activity_guard(&self, pass: &AssetReadPass) -> Result<AssetReadActivityGuard, RuntimeError> {
+        let s = self.state();
+        Self::sdk_locked(&s, &pass.sdk)?;
+        let owner = s
+            .incoming
+            .asset_passes
+            .get(&pass.id)
+            .filter(|p| p.pass == *pass)
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        Ok(AssetReadActivityGuard {
+            sdk: pass.sdk.clone(),
+            guard: owner.guard.clone(),
+        })
+    }
+
+    pub fn validate_asset_read_activity(
+        &self,
+        collection: &Collection,
+        owner: &AssetReadActivityGuard,
+    ) -> Result<(), RuntimeError> {
+        self.with_scan(&owner.guard, collection, |s| Self::sdk_locked(s, &owner.sdk))
+    }
+
     /// Start one event-triggered pass outside SDK handlers. No attempts or first
     /// grants are consumed. A later pass includes entries arriving after this one.
     pub fn begin_asset_read_pass(

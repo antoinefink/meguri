@@ -975,7 +975,7 @@ pub trait CloudPolicyQueue: Send + Sync {
 // a Host alive. The Host owns the Driver; this registry never creates a Driver.
 static POLICIES: Mutex<Vec<Weak<CloudPolicy>>> = Mutex::new(Vec::new());
 impl CloudPolicy {
-    fn for_workflow(workflow: &CloudWorkflow) -> Result<Arc<Self>, CoreError> {
+    pub(crate) fn for_workflow(workflow: &CloudWorkflow) -> Result<Arc<Self>, CoreError> {
         let generation = workflow.host.cloud_connection_generation()?.0;
         if workflow.host.cloud_policy_driver().is_none() {
             return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable));
@@ -1034,7 +1034,7 @@ impl CloudPolicy {
             })
             .collect()
     }
-    fn output(
+    pub(crate) fn output(
         self: &Arc<Self>,
         result: Result<Vec<p::Command>, p::DriverError>,
     ) -> Result<CloudPolicyOutput, CoreError> {
@@ -1274,3 +1274,5 @@ mod tests {
 #[path = "cloud_policy_execution.rs"]
 mod execution;
 pub use execution::{CloudPolicyExecution, CloudPolicyOperationFacts, CloudPolicyReadiness};
+
+pub(crate) use execution::operation_error_class;

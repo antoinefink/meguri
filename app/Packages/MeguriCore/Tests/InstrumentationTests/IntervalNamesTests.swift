@@ -63,7 +63,7 @@ import Testing
             "ManualTransferResult.request_stop",
         ]
         #expect(BridgeCall.all.map(\.name) == [
-            "CloudWorkflow.begin_first_asset_read_pass", "CloudPolicyExecution.begin_asset_read_pass", "CloudAssetReadPass.next", "CloudAssetReadPass.submit", "CloudAssetReadPass.complete", "CloudAssetReadPass.cancel", "CloudAssetReadPass.finish",
+            "CloudWorkflow.begin_first_asset_read_pass", "CloudPolicyExecution.begin_asset_read_pass", "CloudAssetReadPass.next", "CloudAssetReadPass.submit", "CloudAssetReadPass.complete", "CloudAssetReadPass.cancel", "CloudAssetReadPass.finish", "CloudAssetReadPass.operation_activity",
             "CloudWorkflow.media", "CloudWorkflow.submit_media_batch", "CloudMedia.downloads_blocked", "CloudPolicyExecution.begin_media", "CloudPolicyExecution.continue_media_after_send", "CloudMedia.next_work", "CloudMedia.submit_read", "CloudMedia.queue_upload", "CloudMedia.reply",
             "CloudWorkflow.policy", "CloudPolicy.input", "CloudPolicy.refresh_account", "CloudPolicy.project_identity_read", "CloudPolicy.status", "CloudPolicy.execute_core", "CloudPolicy.submit_native", "CloudPolicy.capture_exchange", "CloudPolicy.complete_exchange", "CloudPolicy.end_before_capture",
             "CloudPolicyExecution.validate_control", "CloudPolicyExecution.prepare_flush", "CloudPolicy.exchange_readiness", "CloudPolicy.prepare_execution", "CloudPolicyExecution.original_sdk", "CloudPolicyExecution.validate_execution", "CloudPolicyExecution.register_sdk", "CloudPolicyExecution.retire_original", "CloudPolicyExecution.begin_fetch", "CloudPolicyExecution.begin_send", "CloudPolicyExecution.operation_activity",
