@@ -12,7 +12,7 @@ public nonisolated struct MediaNameSnapshot: Sendable {
     public let root: URL
     public let names: [TrackedMediaName]
     public init(generation: UInt64, root: URL, names: [TrackedMediaName]) {
-        self.generation = generation; self.root = root; self.names = names
+        self.generation = generation; self.root = root.standardizedFileURL; self.names = names
     }
     init(_ value: MeguriCoreBindings.MediaNameSnapshot) {
         self.init(generation: value.generation, root: URL(fileURLWithPath: value.root),

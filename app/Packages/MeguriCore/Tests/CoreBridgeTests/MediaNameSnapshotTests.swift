@@ -4,6 +4,34 @@ import Testing
 @testable import CoreBridge
 
 @Suite struct MediaNameSnapshotTests {
+    @Test func equivalentRootSpellingsNormalizeAcrossInitializers() {
+        let expectedRoot = URL(fileURLWithPath: "/tmp/media-binding/collection.media").standardizedFileURL
+        let names = [
+            CoreBridge.TrackedMediaName(name: "É.PNG", caseKey: "é.png"),
+            CoreBridge.TrackedMediaName(name: "E\u{301}.PNG", caseKey: "e\u{301}.png"),
+        ]
+        for root in [
+            "/tmp/media-binding/collection.media",
+            "/tmp/media-binding/./collection.media",
+            "/tmp/media-binding/staging/../collection.media",
+        ] {
+            let explicit = CoreBridge.MediaNameSnapshot(
+                generation: 19, root: URL(fileURLWithPath: root), names: names)
+            let mapped = CoreBridge.MediaNameSnapshot(MeguriCoreBindings.MediaNameSnapshot(
+                generation: 19, root: root,
+                names: names.map { .init(name: $0.name, caseKey: $0.caseKey) }))
+            #expect(explicit.root == expectedRoot)
+            #expect(mapped.root == expectedRoot)
+            #expect(explicit.root == mapped.root)
+            for value in [explicit, mapped] {
+                #expect(value.generation == 19)
+                #expect(value.names.count == names.count)
+                #expect(value.names.map { Data($0.name.utf8) } == names.map { Data($0.name.utf8) })
+                #expect(value.names.map { Data($0.caseKey.utf8) } == names.map { Data($0.caseKey.utf8) })
+            }
+        }
+    }
+
     @Test func dtoPreservesStoredNameAndCaseKeyBytesAndArrivalGeneration() {
         let raw = MeguriCoreBindings.MediaNameSnapshot(generation: 19, root: "/tmp/media-binding/collection.media", names: [
             .init(name: "É.PNG", caseKey: "é.png"),
