@@ -22,6 +22,8 @@ import Testing
             let fields = searchFields(in: host)
             try #require(fields.count == 1)
             let field = try #require(fields.first)
+            try recordSearchGeometryDiagnostic(window: window, field: field, host: host)
+            try #require(!field.visibleRect.isEmpty, "Search field must have visible geometry before AX traversal")
             #expect((field as any NSAccessibilityProtocol).accessibilityIdentifier() == "settings.root.search")
             let cell = try #require(field.cell as? NSSearchFieldCell)
             let searchLabel = try #require(cell.searchButtonCell?.accessibilityLabel())
@@ -53,6 +55,59 @@ import Testing
     private func searchFields(in view: NSView) -> [NSSearchField] {
         if let field = view as? NSSearchField { return [field] }
         return view.subviews.flatMap { searchFields(in: $0) }
+    }
+
+    private func recordSearchGeometryDiagnostic(window: NSWindow, field: NSSearchField,
+        host: NSView) throws {
+        let maxNodes = 16
+        var chain: [NSView] = []
+        var identities: Set<ObjectIdentifier> = []
+        var current: NSView? = field
+        var reachedHost = false
+        var repeated = false
+        while let view = current, chain.count < maxNodes {
+            guard identities.insert(ObjectIdentifier(view)).inserted else {
+                repeated = true
+                break
+            }
+            chain.append(view)
+            if view === host {
+                reachedHost = true
+                break
+            }
+            current = view.superview
+        }
+        print("settingsSearchGeometry ownedHostReached=\(reachedHost) nodes=\(chain.count)"
+            + " maxNodes=\(maxNodes) repeated=\(repeated)"
+            + " hostBounds=\(host.bounds) windowContentLayoutRect=\(window.contentLayoutRect)")
+        // Validate ownership before recording any ancestor geometry. Never
+        // inspect the host's parent or emit metadata from an unowned chain.
+        try #require(reachedHost, "Search field ancestor chain must reach this test's hosting view")
+        let publicClasses: [(AnyClass, String)] = [
+            (NSSearchField.self, "NSSearchField"), (NSTextField.self, "NSTextField"),
+            (NSClipView.self, "NSClipView"), (NSScrollView.self, "NSScrollView"),
+            (NSStackView.self, "NSStackView"), (NSView.self, "NSView")
+        ]
+        for (index, view) in chain.enumerated() {
+            let identity = view === field ? "field" : view === host ? "ownedHost" : "ancestor"
+            let publicClass = view === host ? "NSHostingView"
+                : publicClasses.first { type(of: view) == $0.0 }?.1 ?? "other"
+            let visibleRect = view.visibleRect
+            let visibleIntersection = view.bounds.intersection(visibleRect)
+            print("settingsSearchGeometry index=\(index) identity=\(identity) class=\(publicClass)"
+                + " frame=\(view.frame) bounds=\(view.bounds) visibleRect=\(visibleRect)"
+                + " frameEmpty=\(view.frame.isEmpty) boundsEmpty=\(view.bounds.isEmpty)"
+                + " visibleRectEmpty=\(visibleRect.isEmpty)"
+                + " visibleIntersection=\(visibleIntersection) visibleIntersectionEmpty=\(visibleIntersection.isEmpty)"
+                + " hidden=\(view.isHidden) hiddenBySelfOrAncestor=\(view.isHiddenOrHasHiddenAncestor)")
+            if index + 1 < chain.count {
+                let parent = chain[index + 1]
+                let intersection = view.frame.intersection(parent.bounds)
+                print("settingsSearchGeometry index=\(index) parentIndex=\(index + 1)"
+                    + " parentBoundsIntersection=\(intersection) parentBoundsIntersectionEmpty=\(intersection.isEmpty)"
+                    + " clippedByParentBounds=\(!parent.bounds.contains(view.frame))")
+            }
+        }
     }
 
     // Diagnostic only: never emit UI strings or

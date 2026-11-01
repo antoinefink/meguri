@@ -76,3 +76,37 @@ Public getter result:
   values were printed. Product behavior is still unproven by this test.
 - Window/layout and native-leaf representation need a bounded diagnosis.
   No product change, suppression or acceptance is claimed.
+
+## Owned-host geometry handoff (2026-11-01)
+
+Fixer session: `s-20261025T162405Z-9dc656e4`. Starting master: `1e08ce40`
+(root binds the full hash). Original batch base:
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+The existing actual receipt `mac-hosted-test/20261101T101731Z-72877` remains
+failed: zero search-button matches, visible window, attached field and empty
+field visible rectangle. AXUnknown/AXTextField and unavailable modern native
+leaf getters do not establish a product defect while layout is unproven.
+
+This test-only repair adds one geometry diagnostic before AX child traversal.
+An identity-guarded chain of at most 16 views must reach this mount's owned
+NSHostingView before ancestor geometry is emitted. A missing host prints
+`ownedHostReached=false` and fails the requirement. The diagnostic stops at
+that host and records numeric frames, bounds, visible rectangles, parent-bound
+intersections, empty/clipping/hidden flags, host bounds and the synthetic
+window's content layout rectangle. Labels use fixed indices, local identities
+and public class allowlisting; no private class names or UI/user strings.
+The field must then have a nonempty visible rectangle before AX traversal.
+
+Both mounts, existing window ordering/layout calls and all original exact
+label/identifier/count/identity/search-text assertions remain. There is no
+layout adjustment, wait, retry, legacy AX or permission-dependent CAX change;
+native leaf-source resolution remains outside this pass.
+
+Bounded source-only handoff: one consistency check, no build/runtime receipt
+from this filtered fixer. Root owns focused MG VM receipts, independent review,
+privacy, provenance and similarity checks. The existing failure remains open;
+this handoff claims neither a pass nor a product repair.
+
+Independent review clears the latest source diagnostic changes (no P0-P2).
+The owned-host geometry VM test is running; its result remains pending.

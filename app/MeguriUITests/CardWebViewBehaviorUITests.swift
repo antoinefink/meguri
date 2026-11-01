@@ -650,22 +650,29 @@ final class CardWebViewBehaviorUITests: XCTestCase {
             add(attachment)
             return refreshVisible
         }
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        shot.name = "card-contrast-probe-before"
-        shot.lifetime = .keepAlways
-        add(shot)
+        func captureWindow(_ phase: String) {
+            let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+            shot.name = "card-contrast-probe-\(phase)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        captureWindow("before")
         guard recordGeometry("before") else {
             throw AuditError(description: "Refresh contrast diagnostic: card.behavior.refresh lost full visibility or hittability before audit")
         }
         var findings: [AuditFinding] = []
         var issueNumber = 0
         do {
-            defer { _ = recordGeometry("after") }
+            defer {
+                _ = recordGeometry("after")
+                captureWindow("after")
+            }
             findings = try AccessibilityAudit.run(
                 app, variant: "diagnostic question sheet, \(variant)", types: .contrast, suppressions: suppressions,
                 onIssue: { _ in
                     issueNumber += 1
                     _ = recordGeometry("issue-\(issueNumber)")
+                    captureWindow("issue-\(issueNumber)")
                 })
         }
         AccessibilityAudit.assertClean(findings)
