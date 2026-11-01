@@ -4,7 +4,7 @@ use super::{
     row_payload::{self, View},
     runtime::{DirtySource, NoteTracking},
     runtime_store::{next, put_binding},
-    store::encode,
+    store::{decode, encode},
     workflow::*,
     *,
 };
@@ -618,16 +618,39 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn save_root_ack(&mut self, b: BindingId, ack: RootAcknowledgement) -> Result<(), Error> {
+    pub(super) fn save_root_ack(
+        &mut self,
+        b: BindingId,
+        ack: RootAcknowledgement,
+    ) -> Result<super::adapter::Durable, Error> {
         let mut s = self.runtime_binding(b)?;
         if s.open_counter != ack.open {
             return Err(Error::InvalidData);
         }
+        let active = Saved {
+            name: "active".into(),
+            envelope: ack.envelope.0.clone(),
+            system_fields: ack.system_fields.0.clone(),
+        };
         s.root_ack = Some(ack);
         let tx = self.connection.transaction()?;
+        let content: Option<String> = tx
+            .query_row(
+                "SELECT content FROM cloud_adapter_state WHERE binding=?1",
+                [b.0.as_slice()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut durable: super::adapter::Durable = content.map(|text| decode(&text)).transpose()?.unwrap_or_default();
+        durable.active = Some(active);
+        // Keep the last applied Service fact and this open's confirmation atomic.
+        tx.execute(
+            "INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content",
+            params![b.0.as_slice(), encode(&durable)?],
+        )?;
         put_binding(&tx, b, &s)?;
         tx.commit()?;
-        Ok(())
+        self.adapter_durable(b)
     }
     #[cfg(feature = "test-hooks")]
     pub fn prepare_entity_baseline_for_testing(

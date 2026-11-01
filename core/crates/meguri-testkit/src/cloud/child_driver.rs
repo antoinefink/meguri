@@ -297,6 +297,7 @@ pub(crate) enum Input {
     WriteDuringMediaTrash(String, Vec<u8>, bool),
     StartSDK(String),
     Facts,
+    LastAppliedActive,
     ScanState,
     ScanProof,
     Capture(u64, u64),
@@ -1294,6 +1295,7 @@ impl ChildDriver {
             Input::RegisterSDK(..) => "RegisterSDK",
             Input::RootFetch(..) => "RootFetch",
             Input::RootRead(..) => "RootRead",
+            Input::LastAppliedActive => "LastAppliedActive",
             Input::SyncNow(..) => "SyncNow",
             Input::Poll(..) => "Poll",
             Input::FetchLifecycle => "FetchLifecycle",
@@ -2281,6 +2283,19 @@ impl Device {
                 value(())
             }
             Input::Facts => value(self.facts()?),
+            Input::LastAppliedActive => {
+                let snapshot = self.runtime()?.adapter_snapshot()?;
+                let content: serde_json::Value = serde_json::from_slice(&snapshot.tracking_content)?;
+                // Snapshot tuple member 4 is persisted adapter::Durable, not
+                // snapshot.root (the current-open root acknowledgement).
+                let tuple = content.as_array().filter(|v| v.len() == 6).ok_or_else(failure)?;
+                let active = tuple[4]
+                    .as_object()
+                    .and_then(|durable| durable.get("active"))
+                    .ok_or_else(failure)?;
+                let active: Option<Saved> = serde_json::from_value(active.clone())?;
+                value(active)
+            }
             Input::ScanState => {
                 let s = self.runtime()?.status()?;
                 value(ScanState {

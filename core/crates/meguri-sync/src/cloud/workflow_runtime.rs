@@ -893,14 +893,21 @@ impl Runtime {
             None
         };
         if let Some(reason) = reason {
-            with_tracking_access(|| {
-                s.store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .isolate_runtime_binding(id, reason)
+            let (binding, durable) = with_tracking_access(|| {
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                let durable = store.isolate_runtime_binding_with_active(
+                    id,
+                    reason,
+                    Saved {
+                        name: "active".into(),
+                        envelope: envelope.to_vec(),
+                        system_fields: system_fields.to_vec(),
+                    },
+                )?;
+                let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;
+                Ok::<_, Error>((binding, durable))
             })?;
-            let binding = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.binding(id))?
-                .ok_or(Error::BindingNotFound)?;
+            s.adapter.durable = durable;
             let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
             b.usable = false;
             b.verified = false;
@@ -908,7 +915,7 @@ impl Runtime {
             return Ok(false);
         }
         let open = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter;
-        with_tracking_access(|| {
+        let durable = with_tracking_access(|| {
             s.store.as_mut().ok_or(Error::Database)?.save_root_ack(
                 id,
                 RootAcknowledgement {
@@ -920,6 +927,7 @@ impl Runtime {
                 },
             )
         })?;
+        s.adapter.durable = durable;
         s.root_reads.insert(request_id);
         let first = !s.root_confirmed;
         s.root_confirmed = true;

@@ -203,6 +203,41 @@ impl TrackingStore {
         Ok(())
     }
 
+    pub(super) fn isolate_runtime_binding_with_active(
+        &mut self,
+        binding: BindingId,
+        reason: IsolationReason,
+        active: super::workflow::Saved,
+    ) -> Result<super::adapter::Durable, Error> {
+        let mut value = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        let replaces = isolation_replaces(value.facts.state, reason);
+        let transaction = self.connection.transaction()?;
+        let content: Option<String> = transaction
+            .query_row(
+                "SELECT content FROM cloud_adapter_state WHERE binding=?1",
+                [binding.0.as_slice()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut durable: super::adapter::Durable = content.map(|text| decode(&text)).transpose()?.unwrap_or_default();
+        durable.active = Some(active);
+        // Persist before isolation: its trigger must clear absence and seen
+        // state without a later write restoring the previous absence ledger.
+        transaction.execute(
+            "INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content",
+            params![binding.0.as_slice(), encode(&durable)?],
+        )?;
+        if replaces {
+            value.facts.state = BindingState::Isolated(reason);
+            transaction.execute(
+                "UPDATE bindings SET facts=?2 WHERE id=?1",
+                params![binding.0.as_slice(), encode(&value.facts)?],
+            )?;
+        }
+        transaction.commit()?;
+        self.adapter_durable(binding)
+    }
+
     pub fn tracked_note(&self, binding: BindingId, id: i64) -> Result<Option<NoteTracking>, Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         let text: Option<String> = self

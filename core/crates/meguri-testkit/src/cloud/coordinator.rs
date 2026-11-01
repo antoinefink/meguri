@@ -10,6 +10,84 @@ use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::{self as production, control_codec};
 pub use production::workflow::TraceEvent;
 use std::cell::RefCell;
+
+// Establish an older last-applied fact through actual root-page intake,
+// independently of the confirmation branches under regression.
+pub fn store_older_active(
+    service: &mut Service<SeededRandom>,
+    files: &PreboundDevice,
+) -> Result<production::workflow::Saved> {
+    use super::devices::{NativeFiles, options};
+    use meguri_sync::cloud::{
+        OpaqueBytes,
+        runtime::{CloudInputs, IdentityProvider, IdentityStatus},
+    };
+    use std::sync::Arc;
+    struct Account(String);
+    impl IdentityProvider for Account {
+        fn read_identity(&self, _: &meguri_sync::cloud::BuildScope) -> IdentityStatus {
+            IdentityStatus::Available(OpaqueBytes(self.0.as_bytes().to_vec()))
+        }
+    }
+    let mut config = options(&files.directory, 1_735_689_600_000, files.seed);
+    config.cloud = Some(CloudInputs {
+        scope: files.binding.scope.clone(),
+        identity: Arc::new(Account(files.scope.account.clone())),
+        files: Arc::new(NativeFiles),
+    });
+    let host = meguri_host::CoreHost::open(config)?;
+    let runtime = host.cloud_runtime().ok_or_else(failure)?;
+    runtime.refresh_identity().map_err(|_| failure())?;
+    let collection = host.collection()?;
+    let media = host.media()?;
+    media.store().register_full(|_, _| true).map_err(|_| failure())?;
+    runtime
+        .reconcile_binding(&collection, &media, std::time::Duration::from_secs(30))
+        .map_err(|_| failure())?;
+    let (sdk, _, _) = runtime.register_sdk(false).map_err(|_| failure())?;
+    let response = service.request(
+        &files.scope,
+        Caller {
+            instance: Some(sdk.clone()),
+            ..Caller::default()
+        },
+        Operation::FetchZone {
+            zone: "meguri-root".into(),
+            token: None,
+        },
+    )?;
+    let Ok(Reply::ZoneChanges(page)) = response.result else {
+        panic!("expected the actual root fetch page");
+    };
+    assert!(!page.more);
+    let records = page
+        .changes
+        .iter()
+        .map(|change| {
+            let RecordChange::Saved(record) = change else {
+                panic!("expected the actual root Active record");
+            };
+            assert_eq!(record.name, "active");
+            assert_eq!(record.record_type, "MGActive");
+            let Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+                panic!("expected the actual Active envelope");
+            };
+            production::workflow::Saved {
+                name: record.name.clone(),
+                envelope: envelope.clone(),
+                system_fields: record.system_fields.bytes().to_vec(),
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    runtime
+        .adapter_fetched(&sdk, "meguri-root", &records, &[])
+        .map_err(|_| failure())?;
+    assert!(!runtime.sdk_root_confirmed());
+    host.close()?;
+    Ok(records.into_iter().next().unwrap())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Barrier {
     IdentityBlocked,
@@ -92,6 +170,9 @@ impl Coordinator {
     }
     pub fn facts(&self) -> Result<DeviceFacts> {
         self.rig.borrow_mut().driver.call(Input::Facts)
+    }
+    pub fn last_applied_active(&self) -> Result<Option<production::workflow::Saved>> {
+        self.rig.borrow_mut().driver.call(Input::LastAppliedActive)
     }
     pub fn scan_state(&self) -> Result<ScanState> {
         self.rig.borrow_mut().driver.call(Input::ScanState)

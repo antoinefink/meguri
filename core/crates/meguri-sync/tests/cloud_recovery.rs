@@ -783,11 +783,14 @@ fn deferred_foreign_key_failure_at_actual_destination_commit_keeps_main_and_wal(
 // is claimed by arranging an already healthy, bound component fixture.
 mod account_and_root_regressions {
     use meguri_model::rng::SeededRandom;
-    use meguri_sync::cloud::{BindingState, IsolationReason, entity_codec as codec};
+    use meguri_sync::cloud::{
+        BindingState, IsolationReason, entity_codec as codec,
+        workflow::{EntityFacts, Saved},
+    };
     use meguri_testkit::{
         cloud::{
             self, Config, Field, LogOutcome, Mutation, Record, ReplyReference, RequestKind, Scope, Service,
-            coordinator::{Barrier, Coordinator, ReadKind, TraceEvent},
+            coordinator::{Barrier, Coordinator, ReadKind, TraceEvent, store_older_active},
             devices::{DeviceFacts, DirtySource, IdentityReads, PreboundDevice},
         },
         generate::recipe::{Recipe, generate_recipe},
@@ -837,6 +840,97 @@ decks:
     fn record(service: &Service<SeededRandom>, files: &PreboundDevice) -> Record {
         service.inspect(&files.scope).unwrap().unwrap().zones[&files.collection_zone].records[&files.entity_name]
             .clone()
+    }
+
+    fn saved_active_fact(record: &Record) -> Saved {
+        assert_eq!(record.name, "active");
+        assert_eq!(record.record_type, "MGActive");
+        let Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+            panic!("expected the actual Active envelope");
+        };
+        Saved {
+            name: record.name.clone(),
+            envelope: envelope.clone(),
+            system_fields: record.system_fields.bytes().to_vec(),
+        }
+    }
+
+    fn advance_service_active(
+        service: &mut Service<SeededRandom>,
+        files: &PreboundDevice,
+        switch_epoch: bool,
+    ) -> (Record, Saved) {
+        let old_active = service.inspect(&files.scope).unwrap().unwrap().zones["meguri-root"].records["active"].clone();
+        let Field::EncryptedBytes(old_envelope) = &old_active.fields["e"] else {
+            panic!("expected the actual Active envelope");
+        };
+        let mut newer_active = meguri_sync::cloud::control_codec::Active::decode(old_envelope).unwrap();
+        assert_eq!(newer_active.epoch, files.binding.facts.epoch.0);
+        newer_active.activated_at_ms = newer_active.activated_at_ms.checked_add(1).unwrap();
+        if switch_epoch {
+            newer_active.previous = Some(newer_active.epoch);
+            newer_active.epoch[0] ^= 1;
+            newer_active.replaced_through_ms = Some(newer_active.activated_at_ms);
+        }
+        let newer_envelope = newer_active.encode().unwrap();
+        assert_ne!(&newer_envelope, old_envelope);
+        let response = service
+            .request(
+                &files.scope,
+                cloud::Caller::default(),
+                cloud::Operation::Modify {
+                    zone: "meguri-root".into(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: cloud::RecordInput::encrypted("active", "MGActive", newer_envelope.clone()),
+                        if_unchanged: Some(old_active.system_fields.clone()),
+                    }],
+                },
+            )
+            .unwrap();
+        let Ok(cloud::Reply::Modified(items)) = response.result else {
+            panic!("expected the actual conditional Active save result");
+        };
+        assert_eq!(items.len(), 1);
+        let Ok(cloud::MutationSuccess::Saved(saved_active)) = &items[0].result else {
+            panic!("expected an accepted Service Active version");
+        };
+        assert_ne!(saved_active.system_fields, old_active.system_fields);
+        let Field::EncryptedBytes(saved_envelope) = &saved_active.fields["e"] else {
+            panic!("expected the accepted Active envelope");
+        };
+        assert_eq!(saved_envelope, &newer_envelope);
+        assert_eq!(saved_active.record_type, "MGActive");
+        (saved_active.clone(), saved_active_fact(saved_active))
+    }
+
+    fn assert_ack_unchanged(before: &EntityFacts, after: &EntityFacts) {
+        assert_eq!(after.acked_rev, before.acked_rev);
+        assert_eq!(after.server_erev, before.server_erev);
+        assert_eq!(after.acked_system_fields, before.acked_system_fields);
+        assert_eq!(after.acked_row_digest, before.acked_row_digest);
+        assert_eq!(after.acked_payload_digest, before.acked_payload_digest);
+        assert!(after.acked_payload == before.acked_payload);
+        assert!(after.acked_envelope == before.acked_envelope);
+        assert!(after.in_flight == before.in_flight);
+    }
+
+    fn assert_no_root_ack(files: &PreboundDevice) {
+        meguri_sync::cloud::runtime::with_tracking_access(|| {
+            let store =
+                match meguri_sync::cloud::TrackingStore::open(&files.directory, files.binding.scope.clone()).unwrap() {
+                    meguri_sync::cloud::OpenOutcome::Opened(store) => store,
+                    _ => panic!("expected the actual tracking store"),
+                };
+            assert!(
+                store
+                    .stored_runtime_state(files.binding.id)
+                    .unwrap()
+                    .unwrap()
+                    .root_ack
+                    .is_none()
+            );
+        });
     }
 
     fn decode(files: &PreboundDevice, record: &Record) -> (codec::Entity, codec::Note) {
@@ -1193,6 +1287,174 @@ decks:
     }
 
     #[test]
+    fn normal_root_confirmation_persists_exact_service_active_across_reopen() {
+        for completed_fetch in [false, true] {
+            let (_run, mut service, files) = fixture();
+            let baseline = record(&service, &files);
+            let baseline_ack = files.read_entity_durable(&files.entity_name).unwrap();
+            let older = store_older_active(&mut service, &files).unwrap();
+            let mut current = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            current.reach(Barrier::BeforeRootConfirmation).unwrap();
+            assert!(current.last_applied_active().unwrap() == Some(older.clone()));
+            let edit = current.edit_note_fields(files.note.id, &EDIT).unwrap();
+            assert_observer_capture(&current, &edit);
+            let local = current.facts().unwrap();
+            assert!(local.pending_names.contains(&files.entity_name));
+            assert_closed(&mut current, &mut service);
+            let (accepted, expected) = advance_service_active(&mut service, &files, false);
+            assert_ne!(expected.envelope, older.envelope);
+            assert_ne!(expected.system_fields, older.system_fields);
+            let before = cursor(&service);
+            let original = current.read(&mut service, ReadKind::ActiveNoState).unwrap();
+            assert_eq!(original.record, accepted);
+            assert_eq!(original.active_epoch, Some(files.binding.facts.epoch));
+            assert_service_read(&service, &files, original.request_id, &current.instance(), "MGActive");
+            if completed_fetch {
+                let fetch = current.fetch_root(&mut service).unwrap();
+                current.deliver_root_fetch(&fetch).unwrap();
+            } else {
+                current.deliver_read(&original).unwrap();
+            }
+            assert!(
+                current.last_applied_active().unwrap() == Some(expected.clone()),
+                "normal confirmation must replace the older stored Active with the exact accepted Service version"
+            );
+            assert!(current.trace().iter().any(|e| matches!(e,
+                TraceEvent::RootConfirmed { instance } if instance == &current.instance())));
+            assert_tracking_unchanged(&local, &current.facts().unwrap());
+            assert_no_writes_since(&service, before);
+            current.close_clean().unwrap();
+            assert_ack_unchanged(&baseline_ack, &files.read_entity_durable(&files.entity_name).unwrap());
+
+            let mut reopened =
+                Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            assert!(
+                reopened.last_applied_active().unwrap() == Some(expected.clone()),
+                "the exact normal-confirmation Active must survive a real reopen"
+            );
+            reopened.reach(Barrier::BeforeRootConfirmation).unwrap();
+            let reopened_local = reopened.facts().unwrap();
+            assert_eq!(reopened_local.note, edit.note);
+            assert_tracking_unchanged(&local, &reopened_local);
+            let _late_read_result = reopened.deliver_read(&original);
+            assert!(reopened.last_applied_active().unwrap() == Some(expected.clone()));
+            assert!(
+                !reopened
+                    .trace()
+                    .iter()
+                    .any(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+            );
+            assert_tracking_unchanged(&reopened_local, &reopened.facts().unwrap());
+            assert_closed(&mut reopened, &mut service);
+            assert_no_writes_since(&service, before);
+            // Only a current proof can open sending in the new owner.
+            if completed_fetch {
+                let fresh = reopened.fetch_root(&mut service).unwrap();
+                reopened.deliver_root_fetch(&fresh).unwrap();
+            } else {
+                let fresh = reopened.read(&mut service, ReadKind::ActiveNoState).unwrap();
+                assert_eq!(fresh.record, accepted);
+                assert_service_read(&service, &files, fresh.request_id, &reopened.instance(), "MGActive");
+                reopened.deliver_read(&fresh).unwrap();
+            }
+            assert!(reopened.last_applied_active().unwrap() == Some(expected));
+            assert!(reopened.trace().iter().any(|e| matches!(e,
+                TraceEvent::RootConfirmed { instance } if instance == &reopened.instance())));
+            assert_no_writes_since(&service, before);
+            assert_saved(&mut reopened, &mut service, &files, &baseline, &edit.note);
+            reopened.close_clean().unwrap();
+        }
+    }
+
+    #[test]
+    fn ordinary_epoch_switch_persists_exact_service_active_across_reopen() {
+        for completed_fetch in [false, true] {
+            let (_run, mut service, files) = fixture();
+            let baseline = record(&service, &files);
+            let baseline_ack = files.read_entity_durable(&files.entity_name).unwrap();
+            let older = store_older_active(&mut service, &files).unwrap();
+            let mut current = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            current.reach(Barrier::BeforeRootConfirmation).unwrap();
+            assert!(current.last_applied_active().unwrap() == Some(older.clone()));
+            let edit = current.edit_note_fields(files.note.id, &EDIT).unwrap();
+            assert_observer_capture(&current, &edit);
+            let local = current.facts().unwrap();
+            assert!(local.pending_names.contains(&files.entity_name));
+            assert_closed(&mut current, &mut service);
+            let (accepted, expected) = advance_service_active(&mut service, &files, true);
+            assert_ne!(expected.envelope, older.envelope);
+            assert_ne!(expected.system_fields, older.system_fields);
+            let actual = meguri_sync::cloud::control_codec::Active::decode(&expected.envelope).unwrap();
+            assert_ne!(actual.epoch, files.binding.facts.epoch.0);
+            assert_eq!(actual.previous, Some(files.binding.facts.epoch.0));
+            let before = cursor(&service);
+            let original = current.read(&mut service, ReadKind::ActiveNoState).unwrap();
+            assert!(!original.lost_zone);
+            assert_eq!(original.record, accepted);
+            assert_eq!(original.active_epoch.unwrap().0, actual.epoch);
+            assert_service_read(&service, &files, original.request_id, &current.instance(), "MGActive");
+            if completed_fetch {
+                let fetch = current.fetch_root(&mut service).unwrap();
+                current.deliver_root_fetch(&fetch).unwrap();
+            } else {
+                current.deliver_read(&original).unwrap();
+            }
+            assert!(
+                current.last_applied_active().unwrap() == Some(expected.clone()),
+                "ordinary epoch isolation must persist the exact accepted Service Active"
+            );
+            assert_eq!(
+                current.facts().unwrap().binding_state,
+                BindingState::Isolated(IsolationReason::EpochSwitched)
+            );
+            assert_eq!(current.facts().unwrap().note, edit.note);
+            assert_tracking_unchanged(&local, &current.facts().unwrap());
+            assert!(
+                !current
+                    .trace()
+                    .iter()
+                    .any(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+            );
+            assert_closed(&mut current, &mut service);
+            assert_no_writes_since(&service, before);
+            assert_eq!(record(&service, &files), baseline);
+            assert_no_transfer_or_replacement(current.trace());
+            current.close_clean().unwrap();
+            assert_ack_unchanged(&baseline_ack, &files.read_entity_durable(&files.entity_name).unwrap());
+            assert_no_root_ack(&files);
+            assert_tracking_unchanged(&local, &files.read_durable().unwrap());
+
+            let mut reopened =
+                Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            assert!(
+                reopened.last_applied_active().unwrap() == Some(expected.clone()),
+                "the exact epoch-switch Active must survive a real reopen"
+            );
+            let _late_read_result = reopened.deliver_read(&original);
+            assert!(reopened.last_applied_active().unwrap() == Some(expected));
+            assert_eq!(
+                reopened.facts().unwrap().binding_state,
+                BindingState::Isolated(IsolationReason::EpochSwitched)
+            );
+            assert_eq!(reopened.facts().unwrap().note, edit.note);
+            assert_tracking_unchanged(&local, &reopened.facts().unwrap());
+            assert!(
+                !reopened
+                    .trace()
+                    .iter()
+                    .any(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+            );
+            assert_closed(&mut reopened, &mut service);
+            assert_no_writes_since(&service, before);
+            assert_eq!(record(&service, &files), baseline);
+            assert_no_transfer_or_replacement(reopened.trace());
+            reopened.close_clean().unwrap();
+            assert_ack_unchanged(&baseline_ack, &files.read_entity_durable(&files.entity_name).unwrap());
+            assert_no_root_ack(&files);
+        }
+    }
+
+    #[test]
     fn root_confirmation_safety_finite_permutations_require_current_instance_proof() {
         // P24 root_read / K21.20 / V22.14. Finite deterministic property:
         // all six orders of epoch-only, stale read and stale drain, followed by
@@ -1279,19 +1541,23 @@ decks:
         }
 
         let (_run, mut service, files) = fixture();
+        let baseline_ack = files.read_entity_durable(&files.entity_name).unwrap();
         let mut lost = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
         lost.reach(Barrier::BeforeRootConfirmation).unwrap();
         let before_edit = lost.facts().unwrap();
         let edit = lost.edit_note_fields(files.note.id, &EDIT).unwrap();
         assert_observer_capture(&lost, &edit);
         let local = lost.facts().unwrap();
-        let mark = local.mark.unwrap();
+        let mark = local.mark.clone().unwrap();
         assert_eq!(mark.binding, files.binding.id);
         assert_eq!(mark.source, DirtySource::Observer);
         assert!(mark.change_seq > before_edit.change_counter);
         assert!(mark.change_seq <= local.change_counter);
         assert!(lost.facts().unwrap().pending_names.contains(&files.entity_name));
         assert_closed(&mut lost, &mut service);
+        // Advance the actual Service version without changing the bound epoch.
+        // The later read must preserve this envelope and its accepted change tag.
+        let (saved_active, expected_active) = advance_service_active(&mut service, &files, false);
         // Delete only the synthetic bound zone using the existing Service.
         service
             .request(
@@ -1309,8 +1575,13 @@ decks:
         let read = lost.read(&mut service, ReadKind::ActiveAfterLostZone).unwrap();
         assert_eq!(read.instance, lost.instance());
         assert_eq!(read.active_epoch, Some(files.binding.facts.epoch));
+        assert_eq!(read.record, saved_active);
         assert_service_read(&service, &files, read.request_id, &lost.instance(), "MGActive");
         lost.deliver_read(&read).unwrap();
+        assert!(
+            lost.last_applied_active().unwrap() == Some(expected_active.clone()),
+            "the lost-zone Active read must persist the exact accepted Service record"
+        );
         assert!(lost.trace().iter().any(|e| matches!(e,
             TraceEvent::RootReadRecorded { instance, request_id }
                 if instance == &lost.instance() && request_id == &read.request_id)));
@@ -1326,17 +1597,50 @@ decks:
         );
         assert_eq!(lost.facts().unwrap().note, edit.note);
         assert_eq!(lost.facts().unwrap().mark, Some(mark.clone()));
+        assert_tracking_unchanged(&local, &lost.facts().unwrap());
         assert_closed(&mut lost, &mut service);
         assert_no_writes_since(&service, before);
         assert_no_transfer_or_replacement(lost.trace());
         lost.close_clean().unwrap();
+        assert_ack_unchanged(&baseline_ack, &files.read_entity_durable(&files.entity_name).unwrap());
+        assert_no_root_ack(&files);
         let durable = files.read_durable().unwrap();
         assert_eq!(
             durable.binding_state,
             BindingState::Isolated(IsolationReason::ZoneMissing)
         );
         assert_eq!(durable.note, edit.note);
-        assert_eq!(durable.mark, Some(mark));
+        assert_eq!(durable.mark, Some(mark.clone()));
+        assert_tracking_unchanged(&local, &durable);
+        let mut reopened = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        assert!(
+            reopened.last_applied_active().unwrap() == Some(expected_active.clone()),
+            "the exact accepted Service Active record must survive reopen"
+        );
+        // An isolated, unstarted reopen can retain the host instance string.
+        // Deliver the original late read: unusable/unverified authority must
+        // refuse it regardless of whether that string happens to be reused.
+        let _late_read_result = reopened.deliver_read(&read);
+        assert!(reopened.last_applied_active().unwrap() == Some(expected_active));
+        assert_eq!(
+            reopened.facts().unwrap().binding_state,
+            BindingState::Isolated(IsolationReason::ZoneMissing)
+        );
+        assert_eq!(reopened.facts().unwrap().note, edit.note);
+        assert_eq!(reopened.facts().unwrap().mark, Some(mark));
+        assert_tracking_unchanged(&local, &reopened.facts().unwrap());
+        assert!(
+            !reopened
+                .trace()
+                .iter()
+                .any(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
+        );
+        assert_closed(&mut reopened, &mut service);
+        assert_no_writes_since(&service, before);
+        assert_no_transfer_or_replacement(reopened.trace());
+        reopened.close_clean().unwrap();
+        assert_ack_unchanged(&baseline_ack, &files.read_entity_durable(&files.entity_name).unwrap());
+        assert_no_root_ack(&files);
     }
 }
 
