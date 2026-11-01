@@ -204,3 +204,37 @@ No P24 item or Unit is accepted by these receipts alone.
 row comparison: the FFI observation returns optional Data, while the test
 compares it with a byte array. No native test ran. Preserve the assertion by
 using the correct Data representation, then rerun the selected native checks.
+
+## Native row comparison compile correction — source-only handoff
+
+Role: fixer under implementer clean-room rules. Supplied current master
+`75b55c87`; original U113 start
+`1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a` and original batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9` remain authoritative.
+
+The supplied native compile failure `swift-test/20261101T134953Z-92923`
+reported optional Data versus Array<UInt8> at workflow line 103, with an
+UnnecessaryEffectMarker cascade at the same line. Read-only inspection of
+`CloudAssetReadFixtureObservation` confirms `row_fields: Option<Vec<u8>>`;
+the supplied native diagnostic identifies its Swift representation as Data?.
+
+Authored correction (UNRUN): replace only the expected `Array(...)` with
+`Data(...)`. The exact joined UTF-8 bytes and U+001F separator, the
+`ownedCount == 0` assertion and `try #require` remain. Every other assertion,
+workflow step and deadline is unchanged. Only the owned workflow test and
+this log changed; no bindings or production code changed.
+
+Preceding root evidence remains `core-test/20261101T134745Z-91787`
+PASS420/420 and `core-test/20261101T134932Z-92399` PASS8/8. No native test
+has executed. This filtered session ran no builds, tests, gates, Git/history
+or network and accessed no forbidden sources. Root owns native compilation,
+focused reexecution, independent review and the required provenance/privacy/
+similarity and batch gates. No production fix, passing native result,
+acceptance or unit/milestone closure is claimed.
+
+The single source consistency check passed: the test differs from the session
+snapshot only by Array-to-Data at the reported comparison; all other source,
+assertions and deadlines are byte-for-byte unchanged. This log preserves its
+prior contents and appends only this handoff. Both owned files retain final
+newlines and contain no trailing whitespace or conflict markers. Source
+export is ready; the compile correction remains UNRUN.

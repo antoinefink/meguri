@@ -100,7 +100,7 @@ extension ReviewCollectionStartupTests {
                 try #require(firstBackend.assetRetryStarted == expected && firstBackend.assetRetryCompleted == expected,
                     "Actual drain trace: \(trace)")
                 try #require(reads.count == expected && observed.retryCount == UInt32(expected), "Actual drain trace: \(trace)")
-                try #require(observed.ownedCount == 0 && observed.rowFields == Array(localFields.joined(separator: "\u{1f}").utf8))
+                try #require(observed.ownedCount == 0 && observed.rowFields == Data(localFields.joined(separator: "\u{1f}").utf8))
                 try #require(reads.allSatisfy { $0.failedDelivery && !$0.retainedLease
                     && $0.record.name == name && $0.zone == zone
                     && $0.record.envelope == remoteSaved.envelope && $0.record.systemFields == remoteSaved.systemFields })
