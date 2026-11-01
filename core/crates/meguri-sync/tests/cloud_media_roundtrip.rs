@@ -42,7 +42,7 @@ fn adopted_device_reviews_and_uploads_real_rows_and_media_retained_on_both_reope
         mut receiver,
         receiver_dir,
         root,
-    } = published_review_pair();
+    } = published_review_pair(false);
     let sender_dir = root.path().join("sender");
     let before = sender.driver().collection_payloads().unwrap();
     let original_files = sender.driver().media_files().unwrap();
@@ -177,7 +177,7 @@ fn adopted_device_reviews_and_uploads_real_rows_and_media_retained_on_both_reope
 
 #[test]
 fn durable_review_with_lost_capture_recovers_card_and_new_revlog_after_crash() {
-    let mut pair = published_review_pair();
+    let mut pair = published_review_pair(false);
     let before = pair.sender.driver().collection_payloads().unwrap();
     let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
     pair.receiver.adopt_cloud(&preview).unwrap();
@@ -339,6 +339,182 @@ fn durable_review_with_lost_capture_recovers_card_and_new_revlog_after_crash() {
     pair.close();
 }
 
+#[test]
+fn durable_manual_bury_with_lost_capture_recovers_card_and_new_config_after_crash() {
+    let mut pair = published_review_pair(true);
+    let before = pair.sender.driver().collection_payloads().unwrap();
+    assert!(
+        !before
+            .values()
+            .any(|row| matches!(row, Payload::Config(config) if config.key == b"lastUnburied")),
+        "the published fixture must lack lastUnburied"
+    );
+    let original_files = pair.sender.driver().media_files().unwrap();
+    assert_eq!(original_files["photo.jpg"], REMOTE);
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), before);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_completed(&mut pair.receiver);
+    let binding = pair.receiver.facts().unwrap().current.unwrap();
+    let selected = before
+        .values()
+        .find_map(|row| match row {
+            Payload::Card(card) if card.card_type == 0 => Some(card.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let card_name = codec::entity_name(
+        &binding.facts.record_key.0,
+        codec::Kind::Card,
+        &codec::id_key(selected.id),
+    )
+    .unwrap();
+    let config_name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Config, b"lastUnburied").unwrap();
+    let tracking_before = pair.receiver.facts().unwrap().entities;
+    assert!(!before.contains_key(&config_name));
+    assert!(!tracking_before.contains_key(&config_name));
+    assert_eq!(tracking_before[&card_name].payload, Payload::Card(selected.clone()));
+    let runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+    let snapshot_before = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    let server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
+    let request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
+    // Inspect the actual adopted rows immediately before arming. There is no
+    // active review, fixture edit, tracking seed or ACK seed at this boundary.
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), before);
+    pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
+    pair.receiver.driver().bury_card(selected.id).unwrap();
+    let card = pair.receiver.driver().read_card(selected.id).unwrap();
+    assert_eq!(card.queue, -3); // real manual bury, not a sibling scheduling edit
+    assert_eq!(card.id, selected.id);
+    assert_eq!(card.nid, selected.nid);
+    assert_eq!(card.card_type, selected.card_type);
+    assert_eq!(card.reps, selected.reps);
+    assert_eq!(card.last_review_id, selected.last_review_id);
+    let expected = pair.receiver.driver().collection_payloads().unwrap();
+    let Payload::Config(config) = &expected[&config_name] else {
+        panic!("manual bury must create lastUnburied")
+    };
+    assert_eq!(config.key, b"lastUnburied");
+    assert_eq!(
+        config.val,
+        meguri_testkit::generate::recipe::SPAN_DAYS.to_string().as_bytes()
+    );
+    assert_eq!(config.mtime_secs, NOW / 1_000);
+    let buried = [
+        (card_name, Payload::Card(card.clone())),
+        (config_name, Payload::Config(config.clone())),
+    ];
+    assert_eq!(expected.len(), before.len() + 1);
+    for (name, payload) in &buried {
+        assert_eq!(expected.get(name), Some(payload));
+    }
+    for (name, payload) in &before {
+        if name != &buried[0].0 {
+            assert_eq!(expected.get(name), Some(payload));
+        }
+    }
+    let committed = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    assert!(committed.seq > snapshot_before.seq);
+    assert_eq!(committed.generation, snapshot_before.generation);
+    assert_eq!(committed.native_file, snapshot_before.native_file);
+    let capture = pair
+        .receiver
+        .driver()
+        .capture_proof(committed.seq, committed.generation)
+        .unwrap();
+    assert_eq!(capture.observed_seq, committed.seq);
+    assert_eq!(capture.generation, committed.generation);
+    assert!(capture.attempted && !capture.persisted);
+    assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+    assert_eq!(
+        pair.receiver.driver().stored_runtime_state().unwrap().change_counter,
+        runtime_before.change_counter
+    );
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(scan.scan_required && scan.tracking_stopped && !scan.scan_running);
+    let receipt = pair.receiver.driver().wal_proof(committed.seq).unwrap();
+    assert!(receipt.through >= committed.seq);
+    assert_eq!(receipt.generation, committed.generation);
+    assert_eq!(receipt.native_file, committed.native_file);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+    assert_eq!(
+        pair.service.request_log().unwrap().last().unwrap().request_id,
+        request_before
+    );
+
+    // Kill before any drive, Sync Now or reconcile can repair the failed
+    // observer transaction. Reopen the same physical files without new keys.
+    let killed = pair.receiver.kill().unwrap();
+    assert_eq!(killed.signal, Some(9));
+    assert!(!killed.clean_close);
+    pair.reopen_before_identity();
+    assert_eq!(pair.receiver.facts().unwrap().native_file, receipt.native_file);
+    assert!(pair.receiver.facts().unwrap().current.as_ref() == Some(&binding));
+    assert_eq!(pair.receiver.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(scan.scan_required && !scan.scan_running && !scan.scan_completed_this_open);
+    pair.receiver.verify_identity(scope().account).unwrap();
+    assert!(pair.receiver.trace().iter().any(|event| matches!(
+        event,
+        meguri_sync::cloud::workflow::TraceEvent::IdentityVerified { account, .. }
+            if account == &scope().account
+    )));
+    let reopened = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    pair.receiver
+        .driver()
+        .reconcile_binding()
+        .unwrap_or_else(|error| panic!("ordinary reconcile must recover manual bury's new Config: {error:?}"));
+    let scan = pair.receiver.driver().scan_proof().unwrap();
+    assert!(scan.snapshot_seq >= reopened.seq);
+    assert_eq!(scan.snapshot_generation, reopened.generation);
+    assert_eq!(scan.snapshot_native_file, reopened.native_file);
+    assert_eq!(scan.receipt.generation, reopened.generation);
+    assert_eq!(scan.receipt.native_file, reopened.native_file);
+    assert!(scan.receipt.through >= scan.snapshot_seq);
+    let pending = pair.receiver.facts().unwrap().entities;
+    for (name, payload) in &buried {
+        assert!(scan.recovered_names.contains(name));
+        assert_eq!(&pending[name].payload, payload);
+        assert!(pending[name].mark.is_some());
+        assert!(pending[name].local_rev > pending[name].acked_rev);
+    }
+    assert!(pending[&buried[1].0].acked_payload.is_none());
+    assert!(pending[&buried[1].0].base_payload.is_none());
+    let result = pair.receiver.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.receiver.last_sync_phase()));
+    assert_review_saved(&mut pair.receiver, &pair.service, request_before, &buried);
+    assert_completed(&mut pair.receiver);
+    pair.receiver.close_clean().unwrap();
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_review_saved(&mut pair.receiver, &pair.service, request_before, &buried);
+    assert_completed(&mut pair.receiver);
+    let result = pair.sender.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.sender.last_sync_phase()));
+    assert_eq!(pair.sender.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.sender.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.sender.driver().media_files().unwrap(), original_files);
+    assert_completed(&mut pair.sender);
+    let sender_dir = pair.root.path().join("sender");
+    pair.sender.close_clean().unwrap();
+    pair.sender = online(&sender_dir, false);
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.sender.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.sender.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.sender.driver().media_files().unwrap(), original_files);
+    assert_completed(&mut pair.sender);
+    pair.close();
+}
+
 fn assert_review_saved(
     rig: &mut PublicationRig,
     service: &Service<SeededRandom>,
@@ -396,7 +572,7 @@ fn assert_review_saved(
     assert!(rig.sdk_database_pending().is_empty());
 }
 
-fn published_review_pair() -> Pair {
+fn published_review_pair(omit_last_unburied: bool) -> Pair {
     let root = tempfile::tempdir().unwrap();
     let sender_dir = root.path().join("sender");
     let recipe = Recipe::parse(
@@ -417,6 +593,31 @@ decks:
     assert_eq!(manifest.counts.notes, 2);
     assert!(manifest.counts.revlog > 0);
     PreboundDevice::select_review_deck(&sender_dir, NOW, 801).unwrap();
+    if omit_last_unburied {
+        // The generator seeds this to preserve generated buried cards. This
+        // recipe has none; omit only that seed before any binding is published.
+        let host = meguri_testkit::backup_support::open_restore_host(
+            &sender_dir.join("collection.anki2"),
+            &root.path().join("fixture-backups"),
+            std::sync::Arc::new(meguri_model::clock::FixedClock::new(
+                NOW,
+                meguri_model::clock::UtcOffset::UTC,
+            )),
+            std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
+        )
+        .unwrap();
+        host.collection()
+            .unwrap()
+            .run(
+                meguri_engine::OpSpec::named("omit generator unbury seed", meguri_model::changes::OpSource::LocalApi),
+                |ctx| {
+                    assert!(ctx.scope().remove_config("lastUnburied")?.changed());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        host.close().unwrap();
+    }
     let receiver_dir = generated(root.path(), "receiver");
     let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
     let mut sender = online(&sender_dir, true);

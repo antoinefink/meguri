@@ -411,7 +411,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         // Ordinary additions may use an existing layout, never introduce one.
         if !matches!(
             payload.kind(),
-            codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog
+            codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config
         ) {
             return Err(Error::InvalidData);
         }

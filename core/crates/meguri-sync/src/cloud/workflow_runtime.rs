@@ -572,7 +572,10 @@ impl Runtime {
                         let newly_observed = existing.is_none();
                         if newly_observed
                             && !publishing
-                            && !matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog)
+                            && !matches!(
+                                kind,
+                                codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config
+                            )
                         {
                             return Err(Error::InvalidData.into());
                         }
