@@ -571,7 +571,7 @@ fn actual_service_save_conflict_rekeys_before_old_key_apply() {
     let handoff = pair
         .receiver
         .driver()
-        .deliver_real_asset_save_conflict(&mut pair.service, &scope(), &key)
+        .deliver_real_asset_save_conflict_with_small_handoff(&mut pair.service, &scope(), &key)
         .unwrap();
     let inbox = pair.receiver.driver().inbox_entries(b).unwrap();
     assert_eq!(inbox.len(), 1);
@@ -782,6 +782,66 @@ fn clock_rollback_past_i5_cap_fails_once_without_collection_or_ack_changes() {
     assert_eq!(inbox[0].retry_count, 1);
     pair.receiver.driver().drain_incoming(STEPS).unwrap();
     assert_eq!(pair.receiver.driver().inbox_entries(b).unwrap(), inbox);
+    pair.close();
+}
+
+#[test]
+fn new_local_api_config_after_adoption_captures_and_syncs_without_losing_incarnation() {
+    let mut pair = Pair::adopted();
+    let b = binding(&pair);
+    let config_key = format!("_deck_{}_fixture", NOW + 20);
+    let record_key = pair.receiver.facts().unwrap().current.unwrap().facts.record_key;
+    let key = codec::entity_name(&record_key.0, codec::Kind::Config, config_key.as_bytes()).unwrap();
+    let original_rows = pair.receiver.driver().collection_rows().unwrap();
+    assert!(!pair.receiver.facts().unwrap().entities.contains_key(&key));
+    let before = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert!(before.engine_instance.is_some());
+    // Create this key only after real publication/adoption, through LocalApi.
+    let capture = pair
+        .receiver
+        .driver()
+        .rekey_config_value(config_key.clone(), 731)
+        .unwrap();
+    assert!(capture.attempted && capture.persisted);
+    let written = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(written.engine_instance, before.engine_instance);
+    assert_eq!(written.native_file, before.native_file);
+    assert_eq!(written.generation, before.generation);
+    assert_eq!(capture.observed_seq, written.seq);
+    assert_eq!(capture.generation, written.generation);
+    assert!(written.seq > before.seq);
+    let payload = Payload::Config(codec::Config {
+        key: config_key.into_bytes(),
+        mtime_secs: NOW / 1_000,
+        val: b"731".to_vec(),
+    });
+    let rows = pair.receiver.driver().collection_rows().unwrap();
+    assert_eq!(rows.len(), original_rows.len() + 1);
+    assert!(rows.contains(&payload));
+    assert!(original_rows.iter().all(|row| rows.contains(row)));
+    let pending = pair.receiver.facts().unwrap().entities[&key].clone();
+    assert!(pending.payload == payload);
+    assert!(pending.mark.is_some());
+    assert_eq!(pending.server_erev, 0);
+    assert_eq!(pending.acked_rev, 0);
+    assert!(pending.acked_envelope.0.is_empty() && pending.acked_system_fields.is_empty());
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let record = saved(&pair, &key);
+    let acknowledged = pair.receiver.facts().unwrap();
+    assert_eq!(acknowledged.current.unwrap().id, b);
+    assert_ack(&acknowledged.entities[&key], &record);
+    assert_eq!(acknowledged.entities[&key].acked_rev, pending.local_rev);
+    assert!(acknowledged.entities[&key].payload == payload);
+    let synced = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(synced.engine_instance, written.engine_instance);
+    assert_eq!(synced.native_file, written.native_file);
+    assert_eq!(synced.generation, written.generation);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+    assert_settled(&mut pair);
+    pair.receiver.close_clean().unwrap();
+    pair.receiver = online(&pair.receiver_dir, false);
+    assert_eq!(pair.receiver.driver().collection_rows().unwrap(), rows);
+    assert_ack(&pair.receiver.facts().unwrap().entities[&key], &record);
     pair.close();
 }
 
@@ -1043,6 +1103,22 @@ fn large_note_and_dependent_card_rekey_stay_under_absolute_child_rust_heap_limit
         .deliver_collection_records(std::slice::from_ref(&record))
         .unwrap();
     pair.receiver.driver().drain_incoming(STEPS).unwrap();
+    let (drain_peak, drain_live) = pair.receiver.driver().payload_memory_peak().unwrap();
+    eprintln!("device/core Rust heap phase=after_drain cumulative_peak={drain_peak} live={drain_live}");
+    for sample in pair
+        .receiver
+        .driver()
+        .payload_memory_stages()
+        .unwrap()
+        .into_iter()
+        .flatten()
+    {
+        let stage = sample.stage;
+        let (peak, live) = sample.first;
+        eprintln!("device/core Rust heap stage={stage:?} first cumulative_peak={peak} live={live}");
+        let (peak, live) = sample.high_water;
+        eprintln!("device/core Rust heap stage={stage:?} high_water cumulative_peak={peak} live={live}");
+    }
     let rows_after = pair
         .receiver
         .driver()
@@ -1077,6 +1153,7 @@ fn large_note_and_dependent_card_rekey_stay_under_absolute_child_rust_heap_limit
     assert!(pair.receiver.driver().apply_intents(b).unwrap().is_empty());
     assert!(pair.receiver.driver().inbox_entries(b).unwrap().is_empty());
     let (peak, live) = pair.receiver.driver().payload_memory_peak().unwrap();
+    eprintln!("device/core Rust heap phase=after_row_ack_proof cumulative_peak={peak} live={live}");
     assert!(peak >= live_at_start && peak >= live);
     assert!(
         peak < LIMIT,

@@ -93,18 +93,17 @@ pub(crate) fn prepare(
                 let before = journal.before(entry)?;
                 let after = journal.after(entry)?;
                 // Decode card identities before the transaction becomes durable.
-                let before_card = before
+                let before_note = before
                     .as_deref()
-                    .map(meguri_model::card::Card::from_cells)
+                    .map(meguri_storage::rows::cards::validated_note_id)
                     .transpose()?;
-                let after_card = after.as_deref().map(meguri_model::card::Card::from_cells).transpose()?;
-                let note = after_card
-                    .as_ref()
-                    .or(before_card.as_ref())
-                    .ok_or_else(|| StorageError::Io {
-                        detail: "changed card has no image".into(),
-                    })?
-                    .note_id;
+                let after_note = after
+                    .as_deref()
+                    .map(meguri_storage::rows::cards::validated_note_id)
+                    .transpose()?;
+                let note = after_note.or(before_note).ok_or_else(|| StorageError::Io {
+                    detail: "changed card has no image".into(),
+                })?;
                 let memory_state_only = match (&before, &after) {
                     (Some(before), Some(after)) => memory_state_only(before, after),
                     _ => false,

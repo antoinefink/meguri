@@ -8,6 +8,66 @@ use meguri_model::usn::Usn;
 
 use super::{Cell, Record, RowCells, RowError, RowImage, Table};
 
+struct CardScalars {
+    id: CardId,
+    note_id: NoteId,
+    deck_id: DeckId,
+    ord: u16,
+    mtime: EpochSecs,
+    usn: Usn,
+    card_type: CardType,
+    queue: CardQueue,
+    due: i32,
+    interval: u32,
+    ease_factor: u16,
+    reps: u32,
+    lapses: u32,
+    remaining_steps: u32,
+    original_due: i32,
+    original_deck_id: DeckId,
+    flags: u8,
+}
+
+fn read_scalars(cells: &[Cell]) -> Result<CardScalars, RowError> {
+    let row = RowCells {
+        table: Table::Cards,
+        cells,
+    };
+    let card_type = match CardType::from_stored(row.raw_int(6)?) {
+        Some(t) => t,
+        None => return row.fail(6, "not a card type"),
+    };
+    let queue = match CardQueue::from_stored(row.raw_int(7)?) {
+        Some(q) => q,
+        None => return row.fail(7, "not a card queue"),
+    };
+    Ok(CardScalars {
+        id: CardId(row.int(0)?),
+        note_id: NoteId(row.int(1)?),
+        deck_id: DeckId(row.int(2)?),
+        ord: row.int(3)?,
+        mtime: EpochSecs(row.int(4)?),
+        usn: Usn(row.int(5)?),
+        card_type,
+        queue,
+        due: row.int_or(8, 0),
+        interval: row.int(9)?,
+        ease_factor: row.int(10)?,
+        reps: row.int(11)?,
+        lapses: row.int(12)?,
+        remaining_steps: row.int(13)?,
+        original_due: row.int_or(14, 0),
+        original_deck_id: DeckId(row.int(15)?),
+        flags: row.int(16)?,
+    })
+}
+
+/// Validates a stored card with the full reader's scalar rules, without
+/// decoding its infallibly parsed `data` column.
+pub fn validated_note_id(cells: &[Cell]) -> Result<NoteId, RowError> {
+    Ok(read_scalars(cells)?.note_id)
+}
+
 impl Record for Card {
     const TABLE: Table = Table::Cards;
 
@@ -37,36 +97,29 @@ impl Record for Card {
     }
 
     fn from_cells(cells: &[Cell]) -> Result<Card, RowError> {
+        let scalars = read_scalars(cells)?;
         let row = RowCells {
             table: Table::Cards,
             cells,
         };
-        let card_type = match CardType::from_stored(row.raw_int(6)?) {
-            Some(t) => t,
-            None => return row.fail(6, "not a card type"),
-        };
-        let queue = match CardQueue::from_stored(row.raw_int(7)?) {
-            Some(q) => q,
-            None => return row.fail(7, "not a card queue"),
-        };
         Ok(Card {
-            id: CardId(row.int(0)?),
-            note_id: NoteId(row.int(1)?),
-            deck_id: DeckId(row.int(2)?),
-            ord: row.int(3)?,
-            mtime: EpochSecs(row.int(4)?),
-            usn: Usn(row.int(5)?),
-            card_type,
-            queue,
-            due: row.int_or(8, 0),
-            interval: row.int(9)?,
-            ease_factor: row.int(10)?,
-            reps: row.int(11)?,
-            lapses: row.int(12)?,
-            remaining_steps: row.int(13)?,
-            original_due: row.int_or(14, 0),
-            original_deck_id: DeckId(row.int(15)?),
-            flags: row.int(16)?,
+            id: scalars.id,
+            note_id: scalars.note_id,
+            deck_id: scalars.deck_id,
+            ord: scalars.ord,
+            mtime: scalars.mtime,
+            usn: scalars.usn,
+            card_type: scalars.card_type,
+            queue: scalars.queue,
+            due: scalars.due,
+            interval: scalars.interval,
+            ease_factor: scalars.ease_factor,
+            reps: scalars.reps,
+            lapses: scalars.lapses,
+            remaining_steps: scalars.remaining_steps,
+            original_due: scalars.original_due,
+            original_deck_id: scalars.original_deck_id,
+            flags: scalars.flags,
             data: CardData::parse(&row.text_or_empty(17)),
         })
     }

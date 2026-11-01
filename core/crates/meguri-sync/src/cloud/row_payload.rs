@@ -87,6 +87,23 @@ pub fn key(kind: c::Kind, row: &[Cell]) -> Result<Vec<u8>, Error> {
         b
     })
 }
+pub(super) fn tracking_key(kind: c::Kind, key: &RowKey) -> Result<Vec<u8>, Error> {
+    match (kind, key) {
+        (
+            c::Kind::Note | c::Kind::Card | c::Kind::Revlog | c::Kind::Deck | c::Kind::Preset | c::Kind::Notetype,
+            RowKey::Id(id),
+        ) => Ok(c::id_key(*id).to_vec()),
+        (c::Kind::Tag | c::Kind::Config, RowKey::Text(bytes)) => {
+            let text = std::str::from_utf8(bytes).map_err(|_| Error::InvalidData)?;
+            Ok(if kind == c::Kind::Tag {
+                meguri_text::fold::folded(text).into_bytes()
+            } else {
+                bytes.clone()
+            })
+        }
+        _ => Err(Error::InvalidData),
+    }
+}
 pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::Notetype, Error> {
     if generation == 0 {
         return Err(Error::InvalidData);
@@ -430,4 +447,84 @@ pub(super) fn payload_rows(payload: &c::Payload) -> Result<Vec<(Table, RowKey, R
         P::MediaName(_) => return Err(Error::InvalidData),
     }
     Ok(images)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_keys_agree_with_stored_row_keys() {
+        for kind in [
+            c::Kind::Note,
+            c::Kind::Card,
+            c::Kind::Revlog,
+            c::Kind::Deck,
+            c::Kind::Preset,
+            c::Kind::Notetype,
+        ] {
+            for id in [i64::MIN, -1, 0, 1, i64::MAX] {
+                assert_eq!(
+                    tracking_key(kind, &RowKey::Id(id)).unwrap(),
+                    key(kind, &[Cell::Integer(id)]).unwrap()
+                );
+            }
+        }
+        for (text, folded) in [
+            ("Straße", "strasse"),
+            ("\u{fb03}", "iff"),
+            ("E\u{301}", "e\u{301}"),
+            ("", ""),
+        ] {
+            let metadata = RowKey::text(text);
+            let stored = [Cell::Text(text.as_bytes().to_vec())];
+            for kind in [c::Kind::Tag, c::Kind::Config] {
+                let actual = tracking_key(kind, &metadata).unwrap();
+                assert_eq!(actual, key(kind, &stored).unwrap());
+                assert_eq!(
+                    actual,
+                    if kind == c::Kind::Tag {
+                        folded.as_bytes()
+                    } else {
+                        text.as_bytes()
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_keys_refuse_wrong_shapes_and_invalid_utf8() {
+        for kind in [
+            c::Kind::Note,
+            c::Kind::Card,
+            c::Kind::Revlog,
+            c::Kind::Deck,
+            c::Kind::Preset,
+            c::Kind::Notetype,
+        ] {
+            for metadata in [RowKey::text("key"), RowKey::Pair(1, 2)] {
+                assert!(matches!(tracking_key(kind, &metadata), Err(Error::InvalidData)));
+            }
+        }
+        for kind in [c::Kind::Tag, c::Kind::Config] {
+            for metadata in [RowKey::Id(1), RowKey::Pair(1, 2)] {
+                assert!(matches!(tracking_key(kind, &metadata), Err(Error::InvalidData)));
+            }
+        }
+        for metadata in [RowKey::Id(1), RowKey::text("key"), RowKey::Pair(1, 2)] {
+            assert!(matches!(
+                tracking_key(c::Kind::MediaName, &metadata),
+                Err(Error::InvalidData)
+            ));
+        }
+        for bytes in [vec![0xff], vec![0xc3], vec![b'A', 0x80]] {
+            for kind in [c::Kind::Tag, c::Kind::Config] {
+                assert!(matches!(
+                    tracking_key(kind, &RowKey::Text(bytes.clone())),
+                    Err(Error::InvalidData)
+                ));
+            }
+        }
+    }
 }

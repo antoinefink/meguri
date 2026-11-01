@@ -690,19 +690,6 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if state.open_counter != open {
             return Err(Error::InvalidData.into());
         }
-        // add_deck may create several ancestors, in child-to-parent order.
-        // Resolve their native names against this same committed writer view,
-        // including rows that have not reached tracking yet.
-        let mut added_decks = Vec::new();
-        for change in commit.payload.rows(Table::Decks) {
-            let delta = change?;
-            if delta.before.is_none() && matches!(delta.after, meguri_engine::changes::observers::RowAfter::Row(_)) {
-                let RowKey::Id(id) = delta.key else {
-                    return Err(Error::InvalidData.into());
-                };
-                added_decks.push(codec::id_key(id).to_vec());
-            }
-        }
         let tx = self.connection.transaction().map_err(Error::from)?;
         let incoming = super::incoming_store::intents(&tx, b)?;
         let applying = matches!(
@@ -723,24 +710,50 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 .map_err(Error::from)?;
             }
         }
+        // add_deck may create several ancestors, in child-to-parent order.
+        // Resolve their native names against this same committed writer view,
+        // including rows that have not reached tracking yet.
+        let mut added_decks = Vec::new();
+        for row_key in commit.payload.row_keys(Table::Decks) {
+            let key = row_payload::tracking_key(codec::Kind::Deck, row_key)?;
+            if applying
+                && let Some(protected) = incoming
+                    .iter()
+                    .flat_map(|i| &i.keys)
+                    .find(|k| k.kind == codec::Kind::Deck && k.key == key)
+            {
+                if protected.before_digest.is_none() && protected.after_digest.is_some() {
+                    added_decks.push(key);
+                }
+                continue;
+            }
+            let delta = commit.payload.row(Table::Decks, row_key)?.ok_or(Error::InvalidData)?;
+            if delta.before.is_none() && matches!(delta.after, meguri_engine::changes::observers::RowAfter::Row(_)) {
+                added_decks.push(key);
+            }
+        }
         let mut written = 0;
         for kind in row_payload::KINDS {
             let Some(table) = row_payload::table(kind) else {
                 continue;
             };
-            for change in commit.payload.rows(table) {
-                let delta = change?;
-                let raw = rows.row_image(table, &delta.key)?;
-                let key = match raw.as_ref().or(delta.before.as_ref()) {
-                    Some(r) => row_payload::key(kind, r)?,
-                    None => return Err(Error::InvalidData.into()),
-                };
+            for row_key in commit.payload.row_keys(table) {
+                let key = row_payload::tracking_key(kind, row_key)?;
                 let protected = incoming
                     .iter()
                     .flat_map(|i| &i.keys)
                     .find(|k| k.kind == kind && k.key == key);
                 if applying && protected.is_some() {
                     continue;
+                }
+                let delta = commit.payload.row(table, row_key)?.ok_or(Error::InvalidData)?;
+                let raw = rows.row_image(table, &delta.key)?;
+                let actual_key = match raw.as_ref().or(delta.before.as_ref()) {
+                    Some(r) => row_payload::key(kind, r)?,
+                    None => return Err(Error::InvalidData.into()),
+                };
+                if actual_key != key {
+                    return Err(Error::InvalidData.into());
                 }
                 let existing = entity(&tx, b, kind, &key)?;
                 if raw.is_none() {
@@ -804,8 +817,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 let mut e = if let Some(e) = existing {
                     e
                 } else {
-                    let ordinary_addition = matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck)
-                        && delta.before.is_none();
+                    let ordinary_addition = matches!(
+                        kind,
+                        codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck | codec::Kind::Config
+                    ) && delta.before.is_none();
                     if !ordinary_addition && kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
                     }

@@ -4,7 +4,7 @@ Component start: `0d519bd4562953cb6a69380ab46f68fb72793cde`.
 Original integration base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 U113 and U114 remain unaccepted.
 
-Current code parks collisions and own landed tombstones with live Undo rows.
+The initial baseline parked collisions and own landed tombstones with live Undo rows.
 K14.2 requires identity and reference writes, a persisted intent, a covered WAL
 sequence and one tracking transaction. K19 generations and media-name conflict
 paths remain unaccepted.
@@ -121,3 +121,70 @@ findings remain: all-before re-key replay clears its intent without continuing
 the original Ready entry through the writer, and the measured heap cap fails.
 Keep new-Config-after-adoption coverage enabled as well. The next repair must
 use fixed stage samples and retain the cumulative absolute peak.
+
+Third repair: `cleanroom/20261101T014855Z-82262`, from `7450721c`.
+It continues the original inbox entries after identity-intent replay and
+admits journal-proven new Config rows through ordinary observer capture.
+`core-test/20261101T015208Z-83635`: 14 pass, 1 fail, 0 skipped.
+All three crash boundaries now pass. The enabled new-Config-after-adoption
+case passes capture, Service ACK, row/identity preservation and reopen.
+
+Heap diagnostics retain the original reset, sizes, cap and proof assertions.
+After drain the peak is 421,246,794; the proof checks do not increase it.
+The first `ApplyAfterIntent` reading is 253,481,445, with 1,813,663 live bytes.
+The first `ApplyAfterCommit` reading is already 421,246,794. Inspect that
+writer/commit/observer interval before further memory changes.
+
+R4 clears restart continuation and new Config capture. It finds a P1 in
+observer capture: protected intent keys are checked only after journal and
+committed row images have been read. Use metadata-only keys first, then retain
+the existing image reads and validation for unprotected keys. The unchanged
+stress must establish whether that repair is sufficient.
+
+Fourth repair: `cleanroom/20261101T015502Z-85028`.
+`core-test/20261101T015759Z-86310`: 14 pass, 1 fail; heap peak unchanged.
+`core-test/20261101T015930Z-86896`: both selected metadata-key tests pass.
+R5 finds no new P0/P1 in metadata-first capture; the memory failure stays open.
+
+Source attribution locates another allocation in `changes::prepare`: it holds
+raw Card before/after images while decoding both complete Card models only
+to read note identity. Scalar validation can be shared without parsing data;
+the full record reader must retain its existing behavior and error order.
+
+`core-test/20261101T020116Z-87489`: 54 pass, 1 fail. The first-read asset
+conflict case ends with test IPC EOF at the shared save-conflict helper.
+That helper now requests complete EntityFacts after handoff; the earlier
+API returned unit and did not issue that diagnostic read. Restore bounded
+normal helper behavior while keeping the small re-key fixture's exact proof.
+
+Fifth repair: `cleanroom/20261101T020348Z-88138`.
+The full Card reader and the compact identity projection share scalar checks.
+Commit preparation no longer parses Card data solely to obtain note identity.
+The ordinary asset-conflict helper returns unit without diagnostic hydration;
+only the small re-key fixture opts into its pre-handler handoff snapshot.
+
+Final component checks:
+
+- `core-test/20261101T020659Z-89415`: 20/20 pass. This includes all 15 re-key
+  cases, the unchanged 80 MiB Note plus 80 MiB Card absolute heap cap, and
+  five scalar-decoding equivalence/error-order cases.
+- `core-test/20261101T020800Z-89913`: 55/55 pass, including the original
+  large-asset first-read conflict regression and incoming reviews/recovery.
+- `core-test/20261101T020831Z-90299`: 21/21 engine changes/observer tests pass,
+  including malformed-card rollback before commit and event publication.
+
+R6 independent component review finds no remaining P0/P1 code findings.
+The subsequent actual stress run closes the measured Rust heap failure;
+native process RSS is separate evidence and remains required.
+No assertions, payload sizes, heap limit, retry rules or IPC cap were relaxed.
+
+This is a partial implementation checkpoint. Full six-kind/same-object work,
+mixed-digest recovery, remaining tombstone paths, structural generations,
+media-name conflicts, the complete concurrency/fault matrix and the original
+integration/milestone gates remain open. U113 and U114 have no acceptance here.
+
+Final source checks pass: `core-format/20261101T020649Z-89120`,
+`core-lint/20261101T020926Z-90686`, `private/20261101T021011Z-91111` and
+`similarity/20261101T021025Z-91385`. Similarity reports 9 files, 0 flags and
+0 allowlist matches. These focused receipts do not replace the pending batch
+and milestone gates.

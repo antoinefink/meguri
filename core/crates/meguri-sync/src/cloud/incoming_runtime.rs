@@ -988,7 +988,11 @@ impl Runtime {
                     i.id,
                 )?)
             })? {
-                self.replay_identity(collection, guard, &i, &rekey, timeout)?;
+                if let deferred @ IncomingDisposition::Deferred(_) =
+                    self.replay_identity(collection, guard, &i, &rekey, timeout)?
+                {
+                    return Ok(deferred);
+                }
                 continue;
             }
             let (current, current_seq, _) = self.read_intent_rows(collection, &i)?;

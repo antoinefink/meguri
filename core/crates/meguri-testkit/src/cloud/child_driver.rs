@@ -919,10 +919,34 @@ impl ChildDriver {
         service: &mut super::Service<meguri_model::rng::SeededRandom>,
         scope: &Scope,
         name: &str,
+    ) -> Result<()> {
+        self.deliver_real_asset_save_conflict_inner(service, scope, name, false)?;
+        Ok(())
+    }
+    /// Captures full handoff facts only for small fixtures that fit IPC frames.
+    pub fn deliver_real_asset_save_conflict_with_small_handoff(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+        name: &str,
     ) -> Result<EntityFacts> {
+        self.deliver_real_asset_save_conflict_inner(service, scope, name, true)?
+            .ok_or_else(failure)
+    }
+    fn deliver_real_asset_save_conflict_inner(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+        name: &str,
+        capture_handoff: bool,
+    ) -> Result<Option<EntityFacts>> {
         let sdk: String = self.call(Input::AssetSDK)?;
         let batch: BuiltBatch = self.call(Input::Build(sdk.clone(), BTreeSet::from([name.to_owned()])))?;
-        let handoff: EntityFacts = self.call(Input::Entity(name.to_owned()))?;
+        let handoff = if capture_handoff {
+            Some(self.call(Input::Entity(name.to_owned()))?)
+        } else {
+            None
+        };
         let save = batch.saves.iter().find(|save| save.name == name).ok_or_else(failure)?;
         let mut record = super::RecordInput::encrypted(name, "MGEntity", save.envelope.clone());
         if let Some(path) = &save.asset_path {
@@ -1365,7 +1389,7 @@ impl ChildDriver {
     pub fn rekey_deck_fixture(&mut self, id: i64, create_deck: bool) -> Result<()> {
         self.call(Input::RekeyDeckFixture(id, create_deck))
     }
-    pub fn rekey_config_value(&mut self, key: String, value: i64) -> Result<()> {
+    pub fn rekey_config_value(&mut self, key: String, value: i64) -> Result<CaptureProof> {
         self.call(Input::RekeyConfigValue(key, value))
     }
     /// Build and hand off an ordinary save, send it to Service, then lose its reply.
@@ -1936,7 +1960,7 @@ impl Device {
                 value((note_hash, hash(row)))
             }
             Input::RekeyConfigValue(key, number) => {
-                self.host.collection()?.run(
+                let result = self.host.collection()?.run(
                     meguri_engine::OpSpec::named("synthetic config edit", OpSource::LocalApi),
                     move |ctx| {
                         ctx.scope()
@@ -1944,7 +1968,16 @@ impl Device {
                         Ok(())
                     },
                 )?;
-                value(())
+                let proof = self
+                    .runtime()?
+                    .capture_proof(result.seq, result.generation)
+                    .ok_or_else(failure)?;
+                value(CaptureProof {
+                    observed_seq: proof.observed_seq.0,
+                    generation: proof.generation.0,
+                    attempted: proof.attempted,
+                    persisted: proof.persisted,
+                })
             }
             Input::RekeyDeckFixture(id, create_deck) => {
                 self.host.collection()?.run(

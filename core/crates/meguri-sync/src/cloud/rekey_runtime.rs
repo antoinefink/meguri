@@ -476,17 +476,26 @@ impl Runtime {
         i: &ApplyIntent,
         r: &Rekey,
         timeout: Duration,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<IncomingDisposition, RuntimeError> {
         let (after, before, _, _) = self.identity_proof(collection, guard, i, r)?;
         if after {
-            return self.settle_identity(collection, guard, i, r, timeout);
-        }
-        if !before {
+            self.settle_identity(collection, guard, i, r, timeout)?;
+        } else if before {
+            self.with_incoming(guard, collection, |s| {
+                Ok(s.store.as_mut().ok_or(Error::Database)?.clear_rolled_back_rekey(i)?)
+            })?;
+        } else {
             return Err(Error::RecoveryRefused.into());
         }
-        self.with_incoming(guard, collection, |s| {
-            Ok(s.store.as_mut().ok_or(Error::Database)?.clear_rolled_back_rekey(i)?)
-        })
+        let entries = self.with_incoming(guard, collection, |s| {
+            let entries = s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?;
+            let mut by_id: BTreeMap<_, _> = entries.into_iter().map(|entry| (entry.id, entry)).collect();
+            i.inbox_ids
+                .iter()
+                .map(|id| by_id.remove(id).ok_or(Error::InvalidData.into()))
+                .collect()
+        })?;
+        self.apply_ordinary_entries(collection, guard, entries, None, timeout)
     }
     pub(super) fn settle_identity(
         &self,
