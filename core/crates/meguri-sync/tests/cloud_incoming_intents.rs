@@ -4335,6 +4335,8 @@ fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durab
         assert!(pair.receiver.driver().binding_entity(b, &record.name).unwrap().as_ref() == Some(entity));
     }
     assert_eq!(sent_names, deleted);
+    let mut retained = handed.clone();
+    retained.retain(|key, _| !deleted.contains(key));
     let absent = pair.receiver.driver().collection_rows().unwrap();
     assert!(!absent.iter().any(|row| {
         matches!(row, Payload::Note(n) if n.id == id) || matches!(row, Payload::Card(c) if c.nid == id)
@@ -4420,15 +4422,21 @@ fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durab
         assert!(pair.receiver.driver().binding_entity(b, key).unwrap().is_none());
         assert!(!pair.receiver.facts().unwrap().entities.contains_key(key));
     }
-    assert!(pair.receiver.facts().unwrap().entities[&unrelated] == acked[&unrelated]);
+    assert!(pair.receiver.facts().unwrap().entities == retained);
     settled(&mut pair, b);
     assert!(pair.receiver.sdk_pending().is_empty());
     assert!(pair.receiver.sdk_database_pending().is_empty());
     assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
     let after = pair.receiver.driver().incoming_observation(b).unwrap();
-    assert_eq!(after.seq, observation.seq);
+    // The final empty SDK batch still captures through cloud_snapshot_barrier.
+    // It reserves exactly one seq without changing rows or emitting Changes.
+    assert_eq!(after.seq, observation.seq + 1);
     assert_eq!(after.native_file, observation.native_file);
     assert_eq!(after.generation, observation.generation);
+    let wal = pair.receiver.driver().wal_proof(after.seq).unwrap();
+    assert!(wal.through >= after.seq);
+    assert_eq!(wal.native_file, after.native_file);
+    assert_eq!(wal.generation, after.generation);
     assert_eq!(after.col_mod, observation.col_mod);
     assert_eq!(after.undo_depth, observation.undo_depth);
     assert_eq!(after.change_events, observation.change_events);
@@ -4443,7 +4451,7 @@ fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durab
     for key in &deleted {
         assert!(pair.receiver.driver().binding_entity(b, key).unwrap().is_none());
     }
-    assert!(pair.receiver.driver().binding_entity(b, &unrelated).unwrap().as_ref() == Some(&acked[&unrelated]));
+    assert!(pair.receiver.facts().unwrap().entities == retained);
     assert_eq!(pair.receiver.driver().collection_rows().unwrap(), absent);
     settled(&mut pair, b);
     pair.verify_and_drive();
@@ -4455,7 +4463,7 @@ fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durab
     settled(&mut pair, b);
     assert!(pair.receiver.sdk_pending().is_empty());
     assert!(pair.receiver.sdk_database_pending().is_empty());
-    assert!(pair.receiver.facts().unwrap().entities[&unrelated] == acked[&unrelated]);
+    assert!(pair.receiver.facts().unwrap().entities == retained);
     assert_eq!(saved(&pair, &unrelated), unrelated_record);
     assert!(!pair.service.request_log().unwrap().iter().any(|entry| {
         entry.request_id > receipt.request_id

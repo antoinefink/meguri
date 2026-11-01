@@ -28,7 +28,8 @@ backend batch and Service request receipt. A second latch holds subsequent fetch
 intake so fetched deletions cannot substitute for the original Save-result proof.
 Tracking must disappear for the Note and every Card with empty inbox, apply
 intents and SDK pending queues, unchanged absent physical rows and writer
-observations, and unchanged unrelated Note tracking and Service record.
+observations except the empty-batch barrier sequence described below, and
+unchanged retained tracking and unrelated Note Service record.
 
 The real host closes and opens its existing files with the same retained Service
 and no supplied identity, binding, keys, ACK or tracking baseline. Before identity
@@ -56,3 +57,44 @@ with the original map minus exactly the deleted names, including after reopen.
 The current single unrelated Note check does not cover unrelated Cards.
 Privacy and similarity checks passed on the authored source before this entry.
 No requirement is accepted by this WIP commit.
+
+## Authored repair after round 1 — UNRUN
+
+Role: fixer (implementer clean-room restrictions). Repair source start supplied
+by root: `f447889f`; original U113 start and integration batch base above remain
+unchanged. This repair has not been compiled or executed.
+
+Source diagnosis confirms the extra sequence comes from the normal final empty
+batch probe, rather than the UnknownItem tracking removal. `SDKRig`'s
+`drive_budget_inner` calls `build` after the original reply even with empty
+pending Saves. `Runtime::build_collection_batch` still calls
+`ReaderLease::capture_cloud`, which runs `cloud_snapshot_barrier` even with no
+named rows. The executor writer reserves a sequence after committing an empty
+journal and suppresses its empty Changes event. `record_unknown_item` removes
+the unchanged handed Note/Card revision in the tracking transaction only.
+
+The test now requires exactly `observation.seq + 1`, retaining the physical-row
+comparison, native-file and generation equality, unchanged
+`col_mod`, undo depth, Changes events and incoming-run count. The real WAL proof must cover the observed sequence and match the native file
+and generation. The test uses the existing API and creates no apply receipt.
+
+Round-1 P2 is addressed by deriving the expected retained entity map from the
+actual handed map minus exactly the deleted names. Full-map equality is checked
+after the original UnknownItem reply while fetched deletion intake remains held,
+on the actual reopen before identity verification, and after normal driving.
+This includes every unrelated Card and every field of each retained entity.
+Original conditional-Save attribution, actual Service UnknownItem receipts,
+queue clearing, persisted absence and no-later-resend assertions remain.
+
+Only the owned test and this log changed. One source consistency pass completed;
+no builds, tests, forbidden trees, history or network access. Root owns execution,
+independent review and provenance/privacy/similarity and batch/milestone gates.
+The exact sequence and WAL assertions remain UNRUN; no production-defect fix,
+P24, Unit, batch or milestone acceptance is claimed.
+
+## Root verification after repair
+
+`core-test/20261101T134213Z-88036`: PASS1/1. Independent round-2 review
+found no P0–P2. The original failure remains retained. The proof covers the
+handed tombstone clause only; the Resume-binding workflow and the wider
+P24/Q6, U113/U114 and batch requirements remain open.
