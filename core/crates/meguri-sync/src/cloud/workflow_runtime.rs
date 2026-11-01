@@ -570,7 +570,10 @@ impl Runtime {
                                 .entity_image(guard.binding, kind, &key)?)
                         })?;
                         let newly_observed = existing.is_none();
-                        if newly_observed && !publishing && !matches!(kind, codec::Kind::Note | codec::Kind::Card) {
+                        if newly_observed
+                            && !publishing
+                            && !matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog)
+                        {
                             return Err(Error::InvalidData.into());
                         }
                         let p = row_payload::project(&view, kind, &row, |id| {

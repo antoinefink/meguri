@@ -302,6 +302,7 @@ pub(crate) enum Input {
     Capture(u64, u64),
     Wal(u64),
     ArmLoss(i64),
+    ArmCaptureFailure(usize),
     ArmAdoptionActivationCrash,
     ArmAdoptionAccountChange(Option<String>),
     AdoptionCompletion(core::adoption::AdoptOp),
@@ -1581,6 +1582,21 @@ impl ChildDriver {
     pub fn edit_note_fields(&mut self, id: i64, fields: &[&str]) -> Result<Edit> {
         self.call(Input::Edit(id, fields.iter().map(|s| (*s).to_owned()).collect()))
     }
+    pub fn arm_capture_failure_for_testing(&mut self, after_writes: usize) -> Result<()> {
+        self.call(Input::ArmCaptureFailure(after_writes))
+    }
+    pub fn capture_proof(&mut self, seq: u64, generation: u64) -> Result<CaptureProof> {
+        self.call(Input::Capture(seq, generation))
+    }
+    pub fn wal_proof(&mut self, seq: u64) -> Result<Receipt> {
+        self.call(Input::Wal(seq))
+    }
+    pub fn scan_state(&mut self) -> Result<ScanState> {
+        self.call(Input::ScanState)
+    }
+    pub fn scan_proof(&mut self) -> Result<ScanProof> {
+        self.call(Input::ScanProof)
+    }
     pub fn review_begin(&mut self, note: i64) -> Result<u64> {
         self.call(Input::Begin(note))
     }
@@ -2276,6 +2292,10 @@ impl Device {
                     return Err(failure());
                 }
                 value(r)
+            }
+            Input::ArmCaptureFailure(after_writes) => {
+                self.runtime()?.arm_capture_failure_for_testing(after_writes)?;
+                value(())
             }
             Input::ArmLoss(id) => {
                 self.runtime()?.arm_capture_loss_for_testing(id)?;

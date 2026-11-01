@@ -409,7 +409,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         observed: (u64, u64, u64),
     ) -> Result<EntityFacts, Error> {
         // Ordinary additions may use an existing layout, never introduce one.
-        if !matches!(payload.kind(), codec::Kind::Note | codec::Kind::Card) {
+        if !matches!(
+            payload.kind(),
+            codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog
+        ) {
             return Err(Error::InvalidData);
         }
         let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;

@@ -3,7 +3,10 @@ mod support;
 use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::entity_codec::{self as codec, Payload};
 use meguri_testkit::{
-    cloud::{Config, Service, coordinator::PublicationRig, devices::PreboundDevice},
+    cloud::{
+        Config, Field, LogOutcome, ReplyReference, RequestKind, Service, coordinator::PublicationRig,
+        devices::PreboundDevice,
+    },
     generate::recipe::{Recipe, generate_recipe},
 };
 use support::*;
@@ -33,31 +36,14 @@ fn actual_blob_bytes_survive_adoption_reopen_and_reverse_direction() {
 
 #[test]
 fn adopted_device_reviews_and_uploads_real_rows_and_media_retained_on_both_reopens() {
-    let root = tempfile::tempdir().unwrap();
+    let Pair {
+        mut service,
+        mut sender,
+        mut receiver,
+        receiver_dir,
+        root,
+    } = published_review_pair();
     let sender_dir = root.path().join("sender");
-    let recipe = Recipe::parse(
-        r#"recipe: published-review-media
-description: Public synthetic review with retained history and media
-now: "2025-01-01T00:00:00Z"
-decks:
-  - name: Generic::Review
-    notetype: basic
-    new: 1
-    due: 1
-    tags: [generic]
-    fields: ['generic {n}<img src="photo.jpg">', 'back {n}']
-"#,
-    )
-    .unwrap();
-    let manifest = generate_recipe(&recipe, 801, &sender_dir).unwrap();
-    assert_eq!(manifest.counts.notes, 2);
-    assert!(manifest.counts.revlog > 0);
-    PreboundDevice::select_review_deck(&sender_dir, NOW, 801).unwrap();
-    let receiver_dir = generated(root.path(), "receiver");
-    let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
-    let mut sender = online(&sender_dir, true);
-    sender.driver().put_media("photo.jpg", REMOTE).unwrap();
-    publish(&mut sender, &mut service);
     let before = sender.driver().collection_payloads().unwrap();
     let original_files = sender.driver().media_files().unwrap();
     assert_eq!(original_files["photo.jpg"], REMOTE);
@@ -67,7 +53,6 @@ decks:
         .collect::<Vec<_>>();
     assert!(!prior_history.is_empty());
 
-    let mut receiver = online(&receiver_dir, true);
     let preview = receiver.preview(&mut service, STEPS).unwrap();
     receiver.adopt_cloud(&preview).unwrap();
     receiver.drive_ready(&mut service, STEPS).unwrap();
@@ -188,6 +173,263 @@ decks:
     assert_completed(&mut sender);
     receiver.close_clean().unwrap();
     sender.close_clean().unwrap();
+}
+
+#[test]
+fn durable_review_with_lost_capture_recovers_card_and_new_revlog_after_crash() {
+    let mut pair = published_review_pair();
+    let before = pair.sender.driver().collection_payloads().unwrap();
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), before);
+    let binding = pair.receiver.facts().unwrap().current.unwrap();
+    let selected = before
+        .values()
+        .find_map(|row| match row {
+            Payload::Card(card) if card.card_type == 0 => Some(card.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let session = pair.receiver.driver().review_begin(selected.nid).unwrap();
+    let question = pair.receiver.driver().review_start(session).unwrap();
+    assert_eq!(question.id, selected.id);
+    let card_before = pair.receiver.driver().read_card(question.id).unwrap();
+    pair.receiver.advance_clock_ms(1_000).unwrap();
+    pair.receiver.driver().review_show_answer(session, question.id).unwrap();
+    pair.receiver.advance_clock_ms(1_500).unwrap();
+    let tracking_before = pair.receiver.facts().unwrap().entities;
+    let runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+    let snapshot_before = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    let request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
+
+    // Fail a real tracking write in the answer's observer transaction, not a
+    // note-ID match. The collection commit and live review hold remain real.
+    pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
+    let answer = pair.receiver.driver().review_answer_good(session, question.id).unwrap();
+    let card = pair.receiver.driver().read_card(question.id).unwrap();
+    let revlog = pair.receiver.driver().read_revlog(answer.revlog_id).unwrap();
+    assert_eq!(card.id, selected.id);
+    assert_eq!(card.nid, selected.nid);
+    assert_eq!(card.reps, card_before.reps + 1);
+    assert_ne!(card.card_type, card_before.card_type);
+    assert_ne!(card.queue, card_before.queue);
+    assert_ne!(card.due, card_before.due);
+    assert_eq!(card.last_review_id, revlog.id);
+    assert_eq!(revlog.cid, card.id);
+    assert_eq!(revlog.id, answer.revlog_id);
+    assert!(revlog.id >= NOW + 2_500);
+    assert_eq!(revlog.ease, 3);
+    assert_eq!(revlog.time, codec::Stored::Integer(2_500));
+    let committed = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    assert!(committed.seq > snapshot_before.seq);
+    assert_eq!(committed.generation, snapshot_before.generation);
+    assert_eq!(committed.native_file, snapshot_before.native_file);
+    let capture = pair
+        .receiver
+        .driver()
+        .capture_proof(committed.seq, committed.generation)
+        .unwrap();
+    assert_eq!(capture.observed_seq, committed.seq);
+    assert_eq!(capture.generation, committed.generation);
+    assert!(capture.attempted);
+    assert!(!capture.persisted);
+    assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+    assert_eq!(
+        pair.receiver.driver().stored_runtime_state().unwrap().change_counter,
+        runtime_before.change_counter
+    );
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(scan.scan_required && scan.tracking_stopped && !scan.scan_running);
+    let receipt = pair.receiver.driver().wal_proof(committed.seq).unwrap();
+    assert!(receipt.through >= committed.seq);
+    assert_eq!(receipt.generation, committed.generation);
+    assert_eq!(receipt.native_file, committed.native_file);
+    let card_name =
+        codec::entity_name(&binding.facts.record_key.0, codec::Kind::Card, &codec::id_key(card.id)).unwrap();
+    let revlog_name = codec::entity_name(
+        &binding.facts.record_key.0,
+        codec::Kind::Revlog,
+        &codec::id_key(revlog.id),
+    )
+    .unwrap();
+    assert!(!before.contains_key(&revlog_name));
+    assert!(!tracking_before.contains_key(&revlog_name));
+    let hold = pair.receiver.driver().read_review_hold(session).unwrap();
+    assert!(hold.op_ids.contains(&answer.op_id));
+    assert!(hold.entity_names.contains(&card_name));
+    assert!(hold.entity_names.contains(&revlog_name));
+    let cloud_hold = pair.receiver.driver().read_cloud_review_hold(session).unwrap();
+    assert!(cloud_hold.op_ids.contains(&answer.op_id));
+    assert!(cloud_hold.entity_names.contains(&card_name));
+    assert!(cloud_hold.entity_names.contains(&revlog_name));
+    let expected = pair.receiver.driver().collection_payloads().unwrap();
+    let reviewed = [
+        (card_name, Payload::Card(card.clone())),
+        (revlog_name, Payload::Revlog(revlog.clone())),
+    ];
+    assert_eq!(expected.len(), before.len() + 1);
+    for (name, payload) in &reviewed {
+        assert_eq!(expected.get(name), Some(payload));
+    }
+    assert_eq!(
+        pair.service.request_log().unwrap().last().unwrap().request_id,
+        request_before
+    );
+
+    // No End, Sync Now, drive or reconcile after the failed capture. SIGKILL
+    // releases the process's review session; reopen must recover the same files.
+    let killed = pair.receiver.kill().unwrap();
+    assert_eq!(killed.signal, Some(9));
+    assert!(!killed.clean_close);
+    pair.reopen_before_identity();
+    assert_eq!(pair.receiver.facts().unwrap().native_file, receipt.native_file);
+    assert!(pair.receiver.facts().unwrap().current.as_ref() == Some(&binding));
+    assert_eq!(pair.receiver.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.receiver.driver().read_revlog(revlog.id).unwrap(), revlog);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.receiver.facts().unwrap().entities, tracking_before);
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(scan.scan_required && !scan.scan_running && !scan.scan_completed_this_open);
+    pair.receiver.verify_identity(scope().account).unwrap();
+    assert!(pair.receiver.trace().iter().any(|event| matches!(
+        event,
+        meguri_sync::cloud::workflow::TraceEvent::IdentityVerified { account, .. }
+            if account == &scope().account
+    )));
+    pair.receiver
+        .driver()
+        .reconcile_binding()
+        .unwrap_or_else(|error| panic!("ordinary reconcile must recover the durable review's new Revlog: {error:?}"));
+    let scan = pair.receiver.driver().scan_proof().unwrap();
+    let pending = pair.receiver.facts().unwrap().entities;
+    for (name, payload) in &reviewed {
+        assert!(scan.recovered_names.contains(name));
+        assert_eq!(&pending[name].payload, payload);
+        assert!(pending[name].mark.is_some());
+        assert!(pending[name].local_rev > pending[name].acked_rev);
+    }
+    assert!(pending[&reviewed[1].0].acked_payload.is_none());
+    assert!(
+        pair.receiver
+            .driver()
+            .read_cloud_review_hold(session)
+            .unwrap()
+            .op_ids
+            .is_empty()
+    );
+    let result = pair.receiver.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.receiver.last_sync_phase()));
+    assert_review_saved(&mut pair.receiver, &pair.service, request_before, &reviewed);
+    assert_completed(&mut pair.receiver);
+    pair.receiver.close_clean().unwrap();
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.receiver.driver().read_revlog(revlog.id).unwrap(), revlog);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_review_saved(&mut pair.receiver, &pair.service, request_before, &reviewed);
+    assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], REMOTE);
+    let result = pair.sender.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.sender.last_sync_phase()));
+    assert_eq!(pair.sender.driver().read_card(card.id).unwrap(), card);
+    assert_eq!(pair.sender.driver().read_revlog(revlog.id).unwrap(), revlog);
+    assert_eq!(pair.sender.driver().collection_payloads().unwrap(), expected);
+    assert_completed(&mut pair.sender);
+    pair.close();
+}
+
+fn assert_review_saved(
+    rig: &mut PublicationRig,
+    service: &Service<SeededRandom>,
+    after: u64,
+    reviewed: &[(String, Payload)],
+) {
+    let facts = rig.facts().unwrap();
+    let binding = facts.current.unwrap();
+    let zone = rig.collection_zone().unwrap();
+    let outcomes = service.outcomes().unwrap();
+    for (name, payload) in reviewed {
+        let ack = &facts.entities[name];
+        assert_eq!(ack.local_rev, ack.acked_rev);
+        assert!(ack.mark.is_none() && ack.base_payload.is_none() && ack.in_flight.is_empty());
+        assert_eq!(ack.acked_payload.as_ref(), Some(payload));
+        let mut saved_count = 0;
+        for request in service.request_log().unwrap().iter().filter(|request| {
+            request.request_id > after
+                && request.kind == RequestKind::Modify
+                && request.scope == scope()
+                && request.zone.as_deref() == Some(zone.as_str())
+        }) {
+            let outcome = outcomes
+                .iter()
+                .find(|outcome| outcome.request_id == request.request_id)
+                .unwrap();
+            let Ok(ReplyReference::Modified(items)) = &outcome.result else {
+                continue;
+            };
+            for item in items.iter().filter(|item| &item.name == name) {
+                let reference = item.result.as_ref().unwrap().as_ref().unwrap();
+                assert!(
+                    request
+                        .records
+                        .iter()
+                        .any(|record| &record.name == name && record.outcome == LogOutcome::Success)
+                );
+                let saved = service.resolve_record(&scope(), reference).unwrap();
+                let Field::EncryptedBytes(envelope) = &saved.fields["e"] else {
+                    panic!("entity envelope")
+                };
+                let received =
+                    codec::receive(&binding.facts.record_key.0, name, envelope, codec::AssetInput::Absent).unwrap();
+                assert_eq!(received.payload.as_ref(), Some(payload));
+                assert_eq!(ack.acked_system_fields, saved.system_fields.bytes());
+                assert_eq!(ack.acked_envelope.0, *envelope);
+                assert_eq!(ack.acked_row_digest, payload.row_digest().unwrap());
+                assert_eq!(ack.acked_payload_digest, payload.payload_digest().unwrap());
+                saved_count += 1;
+            }
+        }
+        assert_eq!(saved_count, 1, "Saved outcome count mismatch");
+    }
+    assert!(rig.sdk_pending().is_empty());
+    assert!(rig.sdk_database_pending().is_empty());
+}
+
+fn published_review_pair() -> Pair {
+    let root = tempfile::tempdir().unwrap();
+    let sender_dir = root.path().join("sender");
+    let recipe = Recipe::parse(
+        r#"recipe: published-review-media
+description: Public synthetic review with retained history and media
+now: "2025-01-01T00:00:00Z"
+decks:
+  - name: Generic::Review
+    notetype: basic
+    new: 1
+    due: 1
+    tags: [generic]
+    fields: ['generic {n}<img src="photo.jpg">', 'back {n}']
+"#,
+    )
+    .unwrap();
+    let manifest = generate_recipe(&recipe, 801, &sender_dir).unwrap();
+    assert_eq!(manifest.counts.notes, 2);
+    assert!(manifest.counts.revlog > 0);
+    PreboundDevice::select_review_deck(&sender_dir, NOW, 801).unwrap();
+    let receiver_dir = generated(root.path(), "receiver");
+    let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
+    let mut sender = online(&sender_dir, true);
+    sender.driver().put_media("photo.jpg", REMOTE).unwrap();
+    publish(&mut sender, &mut service);
+    let receiver = online(&receiver_dir, true);
+    Pair {
+        service,
+        sender,
+        receiver,
+        receiver_dir,
+        root,
+    }
 }
 
 fn assert_completed(rig: &mut PublicationRig) {
