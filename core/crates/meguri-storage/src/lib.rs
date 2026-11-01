@@ -10,6 +10,7 @@ pub mod atomic_file;
 pub mod bootstrap;
 pub mod bulk;
 pub mod checkpoint;
+mod cloud_rekey;
 pub mod collation;
 pub mod collection_package;
 pub mod conn_init;

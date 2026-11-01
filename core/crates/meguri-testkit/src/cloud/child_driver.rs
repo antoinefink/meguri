@@ -297,6 +297,10 @@ pub(crate) enum Input {
     DeleteNote(i64),
     BuryCard(i64),
     WriteCardData(i64, String),
+    RekeyDeckFixture(i64, bool),
+    RekeyConfigValue(String, i64),
+    GeneratedCardData(i64, usize),
+    RekeyRowsProof(i64, i64, i64),
     IncomingObservation(core::BindingId),
     IncomingSubmission,
     InterruptIncoming(ApplyInterruption),
@@ -915,9 +919,10 @@ impl ChildDriver {
         service: &mut super::Service<meguri_model::rng::SeededRandom>,
         scope: &Scope,
         name: &str,
-    ) -> Result<()> {
+    ) -> Result<EntityFacts> {
         let sdk: String = self.call(Input::AssetSDK)?;
         let batch: BuiltBatch = self.call(Input::Build(sdk.clone(), BTreeSet::from([name.to_owned()])))?;
+        let handoff: EntityFacts = self.call(Input::Entity(name.to_owned()))?;
         let save = batch.saves.iter().find(|save| save.name == name).ok_or_else(failure)?;
         let mut record = super::RecordInput::encrypted(name, "MGEntity", save.envelope.clone());
         if let Some(path) = &save.asset_path {
@@ -964,7 +969,7 @@ impl ChildDriver {
             },
         ))?;
         let _: u64 = self.call(Input::ReturnHandler(sdk))?;
-        Ok(())
+        Ok(handoff)
     }
     pub fn drain_incoming(&mut self, steps: usize) -> Result<IncomingProgress> {
         match self.call(Input::DrainIncoming(steps)) {
@@ -1348,6 +1353,57 @@ impl ChildDriver {
     }
     pub fn sign_out_for_testing(&mut self) -> Result<()> {
         self.call(Input::SignOut)
+    }
+    pub fn generated_card_data(&mut self, id: i64, bytes: usize) -> Result<()> {
+        self.call(Input::GeneratedCardData(id, bytes))
+    }
+    /// Hash complete physical rows, normalizing only the two moved references.
+    pub fn rekey_rows_proof(&mut self, note: i64, card: i64, original: i64) -> Result<([u8; 32], [u8; 32])> {
+        self.call(Input::RekeyRowsProof(note, card, original))
+    }
+    /// Synthetic deck/config fixture, written through the journalled Local API.
+    pub fn rekey_deck_fixture(&mut self, id: i64, create_deck: bool) -> Result<()> {
+        self.call(Input::RekeyDeckFixture(id, create_deck))
+    }
+    pub fn rekey_config_value(&mut self, key: String, value: i64) -> Result<()> {
+        self.call(Input::RekeyConfigValue(key, value))
+    }
+    /// Build and hand off an ordinary save, send it to Service, then lose its reply.
+    pub fn lose_named_save_reply(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+        name: &str,
+    ) -> Result<super::Record> {
+        let sdk: String = self.call(Input::AssetSDK)?;
+        let batch: BuiltBatch = self.call(Input::Build(sdk, BTreeSet::from([name.to_owned()])))?;
+        let save = batch.saves.iter().find(|save| save.name == name).ok_or_else(failure)?;
+        if save.asset_path.is_some() {
+            return Err(failure());
+        }
+        let zone: String = self.call(Input::CollectionZone)?;
+        let response = service.request(
+            scope,
+            Default::default(),
+            super::Operation::Modify {
+                zone,
+                atomic: false,
+                changes: vec![super::Mutation::Save {
+                    record: super::RecordInput::encrypted(name, "MGEntity", save.envelope.clone()),
+                    if_unchanged: save.system_fields.clone().map(super::SystemFields::from_bytes),
+                }],
+            },
+        )?;
+        let Ok(super::Reply::Modified(items)) = response.result else {
+            return Err(failure());
+        };
+        let Some(item) = items.into_iter().next() else {
+            return Err(failure());
+        };
+        let Ok(super::MutationSuccess::Saved(record)) = item.result else {
+            return Err(failure());
+        };
+        Ok(record)
     }
     /// Journal a real Card data edit through the normal host writer.
     pub fn write_card_data(&mut self, id: i64, data: String) -> Result<()> {
@@ -1816,6 +1872,97 @@ impl Device {
             }
             Input::DeleteNote(id) => {
                 meguri_engine::notes::delete(&self.host.collection()?, vec![NoteId(id)], OpSource::UserUndoable)?;
+                value(())
+            }
+            Input::GeneratedCardData(id, bytes) => {
+                let data = format!("{{\"fixture\":\"{}\"}}", "r".repeat(bytes));
+                self.host.collection()?.run(
+                    meguri_engine::OpSpec::named("synthetic large card", OpSource::UserUndoable),
+                    move |ctx| {
+                        ctx.scope()
+                            .put_card_data(CardId(id), &meguri_model::card_data::CardData::parse(&data))?;
+                        Ok(())
+                    },
+                )?;
+                value(())
+            }
+            Input::RekeyRowsProof(note, card, original) => {
+                use meguri_storage::Cell;
+                use sha2::Digest;
+                fn hash(row: Vec<Cell>) -> [u8; 32] {
+                    let mut h = Sha256::new();
+                    for cell in row {
+                        match cell {
+                            Cell::Null => h.update([0]),
+                            Cell::Integer(v) => {
+                                h.update([1]);
+                                h.update(v.to_be_bytes());
+                            }
+                            Cell::Real(v) => {
+                                h.update([2]);
+                                h.update(v.to_bits().to_be_bytes());
+                            }
+                            Cell::Text(v) => {
+                                h.update([3]);
+                                h.update((v.len() as u64).to_be_bytes());
+                                h.update(v);
+                            }
+                            Cell::Blob(v) => {
+                                h.update([4]);
+                                h.update((v.len() as u64).to_be_bytes());
+                                h.update(v);
+                            }
+                        }
+                    }
+                    h.finalize().into()
+                }
+                let c = self.host.collection()?;
+                let lease = c.reader(meguri_storage::ReaderRole::Cloud)?;
+                let snapshot = lease.snapshot()?;
+                let note_hash = {
+                    let mut row = snapshot
+                        .row_image(Table::Notes, &RowKey::Id(note))?
+                        .ok_or_else(failure)?;
+                    row[0] = Cell::Integer(original);
+                    hash(row)
+                };
+                let mut row = snapshot
+                    .row_image(Table::Cards, &RowKey::Id(card))?
+                    .ok_or_else(failure)?;
+                if row[1] != Cell::Integer(note) {
+                    return Err(failure());
+                }
+                row[1] = Cell::Integer(original);
+                value((note_hash, hash(row)))
+            }
+            Input::RekeyConfigValue(key, number) => {
+                self.host.collection()?.run(
+                    meguri_engine::OpSpec::named("synthetic config edit", OpSource::LocalApi),
+                    move |ctx| {
+                        ctx.scope()
+                            .set_config(&key, &meguri_storage::ConfigValue::from(number))?;
+                        Ok(())
+                    },
+                )?;
+                value(())
+            }
+            Input::RekeyDeckFixture(id, create_deck) => {
+                self.host.collection()?.run(
+                    meguri_engine::OpSpec::named("synthetic rekey deck", OpSource::LocalApi),
+                    move |ctx| {
+                        let scope = ctx.scope();
+                        scope.set_config(&format!("_deck_{id}_fixture"), &meguri_storage::ConfigValue::from(id))?;
+                        if create_deck {
+                            let mut deck = scope.deck(DeckId(1))?.ok_or(meguri_engine::EngineError::Internal {
+                                message: "fixture deck missing".into(),
+                            })?;
+                            deck.id = DeckId(id);
+                            deck.name = "Synthetic collision deck".into();
+                            scope.put(&deck)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 value(())
             }
             Input::WriteCardData(id, data) => {

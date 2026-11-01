@@ -1,19 +1,36 @@
 //! Private wire primitives for K5.3; deliberately unrelated to tolerant model protobufs.
 use super::{CodecError, MAX_PAYLOAD_BYTES};
+use sha2::{Digest, Sha256};
 
 type Result<T> = std::result::Result<T, CodecError>;
 
 pub(crate) struct Writer {
     bytes: Option<Vec<u8>>,
+    hash: Option<Sha256>,
     pub len: usize,
 }
 impl Writer {
     pub fn counting() -> Self {
-        Self { bytes: None, len: 0 }
+        Self {
+            bytes: None,
+            hash: None,
+            len: 0,
+        }
     }
     pub fn emitting() -> Self {
+        Self::with_capacity(0)
+    }
+    pub fn with_capacity(len: usize) -> Self {
         Self {
-            bytes: Some(Vec::new()),
+            bytes: Some(Vec::with_capacity(len)),
+            hash: None,
+            len: 0,
+        }
+    }
+    pub fn hashing() -> Self {
+        Self {
+            bytes: None,
+            hash: Some(Sha256::new()),
             len: 0,
         }
     }
@@ -22,7 +39,13 @@ impl Writer {
         if let Some(out) = &mut self.bytes {
             out.extend_from_slice(bytes);
         }
+        if let Some(hash) = &mut self.hash {
+            hash.update(bytes);
+        }
         Ok(())
+    }
+    pub fn finish_hash(self) -> [u8; 32] {
+        self.hash.expect("hash writer").finalize().into()
     }
     pub fn finish(self) -> Vec<u8> {
         self.bytes.unwrap_or_default()
@@ -150,10 +173,16 @@ pub(crate) trait Message: Sized {
         Ok(out.len)
     }
     fn encode(&self, row: bool) -> Result<Vec<u8>> {
-        self.encoded_len(row)?;
-        let mut out = Writer::emitting();
+        let len = self.encoded_len(row)?;
+        let mut out = Writer::with_capacity(len);
         self.write(&mut out, row)?;
         Ok(out.finish())
+    }
+    fn digest(&self, row: bool) -> Result<[u8; 32]> {
+        self.encoded_len(row)?;
+        let mut out = Writer::hashing();
+        self.write(&mut out, row)?;
+        Ok(out.finish_hash())
     }
     fn decode(bytes: &[u8]) -> Result<Self> {
         if bytes.len() as u64 > MAX_PAYLOAD_BYTES {
@@ -210,5 +239,33 @@ impl FieldValue for Option<Vec<u8>> {
     fn read_field(&mut self, value: Value<'_>) -> Result<()> {
         *self = Some(value.bytes()?.to_vec());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct OverCap;
+    impl Message for OverCap {
+        fn write(&self, out: &mut Writer, _row: bool) -> Result<()> {
+            let chunk = [0; 1024];
+            for _ in 0..=MAX_PAYLOAD_BYTES / 1024 {
+                out.bytes(1, &chunk, true)?;
+            }
+            Ok(())
+        }
+        fn read(_bytes: &[u8]) -> Result<Self> {
+            Err(CodecError::NonCanonical)
+        }
+    }
+
+    #[test]
+    fn counting_hashing_and_encoding_keep_the_same_cap() {
+        for row in [false, true] {
+            assert_eq!(OverCap.encoded_len(row), Err(CodecError::Oversize));
+            assert_eq!(OverCap.encode(row), Err(CodecError::Oversize));
+            assert_eq!(OverCap.digest(row), Err(CodecError::Oversize));
+        }
     }
 }

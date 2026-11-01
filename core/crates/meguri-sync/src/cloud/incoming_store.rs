@@ -462,6 +462,15 @@ impl TrackingStore {
         Ok(())
     }
     pub(super) fn rollback_apply(&mut self, b: BindingId, ids: &[i64], cancel: bool) -> Result<(), Error> {
+        self.rollback_apply_kind(b, ids, cancel, ApplyFailure::Apply)
+    }
+    pub(super) fn rollback_apply_kind(
+        &mut self,
+        b: BindingId,
+        ids: &[i64],
+        cancel: bool,
+        failure: ApplyFailure,
+    ) -> Result<(), Error> {
         let tx = self.connection.transaction()?;
         for id in ids {
             let text: String = tx.query_row(
@@ -475,14 +484,19 @@ impl TrackingStore {
             } else {
                 e.retry_count = e.retry_count.saturating_add(1);
                 InboxReason::ApplyFailed {
-                    failure: ApplyFailure::Apply,
-                    error: OpaqueBytes(b"collection_apply".to_vec()),
+                    failure,
+                    error: OpaqueBytes(if failure == ApplyFailure::Rekey {
+                        b"collection_rekey".to_vec()
+                    } else {
+                        b"collection_apply".to_vec()
+                    }),
                 }
             };
             tx.execute("UPDATE inbox SET entry=?2 WHERE id=?1", params![id, encode(&e)?])?;
         }
         for i in intents(&tx, b)? {
             if i.result_seq.is_none() && i.inbox_ids.iter().any(|id| ids.contains(id)) {
+                tx.execute("DELETE FROM cloud_rekey_intents WHERE id=?1", [i.id])?;
                 tx.execute("DELETE FROM cloud_apply_intents WHERE id=?1", [i.id])?;
             }
         }

@@ -174,7 +174,7 @@ impl EntityFacts {
             || remote.fields.origin != self.origin
             || remote.fields.kind != self.kind
             || remote.fields.key != self.key
-            || !matches!(self.kind, c::Kind::Note | c::Kind::Card)
+            || !matches!(self.kind, c::Kind::Note | c::Kind::Card | c::Kind::Config)
             || !remote.fields.tombstone
             || remote.fields.generation.is_some()
             || remote.payload.as_deref() != Some(&[])
@@ -204,14 +204,14 @@ impl EntityFacts {
         {
             return Err(Error::InvalidData);
         }
-        if self.tombstone_at.is_some() && !matches!(self.kind, c::Kind::Note | c::Kind::Card) {
+        if self.tombstone_at.is_some() && !matches!(self.kind, c::Kind::Note | c::Kind::Card | c::Kind::Config) {
             return Err(Error::InvalidData);
         }
         for flight in &self.in_flight {
             super::runtime_store::checked(flight.image_seq)?;
             if flight.tombstone
                 && self.kind != c::Kind::MediaName
-                && (!matches!(self.kind, c::Kind::Note | c::Kind::Card)
+                && (!matches!(self.kind, c::Kind::Note | c::Kind::Card | c::Kind::Config)
                     || flight.row_digest != c::sha256(&[])
                     || flight.payload_digest != c::sha256(&[])
                     || flight.payload.identity()? != (self.kind, self.key.clone()))
@@ -248,7 +248,7 @@ impl EntityFacts {
                 else {
                     return Err(Error::InvalidData);
                 };
-                if !matches!(self.kind, c::Kind::Note | c::Kind::Card)
+                if !matches!(self.kind, c::Kind::Note | c::Kind::Card | c::Kind::Config)
                     || entity.fields.kind != self.kind
                     || entity.fields.key != self.key
                     || entity.fields.origin != self.origin
@@ -283,7 +283,7 @@ impl EntityFacts {
         Ok(())
     }
     pub(crate) fn remove(&mut self, before: c::Payload, at: i64, counter: &mut u64) -> Result<(), Error> {
-        if !matches!(self.kind, c::Kind::Note | c::Kind::Card) || self.acked_tombstone() {
+        if !matches!(self.kind, c::Kind::Note | c::Kind::Card | c::Kind::Config) || self.acked_tombstone() {
             return Err(Error::InvalidData);
         }
         if self.tombstone_at.is_some() {

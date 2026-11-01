@@ -656,17 +656,17 @@ impl Runtime {
             return Err(Error::InvalidData.into());
         }
         if let Ok(codec::DecodeOutcome::Supported(entity)) = codec::Entity::decode(&server.envelope) {
-            // Structural generations, media and rekey remain separate work.
+            // Structural generations and media retain their separate workers.
+            // Identity collisions enter the shared guarded re-key path.
             // K20 refusals still reach ordinary classification below.
             let (_, refused) = classify(&b.facts.record_key.0, std::slice::from_ref(server), 0);
             if refused.is_empty()
                 && (entity.fields.generation.is_some()
-                    || matches!(entity.fields.kind, codec::Kind::Notetype | codec::Kind::MediaName)
+                    || (entity.fields.kind == codec::Kind::MediaName
+                        || (entity.fields.kind == codec::Kind::Notetype
+                            && !(entity.fields.origin != local.origin && local.server_erev == 0)))
                     || (entity.fields.tombstone
-                        && !matches!(entity.fields.kind, codec::Kind::Note | codec::Kind::Card))
-                    || (entity.fields.origin != local.origin
-                        && local.server_erev == 0
-                        && (entity.fields.kind as u8) <= 6))
+                        && !matches!(entity.fields.kind, codec::Kind::Note | codec::Kind::Card)))
             {
                 return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
             }

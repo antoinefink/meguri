@@ -166,6 +166,7 @@ pub fn project(
             let note = view.row(Table::Notes, &RowKey::Id(nid))?.ok_or(Error::InvalidData)?;
             let mid = int(&note, 2)?;
             let generation = layout(view, mid, &acknowledged(mid)?)?;
+            drop(note);
             P::Card(c::Card {
                 id: int(row, 0)?,
                 nid,
@@ -267,7 +268,7 @@ pub fn project(
         c::Kind::MediaName => return Err(Error::InvalidData),
     };
     // The codec enforces the payload cap; envelope placement owns the inline limit.
-    p.encode().map_err(|_| Error::InvalidData)?;
+    p.encoded_len().map_err(|_| Error::InvalidData)?;
     Ok(p)
 }
 

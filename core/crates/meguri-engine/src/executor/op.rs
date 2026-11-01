@@ -374,10 +374,20 @@ impl<'c> OpContext<'_, 'c> {
         self.media_removed.push(name.into());
     }
 
-    /// Between batches of a write phase the catalog declares cancellable
-    /// (O5): `Err(Cancelled)` once cancel was requested, which rolls the op
-    /// back. For every other op the write phase is past the cancel point and
-    /// this is always `Ok`.
+    /// A CloudKit identity move polls this token while storage pages its
+    /// references. The caller must translate a stop into Cancelled, preserving
+    /// the CloudKit rollback/ready semantics of O1.1.
+    pub fn cloud_rekey_scope(&mut self) -> Result<(&mut WriteScope<'c>, Option<Arc<CancelToken>>), EngineError> {
+        if self.source != OpSource::CloudRekey {
+            return Err(EngineError::InvalidArgument {
+                message: "CloudRekey scope required".into(),
+            });
+        }
+        Ok((self.scope, self.cancel.clone()))
+    }
+
+    /// Between batches of a catalog-declared cancellable write (O5), return
+    /// Cancelled on a stop request; other writes have passed the cancel point.
     pub fn check_cancel(&self) -> Result<(), EngineError> {
         match &self.cancel {
             Some(token) if self.cancellable_write => token.check(),

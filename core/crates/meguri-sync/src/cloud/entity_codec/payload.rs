@@ -1,6 +1,6 @@
 //! K6.1 values. Bytes retain the stored TEXT/BLOB representation without repair.
 use super::wire::{FieldValue, Message, Reader, Value, Writer};
-use super::{CodecError, Kind, sha256};
+use super::{CodecError, Kind};
 
 type Result<T> = std::result::Result<T, CodecError>;
 
@@ -293,14 +293,14 @@ macro_rules! payloads {
         impl Payload {
             pub fn kind(&self) -> Kind { match self { $(Self::$name(_) => Kind::$name,)* } }
             pub fn encode(&self) -> Result<Vec<u8>> { match self { $(Self::$name(value) => value.encode(false),)* } }
+            pub fn encoded_len(&self) -> Result<usize> { match self { $(Self::$name(value) => value.encoded_len(false),)* } }
             pub fn decode(kind: Kind, bytes: &[u8]) -> Result<Self> {
                 match kind { $(Kind::$name => Ok(Self::$name($name::decode(bytes)?)),)* }
             }
             pub fn row_digest(&self) -> Result<[u8; 32]> {
-                let bytes = match self { $(Self::$name(value) => value.encode(true)?,)* };
-                Ok(sha256(&bytes))
+                match self { $(Self::$name(value) => value.digest(true),)* }
             }
-            pub fn payload_digest(&self) -> Result<[u8; 32]> { Ok(sha256(&self.encode()?)) }
+            pub fn payload_digest(&self) -> Result<[u8; 32]> { match self { $(Self::$name(value) => value.digest(false),)* } }
         }
     };
 }
@@ -309,6 +309,181 @@ payloads!(Note, Card, Revlog, Deck, Preset, Notetype, Tag, Config, MediaName);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_count_and_streamed_hashes_match_bytes_for_every_kind() {
+        let values = vec![
+            Payload::Note(Note {
+                id: -7,
+                guid: vec![0, 255],
+                flds: vec![31; 257],
+                sfld: Stored::Real(-0.0),
+                nt_struct_gen: 19,
+                ..Default::default()
+            }),
+            Payload::Card(Card {
+                id: 128,
+                due: Stored::Text(vec![0, 255]),
+                odue: Stored::Blob(vec![1; 128]),
+                data: Stored::Integer(-1),
+                last_review_id: -9,
+                nt_struct_gen: 21,
+                ..Default::default()
+            }),
+            Payload::Revlog(Revlog {
+                id: -1,
+                ivl: Stored::Real(f64::from_bits(0x7ff8_0000_0000_0001)),
+                last_ivl: Stored::Text(vec![]),
+                time: Stored::Blob(vec![]),
+                ..Default::default()
+            }),
+            Payload::Deck(Deck {
+                id: 128,
+                name: b"parent\x1fchild".to_vec(),
+                parent_id: 127,
+                common: vec![0; 129],
+                kind: vec![255],
+                ..Default::default()
+            }),
+            Payload::Preset(Preset {
+                id: -2,
+                config: vec![3; 257],
+                ..Default::default()
+            }),
+            Payload::Notetype(Notetype {
+                id: 3,
+                struct_gen: 18,
+                fields: vec![
+                    Field {
+                        ord: 2,
+                        name: vec![255],
+                        ..Default::default()
+                    },
+                    Field::default(),
+                ],
+                templates: vec![Template {
+                    ord: 1,
+                    config: vec![128; 129],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            Payload::Tag(Tag {
+                tag: b"tag".to_vec(),
+                collapsed: -1,
+                config: Some(vec![]),
+            }),
+            Payload::Config(Config {
+                key: b"key".to_vec(),
+                mtime_secs: -1,
+                val: vec![0; 129],
+            }),
+            Payload::MediaName(MediaName {
+                name: b"media".to_vec(),
+                sha256: [127; 32],
+                sha1: [255; 20],
+                size: 128,
+            }),
+        ];
+        for payload in values {
+            let bytes = payload.encode().unwrap();
+            assert_eq!(payload.encoded_len().unwrap(), bytes.len());
+            assert_eq!(payload.payload_digest().unwrap(), super::super::sha256(&bytes));
+            let row = match &payload {
+                Payload::Note(v) => v.encode(true),
+                Payload::Card(v) => v.encode(true),
+                Payload::Revlog(v) => v.encode(true),
+                Payload::Deck(v) => v.encode(true),
+                Payload::Preset(v) => v.encode(true),
+                Payload::Notetype(v) => v.encode(true),
+                Payload::Tag(v) => v.encode(true),
+                Payload::Config(v) => v.encode(true),
+                Payload::MediaName(v) => v.encode(true),
+            }
+            .unwrap();
+            assert_eq!(payload.row_digest().unwrap(), super::super::sha256(&row));
+            let decoded = Payload::decode(payload.kind(), &bytes).unwrap();
+            assert_eq!(decoded.encode().unwrap(), bytes);
+            assert_eq!(decoded.payload_digest(), payload.payload_digest());
+            assert_eq!(decoded.row_digest(), payload.row_digest());
+        }
+    }
+
+    #[test]
+    fn every_kind_keeps_the_same_oversize_error_for_count_encode_and_hash() {
+        for kind in [
+            Kind::Note,
+            Kind::Card,
+            Kind::Revlog,
+            Kind::Deck,
+            Kind::Preset,
+            Kind::Notetype,
+            Kind::Tag,
+            Kind::Config,
+            Kind::MediaName,
+        ] {
+            let bytes = vec![0; usize::try_from(super::super::MAX_PAYLOAD_BYTES).unwrap() + 1];
+            let payload = match kind {
+                Kind::Note => Payload::Note(Note {
+                    flds: bytes,
+                    ..Default::default()
+                }),
+                Kind::Card => Payload::Card(Card {
+                    data: Stored::Blob(bytes),
+                    ..Default::default()
+                }),
+                Kind::Revlog => Payload::Revlog(Revlog {
+                    ivl: Stored::Text(bytes),
+                    ..Default::default()
+                }),
+                Kind::Deck => Payload::Deck(Deck {
+                    common: bytes,
+                    ..Default::default()
+                }),
+                Kind::Preset => Payload::Preset(Preset {
+                    config: bytes,
+                    ..Default::default()
+                }),
+                Kind::Notetype => Payload::Notetype(Notetype {
+                    config: bytes,
+                    ..Default::default()
+                }),
+                Kind::Tag => Payload::Tag(Tag {
+                    config: Some(bytes),
+                    ..Default::default()
+                }),
+                Kind::Config => Payload::Config(Config {
+                    val: bytes,
+                    ..Default::default()
+                }),
+                Kind::MediaName => Payload::MediaName(MediaName {
+                    name: bytes,
+                    ..Default::default()
+                }),
+            };
+            assert_eq!(payload.encode(), Err(CodecError::Oversize));
+            assert_eq!(payload.encoded_len(), Err(CodecError::Oversize));
+            assert_eq!(payload.row_digest(), Err(CodecError::Oversize));
+            assert_eq!(payload.payload_digest(), Err(CodecError::Oversize));
+        }
+    }
+
+    #[test]
+    fn count_and_hash_reject_the_same_invalid_notetype_as_encode() {
+        for templates in [false, true] {
+            let mut nt = Notetype::default();
+            if templates {
+                nt.templates = vec![Template::default(), Template::default()];
+            } else {
+                nt.fields = vec![Field::default(), Field::default()];
+            }
+            let payload = Payload::Notetype(nt);
+            assert_eq!(payload.encode(), Err(CodecError::NonCanonical));
+            assert_eq!(payload.encoded_len(), Err(CodecError::NonCanonical));
+            assert_eq!(payload.row_digest(), Err(CodecError::NonCanonical));
+            assert_eq!(payload.payload_digest(), Err(CodecError::NonCanonical));
+        }
+    }
 
     #[test]
     fn field_read_rejects_nonincreasing_ord_before_append() {

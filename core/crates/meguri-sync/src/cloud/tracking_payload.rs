@@ -209,10 +209,51 @@ pub(super) fn validate_flights(
                     || p.payload_digest().map_err(|_| Error::InvalidData)? != f.payload_digest))
             || (f.tombstone
                 && kind != c::Kind::MediaName
-                && (!matches!(kind, c::Kind::Note | c::Kind::Card)
+                && (!matches!(kind, c::Kind::Note | c::Kind::Card | c::Kind::Config)
                     || f.row_digest != c::sha256(&[])
                     || f.payload_digest != c::sha256(&[])))
         {
+            return Err(Error::InvalidData);
+        }
+    }
+    Ok(())
+}
+pub(super) fn validate_config_flights(b: BindingId, e: &EntityFacts) -> Result<(), Error> {
+    if e.kind != c::Kind::Config {
+        return Ok(());
+    }
+    for f in e.in_flight.iter().filter(|f| f.tombstone) {
+        if f.local_rev == 0
+            || f.local_rev > e.local_rev
+            || f.erev <= e.server_erev
+            || f.held
+            || f.tombstone_envelope_digest.is_none()
+        {
+            return Err(Error::InvalidData);
+        }
+        // A later local value retains the handed digest, as for Note/Card.
+        // Current deletion fields cannot reconstruct that historical envelope.
+        if f.local_rev < e.local_rev {
+            continue;
+        }
+        let envelope = c::Entity::build(
+            c::EntityFields {
+                kind: e.kind,
+                key: e.key.clone(),
+                origin: e.origin,
+                erev: f.erev,
+                generation: None,
+                tombstone: true,
+                deleted_at_ms: e.tombstone_at.ok_or(Error::InvalidData)?,
+                writer: b.0,
+                base_sha256: (e.server_erev > 0).then_some(e.acked_payload_digest),
+            },
+            &[],
+        )
+        .map_err(|_| Error::InvalidData)?
+        .encode()
+        .map_err(|_| Error::InvalidData)?;
+        if f.tombstone_envelope_digest != Some(c::sha256(&envelope)) {
             return Err(Error::InvalidData);
         }
     }
@@ -577,6 +618,68 @@ pub(super) fn load_entity(cn: &Connection, b: BindingId, kind: c::Kind, text: &s
     Ok(h.facts)
 }
 impl Header {
+    pub(super) fn rekey_reference(
+        &mut self,
+        tx: &Transaction<'_>,
+        b: BindingId,
+        payload: c::Payload,
+        counter: &mut u64,
+        observed: (u64, u64, u64),
+    ) -> Result<(), Error> {
+        if payload.kind() != self.facts.kind
+            || super::row_payload::payload_key(&payload)? != self.facts.key
+            || self.facts.acked_tombstone()
+        {
+            return Err(Error::InvalidData);
+        }
+        let row_digest = payload.row_digest().map_err(|_| Error::InvalidData)?;
+        let digest = save_payload(tx, b, &payload)?;
+        if self.facts.mark.is_none() {
+            self.images.base = self.images.acked;
+            self.facts.base_payload = self.images.base.map(|_| empty(self.facts.kind));
+        }
+        self.images.local = digest;
+        self.images.local_row_digest = row_digest;
+        self.facts.tombstone_at = None;
+        self.rekey_mark(digest, counter, observed)
+    }
+    pub(super) fn rekey_config_removed(
+        &mut self,
+        at: i64,
+        counter: &mut u64,
+        observed: (u64, u64, u64),
+    ) -> Result<(), Error> {
+        if self.facts.kind != c::Kind::Config || self.facts.acked_tombstone() {
+            return Err(Error::InvalidData);
+        }
+        if self.facts.tombstone_at.is_some() {
+            return Ok(());
+        }
+        if self.facts.mark.is_none() {
+            self.images.base = Some(self.images.local);
+            self.facts.base_payload = Some(empty(self.facts.kind));
+        }
+        self.facts.tombstone_at = Some(at);
+        self.rekey_mark(self.images.local, counter, observed)
+    }
+    fn rekey_mark(&mut self, digest: [u8; 32], counter: &mut u64, observed: (u64, u64, u64)) -> Result<(), Error> {
+        self.facts.local_rev = super::runtime_store::next(self.facts.local_rev)?;
+        *counter = super::runtime_store::next(*counter)?;
+        self.facts.mark = Some(DirtyMark {
+            source: DirtySource::Observer,
+            change_seq: *counter,
+            payload_digest: digest,
+        });
+        self.facts.observer_open = observed.0;
+        self.facts.observed_seq = observed.1;
+        self.facts.observed_generation = observed.2;
+        Ok(())
+    }
+    pub(super) fn clear_rekey_base(&mut self) {
+        self.facts.mark = None;
+        self.facts.base_payload = None;
+        self.images.base = None;
+    }
     pub fn local_digest(&self) -> [u8; 32] {
         self.images.local
     }
@@ -681,6 +784,74 @@ mod tests {
             environment: Environment::Development,
         }
     }
+    #[test]
+    fn historical_config_tombstone_keeps_its_handed_digest_after_observe() {
+        let (_, b, _, mut e, _, _) = legacy();
+        let payload = c::Payload::Config(c::Config {
+            key: b"synthetic-config".to_vec(),
+            val: b"1".to_vec(),
+            ..Default::default()
+        });
+        e.kind = c::Kind::Config;
+        e.key = super::super::row_payload::payload_key(&payload).unwrap();
+        e.payload = payload.clone();
+        e.tombstone_at = Some(71);
+        let bytes = c::Entity::build(
+            c::EntityFields {
+                kind: e.kind,
+                key: e.key.clone(),
+                origin: e.origin,
+                erev: 1,
+                generation: None,
+                tombstone: true,
+                deleted_at_ms: 71,
+                writer: b.0,
+                base_sha256: None,
+            },
+            &[],
+        )
+        .unwrap()
+        .encode()
+        .unwrap();
+        e.in_flight = vec![Flight {
+            local_rev: e.local_rev,
+            payload_digest: c::sha256(&[]),
+            row_digest: c::sha256(&[]),
+            payload: payload.into(),
+            erev: 1,
+            image_seq: 5,
+            held: false,
+            tombstone: true,
+            tombstone_envelope_digest: Some(c::sha256(&bytes)),
+        }];
+        assert!(validate_config_flights(b, &e).is_ok());
+        let mut bad = e.clone();
+        bad.in_flight[0].tombstone_envelope_digest = Some([0; 32]);
+        assert!(validate_config_flights(b, &bad).is_err());
+        let handed = e.in_flight.clone();
+        let mut counter = 7;
+        let newer = c::Payload::Config(c::Config {
+            key: e.key.clone(),
+            val: b"2".to_vec(),
+            ..Default::default()
+        });
+        assert!(e.observe(newer.clone(), DirtySource::Observer, &mut counter).unwrap());
+        assert!(e.tombstone_at.is_none());
+        assert_eq!(e.payload, newer);
+        assert!(e.in_flight == handed);
+        assert!(validate_config_flights(b, &e).is_ok());
+        for invalid in 0..4 {
+            let mut bad = e.clone();
+            match invalid {
+                0 => bad.in_flight[0].tombstone_envelope_digest = None,
+                1 => bad.in_flight[0].local_rev = bad.local_rev + 1,
+                2 => bad.in_flight[0].held = true,
+                _ => bad.in_flight[0].erev = bad.server_erev,
+            }
+            assert!(validate_config_flights(b, &bad).is_err());
+        }
+    }
+
     fn legacy() -> (Connection, BindingId, NoteTracking, EntityFacts, String, String) {
         let cn = Connection::open_in_memory().unwrap();
         cn.execute_batch("PRAGMA foreign_keys=ON;

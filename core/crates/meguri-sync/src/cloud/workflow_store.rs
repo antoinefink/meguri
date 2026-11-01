@@ -32,12 +32,25 @@ pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
         let v = s
             .query_map([], |r| r.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if v != [1] {
+        if v != [1] && v != [2] {
             return Err(Error::RuntimeSchemaUnsupported);
+        }
+        let rekey_table: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_rekey_intents' AND type='table')",
+            [],
+            |r| r.get(0),
+        )?;
+        if v == [2] {
+            if !rekey_table {
+                return Err(Error::InvalidData);
+            }
+            super::rekey_store::validate(c)?;
+        } else if rekey_table {
+            return Err(Error::InvalidData);
         }
     } else {
         let orphan: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_entities')",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_runtime_entities','cloud_rekey_intents'))",
             [],
             |r| r.get(0),
         )?;
@@ -178,6 +191,10 @@ impl TrackingStore {
     pub(super) fn install_workflow(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
         self.connection.execute_batch(SCHEMA)?;
+        let tx = self.connection.transaction()?;
+        super::rekey_store::install(&tx)?;
+        tx.execute("UPDATE cloud_workflow_schema SET version=2", [])?;
+        tx.commit()?;
         super::media::store::install(&self.connection)?;
         // Expression indexes are maintained by every note/entity writer, including
         // the legacy note capture path. Dirty discovery reads keys only.
@@ -194,6 +211,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             let e = super::tracking_payload::load_entity(&self.connection, owner, kind, &r.get::<_, String>(0)?)?;
             e.validate()?;
             super::tracking_payload::validate_flights(&self.connection, owner, kind, &e.key, &e.in_flight)?;
+            super::tracking_payload::validate_config_flights(owner, &e)?;
             if e.kind as i64 != r.get::<_, i64>(1)? || e.key != r.get::<_, Vec<u8>>(2)? {
                 return Err(Error::InvalidData);
             }
@@ -469,7 +487,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         received: codec::Received,
     ) -> Result<bool, Error> {
         if received.entity.fields.tombstone
-            && matches!(received.entity.fields.kind, codec::Kind::Note | codec::Kind::Card)
+            && matches!(
+                received.entity.fields.kind,
+                codec::Kind::Note | codec::Kind::Card | codec::Kind::Config
+            )
         {
             return self.acknowledge_row_tombstone(b, saved, received);
         }
@@ -657,7 +678,8 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         mut hook: impl FnMut(usize) -> Result<(), Error>,
     ) -> Result<(), runtime::RuntimeError> {
         if commit.changes.whole_collection
-            || !commit.changes.notetypes.is_empty()
+            || (!commit.changes.notetypes.is_empty()
+                && commit.changes.source != meguri_model::changes::OpSource::CloudRekey)
             || !commit.changes.media_added.is_empty()
             || !commit.changes.media_removed.is_empty()
         {
@@ -683,9 +705,16 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         let tx = self.connection.transaction().map_err(Error::from)?;
         let incoming = super::incoming_store::intents(&tx, b)?;
-        let applying = commit.changes.source == meguri_model::changes::OpSource::CloudIncoming;
+        let applying = matches!(
+            commit.changes.source,
+            meguri_model::changes::OpSource::CloudIncoming | meguri_model::changes::OpSource::CloudRekey
+        );
         if applying {
             for mut intent in incoming.iter().filter(|i| i.result_seq.is_none()).cloned() {
+                let rekey = super::rekey_store::get(&tx, intent.id)?.is_some();
+                if rekey != (commit.changes.source == meguri_model::changes::OpSource::CloudRekey) {
+                    continue;
+                }
                 intent.result_seq = Some(commit.seq.0);
                 tx.execute(
                     "UPDATE cloud_apply_intents SET content=?2 WHERE id=?1",

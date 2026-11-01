@@ -3,6 +3,9 @@ use super::*;
 use crate::cloud::{incoming::*, incoming_merge, row_payload, workflow::Saved};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "rekey_runtime.rs"]
+mod rekey_impl;
+
 type IntentRows = (
     BTreeMap<String, Option<codec::Payload>>,
     Seq,
@@ -606,6 +609,15 @@ impl Runtime {
     ) -> Result<IncomingDisposition, RuntimeError> {
         collection.check_rollover()?;
         self.with_incoming(guard, collection, |_| Ok(()))?;
+        let (entries, rekey) = if replay_of.is_none() {
+            if let Some(index) = self.select_rekey(collection, guard, &entries)? {
+                (vec![entries.into_iter().nth(index).ok_or(Error::InvalidData)?], true)
+            } else {
+                (entries, false)
+            }
+        } else {
+            (entries, false)
+        };
         let shared = self.state.clone();
         #[cfg(feature = "test-hooks")]
         let hooks = self.incoming_hooks.clone();
@@ -620,13 +632,23 @@ impl Runtime {
         let fatal = Arc::new(Mutex::new(None));
         let writer_fatal = fatal.clone();
         let result = collection.run(
-            meguri_engine::OpSpec::named("cloud_incoming_apply", meguri_engine::OpSource::CloudIncoming),
+            meguri_engine::OpSpec::named(
+                "cloud_incoming_apply",
+                if rekey {
+                    meguri_engine::OpSource::CloudRekey
+                } else {
+                    meguri_engine::OpSource::CloudIncoming
+                },
+            ),
             move |ctx| {
                 if ctx.generation() != generation {
                     return Err(engine_error("incoming generation"));
                 }
                 let capture = |error: RuntimeError| {
-                    let mapped = engine_error(&error);
+                    let mapped = match &error {
+                        RuntimeError::Engine(error) => error.clone(),
+                        _ => engine_error(&error),
+                    };
                     if !matches!(error, RuntimeError::Engine(_)) {
                         *writer_fatal.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
                     }
@@ -636,7 +658,11 @@ impl Runtime {
                     let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
-                        apply(ctx, &mut s, &writer_guard, &directory, entries, replay_of)
+                        if rekey {
+                            rekey_impl::apply_rekey(ctx, &mut s, &writer_guard, &directory, entries)
+                        } else {
+                            apply(ctx, &mut s, &writer_guard, &directory, entries, replay_of)
+                        }
                     })
                     .map_err(capture)?
                 };
@@ -681,10 +707,12 @@ impl Runtime {
                 let cancel = matches!(error, EngineError::Cancelled);
                 let rollback = self.with_incoming(guard, collection, |s| {
                     let rollback = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        s.store
-                            .as_mut()
-                            .ok_or(Error::Database)?
-                            .rollback_apply(binding, &attempted, cancel)
+                        let store = s.store.as_mut().ok_or(Error::Database)?;
+                        if rekey {
+                            store.rollback_apply_kind(binding, &attempted, cancel, ApplyFailure::Rekey)
+                        } else {
+                            store.rollback_apply(binding, &attempted, cancel)
+                        }
                     }))
                     .unwrap_or(Err(Error::Database));
                     if rollback.is_err() {
@@ -752,6 +780,12 @@ impl Runtime {
                     }
                 }
             }
+            if let Some(rekey) =
+                crate::cloud::rekey_store::get(&s.store.as_ref().ok_or(Error::Database)?.connection, intent_id)?
+                && s.cloud.incoming_held.contains(&rekey.old_name)
+            {
+                s.cloud.incoming_held.insert(rekey.new_name);
+            }
             s.store
                 .as_mut()
                 .ok_or(Error::Database)?
@@ -776,6 +810,18 @@ impl Runtime {
         self.incoming_hooks
             .hit(super::super::testing::IncomingStage::ApplyAfterCommit);
         self.settle_ordinary(collection, guard, intent_id, timeout)?;
+        if rekey {
+            let entries = self.with_incoming(guard, collection, |s| {
+                Ok(s.store
+                    .as_ref()
+                    .ok_or(Error::Database)?
+                    .inbox(binding)?
+                    .into_iter()
+                    .filter(|e| attempted.contains(&e.id))
+                    .collect::<Vec<_>>())
+            })?;
+            return self.apply_ordinary_entries(collection, guard, entries, None, timeout);
+        }
         Ok(IncomingDisposition::Progress(attempted.len()))
     }
 
@@ -795,6 +841,14 @@ impl Runtime {
                 .find(|i| i.id == id)
                 .ok_or(Error::InvalidData.into())
         })?;
+        if let Some(rekey) = self.with_incoming(guard, collection, |s| {
+            Ok(crate::cloud::rekey_store::get(
+                &s.store.as_ref().ok_or(Error::Database)?.connection,
+                i.id,
+            )?)
+        })? {
+            return self.settle_identity(collection, guard, &i, &rekey, timeout);
+        }
         let (current, seq, identity) = self.read_intent_rows(collection, &i)?;
         // The snapshot/read lease has been released; no caller waits under it,
         // the writer, runtime state or the tracking gate. Seq belongs to this
@@ -927,6 +981,15 @@ impl Runtime {
             collection.check_rollover()?;
             if i.native_file != guard.file {
                 return Err(RuntimeError::FileIdentityUnavailable);
+            }
+            if let Some(rekey) = self.with_incoming(guard, collection, |s| {
+                Ok(crate::cloud::rekey_store::get(
+                    &s.store.as_ref().ok_or(Error::Database)?.connection,
+                    i.id,
+                )?)
+            })? {
+                self.replay_identity(collection, guard, &i, &rekey, timeout)?;
+                continue;
             }
             let (current, current_seq, _) = self.read_intent_rows(collection, &i)?;
             let all_after = i
@@ -1068,15 +1131,20 @@ fn layouts(store: &TrackingStore, b: BindingId) -> Result<BTreeMap<i64, codec::N
     let mut layouts = BTreeMap::new();
     let mut after = None;
     loop {
-        let page = store.entity_page(b, codec::Kind::Notetype, after.as_deref())?;
+        let page = store.entity_keys_page(b, codec::Kind::Notetype, after.as_deref())?;
         if page.is_empty() {
             break;
         }
-        for e in page {
-            after = Some(e.key);
-            if let Some(codec::Payload::Notetype(n)) = e.acked_payload {
+        for key in page {
+            let header = store
+                .entity_key_header(b, codec::Kind::Notetype, &key)?
+                .ok_or(Error::InvalidData)?;
+            if let codec::Payload::Notetype(n) = header.local_payload(&store.connection, b)? {
                 layouts.insert(n.id, n);
+            } else {
+                return Err(Error::InvalidData);
             }
+            after = Some(key);
         }
     }
     Ok(layouts)
@@ -1209,6 +1277,9 @@ fn apply(
             store.park_incoming(binding, entry.id, InboxReason::Structure)?;
             continue;
         }
+        let changed_origin = facts
+            .as_ref()
+            .is_some_and(|e| e.origin != remote.fields.origin && e.server_erev == 0);
         let own = facts
             .as_ref()
             .filter(|e| e.origin == remote.fields.origin && remote.fields.writer == binding.0)
@@ -1224,11 +1295,15 @@ fn apply(
             })
             .map(|f| super::super::tracking_payload::flight_payload(&store.connection, binding, f))
             .transpose()?;
-        let base = flight_base.as_ref().or_else(|| {
-            facts
-                .as_ref()
-                .and_then(|e| e.base_payload.as_ref().or(e.acked_payload.as_ref()))
-        });
+        let base = if changed_origin {
+            None
+        } else {
+            flight_base.as_ref().or_else(|| {
+                facts
+                    .as_ref()
+                    .and_then(|e| e.base_payload.as_ref().or(e.acked_payload.as_ref()))
+            })
+        };
         if local.is_none()
             && facts
                 .as_ref()
@@ -1452,6 +1527,13 @@ fn same_object(local: Option<&codec::Payload>, server: &codec::Payload) -> bool 
             .zip(std::str::from_utf8(&s.name).ok())
             .is_some_and(|(l, s)| meguri_text::fold::compare_folded(l, s) == std::cmp::Ordering::Equal),
         (Some(codec::Payload::Preset(l)), codec::Payload::Preset(s)) => l.name == s.name,
+        (Some(codec::Payload::Notetype(l)), codec::Payload::Notetype(s)) => {
+            l.fields.iter().map(|f| &f.name).eq(s.fields.iter().map(|f| &f.name))
+                && l.templates
+                    .iter()
+                    .map(|t| &t.name)
+                    .eq(s.templates.iter().map(|t| &t.name))
+        }
         _ => false,
     }
 }

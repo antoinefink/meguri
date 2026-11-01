@@ -28,6 +28,7 @@ pub mod media;
 mod open;
 mod payload_asset;
 mod recovery;
+mod rekey_store;
 mod runtime_store;
 mod store;
 #[cfg(feature = "test-hooks")]

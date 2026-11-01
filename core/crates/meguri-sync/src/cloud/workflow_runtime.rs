@@ -607,6 +607,8 @@ impl Runtime {
                                 | codec::Kind::Card
                                 | codec::Kind::Revlog
                                 | codec::Kind::Deck
+                                | codec::Kind::Preset
+                                | codec::Kind::Notetype
                                 | codec::Kind::Config
                         ) && e.payload != p
                         {
@@ -981,6 +983,7 @@ impl Runtime {
                 }
             }
             let ready = Self::gate_locked(s).is_ok()
+                && !store.has_rekey_intents(guard.binding)?
                 && s.cloud.incoming_seq <= snapshot.seq().0
                 && s.last_session == snapshot.active_session().map(|session| session.0);
             Ok((
@@ -1098,7 +1101,11 @@ impl Runtime {
                         })
                         .map_err(|_| Error::InvalidData)?;
                     if let Some(e) = tracked
-                        && let codec::Payload::Notetype(n) = e.acked_payload.unwrap_or(e.payload)
+                        && let codec::Payload::Notetype(n) = if e.mark.is_some() {
+                            e.payload
+                        } else {
+                            e.acked_payload.unwrap_or(e.payload)
+                        }
                     {
                         return Ok(n);
                     }

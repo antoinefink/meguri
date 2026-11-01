@@ -55,6 +55,50 @@ pub fn allocate(conn: &Connection, table: Table, now_ms: i64) -> Result<i64, Sto
         .ok_or(StorageError::IdsExhausted { table: name })
 }
 
+/// I5 physical half of allocation. Scan ordered integer headers only; return
+/// at the first gap, never a clock candidate or the collection maximum.
+pub(crate) fn rekey_candidate(
+    conn: &Connection,
+    table: Table,
+    after: i64,
+    now_ms: i64,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<i64, StorageError> {
+    let name = table.name();
+    if !table.allocates_ids() {
+        return Err(StorageError::Mode {
+            detail: "rekey requires an allocated table".into(),
+        });
+    }
+    let exhausted = || StorageError::IdsExhausted { table: name };
+    let cap = now_ms.checked_add(MAX_AHEAD_MS).ok_or_else(exhausted)?;
+    let mut candidate = after.checked_add(1).filter(|id| *id <= cap).ok_or_else(exhausted)?;
+    // A page bounds each SQLite cursor's lifetime and memory. The binding
+    // owner checks cancellation between successive candidate requests.
+    loop {
+        if cancelled() {
+            return Err(StorageError::Mode {
+                detail: "CloudKit rekey cancelled".into(),
+            });
+        }
+        let mut q = conn.prepare(&format!(
+            "SELECT id FROM {name} WHERE id>=?1 AND id<=?2 ORDER BY id LIMIT 250"
+        ))?;
+        let ids = q
+            .query_map((candidate, cap), |r| r.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if ids.is_empty() {
+            return Ok(candidate);
+        }
+        for id in ids {
+            if id > candidate {
+                return Ok(candidate);
+            }
+            candidate = candidate.checked_add(1).filter(|id| *id <= cap).ok_or_else(exhausted)?;
+        }
+    }
+}
+
 fn taken(conn: &Connection, table: &str, id: i64) -> Result<bool, StorageError> {
     Ok(conn
         .prepare_cached(&format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE id = ?1)"))?

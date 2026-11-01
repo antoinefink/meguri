@@ -626,12 +626,27 @@ impl Journal {
         let spill = self.spill.as_mut().ok_or_else(|| StorageError::Io {
             detail: "no spill file".to_owned(),
         })?;
-        let bytes = encode(&image);
         let offset = spill.len;
-        let checksum: [u8; 32] = Sha256::digest(&bytes).into();
-        spill.file.write_all_at(&checksum, offset).map_err(io)?;
-        spill.file.write_all_at(&bytes, offset + 32).map_err(io)?;
-        let len = bytes.len() as u64;
+        let len = if size <= self.options.spill_threshold {
+            let bytes = encode(&image);
+            let checksum: [u8; 32] = Sha256::digest(&bytes).into();
+            spill.file.write_all_at(&checksum, offset).map_err(io)?;
+            spill.file.write_all_at(&bytes, offset + 32).map_err(io)?;
+            bytes.len() as u64
+        } else {
+            let checksum = digest(&image);
+            spill.file.write_all_at(&checksum, offset).map_err(io)?;
+            let mut len = 0_u64;
+            let mut written = Ok(());
+            encoded_parts(&image, |bytes| {
+                if written.is_ok() {
+                    written = spill.file.write_all_at(bytes, offset + 32 + len);
+                    len += bytes.len() as u64;
+                }
+            });
+            written.map_err(io)?;
+            len
+        };
         spill.len += 32 + len;
         self.live_spilled += 32 + len;
         Ok(Before::Spilled { offset, len })
@@ -684,7 +699,9 @@ fn io(error: std::io::Error) -> StorageError {
 /// The SHA-256 of a row image in the journal's own encoding: a note's
 /// after-image digest, and the row digests of `engine/op-model` O7.
 pub fn digest(image: &[Cell]) -> [u8; 32] {
-    Sha256::digest(encode(image)).into()
+    let mut hash = Sha256::new();
+    encoded_parts(image, |bytes| hash.update(bytes));
+    hash.finalize().into()
 }
 
 fn note_digest(before: Option<&[Cell]>, after: &[Cell]) -> NoteDigest {
@@ -705,25 +722,29 @@ fn image_bytes(image: &[Cell]) -> usize {
 /// 8 bytes little-endian for numbers, or a length and the bytes.
 pub(crate) fn encode(image: &[Cell]) -> Vec<u8> {
     let mut out = Vec::with_capacity(image_bytes(image) + image.len() * 9);
+    encoded_parts(image, |bytes| out.extend_from_slice(bytes));
+    out
+}
+
+fn encoded_parts(image: &[Cell], mut emit: impl FnMut(&[u8])) {
     for cell in image {
         match cell {
-            Cell::Null => out.push(0),
+            Cell::Null => emit(&[0]),
             Cell::Integer(v) => {
-                out.push(1);
-                out.extend_from_slice(&v.to_le_bytes());
+                emit(&[1]);
+                emit(&v.to_le_bytes());
             }
             Cell::Real(v) => {
-                out.push(2);
-                out.extend_from_slice(&v.to_bits().to_le_bytes());
+                emit(&[2]);
+                emit(&v.to_bits().to_le_bytes());
             }
             Cell::Text(bytes) | Cell::Blob(bytes) => {
-                out.push(if matches!(cell, Cell::Text(_)) { 3 } else { 4 });
-                out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-                out.extend_from_slice(bytes);
+                emit(&[if matches!(cell, Cell::Text(_)) { 3 } else { 4 }]);
+                emit(&(bytes.len() as u64).to_le_bytes());
+                emit(bytes);
             }
         }
     }
-    out
 }
 
 pub(crate) fn decode(mut bytes: &[u8]) -> Option<RowImage> {
@@ -764,6 +785,46 @@ pub(crate) fn decode(mut bytes: &[u8]) -> Option<RowImage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_spill_and_digest_keep_the_exact_image_encoding() {
+        let image = vec![
+            Cell::Null,
+            Cell::Integer(-5),
+            Cell::Real(-0.0),
+            Cell::Text(vec![0xff, b'a']),
+            Cell::Blob(Vec::new()),
+        ];
+        let mut expected = vec![0, 1];
+        expected.extend_from_slice(&(-5_i64).to_le_bytes());
+        expected.push(2);
+        expected.extend_from_slice(&(-0.0_f64).to_bits().to_le_bytes());
+        expected.push(3);
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&[0xff, b'a']);
+        expected.push(4);
+        expected.extend_from_slice(&0_u64.to_le_bytes());
+        assert_eq!(encode(&image), expected);
+        let checksum: [u8; 32] = Sha256::digest(&expected).into();
+        assert_eq!(digest(&image), checksum);
+        let directory = tempfile::tempdir().unwrap();
+        let mut journal = Journal::new(JournalOptions {
+            spill_threshold: 0,
+            spill_dir: Some(directory.path().to_owned()),
+        });
+        let Before::Spilled { offset, len } = journal.keep(image.clone()).unwrap() else {
+            panic!("spilled image");
+        };
+        assert_eq!(len, expected.len() as u64);
+        assert_eq!(journal.read_spill(offset, len).unwrap(), image);
+        let file = &journal.spill.as_ref().unwrap().file;
+        let mut stored = vec![0; 32 + expected.len()];
+        file.read_exact_at(&mut stored, offset).unwrap();
+        assert_eq!(&stored[..32], &checksum);
+        assert_eq!(&stored[32..], expected);
+        file.write_all_at(&[checksum[0] ^ 1], offset).unwrap();
+        assert!(journal.read_spill(offset, len).is_err());
+    }
 
     #[test]
     fn images_round_trip_through_the_encoding() {
