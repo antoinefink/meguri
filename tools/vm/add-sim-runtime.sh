@@ -4,7 +4,9 @@
 # Mac's copy: nothing is downloaded. Run by the orchestrator when doctor
 # reports the VM without it (docs/process/mac-ui-vm.md).
 #
-# usage: tools/vm/add-sim-runtime.sh [--vm <name>]
+# usage: tools/vm/add-sim-runtime.sh [--vm <name>] [--foldable]
+#
+# --foldable puts the foldable kind's own pinned runtime there instead.
 #
 # The VM is the first one of the per-host config (tools/vm/AGENTS.md) that
 # can run, or the one named; it is started headless when it is stopped. The
@@ -24,15 +26,16 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 log() { printf 'add-sim-runtime: %s\n' "$*" >&2; }
 die() { log "$*" && exit 1; }
 
-want=""
+want="" pin_path=.runtime
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --vm) [ "$#" -ge 2 ] || { log "--vm needs a name" && exit 2; }; want="$2" && shift 2 ;;
-    *) log "usage: tools/vm/add-sim-runtime.sh [--vm <name>]" && exit 2 ;;
+    --foldable) pin_path=.foldable.runtime && shift ;;
+    *) log "usage: tools/vm/add-sim-runtime.sh [--vm <name>] [--foldable]" && exit 2 ;;
   esac
 done
 
-pin="$(jq -c .runtime "$ROOT/tools/sim-devices.json")" || die "cannot read tools/sim-devices.json"
+pin="$(jq -c "$pin_path" "$ROOT/tools/sim-devices.json")" || die "cannot read tools/sim-devices.json"
 id="$(jq -r .identifier <<<"$pin")"
 build="$(jq -r .build <<<"$pin")"
 label="iOS $(jq -r .version <<<"$pin") ($build)"

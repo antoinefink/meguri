@@ -85,7 +85,7 @@ case "${1:-} ${2:-}" in
 {"runtimes": [
   {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "version": "18.2", "buildversion": "22C150", "isAvailable": true, "platform": "iOS"},
   $rt27
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "buildversion": "24B5", "isAvailable": false, "platform": "iOS"},
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "buildversion": "${FAKE_SIM_RT271_BUILD:-24B5}", "isAvailable": ${FAKE_SIM_RT271:-false}, "platform": "iOS"},
   {"identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-28-0", "version": "28.0", "buildversion": "23R1", "isAvailable": true, "platform": "watchOS"}
 ]}
 EOF
@@ -103,7 +103,7 @@ EOF
   {"name": "Apple Watch Ultra 3 (49mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Ultra-3-49mm", "productFamily": "Apple Watch"}
 EOF
       [ "${FAKE_SIM_FOLDABLE:-}" != 1 ] ||
-        echo ', {"name": "iPhone Fold", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Fold", "productFamily": "iPhone"}'
+        echo ', {"name": "iPhone Duo", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo", "productFamily": "iPhone"}'
       echo ']}'
     }
     ;;

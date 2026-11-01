@@ -68,7 +68,7 @@ assert_pool_devices_untouched() {
 
 # --- acquire ----------------------------------------------------------------
 
-@test "acquire creates a pool iPhone on the newest iOS runtime, boots it and prints only its UDID" {
+@test "acquire creates a pool iPhone on the pinned iOS runtime, boots it and prints only its UDID" {
   pool acquire iphone --holder t1
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
@@ -643,14 +643,26 @@ mg_sandbox() {
   not_called "simctl create"
 }
 
-@test "the foldable kind is unavailable until Xcode has a foldable iPhone, then created like the others" {
+@test "the foldable kind is unavailable until Xcode has its device type and runtime, then uses its own runtime" {
   pool acquire foldable
   [ "$status" -eq 4 ]
   [[ "$stderr" == *"unavailable: toolchain"* ]]
+  FAKE_SIM_FOLDABLE=1 pool acquire foldable
+  [ "$status" -eq 4 ]
+  [[ "$stderr" == *"unavailable: toolchain"* ]]
   not_called "simctl create"
-  FAKE_SIM_FOLDABLE=1 pool acquire foldable --holder t1
+  FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true pool acquire foldable --holder t1
   [ "$status" -eq 0 ]
-  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Fold $RT27\$"
+  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-1\$"
+}
+
+@test "a newer runtime in the pool leaves the other kinds on the pinned one" {
+  FAKE_SIM_RT271=true pool acquire iphone --holder t1
+  [ "$status" -eq 0 ]
+  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro $RT27\$"
+  FAKE_SIM_RT271=true pool status
+  [ "$(jq -r '.runtime.version' <<<"$output")" = 27.0 ]
+  [ "$(jq -r '.devices[0].current_runtime' <<<"$output")" = true ]
 }
 
 # --- reset ------------------------------------------------------------------

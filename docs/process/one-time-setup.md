@@ -115,7 +115,7 @@ Optional: enable "Allow external agents to use Xcode tools" in Xcode's settings.
 
 ### `xcode-27-1`
 
-Install Xcode 27.1 when it ships. It adds the foldable iPhone simulator (R1962); until then, foldable layouts are approximated. Doctor lists this step while Xcode is older than 27.1.
+Xcode 27.1 or later adds the iPhone Duo simulator (R1962). It needs its own iOS 27.1 runtime, pinned under `foldable` in `tools/sim-devices.json`; `tools/vm/add-sim-runtime.sh --foldable` copies it into the VM. Doctor lists this step while Xcode is older than 27.1.
 
 ### `nightly-scheduler`
 

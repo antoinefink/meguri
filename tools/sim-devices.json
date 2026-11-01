@@ -13,8 +13,13 @@
   ],
   "foldable": {
     "kind": "foldable",
-    "device_type_name_pattern": "fold",
-    "comment": "No foldable iPhone simulator in Xcode 27.0 (expected with 27.1); the lane reports unavailable: toolchain until an iPhone device type matches the pattern."
+    "device_type_name_pattern": "duo|fold",
+    "runtime": {
+      "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1",
+      "version": "27.1",
+      "build": "24A94425"
+    },
+    "comment": "iPhone Duo needs iOS 27.1 or later (its device type's minimum), while the other kinds stay on the runtime above: installing this one must not move them. The lane reports unavailable until both the device type and this runtime are present."
   },
   "status_bar": {
     "time": "9:41",

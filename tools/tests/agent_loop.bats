@@ -291,10 +291,10 @@ EOF
 }
 
 @test "sim-setup adds the foldable lane once the toolchain offers a foldable iPhone" {
-  FAKE_SIM_FOLDABLE=1 mg sim-setup --kinds foldable
+  FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24A94425 mg sim-setup --kinds foldable
   [ "$status" -eq 0 ]
   [ "$(field '.details.foldable.status')" = available ]
-  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Fold $RT27\$"
+  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-1\$"
   not_called "simctl create Meguri-Pool-iphone"
 }
 

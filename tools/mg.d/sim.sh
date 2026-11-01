@@ -136,11 +136,11 @@ mg_job sim-setup host mg_sim_setup \
 mg_job sim-reset host mg_sim_reset \
   "Reset a pool simulator this checkout leased (user apps, privacy, keychain, UI options, status bar) and keep the lease, under the test VM's lease: <udid>"
 
-# The newest available iOS runtime (the pool's): identifier, version, build.
+# The pinned iOS runtime when it is available: identifier, version, build. The
+# foldable kind pins its own; a newer one never changes the other kinds'.
 mg_sim__pool_runtime() {
-  mg_simctl list runtimes --json | jq -c '[.runtimes[] | select(.isAvailable != false and
-      ((.platform // "") == "iOS" or (.identifier | test("SimRuntime\\.iOS-"))))]
-    | sort_by(.version | split(".") | map(tonumber? // 0)) | last // null
+  mg_simctl list runtimes --json | jq -c --arg p "$(jq -r "${2:-.runtime}.identifier" "$1")" '
+    first((.runtimes[] | select(.identifier == $p and .isAvailable != false)), null)
     | if . == null then null else {identifier, version, build: .buildversion} end'
 }
 
@@ -157,10 +157,10 @@ mg_sim_setup() {
   mg_sim_pool_take || return 0
   local expected actual
   expected="$(jq -c .runtime "$pinned")"
-  actual="$(mg_sim__pool_runtime)" || actual=null
+  actual="$(mg_sim__pool_runtime "$pinned")" || actual=null
   mg_detail runtime "$(jq -nc --argjson e "$expected" --argjson a "${actual:-null}" '{expected: $e, actual: $a}')"
   if [ "$(jq -r '"\(.identifier) \(.build)"' <<<"$expected")" != "$(jq -r 'if . == null then "none" else "\(.identifier) \(.build)" end' <<<"${actual:-null}")" ]; then
-    mg_failure runtime-mismatch "the newest iOS runtime is $(jq -r 'if . == null then "missing" else "iOS \(.version) (\(.build), \(.identifier))" end' <<<"${actual:-null}"); tools/sim-devices.json pins iOS $(jq -r '"\(.version) (\(.build), \(.identifier))"' <<<"$expected"). Install the pinned runtime, or update the pin and re-record the baselines (R1966, R1974)."
+    mg_failure runtime-mismatch "the pinned iOS runtime is $(jq -r 'if . == null then "missing" else "iOS \(.version) (\(.build), \(.identifier))" end' <<<"${actual:-null}"); tools/sim-devices.json pins iOS $(jq -r '"\(.version) (\(.build), \(.identifier))"' <<<"$expected"). Install the pinned runtime, or update the pin and re-record the baselines (R1966, R1974)."
     mg_message "sim-setup: runtime build mismatch: expected $(jq -r .build <<<"$expected"), found $(jq -r '.build // "none"' <<<"${actual:-null}")"
     mg_status fail
     return 0
@@ -177,6 +177,8 @@ mg_sim_setup() {
   fi
   foldable="$(jq -r --argjson t "$types" '.foldable.device_type_name_pattern as $p
     | first($t.devicetypes[] | select((.productFamily // "") == "iPhone" and (.name | test($p; "i"))) | .identifier) // ""' "$pinned")"
+  # The foldable lane also needs its own runtime, with the same build.
+  [ "$(mg_sim__pool_runtime "$pinned" .foldable.runtime | jq -r '.build // ""')" = "$(jq -r .foldable.runtime.build "$pinned")" ] || foldable=""
   if [ -n "$foldable" ]; then
     mg_detail foldable "$(jq -n --arg t "$foldable" '{status: "available", device_type: $t}')"
   else

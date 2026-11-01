@@ -36,7 +36,7 @@
 #       never leased ones, never other names) whose device directory is older
 #       than N hours (default 6). --list prints the targets and deletes nothing.
 #
-# Pool devices are Meguri-Pool-<kind>-<n> on the newest installed iOS runtime,
+# Pool devices are Meguri-Pool-<kind>-<n> on their kind's pinned iOS runtime,
 # at most MEGURI_SIM_POOL_MAX (3) per kind. Kinds and their device types come
 # from tools/sim-devices.json; kind `foldable` exists once Xcode has an iPhone
 # device type matching its pattern (until then acquire exits 4). Leases live in
@@ -235,13 +235,14 @@ sp_devices() {
     [.udid, .name, .state, $rt, (if .isAvailable == false then "false" else "true" end)] | @tsv' <<<"$json"
 }
 
-# The newest available iOS runtime: identifier<TAB>version.
+# sp_runtime [<kind>]: the kind's pinned iOS runtime, when it is installed and
+# available: identifier<TAB>version. The foldable kind has its own, which a
+# newer runtime in the pool never changes for the other kinds.
 sp_runtime() {
-  local json
+  local json pin
+  pin="$(jq -r --arg k "${1:-}" 'if $k == .foldable.kind then .foldable.runtime else .runtime end | .identifier' "$SP_DEVICES_JSON")" || return 1
   json="$(xcrun simctl list runtimes --json)" || return 1
-  jq -r '[.runtimes[] | select(.isAvailable != false and
-      ((.platform // "") == "iOS" or (.identifier | test("SimRuntime\\.iOS-"))))]
-    | sort_by(.version | split(".") | map(tonumber? // 0)) | last // empty
+  jq -r --arg p "$pin" 'first(.runtimes[] | select(.identifier == $p and .isAvailable != false))
     | [.identifier, .version] | @tsv' <<<"$json"
 }
 
@@ -502,8 +503,12 @@ sp_acquire() {
   [ -n "$kind" ] || sp_usage "acquire: missing kind"
   pinned="$(sp_kind_type "$kind")" || sp_usage "acquire: unknown kind '$kind' (kinds: $(sp_kind_names))"
   [ -n "$holder" ] || holder="$(basename "$(sp_checkout)")"
-  rt="$(sp_runtime)" || { sp_log "simctl list runtimes failed"; exit 1; }
-  [ -n "$rt" ] || { sp_log "no iOS simulator runtime is installed"; exit 1; }
+  rt="$(sp_runtime "$kind")" || { sp_log "simctl list runtimes failed"; exit 1; }
+  if [ -z "$rt" ]; then
+    [ -n "$pinned" ] || { sp_log "unavailable: toolchain: the foldable iPhone's iOS runtime is not installed"; exit 4; }
+    sp_log "the pinned iOS simulator runtime is not installed"
+    exit 1
+  fi
   rt_id="${rt%%"$SP_TAB"*}"
   if [ -n "$pinned" ]; then
     type="$(sp_devicetype_known "$pinned")" || { sp_log "simctl list devicetypes failed"; exit 1; }
@@ -635,7 +640,7 @@ sp_release() {
   return "$rc"
 }
 
-# sp_status_devices <device list> <current runtime id> <now>: one JSON line
+# sp_status_devices <device list> <pinned runtime id> <now> <foldable runtime id>: one JSON line
 # per pool device. (A function: macOS bash 3.2 cannot parse a case statement
 # inside $(...).)
 sp_status_devices() {
@@ -648,11 +653,12 @@ sp_status_devices() {
       [ -n "$lease" ] || lease='{}'
     fi
     jq -nc --arg udid "$udid" --arg name "$name" --arg state "$state" --arg rt "$rtid" \
-      --arg cur "$2" --argjson avail "$avail" --argjson lease "$lease" \
-      --arg prefix "$SP_PREFIX" --argjson now "$3" '{
+      --arg cur "$2" --arg fold "$4" --argjson avail "$avail" --argjson lease "$lease" \
+      --arg prefix "$SP_PREFIX" --argjson now "$3" '($name | ltrimstr($prefix) | sub("-[0-9]+$"; "")) as $kind | {
         udid: $udid, name: $name,
-        kind: ($name | ltrimstr($prefix) | sub("-[0-9]+$"; "")),
-        state: $state, runtime: $rt, current_runtime: ($rt == $cur), available: $avail,
+        kind: $kind,
+        state: $state, runtime: $rt,
+        current_runtime: ($rt == (if $kind == "foldable" then $fold else $cur end)), available: $avail,
         leased: ($lease != null), lease: $lease,
         lease_expired: (if $lease == null then false else $now >= ($lease.expires_epoch // 0) end)
       }'
@@ -666,7 +672,7 @@ sp_status() {
   local list rt json orphans="" d
   list="$(sp_devices)" || exit 1
   rt="$(sp_runtime 2>/dev/null)" || rt=""
-  json="$(sp_status_devices "$list" "${rt%%"$SP_TAB"*}" "$(sp_now)")"
+  json="$(sp_status_devices "$list" "${rt%%"$SP_TAB"*}" "$(sp_now)" "$(jq -r .foldable.runtime.identifier "$SP_DEVICES_JSON")")"
   if [ -d "$SP_LEASES" ]; then
     for d in "$SP_LEASES"/*; do
       [ -d "$d" ] || continue
