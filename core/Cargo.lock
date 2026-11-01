@@ -1901,6 +1901,7 @@ dependencies = [
  "hmac",
  "libc",
  "meguri-engine",
+ "meguri-host",
  "meguri-model",
  "meguri-package",
  "meguri-storage",
