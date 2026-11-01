@@ -35,3 +35,17 @@ Root: swift-test/20261101T144351Z-17936 compiled; 15/21 passed. Six cases
 stopped at fixture setup: backups were inside the collection directory.
 Use sibling directories in the test. The safety check stays enabled.
 Native workflow and the six blocked cases remain unaccepted.
+
+Layout correction start: 18ac384a. The test creates collection and backups
+as separate children of its temporary parent. Assertions and cleanup stay
+unchanged. Independent review found no P0–P2; focused execution is pending.
+
+Native: swift-test/20261101T144749Z-20763 PASS2/2. Reviews, media, automatic
+asset recovery and final reopen pass against the synthetic Service. The large
+exchanges took 227/178 ms, previously 9391/9310 ms; the limit stayed ten seconds.
+Live CloudKit and close with an original operation held still need proof.
+
+Focused: swift-test/20261101T144959Z-22621 compiled, 15/21 passed. Directory
+setup now succeeds. Six cases fail because the helper has no issued resumeMedia
+command. Replace its manual adapter setup with the proven ServiceAppHarness
+startup. Preserve opaque handles and all scheduler assertions.

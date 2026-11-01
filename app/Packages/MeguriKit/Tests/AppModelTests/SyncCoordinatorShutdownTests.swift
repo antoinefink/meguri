@@ -272,15 +272,17 @@ extension ReviewCollectionStartupTests {
 ) async throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
+    let collectionDirectory = root.appending(path: "collection")
     let backups = root.appending(path: "backups")
+    try FileManager.default.createDirectory(at: collectionDirectory, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
     let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
-    try FileManager.default.copyItem(at: source, to: root.appending(path: "collection.anki2"))
+    try FileManager.default.copyItem(at: source, to: collectionDirectory.appending(path: "collection.anki2"))
     try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development,
         status: .available, identity: Data("synthetic-account-A".utf8))
     let collection = CoreCollectionService()
     do {
-        try await collection.open(.init(collectionDirectory: root, backupsDirectory: backups,
+        try await collection.open(.init(collectionDirectory: collectionDirectory, backupsDirectory: backups,
             appGroupSnapshot: root.appending(path: "widget.snapshot")), randomSeed: 114)
         try await MaintenanceLane.shared.call(BridgeCall("testCloudPrepareAdapterBaseline")) { @Sendable in
             _ = try testCloudPrepareAdapterBaseline(entityCount: 1, localRevision: 3,
