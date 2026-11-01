@@ -141,3 +141,51 @@ Manual-media integration evidence:
   is rejected at execute.quiet-preconditions with pending=1; all its other
   reported conditions hold. ResumeMedia is now emitted, but its later failure
   follows the failed exchange. The full workflow remains unaccepted.
+
+P2 quiet-candidate consistency repair, fixer s-20261025T162405Z-9dc656e4:
+- Source base: a915f39a8b122cb67a4c6fbc9adc389b933eaa39. Original U113 start
+  1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a and batch base
+  1416a520542a8c5daa38a23bfe398da704c3d6c9 remain unchanged.
+- Independent native_bounds_review requested this bounded P2 repair. Source
+  and swift-test/20261101T085632Z-11428 identify the postqualification branch:
+  collection_known=true, scan_clear=true, pending=1, in_flight=0, ready=0,
+  apply_in_progress=false, unsettled_intents=0, both zones drained. Original
+  command guard, owner and issuance checks passed. Real local work arrived
+  after qualification; rejecting that observation failed the native exchange.
+- The matched candidate is consumed through EvidenceCommitted, as in
+  ApplyReady Progress(0). Durable quiet evidence and quiet_serial stay unchanged.
+  Current facts are reported. Other validation and Runtime errors are preserved.
+  Duplicate use is rejected. A fresh drain can produce a new candidate.
+- Added actual_quiet_candidate_superseded_by_local_work_is_observation_only_until_a_new_drain
+  in the existing FFI policy tests. Actual SDK callbacks qualify the candidate;
+  a real deck commit and host tracking observer create pending work before
+  execution. Assertions require success with only status followups, actual
+  pending work, unchanged durable quiet evidence and serial, and rejection of
+  nonissued and consumed commands. Actual Service Saved and handler return ACK
+  the captured deck; a refresh alone cannot stamp, and a later fetch drain can.
+  A real pause still rejects the original command even with newer pending work.
+  Existing wrong-owner, close, generation and native-admission tests remain.
+- The earlier 20/20 policy PASS and clear manual-media source review are the
+  integration results above, before this repair. The original full App test
+  remains red until root verifies this delta. No new passing test is claimed.
+- One bounded source consistency check covers this delta. No builds, tests,
+  Git, history or network operations ran in this filtered fixer session. Root
+  owns MG formatting, the focused actual Driver/FFI test, existing policy and
+  ownership checks, independent review and the full App run. The original
+  18 Card/9 Revlog cells, real Saved/media, reopen/adoption assertions and
+  budgets are untouched. No Swift, Harness, transition or parallel-owner file
+  was changed. Provenance/privacy/similarity and required gates remain pending;
+  no full workflow, unit or release acceptance is claimed by this handoff.
+
+Quiet-observation integration evidence:
+- native_bounds_review: no P0-P2 source findings.
+- core-format/20261101T090556Z-17639: PASS.
+- core-test/20261101T090635Z-18285: 43/43 PASS, including the actual Driver
+  regression, original-owner checks, pause and generation replacement cases.
+- similarity/20261101T090739Z-20080: PASS.
+- private/20261101T090622Z-18020: source files passed; the log passed after
+  rewrite in private/20261101T090717Z-19669.
+- swift-test/20261101T090638Z-18545: FAIL. The quiet candidate is consumed as
+  an observation. The next reported failures are allBackendsClosed and reopen
+  with operationFailed and generationChanged evidence. Lifecycle diagnosis is
+  open; the full workflow remains unaccepted.

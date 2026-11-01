@@ -1633,6 +1633,246 @@ fn actual_apply_rollback_is_deferred_and_keeps_incoming_without_tracking_stop() 
 }
 
 #[test]
+fn actual_quiet_candidate_superseded_by_local_work_is_observation_only_until_a_new_drain() {
+    use meguri_sync::cloud::policy as p;
+    use meguri_testkit::cloud::{
+        Caller, Config, Mutation, MutationSuccess, Operation, RecordInput, Reply, Scope, Service,
+        coordinator::publication_control_record,
+    };
+
+    let (fixture, sdk, _) = rig();
+    let host = &fixture.workflow.host;
+    let runtime = &fixture.workflow.core;
+    let driver = host.cloud_policy_driver().unwrap();
+    let collection = host.collection().unwrap();
+    let projection = || {
+        runtime
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+    };
+    // Actual SDK fetch boundaries produce Runtime drains. No summary or
+    // evidence is installed by the test, including the initial quiet stamp.
+    let fetch = || {
+        let id = fixture
+            .workflow
+            .begin_fetch(
+                sdk.instance_id.clone(),
+                vec!["meguri-root".into(), sdk.collection_zone.clone()],
+            )
+            .unwrap();
+        for zone in [p::Zone::Root, p::Zone::Collection] {
+            let started = host
+                .cloud_policy_input(p::DeviceEvent::Operation {
+                    instance: sdk.instance_id.clone(),
+                    operation: p::Operation {
+                        zone,
+                        kind: p::OperationKind::Fetch,
+                    },
+                    phase: p::Activity::Started,
+                })
+                .unwrap();
+            assert!(
+                !started
+                    .iter()
+                    .any(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. }))
+            );
+        }
+        fixture
+            .workflow
+            .will_fetch(sdk.instance_id.clone(), "policy-quiet-fetch".into(), true)
+            .unwrap();
+        // The fixture has a saved cursor. Unchanged zones still drain through
+        // the real did/finish callbacks, without an absence pass.
+        fixture
+            .workflow
+            .did_fetch(sdk.instance_id.clone(), "policy-quiet-fetch".into(), true)
+            .unwrap();
+        assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), id).unwrap());
+        let mut quiet = Vec::new();
+        for zone in [p::Zone::Root, p::Zone::Collection] {
+            quiet.extend(
+                host.cloud_policy_input(p::DeviceEvent::Operation {
+                    instance: sdk.instance_id.clone(),
+                    operation: p::Operation {
+                        zone,
+                        kind: p::OperationKind::Fetch,
+                    },
+                    phase: p::Activity::Ended {
+                        outcome: p::Outcome::Ok,
+                        saved: 0,
+                    },
+                })
+                .unwrap()
+                .into_iter()
+                .filter(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. })),
+            );
+        }
+        assert_eq!(quiet.len(), 1, "one candidate for the actual two-zone drain");
+        quiet.pop().unwrap()
+    };
+
+    assert_eq!(projection().evidence.quiet_ms, None);
+    let initial = fetch();
+    host.execute_cloud_policy_core(&initial, Duration::from_secs(1))
+        .unwrap();
+    let stamped = projection().evidence.quiet_ms;
+    assert_eq!(stamped, Some(NOW));
+    fixture.clock.step_ms(1_000);
+    let candidate = fetch();
+    let quiet_serial = driver.state().quiet_serial;
+    let mut nonissued = candidate.clone();
+    let p::ActionKind::RecordQuietPoint { at_ms } = &mut nonissued.action.kind else {
+        panic!("actual quiet candidate required")
+    };
+    *at_ms += 1;
+    assert!(matches!(
+        host.execute_cloud_policy_core(&nonissued, Duration::from_secs(1)),
+        Err(p::DriverError::UnqualifiedCompletion)
+    ));
+
+    let added = meguri_engine::decks::add(&collection, "Quiet candidate deck".into()).unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, added.seq.0)
+        .unwrap();
+    assert!(projection().facts.summary.pending_unheld > 0);
+    driver.validate(&candidate).unwrap();
+    let followups = host
+        .execute_cloud_policy_core(&candidate, Duration::from_secs(1))
+        .unwrap();
+    assert!(
+        followups
+            .iter()
+            .all(|c| matches!(c.action.kind, p::ActionKind::StatusChanged(_)))
+    );
+    assert!(driver.state().facts.summary.pending_unheld > 0);
+    assert_eq!(projection().evidence.quiet_ms, stamped);
+    assert_eq!(driver.state().quiet_serial, quiet_serial);
+    assert!(matches!(
+        host.execute_cloud_policy_core(&candidate, Duration::from_secs(1)),
+        Err(p::DriverError::UnqualifiedCompletion)
+    ));
+
+    // ACK only the genuinely captured deck against the existing Service
+    // protocol; the fixture's prebound baseline is not a Service publication.
+    let pending = captured_decks(&fixture, "Quiet candidate deck").pop().unwrap();
+    let requested = fixture
+        .workflow
+        .tracking_sendables()
+        .unwrap()
+        .into_iter()
+        .filter(|(name, _)| name == &pending.name)
+        .collect();
+    let batch = fixture
+        .workflow
+        .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), requested)
+        .unwrap()
+        .expect("observer-captured deck is sendable");
+    assert_eq!(batch.saves.len(), 1);
+    let record = &batch.saves[0];
+    assert_eq!(record.name, pending.name);
+    assert!(record.system_fields.is_none());
+    let directory = tempfile::tempdir().unwrap();
+    let mut server = Service::open(directory.path(), Config::default(), SeededRandom::new(114_143)).unwrap();
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    server
+        .request(
+            &scope,
+            Caller::default(),
+            Operation::CreateZone {
+                zone: sdk.collection_zone.clone(),
+            },
+        )
+        .unwrap()
+        .result
+        .unwrap();
+    let Reply::Modified(mut results) = server
+        .request(
+            &scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted(record.name.clone(), "MGEntity", record.envelope.clone()),
+                    if_unchanged: None,
+                }],
+            },
+        )
+        .unwrap()
+        .result
+        .unwrap()
+    else {
+        panic!("actual Service modify required")
+    };
+    assert_eq!(results.len(), 1);
+    let MutationSuccess::Saved(record) = results.pop().unwrap().result.unwrap() else {
+        panic!("actual Service Saved required")
+    };
+    let value = publication_control_record(&record).unwrap();
+    fixture
+        .workflow
+        .sent(
+            sdk.instance_id.clone(),
+            batch.id,
+            vec![CloudRecord {
+                name: record.name,
+                envelope: value.encrypted.unwrap(),
+                system_fields: Some(value.system_fields.0),
+                ..Default::default()
+            }],
+            vec![],
+            vec![],
+            vec![],
+            1,
+        )
+        .unwrap();
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    let clean = captured_decks(&fixture, "Quiet candidate deck").pop().unwrap();
+    assert_eq!((clean.local_rev, clean.acked_rev), (1, 1));
+    assert!(clean.mark.is_none() && clean.in_flight.is_empty());
+    assert!(clean.acked_payload == Some(pending.payload));
+    assert_eq!(projection().facts.summary.pending_unheld, 0);
+    let refreshed = host
+        .cloud_policy_input(p::DeviceEvent::Refresh(p::ChangeCause::Cloud))
+        .unwrap();
+    assert!(
+        !refreshed
+            .iter()
+            .any(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. }))
+    );
+    assert_eq!(driver.state().quiet_serial, quiet_serial);
+    assert_eq!(projection().evidence.quiet_ms, stamped);
+
+    fixture.clock.step_ms(1_000);
+    let later = fetch();
+    assert!(driver.state().quiet_serial > quiet_serial);
+    host.execute_cloud_policy_core(&later, Duration::from_secs(1)).unwrap();
+    assert_eq!(projection().evidence.quiet_ms, Some(NOW + 2_000));
+    // An actual Runtime guard invalidation must still fail before the quiet
+    // branch, including after new local work supersedes the observation.
+    fixture.clock.step_ms(1_000);
+    let stale = fetch();
+    let changed =
+        meguri_engine::decks::rename(&collection, added.value.id, "Quiet candidate deck edited".into()).unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, changed.seq.0)
+        .unwrap();
+    fixture.workflow.set_paused(true).unwrap();
+    assert!(matches!(
+        host.execute_cloud_policy_core(&stale, Duration::from_secs(1)),
+        Err(p::DriverError::StaleCommand)
+    ));
+    assert_eq!(projection().evidence.quiet_ms, Some(NOW + 2_000));
+    host.close().unwrap();
+}
+
+#[test]
 fn policy_empty_media_ledger_and_unqualified_completion_never_claim_success() {
     let (fixture, _, _) = rig();
     let policy = fixture.workflow.policy().unwrap();

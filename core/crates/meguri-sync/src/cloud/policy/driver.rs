@@ -638,27 +638,16 @@ impl Driver {
                     || owned.state.drained != [true, true]
                 {
                     #[cfg(feature = "test-hooks")]
-                    eprintln!(
-                        concat!(
-                            "cloud-policy-rejection stage=execute.quiet-preconditions ",
-                            "collection_known={} scan_clear={} pending={} in_flight={} ready={} ",
-                            "apply_in_progress={} unsettled_intents={} root_drained={} collection_drained={}"
-                        ),
-                        summary.collection_known,
-                        summary.scan == Scan::None,
-                        summary.pending_unheld,
-                        summary.in_flight,
-                        summary.ready,
-                        summary.apply_in_progress,
-                        summary.unsettled_intents,
-                        owned.state.drained[0],
-                        owned.state.drained[1],
-                    );
-                    return Err(DriverError::StaleCommand);
+                    eprintln!("cloud-policy-observation stage=execute.quiet-superseded");
+                    // Valid work can arrive after this drain qualified. Consume
+                    // its candidate without stamping or retrying the same drain.
+                    owned.issued_quiet = None;
+                    Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                } else {
+                    self.runtime
+                        .policy_record_quiet(guard, *at_ms)
+                        .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
                 }
-                self.runtime
-                    .policy_record_quiet(guard, *at_ms)
-                    .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
             }
             ActionKind::RecordExchange(record) => {
                 if owned.issued_records.get(&record.exchange) != Some(record) {
