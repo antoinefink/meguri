@@ -198,7 +198,7 @@ fn cleanup_listing_case(case: ListingCase) {
     assert_eq!(NativeFiles.identity(&path).unwrap(), published.native_file);
     let collection = host.collection().unwrap();
     let media = host.media().unwrap();
-    let instance = runtime.instance().unwrap();
+    let (instance, _, _) = runtime.register_sdk(false).unwrap();
     let initial_request = runtime.begin_zone_listing(&instance, &collection).unwrap();
     let initial = listing(&mut service);
     runtime
@@ -237,7 +237,62 @@ fn cleanup_listing_case(case: ListingCase) {
             )
             .unwrap()
     );
-    runtime.publication_collection_drained(&instance).unwrap();
+    let fetch = runtime
+        .adapter_begin_fetch(&instance, vec![current_zone.clone()])
+        .unwrap();
+    runtime
+        .adapter_will_fetch(&instance, "cleanup-proof".into(), true)
+        .unwrap();
+    runtime
+        .adapter_fetch_zone(&instance, current_zone.clone(), true, false)
+        .unwrap();
+    let mut token = None;
+    loop {
+        let response = service
+            .request(
+                &scope(),
+                Caller {
+                    instance: Some(instance.clone()),
+                    ..Caller::default()
+                },
+                Operation::FetchZone {
+                    zone: current_zone.clone(),
+                    token,
+                },
+            )
+            .unwrap();
+        let Ok(Reply::ZoneChanges(page)) = response.result else {
+            panic!("actual collection fetch required")
+        };
+        let records = page
+            .changes
+            .into_iter()
+            .filter_map(|change| match change {
+                RecordChange::Saved(record) => Some(meguri_sync::cloud::workflow::Saved {
+                    name: record.name,
+                    envelope: match record.fields.get("e") {
+                        Some(Field::EncryptedBytes(e)) => e.clone(),
+                        _ => panic!("encrypted record"),
+                    },
+                    system_fields: record.system_fields.bytes().to_vec(),
+                }),
+                RecordChange::Deleted { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        runtime
+            .adapter_fetched(&instance, &current_zone, &records, &[])
+            .unwrap();
+        if !page.more {
+            break;
+        }
+        token = Some(page.token);
+    }
+    runtime
+        .adapter_fetch_zone(&instance, current_zone.clone(), false, false)
+        .unwrap();
+    runtime.adapter_did_fetch(&instance, "cleanup-proof", true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&instance, fetch).unwrap());
+    runtime.publication_collection_drained(&instance, &collection).unwrap();
     assert!(runtime.publication_control_for_testing().unwrap().zones[&old_zone].deletion_due);
 
     // A21 false: an own all-zone inventory is captured now and kept verbatim.

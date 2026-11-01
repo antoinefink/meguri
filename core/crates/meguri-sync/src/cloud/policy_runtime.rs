@@ -203,6 +203,7 @@ impl Runtime {
             tracking_stopped: s.tracking_stopped,
             root_confirmed: s.root_confirmed,
             drains: s.adapter.durable.drains.clone(),
+            cleanup_drain: s.publication.cleanup_drain.clone(),
             backend_guard: Self::adapter_guard_locked(&s),
         })
     }
@@ -211,6 +212,7 @@ impl Runtime {
         guard: &crate::cloud::adapter::Guard,
         update: Update,
     ) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);

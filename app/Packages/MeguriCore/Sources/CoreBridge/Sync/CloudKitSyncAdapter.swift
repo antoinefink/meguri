@@ -23,6 +23,25 @@ private actor CloudSDKDelegate: CloudKitEngineDelegate {
     }
 }
 
+// Used only after Core accepts the original complete receipt. Keep a normal
+// delete absence in diagnostics while allowing the media worker to continue.
+struct CloudMediaSendReceipt {
+    private struct RecordError: Error { let record: CloudRecordFailure }
+    let diagnostic: CloudKitSDKOperationFailure?
+    let blocking: CloudKitSDKOperationFailure?
+    init(failed: [CloudRecordFailure], failedDeletes: [CloudRecordFailure]) {
+        let original = failed + failedDeletes
+        let delay = original.compactMap(\.retryAfterMilliseconds).max()
+        func failure(_ record: CloudRecordFailure) -> CloudKitSDKOperationFailure {
+            .init(underlying: RecordError(record: record), code: record.nativeCode ?? 0,
+                  retryAfterMilliseconds: delay)
+        }
+        diagnostic = original.first { $0.zone == "meguri-media" }.map(failure)
+        let errors = failed + failedDeletes.filter { $0.code != .unknownItem }
+        blocking = errors.first { $0.zone == "meguri-media" }.map(failure)
+    }
+}
+
 public actor CloudKitSyncAdapter {
     private final class AssetReadRequest {
         let id: UUID
@@ -514,14 +533,14 @@ public actor CloudKitSyncAdapter {
             case .databaseChanges: break
             case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
             case .fetched(let zone, let records, let deleted): try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
-            case .sent(let id, let saved, let failed, let deleted):
-                guard deleted.isEmpty else { throw BridgeError.internal("Cloud deletion acknowledgement is unavailable") }
-                let actualSaved = try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count))
+            case .sent(let id, let saved, let failed, let deleted, let failedDeletes):
+                let actualSaved = try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, deleted: deleted, failedDeletes: failedDeletes, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count + deleted.count + failedDeletes.count))
                 instance.operationSaved += actualSaved
-                if let actual = failed.first(where: { $0.zone == "meguri-media" && $0.nativeCode != nil }) {
-                    instance.mediaSendFailure = .init(underlying: CloudMediaFailure.queueRejected, code: actual.nativeCode!,
-                        retryAfterMilliseconds: failed.compactMap(\.retryAfterMilliseconds).max())
-                }
+                let receipt = CloudMediaSendReceipt(failed: failed, failedDeletes: failedDeletes)
+                if let diagnostic = receipt.diagnostic { lastFailure = diagnostic }
+                // A prior blocking result in this same SDK operation remains
+                // blocking even when a later callback reports normal absence.
+                if let failure = receipt.blocking { instance.mediaSendFailure = failure }
             case .accountChanged(let change, let identity):
                 if change == .switchAccounts {
                     try await core.accountChanged(sdk: origin, status: .switchedAccounts, identity: nil)

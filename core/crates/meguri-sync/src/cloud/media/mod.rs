@@ -1,4 +1,5 @@
 pub mod blob;
+pub(crate) mod cleanup;
 pub(crate) mod io;
 pub(crate) mod store;
 use super::{entity_codec as c, runtime::NativeFileIdentity, *};
@@ -31,6 +32,10 @@ pub struct BlobState {
     pub staged: Option<PathBuf>,
     pub recheck_at: Option<i64>,
     pub rechecked: bool,
+    #[serde(default)]
+    pub unreferenced_since_ms: Option<i64>,
+    #[serde(default)]
+    pub deletion_due_ms: Option<i64>,
 }
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NameState {
@@ -63,6 +68,8 @@ pub(crate) struct Ledger {
     pub blobs: BTreeMap<String, BlobState>,
     pub adoption: bool,
     pub zone_missing: bool,
+    #[serde(default)]
+    pub cleanup_drain_ms: Option<i64>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Authority {
@@ -77,6 +84,9 @@ pub struct Authority {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Request {
+    Delete {
+        name: String,
+    },
     Root,
     Read {
         name: String,
@@ -143,6 +153,7 @@ pub(crate) enum Selection {
 #[derive(Default)]
 pub(crate) struct Process {
     pub epoch: u64,
+    pub observed_now_ms: i64,
     pub pending: Option<Work>,
     pub metadata_pending: Option<Work>,
     pub next: u64,

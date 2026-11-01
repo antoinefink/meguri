@@ -153,3 +153,84 @@ extension CloudMediaTests {
         await #expect(throws: CloudMediaFailure.self) { try await stale.deliver(73) }
     }
 }
+
+
+extension CloudMediaTests {
+    @Test func acceptedDeleteAbsenceIsDiagnosticAndDoesNotStopTheMediaRound() throws {
+        let missing = CloudRecordFailure(name: "blob", code: .unknownItem, zone: "meguri-media", nativeCode: 11)
+        let receipt = CloudMediaSendReceipt(failed: [], failedDeletes: [missing])
+        #expect(receipt.blocking == nil)
+        #expect(receipt.diagnostic?.code == 11)
+        // The same result for a SAVE is an error, never deletion evidence.
+        #expect(CloudMediaSendReceipt(failed: [missing], failedDeletes: []).blocking?.code == 11)
+        let denied = CloudRecordFailure(name: "other", code: .other, zone: "meguri-media", nativeCode: 12)
+        for saveFailure in [false, true] {
+            let mixed = CloudMediaSendReceipt(failed: saveFailure ? [denied] : [],
+                failedDeletes: saveFailure ? [missing] : [missing, denied])
+            #expect(mixed.blocking?.code == 12)
+            #expect(mixed.diagnostic?.code == 11 || mixed.diagnostic?.code == 12)
+        }
+    }
+
+    @Test func deletionOnlyThrottleAndMixedReceiptsRetainOriginalMaximumDelay() throws {
+        let missing = CloudRecordFailure(name: "absent", code: .unknownItem, zone: "meguri-media", nativeCode: 11)
+        let deletion = CloudRecordFailure(name: "delete", code: .requestRateLimited, zone: "meguri-media",
+            nativeCode: 7, retryAfterMilliseconds: 120_000)
+        let save = CloudRecordFailure(name: "save", code: .serviceUnavailable, zone: "meguri-media",
+            nativeCode: 6, retryAfterMilliseconds: 30_000)
+        let only = try #require(CloudMediaSendReceipt(failed: [], failedDeletes: [missing, deletion]).blocking)
+        #expect(only.code == 7 && only.retryAfterMilliseconds == 120_000)
+        let mixed = try #require(CloudMediaSendReceipt(failed: [save], failedDeletes: [missing, deletion]).blocking)
+        #expect(mixed.code == 6 && mixed.retryAfterMilliseconds == 120_000)
+        // Metadata inputs retain their original per-record attribution.
+        #expect(deletion.name == "delete" && deletion.zone == "meguri-media" && deletion.nativeCode == 7)
+        #expect(save.retryAfterMilliseconds == 30_000)
+    }
+}
+
+extension EventTests {
+    @Test func originalFakeSDKCannotTurnAnInvalidDeleteAbsenceIntoAcceptedBookkeeping() async throws {
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            let batch = try #require(await engine.requestRetainedBatch(zone: f.zone))
+            let before = try await f.core.durableSnapshot()
+            let name = try #require(batch.saves.first?.name)
+            // This name was handed as a save. Only original Core validation
+            // can decide whether a delete receipt belongs to a retained Work.
+            await engine.emitRetained(.sent(batchID: batch.id, saved: [], failed: [], deleted: [],
+                failedDeletes: [.init(name: name, code: .unknownItem, zone: "meguri-media", nativeCode: 11)]),
+                label: "invalidDeleteAbsence")
+            #expect(await f.adapter.lastFailure != nil)
+            let after = try await f.core.durableSnapshot()
+            #expect(after.entities == before.entities)
+        }
+    }
+
+    @Test func deletionReceiptDelayReachesActualPolicyErrorFacts() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, _) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let failure = try #require(CloudMediaSendReceipt(failed: [], failedDeletes: [
+                .init(name: "delete", code: .requestRateLimited, zone: "meguri-media", nativeCode: 7,
+                      retryAfterMilliseconds: 120_000)
+            ]).blocking)
+            _ = try await policy.input(.operationError(instance: engine.instanceID,
+                operation: .init(zone: .media, kind: .send), error: .throttled,
+                code: failure.code, retryAfterMilliseconds: failure.retryAfterMilliseconds))
+            let error = try #require(try await policy.status().error)
+            #expect(error.code == 7 && error.retryAfterMilliseconds == 120_000)
+            #expect(error.operation == .init(zone: .media, kind: .send))
+        }
+    }
+}
+
+
+extension CloudMediaTests {
+    @Test func failedRecordMappingPreservesOriginalNativeMetadata() {
+        let failure = CloudRecordFailure(name: "original-delete", code: .requestRateLimited,
+            zone: "meguri-media", nativeCode: 7, retryAfterMilliseconds: 120_000)
+        let raw = failure.raw
+        #expect(raw.name == failure.name && raw.zone == failure.zone)
+        #expect(raw.nativeCode == 7 && raw.retryAfterMs == 120_000)
+    }
+}

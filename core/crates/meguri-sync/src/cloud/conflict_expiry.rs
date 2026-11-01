@@ -184,6 +184,57 @@ fn queue(tx: &Transaction<'_>, name: &str, evidence: &Unlink) -> Result<(), Erro
     Ok(())
 }
 
+pub(super) fn expire_in_transaction(tx: &Transaction<'_>, root: &Path, now_ms: i64) -> Result<usize, Error> {
+    tx.execute_batch(UNLINKS)?;
+    let rows: Vec<(Vec<u8>, String)> = {
+        let mut q = tx.prepare("SELECT binding,content FROM conflicts ORDER BY id")?;
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    let mut owners = BTreeSet::new();
+    let mut staged = Vec::new();
+    let mut count = 0;
+    for (owner, content) in rows {
+        let copy: ConflictCopy = decode(&content)?;
+        if !copy
+            .resolved_at_ms
+            .and_then(|resolved| now_ms.checked_sub(resolved))
+            .is_some_and(|age| age >= RETENTION_MS)
+        {
+            continue;
+        }
+        if copy.kind == ConflictKind::MediaName
+            && let Some(path) = copy.staged_path.as_deref()
+            && let Some(owned) = capture(root, Path::new(path))?
+        {
+            staged.push(owned);
+        }
+        tx.execute("DELETE FROM conflicts WHERE id=?1", [copy.id.0.as_slice()])?;
+        owners.insert(owner);
+        count += 1;
+    }
+    let live = references(tx, root)?;
+    for (name, evidence) in staged {
+        if !retained(&live, &root.join(STAGING).join(&name)) {
+            queue(tx, &name, &evidence)?;
+        }
+    }
+    for owner in owners {
+        let owner = binding_id(owner)?;
+        let remaining: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM conflicts WHERE binding=?1)",
+            [owner.0.as_slice()],
+            |r| r.get(0),
+        )?;
+        if remaining || has_work(tx, owner)? {
+            continue;
+        }
+        tx.execute("DELETE FROM bindings WHERE id=?1 AND active=0", [owner.0.as_slice()])?;
+        tx.execute("DELETE FROM salvage_bindings WHERE id=?1", [owner.0.as_slice()])?;
+    }
+    Ok(count)
+}
+
 impl TrackingStore {
     /// P10.3 item 4's single transaction, across ALL owners/builds. Caller
     /// excludes other tracking and staging writers through finish/recovery.
@@ -194,53 +245,7 @@ impl TrackingStore {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch(UNLINKS)?;
-        let rows: Vec<(Vec<u8>, String)> = {
-            let mut q = tx.prepare("SELECT binding,content FROM conflicts ORDER BY id")?;
-            q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?
-        };
-        let mut owners = BTreeSet::new();
-        let mut staged = Vec::new();
-        let mut count = 0;
-        for (owner, content) in rows {
-            let copy: ConflictCopy = decode(&content)?;
-            if !copy
-                .resolved_at_ms
-                .and_then(|resolved| now_ms.checked_sub(resolved))
-                .is_some_and(|age| age >= RETENTION_MS)
-            {
-                continue;
-            }
-            if copy.kind == ConflictKind::MediaName
-                && let Some(path) = copy.staged_path.as_deref()
-                && let Some(owned) = capture(root, Path::new(path))?
-            {
-                staged.push(owned);
-            }
-            tx.execute("DELETE FROM conflicts WHERE id=?1", [copy.id.0.as_slice()])?;
-            owners.insert(owner);
-            count += 1;
-        }
-        let live = references(&tx, root)?;
-        for (name, evidence) in staged {
-            if !retained(&live, &root.join(STAGING).join(&name)) {
-                queue(&tx, &name, &evidence)?;
-            }
-        }
-        for owner in owners {
-            let owner = binding_id(owner)?;
-            let remaining: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM conflicts WHERE binding=?1)",
-                [owner.0.as_slice()],
-                |r| r.get(0),
-            )?;
-            if remaining || has_work(&tx, owner)? {
-                continue;
-            }
-            tx.execute("DELETE FROM bindings WHERE id=?1 AND active=0", [owner.0.as_slice()])?;
-            tx.execute("DELETE FROM salvage_bindings WHERE id=?1", [owner.0.as_slice()])?;
-        }
+        let count = expire_in_transaction(&tx, root, now_ms)?;
         tx.commit()?;
         Ok(count)
     }

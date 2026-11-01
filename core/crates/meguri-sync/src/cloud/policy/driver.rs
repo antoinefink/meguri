@@ -19,6 +19,8 @@ pub struct Command {
     /// Opening identity, independent of the SDK instance used at an exchange step.
     pub owner: String,
     backend_guard: crate::cloud::adapter::Guard,
+    // Part of command equality: an old handle cannot consume a later drain.
+    cleanup_drain: Option<crate::cloud::publication::CleanupDrain>,
 }
 #[derive(Clone, Debug)]
 pub enum DeviceEvent {
@@ -116,6 +118,7 @@ struct Owned {
     last_owner: String,
     issued_records: BTreeMap<u64, ExchangeRecord>,
     issued_quiet: Option<(Guard, i64)>,
+    issued_cleanup: Option<Command>,
 }
 /// No Host/Collection strong reference. Every collection operation borrows its current handle.
 pub struct Driver {
@@ -265,6 +268,7 @@ impl Driver {
         ended_ms: Option<i64>,
     ) -> Result<Vec<Command>, DriverError> {
         let now_ms = ended_ms.unwrap_or_else(|| self.clock.now_ms());
+        let cleanup_before = owned.state.last_cleanup_ms;
         let ended_session = match self.runtime.instance() {
             Ok(instance) => self.runtime.poll_review(&instance)?,
             Err(_) => None,
@@ -291,6 +295,7 @@ impl Driver {
             owned.captures.clear();
             owned.issued_records.clear();
             owned.issued_quiet = None;
+            owned.issued_cleanup = None;
             owned.last_owner = owner.clone();
             owned.sdk = None;
             owned.drain_offset = projection.drains.len();
@@ -436,14 +441,60 @@ impl Driver {
                 _ => {}
             }
         }
-        Ok(actions
+        let commands = actions
             .into_iter()
-            .map(|action| Command {
-                action,
-                owner: owner.clone(),
-                backend_guard: projection.backend_guard.clone(),
+            .map(|action| {
+                let cleanup_drain = if action.kind == ActionKind::RunCleanup {
+                    projection.cleanup_drain.clone()
+                } else {
+                    None
+                };
+                Command {
+                    action,
+                    owner: owner.clone(),
+                    backend_guard: projection.backend_guard.clone(),
+                    cleanup_drain,
+                }
             })
-            .collect())
+            .collect::<Vec<_>>();
+        for command in &commands {
+            if command.action.kind == ActionKind::RunCleanup {
+                owned.issued_cleanup = Some(command.clone());
+                // Issuance is not a committed cleanup. Failures/cancellation
+                // cannot advance the 24h marker or refresh a blob's 1h mark.
+                owned.state.last_cleanup_ms = cleanup_before;
+            }
+        }
+        Ok(commands)
+    }
+    /// Local P10.3 port for a retained, issued cleanup command. Native's full
+    /// RunCleanup still awaits the later inventory observation/integration.
+    /// The caller cannot substitute a timestamp; qualification is consumed once.
+    pub fn compute_qualified_local_cleanup(
+        &self,
+        command: &Command,
+        collection: &Collection,
+    ) -> Result<(), DriverError> {
+        let (receipt, sdk) = {
+            let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+            self.validate_locked(&owned, command)?;
+            if owned.issued_cleanup.as_ref() != Some(command) || command.action.kind != ActionKind::RunCleanup {
+                return Err(DriverError::UnqualifiedCompletion);
+            }
+            let issued = owned.issued_cleanup.take().ok_or(DriverError::UnqualifiedCompletion)?;
+            (
+                issued.cleanup_drain.ok_or(DriverError::UnqualifiedCompletion)?,
+                owned.sdk.clone().ok_or(DriverError::StaleCommand)?,
+            )
+        };
+        // Runtime samples original providers before locking its state. Do not
+        // retain the Driver mutex across those foreign callbacks either.
+        self.runtime
+            .compute_policy_local_cleanup(&command.backend_guard, &sdk, collection, &receipt)?;
+        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.validate_locked(&owned, command)?;
+        owned.state.last_cleanup_ms = Some(receipt.2);
+        Ok(())
     }
     pub fn validate(&self, command: &Command) -> Result<(), DriverError> {
         let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
@@ -574,7 +625,10 @@ impl Driver {
                     .policy_record_exchange(collection, guard, &command.owner, record)
                     .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
             }
-            ActionKind::RunCleanup => return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup")),
+            ActionKind::RunCleanup => {
+                owned.issued_cleanup = None;
+                return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup"));
+            }
             ActionKind::StatusChanged(_) => return Ok(Vec::new()),
             _ => return Err(DriverError::NotCoreAction),
         };
@@ -606,6 +660,7 @@ impl Driver {
                         action,
                         owner: command.owner.clone(),
                         backend_guard: backend_guard.clone(),
+                        cleanup_drain: None,
                     })
                     .collect();
                 Err(DriverError::CoreActionFailed { error, commands })

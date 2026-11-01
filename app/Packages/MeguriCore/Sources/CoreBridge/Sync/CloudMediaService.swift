@@ -8,10 +8,12 @@ public enum CloudMediaFailure: Error, Sendable {
 }
 public enum CloudMediaRequest: Sendable, Equatable {
     case root, read(name: String), reads(names: [String]), download(name: String)
+    case delete(name: String)
     case upload(name: String, envelope: Data, stagedPath: String)
     var downloadsAsset: Bool { if case .download = self { true } else { false } }
     init(_ raw: MeguriCoreBindings.CloudMediaRequest) {
         switch raw {
+        case .delete(let name): self = .delete(name: name)
         case .root: self = .root
         case .read(let name): self = .read(name: name)
         case .reads(let names): self = .reads(names: names)
@@ -163,6 +165,10 @@ public actor CloudMediaExecutor {
             case .read, .reads: break
             default: throw CloudMediaFailure.metadataScope
             }
+        }
+        if case .delete(let name) = work.request {
+            guard queued.insert(name).inserted else { return .idle }
+            return .engineSendRequired
         }
         if case .upload(let name, _, _) = work.request {
             guard queued.insert(name).inserted else { return .idle }

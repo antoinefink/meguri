@@ -224,6 +224,8 @@ pub enum PublicationWork {
     SendEntities,
     Idle,
 }
+pub(crate) type CleanupDrain = (super::adapter::Guard, String, i64);
+
 #[derive(Default)]
 pub(crate) struct ProcessState {
     pub next_preview: u64,
@@ -235,6 +237,7 @@ pub(crate) struct ProcessState {
     pub own_epoch_read: bool,
     pub waiting: bool,
     pub last_cleanup_ms: Option<i64>,
+    pub cleanup_drain: Option<CleanupDrain>,
     pub restarted_confirmed: bool,
 }
 macro_rules! opaque_debug {($($t:ty),+)=>{$(impl std::fmt::Debug for $t {

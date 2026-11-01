@@ -516,6 +516,8 @@ fn new_deck_real_service_saved_ack_and_next_edit_keep_origin_revision_and_base()
                     ..Default::default()
                 }],
                 vec![],
+                vec![],
+                vec![],
                 1,
             )
             .unwrap();

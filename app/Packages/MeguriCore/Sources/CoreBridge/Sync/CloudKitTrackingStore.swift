@@ -168,9 +168,9 @@ public actor CoreCloudWorkflowService {
         }
     }
     @discardableResult
-    func sent(sdk: String, batchID: UInt64, saved: [CloudRecord], failed: [CloudRecordFailure], batchCount: UInt32) async throws -> UInt64 {
+    func sent(sdk: String, batchID: UInt64, saved: [CloudRecord], failed: [CloudRecordFailure], deleted: [String], failedDeletes: [CloudRecordFailure], batchCount: UInt32) async throws -> UInt64 {
         let raw = try await owner()
-        return try await MaintenanceLane.shared.call(.cloudWorkflowSent) { try raw.sent(sdk: sdk, batchId: batchID, saved: saved.map(\.raw), failed: failed.map(\.raw), batchCount: batchCount) }
+        return try await MaintenanceLane.shared.call(.cloudWorkflowSent) { try raw.sent(sdk: sdk, batchId: batchID, saved: saved.map(\.raw), failed: failed.map(\.raw), deleted: deleted, failedDelete: failedDeletes.map(\.raw), batchCount: batchCount) }
     }
      func handlerReturned(sdk: String) async throws -> Void {
         let raw = try await owner()

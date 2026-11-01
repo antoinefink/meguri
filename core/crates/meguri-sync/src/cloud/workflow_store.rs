@@ -485,6 +485,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         b: BindingId,
         saved: &Saved,
         received: codec::Received,
+        now_ms: i64,
     ) -> Result<bool, Error> {
         if received.entity.fields.tombstone
             && matches!(
@@ -495,7 +496,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             return self.acknowledge_row_tombstone(b, saved, received);
         }
         if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
-            return self.acknowledge_media_tombstone(b, saved, received);
+            return self.acknowledge_media_tombstone(b, saved, received, now_ms);
         }
         let mut h = self.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?;
         let e = &h.facts;
@@ -514,12 +515,31 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             .position(|f| f.payload_digest == digest && f.erev == received.entity.fields.erev)
             .ok_or(Error::InvalidData)?;
         let flight_rev = e.in_flight[index].local_rev;
+        // Header payloads can be placeholders. Materialize the complete prior
+        // local/ACK images before replacing the header's ACK references.
+        let prior_media = if h.facts.kind == codec::Kind::MediaName {
+            Some(self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?)
+        } else {
+            None
+        };
+        let mut media_ledger = prior_media.as_ref().map(|_| self.media_ledger(b)).transpose()?;
         h.ack(index, saved)?;
+        let media_removal_pending = media_ledger.as_ref().is_some_and(|ledger| {
+            std::str::from_utf8(&h.facts.key)
+                .ok()
+                .and_then(|key| ledger.names.get(key))
+                .is_some_and(|name| name.tombstone_at.is_some())
+        });
+        if media_removal_pending {
+            h.facts.acked_rev = flight_rev;
+        }
         // Undo may have made the row clean against the previous ACK while an
         // older save was still unconfirmed. The new ACK makes that local row
         // pending again; it must remain sendable without another host edit.
         let state = if h.facts.mark.is_none()
-            && (h.facts.tombstone_at.is_some() || h.images.local_row_digest != h.facts.acked_row_digest)
+            && (media_removal_pending
+                || h.facts.tombstone_at.is_some()
+                || h.images.local_row_digest != h.facts.acked_row_digest)
         {
             let mut state = self.runtime_binding(b)?;
             if h.facts.local_rev <= flight_rev {
@@ -537,7 +557,14 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         };
         let pending = h.facts.mark.is_some();
         let tx = self.connection.transaction()?;
+        if let Some(ledger) = &mut media_ledger {
+            super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+        }
         super::tracking_payload::put_header(&tx, b, &h)?;
+        if let Some(ledger) = &mut media_ledger {
+            super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+            super::media::store::put_ledger(&tx, b, ledger)?;
+        }
         if let Some(state) = state {
             put_binding(&tx, b, &state)?;
         }

@@ -45,6 +45,13 @@ fn same(a: Option<&codec::MediaName>, b: Option<&codec::MediaName>) -> bool {
     a == b
 }
 impl Runtime {
+    /// Read the persisted blob ledger without advancing media work or policy.
+    #[cfg(feature = "test-hooks")]
+    pub fn media_blobs_for_testing(&self) -> Result<BTreeMap<String, BlobState>, RuntimeError> {
+        let s = self.state();
+        let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+        with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.media_ledger(binding)?.blobs))
+    }
     #[cfg(feature = "test-hooks")]
     pub fn media_conflicts_for_testing(&self) -> Result<Vec<ConflictCopy>, RuntimeError> {
         let s = self.state();
@@ -170,6 +177,7 @@ impl Runtime {
         work()
     }
     fn put_media_state(&self, a: &Authority, ledger: &Ledger) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         Self::check_media_locked(&s, a)?;
         let changed = with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.put_media(a.binding, ledger))?;
@@ -185,6 +193,7 @@ impl Runtime {
         Ok(())
     }
     fn finish_media_pending(&self, a: &Authority) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         Self::check_media_locked(&s, a)?;
         self.notify_media_pending_locked(&mut s, false)
@@ -399,6 +408,7 @@ impl Runtime {
         }
         feed_state.feed = Some((feed.status.feed_id.0, feed.status.counter));
         media.check_generation(a.generation)?;
+        let now_ms = self.media_now()?;
         let mut state = self.state();
         let bound = state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if bound.binding.id != a.binding
@@ -411,6 +421,7 @@ impl Runtime {
         if let Some((authority, ..)) = &apply_commit {
             Self::check_media_recovery_locked(&state, authority)?;
         }
+        state.media.observed_now_ms = now_ms;
         let (changed_work, retained_floor) = with_tracking_access(|| -> Result<_, Error> {
             let store = state.store.as_mut().ok_or(Error::Database)?;
             let changed_work = store.commit_media_feed(
@@ -418,6 +429,7 @@ impl Runtime {
                 &feed_state,
                 &file_changes,
                 (a.open, collection.last_seq().0, a.generation),
+                now_ms,
                 apply_commit
                     .as_ref()
                     .map(|(_, intent, _, proposals, clear)| (intent, proposals.as_slice(), *clear)),
@@ -435,13 +447,7 @@ impl Runtime {
         Ok(feed.items.len())
     }
     fn media_now(&self) -> Result<i64, RuntimeError> {
-        let clock = self
-            .adapter_clock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or(Error::InvalidData)?;
-        Ok(clock.now_ms())
+        self.adapter_now()
     }
     pub fn resume_cloud_media(&self) {
         let mut s = self.state();
@@ -782,6 +788,14 @@ impl Runtime {
                         });
                         break;
                     }
+                }
+            }
+            if request.is_none() && selection == Selection::Resume {
+                let now = self.media_now()?;
+                let due = self.with_media(&a, |store| store.media_deletions(a.binding, now, true))?;
+                let s = self.state();
+                if let Some(name) = due.into_iter().find(|name| !s.policy.parked.contains(name)) {
+                    request = Some(Request::Delete { name });
                 }
             }
             if let Some(Request::Download { name }) = &request {
@@ -2024,7 +2038,7 @@ fn rewrite_note(
 impl Runtime {
     pub fn validate_cloud_media_work(&self, collection: &Collection, work: &Work) -> Result<(), RuntimeError> {
         let mut current = self.media_authority(collection, true)?;
-        if matches!(work.request, Request::Upload { .. }) {
+        if matches!(work.request, Request::Upload { .. } | Request::Delete { .. }) {
             current.media_epoch = work.authority.media_epoch;
         }
         if self.publication_account()? != work.authority.account || current != work.authority {
@@ -2034,6 +2048,7 @@ impl Runtime {
         Self::check_media_locked(&s, &work.authority)?;
         if s.media.pending.as_ref() != Some(work)
             && s.media.metadata_pending.as_ref() != Some(work)
+            && !s.actions.media_batches.values().any(|original| original == work)
             && !s
                 .actions
                 .media_upload

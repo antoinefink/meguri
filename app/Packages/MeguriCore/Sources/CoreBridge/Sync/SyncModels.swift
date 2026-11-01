@@ -52,7 +52,8 @@ public struct CloudRecordFailure: Sendable, Equatable {
         self.name = name; self.code = code; self.zone = zone; self.nativeCode = nativeCode; self.retryAfterMilliseconds = retryAfterMilliseconds
         self.serverRecord = serverRecord
     }
-    var raw: MeguriCoreBindings.CloudRecordFailure { .init(name: name, code: code.raw, serverRecord: serverRecord?.raw) }
+    var raw: MeguriCoreBindings.CloudRecordFailure { .init(name: name, code: code.raw, serverRecord: serverRecord?.raw, zone: zone,
+        nativeCode: nativeCode, retryAfterMs: retryAfterMilliseconds) }
 }
 public enum CloudFetchReason: Sendable, Equatable { case manual, scheduled }
 public enum CloudAccountChange: Sendable, Equatable { case signIn, signOut, switchAccounts }
@@ -72,7 +73,7 @@ public enum CloudEngineEvent: Sendable, Equatable {
     case stateUpdate(Data)
     case accountChanged(change: CloudAccountChange, identity: Data?)
     case fetched(zone: String, records: [CloudRecord], deleted: [String])
-    case sent(batchID: UInt64, saved: [CloudRecord], failed: [CloudRecordFailure], deleted: [String])
+    case sent(batchID: UInt64, saved: [CloudRecord], failed: [CloudRecordFailure], deleted: [String], failedDeletes: [CloudRecordFailure] = [])
     case willFetch(groupID: String, reason: CloudFetchReason)
     case willFetchZone(zone: String)
     case didFetchZone(zone: String, error: CloudEngineErrorCode?)

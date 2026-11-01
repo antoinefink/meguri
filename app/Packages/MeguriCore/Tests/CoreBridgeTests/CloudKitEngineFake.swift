@@ -332,7 +332,12 @@ actor CloudKitEngineFake: CloudKitEngine {
                     for name in names { pending.removeValue(forKey: name) }
                 }
             }
-            let sent = CloudEngineEvent.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted)
+            let deleteNames = Set(batch.deletes)
+            let failedDeletes = failed.filter { deleteNames.contains($0.name) }.map {
+                CloudRecordFailure(name: $0.name, code: $0.code, zone: zone)
+            }
+            failed.removeAll { deleteNames.contains($0.name) }
+            let sent = CloudEngineEvent.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted, failedDeletes: failedDeletes)
             await deliver(sent, label: "sent", notifyBookkeeping: false, savedToRemove: saved.map(\.name) + deleted)
             if let gate = afterSent { afterSent = nil; await waitInCall(gate) }
             if !a23 {

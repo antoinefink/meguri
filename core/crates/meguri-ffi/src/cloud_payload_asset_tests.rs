@@ -242,7 +242,15 @@ fn ordinary_pa_large_note_real_save_ack_preserves_later_local_revision() {
     let callback = callback_record(&saved, &sdk.collection_zone, download.path());
     fixture
         .workflow
-        .sent(sdk.instance_id.clone(), batch.id, vec![callback], vec![], 1)
+        .sent(
+            sdk.instance_id.clone(),
+            batch.id,
+            vec![callback],
+            vec![],
+            vec![],
+            vec![],
+            1,
+        )
         .expect("actual pa-bearing Saved must ACK the handed revision");
     fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
     let acked = note_facts(&fixture, id);
@@ -545,7 +553,15 @@ fn held_automatic_pa_after_resume(disposition: u8) {
     if disposition == 0 {
         fixture
             .workflow
-            .sent(sdk.instance_id.clone(), batch.id, vec![callback], vec![], 1)
+            .sent(
+                sdk.instance_id.clone(),
+                batch.id,
+                vec![callback],
+                vec![],
+                vec![],
+                vec![],
+                1,
+            )
             .unwrap();
         assert_eq!(std::fs::read(path).unwrap(), bytes);
         let acked = note_facts(&fixture, id);
@@ -568,7 +584,15 @@ fn held_automatic_pa_after_resume(disposition: u8) {
             assert!(
                 fixture
                     .workflow
-                    .sent(sdk.instance_id.clone(), batch.id, vec![callback.clone()], vec![], 1)
+                    .sent(
+                        sdk.instance_id.clone(),
+                        batch.id,
+                        vec![callback.clone()],
+                        vec![],
+                        vec![],
+                        vec![],
+                        1
+                    )
                     .is_err()
             );
         }
@@ -578,7 +602,15 @@ fn held_automatic_pa_after_resume(disposition: u8) {
         assert!(
             fixture
                 .workflow
-                .sent(sdk.instance_id.clone(), batch.id, vec![callback.clone()], vec![], 1)
+                .sent(
+                    sdk.instance_id.clone(),
+                    batch.id,
+                    vec![callback.clone()],
+                    vec![],
+                    vec![],
+                    vec![],
+                    1
+                )
                 .is_err()
         );
         assert_eq!(note_facts(&fixture, id).acked_rev, original.acked_rev);
@@ -601,7 +633,15 @@ fn held_automatic_pa_after_resume(disposition: u8) {
             assert!(
                 fixture
                     .workflow
-                    .sent(successor.instance_id, batch.id, vec![callback], vec![], 1)
+                    .sent(
+                        successor.instance_id,
+                        batch.id,
+                        vec![callback],
+                        vec![],
+                        vec![],
+                        vec![],
+                        1
+                    )
                     .is_err()
             );
             assert_eq!(note_facts(&fixture, id).acked_rev, original.acked_rev);

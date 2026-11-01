@@ -873,6 +873,7 @@ impl Runtime {
         result: OwnResult,
         collection: &Collection,
     ) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         if result == OwnResult::NotStarted {
             let mut s = self.state();
             if s.publication.running.as_ref() != Some(request) || s.publication.submitted {
@@ -1235,27 +1236,54 @@ impl Runtime {
         Ok(())
     }
     /// Called from a real collection drain; no timer makes a zone due.
-    pub fn publication_collection_drained(&self, instance: &str) -> Result<(), RuntimeError> {
-        let now = self.adapter_now()?;
+    pub fn publication_collection_drained(&self, instance: &str, collection: &Collection) -> Result<(), RuntimeError> {
+        let now_ms = self.adapter_now()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let account = self.publication_account()?;
         let mut s = self.state();
-        Self::caller_locked(&s, instance)?;
-        if !s.root_confirmed || Self::publication_allows_send_locked(&s) || Self::gate_locked(&s).is_err() {
+        Self::sdk_locked(&s, instance)?;
+        let Some((guard, sdk, at_ms)) = s.publication.cleanup_drain.take() else {
             return Ok(());
-        }
-        if s.publication
-            .last_cleanup_ms
-            .is_some_and(|last| now.checked_sub(last).is_none_or(|age| age < 86_400_000))
+        };
+        if guard != Self::adapter_guard_locked(&s)
+            || sdk != instance
+            || now_ms
+                .checked_sub(at_ms)
+                .is_none_or(|age| !(0..media::cleanup::FRESH_MS).contains(&age))
+            || !s.root_confirmed
+            || Self::publication_allows_send_locked(&s)
+            || Self::gate_locked(&s).is_err()
         {
             return Ok(());
         }
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        with_tracking_access(|| {
+        let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if bound.file != file
+            || bound.binding.facts.account != account
+            || !collection.is_current()
+            || bound.evidence.generation != collection.generation()
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        if s.publication
+            .last_cleanup_ms
+            .is_some_and(|last| at_ms.checked_sub(last).is_none_or(|age| age < 86_400_000))
+        {
+            return Ok(());
+        }
+        let b = bound.binding.id;
+        let media = s.media.enabled != Some(false) && !s.media.paused;
+        with_tracking_access(|| -> Result<(), RuntimeError> {
             s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .mark_publication_zones_due(b, now)
+                .compute_cleanup(b, at_ms, media)?;
+            Ok(())
         })?;
-        s.publication.last_cleanup_ms = Some(now);
+        s.publication.last_cleanup_ms = Some(at_ms);
+        s.media.observed_now_ms = now_ms;
+        self.emit_pending_locked(&mut s, UpdateKind::Full, Default::default())?;
+        // Durable unlink replay follows the single committed computation.
+        with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.finish_conflict_expiry())?;
         Ok(())
     }
     pub fn begin_zone_deletion_read(

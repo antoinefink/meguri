@@ -6,8 +6,9 @@ use super::{
     *,
 };
 use meguri_model::rng::SeededRandom;
-use meguri_sync::cloud::workflow::{
-    self, BuiltBatch, EntityFacts, ExchangeResult, FetchPhase, Saved, SendCall, SendError,
+use meguri_sync::cloud::{
+    self,
+    workflow::{self, BuiltBatch, EntityFacts, ExchangeResult, FetchPhase, Saved, SendCall, SendError},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -78,6 +79,7 @@ pub struct SDKRig {
     observations: Vec<Observation>,
     emitted: Vec<u64>,
     sent: BTreeMap<u64, ResponseBatch>,
+    media_requests: BTreeSet<u64>,
     calls: BTreeMap<u64, u64>,
     waiting: Option<u64>,
     handler: Option<u64>,
@@ -144,6 +146,7 @@ impl SDKRig {
             observations: Vec::new(),
             emitted: Vec::new(),
             sent: BTreeMap::new(),
+            media_requests: BTreeSet::new(),
             calls: BTreeMap::new(),
             waiting: None,
             handler: None,
@@ -625,6 +628,83 @@ impl SDKRig {
         self.waiting = Some(batch.response.request_id);
         Ok(batch)
     }
+    /// Return the Runtime selection unchanged. The send path validates that
+    /// retained value again before submitting its Service operation.
+    pub fn select_media_batch(&mut self) -> Result<Option<(u64, cloud::media::Work)>> {
+        self.updates()?;
+        let names = self.pending.keys().cloned().collect();
+        let selected = self.driver.call(Input::MediaBuild(names))?;
+        self.updates()?;
+        Ok(selected)
+    }
+    pub fn request_selected_media_response(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        selected: (u64, cloud::media::Work),
+    ) -> Result<ResponseBatch> {
+        let (id, work) = selected;
+        let original: cloud::media::Work = match self.driver.call(Input::MediaAdmit(id)) {
+            Ok(original) => original,
+            Err(error) => {
+                self.updates()?;
+                return Err(error);
+            }
+        };
+        if original != work {
+            return Err(failure());
+        }
+        let mutation = match original.request {
+            cloud::media::Request::Delete { name } => Mutation::Delete { name },
+            cloud::media::Request::Upload { name, envelope, staged } => {
+                use std::io::Read;
+                let mut bytes = Vec::new();
+                std::fs::File::open(staged)?
+                    .take(cloud::media::MAX_ASSET_BYTES + 1)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() as u64 > cloud::media::MAX_ASSET_BYTES {
+                    return Err(failure());
+                }
+                let mut record = RecordInput::encrypted(name, "MGBlob", envelope);
+                record.fields.insert("a".into(), Field::Asset(Asset::synthetic(bytes)));
+                Mutation::Save {
+                    record,
+                    if_unchanged: None,
+                }
+            }
+            _ => return Err(failure()),
+        };
+        let mutations = vec![mutation];
+        let response = service.request(
+            &self.files.scope,
+            self.caller(),
+            Operation::Modify {
+                zone: "meguri-media".into(),
+                atomic: false,
+                changes: mutations.clone(),
+            },
+        )?;
+        let batch = ResponseBatch {
+            instance: self.instance.clone(),
+            backend_batch_id: id,
+            mutations,
+            response,
+        };
+        self.media_requests.insert(batch.response.request_id);
+        self.sent.insert(batch.response.request_id, batch.clone());
+        self.waiting = Some(batch.response.request_id);
+        Ok(batch)
+    }
+    pub(crate) fn send_pending_media(&mut self, service: &mut Service<SeededRandom>) -> Result<bool> {
+        let Some(selected) = self.select_media_batch()? else {
+            self.updates()?;
+            return Ok(false);
+        };
+        let batch = self.request_selected_media_response(service, selected)?;
+        self.deliver_sent_event(&batch.response)?;
+        self.return_sent_handler()?;
+        self.updates()?;
+        Ok(true)
+    }
     pub fn request_collection_batch(&mut self, service: &mut Service<SeededRandom>) -> Result<BatchAttempt> {
         let (built, mutations) = self.build()?;
         if mutations.is_empty() {
@@ -839,10 +919,13 @@ impl SDKRig {
         let mut saved = Vec::new();
         let mut conflicts = Vec::new();
         let mut failed = Vec::new();
+        let mut deleted = Vec::new();
+        let mut blob_conflicts = Vec::new();
         let error = |c: ErrorCode| match c {
             ErrorCode::LimitExceeded => SendError::LimitExceeded,
             ErrorCode::BatchRequestFailed => SendError::BatchRequestFailed,
             ErrorCode::ZoneNotFound => SendError::ZoneMissing,
+            ErrorCode::UnknownItem => SendError::UnknownItem,
             _ => SendError::Other,
         };
         match &response.result {
@@ -864,6 +947,17 @@ impl SDKRig {
                             let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
                                 return Err(failure());
                             };
+                            if self.media_requests.contains(&response.request_id)
+                                && record.record_type == "MGBlob"
+                                && record.name == item.name
+                            {
+                                blob_conflicts.push(Saved {
+                                    name: record.name.clone(),
+                                    envelope: envelope.clone(),
+                                    system_fields: record.system_fields.bytes().to_vec(),
+                                });
+                                continue;
+                            }
                             if record.name != item.name || record.record_type != "MGEntity" {
                                 return Err(failure());
                             }
@@ -873,8 +967,8 @@ impl SDKRig {
                                 system_fields: record.system_fields.bytes().to_vec(),
                             });
                         }
+                        Ok(MutationSuccess::Deleted) => deleted.push(item.name.clone()),
                         Err(e) => failed.push((item.name.clone(), error(e.code))),
-                        _ => {}
                     }
                 }
             }
@@ -883,12 +977,42 @@ impl SDKRig {
                     return Err(failure());
                 }
                 for m in &batch.mutations {
-                    if let Mutation::Save { record, .. } = m {
-                        failed.push((record.name.clone(), error(e.code)));
-                    }
+                    let name = match m {
+                        Mutation::Save { record, .. } => record.name.clone(),
+                        Mutation::Delete { name } => name.clone(),
+                    };
+                    failed.push((name, error(e.code)));
                 }
             }
             _ => return Err(failure()),
+        }
+        let media = self.media_requests.contains(&response.request_id);
+        if media {
+            let delete_names: BTreeSet<_> = batch
+                .mutations
+                .iter()
+                .filter_map(|m| {
+                    if let Mutation::Delete { name } = m {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let (failed_delete, failed_save): (Vec<_>, Vec<_>) =
+                failed.into_iter().partition(|(name, _)| delete_names.contains(name));
+            self.driver.call::<()>(Input::MediaSent(
+                batch.instance.clone(),
+                batch.backend_batch_id,
+                saved,
+                blob_conflicts,
+                failed_save,
+                deleted,
+                failed_delete,
+                Vec::new(),
+            ))?;
+            self.refresh()?;
+            return Ok(());
         }
         self.driver.call::<()>(Input::Sent(
             batch.instance.clone(),

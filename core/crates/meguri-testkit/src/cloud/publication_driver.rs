@@ -324,9 +324,13 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
             value(())
         }
         Input::CollectionDrained => {
-            device
-                .runtime()?
-                .publication_collection_drained(&device.runtime()?.instance()?)?;
+            device.runtime()?.publication_collection_drained(
+                &device
+                    .runtime()?
+                    .incoming_sdk_instance_for_testing()
+                    .ok_or_else(failure)?,
+                &collection,
+            )?;
             value(())
         }
         Input::DeletionGuard => {

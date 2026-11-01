@@ -23,10 +23,26 @@ impl SDKRig {
             if self.updates()? {
                 return Ok(true);
             }
-            let Some(work) = work else { return Ok(false) };
+            let Some(work) = work else {
+                *remaining -= 1;
+                return self.send_pending_media(service);
+            };
             *remaining -= 1;
+            if matches!(work.request, MediaRequest::Delete { .. }) {
+                return self.send_pending_media(service);
+            }
+            if matches!(work.request, MediaRequest::Upload { .. }) {
+                if self.driver.call::<bool>(Input::MediaQueue(work.clone()))? {
+                    self.updates()?;
+                    if self.send_pending_media(service)? {
+                        continue;
+                    }
+                    return Ok(false);
+                }
+            }
             self.driver.call::<()>(Input::MediaValidate(work.clone()))?;
             let operation = match &work.request {
+                MediaRequest::Delete { .. } => return Err(failure()),
                 MediaRequest::Reads { names } => {
                     if names.is_empty() || names.len() > 200 {
                         return Err(failure());

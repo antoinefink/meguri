@@ -441,6 +441,7 @@ pub struct Runtime {
     directory: PathBuf,
     inputs: CloudInputs,
     adapter_clock: Mutex<Option<Arc<dyn meguri_model::clock::Clock>>>,
+    pending_clock: std::sync::atomic::AtomicI64,
     no_collection_identity_owner: Mutex<Option<NoCollectionIdentityOwner>>,
     state: Arc<Mutex<State>>,
     incoming_idle: Arc<std::sync::Condvar>,
@@ -500,6 +501,7 @@ impl Runtime {
             directory,
             inputs,
             adapter_clock: Mutex::new(None),
+            pending_clock: std::sync::atomic::AtomicI64::new(0),
             no_collection_identity_owner: Mutex::new(None),
             random: Mutex::new(None),
             key_bytes: Mutex::new(None),
@@ -1160,6 +1162,7 @@ impl ChangeObserver for Runtime {
         Err(engine_error("callback row capability required"))
     }
     fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+        let _ = self.adapter_now();
         #[cfg(feature = "test-hooks")]
         let body_reads_before = super::workflow_store::body_reads();
         let mut state = self.state();

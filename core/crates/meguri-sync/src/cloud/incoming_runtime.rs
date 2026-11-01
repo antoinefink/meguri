@@ -44,6 +44,7 @@ impl Drop for Running {
 
 impl Runtime {
     fn finish_incoming(&self, running: Running) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         drop(running);
         let mut s = self.state();
         let cleanup = with_tracking_access(|| -> Result<(), Error> {

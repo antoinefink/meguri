@@ -421,8 +421,9 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
             Event::FetchDrained {
                 zone: Zone::Collection, ..
             } if open => {
-                let cleanup =
-                    s.root_confirmed && s.last_cleanup_ms.is_none_or(|at| now.saturating_sub(at) >= 86_400_000);
+                let cleanup = s.root_confirmed
+                    && s.last_cleanup_ms
+                        .is_none_or(|at| now.checked_sub(at).is_some_and(|age| age >= 86_400_000));
                 if cleanup {
                     s.last_cleanup_ms = Some(now);
                     a.push(ActionKind::RunCleanup);

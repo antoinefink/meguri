@@ -101,7 +101,7 @@ nonisolated struct ServiceMediaTransport: CloudMediaTransport {
         case .read(let name): names = [name]; fields = ["e"]
         case .reads(let batch): names = batch; fields = ["e"]
         case .download(let name): names = [name]; fields = ["e", "a"]
-        case .upload: throw CloudMediaFailure.requiresSyncEngine
+        case .upload, .delete: throw CloudMediaFailure.requiresSyncEngine
         }
         guard !names.isEmpty else { throw ServiceWorkflowFailure.unsupported }
         let operations = names.map { serviceReadOperation(zone: "meguri-media", name: $0, fields: fields) }

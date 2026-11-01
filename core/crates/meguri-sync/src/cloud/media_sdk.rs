@@ -26,7 +26,8 @@ impl Runtime {
         sdk: &str,
         collection: &Collection,
         batch: u64,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Work, RuntimeError> {
+        let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
         let work = self
             .state()
@@ -36,6 +37,27 @@ impl Runtime {
             .cloned()
             .ok_or(RuntimeError::StaleIncarnation)?;
         self.validate_cloud_media_admission(sdk, collection, &work)?;
+        if let Request::Delete { name } = &work.request {
+            let now = self.adapter_now()?;
+            let mut s = self.state();
+            s.media.observed_now_ms = now;
+            let allowed = s.root_confirmed
+                && !s.media.paused
+                && s.media.enabled != Some(false)
+                && !Self::publication_allows_send_locked(&s);
+            let admitted = with_tracking_access(|| {
+                s.store
+                    .as_ref()
+                    .ok_or(Error::Database)?
+                    .media_deletions(work.authority.binding, now, allowed)
+            })?
+            .contains(name);
+            if !admitted {
+                s.actions.media_batches.remove(&(sdk.to_owned(), batch));
+                self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        }
         let s = self.state();
         if let Request::Upload { name, .. } = &work.request
             && s.media.enabled.is_some()
@@ -46,7 +68,7 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        Ok(())
+        Ok(work)
     }
     pub fn queue_cloud_media_upload(
         &self,
@@ -54,6 +76,7 @@ impl Runtime {
         collection: &Collection,
         work: &Work,
     ) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
         self.validate_cloud_media_work(collection, work)?;
         if !matches!(work.request, Request::Upload { .. }) {
@@ -86,7 +109,59 @@ impl Runtime {
         collection: &Collection,
         requested: &BTreeSet<String>,
     ) -> Result<Option<(u64, Work)>, RuntimeError> {
+        let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
+        // Selection is only a hint. Re-read eligibility with a fresh clock and
+        // retain this exact work through final admission and the SDK callback.
+        self.consume_media_feed(collection, &self.media_service(collection)?)?;
+        let now = self.adapter_now()?;
+        let authority = self.media_authority(collection, true)?;
+        {
+            let mut s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            Self::gate_locked(&s)?;
+            s.media.observed_now_ms = now;
+            let allowed = s.root_confirmed
+                && !s.media.paused
+                && s.media.enabled != Some(false)
+                && s.media.root_checked
+                && !Self::publication_allows_send_locked(&s);
+            let due = with_tracking_access(|| {
+                s.store
+                    .as_ref()
+                    .ok_or(Error::Database)?
+                    .media_deletions(authority.binding, now, allowed)
+            })?;
+            if let Some(name) = due
+                .intersection(requested)
+                .find(|name| !s.policy.parked.contains(*name))
+                .cloned()
+            {
+                for ((owner, id), work) in &s.actions.media_batches {
+                    if matches!(&work.request,Request::Delete{name:n} if n==&name) {
+                        return if owner == sdk {
+                            Ok(Some((*id, work.clone())))
+                        } else {
+                            Err(RuntimeError::StaleIncarnation)
+                        };
+                    }
+                }
+                s.actions.batch = s.actions.batch.checked_add(1).ok_or(Error::InvalidData)?;
+                let id = s.actions.batch;
+                let work = Work {
+                    id,
+                    authority: authority.clone(),
+                    request: Request::Delete { name: name.clone() },
+                };
+                s.actions.media_batches.insert((sdk.into(), id), work.clone());
+                s.actions.observations.push(workflow::Observation::BatchBuilt {
+                    names: BTreeSet::from([name]),
+                    batch_id: id,
+                });
+                return Ok(Some((id, work)));
+            }
+            self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
+        }
         let queued = self.state().actions.media_upload.clone();
         let Some((owner, work)) = queued.filter(|(owner, _)| owner == sdk) else {
             return Ok(None);
@@ -146,36 +221,106 @@ impl Runtime {
 
     /// False means a collection batch. Matching media batches retain their
     /// ORIGINAL Work through transient SDK failures, never reconstructed ids.
+    #[allow(clippy::too_many_arguments)]
     pub fn cloud_media_sdk_sent(
         &self,
         sdk: &str,
         collection: &Collection,
         request_id: u64,
         saved: &[workflow::Saved],
+        blob_conflicts: &[workflow::Saved],
         failed: &[(String, workflow::SendError)],
+        deleted: &[String],
+        failed_delete: &[(String, workflow::SendError)],
         retrying: &[String],
     ) -> Result<bool, RuntimeError> {
+        let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
         let key = (sdk.to_owned(), request_id);
         let Some(work) = self.state().actions.media_batches.get(&key).cloned() else {
             return Ok(false);
         };
         self.validate_cloud_media_work(collection, &work)?;
+        if let Request::Delete { name } = &work.request {
+            if !saved.is_empty()
+                || !blob_conflicts.is_empty()
+                || !failed.is_empty()
+                || deleted.len() + failed_delete.len() + retrying.len() != 1
+                || deleted.iter().any(|n| n != name)
+                || failed_delete.iter().any(|(n, _)| n != name)
+                || retrying.iter().any(|n| n != name)
+                || self.state().actions.handler != Some(request_id)
+            {
+                return Err(Error::InvalidData.into());
+            }
+            let done = !deleted.is_empty()
+                || failed_delete
+                    .iter()
+                    .any(|(_, e)| *e == workflow::SendError::UnknownItem);
+            if done {
+                self.with_media(&work.authority, |store| {
+                    store.media_deleted(work.authority.binding, name)
+                })?;
+            }
+            let now = self.adapter_now()?;
+            let mut s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            Self::check_media_locked(&s, &work.authority)?;
+            s.media.observed_now_ms = now;
+            // Preserve the separate callback categories: only actual Deleted
+            // names participate in the SDK's successful-result removal list.
+            s.actions
+                .saved_callbacks
+                .insert(request_id, deleted.iter().cloned().collect());
+            if s.media
+                .pending
+                .as_ref()
+                .is_some_and(|pending| matches!(&pending.request,Request::Delete{name:n} if n==name))
+            {
+                s.media.pending = None;
+            }
+            if done {
+                s.actions.media_batches.remove(&key);
+            } else if let Some((_, error)) = failed_delete.first() {
+                s.actions.media_batches.remove(&key);
+                if *error != workflow::SendError::BatchRequestFailed {
+                    // This bridge builds one deletion per batch. A one-record
+                    // limit failure is parked, exactly as collection sends.
+                    s.policy.parked.insert(name.clone());
+                }
+            }
+            let force = if failed_delete
+                .iter()
+                .any(|(_, error)| *error == workflow::SendError::BatchRequestFailed)
+            {
+                BTreeSet::from([name.clone()])
+            } else {
+                BTreeSet::new()
+            };
+            self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, force)?;
+            return Ok(true);
+        }
+        if !deleted.is_empty() || !failed_delete.is_empty() {
+            return Err(Error::InvalidData.into());
+        }
         let Request::Upload { name, envelope, staged } = &work.request else {
             return Err(Error::InvalidData.into());
         };
-        if saved.len() > 1
+        if saved.len() + blob_conflicts.len() > 1
             || failed.len() > 1
             || retrying.len() > 1
-            || saved.len() + failed.len() + retrying.len() != 1
-            || saved.iter().any(|r| r.name != *name || r.envelope != *envelope)
+            || saved.len() + blob_conflicts.len() + failed.len() + retrying.len() != 1
+            || saved
+                .iter()
+                .chain(blob_conflicts)
+                .any(|r| r.name != *name || r.envelope != *envelope)
             || failed.iter().any(|(n, _)| n != name)
             || retrying.iter().any(|n| n != name)
             || self.state().actions.handler != Some(request_id)
         {
             return Err(Error::InvalidData.into());
         }
-        if let Some(record) = saved.first() {
+        if let Some(record) = saved.first().or_else(|| blob_conflicts.first()) {
             meguri_model::faultpoint!("cloud.media.after_blob_save").map_err(Error::from)?;
             self.cloud_media_reply(
                 collection,
@@ -201,7 +346,7 @@ impl Runtime {
         s.actions
             .saved_callbacks
             .insert(request_id, saved.iter().map(|r| r.name.clone()).collect());
-        if !saved.is_empty() {
+        if !saved.is_empty() || !blob_conflicts.is_empty() {
             s.actions.media_upload = None;
             s.actions.media_batches.remove(&key);
         } else if !failed.is_empty() {
@@ -219,6 +364,10 @@ impl Runtime {
             .media_upload
             .as_ref()
             .is_some_and(|(_, work)| &work.authority == authority)
+            || s.actions
+                .media_batches
+                .values()
+                .any(|work| &work.authority == authority)
     }
 
     pub fn cloud_media_downloads_blocked(&self) -> bool {
@@ -262,6 +411,7 @@ impl Runtime {
         sdk: Option<&str>,
         action: &crate::cloud::policy::ActionKind,
     ) -> Result<bool, RuntimeError> {
+        let _ = self.adapter_now();
         if let Some(sdk) = sdk {
             self.prepare_cloud_media_sdk(sdk)?;
         }
@@ -342,6 +492,7 @@ impl Runtime {
         guard: &crate::cloud::adapter::Guard,
         sdk: &str,
     ) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         if Self::adapter_guard_locked(&s) != *guard {
             return Err(RuntimeError::StaleIncarnation);

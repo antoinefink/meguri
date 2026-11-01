@@ -12,7 +12,9 @@ impl Runtime {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .ok_or(Error::InvalidData)?;
-        Ok(clock.now_ms())
+        let now = clock.now_ms();
+        self.pending_clock.store(now, std::sync::atomic::Ordering::Relaxed);
+        Ok(now)
     }
     pub(super) fn adapter_guard_locked(s: &State) -> Guard {
         Guard {
@@ -25,6 +27,7 @@ impl Runtime {
         Self::adapter_guard_locked(&self.state())
     }
     pub fn register_sdk(&self, automatic: bool) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         self.register_sdk_locked(&mut s, automatic)
     }
@@ -35,6 +38,7 @@ impl Runtime {
         guard: &Guard,
         automatic: bool,
     ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
+        let _ = self.adapter_now();
         let mut s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
@@ -208,6 +212,7 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_account(&self, sdk: Option<&str>, identity: IdentityStatus) -> Result<(), RuntimeError> {
+        let _ = self.adapter_now();
         self.wait_incoming_idle();
         let mut s = self.state();
         if let Some(sdk) = sdk {
@@ -693,6 +698,10 @@ impl Runtime {
         }
         if let Some(binding) = s.bound.as_ref().map(|b| b.binding.clone()) {
             let zone = collection_zone(binding.facts.epoch);
+            if drains.iter().any(|d| d.zone == zone) {
+                s.publication.cleanup_drain = Some((Self::adapter_guard_locked(&s), sdk.into(), at_ms));
+                s.media.observed_now_ms = at_ms;
+            }
             if drains.iter().any(|d| d.zone == zone && d.fetched) {
                 let completed = with_tracking_access(|| {
                     s.store
@@ -1174,6 +1183,7 @@ impl Runtime {
         _transition: bool,
         origin_sdk: Option<&str>,
     ) -> Result<u64, RuntimeError> {
+        let _ = self.adapter_now();
         let no_collection = self.state().store.is_none();
         self.with_identity_read_state(no_collection, |s| {
             if let Some(sdk) = origin_sdk {

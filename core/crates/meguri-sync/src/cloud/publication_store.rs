@@ -546,34 +546,13 @@ impl TrackingStore {
         tx.commit()?;
         Ok(())
     }
+    #[cfg(feature = "test-hooks")]
     pub(super) fn mark_publication_zones_due(&mut self, b: BindingId, now: i64) -> Result<(), Error> {
-        let state = self.runtime_binding(b)?;
-        let active = state.root_ack.ok_or(Error::InvalidData)?;
-        let active = super::control_codec::Active::decode(&active.envelope.0).map_err(|_| Error::InvalidData)?;
-        let owner = self.binding(b)?.ok_or(Error::BindingNotFound)?;
-        if active.epoch != owner.facts.epoch.0 {
-            return Err(Error::InvalidData);
-        }
-        let own = super::adapter::collection_zone(owner.facts.epoch);
-        let previous = active.previous.map(|e| super::adapter::collection_zone(EpochId(e)));
-        let zones = self.retained_zones(b)?;
-        let tx = self.connection.transaction()?;
-        for (name, zone) in zones {
-            if name == own {
-                continue;
-            }
-            let from = if previous.as_ref() == Some(&name) {
-                zone.first_seen_ms.max(active.activated_at_ms)
-            } else {
-                zone.first_seen_ms
-            };
-            if now.checked_sub(from).is_some_and(|age| age >= 30 * 86_400_000) {
-                tx.execute(
-                    "UPDATE cloud_publication_zones SET deletion_due=1 WHERE binding=?1 AND zone=?2",
-                    params![b.0.as_slice(), name],
-                )?;
-            }
-        }
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        mark_zones_due(&tx, b, now)?;
         tx.commit()?;
         Ok(())
     }
@@ -601,4 +580,47 @@ fn valid_collection_zone(zone: &str) -> bool {
         return false;
     };
     bytes.len() == 16 && data_encoding::BASE32_NOPAD.encode(&bytes).to_ascii_lowercase() == encoded
+}
+
+// Caller has already scoped and confirmed the active binding in this transaction.
+pub(super) fn mark_zones_due(tx: &rusqlite::Transaction<'_>, b: BindingId, now: i64) -> Result<(), Error> {
+    let state: super::runtime::StoredRuntimeState = decode(&tx.query_row(
+        "SELECT content FROM cloud_runtime_bindings WHERE binding=?1",
+        [b.0.as_slice()],
+        |r| r.get::<_, String>(0),
+    )?)?;
+    let active = super::control_codec::Active::decode(&state.root_ack.ok_or(Error::InvalidData)?.envelope.0)
+        .map_err(|_| Error::InvalidData)?;
+    let facts: BindingFacts = decode(&tx.query_row(
+        "SELECT facts FROM bindings WHERE id=?1",
+        [b.0.as_slice()],
+        |r| r.get::<_, String>(0),
+    )?)?;
+    if active.epoch != facts.epoch.0 || facts.state != BindingState::Active {
+        return Err(Error::InvalidData);
+    }
+    let own = super::adapter::collection_zone(facts.epoch);
+    let previous = active.previous.map(|e| super::adapter::collection_zone(EpochId(e)));
+    let zones: Vec<(String, i64)> = {
+        let mut q = tx.prepare("SELECT zone,first_seen_ms FROM cloud_publication_zones WHERE binding=?1")?;
+        q.query_map([b.0.as_slice()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    for (name, first) in zones {
+        if name == own {
+            continue;
+        }
+        let from = if previous.as_ref() == Some(&name) {
+            first.max(active.activated_at_ms)
+        } else {
+            first
+        };
+        if now.checked_sub(from).is_some_and(|age| age >= 30 * 86_400_000) {
+            tx.execute(
+                "UPDATE cloud_publication_zones SET deletion_due=1 WHERE binding=?1 AND zone=?2",
+                params![b.0.as_slice(), name],
+            )?;
+        }
+    }
+    Ok(())
 }

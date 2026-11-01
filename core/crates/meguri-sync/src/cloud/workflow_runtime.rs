@@ -101,6 +101,7 @@ impl Runtime {
     }
     /// Called off the writer after real ReviewService inputs complete.
     pub fn poll_review(&self, instance: &str) -> Result<Option<u64>, RuntimeError> {
+        let _ = self.adapter_now();
         let active = self.active_review();
         let mut s = self.state();
         if Self::caller_locked(&s, instance).is_err() {
@@ -239,6 +240,15 @@ impl Runtime {
         {
             pending.0.insert(name.clone(), PendingChange::Save);
         }
+        let allowed = s.root_confirmed
+            && !s.media.paused
+            && s.media.enabled != Some(false)
+            && !Self::publication_allows_send_locked(s);
+        for name in store.media_deletions(b.binding.id, s.media.observed_now_ms, allowed)? {
+            if !s.policy.parked.contains(&name) {
+                pending.0.insert(name, PendingChange::Delete);
+            }
+        }
         Ok(pending)
     }
     pub(super) fn emit_pending_locked(
@@ -247,12 +257,27 @@ impl Runtime {
         kind: UpdateKind,
         force: BTreeSet<String>,
     ) -> Result<PendingUpdate, RuntimeError> {
+        s.media.observed_now_ms = self.pending_clock.load(std::sync::atomic::Ordering::Relaxed);
         if kind == UpdateKind::Full {
             s.cloud.deferred.clear();
             s.policy.parked.clear();
             s.policy.held_images.clear();
         }
         // Callers with the state guard hold tracking access only for row reads.
+        with_tracking_access(|| -> Result<(), RuntimeError> {
+            let allowed = s.root_confirmed
+                && s.media.enabled != Some(false)
+                && !s.media.paused
+                && !Self::publication_allows_send_locked(s);
+            if let Some(b) = s.bound.as_ref().map(|b| b.binding.id) {
+                s.store.as_mut().ok_or(Error::Database)?.clear_invalid_media_deletions(
+                    b,
+                    s.media.observed_now_ms,
+                    allowed,
+                )?;
+            }
+            Ok(())
+        })?;
         let snapshot = with_tracking_access(|| Self::sendables_locked(s))?;
         Ok(s.actions.update(kind, snapshot, force))
     }
@@ -805,6 +830,7 @@ impl Runtime {
         lost_zone: bool,
         completed_fetch: bool,
     ) -> Result<bool, RuntimeError> {
+        let _ = self.adapter_now();
         let active = super::super::control_codec::Active::decode(envelope).map_err(|_| Error::InvalidData)?;
         let mut s = self.state();
         if Self::caller_locked(&s, instance).is_err() {
@@ -1596,6 +1622,7 @@ impl Runtime {
         collection: &Collection,
         saved: &Saved,
         received: codec::Received,
+        now_ms: i64,
         force: &mut BTreeSet<String>,
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
@@ -1606,7 +1633,7 @@ impl Runtime {
         );
         let image = s.cloud.handed_images.get(&image_key).copied();
         let store = s.store.as_mut().ok_or(Error::Database)?;
-        if store.acknowledge(b, saved, received)? {
+        if store.acknowledge(b, saved, received, now_ms)? {
             force.insert(saved.name.clone());
         }
         if let Some(image) = image {
@@ -1649,6 +1676,7 @@ impl Runtime {
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<u64, RuntimeError> {
+        let _ = self.adapter_now();
         let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
         let mut s = self.state();
@@ -1713,12 +1741,12 @@ impl Runtime {
             }
             for saved in saved {
                 let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
-                Self::acknowledge_sent_locked(&mut s, collection, saved, received, &mut force)?;
+                Self::acknowledge_sent_locked(&mut s, collection, saved, received, at_ms, &mut force)?;
                 saved_count += 1;
             }
             for server in conflicts {
                 if let Some(received) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
-                    Self::acknowledge_sent_locked(&mut s, collection, server, received, &mut force)?;
+                    Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force)?;
                     saved_count += 1;
                 } else {
                     let key = s
@@ -1843,13 +1871,10 @@ impl Runtime {
         s.actions
             .saved_callbacks
             .insert(request_id, saved.iter().map(|s| s.name.clone()).collect());
-        // Non-atomic batches can contain both Saved and an unsupported failure.
-        // Preserve real acknowledgements, exchange accounting and handler
-        // receipts before stopping. Failed records remain durably pending.
-        if failed
-            .iter()
-            .any(|(_, error)| matches!(error, SendError::ZoneMissing | SendError::Other))
-        {
+        // Ordinary per-record failures park their records without discarding
+        // valid root proof or ACKs. Zone loss still requires the native zone
+        // lifecycle path. All failed records remain durably pending.
+        if failed.iter().any(|(_, error)| matches!(error, SendError::ZoneMissing)) {
             Self::invalidate_locked(&mut s);
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
@@ -1859,6 +1884,7 @@ impl Runtime {
         Ok(saved_count)
     }
     pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
+        let _ = self.adapter_now();
         self.poll_review(instance)?;
         self.consume_media_feed(collection, &self.media_service(collection)?)?;
         if self.active_review().is_some() {
@@ -1911,7 +1937,10 @@ impl Runtime {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut revs = BTreeMap::new();
             for name in &names {
-                let e = store.entity_header(b, name)?.ok_or(Error::InvalidData)?.facts;
+                let Some(header) = store.entity_header(b, name)? else {
+                    continue;
+                };
+                let e = header.facts;
                 if e.observer_open == open
                     && e.observed_generation == snapshot.generation().0
                     && e.observed_seq > boundary
@@ -1922,6 +1951,7 @@ impl Runtime {
             }
             Ok(revs)
         })?;
+        let names = revs.keys().cloned().collect::<BTreeSet<_>>();
         s.adapter.exchange_owner = Some((id, instance.into(), s.incarnation));
         s.actions.selected_revs = revs;
         s.actions.exchange_phase = Some(FetchPhase::BeforeSend);

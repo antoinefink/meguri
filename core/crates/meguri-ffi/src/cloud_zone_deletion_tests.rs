@@ -81,9 +81,10 @@ fn due(f: &PublishedFixture, sdk: &CloudEngineRegistration) -> Vec<String> {
             .unwrap()
     );
     f.clock.step_ms(30 * 86_400_000);
+    let _commands = drain_commands(f, sdk);
     f.workflow
         .core
-        .publication_collection_drained(&sdk.instance_id)
+        .publication_collection_drained(&sdk.instance_id, &collection)
         .unwrap();
     let facts = f
         .workflow

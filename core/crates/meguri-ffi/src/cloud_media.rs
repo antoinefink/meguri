@@ -8,6 +8,9 @@ use std::sync::Arc;
 
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudMediaRequest {
+    Delete {
+        name: String,
+    },
     Root,
     Read {
         name: String,
@@ -27,6 +30,7 @@ pub enum CloudMediaRequest {
 impl From<&m::Request> for CloudMediaRequest {
     fn from(request: &m::Request) -> Self {
         match request {
+            m::Request::Delete { name } => Self::Delete { name: name.clone() },
             m::Request::Root => Self::Root,
             m::Request::Read { name } => Self::Read { name: name.clone() },
             m::Request::Reads { names } => Self::Reads { names: names.clone() },
@@ -201,7 +205,7 @@ impl CloudMedia {
     /// No state/tracking lock survives validation or encloses foreign code.
     pub fn submit_read(&self, work: Arc<CloudMediaWork>, queue: Arc<dyn CloudMediaQueue>) -> Result<bool, CoreError> {
         callback::enter("CloudMedia.submit_read");
-        if matches!(work.work.request, m::Request::Upload { .. }) {
+        if matches!(work.work.request, m::Request::Upload { .. } | m::Request::Delete { .. }) {
             return Err(cloud_error("media upload requires the registered sync engine"));
         }
         self.owns(&work)?;
@@ -220,7 +224,7 @@ impl CloudMedia {
     pub fn reply(&self, work: Arc<CloudMediaWork>, reply: CloudMediaReply) -> Result<(), CoreError> {
         callback::enter("CloudMedia.reply");
         self.owns(&work)?;
-        if matches!(work.work.request, m::Request::Upload { .. }) {
+        if matches!(work.work.request, m::Request::Upload { .. } | m::Request::Delete { .. }) {
             return Err(cloud_error("media Saved requires the original sync engine callback"));
         }
         self.host

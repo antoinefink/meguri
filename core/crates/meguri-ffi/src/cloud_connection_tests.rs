@@ -835,7 +835,7 @@ fn active_request_with_epoch(
                     .collect();
                 fixture
                     .workflow
-                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], count)
+                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], vec![], vec![], count)
                     .unwrap();
                 fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
             }

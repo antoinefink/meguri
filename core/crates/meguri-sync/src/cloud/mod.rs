@@ -9,6 +9,7 @@ pub mod adapter;
 mod adapter_store;
 pub mod adoption;
 mod adoption_store;
+mod cleanup_store;
 mod conflict_expiry;
 pub mod control_codec;
 pub mod entity_codec;

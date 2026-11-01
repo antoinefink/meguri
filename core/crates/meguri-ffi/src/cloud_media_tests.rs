@@ -136,7 +136,7 @@ fn published_with_initial_media(initial_media: Option<(&str, &[u8])>) -> (Publis
                     .collect();
                 fixture
                     .workflow
-                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], count)
+                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], vec![], vec![], count)
                     .unwrap();
                 fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
             }
@@ -355,7 +355,15 @@ fn real_nonempty_upload_is_pending_until_original_sdk_saved_callback() {
     assert!(
         fixture
             .workflow
-            .sent("wrong-sdk".into(), batch.id, batch.saves.clone(), vec![], 1)
+            .sent(
+                "wrong-sdk".into(),
+                batch.id,
+                batch.saves.clone(),
+                vec![],
+                vec![],
+                vec![],
+                1
+            )
             .is_err()
     );
     fixture.workflow.core.pause_cloud_media();
@@ -368,7 +376,15 @@ fn real_nonempty_upload_is_pending_until_original_sdk_saved_callback() {
     assert_eq!(admission.0.load(Ordering::SeqCst), 1);
     fixture
         .workflow
-        .sent(sdk.instance_id.clone(), batch.id, batch.saves, vec![], 1)
+        .sent(
+            sdk.instance_id.clone(),
+            batch.id,
+            batch.saves,
+            vec![],
+            vec![],
+            vec![],
+            1,
+        )
         .unwrap();
     fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
     assert!(
@@ -1923,6 +1939,13 @@ fn failed_metadata_and_download_reads_keep_successes_and_read_error_scope() {
 }
 
 fn fetch_published_collection(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) {
+    fetch_published_collection_receipt(fixture, sdk);
+    fixture
+        .workflow
+        .exchange_fetched(sdk.instance_id.clone(), true)
+        .unwrap();
+}
+fn fetch_published_collection_receipt(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) {
     let workflow = &fixture.workflow;
     let fetch = workflow
         .begin_fetch(sdk.instance_id.clone(), vec![sdk.collection_zone.clone()])
@@ -1981,7 +2004,6 @@ fn fetch_published_collection(fixture: &PublishedFixture, sdk: &CloudEngineRegis
         .unwrap();
     workflow.did_fetch(sdk.instance_id.clone(), group, true).unwrap();
     assert!(workflow.finish_fetch(sdk.instance_id.clone(), fetch).unwrap());
-    workflow.exchange_fetched(sdk.instance_id.clone(), true).unwrap();
 }
 
 #[test]
@@ -2132,7 +2154,12 @@ fn handed_media_absence(retain_older_flight: bool) {
                     name: name.clone(),
                     code: CloudEngineErrorCode::UnknownItem,
                     server_record: None,
+                    zone: None,
+                    native_code: None,
+                    retry_after_ms: None,
                 }],
+                vec![],
+                vec![],
                 batch.saves.len() as u32
             )
             .is_err()
@@ -2149,7 +2176,12 @@ fn handed_media_absence(retain_older_flight: bool) {
                 name: name.clone(),
                 code: CloudEngineErrorCode::UnknownItem,
                 server_record: None,
+                zone: None,
+                native_code: None,
+                retry_after_ms: None,
             }],
+            vec![],
+            vec![],
             batch.saves.len() as u32,
         )
         .unwrap();
@@ -2282,7 +2314,12 @@ fn missing_save_reply_preserves_recreated_media_and_other_selected_work() {
                 name: name.clone(),
                 code: CloudEngineErrorCode::UnknownItem,
                 server_record: None,
+                zone: None,
+                native_code: None,
+                retry_after_ms: None,
             }],
+            vec![],
+            vec![],
             1,
         )
         .unwrap();
@@ -2310,4 +2347,330 @@ fn missing_save_reply_preserves_recreated_media_and_other_selected_work() {
         .complete_exchange(sdk.instance_id, exchange, true, false, false)
         .unwrap();
     assert!(matches!(completed.collection, CloudCollectionOutcome::Incomplete));
+}
+
+// Store a tombstone through the test Service and forward its Saved result to
+// Core through fixture callbacks. This setup does not establish a blob upload.
+fn retired_policy_blob() -> (PublishedFixture, CloudEngineRegistration, String) {
+    let (f, sdk) = published_with_initial_media(Some(("receipt.bin", b"synthetic receipt media")));
+    let collection = f.workflow.host.collection().unwrap();
+    let media = f.workflow.host.media().unwrap();
+    media.store().trash(&["receipt.bin".into()]).unwrap();
+    f.workflow.core.consume_media_feed(&collection, &media).unwrap();
+    let batch = f
+        .workflow
+        .build_batch(
+            sdk.instance_id.clone(),
+            sdk.collection_zone.clone(),
+            f.workflow.tracking_sendables().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(
+        batch
+            .saves
+            .iter()
+            .any(|r| matches!(c::entity_codec::Entity::decode(&r.envelope).unwrap(),
+        c::entity_codec::DecodeOutcome::Supported(e) if e.fields.tombstone))
+    );
+    let changes = batch
+        .saves
+        .iter()
+        .map(|r| Mutation::Save {
+            record: RecordInput::encrypted(&r.name, "MGEntity", r.envelope.clone()),
+            if_unchanged: r.system_fields.clone().map(SystemFields::from_bytes),
+        })
+        .collect();
+    let reply = f
+        .server
+        .lock()
+        .unwrap()
+        .request(
+            &f.scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes,
+            },
+        )
+        .unwrap()
+        .result
+        .unwrap();
+    let Reply::Modified(items) = reply else {
+        panic!("actual tombstone receipt")
+    };
+    let saved: Vec<_> = items
+        .into_iter()
+        .map(|item| {
+            let MutationSuccess::Saved(record) = item.result.unwrap() else {
+                panic!("actual Saved")
+            };
+            let value = publication_control_record(&record).unwrap();
+            CloudRecord {
+                name: record.name,
+                envelope: value.encrypted.unwrap(),
+                system_fields: Some(value.system_fields.0),
+                ..Default::default()
+            }
+        })
+        .collect();
+    let count = saved.len() as u32;
+    f.workflow
+        .sent(sdk.instance_id.clone(), batch.id, saved, vec![], vec![], vec![], count)
+        .unwrap();
+    f.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    let blobs = f.workflow.core.media_blobs_for_testing().unwrap();
+    assert_eq!(blobs.len(), 1);
+    let (blob, state) = blobs.into_iter().next().unwrap();
+    assert_eq!(state.unreferenced_since_ms, Some(NOW));
+    f.policy
+        .clone()
+        .input(crate::cloud_policy::CloudPolicyEvent::Settings {
+            settings: crate::cloud_policy::CloudPolicyDeviceSettings {
+                enabled: true,
+                paused: false,
+                automatic: true,
+                media: true,
+            },
+        })
+        .unwrap();
+    f.workflow.core.resume_cloud_media();
+    let media = f.workflow.media().unwrap();
+    accept_root(&media, &sdk);
+    f.clock.step_ms(30 * 86_400_000);
+    (f, sdk, blob)
+}
+fn issue_local_cleanup(f: &PublishedFixture) -> meguri_sync::cloud::policy::Command {
+    use meguri_sync::cloud::policy::{ActionKind, ChangeCause, DeviceEvent};
+    f.workflow
+        .host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap()
+        .into_iter()
+        .find(|c| c.action.kind == ActionKind::RunCleanup)
+        .expect("actual Driver-issued RunCleanup")
+}
+fn original_cleanup_drain(f: &PublishedFixture, sdk: &CloudEngineRegistration) {
+    // Read collection pages from the test Service and deliver the fixture's
+    // fetch callbacks to Core. Native execution is not exercised here.
+    fetch_published_collection_receipt(f, sdk);
+}
+#[test]
+fn delayed_cleanup_command_is_rejected_and_new_fetch_is_checked_once() {
+    for delay_projection in [true, false] {
+        let (f, sdk, blob) = retired_policy_blob();
+        original_cleanup_drain(&f, &sdk);
+        let early = (!delay_projection).then(|| issue_local_cleanup(&f));
+        f.clock.step_ms(2 * 3_600_000);
+        let command = early.unwrap_or_else(|| issue_local_cleanup(&f));
+        let driver = f.workflow.host.cloud_policy_driver().unwrap();
+        let collection = f.workflow.host.collection().unwrap();
+        assert!(driver.compute_qualified_local_cleanup(&command, &collection).is_err());
+        assert_eq!(driver.state().last_cleanup_ms, None);
+        assert_eq!(
+            f.workflow.core.media_blobs_for_testing().unwrap()[&blob].deletion_due_ms,
+            None
+        );
+        assert!(
+            f.workflow
+                .build_batch(
+                    sdk.instance_id.clone(),
+                    "meguri-media".into(),
+                    f.workflow.tracking_sendables().unwrap()
+                )
+                .unwrap()
+                .is_none()
+        );
+        // Deliver another fixture fetch at the advanced clock before requesting a command.
+        original_cleanup_drain(&f, &sdk);
+        let fresh = issue_local_cleanup(&f);
+        assert_ne!(fresh, command, "the issued command retains its own original receipt");
+        assert!(driver.compute_qualified_local_cleanup(&command, &collection).is_err());
+        driver.compute_qualified_local_cleanup(&fresh, &collection).unwrap();
+        let at = NOW + 30 * 86_400_000 + 2 * 3_600_000;
+        assert_eq!(
+            f.workflow.core.media_blobs_for_testing().unwrap()[&blob].deletion_due_ms,
+            Some(at)
+        );
+        assert!(driver.compute_qualified_local_cleanup(&fresh, &collection).is_err());
+        let batch = f
+            .workflow
+            .build_batch(
+                sdk.instance_id.clone(),
+                "meguri-media".into(),
+                f.workflow.tracking_sendables().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch.deletes, vec![blob.clone()]);
+        let queue = Arc::new(ReadQueue(AtomicUsize::new(0)));
+        assert!(
+            f.workflow
+                .submit_media_batch(sdk.instance_id.clone(), batch.id, queue.clone())
+                .unwrap()
+        );
+        assert_eq!(queue.0.load(Ordering::SeqCst), 1);
+        f.clock.step_ms(3_600_000);
+        assert!(
+            f.workflow
+                .submit_media_batch(sdk.instance_id.clone(), batch.id, queue.clone())
+                .is_err()
+        );
+        assert_eq!(queue.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            f.workflow.core.media_blobs_for_testing().unwrap()[&blob].deletion_due_ms,
+            None
+        );
+    }
+}
+#[test]
+fn issued_local_cleanup_rejects_original_account_sdk_and_closed_open() {
+    for changed in 0..3 {
+        let (f, sdk, blob) = retired_policy_blob();
+        original_cleanup_drain(&f, &sdk);
+        let command = issue_local_cleanup(&f);
+        let collection = f.workflow.host.collection().unwrap();
+        let driver = f.workflow.host.cloud_policy_driver().unwrap();
+        match changed {
+            0 => {
+                f.workflow
+                    .account_changed(Some(sdk.instance_id.clone()), CloudAccountStatus::NoAccount, None)
+                    .unwrap();
+            }
+            1 => {
+                f.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+            }
+            _ => {
+                f.workflow.host.close().unwrap();
+            }
+        }
+        assert!(driver.compute_qualified_local_cleanup(&command, &collection).is_err());
+        assert_eq!(driver.state().last_cleanup_ms, None);
+        if changed != 2 {
+            assert_eq!(
+                f.workflow.core.media_blobs_for_testing().unwrap()[&blob].deletion_due_ms,
+                None
+            );
+        }
+    }
+}
+
+#[test]
+fn other_owner_copy_is_rechecked_by_real_cleanup_builder_and_final_queue_admission() {
+    use meguri_sync::cloud::entity_codec as codec;
+    for phase in 0..3 {
+        let (f, sdk, blob) = retired_policy_blob();
+        let runtime = &f.workflow.core;
+        let collection = f.workflow.host.collection().unwrap();
+        original_cleanup_drain(&f, &sdk);
+        let cleanup = issue_local_cleanup(&f);
+        let driver = f.workflow.host.cloud_policy_driver().unwrap();
+        if phase > 0 {
+            driver.compute_qualified_local_cleanup(&cleanup, &collection).unwrap();
+        }
+        let selected = (phase == 2).then(|| {
+            f.workflow
+                .build_batch(
+                    sdk.instance_id.clone(),
+                    "meguri-media".into(),
+                    f.workflow.tracking_sendables().unwrap(),
+                )
+                .unwrap()
+                .unwrap()
+        });
+        // This fixture is a copy in real typed tracking storage. No pending
+        // list, Saved result or UI conflict resolution is supplied by it.
+        let metadata = runtime.media_blobs_for_testing().unwrap()[&blob].metadata.clone();
+        c::runtime::with_tracking_access(|| {
+            let scope = c::BuildScope {
+                container: c::ContainerId::new("test.cleanup.foreign").unwrap(),
+                environment: c::Environment::Production,
+            };
+            let mut store = match c::TrackingStore::open(collection.path().parent().unwrap(), scope).unwrap() {
+                c::OpenOutcome::Opened(s) => s,
+                _ => panic!("existing fixture store"),
+            };
+            let owner = store
+                .create_binding(
+                    c::BindingFacts {
+                        account: c::OpaqueBytes(vec![90]),
+                        epoch: c::EpochId([91; 16]),
+                        record_key: c::RecordKey([92; 32]),
+                        publication: serde_json::from_str("[1,2]").unwrap(),
+                        state: c::BindingState::Isolated(c::IsolationReason::SignedOut),
+                    },
+                    f.clock.as_ref(),
+                    &SeededRandom::new(913),
+                )
+                .unwrap();
+            let payload = codec::Payload::MediaName(metadata.media("preserved.bin"));
+            let envelope = codec::Entity::build(
+                codec::EntityFields {
+                    kind: codec::Kind::MediaName,
+                    key: b"preserved.bin".to_vec(),
+                    origin: [93; 16],
+                    erev: 1,
+                    generation: None,
+                    tombstone: false,
+                    deleted_at_ms: 0,
+                    writer: owner.id.0,
+                    base_sha256: None,
+                },
+                &payload.encode().unwrap(),
+            )
+            .unwrap()
+            .encode()
+            .unwrap();
+            store
+                .store_conflict(
+                    owner.id,
+                    &c::ConflictCopy {
+                        id: c::CopyId([94; 16]),
+                        kind: c::ConflictKind::MediaName,
+                        key: c::OpaqueBytes(b"preserved.bin".to_vec()),
+                        reason: c::ConflictReason::MediaContent,
+                        losing_envelope: c::OpaqueBytes(envelope),
+                        losing_payload_digest: c::PayloadDigest(payload.payload_digest().unwrap()),
+                        winning_payload_digest: c::PayloadDigest([95; 32]),
+                        field_names: None,
+                        template_names: None,
+                        note_deck: None,
+                        staged_path: None,
+                        created_at_ms: NOW,
+                        resolved_at_ms: None,
+                    },
+                )
+                .unwrap();
+        });
+        if phase == 0 {
+            driver.compute_qualified_local_cleanup(&cleanup, &collection).unwrap();
+        }
+        if let Some(batch) = selected {
+            assert_eq!(batch.deletes, vec![blob.clone()]);
+            let queue = Arc::new(ReadQueue(AtomicUsize::new(0)));
+            assert!(
+                f.workflow
+                    .submit_media_batch(sdk.instance_id.clone(), batch.id, queue.clone())
+                    .is_err()
+            );
+            assert_eq!(queue.0.load(Ordering::SeqCst), 0);
+        } else {
+            assert!(
+                f.workflow
+                    .build_batch(
+                        sdk.instance_id.clone(),
+                        "meguri-media".into(),
+                        f.workflow.tracking_sendables().unwrap()
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert_eq!(runtime.media_blobs_for_testing().unwrap()[&blob].deletion_due_ms, None);
+        assert_ne!(
+            runtime.media_blobs_for_testing().unwrap()[&blob].server,
+            m::ServerState::Deleted
+        );
+    }
 }

@@ -423,20 +423,30 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 forwarded = events.last ?? .databaseChanges
             case .sentRecordZoneChanges(let sent):
                 guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
-                let batch = try NativeCloudKitRecordRouting.sentEngineBatchID(saved: sent.savedRecords.map(\.recordID), failed: sent.failedRecordSaves.map { $0.record.recordID }, deleted: sent.deletedRecordIDs, collectionZoneID: zone(collectionZone), batches: batches, pendingBatch: pendingBatch)
-                var saved = try sent.savedRecords.map(decode)
+                let batch = try NativeCloudKitRecordRouting.sentEngineBatchID(saved: sent.savedRecords.map(\.recordID), failed: sent.failedRecordSaves.map { $0.record.recordID } + Array(sent.failedRecordDeletes.keys), deleted: sent.deletedRecordIDs, collectionZoneID: zone(collectionZone), batches: batches, pendingBatch: pendingBatch)
+                let saved = try sent.savedRecords.map(decode)
                 var failed: [CloudRecordFailure] = []
                 for item in sent.failedRecordSaves {
                     // K9.3 immutable-blob conflicts count only from the real
                     // SDK sent callback and its actual server record. Rust
                     // still checks the original Work and exact blob metadata.
                     if let blob = try NativeCloudKitSendError.savedBlobConflict(record: item.record, error: item.error) {
-                        saved.append(blob)
+                        failed.append(CloudRecordFailure(name: blob.name, code: .serverRecordChanged,
+                            zone: "meguri-media", nativeCode: Int64(item.error.code.rawValue),
+                            retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(item.error).flatMap { Int64(exactly: $0) },
+                            serverRecord: blob))
                     } else {
                         failed.append(try NativeCloudKitSendError.failure(record: item.record, error: item.error, collectionZoneID: zone(collectionZone)))
                     }
                 }
-                forwarded = .sent(batchID: batch, saved: saved, failed: failed, deleted: sent.deletedRecordIDs.map(\.recordName))
+                let failedDeletes = try sent.failedRecordDeletes.map { id, error in
+                    guard id.zoneID == NativeCloudOwnRecords.zone("meguri-media") else { throw NativeCloudKitFailure.unsupportedRecord }
+                    _ = try NativeCloudKitIdentityValidation.zoneName(id.zoneID)
+                    return CloudRecordFailure(name: id.recordName, code: NativeCloudKitSendError.code(error),
+                        zone: id.zoneID.zoneName, nativeCode: Int64(error.code.rawValue),
+                        retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(error).flatMap { Int64(exactly: $0) })
+                }
+                forwarded = .sent(batchID: batch, saved: saved, failed: failed, deleted: sent.deletedRecordIDs.map(\.recordName), failedDeletes: failedDeletes)
             case .willFetchChanges(let will): forwarded = .willFetch(groupID: will.context.options.operationGroup.name ?? "", reason: will.context.reason == .manual ? .manual : .scheduled)
             case .willFetchRecordZoneChanges(let will):
                 forwarded = .willFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(will.zoneID))

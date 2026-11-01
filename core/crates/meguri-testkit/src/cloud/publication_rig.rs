@@ -28,6 +28,7 @@ pub enum Point {
     BeforeEpochRead,
     BeforeActiveSave,
     BeforeZoneDeletion,
+    AfterCollectionCleanup,
     ZoneDeletionReply,
     ResolutionBeforeMove,
     ResolutionRewriteCommitted,
@@ -367,6 +368,9 @@ impl PublicationRig {
     }
     pub fn sdk_database_pending(&self) -> BTreeMap<String, adapter::PendingChange> {
         self.sdk.borrow().database_pending()
+    }
+    pub fn sdk_pending(&self) -> BTreeMap<String, adapter::PendingChange> {
+        self.sdk.borrow().sdk_pending()
     }
     pub fn hold(&mut self, point: Point) -> Result<()> {
         if let Some(stage) = point.incoming_stage() {
@@ -917,6 +921,9 @@ impl PublicationRig {
             self.drive_budget(service, &mut remaining)?;
             self.last_sync_phase = "finish_collection_drain";
             self.finish_collection_drain(service, &mut remaining)?;
+            if self.held.is_some() {
+                return self.refresh();
+            }
             self.last_sync_phase = "drive_cloud_media";
             self.sdk.get_mut().drive_media_budget(service, &mut remaining)
         })();
@@ -934,12 +941,32 @@ impl PublicationRig {
                 .is_some_and(|b| b.facts.state == cloud::BindingState::Active)
         {
             self.sdk.get_mut().driver.call::<()>(Input::CollectionDrained)?;
+            if self.gate(Point::AfterCollectionCleanup) {
+                return Ok(());
+            }
             if self.control()?.zones.values().any(|z| z.deletion_due) {
                 self.cleanup_pending = true;
                 self.drive_budget(service, remaining)?;
             }
         }
         Ok(())
+    }
+    pub fn fetch_without_sending(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
+        self.sdk.get_mut().fetch_recovery_exchange(service, steps)
+    }
+    pub fn select_media_batch(&mut self) -> Result<Option<(u64, cloud::media::Work)>> {
+        self.sdk.get_mut().select_media_batch()
+    }
+    pub fn send_selected_media(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        selected: (u64, cloud::media::Work),
+    ) -> Result<ResponseBatch> {
+        self.sdk.get_mut().request_selected_media_response(service, selected)
+    }
+    pub fn deliver_media_response(&mut self, response: &Response) -> Result<()> {
+        self.sdk.get_mut().deliver_sent_event(response)?;
+        self.sdk.get_mut().return_sent_handler()
     }
     pub fn advance_clock_ms(&mut self, ms: i64) -> Result<()> {
         self.sdk.get_mut().advance_clock_ms(ms)

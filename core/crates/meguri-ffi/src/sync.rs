@@ -320,6 +320,9 @@ pub struct CloudRecordFailure {
     pub name: String,
     pub code: CloudEngineErrorCode,
     pub server_record: Option<CloudRecord>,
+    pub zone: Option<String>,
+    pub native_code: Option<i64>,
+    pub retry_after_ms: Option<i64>,
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CloudAccountStatus {
@@ -609,16 +612,7 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.build_batch");
         self.core.validate_sdk(&sdk).map_err(cloud_error)?;
         if zone == "meguri-media" {
-            if pending
-                .values()
-                .any(|change| matches!(change, CloudPendingChange::Delete))
-            {
-                return Err(cloud_error("cloud media deletion authority port unavailable"));
-            }
-            let requested = pending
-                .into_iter()
-                .filter_map(|(name, change)| matches!(change, CloudPendingChange::Save).then_some(name))
-                .collect();
+            let requested = pending.into_keys().collect();
             let Some((id, work)) = self
                 .core
                 .build_cloud_media_batch(&sdk, &self.host.collection()?, &requested)
@@ -626,21 +620,22 @@ impl CloudWorkflow {
             else {
                 return Ok(None);
             };
-            let c::media::Request::Upload { name, envelope, staged } = work.request else {
-                return Err(cloud_error("unsupported media batch"));
+            let (saves, deletes) = match work.request {
+                c::media::Request::Upload { name, envelope, staged } => (
+                    vec![CloudRecord {
+                        name,
+                        envelope,
+                        system_fields: None,
+                        record_type: Some("MGBlob".into()),
+                        zone: Some(zone),
+                        asset_path: Some(staged.to_string_lossy().into_owned()),
+                    }],
+                    Vec::new(),
+                ),
+                c::media::Request::Delete { name } => (Vec::new(), vec![name]),
+                _ => return Err(cloud_error("unsupported media batch")),
             };
-            return Ok(Some(CloudEngineBatch {
-                id,
-                saves: vec![CloudRecord {
-                    name,
-                    envelope,
-                    system_fields: None,
-                    record_type: Some("MGBlob".into()),
-                    zone: Some(zone),
-                    asset_path: Some(staged.to_string_lossy().into_owned()),
-                }],
-                deletes: Vec::new(),
-            }));
+            return Ok(Some(CloudEngineBatch { id, saves, deletes }));
         }
         let epoch = self
             .core
@@ -682,12 +677,15 @@ impl CloudWorkflow {
             deletes: Vec::new(),
         }))
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn sent(
         &self,
         sdk: String,
         batch_id: u64,
         saved: Vec<CloudRecord>,
         failed: Vec<CloudRecordFailure>,
+        deleted: Vec<String>,
+        failed_delete: Vec<CloudRecordFailure>,
         batch_count: u32,
     ) -> Result<u64, CoreError> {
         callback::enter("CloudWorkflow.sent");
@@ -726,14 +724,35 @@ impl CloudWorkflow {
             .iter()
             .map(|record| &record.name)
             .chain(failed.iter().map(|failure| &failure.name))
+            .chain(deleted.iter())
+            .chain(failed_delete.iter().map(|failure| &failure.name))
             .any(|name| !names.insert(name))
         {
             return Err(cloud_error("duplicate sent receipt name"));
         }
+        if failed_delete
+            .iter()
+            .any(|f| f.zone.as_deref() != Some("meguri-media") || f.server_record.is_some())
+        {
+            return Err(cloud_error("invalid failed deletion metadata"));
+        }
         let mut conflicts = Vec::new();
+        let mut blob_conflicts = Vec::new();
         for failure in &failed {
             match (&failure.code, &failure.server_record) {
                 (CloudEngineErrorCode::ServerRecordChanged, Some(record)) => {
+                    if record.record_type.as_deref() == Some("MGBlob") {
+                        if failure.zone.as_deref() != Some("meguri-media")
+                            || record.zone.as_deref() != Some("meguri-media")
+                            || record.name != failure.name
+                            || record.asset_path.is_some()
+                            || record.envelope.is_empty()
+                        {
+                            return Err(cloud_error("invalid immutable blob conflict metadata"));
+                        }
+                        blob_conflicts.push(record.clone().saved());
+                        continue;
+                    }
                     let binding = self
                         .core
                         .status()
@@ -771,7 +790,7 @@ impl CloudWorkflow {
                 .map_err(cloud_error)?;
         }
         self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
-        let sdk_retrying = failed.iter().any(|f| {
+        let sdk_retrying = failed.iter().chain(&failed_delete).any(|f| {
             matches!(
                 f.code,
                 CloudEngineErrorCode::NotAuthenticated
@@ -789,6 +808,7 @@ impl CloudWorkflow {
         let saved = saved.into_iter().map(CloudRecord::saved).collect::<Vec<_>>();
         let retrying = failed
             .iter()
+            .chain(&failed_delete)
             .filter(|f| {
                 !matches!(
                     f.code,
@@ -801,6 +821,20 @@ impl CloudWorkflow {
                 )
             })
             .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
+        let failed_delete = failed_delete
+            .into_iter()
+            .filter_map(|f| {
+                let code = match f.code {
+                    CloudEngineErrorCode::LimitExceeded => w::SendError::LimitExceeded,
+                    CloudEngineErrorCode::BatchRequestFailed => w::SendError::BatchRequestFailed,
+                    CloudEngineErrorCode::UnknownItem => w::SendError::UnknownItem,
+                    CloudEngineErrorCode::ZoneNotFound => w::SendError::ZoneMissing,
+                    CloudEngineErrorCode::Other | CloudEngineErrorCode::ServerRecordChanged => w::SendError::Other,
+                    _ => return None,
+                };
+                Some((f.name, code))
+            })
             .collect::<Vec<_>>();
         let failed = failed
             .into_iter()
@@ -818,13 +852,23 @@ impl CloudWorkflow {
             .collect::<Vec<_>>();
         if self
             .core
-            .cloud_media_sdk_sent(&sdk, &self.host.collection()?, batch_id, &saved, &failed, &retrying)
+            .cloud_media_sdk_sent(
+                &sdk,
+                &self.host.collection()?,
+                batch_id,
+                &saved,
+                &blob_conflicts,
+                &failed,
+                &deleted,
+                &failed_delete,
+                &retrying,
+            )
             .map_err(cloud_error)?
         {
             return Ok(saved.len() as u64);
         }
-        if media_metadata {
-            return Err(cloud_error("media Saved has no original SDK work"));
+        if media_metadata || !blob_conflicts.is_empty() || !deleted.is_empty() || !failed_delete.is_empty() {
+            return Err(cloud_error("media receipt has no original SDK work"));
         }
         self.core
             .sent_results_with_conflicts(

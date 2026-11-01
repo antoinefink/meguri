@@ -273,10 +273,24 @@ pub(crate) enum Input {
     Identity(Option<String>),
     Reconcile,
     MediaWork,
+    MediaQueue(core::media::Work),
+    MediaBuild(BTreeSet<String>),
+    MediaAdmit(u64),
+    MediaSent(
+        String,
+        u64,
+        Vec<Saved>,
+        Vec<Saved>,
+        Vec<(String, SendError)>,
+        Vec<String>,
+        Vec<(String, SendError)>,
+        Vec<String>,
+    ),
     MediaResume,
     MediaAdapterPause(bool),
     MediaTrash(String),
     MediaConflicts,
+    MediaBlobs,
     MediaReply(core::media::Work, core::media::Reply),
     MediaValidate(core::media::Work),
     FailMediaIo,
@@ -1121,6 +1135,9 @@ impl ChildDriver {
     }
     pub fn media_conflicts(&mut self) -> Result<Vec<core::ConflictCopy>> {
         self.call(Input::MediaConflicts)
+    }
+    pub fn media_blobs(&mut self) -> Result<BTreeMap<String, core::media::BlobState>> {
+        self.call(Input::MediaBlobs)
     }
     pub fn pause_automatic_wal_flush_for_testing(&mut self, paused: bool) -> Result<()> {
         self.call(Input::PauseAutomaticWAL(paused))
@@ -2229,7 +2246,53 @@ impl Device {
             Input::Trace => value(self.runtime()?.trace()),
             Input::Observations => value(self.runtime()?.observations()),
             Input::Emitted => value(self.runtime()?.emitted_update_ids()),
-            Input::MediaWork => value(self.host.next_cloud_media_work()?),
+            Input::MediaBlobs => value(self.runtime()?.media_blobs_for_testing()?),
+            Input::MediaWork => {
+                let runtime = self.runtime()?;
+                if let Some(sdk) = runtime.incoming_sdk_instance_for_testing() {
+                    runtime.prepare_cloud_media_sdk(&sdk)?;
+                }
+                value(self.host.next_cloud_media_work()?)
+            }
+            Input::MediaQueue(work) => {
+                let runtime = self.runtime()?;
+                let Some(sdk) = runtime.incoming_sdk_instance_for_testing() else {
+                    return value(false);
+                };
+                runtime.queue_cloud_media_upload(&sdk, &self.host.collection()?, &work)?;
+                value(true)
+            }
+            Input::MediaBuild(names) => {
+                let runtime = self.runtime()?;
+                let Some(sdk) = runtime.incoming_sdk_instance_for_testing() else {
+                    return value(None::<(u64, core::media::Work)>);
+                };
+                value(runtime.build_cloud_media_batch(&sdk, &self.host.collection()?, &names)?)
+            }
+            Input::MediaAdmit(id) => {
+                let runtime = self.runtime()?;
+                value(runtime.validate_cloud_media_batch(
+                    &runtime.incoming_sdk_instance_for_testing().ok_or_else(failure)?,
+                    &self.host.collection()?,
+                    id,
+                )?)
+            }
+            Input::MediaSent(sdk, id, saved, blob_conflicts, failed, deleted, failed_delete, retrying) => {
+                if !self.runtime()?.cloud_media_sdk_sent(
+                    &sdk,
+                    &self.host.collection()?,
+                    id,
+                    &saved,
+                    &blob_conflicts,
+                    &failed,
+                    &deleted,
+                    &failed_delete,
+                    &retrying,
+                )? {
+                    return Err(failure());
+                }
+                value(())
+            }
             Input::MediaAdapterPause(paused) => {
                 self.runtime()?.adapter_pause(paused)?;
                 value(())

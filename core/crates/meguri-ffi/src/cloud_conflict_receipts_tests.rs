@@ -86,6 +86,9 @@ fn results(
                     name: item.name,
                     code: CloudEngineErrorCode::ServerRecordChanged,
                     server_record: Some(metadata(&server, sdk)),
+                    zone: None,
+                    native_code: None,
+                    retry_after_ms: None,
                 });
             }
             _ => panic!("save result"),
@@ -108,6 +111,8 @@ fn deliver(
             batch.id,
             saved,
             failed,
+            vec![],
+            vec![],
             batch.saves.len() as u32,
         )
         .unwrap()
@@ -658,7 +663,15 @@ fn malformed_conflict_tail_cannot_ack_real_saved_sibling_or_enter_handler() {
         assert!(
             fixture
                 .workflow
-                .sent(sdk.instance_id.clone(), batch.id, saved.clone(), malformed, 2)
+                .sent(
+                    sdk.instance_id.clone(),
+                    batch.id,
+                    saved.clone(),
+                    malformed,
+                    vec![],
+                    vec![],
+                    2
+                )
                 .is_err()
         );
         assert!(fixture.workflow.handler_returned(sdk.instance_id.clone()).is_err());
@@ -781,13 +794,16 @@ fn ffi_retained_media_other_stays_pending_and_saved_returns_validated_count() {
                     name: name.clone(),
                     code: CloudEngineErrorCode::Other,
                     server_record: None,
+                    zone: None,
+                    native_code: None,
+                    retry_after_ms: None,
                 }],
             )
         };
         assert_eq!(
             fixture
                 .workflow
-                .sent(sdk.instance_id.clone(), batch.id, saved, failed, 1)
+                .sent(sdk.instance_id.clone(), batch.id, saved, failed, vec![], vec![], 1)
                 .unwrap(),
             u64::from(saved_reply)
         );

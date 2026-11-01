@@ -6,7 +6,7 @@ import Synchronization
 enum NativeCloudMediaRecords {
     static func id(_ request: CloudMediaRequest) throws -> CKRecord.ID {
         let name: String
-        switch request { case .root: name = "root"; case .reads: throw NativeCloudKitFailure.unsupportedRecord; case .read(let n), .download(let n), .upload(let n, _, _): name = n }
+        switch request { case .root: name = "root"; case .reads: throw NativeCloudKitFailure.unsupportedRecord; case .read(let n), .download(let n), .delete(let n), .upload(let n, _, _): name = n }
         return .init(recordName: name, zoneID: NativeCloudOwnRecords.zone("meguri-media"))
     }
     static func isBlobName(_ name: String) -> Bool {
@@ -16,7 +16,7 @@ enum NativeCloudMediaRecords {
     static func read(_ record: CKRecord, request: CloudMediaRequest, staging: CloudMediaStaging, cancelled: @Sendable () -> Bool) throws -> CloudMediaReadResult {
         try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
         let type: String
-        switch request { case .root: type = "MGMediaRoot"; case .read, .download: type = "MGBlob"; case .upload: throw CloudMediaFailure.requiresSyncEngine; case .reads: throw NativeCloudKitFailure.unsupportedRecord }
+        switch request { case .root: type = "MGMediaRoot"; case .read, .download: type = "MGBlob"; case .upload, .delete: throw CloudMediaFailure.requiresSyncEngine; case .reads: throw NativeCloudKitFailure.unsupportedRecord }
         guard record.recordID == (try id(request)), record.recordType == type,
               record["pa"] == nil, record["ma"] == nil,
               let envelope = record.encryptedValues["e"] as? Data,
@@ -116,7 +116,7 @@ public struct NativeCloudMediaTransport: CloudMediaTransport {
         self.queue = queue; self.staging = staging; self.terminalHandlerInstalled = terminalHandlerInstalled
     }
     public func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead {
-        if case .upload = request { throw CloudMediaFailure.requiresSyncEngine }
+        switch request { case .upload, .delete: throw CloudMediaFailure.requiresSyncEngine; default: break }
         if case .reads(let names) = request { return try prepareBlobReads(names) }
         let id = try NativeCloudMediaRecords.id(request)
         if case .root = request {} else {

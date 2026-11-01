@@ -1,3 +1,4 @@
+pub(crate) use super::cleanup::update_blob_reference_age;
 use super::*;
 use crate::cloud::{
     runtime::DirtySource,
@@ -17,7 +18,7 @@ pub(crate) fn install(c: &Connection) -> Result<(), Error> {
     c.execute_batch("CREATE TABLE IF NOT EXISTS cloud_media_state(binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content)));" )?;
     Ok(())
 }
-fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &Ledger) -> Result<(), Error> {
+pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &Ledger) -> Result<(), Error> {
     let content: Option<String> = tx
         .query_row(
             "SELECT content FROM cloud_media_state WHERE binding=?1",
@@ -68,6 +69,7 @@ impl TrackingStore {
         next_ledger: &Ledger,
         file_changes: &[(c::Payload, [u8; 16])],
         observation: (u64, u64, u64),
+        now_ms: i64,
         apply_commit: Option<MediaApplyCommit<'_>>,
     ) -> Result<bool, Error> {
         let binding = self.binding(binding_id)?.ok_or(Error::BindingNotFound)?;
@@ -77,7 +79,8 @@ impl TrackingStore {
         let tx = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        put_ledger(&tx, binding_id, next_ledger)?;
+        let mut next_ledger = next_ledger.clone();
+        update_blob_reference_age(&tx, binding_id, &mut next_ledger, now_ms)?;
         if let Some((_, proposals, _)) = apply_commit {
             for (prior, candidate) in proposals {
                 if workflow_store::entity(&tx, binding_id, candidate.kind, &candidate.key)? != *prior {
@@ -185,6 +188,8 @@ impl TrackingStore {
             )?;
             meguri_model::faultpoint!("cloud.tracking.commit.ack")?;
         }
+        update_blob_reference_age(&tx, binding_id, &mut next_ledger, now_ms)?;
+        put_ledger(&tx, binding_id, &next_ledger)?;
         runtime_store::put_binding(&tx, binding_id, &runtime)?;
         tx.commit()?;
         Ok(changed_work || self.dirty_names(binding_id)? != pending)
@@ -215,6 +220,7 @@ impl TrackingStore {
         b: BindingId,
         saved: &workflow::Saved,
         r: c::Received,
+        now_ms: i64,
     ) -> Result<bool, Error> {
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         if e.origin != r.entity.fields.origin
@@ -245,7 +251,7 @@ impl TrackingStore {
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
         e.acked_system_fields = saved.system_fields.clone();
         e.in_flight.retain(|f| f.local_rev > flight.local_rev);
-        let ledger = self.media_ledger(b)?;
+        let mut ledger = self.media_ledger(b)?;
         if ledger
             .names
             .get(std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?)
@@ -258,7 +264,10 @@ impl TrackingStore {
         }
         let pending = e.mark.is_some();
         let tx = self.connection.transaction()?;
+        update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
         workflow_store::put(&tx, b, &e)?;
+        update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
+        put_ledger(&tx, b, &ledger)?;
         crate::cloud::adapter_store::mark_ack(&tx, b, &e.name)?;
         tx.commit()?;
         Ok(pending)

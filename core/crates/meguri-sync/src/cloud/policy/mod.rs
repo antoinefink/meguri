@@ -27,5 +27,6 @@ pub struct Projection {
     pub tracking_stopped: bool,
     pub root_confirmed: bool,
     pub drains: Vec<crate::cloud::adapter::FetchDrain>,
+    pub(crate) cleanup_drain: Option<crate::cloud::publication::CleanupDrain>,
     pub backend_guard: crate::cloud::adapter::Guard,
 }
