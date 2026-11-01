@@ -515,6 +515,291 @@ fn durable_manual_bury_with_lost_capture_recovers_card_and_new_config_after_cras
     pair.close();
 }
 
+#[test]
+fn captured_review_undo_removes_never_sent_revlog_and_survives_crash() {
+    review_undo_survives_crash(false);
+}
+
+#[test]
+fn lost_review_undo_capture_recovers_absent_never_sent_revlog_after_crash() {
+    review_undo_survives_crash(true);
+}
+
+fn review_undo_survives_crash(lose_undo_capture: bool) {
+    let mut pair = published_review_pair(false);
+    let before = pair.sender.driver().collection_payloads().unwrap();
+    let original_files = pair.sender.driver().media_files().unwrap();
+    assert_eq!(original_files["photo.jpg"], REMOTE);
+    assert!(before.values().any(|row| matches!(row, Payload::Revlog(_))));
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), before);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_completed(&mut pair.receiver);
+    let binding = pair.receiver.facts().unwrap().current.unwrap();
+    let baseline = pair.receiver.facts().unwrap().entities;
+    for (name, payload) in &before {
+        let ack = &baseline[name];
+        assert_eq!(ack.acked_payload.as_ref(), Some(payload));
+        assert_eq!(ack.acked_payload_digest, payload.payload_digest().unwrap());
+        assert_eq!(ack.acked_row_digest, payload.row_digest().unwrap());
+        assert!(ack.server_erev > 0 && ack.mark.is_none() && ack.in_flight.is_empty());
+    }
+    let selected = before
+        .values()
+        .find_map(|row| match row {
+            Payload::Card(card) if card.card_type == 0 => Some(card.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let card_name = codec::entity_name(
+        &binding.facts.record_key.0,
+        codec::Kind::Card,
+        &codec::id_key(selected.id),
+    )
+    .unwrap();
+    assert_review_saved(
+        &mut pair.sender,
+        &pair.service,
+        0,
+        &[(card_name.clone(), Payload::Card(selected.clone()))],
+    );
+    let server_before = pair.service.inspect(&scope()).unwrap().unwrap().zones;
+    let request_before = pair.service.request_log().unwrap().last().unwrap().request_id;
+    let session = pair.receiver.driver().review_begin(selected.nid).unwrap();
+    let question = pair.receiver.driver().review_start(session).unwrap();
+    assert_eq!(question.id, selected.id);
+    let card_before = pair.receiver.driver().read_card(question.id).unwrap();
+    let before_answer = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    pair.receiver.advance_clock_ms(1_000).unwrap();
+    pair.receiver.driver().review_show_answer(session, question.id).unwrap();
+    pair.receiver.advance_clock_ms(1_500).unwrap();
+    let answer = pair.receiver.driver().review_answer_good(session, question.id).unwrap();
+    let card = pair.receiver.driver().read_card(question.id).unwrap();
+    let revlog = pair.receiver.driver().read_revlog(answer.revlog_id).unwrap();
+    assert_eq!(card.reps, card_before.reps + 1);
+    assert_ne!(card.card_type, card_before.card_type);
+    assert_ne!(card.queue, card_before.queue);
+    assert_ne!(card.due, card_before.due);
+    assert_eq!(card.last_review_id, revlog.id);
+    assert_eq!(revlog.cid, selected.id);
+    assert_eq!(revlog.id, answer.revlog_id);
+    assert!(revlog.id >= NOW + 2_500);
+    assert_eq!(revlog.ease, 3);
+    assert_eq!(revlog.time, codec::Stored::Integer(2_500));
+    let revlog_name = codec::entity_name(
+        &binding.facts.record_key.0,
+        codec::Kind::Revlog,
+        &codec::id_key(revlog.id),
+    )
+    .unwrap();
+    assert!(!before.contains_key(&revlog_name));
+    let answered = pair.receiver.driver().collection_payloads().unwrap();
+    assert_eq!(answered.len(), before.len() + 1);
+    assert_eq!(answered[&card_name], Payload::Card(card.clone()));
+    assert_eq!(answered[&revlog_name], Payload::Revlog(revlog.clone()));
+    let before_undo = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    assert!(before_undo.seq > before_answer.seq);
+    let capture = pair
+        .receiver
+        .driver()
+        .capture_proof(before_undo.seq, before_undo.generation)
+        .unwrap();
+    assert_eq!(capture.observed_seq, before_undo.seq);
+    assert_eq!(capture.generation, before_undo.generation);
+    assert!(capture.attempted && capture.persisted);
+    let tracking_before = pair.receiver.facts().unwrap().entities;
+    assert_eq!(tracking_before[&card_name].payload, Payload::Card(card));
+    let new_history = &tracking_before[&revlog_name];
+    assert_eq!(new_history.payload, Payload::Revlog(revlog));
+    assert!(new_history.mark.is_some() && new_history.local_rev > new_history.acked_rev);
+    // Existing facts have no independent `sent` member. Zero server revision,
+    // no handed flights and no Service handoff establish K17.1's never-sent case.
+    assert_eq!(new_history.server_erev, 0);
+    assert!(new_history.in_flight.is_empty() && new_history.acked_payload.is_none());
+    assert!(new_history.acked_system_fields.is_empty() && new_history.acked_envelope.0.is_empty());
+    let hold = pair.receiver.driver().read_review_hold(session).unwrap();
+    let cloud_hold = pair.receiver.driver().read_cloud_review_hold(session).unwrap();
+    for hold in [&hold, &cloud_hold] {
+        assert!(hold.op_ids.contains(&answer.op_id));
+        assert!(hold.entity_names.contains(&card_name));
+        assert!(hold.entity_names.contains(&revlog_name));
+    }
+    let runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+    assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+    assert_eq!(
+        pair.service.request_log().unwrap().last().unwrap().request_id,
+        request_before
+    );
+
+    if lose_undo_capture {
+        pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
+    }
+    pair.receiver.driver().undo().unwrap();
+    let restored = pair.receiver.driver().read_card(selected.id).unwrap();
+    // Undo may stamp modification time; all scheduling and other card fields
+    // must be the actual before-image, including last_review_id and card data.
+    let mut restored_scheduling = restored.clone();
+    restored_scheduling.modified = card_before.modified;
+    assert_eq!(restored_scheduling, card_before);
+    let expected = pair.receiver.driver().collection_payloads().unwrap();
+    assert_eq!(expected.len(), before.len());
+    assert_eq!(expected[&card_name], Payload::Card(restored.clone()));
+    assert!(!expected.contains_key(&revlog_name));
+    for (name, payload) in &before {
+        assert!(expected.contains_key(name));
+        if name != &card_name && !matches!(payload, Payload::Deck(_) | Payload::Config(_)) {
+            assert_eq!(expected.get(name), Some(payload));
+        }
+    }
+    let committed = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    assert!(committed.seq > before_undo.seq);
+    assert_eq!(committed.generation, before_undo.generation);
+    assert_eq!(committed.native_file, before_undo.native_file);
+    let capture = pair
+        .receiver
+        .driver()
+        .capture_proof(committed.seq, committed.generation)
+        .unwrap();
+    assert_eq!(capture.observed_seq, committed.seq);
+    assert_eq!(capture.generation, committed.generation);
+    assert!(capture.attempted);
+    assert_eq!(capture.persisted, !lose_undo_capture);
+    let tracking_after = pair.receiver.facts().unwrap().entities;
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    if lose_undo_capture {
+        assert_eq!(tracking_after, tracking_before);
+        assert_eq!(
+            pair.receiver.driver().stored_runtime_state().unwrap().change_counter,
+            runtime_before.change_counter
+        );
+        assert!(scan.scan_required && scan.tracking_stopped && !scan.scan_running);
+    } else {
+        assert!(!tracking_after.contains_key(&revlog_name));
+        assert_eq!(tracking_after[&card_name].payload, Payload::Card(restored.clone()));
+        assert!(!scan.scan_required && !scan.tracking_stopped && !scan.scan_running);
+    }
+    let receipt = pair.receiver.driver().wal_proof(committed.seq).unwrap();
+    assert!(receipt.through >= committed.seq);
+    assert_eq!(receipt.generation, committed.generation);
+    assert_eq!(receipt.native_file, committed.native_file);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+    assert_eq!(
+        pair.service.request_log().unwrap().last().unwrap().request_id,
+        request_before
+    );
+
+    // No End, drive, Sync Now or reconcile after Undo: preserve the failed
+    // observer's live Revlog image until a real SIGKILL of the actual child.
+    let killed = pair.receiver.kill().unwrap();
+    assert_eq!(killed.signal, Some(9));
+    assert!(!killed.clean_close);
+    pair.reopen_before_identity();
+    assert_eq!(pair.receiver.facts().unwrap().native_file, receipt.native_file);
+    assert!(pair.receiver.facts().unwrap().current.as_ref() == Some(&binding));
+    assert_eq!(pair.receiver.driver().read_card(selected.id).unwrap(), restored);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert_eq!(pair.receiver.facts().unwrap().entities, tracking_after);
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(scan.scan_required && !scan.scan_running && !scan.scan_completed_this_open);
+    pair.receiver.verify_identity(scope().account).unwrap();
+    assert!(pair.receiver.trace().iter().any(|event| matches!(
+        event,
+        meguri_sync::cloud::workflow::TraceEvent::IdentityVerified { account, .. }
+            if account == &scope().account
+    )));
+    let reopened = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    pair.receiver
+        .driver()
+        .reconcile_binding()
+        .unwrap_or_else(|error| panic!("ordinary reconcile must recover Undo's absent never-sent Revlog: {error:?}"));
+    let scan = pair.receiver.driver().scan_proof().unwrap();
+    // Sequence comparisons stay within the reopened engine lifetime.
+    assert!(scan.snapshot_seq >= reopened.seq);
+    assert_eq!(scan.snapshot_generation, reopened.generation);
+    assert_eq!(scan.snapshot_native_file, reopened.native_file);
+    assert_eq!(scan.receipt.generation, reopened.generation);
+    assert_eq!(scan.receipt.native_file, reopened.native_file);
+    assert!(scan.receipt.through >= scan.snapshot_seq);
+    let pending = pair.receiver.facts().unwrap().entities;
+    assert!(!pending.contains_key(&revlog_name));
+    let restored_payload = Payload::Card(restored.clone());
+    let tracked_card = &pending[&card_name];
+    assert_eq!(tracked_card.payload, restored_payload);
+    assert_eq!(tracked_card.acked_payload, baseline[&card_name].acked_payload);
+    assert_eq!(
+        tracked_card.acked_payload_digest,
+        baseline[&card_name].acked_payload_digest
+    );
+    assert_eq!(tracked_card.acked_row_digest, baseline[&card_name].acked_row_digest);
+    if restored_payload.row_digest().unwrap() == tracked_card.acked_row_digest {
+        assert!(tracked_card.mark.is_none() && tracked_card.base_payload.is_none());
+    } else {
+        let mark = tracked_card
+            .mark
+            .as_ref()
+            .expect("changed restored card must remain pending");
+        assert_eq!(mark.payload_digest, restored_payload.payload_digest().unwrap());
+        assert!(tracked_card.local_rev > tracked_card.acked_rev);
+    }
+    let remaining = expected
+        .iter()
+        .filter_map(|(name, payload)| {
+            let entity = &pending[name];
+            assert_eq!(&entity.payload, payload);
+            entity.mark.as_ref().map(|_| (name.clone(), payload.clone()))
+        })
+        .collect::<Vec<_>>();
+    let scan = pair.receiver.driver().scan_state().unwrap();
+    assert!(!scan.scan_required && !scan.tracking_stopped && !scan.scan_running);
+    assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
+    assert_eq!(
+        pair.service.request_log().unwrap().last().unwrap().request_id,
+        request_before
+    );
+    let result = pair.receiver.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.receiver.last_sync_phase()));
+    assert_review_saved(&mut pair.receiver, &pair.service, request_before, &remaining);
+    assert_completed(&mut pair.receiver);
+    pair.receiver.close_clean().unwrap();
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().read_card(selected.id).unwrap(), restored);
+    assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.receiver.driver().media_files().unwrap(), original_files);
+    assert!(!pair.receiver.facts().unwrap().entities.contains_key(&revlog_name));
+    assert_completed(&mut pair.receiver);
+    assert!(pair.receiver.sdk_pending().is_empty());
+    let result = pair.sender.sync_now_and_drain(&mut pair.service, STEPS);
+    result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.sender.last_sync_phase()));
+    assert_eq!(pair.sender.driver().read_card(selected.id).unwrap(), restored);
+    assert_eq!(pair.sender.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.sender.driver().media_files().unwrap(), original_files);
+    assert!(!pair.sender.facts().unwrap().entities.contains_key(&revlog_name));
+    assert_completed(&mut pair.sender);
+    assert!(pair.sender.sdk_pending().is_empty());
+    let sender_dir = pair.root.path().join("sender");
+    pair.sender.close_clean().unwrap();
+    pair.sender = online(&sender_dir, false);
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.sender.driver().collection_payloads().unwrap(), expected);
+    assert_eq!(pair.sender.driver().media_files().unwrap(), original_files);
+    assert_completed(&mut pair.sender);
+    assert!(pair.sender.sdk_pending().is_empty());
+    assert!(
+        pair.service
+            .request_log()
+            .unwrap()
+            .iter()
+            .all(|request| { request.records.iter().all(|record| record.name != revlog_name) }),
+        "the undone Revlog must never reach Service, even as an attempted save"
+    );
+    pair.close();
+}
+
 fn assert_review_saved(
     rig: &mut PublicationRig,
     service: &Service<SeededRandom>,
