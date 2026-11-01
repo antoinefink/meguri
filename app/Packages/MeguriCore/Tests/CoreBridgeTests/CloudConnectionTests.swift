@@ -51,11 +51,27 @@ extension EventTests {
             let first = try await f.ready()
             let second = try await f.ready()
             let other = try await f.workflow.connection()
+            do { try await other.resumeBinding(second); Issue.record("wrong owner resume accepted") }
+            catch { #expect(error as? BridgeError == .cloudConnection(.wrongOwner)) }
             do { _ = try await other.confirmPublication(second); Issue.record("wrong owner accepted") }
             catch { #expect(error as? BridgeError == .cloudConnection(.wrongOwner)) }
             do { try await f.connection.cancelPreview(first); Issue.record("old preview cancelled new one") }
             catch { #expect(error as? BridgeError == .cloudConnection(.authorityChanged)) }
             _ = try await f.connection.confirmPublication(second)
+        }
+    }
+    @Test func resumeCannotPublishAnUploadPreviewOrReuseCancelledAuthority() async throws {
+        try await withCloudConnection { f in
+            let upload = try await f.ready()
+            await #expect(throws: BridgeError.cloudConnection(.notOffered)) { try await f.connection.resumeBinding(upload) }
+            #expect(try await f.connection.recoveryStatus() == nil)
+            await #expect(throws: BridgeError.cloudConnection(.consumed)) { _ = try await f.connection.confirmPublication(upload) }
+            let cancelled = try await f.ready()
+            try await f.connection.cancelPreview(cancelled)
+            await #expect(throws: BridgeError.cloudConnection(.consumed)) { try await f.connection.resumeBinding(cancelled) }
+            let current = try await f.ready()
+            await #expect(throws: BridgeError.cloudConnection(.consumed)) { try await f.connection.resumeBinding(cancelled) }
+            _ = try await f.connection.confirmPublication(current)
         }
     }
     @Test func retainedOwnRequestRechecksPauseAtEnqueueAndRejectsHeldReplyAfterClose() async throws {

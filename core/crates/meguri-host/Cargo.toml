@@ -24,6 +24,7 @@ bytes.workspace = true
 zstd.workspace = true
 sha2.workspace = true
 meguri-sched.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }

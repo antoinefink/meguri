@@ -32,9 +32,7 @@ public struct AccountSyncView: View {
                     CloudPreviewEntryButton(collection: collection, entry: .connect, host: host)
                 case .decisionRequired: EmptyView()
                 case .awaitingResumeOffer:
-                    Button(SyncText.value("sync.action.resume")) {}.disabled(true)
-                        .accessibilityIdentifier("settings.accountSync.resume")
-                    Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+                    CloudPreviewEntryButton(collection: collection, entry: .connect, host: host)
                 case nil where sync.settings.paused:
                     // The persisted device pause is available before a Host.
                     Button(SyncText.value("sync.settings.resumePause")) { update(paused: false) }
@@ -143,27 +141,21 @@ struct CloudPreviewEntryButton: View {
     let entry: CloudSyncEntry
     var host: AppNavigation.SheetHost = .main
     private var reason: String? {
-        if collection.sync.settings.paused { return "sync.status.paused.user" }
-        if collection.sync.setupState == .configurationUnavailable { return "sync.status.unavailable.setupNeeded" }
-        if collection.sync.connectionService == nil,
-           !(entry == .connect && collection.lifecycle == .noCollection && collection.sync.setupState == .prepared) {
-            return "sync.now.unavailable.collectionUnavailable"
-        }
-        if collection.sync.setupState == .failed { return "sync.recovery.error.other" }
-        if collection.sync.connectionOperationActive { return "sync.recovery.error.busy" }
-        if collection.sync.connectionPreviewActive { return "sync.connect.reading" }
-        return nil
+        collection.cloudPreviewEntryUnavailableReason(entry)
     }
     var body: some View {
         Button(SyncText.value(titleKey)) { collection.presentCloudSync(entry, host: host) }
             .disabled(reason != nil || (collection.navigation.sheet != nil && collection.navigation.sheet != .accountSync))
             .help(SyncText.value(reason ?? titleKey))
-            .accessibilityIdentifier(entry == .connect ? "settings.accountSync.connect" : "settings.accountSync.\(entry.rawValue)")
+            .accessibilityIdentifier(entry == .connect && collection.sync.status?.controls.resumeBindingOffered == true ? "settings.accountSync.resume"
+                : entry == .connect ? "settings.accountSync.connect" : "settings.accountSync.\(entry.rawValue)")
         if let reason { Text(SyncText.value(reason)).foregroundStyle(.secondary) }
     }
     private var titleKey: String {
         switch entry {
-        case .connect: "sync.connect.action"
+        case .connect:
+            collection.sync.status?.controls.resumeBindingOffered == true
+                ? "sync.action.resume" : "sync.connect.action"
         case .publicationChoice: "sync.decision.action"
         case .replaceLocal: "sync.adopt.action"
         case .replaceCloud: "sync.publish.action"

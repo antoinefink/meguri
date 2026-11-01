@@ -187,9 +187,11 @@ impl Runtime {
             || s.invalidation_exhausted
             || Self::adapter_guard_locked(s).token != a.adapter_token
             || s.media.epoch != a.media_epoch
-            || s.adapter.paused
             || s.tracking_stopped
-            || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping)
+            || s.adapter
+                .sdk
+                .as_ref()
+                .is_some_and(|sdk| sdk.stopping && sdk.guard == Self::adapter_guard_locked(s))
         {
             return Err(RuntimeError::StaleIncarnation);
         }
@@ -202,6 +204,20 @@ impl Runtime {
     ) -> Result<T, RuntimeError> {
         let mut s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
+        with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
+    }
+    // Durable intent replay is local recovery even while device sync is disabled.
+    // Selecting READY input and persisting a NEW intent still require admission.
+    fn with_media_admission<T>(
+        &self,
+        a: &MediaRecoveryAuthority,
+        work: impl FnOnce(&mut TrackingStore) -> Result<T, Error>,
+    ) -> Result<T, RuntimeError> {
+        let mut s = self.state();
+        Self::check_media_recovery_locked(&s, a)?;
+        if s.adapter.paused {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
     }
     fn media_recovery_io<T>(
@@ -1444,6 +1460,7 @@ impl Runtime {
         pending: PendingMediaApply,
     ) -> Result<(), RuntimeError> {
         self.media_recovery_io(collection, a, || Ok(()))?;
+        self.with_media_admission(a, |_| Ok(()))?;
         let PendingMediaApply {
             incoming,
             inbox,
@@ -1536,7 +1553,8 @@ impl Runtime {
         if intent.media.as_ref().is_some_and(|i| i.moved.is_some()) {
             self.plan_media_rewrite(collection, a, &mut intent)?;
         }
-        intent.id = self.with_media_recovery(a, |s| s.persist_apply_intent(&intent, None))?;
+        // Recheck after provider reads/planning, under the same lock as persistence.
+        intent.id = self.with_media_admission(a, |s| s.persist_apply_intent(&intent, None))?;
         self.execute_media_apply(collection, media, a, intent)
     }
     fn plan_media_rewrite(
@@ -2363,7 +2381,7 @@ impl Runtime {
         self.consume_media_feed(collection, media)?;
         let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
         self.media_recovery_io(collection, &a, || Ok(()))?;
-        let entries = self.with_media_recovery(&a, |s| s.inbox(a.binding))?;
+        let entries = self.with_media_admission(&a, |s| s.inbox(a.binding))?;
         let mut count = 0;
         for entry in entries {
             if entry.entry.reason != InboxReason::Ready {
@@ -2699,6 +2717,7 @@ mod recovery_authority_tests {
             }),
             ..State::default()
         };
+        state.adapter.paused = true;
         state.media.paused = true;
         state.media.enabled = Some(false);
         (state, MediaRecoveryAuthority(authority))
@@ -2727,13 +2746,12 @@ mod recovery_authority_tests {
                 Err(RuntimeError::StaleIncarnation)
             ));
         }
-        let refusals: [fn(&mut State); 7] = [
+        let refusals: [fn(&mut State); 6] = [
             |s| s.bound.as_mut().unwrap().usable = false,
             |s| s.bound.as_mut().unwrap().verified = false,
             |s| s.bound.as_mut().unwrap().binding.facts.state = BindingState::Isolated(IsolationReason::FileMismatch),
             |s| s.invalidation_exhausted = true,
             |s| s.tracking_stopped = true,
-            |s| s.adapter.paused = true,
             |s| {
                 s.adapter.sdk = Some(crate::cloud::adapter::SDKAuthority {
                     id: "synthetic-stopping-sdk".into(),
@@ -2747,5 +2765,45 @@ mod recovery_authority_tests {
             refuse(&mut state);
             assert!(Runtime::check_media_recovery_locked(&state, &original).is_err());
         }
+    }
+
+    #[test]
+    fn retained_invalidated_sdk_allows_only_current_local_recovery() {
+        let (mut state, old) = paused_owner();
+        state.adapter.sdk = Some(crate::cloud::adapter::SDKAuthority {
+            id: "synthetic-retained-sdk".into(),
+            guard: Runtime::adapter_guard_locked(&state),
+            stopping: true,
+        });
+        assert!(matches!(
+            Runtime::check_media_recovery_locked(&state, &old),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+
+        state.incarnation += 1;
+        state.adapter.token += 1;
+        let mut current = old.clone();
+        current.0.incarnation = state.incarnation;
+        current.0.adapter_token = Runtime::adapter_guard_locked(&state).token;
+        assert!(Runtime::check_media_recovery_locked(&state, &current).is_ok());
+        assert!(matches!(
+            Runtime::check_media_recovery_locked(&state, &old),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+        // Even with media unpaused, the retained object admits no network work.
+        state.adapter.paused = false;
+        state.media.paused = false;
+        state.media.enabled = Some(true);
+        assert!(matches!(
+            Runtime::check_media_locked(&state, &current),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+
+        let guard = Runtime::adapter_guard_locked(&state);
+        state.adapter.sdk.as_mut().unwrap().guard = guard;
+        assert!(matches!(
+            Runtime::check_media_recovery_locked(&state, &current),
+            Err(RuntimeError::StaleIncarnation)
+        ));
     }
 }

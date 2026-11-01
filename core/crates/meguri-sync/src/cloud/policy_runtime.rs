@@ -23,6 +23,7 @@ impl Runtime {
 
     pub fn policy_projection(&self, lifecycle: Lifecycle, generation: u64) -> Result<Projection, RuntimeError> {
         let session = self.active_review();
+        let resume_binding = self.resume_binding_offer();
         // Read the existing sidecar fact, outside Runtime/tracking locks. This grants no authority.
         let publication =
             meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
@@ -193,6 +194,14 @@ impl Runtime {
                 session,
                 fence,
                 summary,
+                resume_binding_offered: resume_binding
+                    .filter(|id| {
+                        s.publication
+                            .resume
+                            .as_ref()
+                            .is_some_and(|c| c.binding.id == *id && self.validate_resume_context_locked(&s, c).is_ok())
+                    })
+                    .map(|_| true),
             },
             evidence,
             engine: s.adapter.sdk.as_ref().map(|sdk| Engine {

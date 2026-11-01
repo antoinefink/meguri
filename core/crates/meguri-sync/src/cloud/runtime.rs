@@ -34,6 +34,8 @@ mod media_impl;
 mod policy_impl;
 #[path = "publication_runtime.rs"]
 mod publication_impl;
+#[path = "resume_runtime.rs"]
+mod resume_impl;
 #[path = "workflow_runtime.rs"]
 mod workflow_impl;
 #[path = "zone_deletion_runtime.rs"]
@@ -475,6 +477,20 @@ struct ScanGuard {
     incarnation: u64,
 }
 
+/// Retained process authority, never serialized or reconstructed from a DTO.
+#[derive(Clone)]
+pub(crate) struct ResumeContext {
+    collection: Collection,
+    scan: ScanGuard,
+    adapter: super::adapter::Guard,
+    binding: Binding,
+    decision: super::publication::DecisionSnapshot,
+    publish: Option<super::publication::PublishOp>,
+    adopt: Option<super::adoption::AdoptOp>,
+    active: Option<super::publication::ControlRecord>,
+    epoch: Option<super::publication::ControlRecord>,
+}
+
 /// Original authority for one actual database inventory request. Not a set of
 /// names or a serializable grant; completion consumes it, including on failure.
 pub struct ZoneListingRequest {
@@ -620,6 +636,8 @@ impl Runtime {
         state.root_confirmed = false;
         state.root_fetch_qualified = false;
         state.root_reads.clear();
+        state.publication.resume = None;
+        state.publication.preview = None;
         state.publication.running = None;
         state.publication.zones_created = false;
         state.publication.own_epoch_read = false;
@@ -782,6 +800,13 @@ impl Runtime {
         }) != Some(guard)
         {
             return Err(RuntimeError::StaleIncarnation);
+        }
+        if !matches!(&result, IdentityStatus::Available(account)
+            if state.bound.as_ref().is_some_and(|b| &b.binding.facts.account == account))
+        {
+            state.publication.resume = None;
+            state.publication.preview = None;
+            state.adapter.token = state.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         }
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
             let State { bound, store, .. } = &mut *state;

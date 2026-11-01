@@ -11,6 +11,7 @@ pub enum CloudConnectionFailure {
     Consumed,
     AuthorityChanged,
     AccountUnavailable,
+    AccountMismatch,
     Busy,
     KeyUnavailable,
     EpochIncomplete,
@@ -31,6 +32,7 @@ pub(crate) fn error(error: r::RuntimeError) -> CoreError {
     failure(match error {
         r::RuntimeError::Publication(e) => match e {
             p::PublicationError::AccountUnavailable => F::AccountUnavailable,
+            p::PublicationError::AccountMismatch => F::AccountMismatch,
             p::PublicationError::AuthorityChanged => F::AuthorityChanged,
             p::PublicationError::Busy => F::Busy,
             p::PublicationError::KeyUnavailable => F::KeyUnavailable,
@@ -104,6 +106,7 @@ fn epoch(epoch: c::EpochId) -> CloudControlTarget {
 pub enum CloudConnectionDecision {
     ConfirmUpload,
     ConfirmAdoption,
+    ConfirmResume,
     ChooseCollection,
     CloudUnreadable,
     NoCollection,
@@ -161,6 +164,9 @@ pub struct CloudConnectionSummary {
     pub published_at_ms: Option<i64>,
     pub decision: CloudConnectionDecision,
     pub unpublished_counts: Vec<CloudKindCount>,
+    /// Present “Continue syncing this collection” and these unsent counts.
+    pub resume_binding_id: Option<Vec<u8>>,
+    pub unsent_counts: Vec<CloudKindCount>,
 }
 impl From<&p::Preview> for CloudConnectionSummary {
     fn from(v: &p::Preview) -> Self {
@@ -177,10 +183,13 @@ impl From<&p::Preview> for CloudConnectionSummary {
                 p::ConnectDecision::NoCollection => CloudConnectionDecision::NoCollection,
                 p::ConnectDecision::ConfirmUpload => CloudConnectionDecision::ConfirmUpload,
                 p::ConnectDecision::ConfirmAdoption => CloudConnectionDecision::ConfirmAdoption,
+                p::ConnectDecision::ConfirmResume => CloudConnectionDecision::ConfirmResume,
                 p::ConnectDecision::ChooseCollection => CloudConnectionDecision::ChooseCollection,
                 p::ConnectDecision::CloudUnreadable => CloudConnectionDecision::CloudUnreadable,
             },
             unpublished_counts: counts(&v.unpublished_by_kind),
+            resume_binding_id: v.resume_binding.map(|b| b.0.to_vec()),
+            unsent_counts: counts(&v.unsent_by_kind),
         }
     }
 }
@@ -491,6 +500,21 @@ pub struct CloudRecoveryStatus {
 
 #[uniffi::export]
 impl CloudConnection {
+    pub fn resume_binding(&self, preview: Arc<CloudConnectionPreview>) -> Result<(), CoreError> {
+        callback::enter("CloudConnection.resume_binding");
+        self.owns(&preview.owner)?;
+        self.owner.check_generation(preview.generation)?;
+        let p::PreviewWork::Ready(p) = preview.take()? else {
+            return Err(failure(CloudConnectionFailure::NotOffered));
+        };
+        if p.decision != p::ConnectDecision::ConfirmResume {
+            return Err(failure(CloudConnectionFailure::NotOffered));
+        }
+        self.owner
+            .host
+            .resume_cloud_binding(&p, meguri_engine::Generation(preview.generation))
+            .map_err(error)
+    }
     pub fn begin_connection_preview(&self) -> Result<CloudConnectionPreviewWork, CoreError> {
         callback::enter("CloudConnection.begin_connection_preview");
         let generation = self.owner.current_generation()?;

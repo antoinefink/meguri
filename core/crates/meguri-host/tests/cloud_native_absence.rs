@@ -1237,3 +1237,882 @@ fn real_surfaced_token_expiry_then_partial_drain_starts_no_pass() {
     assert!(logged(runtime).is_empty());
     assert!(!runtime.adapter_snapshot().unwrap().absence_pass_completed);
 }
+
+#[path = "support/sign_out_absence.rs"]
+mod sign_out_absence;
+
+const Q6_CHILD_ENV: &str = "MEGURI_Q6_RESUME_ABSENCE_CHILD";
+const Q6_CHECKPOINT: &str = "Q6_RESUME_ABSENCE_CHECKPOINT ";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Q6LocalFacts {
+    note_id: i64,
+    edited_fields: Vec<u8>,
+    review_id: i64,
+    reviewed_card: i64,
+    baseline_notes: usize,
+    baseline_cards: usize,
+    baseline_reviews: usize,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Q6Checkpoint {
+    serialization: Vec<u8>,
+    seen: BTreeSet<String>,
+    pass: [u8; 16],
+    entities: Vec<cloud::workflow::EntityFacts>,
+    inbox_marks: Vec<(String, Option<[u8; 16]>)>,
+    // Real, checked receipt coverage, represented only as semantic scalars.
+    wal: Vec<(u64, u64)>,
+}
+
+// Compare native collection contents; compatibility USNs are device-local.
+fn q6_content(host: &CoreHost) -> BTreeMap<Table, Vec<Vec<Cell>>> {
+    let actual = rows(host);
+    [(Table::Notes, 4), (Table::Cards, 5), (Table::Revlog, 2)]
+        .into_iter()
+        .map(|(table, usn)| {
+            let content = actual[&table]
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .enumerate()
+                        .filter(|(index, _)| *index != usn)
+                        .map(|(_, cell)| cell.clone())
+                        .collect()
+                })
+                .collect();
+            (table, content)
+        })
+        .collect()
+}
+fn q6_local_rows(host: &CoreHost, facts: &Q6LocalFacts) {
+    let actual = rows(host);
+    assert_eq!(actual[&Table::Revlog].len(), facts.baseline_reviews + 1);
+    let note = actual[&Table::Notes]
+        .iter()
+        .find(|row| row[0] == Cell::Integer(facts.note_id))
+        .unwrap();
+    assert_eq!(note[6], Cell::Text(facts.edited_fields.clone()));
+    let review = actual[&Table::Revlog]
+        .iter()
+        .find(|row| row[0] == Cell::Integer(facts.review_id))
+        .unwrap();
+    assert_eq!(review[1], Cell::Integer(facts.reviewed_card));
+    assert!(
+        actual[&Table::Cards]
+            .iter()
+            .any(|row| row[0] == Cell::Integer(facts.reviewed_card))
+    );
+}
+fn q6_no_deletions(host: &CoreHost) {
+    let runtime = host.cloud_runtime().unwrap();
+    assert!(
+        runtime
+            .adapter_snapshot()
+            .unwrap()
+            .inbox
+            .iter()
+            .all(|e| !matches!(e.value, InboxValue::Deletion))
+    );
+    assert!(rows(host)[&Table::Graves].is_empty());
+}
+// Observe intake before apply can consume entries; a transient deletion must
+// fail here even if a later apply could hide it from the final inbox snapshot.
+fn q6_deliver(host: &CoreHost, sdk: &str, zone: &str, p: &Page<RecordChange>) -> BTreeSet<String> {
+    let runtime = host.cloud_runtime().unwrap();
+    let before = sign_out_absence::names(runtime);
+    let seen = deliver(host, sdk, zone, p, false);
+    q6_no_deletions(host);
+    for _ in 0..16 {
+        if runtime.drain_incoming(&host.collection().unwrap(), BUDGET).unwrap() == 0 {
+            break;
+        }
+    }
+    assert!(
+        before.is_subset(&sign_out_absence::names(runtime)),
+        "fetch must remove no tracked entity"
+    );
+    q6_no_deletions(host);
+    if !p.more {
+        assert!(
+            runtime
+                .inbox_entries(runtime.status().unwrap().binding.unwrap().id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    seen
+}
+fn q6_assert_pairs(host: &CoreHost, accepted: &[Saved], facts: &Q6LocalFacts) {
+    let actual = rows(host);
+    assert_eq!(actual[&Table::Notes].len(), facts.baseline_notes + 300);
+    assert_eq!(actual[&Table::Cards].len(), facts.baseline_cards + 300);
+    let runtime = host.cloud_runtime().unwrap();
+    for record in accepted {
+        let (_, payload) = decode(record);
+        let tracked = runtime.entity_facts(&record.name).unwrap().unwrap();
+        assert!(tracked.acked_rev > 0);
+        assert!(tracked.acked_payload.as_ref() == Some(&payload));
+        assert_eq!(tracked.acked_system_fields, record.system_fields);
+        match payload {
+            Payload::Note(note) => {
+                let row = actual[&Table::Notes]
+                    .iter()
+                    .find(|row| row[0] == Cell::Integer(note.id))
+                    .unwrap();
+                assert_eq!(row[6], Cell::Text(note.flds));
+            }
+            Payload::Card(card) => {
+                let row = actual[&Table::Cards]
+                    .iter()
+                    .find(|row| row[0] == Cell::Integer(card.id))
+                    .unwrap();
+                assert_eq!(row[1], Cell::Integer(card.nid));
+            }
+            _ => panic!("only the actual 300 new pairs belong to this witness"),
+        }
+    }
+    q6_no_deletions(host);
+}
+
+/// Owns the process and its sole pipe reader before any checkpoint assertion.
+/// Drop also kills/reaps/joins on timeout, parse failure, or parent assertion.
+struct Q6Child {
+    child: Option<std::process::Child>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+impl Q6Child {
+    fn spawn(root: &Path) -> (Self, mpsc::Receiver<String>) {
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cloud_q6_resume_absence_child_checkpoint",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(Q6_CHILD_ENV, root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let mut owner = Self {
+            child: Some(child),
+            reader: None,
+        };
+        let stdout = owner.child.as_mut().unwrap().stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        owner.reader = Some(std::thread::spawn(move || {
+            // Continue draining until EOF, including after a checkpoint. There
+            // is no detached writer or pipe thread at parent teardown.
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if let Some((_, json)) = line.split_once(Q6_CHECKPOINT) {
+                    let _ = tx.send(json.to_owned());
+                }
+            }
+        }));
+        (owner, rx)
+    }
+    fn stop(&mut self) -> Option<(std::io::Result<()>, std::io::Result<std::process::ExitStatus>)> {
+        let result = self.child.take().map(|mut child| {
+            let killed = child.kill();
+            let reaped = child.wait();
+            (killed, reaped)
+        });
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+        result
+    }
+}
+impl Drop for Q6Child {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+/// V9.2/V13/V26.2, K17.4, Q6 sign_out_resume + no_state_resume_absence.
+/// Synthetic Service with the actual Rust Host and native SDK callback seam;
+/// this makes no claim about live Apple SDK behavior (A7/A9a/A12).
+#[test]
+fn sign_out_resume_real_adoption_300_pairs_survive_first_page_apply_process_kill() {
+    use cloud::entity_codec::Kind;
+    use meguri_engine::session::{AnswerOutcome, StartResult};
+    use meguri_model::{
+        ids::{NoteId, NotetypeId},
+        time::EpochMillis,
+    };
+    use meguri_sched::answer::Rating;
+    use sign_out_absence as actual;
+
+    let root = tempfile::tempdir().unwrap();
+    let a_dir = root.path().join("q6-a");
+    let b_dir = root.path().join("q6-b");
+    actual::generated(&a_dir);
+    let account = Arc::new(actual::MutableAccount(std::sync::Mutex::new(identity())));
+    let a = actual::open_actual(&a_dir, account.clone());
+    let mut service = service(root.path());
+    let binding = actual::publish(&a, &mut service);
+    let b = actual::adopt(&b_dir, &mut service);
+    assert_eq!(
+        b.cloud_runtime()
+            .unwrap()
+            .status()
+            .unwrap()
+            .binding
+            .unwrap()
+            .facts
+            .epoch,
+        binding.facts.epoch
+    );
+    assert_eq!(q6_content(&a), q6_content(&b));
+
+    let (old_sdk, _, zone) = admit(&a);
+    confirm_root(&a, &old_sdk, &mut service);
+    // Save an actual Service cursor before sign-out; Resume must delete it.
+    let fetch = begin(a.cloud_runtime().unwrap(), &old_sdk, &zone);
+    let baseline = page(&mut service, &zone, None);
+    assert!(!baseline.more);
+    q6_deliver(&a, &old_sdk, &zone, &baseline);
+    finish(a.cloud_runtime().unwrap(), &old_sdk, &zone, fetch, false);
+    let old_cursor = a
+        .cloud_runtime()
+        .unwrap()
+        .adapter_snapshot()
+        .unwrap()
+        .serialization
+        .unwrap();
+    assert!(!old_cursor.is_empty());
+    let original = a
+        .cloud_runtime()
+        .unwrap()
+        .entity_facts_page(Kind::Note, None)
+        .unwrap()
+        .remove(0);
+    let Payload::Note(note) = original.payload.clone() else {
+        panic!("actual published Note")
+    };
+    let before_rows = rows(&a);
+    let requests = service.request_log().unwrap().len();
+    *account.0.lock().unwrap() = IdentityStatus::SignedOut;
+    a.cloud_runtime().unwrap().refresh_identity().unwrap();
+    assert_eq!(
+        a.cloud_runtime()
+            .unwrap()
+            .status()
+            .unwrap()
+            .binding
+            .unwrap()
+            .facts
+            .state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut)
+    );
+    assert!(a.cloud_runtime().unwrap().validate_sdk(&old_sdk).is_err());
+
+    let mut fields: Vec<String> = std::str::from_utf8(&note.flds)
+        .unwrap()
+        .split('\u{1f}')
+        .map(str::to_owned)
+        .collect();
+    fields[1] = "edited while signed out; public Q6 witness".into();
+    let edited_fields = fields.join("\u{1f}").into_bytes();
+    assert!(
+        meguri_engine::notes::update(
+            &a.collection().unwrap(),
+            meguri_engine::notes::UpdateNote {
+                id: NoteId(note.id),
+                fields,
+                tags: Vec::new(),
+            },
+            OpSource::UserUndoable
+        )
+        .unwrap()
+        .value
+        .written
+    );
+    let card = a
+        .cloud_runtime()
+        .unwrap()
+        .entity_facts_page(Kind::Card, None)
+        .unwrap()
+        .remove(0);
+    let Payload::Card(card) = card.payload else {
+        panic!("published Card")
+    };
+    let StartResult::Started { session_id, head, .. } = a.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("local review must work while signed out")
+    };
+    let item = &head.items[0];
+    let reviewed_card = item.card_id.0;
+    assert!(matches!(
+        a.review()
+            .answer(
+                session_id,
+                item.card_id,
+                Rating::Easy,
+                item.state_token,
+                EpochMillis(NOW),
+                123
+            )
+            .unwrap(),
+        AnswerOutcome::Accepted { .. }
+    ));
+    a.review().end(session_id).unwrap();
+    let after_rows = rows(&a);
+    let reviews: Vec<_> = after_rows[&Table::Revlog]
+        .iter()
+        .filter(|row| !before_rows[&Table::Revlog].iter().any(|old| old[0] == row[0]))
+        .collect();
+    assert_eq!(reviews.len(), 1);
+    let Cell::Integer(review_id) = reviews[0][0] else {
+        panic!("review ID")
+    };
+    let facts = Q6LocalFacts {
+        note_id: note.id,
+        edited_fields,
+        review_id,
+        reviewed_card,
+        baseline_notes: before_rows[&Table::Notes].len(),
+        baseline_cards: before_rows[&Table::Cards].len(),
+        baseline_reviews: before_rows[&Table::Revlog].len(),
+    };
+    q6_local_rows(&a, &facts);
+    assert!(
+        a.cloud_runtime()
+            .unwrap()
+            .entity_facts(&original.name)
+            .unwrap()
+            .unwrap()
+            == original,
+        "isolated changes must remain local until reconciliation"
+    );
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(a.cloud_runtime().unwrap().resume_binding_offer().is_none());
+    a.close().unwrap();
+    drop(a);
+
+    let (b_sdk, _, b_zone) = admit(&b);
+    assert_eq!(b_zone, zone);
+    confirm_root(&b, &b_sdk, &mut service);
+    let mut added_ids = BTreeSet::new();
+    for n in 0..300 {
+        let added = meguri_engine::notes::add(
+            &b.collection().unwrap(),
+            meguri_engine::notes::AddNote {
+                notetype_id: NotetypeId(note.mid),
+                fields: vec![format!("Q6 remote question {n}"), format!("Q6 remote answer {n}")],
+                tags: Vec::new(),
+                deck_id: DeckId(card.did),
+                guid: None,
+                update_add_defaults: false,
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap()
+        .value;
+        assert_eq!(added.cards.len(), 1);
+        assert!(added_ids.insert((Kind::Note, added.id.0)));
+        assert!(added_ids.insert((Kind::Card, added.cards[0].0)));
+    }
+    b.cloud_runtime()
+        .unwrap()
+        .reconcile_binding(&b.collection().unwrap(), &b.media().unwrap(), BUDGET)
+        .unwrap();
+    let accepted: Vec<Saved> = actual::send_pending(&b, &mut service, &b_sdk)
+        .into_iter()
+        .filter(|record| {
+            let (_, payload) = decode(record);
+            match payload {
+                Payload::Note(n) => added_ids.contains(&(Kind::Note, n.id)),
+                Payload::Card(c) => added_ids.contains(&(Kind::Card, c.id)),
+                _ => false,
+            }
+        })
+        .collect();
+    assert_eq!(accepted.len(), 600);
+    assert_eq!(
+        accepted.iter().map(|r| r.name.clone()).collect::<BTreeSet<_>>().len(),
+        600
+    );
+    q6_assert_pairs(&b, &accepted, &facts);
+    std::fs::write(
+        root.path().join("q6-local-facts.json"),
+        serde_json::to_vec(&facts).unwrap(),
+    )
+    .unwrap();
+    // Serialize Service ownership: no parent Service SQLite access during child.
+    drop(service);
+    let (mut child, checkpoint_rx) = Q6Child::spawn(root.path());
+    let checkpoint = checkpoint_rx.recv_timeout(BUDGET);
+    let (killed, reaped) = child.stop().unwrap();
+    // All pipes are joined and the process is reaped before parsing/asserting.
+    killed.unwrap();
+    let status = reaped.unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(9), "checkpoint must end with actual SIGKILL");
+    }
+    assert!(!status.success());
+    let checkpoint: Q6Checkpoint =
+        serde_json::from_str(&checkpoint.expect("first real WAL-covered page checkpoint within unchanged BUDGET"))
+            .unwrap();
+    assert_eq!(checkpoint.seen.len(), 50);
+    assert!(!checkpoint.wal.is_empty());
+    assert!(
+        !checkpoint.inbox_marks.is_empty(),
+        "real first-page Card references must witness durable inbox pass marks"
+    );
+    assert!(
+        checkpoint
+            .inbox_marks
+            .iter()
+            .all(|(_, mark)| *mark == Some(checkpoint.pass))
+    );
+    assert!(
+        checkpoint
+            .seen
+            .iter()
+            .any(|name| accepted.iter().any(|r| &r.name == name))
+    );
+
+    let a = actual::open_actual(&a_dir, Arc::new(Account));
+    let runtime = a.cloud_runtime().unwrap();
+    q6_local_rows(&a, &facts);
+    assert_eq!(
+        runtime.adapter_snapshot().unwrap().serialization,
+        Some(checkpoint.serialization.clone())
+    );
+    assert_eq!(actual::running_pass(runtime), checkpoint.pass);
+    assert!(
+        logged(runtime).is_empty(),
+        "partial fetch must not report a new completion on open"
+    );
+    for before in &checkpoint.entities {
+        let reopened = runtime.entity_facts(&before.name).unwrap().unwrap();
+        assert_eq!(reopened.local_rev, before.local_rev);
+        assert_eq!(reopened.acked_rev, before.acked_rev);
+        assert_eq!(reopened.acked_envelope, before.acked_envelope);
+        assert_eq!(reopened.acked_system_fields, before.acked_system_fields);
+        assert!(reopened.acked_payload == before.acked_payload);
+    }
+    let reopened_marks: Vec<_> = runtime
+        .inbox_entries(binding.id)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.entry.record_name, e.entry.absence_pass))
+        .collect();
+    assert_eq!(reopened_marks, checkpoint.inbox_marks);
+    let (sdk, state, resumed_zone) = admit(&a);
+    assert_eq!(resumed_zone, zone);
+    assert_eq!(state, Some(checkpoint.serialization.clone()));
+    let mut service = self::service(root.path());
+    // This SDK retains the interrupted cursor; the fresh cursorless helper is
+    // exercised before the child's first fetch instead.
+    runtime.validate_sdk(&sdk).unwrap();
+    assert!(!runtime.sdk_root_confirmed());
+    let fenced = runtime
+        .build_collection_batch(&sdk, &a.collection().unwrap(), &actual::names(runtime))
+        .unwrap();
+    assert_eq!(fenced.id, 0);
+    assert!(fenced.saves.is_empty());
+    confirm_root(&a, &sdk, &mut service);
+    assert_eq!(actual::running_pass(runtime), checkpoint.pass);
+    // A fetched:false call must leave the interrupted pass running.
+    let idle = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("q6-idle-{idle}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&sdk, idle).unwrap());
+    assert_eq!(actual::running_pass(runtime), checkpoint.pass);
+    assert!(logged(runtime).is_empty());
+    let (stored_zone, token): (String, Token) = serde_json::from_slice(&checkpoint.serialization).unwrap();
+    assert_eq!(stored_zone, zone);
+    let fetch = begin(runtime, &sdk, &zone);
+    assert_eq!(
+        actual::running_pass(runtime),
+        checkpoint.pass,
+        "a restored cursor must continue the original pass"
+    );
+    let mut token = Some(token);
+    let mut remaining = BTreeSet::new();
+    loop {
+        let p = page(&mut service, &zone, token);
+        remaining.extend(q6_deliver(&a, &sdk, &zone, &p));
+        q6_no_deletions(&a);
+        if !p.more {
+            break;
+        }
+        token = Some(p.token);
+    }
+    assert!(
+        remaining.is_disjoint(&checkpoint.seen),
+        "the saved actual page token must skip its covered prefix"
+    );
+    assert!(
+        accepted
+            .iter()
+            .all(|record| checkpoint.seen.contains(&record.name) || remaining.contains(&record.name))
+    );
+    finish(runtime, &sdk, &zone, fetch, false);
+    assert_eq!(completed(&a, &zone, BTreeSet::new()), checkpoint.pass);
+    q6_assert_pairs(&a, &accepted, &facts);
+    assert!(
+        checkpoint
+            .entities
+            .iter()
+            .all(|entity| actual::names(runtime).contains(&entity.name))
+    );
+    q6_local_rows(&a, &facts);
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    // First actual A sends follow Resume's settle/reconcile and this fresh SDK's
+    // root confirmation. Only Service Saved outcomes acknowledge local work.
+    assert!(runtime.sdk_root_confirmed());
+    let local_acks = actual::send_pending(&a, &mut service, &sdk);
+    assert!(
+        local_acks
+            .iter()
+            .any(|r| matches!(decode(r).1, Payload::Note(n) if n.id == facts.note_id && n.flds == facts.edited_fields))
+    );
+    assert!(
+        local_acks
+            .iter()
+            .any(|r| matches!(decode(r).1, Payload::Revlog(r) if r.id == facts.review_id))
+    );
+    for record in &local_acks {
+        let tracked = runtime.entity_facts(&record.name).unwrap().unwrap();
+        assert_eq!(tracked.acked_system_fields, record.system_fields);
+        assert_eq!(tracked.acked_envelope.0, record.envelope);
+        assert!(tracked.acked_rev > 0);
+    }
+    let fetch = begin(b.cloud_runtime().unwrap(), &b_sdk, &zone);
+    let mut token = None;
+    loop {
+        let p = page(&mut service, &zone, token);
+        q6_deliver(&b, &b_sdk, &zone, &p);
+        q6_no_deletions(&b);
+        if !p.more {
+            break;
+        }
+        token = Some(p.token);
+    }
+    finish(b.cloud_runtime().unwrap(), &b_sdk, &zone, fetch, false);
+    q6_local_rows(&b, &facts);
+    assert_eq!(q6_content(&a), q6_content(&b));
+    q6_assert_pairs(&a, &accepted, &facts);
+    q6_assert_pairs(&b, &accepted, &facts);
+    for record in &local_acks {
+        let tracked = b.cloud_runtime().unwrap().entity_facts(&record.name).unwrap().unwrap();
+        assert!(tracked.acked_payload.as_ref() == Some(&decode(record).1));
+    }
+    assert!(runtime.inbox_entries(binding.id).unwrap().is_empty());
+    assert!(
+        b.cloud_runtime()
+            .unwrap()
+            .inbox_entries(b.cloud_runtime().unwrap().status().unwrap().binding.unwrap().id)
+            .unwrap()
+            .is_empty()
+    );
+    a.close().unwrap();
+    b.close().unwrap();
+}
+
+/// Q6 sign_out_resume's other-account variant; the positive test owns 300 pairs
+/// and kill/reopen. All previews below use actual Service reads in their account.
+#[test]
+fn sign_out_resume_wrong_account_keeps_pending_note_and_reads_own_namespace() {
+    use cloud::{
+        entity_codec::Kind,
+        publication::{ConnectDecision, PublicationError},
+        runtime::RuntimeError,
+    };
+    use meguri_testkit::cloud::{ErrorCode, LogOutcome, RequestKind};
+    use sign_out_absence as actual;
+
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("q6-wrong-account");
+    actual::generated(&dir);
+    let account = Arc::new(actual::MutableAccount(std::sync::Mutex::new(identity())));
+    let host = actual::open_actual(&dir, account.clone());
+    let mut service = service(root.path());
+    let binding = actual::publish(&host, &mut service);
+    let (old_sdk, _, _) = admit(&host);
+    confirm_root(&host, &old_sdk, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let original = runtime.entity_facts_page(Kind::Note, None).unwrap().remove(0);
+    assert!(original.acked_rev > 0);
+    assert!(!original.acked_system_fields.is_empty());
+    assert!(!original.acked_envelope.0.is_empty());
+    let Payload::Note(note) = &original.payload else {
+        panic!("actual published Note")
+    };
+    let mut fields: Vec<String> = std::str::from_utf8(&note.flds)
+        .unwrap()
+        .split('\u{1f}')
+        .map(str::to_owned)
+        .collect();
+    fields[1] = "Q6 edit before sign-out; never sent to the other account".into();
+    let edited_fields = fields.join("\u{1f}").into_bytes();
+    let edit = meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id: meguri_model::ids::NoteId(note.id),
+            fields,
+            tags: std::str::from_utf8(&note.tags)
+                .unwrap()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(edit.value.written);
+    let pending = runtime.entity_facts(&original.name).unwrap().unwrap();
+    assert!(pending.mark.is_some());
+    assert!(pending.local_rev > original.local_rev && pending.local_rev > pending.acked_rev);
+    assert_eq!(pending.observed_seq, edit.seq.0);
+    assert_eq!(pending.acked_rev, original.acked_rev);
+    assert_eq!(pending.acked_system_fields, original.acked_system_fields);
+    assert!(pending.acked_payload == original.acked_payload);
+    assert!(pending.acked_envelope == original.acked_envelope);
+    assert!(matches!(&pending.payload, Payload::Note(n) if n.flds == edited_fields));
+    let local_rows = rows(&host);
+    let account1_records = service.inspect(&scope()).unwrap().unwrap();
+    let other_scope = Scope {
+        account: "synthetic-account-B".into(),
+        ..scope()
+    };
+    assert!(service.inspect(&other_scope).unwrap().is_none());
+    let requests = service.request_log().unwrap().len();
+
+    *account.0.lock().unwrap() = IdentityStatus::SignedOut;
+    runtime.refresh_identity().unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut)
+    );
+    assert!(runtime.resume_binding_offer().is_none());
+    assert!(runtime.validate_sdk(&old_sdk).is_err());
+    let blocked = runtime
+        .build_collection_batch(&old_sdk, &collection, &actual::names(runtime))
+        .unwrap();
+    assert_eq!(blocked.id, 0);
+    assert!(blocked.saves.is_empty());
+    assert!(runtime.entity_facts(&original.name).unwrap().unwrap() == pending);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    // The original SDK owns cancellation and release; no replacement SDK is made.
+    runtime.retire_sdk(&old_sdk, false).unwrap();
+    runtime.release_sdk(&old_sdk).unwrap();
+    assert_eq!(service.request_log().unwrap().len(), requests);
+
+    *account.0.lock().unwrap() = identity();
+    runtime.refresh_identity().unwrap();
+    let retained = actual::actual_preview(&host, &mut service);
+    assert_eq!(retained.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(retained.resume_binding, Some(binding.id));
+    assert!(retained.unsent_by_kind[&Kind::Note] >= 1);
+    let requests = service.request_log().unwrap().len();
+    *account.0.lock().unwrap() = IdentityStatus::Available(OpaqueBytes(other_scope.account.as_bytes().to_vec()));
+    // Provider revalidation must refuse even before the account notification.
+    assert!(matches!(
+        host.resume_cloud_binding(&retained, collection.generation()),
+        Err(RuntimeError::Publication(PublicationError::AccountMismatch))
+    ));
+    assert!(matches!(
+        host.resume_cloud_binding(&retained, collection.generation()),
+        Err(RuntimeError::Publication(PublicationError::NotOffered))
+    ));
+    runtime.refresh_identity().unwrap();
+    let assert_retained = || {
+        let current = runtime.status().unwrap().binding.unwrap();
+        assert_eq!(current.id, binding.id);
+        assert!(current.facts.account == binding.facts.account);
+        assert!(matches!(
+            current.facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut | cloud::IsolationReason::AccountChanged)
+        ));
+        assert!(runtime.entity_facts(&original.name).unwrap().unwrap() == pending);
+        assert_eq!(rows(&host), local_rows);
+    };
+    assert_retained();
+    assert!(runtime.resume_binding_offer().is_none());
+    assert_eq!(service.request_log().unwrap().len(), requests);
+
+    let other = actual::actual_preview_for_scope(&host, &mut service, &other_scope);
+    assert_ne!(other.id, retained.id);
+    assert!(other.account.0 == other_scope.account.as_bytes());
+    assert_eq!(other.decision, ConnectDecision::ConfirmUpload);
+    assert!(other.resume_binding.is_none() && other.active.is_none() && other.cloud.is_none());
+    assert!(runtime.resume_binding_offer().is_none());
+    assert!(matches!(
+        host.resume_cloud_binding(&other, collection.generation()),
+        Err(RuntimeError::Publication(PublicationError::NotOffered))
+    ));
+    let log = service.request_log().unwrap();
+    assert_eq!(log.len(), requests + 1);
+    let read = &log[requests];
+    assert!(read.scope == other_scope);
+    assert_eq!(read.kind, RequestKind::Read);
+    assert_eq!(read.zone.as_deref(), Some("meguri-root"));
+    assert_eq!(read.outcome, LogOutcome::Failure(ErrorCode::ZoneNotFound));
+    assert!(
+        log.iter()
+            .filter(|r| r.scope == other_scope)
+            .all(|r| r.kind == RequestKind::Read)
+    );
+    assert!(
+        service
+            .inspect(&other_scope)
+            .unwrap()
+            .is_none_or(|db| db.zones.is_empty() && db.used_bytes == 0)
+    );
+    assert!(service.inspect(&scope()).unwrap().unwrap() == account1_records);
+    assert_retained();
+
+    *account.0.lock().unwrap() = identity();
+    runtime.refresh_identity().unwrap();
+    assert!(runtime.resume_binding_offer().is_none());
+    assert!(matches!(
+        host.resume_cloud_binding(&retained, collection.generation()),
+        Err(RuntimeError::Publication(PublicationError::NotOffered))
+    ));
+    assert_retained();
+    assert_eq!(service.request_log().unwrap().len(), log.len());
+    let fresh = actual::actual_preview(&host, &mut service);
+    assert_ne!(fresh.id, retained.id);
+    assert_ne!(fresh.id, other.id);
+    assert_eq!(fresh.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(fresh.resume_binding, Some(binding.id));
+    assert!(fresh.unsent_by_kind[&Kind::Note] >= 1);
+    assert!(matches!(
+        host.resume_cloud_binding(&retained, collection.generation()),
+        Err(RuntimeError::Publication(PublicationError::NotOffered))
+    ));
+    assert_retained();
+    assert!(service.inspect(&scope()).unwrap().unwrap() == account1_records);
+    assert!(
+        service
+            .inspect(&other_scope)
+            .unwrap()
+            .is_none_or(|db| db.zones.is_empty() && db.used_bytes == 0)
+    );
+    host.close().unwrap();
+}
+
+/// Subprocess infrastructure only. Parent owns kill/reap even if this panics.
+#[test]
+fn cloud_q6_resume_absence_child_checkpoint() {
+    use cloud::{entity_codec::Kind, publication::ConnectDecision};
+    use sign_out_absence as actual;
+    let Some(root) = std::env::var_os(Q6_CHILD_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    let facts: Q6LocalFacts =
+        serde_json::from_slice(&std::fs::read(root.join("q6-local-facts.json")).unwrap()).unwrap();
+    let account = Arc::new(actual::MutableAccount(std::sync::Mutex::new(IdentityStatus::SignedOut)));
+    let host = actual::open_actual(&root.join("q6-a"), account.clone());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    q6_local_rows(&host, &facts);
+    *account.0.lock().unwrap() = identity();
+    runtime.refresh_identity().unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut)
+    );
+    assert!(runtime.resume_binding_offer().is_none());
+    assert!(runtime.resume_binding(binding.id, &collection).is_err());
+    let mut service = service(&root);
+    let preview = actual::actual_preview(&host, &mut service);
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(preview.resume_binding, Some(binding.id));
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+    assert!(preview.unsent_by_kind[&Kind::Note] >= 1);
+    assert!(preview.unsent_by_kind[&Kind::Revlog] >= 1);
+    let open = runtime.stored_state_for_testing().unwrap().open_counter;
+    let requests = service.request_log().unwrap().len();
+    host.resume_cloud_binding(&preview, collection.generation()).unwrap();
+    assert_eq!(
+        service.request_log().unwrap().len(),
+        requests,
+        "Resume performs no Service writes"
+    );
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Active
+    );
+    assert_eq!(runtime.stored_state_for_testing().unwrap().open_counter, open);
+    assert!(!runtime.stored_state_for_testing().unwrap().drained);
+    assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_none());
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(!runtime.status().unwrap().scan_required);
+    assert!(runtime.entity_facts_page(Kind::Note, None).unwrap().iter().any(
+        |e| matches!(&e.payload, Payload::Note(n) if n.id == facts.note_id && n.flds == facts.edited_fields)
+            && e.mark.is_some()
+    ));
+    assert!(!runtime.entity_facts_page(Kind::Revlog, None).unwrap().is_empty());
+    let (sdk, state, zone) = admit(&host);
+    assert!(state.is_none(), "explicit Resume must start a cursorless SDK");
+    actual::assert_send_fenced(&host, &sdk);
+    confirm_root(&host, &sdk, &mut service);
+    assert!(
+        runtime.incoming_runs().is_empty(),
+        "no earlier apply may stand in for the first fetched page"
+    );
+    let _fetch = begin(runtime, &sdk, &zone);
+    let p = page(&mut service, &zone, None);
+    assert_eq!(p.changes.len(), 50);
+    assert!(p.more);
+    assert!(p.changes.iter().all(|c| matches!(c, RecordChange::Saved(_))));
+    let seen = q6_deliver(&host, &sdk, &zone, &p);
+    let runs = runtime.incoming_runs();
+    let receipts = runtime.incoming_wal_receipts();
+    assert!(
+        !runs.is_empty(),
+        "the first real page must apply, not just advance a cursor"
+    );
+    let mut wal = Vec::new();
+    for run in runs {
+        assert_eq!(run.generation, collection.generation().0);
+        assert!(receipts.iter().any(|receipt| receipt.identity().native_file()
+            == (run.native_file.device, run.native_file.inode)
+            && receipt.identity().generation().0 == run.generation
+            && receipt.through().0 >= run.seq));
+        wal.push((run.generation, run.seq));
+    }
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(logged(runtime).is_empty());
+    q6_no_deletions(&host);
+    q6_local_rows(&host, &facts);
+    let snapshot = runtime.adapter_snapshot().unwrap();
+    let pass = actual::running_pass(runtime);
+    let checkpoint = Q6Checkpoint {
+        serialization: snapshot.serialization.unwrap(),
+        seen,
+        pass,
+        entities: snapshot.entities,
+        inbox_marks: snapshot
+            .inbox
+            .into_iter()
+            .map(|entry| (entry.record_name, entry.absence_pass))
+            .collect(),
+        wal,
+    };
+    assert!(checkpoint.inbox_marks.iter().all(|(_, mark)| *mark == Some(pass)));
+    let checkpoint = serde_json::to_string(&checkpoint).unwrap();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == IncomingStage::FetchAfterCursor {
+            println!("{Q6_CHECKPOINT}{checkpoint}");
+            std::io::stdout().flush().unwrap();
+            let _ = std::io::stdin().read(&mut [0]);
+            panic!("parent must SIGKILL the A process at the real checkpoint");
+        }
+    });
+    // Same post-cursor checkpoint seam as cloud_absence_child_checkpoint. The
+    // apply and WAL receipt above are real; the seam only holds this process.
+    runtime.incoming_stage_for_testing(IncomingStage::FetchAfterCursor);
+}

@@ -472,6 +472,176 @@ extension ReviewCollectionStartupTests {
     }
 }
 
+// Uses the existing real publication fixture and retained production Host.
+// Only CloudKit execution is faked; no preview or binding authority is built here.
+extension ReviewCollectionStartupTests {
+    @Test func stoppedBindingCanDiscoverBeforeResumeIsOffered() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            // With no projection, offer evidence is nil and cannot disable discovery.
+            await harness.owner.start()
+            #expect(harness.sync.status?.controls.resumeBindingOffered == nil)
+            #expect(harness.owner.cloudPreviewEntryUnavailableReason(.connect) == nil)
+            await harness.sync.confirmResume()
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            try await harness.prepareStoppedResume(discover: false)
+            let status = try #require(harness.sync.status)
+            #expect(status.controls.resumeBindingOffered == nil)
+            #expect(status.controls.bindingStopped == true && status.controls.bindingActive == false)
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false && harness.factory.live.isEmpty)
+            #expect(harness.owner.cloudPreviewEntryUnavailableReason(.connect) == nil)
+            let starts = harness.factory.created.count
+            await harness.sync.confirmResume()
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            #expect(harness.sync.preview == nil && harness.factory.created.count == starts)
+            harness.owner.presentCloudSync(.connect)
+            #expect(harness.owner.navigation.sheet == .cloudSync(.connect))
+            try await harness.owner.prepareCloudConnectionPreview()
+            await harness.sync.waitForConnectionPreview()
+            guard case .ready(_, let summary) = harness.sync.preview else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(summary.decision == .confirmResume && summary.resumeBindingId != nil)
+            #expect(!harness.sync.settings.enabled && harness.factory.created.count == starts)
+            await harness.sync.cancelConnectionPreview()
+            harness.owner.navigation.dismissSheet()
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+
+    @Test func connectionFailureBelongsToItsAttemptAndSuccessfulResumePreservesFailureHistory() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.prepareStoppedResume()
+            let backend = try #require(harness.backends.last)
+            let connection = try #require(backend.connection)
+            guard case .ready(let handle, _) = harness.sync.preview else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            try await connection.cancelPreview(handle)
+            await harness.sync.confirmResume()
+            #expect(harness.sync.connectionFailure == .consumed && harness.sync.operationFailed)
+            let failureRevision = harness.sync.failureRevision
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            harness.sync.beginConnectionPreview()
+            #expect(harness.sync.connectionFailure == nil)
+            #expect(harness.sync.operationFailed && harness.sync.failureRevision == failureRevision)
+            await harness.sync.waitForConnectionPreview()
+            guard case .ready(_, let summary) = harness.sync.preview else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(summary.decision == .confirmResume)
+            let accountReads = harness.factory.accountReads
+            let verifiedReads = backend.verifiedAccountReads.count
+            await harness.sync.confirmResume()
+            let resumeDiagnosticParts: [String] = [
+                "connectionFailure=\(String(describing: harness.sync.connectionFailure))",
+                "enabled=\(harness.sync.settings.enabled)",
+                "paused=\(harness.sync.settings.paused)",
+                "previewPresent=\(harness.sync.preview != nil)",
+                "operationFailed=\(harness.sync.operationFailed)",
+                "failureRevision=\(harness.sync.failureRevision)",
+                "accountReadDelta=\(harness.factory.accountReads - accountReads)",
+                "verifiedReadDelta=\(backend.verifiedAccountReads.count - verifiedReads)",
+                backend.startDiagnostics,
+            ]
+            let resumeDiagnostic: String = "Resume proof: \(resumeDiagnosticParts.joined(separator: "; "))"
+            try #require(harness.sync.settings.enabled && harness.sync.connectionFailure == nil, "\(resumeDiagnostic)")
+            await harness.sync.prepareConnectionAuthority()
+            try await backend.waitForStart()
+            #expect(harness.sync.connectionFailure == nil && harness.sync.settings.enabled)
+            #expect(harness.sync.operationFailed && harness.sync.failureRevision == failureRevision)
+            #expect(harness.persistedEnabled == true && harness.sync.preview == nil)
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+
+    @Test func explicitResumeConsumesOnlyTheRetainedResumeDecisionAndStartsWithoutCursor() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.prepareStoppedResume()
+            let backend = try #require(harness.backends.last)
+            let connection = try #require(backend.connection)
+            let starts = harness.factory.created.count
+            let accountReads = harness.factory.accountReads
+            let verifiedReads = backend.verifiedAccountReads.count
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            // Wrong explicit intent must leave the real Resume handle untouched.
+            await harness.sync.confirmPublication()
+            await harness.sync.confirmAdoption()
+            #expect(harness.sync.preview != nil && !harness.sync.operationFailed)
+            #expect(try await connection.recoveryStatus() == nil)
+            #expect(harness.factory.created.count == starts)
+            await harness.sync.confirmResume()
+            let resumeDiagnosticParts: [String] = [
+                "connectionFailure=\(String(describing: harness.sync.connectionFailure))",
+                "enabled=\(harness.sync.settings.enabled)",
+                "paused=\(harness.sync.settings.paused)",
+                "previewPresent=\(harness.sync.preview != nil)",
+                "operationFailed=\(harness.sync.operationFailed)",
+                "failureRevision=\(harness.sync.failureRevision)",
+                "accountReadDelta=\(harness.factory.accountReads - accountReads)",
+                "verifiedReadDelta=\(backend.verifiedAccountReads.count - verifiedReads)",
+                backend.startDiagnostics,
+            ]
+            let resumeDiagnostic: String = "Resume proof: \(resumeDiagnosticParts.joined(separator: "; "))"
+            try #require(!harness.sync.operationFailed && harness.sync.failureRevision == 0, "\(resumeDiagnostic)")
+            await harness.sync.prepareConnectionAuthority()
+            #expect(harness.factory.accountReads == accountReads + 1)
+            #expect(backend.verifiedAccountReads.count == verifiedReads + 1)
+            try await backend.waitForStart()
+            #expect(harness.sync.preview == nil && harness.sync.recovery == nil)
+            #expect(harness.sync.settings.enabled && harness.persistedEnabled == true)
+            #expect(!harness.sync.operationFailed && harness.sync.connectionFailure == nil)
+            #expect(try await connection.recoveryStatus() == nil)
+            #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1)
+            #expect(harness.factory.created.last?.serialization == nil)
+            #expect(harness.factory.accountReadsAtCreation.last == accountReads + 1)
+            #expect(harness.sync.status?.controls.bindingActive == true)
+            await harness.sync.confirmResume() // no authority left to reuse
+            #expect(harness.factory.created.count == starts + 1)
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+
+    @Test func pausedOrCancelledResumeNeverEnablesAndAConsumedPreviewCannotChangeDirection() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.prepareStoppedResume()
+            let backend = try #require(harness.backends.last)
+            let connection = try #require(backend.connection)
+            let starts = harness.factory.created.count
+            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            await harness.sync.waitForInputs()
+            await harness.sync.confirmResume()
+            #expect(harness.sync.preview != nil && !harness.sync.settings.enabled)
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            await harness.sync.waitForInputs()
+            await harness.sync.cancelConnectionPreview()
+            #expect(harness.sync.preview == nil && harness.persistedEnabled == false)
+            await harness.sync.confirmResume()
+            #expect(harness.factory.created.count == starts && !harness.sync.operationFailed)
+            harness.sync.beginConnectionPreview()
+            await harness.sync.waitForConnectionPreview()
+            guard case .ready(let cancelled, let summary) = harness.sync.preview else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(summary.decision == .confirmResume)
+            try await connection.cancelPreview(cancelled)
+            await harness.sync.confirmResume()
+            #expect(harness.sync.connectionFailure == .consumed && harness.sync.operationFailed)
+            #expect(harness.sync.preview == nil && !harness.sync.settings.enabled && harness.persistedEnabled == false)
+            #expect(harness.factory.created.count == starts)
+            #expect(try await connection.recoveryStatus() == nil)
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+}
+
 nonisolated enum InitialCloudHold: Sendable { case pause, background }
 nonisolated enum InitialCloudInterruption: Sendable { case account, close }
 
@@ -536,13 +706,15 @@ nonisolated struct InitialCloudFixture: Sendable {
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
     }
-    lazy var owner: ReviewCollection = {
+    lazy var owner = makeOwner()
+
+    private func makeOwner() -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
-    }()
+    }
     init(fixture: InitialCloudFixture, enabled: Bool = false, automatic: Bool = false) throws {
         self.fixture = fixture
         factory = InitialCloudSDKFactory(fixture: fixture)
@@ -559,6 +731,67 @@ nonisolated struct InitialCloudFixture: Sendable {
         try await owner.prepareCloudConnectionPreview()
         original = Task { [self] in await sync.waitForConnectionPreview(); page.finishedBeforeAdmission() }
         try await page.waitForAdmission()
+    }
+    func prepareStoppedResume(discover: Bool = true) async throws {
+        try await beginAndWaitForPage()
+        try requireHealthy(stage: "adoption-admitted")
+        release()
+        await joinOriginal()
+        try requireHealthy(stage: "adoption-returned")
+        await sync.waitForReplacement()
+        try requireHealthy(stage: "replacement-joined")
+        await owner.waitForCloudActivation()
+        try requireHealthy(stage: "activation-joined")
+        await sync.prepareConnectionAuthority()
+        try requireHealthy(stage: "adoption-account-proof")
+        let adoptedBackend = try #require(backends.last)
+        try await adoptedBackend.waitForStart()
+        try requireHealthy(stage: "adoption-sdk-started")
+        #expect(sync.settings.enabled && persistedEnabled == true)
+        try #require(await sync.cancelAndDrain())
+        try requireHealthy(stage: "native-drained-core-open")
+        try #require(factory.live.isEmpty && backends.allSatisfy { $0.closeCount == 1 })
+        try #require(owner.state == .ready && collectionExists)
+        try await adoptedBackend.workflow.stopSyncing()
+        try requireHealthy(stage: "core-stopped")
+        #expect(sync.settings.enabled && persistedEnabled == true)
+        try #require(await owner.close())
+        try requireHealthy(stage: "stopped-owner-closed")
+        #expect(backends.allSatisfy { $0.closeCount == 1 })
+        #expect(factory.live.isEmpty)
+        defaults.set(["enabled": false, "paused": false, "automatic": false, "media": true],
+            forKey: "meguri.cloud.deviceSettings")
+        let starts = factory.created.count
+        sync = makeSync()
+        owner = makeOwner()
+        await owner.start()
+        try requireHealthy(stage: "stopped-owner-reopened")
+        try #require(owner.state == .ready)
+        await sync.prepareConnectionAuthority()
+        try requireHealthy(stage: "reopened-account-proof")
+        let backend = try #require(backends.last)
+        #expect(backend !== adoptedBackend && backend.closeCount == 0 && backend.starts.isEmpty)
+        #expect(factory.created.count == starts && factory.live.isEmpty)
+        #expect(!sync.settings.enabled && persistedEnabled == false)
+        let before = factory.created.count
+        // A fresh matching identity proof is not an activation request.
+        await sync.accountChanged()
+        await sync.prepareConnectionAuthority()
+        try requireHealthy(stage: "stopped-account-transition")
+        let status = try #require(sync.status)
+        #expect(status.controls.bindingStopped == true && status.controls.bindingActive == false && !sync.settings.enabled)
+        #expect(factory.created.count == before && persistedEnabled == false)
+        guard discover else { return }
+        sync.beginConnectionPreview()
+        await sync.waitForConnectionPreview()
+        try requireHealthy(stage: "resume-preview")
+        guard case .ready(_, let summary) = sync.preview else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(summary.decision == .confirmResume && summary.resumeBindingId != nil)
+        #expect(!summary.initialAdoptionRequired && !sync.settings.enabled && persistedEnabled == false)
+    }
+    private func requireHealthy(stage: String) throws {
+        try #require(!sync.operationFailed && sync.failureRevision == 0,
+            "\(stage): failureRevision=\(sync.failureRevision); \(backends.last?.startDiagnostics ?? "no-backend")")
     }
     func joinOriginal() async { await original?.value; await sync.waitForInputs() }
     func release() { page.finish(fixture.page) }
@@ -728,7 +961,8 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     private(set) var lastStatusCommand: CloudPolicyCommand?
     private var lastPolicyStatus: CloudPolicyStatus?
     private var lastRead = "not-called"
-    private var lastReadError = "none"
+    private var lastReadError: String?
+    private(set) var verifiedAccountReads: [UInt64] = []
     private var lastExecute = "not-called"
     private var lastExecuteError = "none"
     fileprivate var startDiagnostics: String {
@@ -736,7 +970,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         let controls = lastPolicyStatus.map { String(describing: $0.controls) } ?? "unobserved"
         let matches = lastPolicyStatus.map { String($0.accountMatchesBinding) } ?? "unobserved"
         return "startCount=\(starts.count); policyState=\(state); controls=\(controls); accountMatchesBinding=\(matches); "
-            + "lastRead=\(lastRead); lastReadError=\(lastReadError); lastExecute=\(lastExecute); lastExecuteError=\(lastExecuteError)"
+            + "lastRead=\(lastRead); lastReadError=\(lastReadError ?? "none"); lastExecute=\(lastExecute); lastExecuteError=\(lastExecuteError)"
     }
     // Observe only statuses already returned by the real backend calls. Never dump
     // a command, account, or whole status: those can contain identifiers.
@@ -822,7 +1056,8 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         lastRead = "account-read: awaiting"
         let result = await backend.readAccount(id)
         lastRead = "account-read: returned; verified=\(result.accountVerified); failed=\(result.error != nil)"
-        if let error = result.error { lastReadError = String(describing: error) }
+        lastReadError = result.error.map { String(describing: $0) }
+        if result.accountVerified { verifiedAccountReads.append(id) }
         observe(result.outputs)
         return result
     }
@@ -839,6 +1074,8 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
 
 @MainActor private final class InitialCloudSDKFactory: CloudKitEngineFactory {
     var account = CloudResolvedAccount(status: .available, identity: Data("synthetic-initial-account".utf8))
+    private(set) var accountReads = 0
+    private(set) var accountReadsAtCreation: [Int] = []
     let fixture: InitialCloudFixture
     private let completions: AsyncStream<Void>
     private let completed: AsyncStream<Void>.Continuation
@@ -851,9 +1088,13 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         self.fixture = fixture
         (completions, completed) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
     }
-    func resolveAccount() async throws -> CloudResolvedAccount? { account }
+    func resolveAccount() async throws -> CloudResolvedAccount? {
+        accountReads += 1
+        return account
+    }
     func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
         #expect(live.isEmpty)
+        accountReadsAtCreation.append(accountReads)
         created.append(configuration); live.insert(configuration.instanceID)
         maximumLive = max(maximumLive, live.count)
         let engine = InitialCloudSDK(instanceID: configuration.instanceID, delegate: delegate, fixture: fixture,

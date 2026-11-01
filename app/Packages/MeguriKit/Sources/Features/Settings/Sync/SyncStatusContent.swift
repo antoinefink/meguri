@@ -43,7 +43,9 @@ struct SyncStatusRows: View {
                     Text(line)
                 }
             }
-            if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
+            if let failure = sync.connectionFailure {
+                Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+            } else if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
             if let recovery = sync.recovery {
                 CloudRecoveryContent(collection: collection, recovery: recovery)
             }

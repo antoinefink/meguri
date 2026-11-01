@@ -12,6 +12,17 @@
         }
       }
     },
+    "sync.action.resume": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume Syncing"
+          }
+        }
+      }
+    },
     "sync.action.resumeOp": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -593,6 +604,51 @@
           "stringUnit": {
             "state": "translated",
             "value": "Connect to iCloud…"
+          }
+        }
+      }
+    },
+    "sync.connect.continue.confirm": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Syncing"
+          }
+        }
+      }
+    },
+    "sync.connect.continue.message": {
+      "comment": "sync/status-strings T12; the actual retained preview’s total unsent count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld unsent change on this device will sync."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld unsent changes on this device will sync."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.connect.continue.title": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Syncing This Collection?"
           }
         }
       }
@@ -1696,6 +1752,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Uploading this collection to iCloud…"
+          }
+        }
+      }
+    },
+    "sync.recovery.error.accountMismatch": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection belongs to a different iCloud account."
+          }
+        }
+      }
+    },
+    "sync.recovery.error.accountUnavailable": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud isn’t available. Check your iCloud account, then try again."
+          }
+        }
+      }
+    },
+    "sync.recovery.error.epochChanged": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection changed while you were deciding. Review the new details and choose again."
+          }
+        }
+      }
+    },
+    "sync.recovery.error.epochIncomplete": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection isn’t complete yet. Try again later."
           }
         }
       }

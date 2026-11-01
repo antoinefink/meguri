@@ -38,6 +38,12 @@ public actor CoreCloudConnectionService {
         let raw = self.raw
         return try await MaintenanceLane.shared.call(.cloudConnectionConfirmAdoption) { [raw] in CloudRecoveryOperation(raw: try raw.confirmAdoption(preview: preview.raw)) }
     }
+    /// Rust consumes and revalidates the retained preview, commits activation,
+    /// removes the cursor and settles/reconciles before this returns.
+    public func resumeBinding(_ preview: CloudConnectionPreview) async throws {
+        let raw = self.raw
+        try await MaintenanceLane.shared.call(.cloudConnectionResumeBinding) { [raw] in try raw.resumeBinding(preview: preview.raw) }
+    }
     public func nextPublicationWork() async throws -> CloudPublicationWork {
         let raw = self.raw
         return try await MaintenanceLane.shared.call(.cloudConnectionNextPublicationWork) { [raw] in CloudPublicationWork(try raw.nextPublicationWork()) }

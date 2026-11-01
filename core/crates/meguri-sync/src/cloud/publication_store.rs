@@ -108,6 +108,89 @@ pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Erro
     Ok(())
 }
 impl TrackingStore {
+    /// V9.2: no new open, no asset retry reset, no entity/work deletion.
+    pub(super) fn resume_isolated_binding(
+        &mut self,
+        expected: &Binding,
+        file: runtime::NativeFileIdentity,
+        publish: &Option<PublishOp>,
+        adopt: &Option<adoption::AdoptOp>,
+    ) -> Result<Binding, Error> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let facts: Option<String> = tx
+            .query_row(
+                "SELECT facts FROM bindings WHERE id=?1 AND container=?2 AND environment=?3 AND salvage=0",
+                params![
+                    expected.id.0.as_slice(),
+                    self.scope.container.as_str(),
+                    self.scope.environment.code()
+                ],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let facts: BindingFacts = decode(&facts.ok_or(Error::RecoveryRefused)?)?;
+        let read_op = |table: &str| -> Result<Option<String>, Error> {
+            Ok(tx
+                .query_row(
+                    &format!("SELECT content FROM {table} WHERE container=?1 AND environment=?2"),
+                    params![self.scope.container.as_str(), self.scope.environment.code()],
+                    |r| r.get(0),
+                )
+                .optional()?)
+        };
+        let current_publish: Option<PublishOp> = read_op("cloud_publication_ops")?.map(|s| decode(&s)).transpose()?;
+        let current_adopt: Option<adoption::AdoptOp> =
+            read_op("cloud_adoption_ops")?.map(|s| decode(&s)).transpose()?;
+        let other_active: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM bindings WHERE container=?1 AND environment=?2 AND active=1)",
+            params![self.scope.container.as_str(), self.scope.environment.code()],
+            |r| r.get(0),
+        )?;
+        if expected.scope != self.scope
+            || facts != expected.facts
+            || other_active
+            || !matches!(
+                facts.state,
+                BindingState::Isolated(
+                    IsolationReason::SignedOut | IsolationReason::AccountChanged | IsolationReason::Stopped
+                )
+            )
+            || &current_publish != publish
+            || &current_adopt != adopt
+            || current_publish.as_ref().is_some_and(|p| {
+                p.binding_after == Some(expected.id) || p.binding_before.as_ref().is_some_and(|b| b.id == expected.id)
+            })
+            || current_adopt.as_ref().is_some_and(|p| {
+                p.binding_after == expected.id || p.binding_before.as_ref().is_some_and(|b| b.id == expected.id)
+            })
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        let content: String = tx.query_row(
+            "SELECT content FROM cloud_runtime_bindings WHERE binding=?1",
+            [expected.id.0.as_slice()],
+            |r| r.get(0),
+        )?;
+        let mut state: StoredRuntimeState = decode(&content)?;
+        if state.file.is_some_and(|stored| stored != file) {
+            return Err(Error::RecoveryRefused);
+        }
+        state.file = Some(file);
+        state.drained = false;
+        let mut resumed = expected.clone();
+        resumed.facts.state = BindingState::Active;
+        tx.execute(
+            "UPDATE bindings SET facts=?2 WHERE id=?1",
+            params![expected.id.0.as_slice(), encode(&resumed.facts)?],
+        )?;
+        // Preserve the existing DELETE trigger: it also clears absence progress.
+        tx.execute("DELETE FROM engine_state WHERE binding=?1", [expected.id.0.as_slice()])?;
+        super::runtime_store::put_binding(&tx, expected.id, &state)?;
+        tx.commit()?;
+        Ok(resumed)
+    }
     pub(super) fn install_publication(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
         self.connection.execute_batch(SCHEMA)?;

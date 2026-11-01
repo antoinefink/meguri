@@ -157,6 +157,8 @@ pub struct CoreFacts {
     pub session: Option<u64>,
     pub fence: Fence,
     pub summary: Summary,
+    /// Revalidated retained V13 proof; identity alone supplies no offer.
+    pub resume_binding_offered: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Engine {
@@ -317,7 +319,7 @@ pub struct Controls {
     pub binding_stopped: bool,
     pub decision_required: bool,
     pub user_paused: bool,
-    /// No V9.2 resume offer provider is currently wired. Never guess from identity alone.
+    /// The Runtime's retained V13 proof, revalidated for this projection.
     pub resume_binding_offered: Option<bool>,
     pub automatic_eligible: bool,
 }

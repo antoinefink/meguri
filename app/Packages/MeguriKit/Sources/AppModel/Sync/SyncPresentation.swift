@@ -29,6 +29,8 @@ nonisolated public enum CloudSyncEntry: String, Hashable, Sendable {
     case connect, publicationChoice, replaceLocal, replaceCloud
 }
 
+public enum CloudConnectionConfirmation: Sendable, Equatable { case publication, adoption, resume }
+
 /// Presentation only; the retained coordinator owns all work and authority.
 @Observable public final class SyncPresentation {
     public var statusPresented = false
@@ -90,6 +92,28 @@ public struct SyncStatusPresentation {
     public static func permitsPublication(_ decision: CloudConnectionDecision) -> Bool {
         decision == .confirmUpload || decision == .chooseCollection
     }
+    public static func permitsResume(_ decision: CloudConnectionDecision) -> Bool {
+        decision == .confirmResume
+    }
+    public static func permits(_ intent: CloudConnectionConfirmation, decision: CloudConnectionDecision) -> Bool {
+        switch intent {
+        case .publication: permitsPublication(decision)
+        case .adoption: permitsAdoption(decision)
+        case .resume: permitsResume(decision)
+        }
+    }
+    public static func connectionErrorKey(_ failure: CloudConnectionFailure) -> String {
+        switch failure {
+        case .accountMismatch: "sync.recovery.error.accountMismatch"
+        case .accountUnavailable: "sync.recovery.error.accountUnavailable"
+        case .authorityChanged: "sync.recovery.error.epochChanged"
+        case .epochIncomplete: "sync.recovery.error.epochIncomplete"
+        case .closed, .wrongOwner, .consumed, .notOffered: "sync.recovery.error.notOffered"
+        case .busy: "sync.recovery.error.other"
+        case .keyUnavailable, .unreadableControl, .incomingStagingUnavailable, .mediaApplyUnavailable,
+             .resetRecoveryUnavailable, .tracking, .incomplete, .fileIdentityUnavailable: "sync.recovery.error.other"
+        }
+    }
     public static func permitsAdoption(_ decision: CloudConnectionDecision) -> Bool {
         decision == .confirmAdoption || decision == .chooseCollection
     }
@@ -120,6 +144,18 @@ public struct SyncStatusPresentation {
 extension ReviewCollection {
     public var syncPresentation: SyncPresentation {
         navigation.featureState { SyncPresentation() }
+    }
+    public func cloudPreviewEntryUnavailableReason(_ entry: CloudSyncEntry) -> String? {
+        if sync.settings.paused { return "sync.status.paused.user" }
+        if sync.setupState == .configurationUnavailable { return "sync.status.unavailable.setupNeeded" }
+        if sync.connectionService == nil,
+           !(entry == .connect && lifecycle == .noCollection && sync.setupState == .prepared) {
+            return "sync.now.unavailable.collectionUnavailable"
+        }
+        if sync.setupState == .failed { return "sync.recovery.error.other" }
+        if sync.connectionOperationActive { return "sync.recovery.error.busy" }
+        if sync.connectionPreviewActive { return "sync.connect.reading" }
+        return nil
     }
     /// Every control uses Rust's projection, or the actual installation fact
     /// while that projection is absent. No binding or account is inferred.

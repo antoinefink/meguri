@@ -36,6 +36,23 @@ impl CoreHost {
             runtime.begin_connection_preview(&self.collection()?, &self.media()?)
         }
     }
+    /// A connection sheet retains the Host generation it was presented for.
+    pub fn resume_cloud_binding(
+        &self,
+        preview: &Preview,
+        generation: meguri_engine::Generation,
+    ) -> Result<(), RuntimeError> {
+        if self.cloud_connection_generation()? != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let collection = self.cloud_connection_collection()?;
+        if collection.generation() != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.cloud_runtime()
+            .ok_or_else(unavailable)?
+            .confirm_connection_resume(preview, &collection)
+    }
     fn cloud_adoption_collection(&self) -> Result<Option<meguri_engine::Collection>, RuntimeError> {
         self.cloud_connection_generation()?;
         if matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection) {

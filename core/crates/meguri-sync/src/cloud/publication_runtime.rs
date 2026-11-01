@@ -46,6 +46,7 @@ impl Runtime {
         }
         s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.publication.next_preview;
+        s.publication.resume = None;
         s.publication.preview = Some((
             Preview {
                 id,
@@ -62,6 +63,8 @@ impl Runtime {
                 active: None,
                 active_epoch: None,
                 unpublished_by_kind: BTreeMap::new(),
+                resume_binding: None,
+                unsent_by_kind: BTreeMap::new(),
             },
             false,
         ));
@@ -140,6 +143,7 @@ impl Runtime {
             }
             counts.insert(kind, count);
         }
+        let unsent_by_kind = self.resume_unsent_counts(&*snapshot, media)?;
         if self.inputs.files.identity(collection.path())? != file
             || self.publication_decision()? != decision
             || self.publication_account()? != account
@@ -162,6 +166,7 @@ impl Runtime {
         }
         s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.publication.next_preview;
+        s.publication.resume = self.retain_resume_context_locked(&s, collection, file, &decision, &account)?;
         let mut unpublished_by_kind = row_payload::KINDS
             .into_iter()
             .map(|k| (k, 0))
@@ -205,6 +210,8 @@ impl Runtime {
                 active: None,
                 active_epoch: None,
                 unpublished_by_kind,
+                resume_binding: None,
+                unsent_by_kind,
             },
             false,
         ));
@@ -213,6 +220,7 @@ impl Runtime {
     /// Deliver only an actual record-ID read of Active. Missing and unreadable are
     /// distinct; unreadable Active retains its conditional-save system fields.
     pub fn connection_active_read(&self, id: u64, read: RecordRead) -> Result<PreviewWork, RuntimeError> {
+        self.validate_connection_resume(id)?;
         let account = self.publication_account()?;
         self.check_absent_preview_file(id)?;
         let mut s = self.state();
@@ -253,6 +261,7 @@ impl Runtime {
         }
     }
     pub fn connection_epoch_read(&self, id: u64, read: RecordRead) -> Result<PreviewWork, RuntimeError> {
+        self.validate_connection_resume(id)?;
         let account = self.publication_account()?;
         self.check_absent_preview_file(id)?;
         let mut s = self.state();
@@ -268,6 +277,9 @@ impl Runtime {
         let RecordRead::Found(record) = read else {
             return Err(PublicationError::EpochIncomplete.into());
         };
+        if record.system_fields.0.is_empty() {
+            return Err(PublicationError::UnreadableControl.into());
+        }
         let Some(DecodeOutcome::Supported(epoch)) = record.encrypted.as_deref().and_then(|b| Epoch::decode(b).ok())
         else {
             return Err(PublicationError::UnreadableControl.into());
@@ -292,7 +304,19 @@ impl Runtime {
             ConnectDecision::ChooseCollection
         };
         *ready = true;
-        Ok(PreviewWork::Ready(Box::new(p.clone())))
+        let mut preview = p.clone();
+        if let Some(mut context) = s.publication.resume.clone() {
+            context.active = preview.active.clone();
+            context.epoch = Some(record);
+            if self.validate_resume_context_locked(&s, &context).is_ok() && Self::resume_reads_match(&context, &preview)
+            {
+                preview.decision = ConnectDecision::ConfirmResume;
+                preview.resume_binding = Some(context.binding.id);
+                s.publication.resume = Some(context);
+            }
+        }
+        s.publication.preview = Some((preview.clone(), true));
+        Ok(PreviewWork::Ready(Box::new(preview)))
     }
     /// Cancellation of an older native sheet cannot dismiss a newer preview.
     pub fn cancel_connection_preview_id(&self, id: u64) -> Result<(), RuntimeError> {
@@ -301,10 +325,13 @@ impl Runtime {
             return Err(PublicationError::AuthorityChanged.into());
         }
         s.publication.preview = None;
+        s.publication.resume = None;
         Ok(())
     }
     pub fn cancel_connection_preview(&self) {
-        self.state().publication.preview = None;
+        let mut s = self.state();
+        s.publication.preview = None;
+        s.publication.resume = None;
     }
     pub fn publication_op(&self) -> Result<Option<PublishOp>, RuntimeError> {
         let s = self.state();
@@ -425,6 +452,7 @@ impl Runtime {
             Ok(())
         })?;
         s.publication.preview = None;
+        s.publication.resume = None;
         s.publication.waiting = false;
         Ok(id)
     }

@@ -11,6 +11,7 @@ public struct CloudConnectionView: View {
     @State private var confirming = false
     @State private var cancelling = false
     @State private var submitted = false
+    @State private var confirmation: CloudConnectionConfirmation?
     @State private var errorKey: String?
     public init(collection: ReviewCollection, entry: CloudSyncEntry) {
         self.collection = collection; self.entry = entry
@@ -37,14 +38,19 @@ public struct CloudConnectionView: View {
     private func content(_ page: CloudSyncEntry) -> some View {
         Form {
             if let errorKey { Text(SyncText.value(errorKey)) }
-            if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
+            if !submitted || confirmation != .resume {
+                if let failure = sync.connectionFailure {
+                    Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+                } else if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
+            }
             if sync.initialAdoptionActive {
                 ProgressView(SyncText.value("sync.connect.downloading"))
                     .accessibilityIdentifier("sync.connect.download")
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {
-                if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
+                if confirmation == .resume { SyncStatusRows(collection: collection) }
+                else if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
                 else { Text(SyncText.value("sync.counts.unknown")) }
             } else if preparing || sync.connectionPreviewActive || cancelling {
                 ProgressView(SyncText.value("sync.connect.reading"))
@@ -68,17 +74,26 @@ public struct CloudConnectionView: View {
                 Button {
                     Task { await close() }
                 } label: {
-                    if submitted { Text("Close", bundle: .module) }
+                    if submitted && !confirming { Text("Close", bundle: .module) }
                     else { Text(SyncText.value(page == .publicationChoice ? "sync.decision.notNow" : "sync.now.cancel")) }
                 }
                 .disabled(confirming || preparing || cancelling || sync.connectionPreviewCancelling || sync.connectionActivationActive)
                 .accessibilityIdentifier(page == .publicationChoice ? "sync.publicationChoice.notNow" : "sync.connection.cancel")
             }
+            if page == .connect, (summary.map { SyncStatusPresentation.permitsResume($0.decision) } == true
+                || (confirming && confirmation == .resume)) {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(SyncText.value("sync.connect.continue.confirm")) { Task { await confirm(.resume) } }
+                        .disabled(confirming || preparing || cancelling || submitted || sync.settings.paused
+                            || sync.connectionPreviewActive || sync.connectionOperationActive)
+                        .accessibilityIdentifier("sync.connect.continue")
+                }
+            }
             if !submitted, !confirming, !cancelling, !sync.connectionPreviewActive, let summary {
                 if canAdopt(summary, page: page) {
                     ToolbarItem(placement: .destructiveAction) {
                         Button(SyncText.value(page == .connect ? "sync.connect.useICloud.confirm" : "sync.adopt.confirm"), role: .destructive) {
-                            Task { await confirm(adopting: true) }
+                            Task { await confirm(.adoption) }
                         }
                         .disabled(sync.settings.paused)
                         .accessibilityIdentifier("sync.replaceLocal.replace")
@@ -86,7 +101,7 @@ public struct CloudConnectionView: View {
                 }
                 if page == .replaceCloud, summary.decision == .chooseCollection {
                     ToolbarItem(placement: .destructiveAction) {
-                        Button(SyncText.value("sync.publish.confirm"), role: .destructive) { Task { await confirm(adopting: false) } }
+                        Button(SyncText.value("sync.publish.confirm"), role: .destructive) { Task { await confirm(.publication) } }
                             .disabled(sync.settings.paused)
                             .accessibilityIdentifier("sync.replaceCloud.replace")
                     }
@@ -104,30 +119,44 @@ public struct CloudConnectionView: View {
             case .noCollection: Text(SyncText.value("sync.now.unavailable.collectionUnavailable"))
             case .confirmUpload: Text(SyncText.value("sync.connect.upload.message"))
             case .confirmAdoption: Text(SyncText.value("sync.connect.useICloud.message"))
+            case .confirmResume:
+                Text(SyncText.format("sync.connect.continue.message", Int64(clamping: summary.unsentChangeCount)))
             case .chooseCollection: Text(SyncText.value("sync.connect.two.message"))
             case .cloudUnreadable: Text(SyncText.value("sync.attention.rootUnreadable"))
             }
         }
-        if summary.localCollectionPresent { CloudCountSection(counts: summary.localCounts, cloud: false) }
-        if let counts = summary.manifestCounts {
-            CloudCountSection(counts: counts, cloud: true, publishedAt: summary.publishedAtMilliseconds)
-        }
-        Section {
-            ForEach(Self.kindKeys, id: \.0) { kind, key in
-                if let count = summary.unpublishedCounts[kind], count > 0 {
-                    Text(SyncText.format(key, Int64(clamping: count)))
+        if page == .connect, SyncStatusPresentation.permitsResume(summary.decision) {
+            Section {
+                ForEach(Self.kindKeys, id: \.0) { kind, key in
+                    if let count = summary.unsentCounts[kind], count > 0 {
+                        Text(SyncText.format(key, Int64(clamping: count)))
+                    }
                 }
+                Text(SyncText.value("sync.preview.otherDevicesUnknown"))
             }
-            Text(SyncText.value("sync.preview.otherDevicesUnknown"))
+        } else {
+            if summary.localCollectionPresent { CloudCountSection(counts: summary.localCounts, cloud: false) }
+            if let counts = summary.manifestCounts {
+                CloudCountSection(counts: counts, cloud: true, publishedAt: summary.publishedAtMilliseconds)
+            }
+            Section {
+                ForEach(Self.kindKeys, id: \.0) { kind, key in
+                    if let count = summary.unpublishedCounts[kind], count > 0 {
+                        Text(SyncText.format(key, Int64(clamping: count)))
+                    }
+                }
+                Text(SyncText.value("sync.preview.otherDevicesUnknown"))
+            }
         }
         if page == .connect {
             switch summary.decision {
             case .noCollection: Text(SyncText.value("sync.recovery.error.notOffered"))
             case .confirmUpload:
-                Button(SyncText.value("sync.connect.upload.confirm")) { Task { await confirm(adopting: false) } }
+                Button(SyncText.value("sync.connect.upload.confirm")) { Task { await confirm(.publication) } }
                     .disabled(sync.settings.paused)
                     .accessibilityIdentifier("sync.connect.upload")
             case .confirmAdoption: EmptyView() // destructive toolbar confirmation, never Return
+            case .confirmResume: EmptyView() // native confirmation toolbar action
             case .chooseCollection:
                 Section {
                     choice("sync.connect.two.useICloud", caption: "sync.connect.two.useICloud.caption", destination: .replaceLocal)
@@ -194,9 +223,10 @@ public struct CloudConnectionView: View {
         case .replaceCloud: key = "sync.publish.title"
         case .publicationChoice: key = "sync.decision.sheetTitle"
         case .connect:
-            key = switch summary?.decision {
+            key = switch (confirmation == .resume ? CloudConnectionDecision.confirmResume : summary?.decision) {
             case .confirmUpload: "sync.connect.upload.title"
             case .confirmAdoption: "sync.connect.useICloud.title"
+            case .confirmResume: "sync.connect.continue.title"
             case .chooseCollection: "sync.connect.two.title"
             case .noCollection, .cloudUnreadable, nil: "sync.button.label"
             }
@@ -215,16 +245,24 @@ public struct CloudConnectionView: View {
         }
         catch { errorKey = sync.setupState == .configurationUnavailable ? "sync.status.unavailable.setupNeeded" : "sync.recovery.error.other" }
     }
-    private func confirm(adopting: Bool) async {
-        guard !confirming, !submitted, !sync.settings.paused, let summary else { return }
-        if adopting, collection.review != nil { errorKey = "sync.recovery.error.sessionActive"; return }
-        if adopting { guard canAdopt(summary, page: page) else { return } }
-        else {
+    private func confirm(_ intent: CloudConnectionConfirmation) async {
+        guard !confirming, !submitted, !cancelling, !preparing, !sync.connectionOperationActive,
+              !sync.settings.paused, let summary else { return }
+        if intent != .publication, collection.review != nil { errorKey = "sync.recovery.error.sessionActive"; return }
+        switch intent {
+        case .adoption: guard canAdopt(summary, page: page) else { return }
+        case .publication:
             guard (page == .connect && summary.decision == .confirmUpload)
                 || (page == .replaceCloud && summary.decision == .chooseCollection) else { return }
+        case .resume:
+            guard page == .connect, SyncStatusPresentation.permitsResume(summary.decision) else { return }
         }
-        confirming = true; submitted = true
-        if adopting { await sync.confirmAdoption() } else { await sync.confirmPublication() }
+        confirming = true; submitted = true; confirmation = intent
+        switch intent {
+        case .adoption: await sync.confirmAdoption()
+        case .publication: await sync.confirmPublication()
+        case .resume: await sync.confirmResume()
+        }
         confirming = false
     }
     private func close() async {

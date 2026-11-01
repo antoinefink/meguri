@@ -137,7 +137,7 @@ impl State {
             binding_stopped: stopped,
             decision_required: decision,
             user_paused: self.settings.paused,
-            resume_binding_offered: None,
+            resume_binding_offered: self.facts.resume_binding_offered,
             automatic_eligible,
         }
     }

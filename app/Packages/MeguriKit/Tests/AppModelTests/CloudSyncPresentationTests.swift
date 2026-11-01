@@ -43,6 +43,28 @@ import Testing
         #expect(!SyncStatusPresentation.permitsPublication(.cloudUnreadable))
         #expect(!SyncStatusPresentation.permitsAdoption(.cloudUnreadable))
     }
+    @Test func resumeIsAnExplicitDirectionAndOtherChoicesRemainSeparate() {
+        let decisions: [CloudConnectionDecision] = [.noCollection, .confirmUpload, .confirmAdoption,
+            .confirmResume, .chooseCollection, .cloudUnreadable]
+        for decision in decisions {
+            #expect(SyncStatusPresentation.permitsResume(decision) == (decision == .confirmResume))
+            #expect(SyncStatusPresentation.permits(.resume, decision: decision) == (decision == .confirmResume))
+            #expect(SyncStatusPresentation.permitsPublication(decision)
+                == (decision == .confirmUpload || decision == .chooseCollection))
+            #expect(SyncStatusPresentation.permitsAdoption(decision)
+                == (decision == .confirmAdoption || decision == .chooseCollection))
+        }
+        #expect(SyncStatusPresentation.connectionErrorKey(.accountMismatch) == "sync.recovery.error.accountMismatch")
+        #expect(SyncStatusPresentation.connectionErrorKey(.accountUnavailable) == "sync.recovery.error.accountUnavailable")
+        let failures: [CloudConnectionFailure] = [.wrongOwner, .consumed, .closed, .notOffered]
+        for failure in failures {
+            #expect(SyncStatusPresentation.connectionErrorKey(failure) == "sync.recovery.error.notOffered")
+        }
+        #expect(SyncText.value("sync.connect.continue.title") == "Continue Syncing This Collection?")
+        #expect(SyncText.value("sync.connect.continue.confirm") == "Continue Syncing")
+        #expect(SyncText.format("sync.connect.continue.message", Int64(1)) == "1 unsent change on this device will sync.")
+        #expect(SyncText.format("sync.connect.continue.message", Int64(2)) == "2 unsent changes on this device will sync.")
+    }
     @Test func mobileAccountRoutePreservesTheReviewAndReturnsToTheSameSession() {
         final class RetainedSession {}
         let session = RetainedSession()

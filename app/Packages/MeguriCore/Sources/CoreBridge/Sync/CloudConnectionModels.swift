@@ -2,13 +2,14 @@ import Foundation
 internal import MeguriCoreBindings
 
 public enum CloudConnectionFailure: Sendable, Hashable {
-    case closed, wrongOwner, consumed, authorityChanged, accountUnavailable, busy
+    case closed, wrongOwner, consumed, authorityChanged, accountUnavailable, accountMismatch, busy
     case keyUnavailable, epochIncomplete, unreadableControl, notOffered
     case incomingStagingUnavailable, mediaApplyUnavailable, resetRecoveryUnavailable
     case tracking, incomplete, fileIdentityUnavailable
     init(_ value: MeguriCoreBindings.CloudConnectionFailure) {
         self = switch value {
         case .closed: .closed; case .wrongOwner: .wrongOwner; case .consumed: .consumed
+        case .accountMismatch: .accountMismatch
         case .authorityChanged: .authorityChanged; case .accountUnavailable: .accountUnavailable; case .busy: .busy
         case .keyUnavailable: .keyUnavailable; case .epochIncomplete: .epochIncomplete
         case .unreadableControl: .unreadableControl; case .notOffered: .notOffered
@@ -39,7 +40,7 @@ public enum CloudControlRead: Sendable, Equatable {
         switch self { case .found(let r): .found(record: r.raw); case .missing: .missing; case .zoneMissing: .zoneMissing; case .failed: .failed }
     }
 }
-public enum CloudConnectionDecision: Sendable, Equatable { case noCollection, confirmUpload, confirmAdoption, chooseCollection, cloudUnreadable }
+public enum CloudConnectionDecision: Sendable, Equatable { case noCollection, confirmUpload, confirmAdoption, confirmResume, chooseCollection, cloudUnreadable }
 public enum CloudCountKind: Sendable, Hashable { case note, card, revlog, deck, preset, notetype, tag, config, mediaName }
 public struct CloudConnectionSummary: Sendable {
     public let localCollectionPresent: Bool
@@ -52,6 +53,15 @@ public struct CloudConnectionSummary: Sendable {
     public let publishedAtMilliseconds: Int64?
     public let decision: CloudConnectionDecision
     public let unpublishedCounts: [CloudCountKind: UInt64]
+    /// Informational only. Confirmation always passes the original opaque preview.
+    public let resumeBindingId: Data?
+    public let unsentCounts: [CloudCountKind: UInt64]
+    public var unsentChangeCount: UInt64 {
+        unsentCounts.values.reduce(0) { total, count in
+            let sum = total.addingReportingOverflow(count)
+            return sum.overflow ? .max : sum.partialValue
+        }
+    }
     init(_ v: MeguriCoreBindings.CloudConnectionSummary) {
         func counts(_ rows: [MeguriCoreBindings.CloudKindCount]) -> [CloudCountKind: UInt64] {
             Dictionary(uniqueKeysWithValues: rows.map { row in
@@ -67,7 +77,9 @@ public struct CloudConnectionSummary: Sendable {
         localCounts = counts(v.localCounts); localEmpty = v.localEmpty
         manifestCounts = v.manifestCounts.map(counts); publishedAtMilliseconds = v.publishedAtMs
         unpublishedCounts = counts(v.unpublishedCounts)
-        decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
+        resumeBindingId = v.resumeBindingId
+        unsentCounts = counts(v.unsentCounts)
+        decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .confirmResume: .confirmResume; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
     }
 }
 public struct CloudConnectionPreview: Sendable { let raw: MeguriCoreBindings.CloudConnectionPreview }

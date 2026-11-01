@@ -1798,6 +1798,7 @@ dependencies = [
  "meguri-storage",
  "meguri-sync",
  "meguri-testkit",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

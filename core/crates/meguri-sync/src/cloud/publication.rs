@@ -18,6 +18,7 @@ pub enum KeySourceError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PublicationError {
     AccountUnavailable,
+    AccountMismatch,
     AuthorityChanged,
     Busy,
     KeyUnavailable,
@@ -37,6 +38,8 @@ impl From<PublicationError> for runtime::RuntimeError {
 pub enum ConnectDecision {
     ConfirmUpload,
     ConfirmAdoption,
+    /// V13.3: confirm “Continue syncing this collection” with unsent counts.
+    ConfirmResume,
     ChooseCollection,
     CloudUnreadable,
     NoCollection,
@@ -74,6 +77,8 @@ pub struct Preview {
     pub active: Option<ControlRecord>,
     pub active_epoch: Option<EpochId>,
     pub unpublished_by_kind: BTreeMap<Kind, u64>,
+    pub resume_binding: Option<BindingId>,
+    pub unsent_by_kind: BTreeMap<Kind, u64>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PreviewWork {
@@ -230,6 +235,7 @@ pub(crate) type CleanupDrain = (super::adapter::Guard, String, i64);
 pub(crate) struct ProcessState {
     pub next_preview: u64,
     pub preview: Option<(Preview, bool)>,
+    pub resume: Option<super::runtime::ResumeContext>,
     pub next_attempt: u64,
     pub running: Option<OwnRequest>,
     pub submitted: bool,

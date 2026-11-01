@@ -650,10 +650,17 @@ fn send_actual_batch(
     service: &mut Service<SeededRandom>,
     batch: &cloud::workflow::BuiltBatch,
 ) -> BTreeSet<String> {
+    send_actual_batch_with_instance(host, service, batch, host.cloud_runtime().unwrap().instance().unwrap())
+}
+fn send_actual_batch_with_instance(
+    host: &CoreHost,
+    service: &mut Service<SeededRandom>,
+    batch: &cloud::workflow::BuiltBatch,
+    instance: String,
+) -> BTreeSet<String> {
     use cloud::workflow::SendError;
     use meguri_testkit::cloud::ErrorCode;
     let runtime = host.cloud_runtime().unwrap();
-    let instance = runtime.instance().unwrap();
     let binding = runtime.status().unwrap().binding.unwrap();
     let changes = batch
         .saves
@@ -1048,6 +1055,17 @@ fn save_other_writer_publication_note(
 // apply must settle before publication scans or discards its prior binding.
 #[test]
 fn stopped_binding_committed_incoming_settles_before_republication_and_survives_cleanup() {
+    stopped_binding_committed_incoming_transition(false);
+}
+
+/// P24 V2.4 step 8 / Q11: a real post-COMMIT apply intent must settle
+/// before Resume's scan. This covers ordinary apply, not the media/re-key legs.
+#[test]
+fn stopped_binding_resume_settles_committed_incoming_before_scan() {
+    stopped_binding_committed_incoming_transition(true);
+}
+
+fn stopped_binding_committed_incoming_transition(resume: bool) {
     use cloud::entity_codec::{self as codec, Payload};
     use meguri_model::faultpoint::{self, Fault};
     use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
@@ -1200,6 +1218,26 @@ fn stopped_binding_committed_incoming_settles_before_republication_and_survives_
     assert_eq!(runtime.inbox_entries(old.id).unwrap(), inbox);
     let p = actual_preview(&host, &mut service, &scope());
     assert_eq!(p.native_file, Some(intent.native_file));
+    if resume {
+        assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+        runtime.resume_binding(old.id, &collection).unwrap();
+        assert_eq!(runtime.status().unwrap().binding.unwrap(), old);
+        assert!(runtime.apply_intents(old.id).unwrap().is_empty());
+        assert!(runtime.inbox_entries(old.id).unwrap().is_empty());
+        let settled = runtime.binding_entity(old.id, &before.name).unwrap().unwrap();
+        assert_eq!(settled.acked_payload, Some(after.clone()));
+        assert_eq!(settled.acked_system_fields, saved.system_fields);
+        assert_eq!(runtime.incoming_runs(), runs, "settle must not repeat the op");
+        assert!(
+            runtime.incoming_wal_receipts().iter().any(|receipt| {
+                receipt.identity().generation().0 == run.generation && receipt.through().0 >= run.seq
+            })
+        );
+        assert_eq!(note_row(&host, base.id, &notetype), after);
+        assert!(!runtime.status().unwrap().scan_required);
+        host.close().unwrap();
+        return;
+    }
     let calls = service.request_log().unwrap().len();
     let op_id = runtime.confirm_connection_publication(&p, &collection).unwrap();
 
@@ -2364,6 +2402,616 @@ fn edit_workflow_note(collection: &meguri_engine::Collection, note: &cloud::enti
     )
     .unwrap();
     assert!(edit.value.written);
+}
+
+/// V9.2/V13/V26.2, Q6 sign_out_resume (focused single-device leg).
+/// Publication, edits, review and remote reads all use production APIs.
+#[test]
+fn explicit_resume_after_real_isolated_edit_and_review_is_cursorless_and_requires_new_root_proof() {
+    use cloud::entity_codec::{Kind, Payload};
+    use meguri_engine::session::{AnswerOutcome, StartResult};
+    use meguri_model::{ids::DeckId, time::EpochMillis};
+    use meguri_sched::answer::Rating;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("resume");
+    generated(&dir);
+    let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+        cloud::OpaqueBytes(scope().account.into_bytes()),
+    ))));
+    let host = open_host_with(&dir, keys(), account.clone(), scope());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(706)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let original_instance = runtime.instance().unwrap();
+    let before = runtime.entity_facts_page(Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = &before.payload else {
+        panic!("published note")
+    };
+    let (old_sdk, _, _) = runtime.register_sdk(false).unwrap();
+    runtime
+        .adapter_state_update(&old_sdk, b"native-sdk-checkpoint")
+        .unwrap();
+    let open = runtime.stored_state_for_testing().unwrap().open_counter;
+    assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_some());
+
+    *account.0.lock().unwrap() = IdentityStatus::SignedOut;
+    runtime.refresh_identity().unwrap();
+    edit_workflow_note(&collection, note, "edited while signed out");
+    let card = runtime.entity_facts_page(Kind::Card, None).unwrap().remove(0);
+    let Payload::Card(card) = card.payload else {
+        panic!("published card")
+    };
+    let StartResult::Started { session_id, head, .. } = host.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("local review remains available while isolated")
+    };
+    let item = &head.items[0];
+    assert!(matches!(
+        host.review()
+            .answer(
+                session_id,
+                item.card_id,
+                Rating::Easy,
+                item.state_token,
+                EpochMillis(NOW),
+                123
+            )
+            .unwrap(),
+        AnswerOutcome::Accepted { .. }
+    ));
+    host.review().end(session_id).unwrap();
+    // Isolated capture skipped both operations; the preview must read actual rows.
+    assert!(runtime.entity_facts(&before.name).unwrap().unwrap() == before);
+    *account.0.lock().unwrap() = IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()));
+    runtime.refresh_identity().unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut)
+    );
+    assert!(runtime.resume_binding_offer().is_none());
+    assert!(runtime.resume_binding(binding.id, &collection).is_err());
+
+    let p = actual_preview(&host, &mut service, &scope());
+    assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(p.resume_binding, Some(binding.id));
+    assert!(p.unsent_by_kind[&Kind::Note] >= 1);
+    assert!(p.unsent_by_kind[&Kind::Revlog] >= 1);
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+    assert_eq!(
+        runtime
+            .policy_projection(cloud::policy::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .facts
+            .resume_binding_offered,
+        Some(true)
+    );
+    let requests = service.request_log().unwrap().len();
+    host.resume_cloud_binding(&p, collection.generation()).unwrap();
+    assert_eq!(
+        service.request_log().unwrap().len(),
+        requests,
+        "Resume performs no remote write"
+    );
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
+    assert_eq!(runtime.stored_state_for_testing().unwrap().open_counter, open);
+    assert!(!runtime.stored_state_for_testing().unwrap().drained);
+    assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_none());
+    assert!(!runtime.status().unwrap().scan_required);
+    let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert!(pending.mark.is_some());
+    assert_eq!(pending.acked_payload, before.acked_payload);
+    assert_eq!(pending.acked_system_fields, before.acked_system_fields);
+    assert_eq!(pending.acked_envelope, before.acked_envelope);
+    assert!(!runtime.entity_facts_page(Kind::Revlog, None).unwrap().is_empty());
+    assert!(runtime.inbox_entries(binding.id).unwrap().is_empty());
+    assert!(runtime.validate_caller(&original_instance).is_err());
+    assert!(runtime.validate_sdk(&old_sdk).is_err());
+    assert!(runtime.adapter_state_update(&old_sdk, b"late").is_err());
+    assert!(runtime.confirm_connection_resume(&p, &collection).is_err());
+    assert!(!runtime.sdk_root_confirmed());
+
+    // Native cancellation must finish before another object can be registered.
+    assert!(runtime.register_sdk(false).is_err());
+    runtime.release_sdk(&old_sdk).unwrap();
+    let (new_sdk, cursor, _) = runtime.register_sdk(false).unwrap();
+    assert!(cursor.is_none());
+    let fenced_names = entity_names(runtime);
+    let pending_before: Vec<_> = fenced_names
+        .iter()
+        .map(|name| runtime.entity_facts(name).unwrap().unwrap())
+        .collect();
+    let requests = service.request_log().unwrap().len();
+    let fenced = runtime
+        .build_collection_batch(&new_sdk, &collection, &fenced_names)
+        .unwrap();
+    assert_eq!(fenced.id, 0);
+    assert!(fenced.saves.is_empty());
+    assert!(!runtime.sdk_root_confirmed());
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(
+        pending_before
+            .iter()
+            .all(|before| runtime.entity_facts(&before.name).unwrap().unwrap() == *before),
+        "a root-fenced build must preserve pending tracking state"
+    );
+    let response = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Read {
+                zone: "meguri-root".into(),
+                name: "active".into(),
+                fields: RequestedFields::All,
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Record(record)) = response.result else {
+        panic!("independent Active read")
+    };
+    let active = publication_control_record(&record).unwrap();
+    runtime.sdk_fetch_completed_without_root(&new_sdk).unwrap();
+    assert!(
+        runtime
+            .accept_root_read(
+                &new_sdk,
+                706,
+                active.encrypted.as_deref().unwrap(),
+                &active.system_fields.0,
+                false
+            )
+            .unwrap()
+    );
+    let batch = runtime
+        .build_collection_batch(&new_sdk, &collection, &entity_names(runtime))
+        .unwrap();
+    assert!(!batch.saves.is_empty());
+    assert!(send_actual_batch_with_instance(&host, &mut service, &batch, new_sdk).is_empty());
+    let settled = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert!(settled.mark.is_none());
+    assert!(settled.in_flight.is_empty());
+    assert_eq!(settled.acked_rev, settled.local_rev);
+    assert!(settled.acked_payload.as_ref() == Some(&settled.payload));
+    host.close().unwrap();
+}
+
+#[test]
+fn explicit_resume_with_retained_sdk_settles_real_media_intent_before_scan() {
+    resume_media_fixture(false, false);
+}
+
+#[test]
+fn disabled_settings_resume_settles_accepted_media_intent_before_scan_and_enable() {
+    resume_media_fixture(true, false);
+}
+
+#[test]
+fn disabled_settings_refuse_ready_media_intent_admission_and_network_reply() {
+    resume_media_fixture(true, true);
+}
+
+fn disable_device_sync(host: &CoreHost) {
+    use cloud::policy::{DeviceEvent, DeviceSettings};
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: false,
+        paused: false,
+        automatic: false,
+        media: true,
+    }))
+    .unwrap();
+    assert!(!host.cloud_policy_driver().unwrap().state().settings.enabled);
+}
+
+#[test]
+fn disabled_settings_resume_with_empty_media_intents_finishes_scan_before_enable() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("resume-empty-media");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(710)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    runtime.adapter_stop_syncing().unwrap();
+    disable_device_sync(&host); // The real Settings driver calls adapter_pause(true).
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    let requests = service.request_log().unwrap().len();
+    host.resume_cloud_binding(&preview, collection.generation()).unwrap();
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
+    assert!(!runtime.status().unwrap().scan_required);
+    assert!(runtime.status().unwrap().scan_completed_this_open);
+    assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_none());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert!(!host.cloud_policy_driver().unwrap().state().settings.enabled);
+    // Whole reconciliation succeeded, but the actual adapter remains paused.
+    assert!(runtime.register_sdk(false).is_err());
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    host.close().unwrap();
+}
+
+fn resume_media_fixture(disabled: bool, ready_only: bool) {
+    use cloud::entity_codec::{self as codec, Kind, Payload};
+    use cloud::runtime::ScanPausePoint;
+    use meguri_model::faultpoint::{self, Fault};
+    use std::sync::mpsc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("resume-media");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(709)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let media = host.media().unwrap();
+    let old_caller = runtime.instance().unwrap();
+    let (old_sdk, _, _) = runtime.register_sdk(false).unwrap();
+
+    // Real local bytes enter the production feed; a different writer then saves
+    // their deletion to Service and delivers its actual accepted envelope.
+    let path = dir.join("collection.media/retired.jpg");
+    std::fs::write(&path, b"synthetic media removed by another writer").unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    runtime.consume_media_feed(&collection, &media).unwrap();
+    let before = runtime.entity_facts_page(Kind::MediaName, None).unwrap().remove(0);
+    assert!(matches!(&before.payload, Payload::MediaName(p) if p.name == b"retired.jpg"));
+    let envelope = codec::Entity::build(
+        codec::EntityFields {
+            kind: Kind::MediaName,
+            key: before.key.clone(),
+            origin: before.origin,
+            erev: before.server_erev + 1,
+            generation: None,
+            tombstone: true,
+            deleted_at_ms: NOW,
+            writer: binding.id.0.map(|b| b ^ 0x80),
+            base_sha256: None,
+        },
+        &before.payload.encode().unwrap(),
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    let response = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Modify {
+                zone: cloud::adapter::collection_zone(binding.facts.epoch),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted(&before.name, "MGEntity", envelope.clone()),
+                    if_unchanged: None,
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Modified(mut items)) = response.result else {
+        panic!("actual media save")
+    };
+    assert_eq!(items.len(), 1);
+    let Ok(MutationSuccess::Saved(record)) = items.remove(0).result else {
+        panic!("accepted media tombstone")
+    };
+    let saved = Saved {
+        name: record.name,
+        envelope,
+        system_fields: record.system_fields.bytes().to_vec(),
+    };
+    runtime
+        .receive_collection_records(&old_caller, std::slice::from_ref(&saved))
+        .unwrap();
+    let inbox = runtime.inbox_entries(binding.id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].entry.reason, cloud::InboxReason::Ready);
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+
+    if ready_only {
+        // Capture genuinely issued network work before pausing, then try both
+        // a stale reply and fresh READY selection while the device is disabled.
+        let work = runtime.cloud_media_work(&collection, &media).unwrap().unwrap();
+        runtime.validate_cloud_media_work(&collection, &work).unwrap();
+        let files = std::fs::read(&path).unwrap();
+        disable_device_sync(&host);
+        assert!(runtime.cloud_media_work(&collection, &media).unwrap().is_none());
+        assert!(runtime.validate_cloud_media_work(&collection, &work).is_err());
+        assert!(
+            runtime
+                .cloud_media_reply(&collection, &media, &work, cloud::media::Reply::UnknownItem)
+                .is_err()
+        );
+        assert!(runtime.drain_incoming(&collection, Duration::from_secs(30)).is_err());
+        assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+        assert!(runtime.inbox_entries(binding.id).unwrap() == inbox);
+        assert!(runtime.binding_entity(binding.id, &before.name).unwrap().unwrap() == before);
+        assert!(runtime.incoming_wal_receipts().is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), files);
+        host.close().unwrap();
+        return;
+    }
+
+    faultpoint::arm(
+        "cloud.media.after_resolution_install",
+        Fault::IoError(std::io::ErrorKind::Other),
+    );
+    let applied = runtime.drain_incoming(&collection, Duration::from_secs(30));
+    faultpoint::disarm("cloud.media.after_resolution_install");
+    assert!(applied.is_err());
+    assert!(!path.exists());
+    let pending = runtime.apply_intents(binding.id).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].inbox_ids, vec![inbox[0].id]);
+    let apply = pending[0].media.as_ref().expect("actual persisted media apply");
+    assert!(apply.installed && !apply.abandoned && apply.server.is_none());
+    assert!(apply.incoming == saved);
+    assert!(runtime.binding_entity(binding.id, &before.name).unwrap().unwrap() == before);
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    let wal_floor = collection.last_seq();
+    runtime.adapter_stop_syncing().unwrap();
+    if disabled {
+        disable_device_sync(&host);
+    }
+    assert!(runtime.apply_intents(binding.id).unwrap() == pending);
+    assert!(runtime.inbox_entries(binding.id).unwrap() == inbox);
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    let calls = service.request_log().unwrap().len();
+
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    runtime
+        .arm_note_scan_pause_for_testing(ScanPausePoint::BeforeSnapshot, reached_tx, release_rx)
+        .unwrap();
+    let (reached, intents, receipts, engine, retained, callback, caller, result) = std::thread::scope(|threads| {
+        let worker = threads.spawn(|| host.resume_cloud_binding(&preview, collection.generation()));
+        let reached = reached_rx.recv_timeout(Duration::from_secs(30));
+        let intents = runtime.apply_intents(binding.id);
+        let receipts = runtime.incoming_wal_receipts();
+        let engine = runtime.incoming_engine_state_for_testing(binding.id);
+        let retained = runtime.incoming_sdk_instance_for_testing();
+        let callback = runtime.adapter_state_update(&old_sdk, b"late-media-callback");
+        let caller = runtime.validate_caller(&old_caller);
+        let _ = release_tx.send(());
+        (
+            reached,
+            intents,
+            receipts,
+            engine,
+            retained,
+            callback,
+            caller,
+            worker.join(),
+        )
+    });
+    reached.expect("Resume must settle media before the whole scan's snapshot");
+    assert!(intents.unwrap().is_empty());
+    assert!(engine.unwrap().is_none());
+    assert!(receipts.iter().any(|receipt| {
+        receipt.identity().native_file() == (pending[0].native_file.device, pending[0].native_file.inode)
+            && receipt.identity().generation().0 == collection.generation().0
+            && receipt.through() >= wal_floor
+    }));
+    assert_eq!(retained.as_deref(), Some(old_sdk.as_str()));
+    assert!(callback.is_err() && caller.is_err());
+    result.expect("Resume worker must not panic").unwrap();
+    assert_eq!(service.request_log().unwrap().len(), calls);
+    assert!(runtime.inbox_entries(binding.id).unwrap().is_empty());
+    let settled = runtime.binding_entity(binding.id, &before.name).unwrap().unwrap();
+    assert_eq!(settled.acked_envelope.0, saved.envelope);
+    assert_eq!(settled.acked_system_fields, saved.system_fields);
+    assert_eq!(settled.acked_payload, Some(before.payload.clone()));
+    assert_eq!(settled.acked_row_digest, before.payload.row_digest().unwrap());
+    assert_eq!(settled.acked_payload_digest, before.payload.payload_digest().unwrap());
+    assert!(matches!(codec::Entity::decode(&settled.acked_envelope.0),
+        Ok(codec::DecodeOutcome::Supported(e)) if e.fields.tombstone && e.fields.deleted_at_ms == NOW));
+    assert!(!runtime.status().unwrap().scan_required);
+    assert!(runtime.register_sdk(false).is_err());
+    assert!(runtime.confirm_connection_resume(&preview, &collection).is_err());
+    runtime.release_sdk(&old_sdk).unwrap();
+    if disabled {
+        assert!(!host.cloud_policy_driver().unwrap().state().settings.enabled);
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert!(
+            runtime.register_sdk(false).is_err(),
+            "local replay must not unpause the adapter"
+        );
+    } else {
+        let (_, cursor, _) = runtime.register_sdk(false).unwrap();
+        assert!(cursor.is_none());
+    }
+    host.close().unwrap();
+}
+
+/// Retained authority refuses stale explicit actions without changing the binding.
+#[test]
+fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_preview() {
+    for change in ["account", "file", "fence", "operation", "preview", "pause", "reopen"] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("resume-refusal");
+        generated(&dir);
+        let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+            cloud::OpaqueBytes(scope().account.into_bytes()),
+        ))));
+        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
+        let binding = publish_actual_collection(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        runtime.adapter_stop_syncing().unwrap();
+        let p = actual_preview(&host, &mut service, &scope());
+        assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+        let old_file = dir.join("held-original.anki2");
+        match change {
+            "account" => {
+                *account.0.lock().unwrap() = IdentityStatus::Available(cloud::OpaqueBytes(b"other-account".to_vec()))
+            }
+            "file" => {
+                std::fs::rename(collection.path(), &old_file).unwrap();
+                std::fs::copy(&old_file, collection.path()).unwrap();
+            }
+            "fence" | "reopen" => restore_collection(&host, &dir),
+            "operation" => {
+                runtime.confirm_connection_publication(&p, &collection).unwrap();
+            }
+            "preview" => {
+                let newer = actual_preview(&host, &mut service, &scope());
+                assert_ne!(newer.id, p.id);
+            }
+            "pause" => runtime.adapter_pause(true).unwrap(),
+            _ => unreachable!(),
+        }
+        let result = runtime.confirm_connection_resume(&p, &collection);
+        if change == "account" {
+            assert!(matches!(
+                result,
+                Err(cloud::runtime::RuntimeError::Publication(
+                    PublicationError::AccountMismatch
+                ))
+            ));
+        } else {
+            assert!(result.is_err(), "stale {change} proof admitted");
+        }
+        if change == "file" {
+            std::fs::remove_file(collection.path()).unwrap();
+            std::fs::rename(&old_file, collection.path()).unwrap();
+        }
+        assert_ne!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Active
+        );
+        assert_eq!(runtime.status().unwrap().binding.unwrap().id, binding.id);
+        if change == "operation" {
+            let newer = actual_preview(&host, &mut service, &scope());
+            assert_ne!(
+                newer.decision,
+                ConnectDecision::ConfirmResume,
+                "binding-before is excluded"
+            );
+        }
+        host.close().unwrap();
+    }
+}
+
+/// V13 requires an actually read, complete bound MGEpoch; zone existence is
+/// never supplied as a boolean. All mutations and read failures come from Service.
+#[test]
+fn resume_is_not_offered_for_actual_missing_zone_or_changed_epoch_manifest() {
+    for missing in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("resume-zone");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(708)).unwrap();
+        let binding = publish_actual_collection(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        runtime.adapter_stop_syncing().unwrap();
+        let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+        if missing {
+            assert!(
+                service
+                    .request(
+                        &scope(),
+                        Caller::default(),
+                        Operation::DeleteZone {
+                            zone: zone.clone(),
+                            cause: meguri_testkit::cloud::RemovalCause::Deleted,
+                        }
+                    )
+                    .unwrap()
+                    .result
+                    .is_ok()
+            );
+        } else {
+            let response = service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::Read {
+                        zone: zone.clone(),
+                        name: "epoch".into(),
+                        fields: RequestedFields::All,
+                    },
+                )
+                .unwrap();
+            let Ok(Reply::Record(record)) = response.result else {
+                panic!("real manifest")
+            };
+            let control = publication_control_record(&record).unwrap();
+            let DecodeOutcome::Supported(mut epoch) = Epoch::decode(control.encrypted.as_deref().unwrap()).unwrap()
+            else {
+                panic!("complete published manifest")
+            };
+            epoch.state = EpochState::Publishing;
+            epoch.counts.clear();
+            let response = service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::Modify {
+                        zone: zone.clone(),
+                        atomic: true,
+                        changes: vec![Mutation::Save {
+                            record: RecordInput::encrypted("epoch", "MGEpoch", epoch.encode().unwrap()),
+                            if_unchanged: Some(record.system_fields),
+                        }],
+                    },
+                )
+                .unwrap();
+            let Ok(Reply::Modified(items)) = response.result else {
+                panic!("real manifest save")
+            };
+            assert!(items.iter().all(|i| i.result.is_ok()));
+        }
+        let PreviewWork::ReadActive { id } = host.begin_cloud_connection_preview().unwrap() else {
+            panic!("Active read required")
+        };
+        let response = service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Read {
+                    zone: "meguri-root".into(),
+                    name: "active".into(),
+                    fields: RequestedFields::All,
+                },
+            )
+            .unwrap();
+        let Ok(Reply::Record(record)) = response.result else {
+            panic!("real Active read")
+        };
+        assert!(matches!(
+            runtime
+                .connection_active_read(id, RecordRead::Found(publication_control_record(&record).unwrap()))
+                .unwrap(),
+            PreviewWork::ReadEpoch { .. }
+        ));
+        let response = service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Read {
+                    zone,
+                    name: "epoch".into(),
+                    fields: RequestedFields::All,
+                },
+            )
+            .unwrap();
+        let read = match response.result {
+            Ok(Reply::Record(record)) => RecordRead::Found(publication_control_record(&record).unwrap()),
+            Err(error) if error.code == meguri_testkit::cloud::ErrorCode::ZoneNotFound => RecordRead::ZoneMissing,
+            _ => panic!("actual manifest result required"),
+        };
+        assert!(runtime.connection_epoch_read(id, read).is_err());
+        assert!(runtime.resume_binding_offer().is_none());
+        assert!(runtime.resume_binding(binding.id, &host.collection().unwrap()).is_err());
+        host.close().unwrap();
+    }
 }
 
 #[test]

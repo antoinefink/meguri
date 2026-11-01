@@ -81,6 +81,7 @@ public final class SyncCoordinator {
     public private(set) var hasDeferredNativeWork = false
     public private(set) var syncNowUnavailable: CloudPolicyUnavailable?
     public private(set) var preview: CloudConnectionPreviewWork?
+    public private(set) var connectionFailure: CloudConnectionFailure?
     public private(set) var recovery: CloudRecoveryStatus?
     /// True until the original retained preview task has returned, including cancellation/drain.
     /// Publication and recovery work deliberately do not count as preview activity.
@@ -128,6 +129,7 @@ public final class SyncCoordinator {
     private var quitCompletion: (@MainActor () -> Void)?
     private var accountTask: Task<Void, Never>?
     private var pendingAccountRead: UInt64?
+    private var readyPreviewOwner: (service: CoreCloudConnectionService, generation: UInt64, revision: UInt64, id: UUID)?
     private var readingPreview = false
     // A retained acceptance, not preview/view ownership. Nil is distinct from
     // an earlier Enabled=false and survives queued work until Rust ends it.
@@ -321,14 +323,16 @@ public final class SyncCoordinator {
     /// Discovery is read-only. Only Rust's explicit no-file directive transfers
     /// the ready authority to a separate, app-owned adoption operation.
     public func beginConnectionPreview() {
-        guard !closing, !suspended, !replacing, setupState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
+        guard !closing, !suspended, !replacing, !settings.paused, setupState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
+        connectionFailure = nil
         readingPreview = true
         ownTask = Task {
             defer { readingPreview = false; finishOwnWork() }
             do {
                 let work = try await own.preview()
-                guard !Task.isCancelled, !closing, expected == generation, revision == hostRevision else {
+                guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                      expected == generation, revision == hostRevision else {
                     if case .ready(let handle, _) = work { try await backend.connection?.cancelPreview(handle) }
                     return
                 }
@@ -351,7 +355,10 @@ public final class SyncCoordinator {
                     // No await between the persistent setting and actual adopt.
                     saveEnabled(true)
                     observeInitialAdoptionAcceptance?()
-                    do { _ = try await connection.confirmAdoption(handle) }
+                    do {
+                        _ = try await connection.confirmAdoption(handle)
+                        if expected == generation, revision == hostRevision, !closing { connectionFailure = nil }
+                    }
                     catch {
                         // The call did not accept an operation. Restore even
                         // when authority/account changed during the call.
@@ -360,38 +367,94 @@ public final class SyncCoordinator {
                     }
                     recovery = try await connection.recoveryStatus()
                     await runOwnWork(backend, generation: expected, revision: revision)
+                } else if case .ready = work, let connection = backend.connection {
+                    readyPreviewOwner = (connection, expected, revision, UUID())
+                    preview = work
+                    receive(.refresh(.cloud))
                 } else { preview = work }
-            } catch { if expected == generation, !closing, !Task.isCancelled { operationFailed = true } }
+            } catch {
+                if expected == generation, revision == hostRevision, !closing, !Task.isCancelled { recordConnectionFailure(error) }
+            }
         }
     }
     public func cancelConnectionPreview() async {
         if suspended { pendingPreviewCancellation = true; return }
-        if readingPreview { ownTask?.cancel(); await backend?.own?.cancelPreview(); await ownTask?.value }
-        guard case .ready(let handle, _) = preview, let connection = backend?.connection else { return }
-        do { try await connection.cancelPreview(handle); preview = nil }
-        catch { operationFailed = true }
+        if readingPreview {
+            let originalTask = ownTask, original = backend?.own
+            originalTask?.cancel()
+            await original?.cancelPreview()
+            await originalTask?.value
+            return
+        }
+        guard case .ready(let handle, _) = preview, let owner = readyPreviewOwner else { return }
+        do {
+            try await owner.service.cancelPreview(handle)
+            if readyPreviewOwner?.id == owner.id { preview = nil; readyPreviewOwner = nil }
+        } catch {
+            if readyPreviewOwner?.id == owner.id {
+                preview = nil; readyPreviewOwner = nil
+                recordConnectionFailure(error)
+            }
+        }
     }
-    public func confirmPublication() async { await confirmConnection(adopting: false) }
-    public func confirmAdoption() async { await confirmConnection(adopting: true) }
-    private func confirmConnection(adopting: Bool) async {
-        guard !closing, !suspended, !replacing, ownTask == nil, case .ready(let handle, _) = preview,
-              let backend, let connection = backend.connection else { return }
+    public func confirmPublication() async { await confirmConnection(.publication) }
+    public func confirmAdoption() async { await confirmConnection(.adoption) }
+    public func confirmResume() async { await confirmConnection(.resume) }
+    private func recordConnectionFailure(_ error: any Error) {
+        operationFailed = true
+        if case BridgeError.cloudConnection(let failure) = error { connectionFailure = failure }
+    }
+    private func confirmConnection(_ intent: CloudConnectionConfirmation) async {
+        guard !closing, !suspended, !replacing, !settings.paused, !readingPreview,
+              initialAdoptionEnabledBefore == nil, ownTask == nil, case .ready(let handle, let summary) = preview,
+              SyncStatusPresentation.permits(intent, decision: summary.decision),
+              let owner = readyPreviewOwner, owner.generation == generation, owner.revision == hostRevision,
+              let backend, let connection = backend.connection, connection === owner.service else { return }
         let expected = generation, revision = hostRevision
-        preview = nil
+        preview = nil; readyPreviewOwner = nil
         ownTask = Task {
             defer { finishOwnWork() }
             do {
-                if adopting { _ = try await connection.confirmAdoption(handle) }
-                else { _ = try await connection.confirmPublication(handle) }
-                guard !closing, expected == generation, revision == hostRevision else { return }
-                // The actual durable confirmation succeeded. Later failures
-                // keep Enabled and Rust's recoverable operation, never fake a
-                // rollback or mark the operation as successfully published.
+                guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                      expected == generation, revision == hostRevision,
+                      self.backend === backend, backend.connection === connection else {
+                    try await connection.cancelPreview(handle)
+                    return
+                }
+                switch intent {
+                case .adoption: _ = try await connection.confirmAdoption(handle)
+                case .publication: _ = try await connection.confirmPublication(handle)
+                case .resume: try await connection.resumeBinding(handle)
+                }
+                guard expected == generation, revision == hostRevision,
+                      self.backend === backend, backend.connection === connection else { return }
+                if intent != .resume && (closing || suspended || replacing) { return }
+                connectionFailure = nil
+                // Durable confirmation succeeded. Enable only now; subsequent
+                // status comes from policy. Adoption/publication keep their
+                // recoverable operation if later work fails.
                 saveSettings(.init(enabled: true, paused: settings.paused,
                     automatic: settings.automatic, media: settings.media))
-                await waitForInputs()
-                await runOwnWork(backend, generation: expected, revision: revision)
-            } catch { if expected == generation, !closing { operationFailed = true } }
+                guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused else { return }
+                if intent == .resume {
+                    enqueue(.account(false))
+                    await prepareConnectionAuthority()
+                } else { await waitForInputs() }
+                guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                      expected == generation, revision == hostRevision,
+                      self.backend === backend, backend.connection === connection else { return }
+                if intent == .resume {
+                    // Resume invalidates the old identity proof. The ordered
+                    // native read above must return before policy refreshes.
+                    receive(.refresh(.cloud))
+                    await waitForInputs()
+                    guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                          expected == generation, revision == hostRevision,
+                          self.backend === backend, backend.connection === connection else { return }
+                } else { await runOwnWork(backend, generation: expected, revision: revision) }
+            } catch {
+                if expected == generation, revision == hostRevision, !closing { recordConnectionFailure(error) }
+            }
         }
         await ownTask?.value
     }
