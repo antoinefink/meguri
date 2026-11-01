@@ -2,6 +2,7 @@
 //! the private suite and the anonymized clone. Commands land with their units.
 
 mod anonymize;
+mod cloud_service;
 mod conformance;
 mod fp_probe;
 mod generate;
@@ -17,6 +18,7 @@ fn main() {
         Some((command, rest)) if command == "conformance" => conformance::main(rest),
         Some((command, rest)) if command == "generate" => generate::main(rest),
         Some((command, rest)) if command == "internal-native-review" => native_review::main(rest),
+        Some((command, rest)) if command == "internal-cloud-service" => cloud_service::main(rest),
         Some((command, rest)) if command == "fp-probe" => fp_probe::main(rest),
         Some((command, rest)) if command == "profile-extract" => profile_extract::main(rest),
         Some((command, rest)) if command == "private" => private::main(rest),
