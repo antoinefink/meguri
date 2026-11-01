@@ -110,3 +110,32 @@ this handoff claims neither a pass nor a product repair.
 
 Independent review clears the latest source diagnostic changes (no P0-P2).
 The owned-host geometry VM test is running; its result remains pending.
+
+## Controller-hosting experiment: rejected
+
+- Fixer: `s-20261025T162405Z-9dc656e4`; source base `0c0e96d8`.
+- Source review found no P0-P2 findings before execution.
+- mac-hosted-test/20261101T104954Z-94981: FAIL. Attaching the controller
+  changed host and content layout from 900 by 700 to 266 by 10. The search
+  field remains empty. This experiment does not preserve the required viewport.
+- The exact patch and hashes are retained under
+  build/unit-intake/cloud-mac-search-20261101/controller-rejected.patch
+  and controller-rejected.json. Its receipt remains unchanged.
+- The test source was restored to its pre-experiment version. The original
+  assertions and failed hosted check remain enabled; no failure is suppressed.
+- Stop this hosted experiment. Use the production Settings VM route to inspect
+  actual controls before another product or test-host change. No identifier
+  defect, SDK limitation, passing gate or acceptance is established.
+
+Production-window evidence:
+- ui-tree/20261101T105701Z-97845 passed its transport checks but rendered
+  a test-hook error: the required generated fixture was omitted. It supplies
+  no Settings evidence.
+- ui-tree/20261101T110411Z-1725 uses the existing public generated fixture
+  and renders the production Settings window. The screenshot was inspected.
+- Its hierarchy fails only for the native Search button's missing identifier.
+  The search field has settings.root.search and a nonempty 202 by 30 frame.
+  The button has its native Search label and a nonempty 25 by 28 frame.
+- This establishes a product metadata finding independent of the synthetic
+  host. A public identifier-only repair and actual-window verification follow.
+  The hosted and full integration gates remain open.
