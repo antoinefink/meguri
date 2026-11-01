@@ -56,10 +56,7 @@ impl CoreHost {
         cancel: &CancelToken,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<WrittenCollectionExport, EngineError> {
-        self.review().flush_for_background()?;
-        progress.set_phase(meguri_engine::ProgressPhase::Named(
-            "Capturing and writing collection and media",
-        ));
+        collection.open_evidence()?;
         cancel.check()?;
         let config = &self.export;
         let parent = config
@@ -72,6 +69,14 @@ impl CoreHost {
         let protected = vec![config.collection_directory.clone(), config.backups_directory.clone()];
         check_layout(&root, &protected)?;
         let directory = root.join("owned");
+        // Read-only refusal, not a reservation: recheck ownership after preflight.
+        if directory.symlink_metadata().is_ok() && !ownership(&directory).is_ok_and(|(_, state)| state == "safe") {
+            return Err(EngineError::Busy { running_op: "a retained Files export; finish its provider operation before retrying (ownership cannot be proven after restart)".into() });
+        }
+        self.review().flush_for_background()?;
+        progress.set_phase(meguri_engine::ProgressPhase::Named(
+            "Capturing and writing collection and media",
+        ));
         let operation = directory.join(format!("operation-{:016x}", config.random.next_u64()));
         let path = operation.join("Meguri-Collection.colpkg");
         let reader = collection.reader(ReaderRole::Maintenance)?;

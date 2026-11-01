@@ -1163,7 +1163,194 @@ mod tests {
             .write_collection_export(&c, &CancelToken::new(), &ProgressSink::new())
             .err()
             .unwrap();
-        assert!(matches!(error, EngineError::Busy { .. }));
+        assert!(
+            matches!(error, EngineError::Busy { .. }),
+            "expected Busy, got {}",
+            match &error {
+                EngineError::ExportSourceChanged => "ExportSourceChanged",
+                EngineError::ExportSourceInvalid => "ExportSourceInvalid",
+                EngineError::ExportFormatLimit => "ExportFormatLimit",
+                EngineError::SyncNote(_) => "SyncNote",
+                EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",
+                EngineError::SchedOp(_) => "SchedOp",
+                EngineError::InvalidTypeAnswerReplacement => "InvalidTypeAnswerReplacement",
+                EngineError::SessionActive => "SessionActive",
+                EngineError::CollectionCorrupt => "CollectionCorrupt",
+                EngineError::InvalidIgnoreBeforeDate { .. } => "InvalidIgnoreBeforeDate",
+                EngineError::SuspendDeadline { .. } => "SuspendDeadline",
+                EngineError::NotFound { .. } => "NotFound",
+                EngineError::DeckRefused(_) => "DeckRefused",
+                EngineError::NoteNotFound { .. } => "NoteNotFound",
+                EngineError::Stale { .. } => "Stale",
+                EngineError::StaleGeneration { .. } => "StaleGeneration",
+                EngineError::CollectionUnavailable { .. } => "CollectionUnavailable",
+                EngineError::Busy { .. } => "Busy",
+                EngineError::UndoUnavailable { .. } => "UndoUnavailable",
+                EngineError::Cancelled => "Cancelled",
+                EngineError::SchemaNotMarked { .. } => "SchemaNotMarked",
+                EngineError::NotetypeRefused(_) => "NotetypeRefused",
+                EngineError::Open(_) => "Open",
+                EngineError::Storage(_) => "Storage",
+                EngineError::SafetyBackupFailed(_) => "SafetyBackupFailed",
+                EngineError::Media(_) => "Media",
+                EngineError::CommitCompleted { .. } => "CommitCompleted",
+                EngineError::MediaCommitPending { .. } => "MediaCommitPending",
+                EngineError::Panicked { .. } => "Panicked",
+                EngineError::InvalidArgument { .. } => "InvalidArgument",
+                EngineError::Unsupported { .. } => "Unsupported",
+                EngineError::Internal { .. } => "Internal",
+            }
+        );
+        host.close().unwrap();
+    }
+    // Synthetic fixture facts only: never follow symlinks or inventory unrelated roots.
+    #[derive(Debug, PartialEq, Eq)]
+    struct ExportTreeFact {
+        path: PathBuf,
+        identity: (u64, u64),
+        mode: u32,
+        links: u64,
+        length: u64,
+        modified: (i64, i64),
+        bytes: Option<Vec<u8>>,
+        target: Option<PathBuf>,
+    }
+    fn export_tree_facts(paths: &[PathBuf]) -> Vec<ExportTreeFact> {
+        fn visit(path: &Path, facts: &mut Vec<ExportTreeFact>) {
+            assert!(facts.len() < 128, "synthetic fixture tree must stay small");
+            let meta = fs::symlink_metadata(path).unwrap();
+            assert!(meta.len() <= 8 * 1024 * 1024, "synthetic fixture file must stay small");
+            facts.push(ExportTreeFact {
+                path: path.to_owned(),
+                identity: (meta.dev(), meta.ino()),
+                mode: meta.mode(),
+                links: meta.nlink(),
+                length: meta.len(),
+                modified: (meta.mtime(), meta.mtime_nsec()),
+                bytes: meta.is_file().then(|| fs::read(path).unwrap()),
+                target: meta.file_type().is_symlink().then(|| fs::read_link(path).unwrap()),
+            });
+            if meta.is_dir() {
+                let mut children: Vec<_> = fs::read_dir(path).unwrap().map(|entry| entry.unwrap().path()).collect();
+                children.sort();
+                for child in children {
+                    visit(&child, facts);
+                }
+            }
+        }
+        let mut facts = Vec::new();
+        for path in paths {
+            visit(path, &mut facts);
+        }
+        facts
+    }
+    fn reopen_with_provider_owned_export(root: &Path, space: Arc<dyn SpaceProvider>) -> (CoreHost, HostConfig) {
+        let (host, mut config) = host(root);
+        // Include an actual safety backup in the read-only preservation witness.
+        host.backup()
+            .before_colpkg_import(&host.collection().unwrap(), &CancelToken::new())
+            .unwrap();
+        let artifact = prepare(&host);
+        let lease = acquire_native(&artifact);
+        assert!(
+            fs::read_to_string(artifact.owner.directory.join("ownership"))
+                .unwrap()
+                .contains("\nprovider\n")
+        );
+        // No discard or finish: dropping a native lease supplies no safe-removal proof.
+        drop(lease);
+        drop(artifact);
+        host.close().unwrap();
+        drop(host);
+        config.disk_space_provider = space;
+        let reopened = CoreHost::open(config.clone()).unwrap();
+        assert!(reopened.derived().wait_idle(Duration::from_secs(5)));
+        (reopened, config)
+    }
+    #[test]
+    fn provider_owned_restart_refuses_before_capacity_preflight_read_only() {
+        struct Capacity {
+            insufficient: AtomicBool,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        impl SpaceProvider for Capacity {
+            fn available_bytes(&self, _directory: &Path) -> Result<u64, StorageError> {
+                if self.insufficient.load(Ordering::SeqCst) {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(0)
+                } else {
+                    Ok(u64::MAX)
+                }
+            }
+        }
+        let _serial = SERIAL.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let capacity = Arc::new(Capacity {
+            insufficient: AtomicBool::new(false),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let (host, config) = reopen_with_provider_owned_export(root.path(), capacity.clone());
+        let paths = [
+            root.path().join("CollectionExports"),
+            config.collection_directory.clone(),
+            config.backups_directory.clone(),
+        ];
+        let before = export_tree_facts(&paths);
+        let collection = host.collection().unwrap();
+        // Arm only after reopen and baseline capture; setup cannot count as a request call.
+        capacity.calls.store(0, Ordering::SeqCst);
+        capacity.insufficient.store(true, Ordering::SeqCst);
+        let error = host
+            .write_collection_export(&collection, &CancelToken::new(), &ProgressSink::new())
+            .err()
+            .unwrap();
+        let calls = capacity.calls.load(Ordering::SeqCst);
+        capacity.insufficient.store(false, Ordering::SeqCst);
+        assert!(
+            matches!(error, EngineError::Busy { .. }),
+            "occupied provider slot must win over low capacity"
+        );
+        assert_eq!(calls, 0, "occupied provider slot must refuse before capacity work");
+        assert_eq!(export_tree_facts(&paths), before);
+        host.close().unwrap();
+    }
+    #[test]
+    fn provider_owned_restart_refuses_before_invalid_media_source_read_only() {
+        let _serial = SERIAL.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("sentinel.bin"),
+            b"synthetic external media sentinel",
+        )
+        .unwrap();
+        let (host, config) = reopen_with_provider_owned_export(root.path(), Arc::new(StatvfsSpace));
+        // Install the invalid source only after real host recovery has completed.
+        let media = config.collection_directory.join("collection.media");
+        if media.exists() {
+            fs::remove_dir(&media).unwrap();
+        }
+        std::os::unix::fs::symlink(outside.path(), &media).unwrap();
+        let paths = [
+            root.path().join("CollectionExports"),
+            config.collection_directory.clone(),
+            config.backups_directory.clone(),
+            outside.path().to_owned(),
+        ];
+        let before = export_tree_facts(&paths);
+        let collection = host.collection().unwrap();
+        let error = host
+            .write_collection_export(&collection, &CancelToken::new(), &ProgressSink::new())
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, EngineError::Busy { .. }),
+            "occupied provider slot must win over invalid media"
+        );
+        assert_eq!(export_tree_facts(&paths), before);
+        // Restore the synthetic media root before normal host shutdown.
+        fs::remove_file(&media).unwrap();
+        fs::create_dir(&media).unwrap();
         host.close().unwrap();
     }
     #[test]
