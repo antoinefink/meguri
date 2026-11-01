@@ -81,6 +81,7 @@ pub(super) fn note_facts(n: NoteTracking) -> Result<EntityFacts, Error> {
         kind: codec::Kind::Note,
         key: codec::id_key(n.id).to_vec(),
         origin: n.origin,
+        sent: n.sent,
         local_rev: n.local_rev,
         acked_rev: n.acked_rev,
         tombstone_at: n.tombstone_at,
@@ -148,6 +149,7 @@ pub(super) fn new_pending_entity(
         kind,
         key,
         origin,
+        sent: false,
         local_rev: 1,
         acked_rev: 0,
         tombstone_at: None,
@@ -465,9 +467,6 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
     }
     pub(super) fn persist_flight(&mut self, b: BindingId, name: &str, flight: Flight) -> Result<(), Error> {
         let mut h = self.entity_header(b, name)?.ok_or(Error::InvalidData)?;
-        if h.facts.in_flight.len() >= 250 {
-            return Err(Error::InvalidData);
-        }
         let exists = h.facts.in_flight.iter().any(|f| {
             f.local_rev == flight.local_rev
                 && f.payload_digest == flight.payload_digest
@@ -475,7 +474,11 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 && f.tombstone == flight.tombstone
                 && f.tombstone_envelope_digest == flight.tombstone_envelope_digest
         });
+        if !exists && h.facts.in_flight.len() >= 250 {
+            return Err(Error::InvalidData);
+        }
         let tx = self.connection.transaction()?;
+        h.facts.sent = true;
         if !exists {
             h.append_flight(&tx, b, &flight)?;
         }
@@ -576,6 +579,32 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(pending)
     }
+    pub(super) fn remove_unsent_scan_revlog(
+        &mut self,
+        b: BindingId,
+        key: &[u8],
+        open: u64,
+        cursor: &runtime::NoteScanCursor,
+    ) -> Result<bool, Error> {
+        let state = self.runtime_binding(b)?;
+        if state.open_counter != open || state.file != Some(cursor.native_file) {
+            return Err(Error::InvalidData);
+        }
+        let tx = self.connection.transaction()?;
+        let e = entity(&tx, b, codec::Kind::Revlog, key)?.ok_or(Error::InvalidData)?;
+        if e.sent
+            || e.server_erev != 0
+            || !e.in_flight.is_empty()
+            || (e.observer_open == open && e.observed_generation == cursor.generation && e.observed_seq > cursor.seq)
+        {
+            return Ok(false);
+        }
+        // The caller holds the matching reader snapshot and WAL receipt under
+        // with_scan's incarnation/account/file guards. Never synthesize an ACK.
+        remove_entity(&tx, b, &e)?;
+        tx.commit()?;
+        Ok(true)
+    }
     pub(super) fn finish_workflow_scan(&mut self, b: BindingId, ledger: CoverageLedger) -> Result<(), Error> {
         ledger.validate()?;
         let mut s = self.runtime_binding(b)?;
@@ -629,6 +658,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             kind: f.kind,
             key: f.key,
             origin: f.origin,
+            sent: true,
             local_rev: 1,
             acked_rev: 1,
             tombstone_at: None,
@@ -796,7 +826,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         return Err(Error::InvalidData.into());
                     };
                     if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
-                        if e.server_erev == 0 && e.in_flight.is_empty() {
+                        if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
                             remove_entity(&tx, b, &e)?;
                             continue;
                         }
@@ -831,7 +861,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         hook(written)?;
                         continue;
                     }
-                    if kind != codec::Kind::Revlog || e.server_erev != 0 || !e.in_flight.is_empty() {
+                    if kind != codec::Kind::Revlog || e.sent || e.server_erev != 0 || !e.in_flight.is_empty() {
                         return Err(Error::InvalidData.into());
                     }
                     remove_entity(&tx, b, &e)?;

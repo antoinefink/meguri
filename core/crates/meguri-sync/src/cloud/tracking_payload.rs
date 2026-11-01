@@ -77,6 +77,7 @@ fn skeleton(e: &EntityFacts) -> Result<EntityFacts, Error> {
         kind: e.kind,
         key: e.key.clone(),
         origin: e.origin,
+        sent: e.sent,
         local_rev: e.local_rev,
         acked_rev: e.acked_rev,
         tombstone_at: e.tombstone_at,
@@ -101,6 +102,7 @@ fn note_header(n: NoteTracking) -> EntityFacts {
         kind: c::Kind::Note,
         key: c::id_key(n.id).to_vec(),
         origin: n.origin,
+        sent: n.sent,
         local_rev: n.local_rev,
         acked_rev: n.acked_rev,
         tombstone_at: n.tombstone_at,
@@ -125,6 +127,7 @@ fn as_note(e: &EntityFacts, row_digest: [u8; 32]) -> Result<NoteTracking, Error>
         id,
         name: e.name.clone(),
         origin: e.origin,
+        sent: e.sent,
         local_rev: e.local_rev,
         last_observed_digest: Some(row_digest),
         local_payload: OpaqueBytes(Vec::new()),
@@ -159,7 +162,11 @@ fn owner_v5(cn: &Connection, b: BindingId) -> Result<bool, Error> {
             |r| r.get(0),
         )?);
     }
-    Ok(cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))? == 5)
+    match cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))? {
+        5 => Ok(true),                // Historical markerless V5 representation.
+        6 => Err(Error::InvalidData), // Never reconstruct V6 handoff history.
+        _ => Ok(false),
+    }
 }
 pub(super) fn flight_payload(cn: &Connection, b: BindingId, f: &Flight) -> Result<c::Payload, Error> {
     match &f.payload {
@@ -331,6 +338,21 @@ pub(super) fn put_header(tx: &Transaction<'_>, b: BindingId, h: &Header) -> Resu
     if old_text.is_some() && old_images.is_none() && owner_v5(tx, b)? {
         return Err(Error::InvalidData);
     }
+    // Same record name is the same identity, even across an ordinary origin
+    // merge. Only a verified rekey allocates another key/name and starts fresh.
+    #[derive(Deserialize)]
+    struct PriorHandoff {
+        name: String,
+        #[serde(default = "super::runtime::legacy_sent")]
+        sent: bool,
+    }
+    if let Some(text) = old_text.as_deref() {
+        let prior: PriorHandoff = decode(text)?;
+        if prior.name == metadata.name {
+            metadata.sent |= prior.sent;
+        }
+    }
+    let e = &metadata;
     if e.in_flight.len() != h.images.flights.len() {
         return Err(Error::InvalidData);
     }
@@ -498,6 +520,7 @@ pub(super) fn put_note(tx: &Transaction<'_>, b: BindingId, n: &NoteTracking) -> 
         id: n.id,
         name: n.name.clone(),
         origin: n.origin,
+        sent: n.sent,
         local_rev: n.local_rev,
         last_observed_digest: n.last_observed_digest,
         local_payload: OpaqueBytes(Vec::new()),
@@ -701,6 +724,7 @@ impl Header {
         let (erev, local_rev, row_digest, payload_digest) = (f.erev, f.local_rev, f.row_digest, f.payload_digest);
         let digest = *self.images.flights.get(index).ok_or(Error::InvalidData)?;
         let e = &mut self.facts;
+        e.sent = true;
         e.server_erev = erev;
         e.acked_rev = local_rev;
         e.acked_row_digest = row_digest;
@@ -732,6 +756,8 @@ impl Header {
 /// Only ordinary owners in this build scope may change. V5 is the shared
 /// older-reader fence; per-binding markers record actual representation progress.
 pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Error> {
+    // Refuse future or markerless V6 before DDL, including direct migration calls.
+    super::runtime_store::check_version(tx)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payloads(binding BLOB NOT NULL REFERENCES bindings(id),digest BLOB NOT NULL CHECK(length(digest)=32),bytes BLOB NOT NULL,PRIMARY KEY(binding,digest));")?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payload_retired(binding BLOB NOT NULL REFERENCES bindings(id),name TEXT NOT NULL,digest BLOB NOT NULL CHECK(length(digest)=32),PRIMARY KEY(binding,name,digest));")?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payload_owners(binding BLOB PRIMARY KEY REFERENCES bindings(id),version INTEGER NOT NULL CHECK(version=5));")?;
@@ -771,7 +797,7 @@ pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Er
     }
     tx.execute("INSERT INTO cloud_runtime_payload_owners SELECT id,5 FROM bindings WHERE container=?1 AND environment=?2 AND salvage=0 ON CONFLICT(binding) DO NOTHING", params![scope.container.as_str(), scope.environment.code()])?;
     meguri_model::faultpoint!("cloud.payload_migration.before_commit")?;
-    tx.execute("UPDATE cloud_runtime_schema SET version=5", [])?;
+    tx.execute("UPDATE cloud_runtime_schema SET version=6", [])?;
     Ok(())
 }
 
@@ -852,11 +878,36 @@ mod tests {
         }
     }
 
+    fn without_sent(text: &str) -> String {
+        let mut value: serde_json::Value = serde_json::from_str(text).unwrap();
+        value.as_object_mut().unwrap().remove("sent");
+        serde_json::to_string(&value).unwrap()
+    }
+    fn stored_header(cn: &Connection, b: BindingId, kind: c::Kind, key: &[u8]) -> Header {
+        let text: String = if kind == c::Kind::Note {
+            let id = i64::from_be_bytes(key.try_into().unwrap());
+            cn.query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1 AND id=?2",
+                params![b.0.as_slice(), id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        } else {
+            cn.query_row(
+                "SELECT content FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2 AND key=?3",
+                params![b.0.as_slice(), kind as i64, key],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        header(kind, &text).unwrap()
+    }
     fn legacy() -> (Connection, BindingId, NoteTracking, EntityFacts, String, String) {
         let cn = Connection::open_in_memory().unwrap();
         cn.execute_batch("PRAGMA foreign_keys=ON;
             CREATE TABLE bindings(id BLOB PRIMARY KEY,container TEXT NOT NULL,environment INTEGER NOT NULL,salvage INTEGER NOT NULL);
             CREATE TABLE cloud_runtime_schema(version INTEGER); INSERT INTO cloud_runtime_schema VALUES(4);
+            CREATE TABLE cloud_workflow_schema(version INTEGER); INSERT INTO cloud_workflow_schema VALUES(1);
             CREATE TABLE cloud_runtime_notes(binding BLOB REFERENCES bindings(id),id INTEGER,content TEXT CHECK(json_valid(content)),PRIMARY KEY(binding,id));
             CREATE TABLE cloud_runtime_entities(binding BLOB REFERENCES bindings(id),kind INTEGER,key BLOB,content TEXT CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));").unwrap();
         let b = BindingId([71; 16]);
@@ -900,6 +951,7 @@ mod tests {
             id: 11,
             name: "synthetic-note".into(),
             origin: [73; 16],
+            sent: true,
             local_rev: 2,
             last_observed_digest: Some(row),
             local_payload: OpaqueBytes(current.encode().unwrap()),
@@ -946,6 +998,7 @@ mod tests {
             kind: c::Kind::Card,
             key: c::id_key(21).to_vec(),
             origin: [74; 16],
+            sent: true,
             local_rev: 1,
             acked_rev: 0,
             tombstone_at: None,
@@ -979,8 +1032,9 @@ mod tests {
         };
         note.validate().unwrap();
         entity.validate().unwrap();
-        let note_text = encode(&note).unwrap();
-        let entity_text = encode(&entity).unwrap();
+        // Historical rows predate sent; their absence must decode conservatively.
+        let note_text = without_sent(&encode(&note).unwrap());
+        let entity_text = without_sent(&encode(&entity).unwrap());
         cn.execute(
             "INSERT INTO cloud_runtime_notes VALUES(?1,11,?2)",
             params![b.0.as_slice(), &note_text],
@@ -1028,12 +1082,11 @@ mod tests {
         let tx = cn.transaction().unwrap();
         migrate(&tx, &scope()).unwrap();
         tx.commit().unwrap();
-        // Previous runtime readers accepted only versions 1..=4. V5 is explicit
-        // protection, checked by the unchanged private WAL-copy probe path.
+        // Runtime V6 fences the sent bit; payload image ownership remains V5.
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            6
         );
         let text: String = cn
             .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
@@ -1051,17 +1104,259 @@ mod tests {
                 .unwrap(),
             3
         );
-        cn.execute_batch(
-            "CREATE TABLE cloud_workflow_schema(version INTEGER); INSERT INTO cloud_workflow_schema VALUES(1);",
-        )
-        .unwrap();
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
-        cn.execute("UPDATE cloud_runtime_schema SET version=6", []).unwrap();
+        cn.execute("UPDATE cloud_runtime_schema SET version=7", []).unwrap();
         assert!(matches!(
             super::super::runtime_store::check_version(&cn),
             Err(Error::RuntimeSchemaUnsupported)
         ));
     }
+    #[test]
+    fn v5_to_v6_retains_legacy_handoff_defaults_and_reopens_without_downgrade() {
+        let (mut cn, b, note, entity, old_note, old_entity) = legacy();
+        assert!(decode::<NoteTracking>(&old_note).unwrap().sent);
+        assert!(decode::<EntityFacts>(&old_entity).unwrap().sent);
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        // Model a historical V5 header: unchanged image representation, no sent.
+        for table in ["cloud_runtime_notes", "cloud_runtime_entities"] {
+            let text: String = cn
+                .query_row(&format!("SELECT content FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            cn.execute(&format!("UPDATE {table} SET content=?1"), [without_sent(&text)])
+                .unwrap();
+        }
+        cn.execute("UPDATE cloud_runtime_schema SET version=5", []).unwrap();
+        assert!(super::super::runtime_store::check_version(&cn).unwrap());
+        // Also preserve the historical markerless-V5 fallback. V6 never uses it.
+        cn.execute("DROP TABLE cloud_runtime_payload_owners", []).unwrap();
+        assert!(owner_v5(&cn, b).unwrap());
+        assert!(stored_header(&cn, b, c::Kind::Note, &c::id_key(note.id)).facts.sent);
+        assert!(stored_header(&cn, b, entity.kind, &entity.key).facts.sent);
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            6
+        );
+        assert!(owner_v5(&cn, b).unwrap());
+        assert!(
+            dump_note(
+                &cn,
+                b,
+                &cn.query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get::<_, String>(0))
+                    .unwrap()
+            )
+            .unwrap()
+                == note
+        );
+        assert!(
+            dump_entity(
+                &cn,
+                b,
+                entity.kind,
+                &cn.query_row("SELECT content FROM cloud_runtime_entities", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap()
+            )
+            .unwrap()
+                == entity
+        );
+        // Explicitly model the old V5 reader's version predicate. This is a
+        // predicate proof, not a run of an old executable or its WAL probe.
+        let old_v5_accepts = |v: &[i64]| v == [1] || v == [2] || v == [3] || v == [4] || v == [5];
+        assert!(old_v5_accepts(&[5]));
+        assert!(!old_v5_accepts(&[6]));
+        let run = tempfile::tempdir().unwrap();
+        let path = run.path().join("runtime.sqlite");
+        cn.execute("VACUUM INTO ?1", [path.to_str().unwrap()]).unwrap();
+        drop(cn);
+        let mut reopened = Connection::open(&path).unwrap();
+        assert!(super::super::runtime_store::check_version(&reopened).unwrap());
+        let tx = reopened.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            reopened
+                .query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            6
+        );
+        assert!(
+            stored_header(&reopened, b, c::Kind::Note, &c::id_key(note.id))
+                .facts
+                .sent
+        );
+        assert!(stored_header(&reopened, b, entity.kind, &entity.key).facts.sent);
+    }
+
+    #[test]
+    fn same_identity_reconstruction_cannot_clear_conservative_legacy_sent() {
+        let (mut cn, b, mut note, mut entity, _, _) = legacy();
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        // These are legacy records with unknown handoff history, not simulated
+        // engine sends. A reconstruction must preserve the conservative fence.
+        note.sent = false;
+        entity.sent = false;
+        put_note(&tx, b, &note).unwrap();
+        put_entity(&tx, b, &entity).unwrap();
+        tx.commit().unwrap();
+        assert!(stored_header(&cn, b, c::Kind::Note, &c::id_key(note.id)).facts.sent);
+        assert!(stored_header(&cn, b, entity.kind, &entity.key).facts.sent);
+    }
+
+    #[test]
+    fn exact_runtime_fence_and_markerless_v6_refuse_before_migration_mutates() {
+        let (mut cn, b, _, _, old_note, old_entity) = legacy();
+        for version in 1..=5 {
+            cn.execute("UPDATE cloud_runtime_schema SET version=?1", [version])
+                .unwrap();
+            assert!(super::super::runtime_store::check_version(&cn).unwrap());
+        }
+        for version in [6, 7] {
+            cn.execute("UPDATE cloud_runtime_schema SET version=?1", [version])
+                .unwrap();
+            let tx = cn.transaction().unwrap();
+            let error = migrate(&tx, &scope()).unwrap_err();
+            if version == 7 {
+                assert!(matches!(error, Error::RuntimeSchemaUnsupported));
+            } else {
+                assert!(matches!(error, Error::InvalidData));
+            }
+            tx.commit().unwrap();
+            assert_eq!(
+                cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                version
+            );
+            assert_eq!(
+                cn.query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                old_note
+            );
+            assert_eq!(
+                cn.query_row("SELECT content FROM cloud_runtime_entities", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                old_entity
+            );
+            assert!(
+                !cn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'cloud_runtime_payload%')",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )
+                .unwrap()
+            );
+            if version == 6 {
+                assert!(matches!(owner_v5(&cn, b), Err(Error::InvalidData)));
+            }
+        }
+        cn.execute("UPDATE cloud_runtime_schema SET version=5", []).unwrap();
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        assert!(super::super::runtime_store::check_version(&cn).unwrap());
+        // A populated V6 store with a future marker also remains byte-identical.
+        cn.execute("UPDATE cloud_runtime_schema SET version=7", []).unwrap();
+        let note_before: String = cn
+            .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
+            .unwrap();
+        let changes = cn.total_changes();
+        let tx = cn.transaction().unwrap();
+        assert!(matches!(migrate(&tx, &scope()), Err(Error::RuntimeSchemaUnsupported)));
+        tx.commit().unwrap();
+        assert_eq!(cn.total_changes(), changes);
+        assert_eq!(
+            cn.query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            note_before
+        );
+    }
+
+    #[test]
+    fn v6_migration_leaves_other_container_environment_and_salvage_bytes_untouched() {
+        let (mut cn, b, _, entity, old_note, old_entity) = legacy();
+        let owners = [BindingId([81; 16]), BindingId([82; 16]), BindingId([83; 16])];
+        let current_scope = scope();
+        let other = BuildScope {
+            container: ContainerId::new("payload.foreign").unwrap(),
+            ..scope()
+        };
+        for (owner, container, environment, salvage) in [
+            (owners[0], other.container.as_str(), current_scope.environment.code(), 0),
+            (
+                owners[1],
+                current_scope.container.as_str(),
+                Environment::Production.code(),
+                0,
+            ),
+            (
+                owners[2],
+                current_scope.container.as_str(),
+                current_scope.environment.code(),
+                1,
+            ),
+        ] {
+            cn.execute(
+                "INSERT INTO bindings VALUES(?1,?2,?3,?4)",
+                params![owner.0.as_slice(), container, environment, salvage],
+            )
+            .unwrap();
+            cn.execute(
+                "INSERT INTO cloud_runtime_notes VALUES(?1,11,?2)",
+                params![owner.0.as_slice(), &old_note],
+            )
+            .unwrap();
+            cn.execute(
+                "INSERT INTO cloud_runtime_entities VALUES(?1,2,?2,?3)",
+                params![owner.0.as_slice(), &entity.key, &old_entity],
+            )
+            .unwrap();
+        }
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        assert!(owner_v5(&cn, b).unwrap());
+        for owner in owners {
+            assert!(
+                !owner_v5(&cn, owner).unwrap(),
+                "ownership must remain per binding under runtime V6"
+            );
+            assert_eq!(
+                cn.query_row(
+                    "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
+                    [owner.0.as_slice()],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                old_note
+            );
+            assert_eq!(
+                cn.query_row(
+                    "SELECT content FROM cloud_runtime_entities WHERE binding=?1",
+                    [owner.0.as_slice()],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                old_entity
+            );
+            assert_eq!(
+                cn.query_row(
+                    "SELECT count(*) FROM cloud_runtime_payloads WHERE binding=?1",
+                    [owner.0.as_slice()],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+        }
+    }
+
     #[test]
     fn failed_v4_image_migration_rolls_back_and_retries_without_losing_flights() {
         let (mut cn, b, note, _, old_note, _) = legacy();
@@ -1284,8 +1579,17 @@ mod tests {
             (1, 1, 1),
         )
         .unwrap();
-        assert!(e.in_flight.is_empty() && e.server_erev == 0);
+        assert!(!e.sent && e.in_flight.is_empty() && e.server_erev == 0);
         put_entity(&tx, b, &e).unwrap();
+        assert!(!stored_header(&tx, b, e.kind, &e.key).facts.sent);
+        let text: String = tx
+            .query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1 AND id=31",
+                [b.0.as_slice()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!dump_note(&tx, b, &text).unwrap().sent);
         let digest = e.payload.payload_digest().unwrap();
         tx.commit().unwrap();
         let tx = cn.transaction().unwrap();

@@ -144,6 +144,9 @@ pub struct EntityFacts {
     pub kind: c::Kind,
     pub key: Vec<u8>,
     pub origin: [u8; 16],
+    /// Monotonic local handoff history; legacy rows conservatively retain it.
+    #[serde(default = "super::runtime::legacy_sent")]
+    pub sent: bool,
     pub local_rev: u64,
     pub acked_rev: u64,
     /// Explicit committed removal; payload retains the actual last local image.

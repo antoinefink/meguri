@@ -612,6 +612,7 @@ impl TrackingStore {
                     kind: key.kind,
                     key: key.key.clone(),
                     origin: [0; 16],
+                    sent: key.role == ApplyKeyRole::Entry,
                     local_rev: 1,
                     acked_rev: 0,
                     tombstone_at: None,
@@ -917,7 +918,7 @@ fn settle_absent_key(
         let before = key.before_payload.clone().unwrap_or_else(|| e.payload.clone());
         // This is the exact intent before-image when the entity was clean.
         // A dirty entity keeps its earlier pending base instead.
-        if e.server_erev == 0 && e.in_flight.is_empty() {
+        if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
             return super::workflow_store::remove_entity(tx, intent.binding, &e);
         }
         e.remove(before, intent.planned_at_ms, &mut state.change_counter)?;
@@ -977,6 +978,7 @@ fn settle_absent_key(
                     kind: key.kind,
                     key: key.key.clone(),
                     origin: server.fields.origin,
+                    sent: key.role == ApplyKeyRole::Entry,
                     local_rev: 1,
                     acked_rev: 0,
                     tombstone_at: None,

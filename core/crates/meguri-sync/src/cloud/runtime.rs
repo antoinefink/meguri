@@ -168,6 +168,9 @@ pub struct NoteTracking {
     pub id: i64,
     pub name: String,
     pub origin: [u8; 16],
+    /// Monotonic local handoff history; legacy rows conservatively retain it.
+    #[serde(default = "super::runtime::legacy_sent")]
+    pub sent: bool,
     pub local_rev: u64,
     pub last_observed_digest: Option<[u8; 32]>,
     pub local_payload: OpaqueBytes,
@@ -185,6 +188,10 @@ pub struct NoteTracking {
     pub acked_envelope: OpaqueBytes,
     #[serde(default)]
     pub tombstone_at: Option<i64>,
+}
+// Old tracking images cannot prove that a record was never handed off.
+pub(super) fn legacy_sent() -> bool {
+    true
 }
 impl NoteTracking {
     pub(super) fn layout_generation(&self) -> Result<u64, Error> {

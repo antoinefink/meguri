@@ -459,6 +459,7 @@ impl TrackingStore {
             kind: payload.kind(),
             key,
             origin,
+            sent: false,
             local_rev: 1,
             acked_rev: 0,
             tombstone_at: None,

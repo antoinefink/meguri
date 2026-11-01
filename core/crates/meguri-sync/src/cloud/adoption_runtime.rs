@@ -1111,6 +1111,7 @@ impl Runtime {
                 kind: payload.kind(),
                 key: received.entity.fields.key,
                 origin: received.entity.fields.origin,
+                sent: true,
                 local_rev: 1,
                 acked_rev: 1,
                 tombstone_at: None,

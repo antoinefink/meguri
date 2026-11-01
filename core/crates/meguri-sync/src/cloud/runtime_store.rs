@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 5;
+const VERSION: i64 = 6;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -38,8 +38,24 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         let versions = statement
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [2] && versions != [3] && versions != [4] && versions != [VERSION] {
+        if versions != [1]
+            && versions != [2]
+            && versions != [3]
+            && versions != [4]
+            && versions != [5]
+            && versions != [VERSION]
+        {
             return Err(Error::RuntimeSchemaUnsupported);
+        }
+        if versions == [6] {
+            let owners: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_payload_owners')",
+                [],
+                |r| r.get(0),
+            )?;
+            if !owners {
+                return Err(Error::InvalidData);
+            }
         }
     } else {
         let orphan: bool = connection.query_row(
@@ -431,6 +447,7 @@ impl TrackingStore {
             id: image.id,
             name: name.into(),
             origin: received.entity.fields.origin,
+            sent: true,
             local_rev: 0,
             last_observed_digest: Some(payload.row_digest().map_err(|_| Error::InvalidData)?),
             local_payload: OpaqueBytes(bytes.clone()),

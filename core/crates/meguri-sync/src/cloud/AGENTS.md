@@ -12,7 +12,7 @@
 - Lock state before `with_tracking_access`. Store owners also gate opens, writes, checkpoints and drops. Call providers outside both guards. Scan reads/encoding run outside them; page merges recheck incarnation, account and full file identity. Retain the snapshot and matching WAL receipt until return.
 
 - V5 keeps image bodies in `cloud_runtime_payloads`. Headers retain only image structure for current, base and ACK state. `FlightPayload::Image` selects a historical body. Read bodies only for a selected flight or an explicit diagnostic request; validation and sending require complete images.
-- The shared V5 marker fences older readers; `cloud_runtime_payload_owners` records actual per-binding conversion. Install upgrades only non-salvage owners in this build scope, including later upgrades after another scope advanced V5.
+- Runtime V6 fences durable monotonic `sent` metadata; missing legacy `sent` decodes true. Payload images and per-binding `cloud_runtime_payload_owners` remain V5. Markerless V5 is historical; markerless V6 is invalid. Install upgrades only non-salvage owners in this build scope, including later upgrades after another scope advanced V5.
 - GC checks only blob IDs freed by this write in its binding. Header and own-flight intent refs can keep them live. Check that small list again when an intent ends. Digest-only own-save intents still need real writer and WAL proof.
 
 - Workflow V2 pairs `cloud_rekey_intents` with `cloud_apply_intents`. Persist and settle both together; the server inbox remains ready after the move.

@@ -1947,6 +1947,7 @@ impl Runtime {
                         received.entity.fields.key.clone(),
                         received.entity.fields.origin,
                         payload.clone(),
+                        true,
                         a,
                     )
                 });
@@ -1993,6 +1994,7 @@ impl Runtime {
                         received.entity.fields.key.clone(),
                         received.entity.fields.origin,
                         payload.clone(),
+                        true,
                         a,
                     )
                 });
@@ -2030,7 +2032,7 @@ impl Runtime {
             let old = self.with_media_recovery(a, |s| s.entity_facts(a.binding, &name))?;
             let mut e = old
                 .clone()
-                .unwrap_or_else(|| fresh_media_entity(&name, key, [0; 16], payload.clone(), a));
+                .unwrap_or_else(|| fresh_media_entity(&name, key, [0; 16], payload.clone(), false, a));
             if e.origin == [0; 16] {
                 e.origin = self.publication_random_id()?;
             }
@@ -2212,6 +2214,7 @@ fn fresh_media_entity(
     key: Vec<u8>,
     origin: [u8; 16],
     payload: codec::Payload,
+    sent: bool,
     a: &Authority,
 ) -> EntityFacts {
     EntityFacts {
@@ -2219,6 +2222,7 @@ fn fresh_media_entity(
         kind: codec::Kind::MediaName,
         key,
         origin,
+        sent,
         local_rev: 1,
         acked_rev: 0,
         tombstone_at: None,

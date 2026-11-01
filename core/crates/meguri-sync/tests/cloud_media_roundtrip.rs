@@ -842,15 +842,20 @@ fn durable_manual_bury_with_lost_capture_recovers_card_and_new_config_after_cras
 
 #[test]
 fn captured_review_undo_removes_never_sent_revlog_and_survives_crash() {
-    review_undo_survives_crash(false);
+    review_undo_survives_crash(false, false);
 }
 
 #[test]
 fn lost_review_undo_capture_recovers_absent_never_sent_revlog_after_crash() {
-    review_undo_survives_crash(true);
+    review_undo_survives_crash(true, false);
 }
 
-fn review_undo_survives_crash(lose_undo_capture: bool) {
+#[test]
+fn lost_review_undo_capture_keeps_absent_handed_revlog_guard_after_crash() {
+    review_undo_survives_crash(true, true);
+}
+
+fn review_undo_survives_crash(lose_undo_capture: bool, hand_history: bool) {
     let mut pair = published_review_pair(false);
     let before = pair.sender.driver().collection_payloads().unwrap();
     let original_files = pair.sender.driver().media_files().unwrap();
@@ -934,13 +939,13 @@ fn review_undo_survives_crash(lose_undo_capture: bool) {
     assert_eq!(capture.observed_seq, before_undo.seq);
     assert_eq!(capture.generation, before_undo.generation);
     assert!(capture.attempted && capture.persisted);
-    let tracking_before = pair.receiver.facts().unwrap().entities;
+    let mut tracking_before = pair.receiver.facts().unwrap().entities;
     assert_eq!(tracking_before[&card_name].payload, Payload::Card(card));
     let new_history = &tracking_before[&revlog_name];
     assert_eq!(new_history.payload, Payload::Revlog(revlog));
     assert!(new_history.mark.is_some() && new_history.local_rev > new_history.acked_rev);
-    // Existing facts have no independent `sent` member. Zero server revision,
-    // no handed flights and no Service handoff establish K17.1's never-sent case.
+    // Actual local creation, before any handoff, must persist independent history.
+    assert!(!new_history.sent);
     assert_eq!(new_history.server_erev, 0);
     assert!(new_history.in_flight.is_empty() && new_history.acked_payload.is_none());
     assert!(new_history.acked_system_fields.is_empty() && new_history.acked_envelope.0.is_empty());
@@ -951,13 +956,39 @@ fn review_undo_survives_crash(lose_undo_capture: bool) {
         assert!(hold.entity_names.contains(&card_name));
         assert!(hold.entity_names.contains(&revlog_name));
     }
-    let runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+    let mut runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
     assert_eq!(pair.service.inspect(&scope()).unwrap().unwrap().zones, server_before);
     assert_eq!(
         pair.service.request_log().unwrap().last().unwrap().request_id,
         request_before
     );
 
+    if hand_history {
+        pair.receiver.driver().review_end_and_drain(session).unwrap();
+        let landed = pair
+            .receiver
+            .driver()
+            .lose_named_save_reply(&mut pair.service, &scope(), &revlog_name)
+            .unwrap();
+        let received = codec::receive(
+            &binding.facts.record_key.0,
+            &revlog_name,
+            &landed.envelope,
+            codec::AssetInput::Absent,
+        )
+        .unwrap();
+        assert_eq!(received.payload.as_ref(), Some(&new_history.payload));
+        tracking_before = pair.receiver.facts().unwrap().entities;
+        let handed = &tracking_before[&revlog_name];
+        assert!(handed.sent && handed.server_erev == 0 && !handed.in_flight.is_empty());
+        assert!(
+            handed
+                .in_flight
+                .iter()
+                .any(|f| f.payload_digest == received.entity.payload_sha256)
+        );
+        runtime_before = pair.receiver.driver().stored_runtime_state().unwrap();
+    }
     if lose_undo_capture {
         pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
     }
@@ -1037,6 +1068,17 @@ fn review_undo_survives_crash(lose_undo_capture: bool) {
             if account == &scope().account
     )));
     let reopened = pair.receiver.driver().incoming_observation(binding.id).unwrap();
+    if hand_history {
+        let error = pair.receiver.driver().reconcile_binding().unwrap_err();
+        assert!(format!("{error:?}").contains("RuntimeIncompleteWholeBindingReconciliation"));
+        let retained = pair.receiver.facts().unwrap().entities;
+        assert!(retained[&revlog_name].sent);
+        assert!(retained[&revlog_name] == tracking_after[&revlog_name]);
+        assert!(pair.receiver.driver().scan_state().unwrap().scan_required);
+        assert_eq!(pair.receiver.driver().collection_payloads().unwrap(), expected);
+        pair.close();
+        return;
+    }
     pair.receiver
         .driver()
         .reconcile_binding()

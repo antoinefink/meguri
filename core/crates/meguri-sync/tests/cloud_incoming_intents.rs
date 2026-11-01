@@ -2675,6 +2675,7 @@ fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_e
     assert_eq!(historical.fields.origin, old_ack.origin);
     assert_eq!(body(landed), lost_row);
     let outstanding = sdk.entity_facts(&key).unwrap();
+    assert!(outstanding.sent, "actual engine handoff persists sent");
     assert_same_sdk_ack(&outstanding, &old_ack);
     let historical_flight = outstanding
         .in_flight
@@ -2693,6 +2694,7 @@ fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_e
         .unwrap();
     let current = sdk_note(&mut sdk, id);
     assert_ne!(current, lost_row);
+    assert!(sdk.entity_facts(&key).unwrap().sent);
     let retry = sdk.request_collection_batch_response(&mut pair.service).unwrap();
     let returned = conditional_server_record(&retry.response, &key);
     assert_eq!(&returned, landed);
@@ -2718,6 +2720,7 @@ fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_e
         landed.system_fields.bytes(),
         "ACK the actual older landed flight"
     );
+    assert!(ack.sent, "retiring the historical flight must retain sent");
     assert_eq!(ack.server_erev, historical.fields.erev);
     assert_eq!(ack.acked_payload_digest, historical.payload_sha256);
     assert_eq!(ack.acked_row_digest, lost_row.row_digest().unwrap());
@@ -2757,8 +2760,27 @@ fn sdk_own_landed_inline_conflict_acks_historical_flight_and_keeps_newer_local_e
     assert_eq!(body(&saved_current), current);
     sdk.deliver_sent_event(&resend.response).unwrap();
     sdk.return_sent_handler().unwrap();
-    assert!(sdk.entity_facts(&key).unwrap().mark.is_none());
+    let settled = sdk.entity_facts(&key).unwrap();
+    assert!(settled.sent && settled.mark.is_none() && settled.in_flight.is_empty());
+    sdk.advance_clock_ms(61_001).unwrap();
+    sdk.driver()
+        .edit_note_fields(id, &["post ACK Q", "post ACK A"])
+        .unwrap();
+    let edited = sdk.entity_facts(&key).unwrap();
+    assert!(edited.sent && edited.mark.is_some() && edited.in_flight.is_empty());
     sdk.close_clean().unwrap();
+    let mut reopened = meguri_testkit::cloud::adapter::SDKRig::open_existing_collection(
+        &pair.receiver_dir,
+        &scope(),
+        NOW + 130_000,
+        809,
+        Arc::new(NoReopenKeys),
+    )
+    .unwrap();
+    let durable = reopened.entity_facts(&key).unwrap();
+    assert!(durable.sent && durable.in_flight.is_empty());
+    assert!(durable == edited);
+    reopened.close_clean().unwrap();
     pair.sender.close_clean().unwrap();
 }
 

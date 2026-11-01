@@ -502,6 +502,15 @@ impl Runtime {
                 _ => return Err(RuntimeError::StaleIncarnation),
             };
             let view = row_payload::ReadView(&*snapshot);
+            let col = snapshot.col()?;
+            let scan_cursor = NoteScanCursor {
+                seq: snapshot.seq().0,
+                generation: snapshot.generation().0,
+                covered_through: receipt.through().0,
+                native_file: guard.file,
+                modified: col.modified.0,
+                schema_modified: col.schema_modified.0,
+            };
             let mut recovered = Vec::new();
             let mut counts = Vec::new();
             let mut retained_tombstones = Vec::new();
@@ -534,6 +543,21 @@ impl Runtime {
                                     .ok_or(Error::InvalidData)?)
                             })?;
                             e.validate()?;
+                            if kind == codec::Kind::Revlog && !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
+                                let removed = self.with_scan(&guard, collection, |s| {
+                                    Ok(s.store.as_mut().ok_or(Error::Database)?.remove_unsent_scan_revlog(
+                                        guard.binding,
+                                        &key,
+                                        guard.open,
+                                        &scan_cursor,
+                                    )?)
+                                })?;
+                                if !removed {
+                                    return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+                                }
+                                after = Some(key);
+                                continue;
+                            }
                             let deleted = e.tombstone_at.is_some()
                                 || (e.server_erev > 0
                                     && e.acked_tombstone()

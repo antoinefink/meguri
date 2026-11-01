@@ -272,7 +272,7 @@ impl TrackingStore {
                     super::tracking_payload::put_header(&tx, i.binding, &h)?;
                 }
                 (Some(mut h), None) if k.kind == entity_codec::Kind::Config => {
-                    if h.facts.server_erev == 0 && h.facts.in_flight.is_empty() {
+                    if !h.facts.sent && h.facts.server_erev == 0 && h.facts.in_flight.is_empty() {
                         super::workflow_store::remove_entity(&tx, i.binding, &h.facts)?;
                     } else {
                         h.rekey_config_removed(i.planned_at_ms, &mut state.change_counter, observed)?;
