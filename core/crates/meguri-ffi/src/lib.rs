@@ -35,6 +35,8 @@ pub mod media;
 pub mod mutations;
 pub mod notes;
 pub mod notetypes;
+#[cfg(feature = "test-hooks")]
+pub mod physical_review_rows;
 pub mod progress;
 pub mod render;
 pub mod review_session;

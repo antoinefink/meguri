@@ -415,7 +415,7 @@ extension ReviewCollectionStartupTests {
 nonisolated enum InitialCloudHold: Sendable { case pause, background }
 nonisolated enum InitialCloudInterruption: Sendable { case account, close }
 
-private nonisolated struct InitialCloudFixture: Sendable {
+nonisolated struct InitialCloudFixture: Sendable {
     struct Note: Sendable { let id: Int64; let fields: [String] }
     struct Record: Decodable, Sendable {
         let zone: String; let name: String; let recordType: String
@@ -847,7 +847,7 @@ private actor InitialCloudSDK: CloudKitEngine {
     func release() async { await released(instanceID) }
 }
 
-@MainActor private final class InitialCloudEvents: ChangeFanoutSink {
+@MainActor final class InitialCloudEvents: ChangeFanoutSink {
     private let stream: AsyncStream<CoreEvent>
     private let continuation: AsyncStream<CoreEvent>.Continuation
     private(set) var events: [CoreEvent] = []

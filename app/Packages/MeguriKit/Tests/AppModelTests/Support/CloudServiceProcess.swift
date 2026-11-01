@@ -53,6 +53,19 @@ nonisolated final class CloudServiceProcess: Sendable {
         return reply
     }
 
+    // Own/media submit guards need synchronous acceptance by the actual stdio
+    // queue. Preparation owns the exact frame and buffered original reply.
+    func prepare(_ frame: Data) throws -> CloudServicePreparedFrame {
+        guard frame.count <= 1_048_576 else { throw CloudServiceProcessFailure.fixtureInputLimit }
+        guard !frame.contains(10) else { throw CloudServiceProcessFailure.input }
+        return CloudServicePreparedFrame { [worker] finish in
+            worker.queue.async {
+                do { finish(.success(try worker.exchange(frame, afterWrite: nil))) }
+                catch { finish(.failure(error)) }
+            }
+        }
+    }
+
     func close() async -> CloudServiceProcessExit {
         await withCheckedContinuation { continuation in
             worker.queue.async { [worker] in continuation.resume(returning: worker.finish(terminate: false)) }
@@ -69,6 +82,54 @@ nonisolated final class CloudServiceProcess: Sendable {
         // Last-owner fallback also joins, off the caller's actor. Tests always
         // close explicitly so they can assert the original child's exit status.
         worker.queue.async { [worker] in _ = worker.finish(terminate: true) }
+    }
+}
+
+nonisolated final class CloudServicePreparedFrame: Sendable {
+    private struct State {
+        var queued = false
+        var cancelled = false
+        var result: Result<Data, any Error>?
+        var waiter: CheckedContinuation<Data, any Error>?
+    }
+    private let state = Mutex(State())
+    private let schedule: @Sendable (@escaping @Sendable (Result<Data, any Error>) -> Void) -> Void
+    init(schedule: @escaping @Sendable (@escaping @Sendable (Result<Data, any Error>) -> Void) -> Void) {
+        self.schedule = schedule
+    }
+    func enqueue() -> Bool {
+        state.withLock { value in
+            guard !value.queued, !value.cancelled else { return false }
+            value.queued = true
+            schedule { self.finish($0) } // DispatchQueue.async accepts this original exchange now.
+            return true
+        }
+    }
+    func cancel() { state.withLock { $0.cancelled = true } }
+    private func finish(_ result: Result<Data, any Error>) {
+        let waiter = state.withLock { value in
+            guard value.result == nil else { return Optional<CheckedContinuation<Data, any Error>>.none }
+            value.result = result
+            let waiter = value.waiter; value.waiter = nil
+            return waiter
+        }
+        waiter?.resume(with: result)
+    }
+    func reply() async throws -> Data {
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            let ready = state.withLock { value -> Result<Data, any Error>? in
+                guard value.queued else { return .failure(CloudServiceProcessFailure.input) }
+                if let result = value.result { return result }
+                guard value.waiter == nil else { return .failure(CloudServiceProcessFailure.input) }
+                value.waiter = continuation
+                return nil
+            }
+            if let ready { continuation.resume(with: ready) }
+        }
+        // Cancellation never truncates a frame or leaves its reply in stdout.
+        if state.withLock({ $0.cancelled }) { throw CancellationError() }
+        try Task.checkCancellation()
+        return data
     }
 }
 

@@ -734,3 +734,13 @@ pub fn test_cloud_reference_wait_record(erev: u64) -> Result<crate::sync::CloudR
         ..Default::default()
     })
 }
+
+/// Observe the actual answered card and history entry through one Query snapshot.
+#[uniffi::export]
+pub fn test_physical_review_rows(
+    card_id: i64,
+    revlog_id: i64,
+) -> Result<crate::physical_review_rows::PhysicalReviewRows, CoreError> {
+    callback::enter("test_physical_review_rows");
+    crate::physical_review_rows::observe(&runtime::host()?.collection()?, card_id, revlog_id)
+}

@@ -115,6 +115,34 @@ struct SyncCoordinatorTests {
         #expect(SyncCoordinator.changeCause(.cloudRekey) == .cloud)
     }
 
+    @Test func currentOwnerInputFailuresRemainReportedWithoutSuccessorProof() async {
+        let errors: [any Error] = [BridgeError.internal("synthetic-input-failure"),
+            BridgeError.cloudPolicy(.generationChanged), CloudOwnTransportFailure.unexpectedReply]
+        for error in errors {
+            let backend = SyncOwnerFake()
+            var attachments = 0
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+                attachments += 1
+                return backend
+            }, defaults: nil)
+            await sync.preparePlatform()
+            // No actual Core lifecycle can prove a successor to this fake
+            // generation, regardless of other tests' process-wide Host state.
+            await sync.completeOpenedHost(generation: .max)
+            await sync.prepareConnectionAuthority()
+            #expect(!sync.operationFailed)
+            backend.inputError = error
+            sync.receive(.refresh(.local))
+            await sync.waitForInputs()
+            await sync.waitForReplacement()
+            #expect(sync.operationFailed)
+            #expect(sync.generation == .max && sync.setupState == .attached)
+            #expect(attachments == 1 && backend.closeCount == 0)
+            #expect(await sync.cancelAndDrain())
+            #expect(sync.operationFailed)
+        }
+    }
+
     @Test func secondReplacementDuringFactoryDrainsStaleCandidateBeforeLatestOwnerAttaches() async {
         let original = SyncOwnerFake(), stale = SyncOwnerFake(), latest = SyncOwnerFake()
         let factory = SyncOwnerGate(), staleDrain = SyncOwnerGate()
@@ -214,6 +242,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var closed = false
     var closeCount = 0
     var persistedReads = 0
+    var inputError: (any Error)?
     var onClose: (@MainActor () async throws -> Void)?
     private var account: CheckedContinuation<Void, Never>?
     private var accountStarted: CheckedContinuation<Void, Never>?
@@ -221,6 +250,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var own: CloudOwnExecutor? { nil }
     func takeAccountReadRequest() async -> Bool { persistedReads += 1; return false }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+        if let inputError { throw inputError }
         switch event {
         case .foreground: events.append("foreground")
         case .background: events.append("background")

@@ -46,3 +46,7 @@ tempfile.workspace = true
 [[test]]
 name = "maintenance_ffi"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "physical_review_rows"
+required-features = ["test-hooks"]

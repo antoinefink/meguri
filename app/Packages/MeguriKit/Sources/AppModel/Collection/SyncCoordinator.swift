@@ -625,8 +625,28 @@ public final class SyncCoordinator {
             return
         }
         guard !replacing, let backend else { return }
-        do { consume(try await backend.input(event), generation: generation) }
-        catch { operationFailed = true; failureRevision &+= 1 }
+        let expected = generation, revision = hostRevision
+        do {
+            let output = try await backend.input(event)
+            guard expected == generation, revision == hostRevision, !replacing else { return }
+            consume(output, generation: expected)
+        } catch {
+            guard expected == generation, revision == hostRevision, !replacing else { return }
+            if case BridgeError.cloudPolicy(.generationChanged) = error {
+                // Activation can advance the retained Core Host before its
+                // replacement event reaches this ordered lane. Only Core's
+                // ready successor proves this original input was superseded.
+                let lifecycle: CollectionLifecycle?
+                do { lifecycle = try await CoreCollectionService().lifecycle() }
+                catch { lifecycle = nil } // Failed proof retains the input failure below.
+                guard expected == generation, revision == hostRevision, !replacing else { return }
+                if let lifecycle, case .ready(let next) = lifecycle, next > expected {
+                    enqueue(.replaced(next))
+                    return
+                }
+            }
+            operationFailed = true; failureRevision &+= 1
+        }
     }
     private func consume(_ output: CloudPolicyOutput, generation expected: UInt64) {
         let issued: [CloudPolicyCommand]
