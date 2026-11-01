@@ -151,7 +151,7 @@ body {
   overflow-wrap: break-word;
   overscroll-behavior: none;
   color: var(--fg);
-  background: var(--canvas);
+  background: white;
   background-attachment: fixed;
   background-position: top;
   background-repeat: no-repeat;

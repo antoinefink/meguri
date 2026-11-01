@@ -362,7 +362,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     "color", "background-color", "background-size", "background-repeat", "background-attachment", "overscroll-behavior-y", "overflow-wrap",
                 ])
                 #expect(body == [
-                    "color": "rgb(2, 2, 2)", "background-color": "rgb(245, 245, 245)", "background-size": "cover",
+                    "color": "rgb(2, 2, 2)", "background-color": "rgb(255, 255, 255)", "background-size": "cover",
                     "background-repeat": "no-repeat", "background-attachment": "fixed", "overscroll-behavior-y": "none",
                     "overflow-wrap": "break-word",
                 ])

@@ -190,7 +190,7 @@ This spec does not prescribe the selector. Any selector that matches exactly the
 | `html` | `font-family` | `system-ui, -apple-system, sans-serif` (C15 D1) |
 | `html` | `-webkit-text-size-adjust` | `100%` (R487) |
 | `body` | `color` | `var(--fg)` |
-| `body` | `background` (shorthand) | `var(--canvas)` |
+| `body` | `background` (shorthand) | `white` (Antoine, 2026-11-01: Meguri's default light page is white; `--canvas` keeps its value for templates, and a template's own background still wins) |
 | `body` | `background-size` | `cover` |
 | `body` | `background-repeat` | `no-repeat` |
 | `body` | `background-position` | `top` |
