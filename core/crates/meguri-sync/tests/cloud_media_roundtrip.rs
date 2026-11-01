@@ -99,26 +99,52 @@ fn offline_review_and_note_edit_survive_clean_reopen(identity: IdentityReads) {
     assert!(answered.seq > before_answer.seq);
     assert_eq!(answered.generation, before_answer.generation);
     assert_eq!(answered.native_file, native_file);
-    let capture = pair
-        .receiver
-        .driver()
-        .capture_proof(answered.seq, answered.generation)
-        .unwrap();
-    assert_eq!(capture.observed_seq, answered.seq);
-    assert_eq!(capture.generation, answered.generation);
-    assert!(capture.attempted && capture.persisted);
+    // Undo records EntryId from commit.seq (undo/mod.rs); Good returns that
+    // actual held answer entry. A later reader snapshot may have a higher seq.
+    assert!(answer.op_id > before_answer.seq && answer.op_id <= answered.seq);
+    let answer_entities = pair.receiver.facts().unwrap().entities;
+    let answer_counter = pair.receiver.driver().stored_runtime_state().unwrap().change_counter;
+    for (name, payload) in [
+        (&card_name, Payload::Card(card.clone())),
+        (&revlog_name, Payload::Revlog(revlog.clone())),
+    ] {
+        let entity = answer_entities
+            .get(name)
+            .expect("answer must persist actual Card and new Revlog entity facts before End or scan");
+        assert_eq!(entity.payload, payload);
+        let mark = entity
+            .mark
+            .as_ref()
+            .expect("answer must have a durable observer mark before End or scan");
+        assert_eq!(mark.source, meguri_sync::cloud::runtime::DirtySource::Observer);
+        assert_eq!(mark.payload_digest, payload.payload_digest().unwrap());
+        assert!(mark.change_seq > 0 && mark.change_seq <= answer_counter);
+        assert_eq!(entity.observed_seq, answer.op_id);
+        assert_eq!(entity.observed_generation, answered.generation);
+        assert!(entity.local_rev > entity.acked_rev);
+        assert!(entity.in_flight.is_empty());
+        if let Some(old) = baseline.get(name) {
+            assert!(entity.local_rev > old.local_rev);
+            assert_eq!(entity.acked_rev, old.acked_rev);
+            assert_eq!(entity.acked_payload, old.acked_payload);
+            assert_eq!(entity.acked_row_digest, old.acked_row_digest);
+            assert_eq!(entity.acked_payload_digest, old.acked_payload_digest);
+            assert_eq!(entity.acked_system_fields, old.acked_system_fields);
+            assert_eq!(entity.acked_envelope, old.acked_envelope);
+            assert_eq!(entity.server_erev, old.server_erev);
+        } else {
+            assert_eq!(name, &revlog_name);
+            assert_eq!(entity.server_erev, 0);
+            assert_eq!(entity.acked_rev, 0);
+            assert!(entity.acked_payload.is_none());
+            assert!(entity.acked_system_fields.is_empty() && entity.acked_envelope.0.is_empty());
+        }
+    }
     let held = pair.receiver.driver().read_cloud_review_hold(session).unwrap();
     assert!(held.op_ids.contains(&answer.op_id));
     assert!(held.entity_names.contains(&card_name) && held.entity_names.contains(&revlog_name));
     pair.receiver.driver().review_end_and_drain(session).unwrap();
-    assert!(
-        pair.receiver
-            .driver()
-            .read_cloud_review_hold(session)
-            .unwrap()
-            .op_ids
-            .is_empty()
-    );
+    assert_eq!(pair.receiver.driver().review_active_session().unwrap(), None);
 
     // This driver command calls the real undoable engine Note update API.
     let edit = pair

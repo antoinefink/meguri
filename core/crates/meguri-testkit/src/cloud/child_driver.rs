@@ -393,6 +393,7 @@ pub(crate) enum Input {
     Show(u64, i64),
     Good(u64, i64),
     End(u64),
+    ActiveReviewSession,
     Hold(u64),
     Card(i64),
     Revlog(i64),
@@ -1612,6 +1613,9 @@ impl ChildDriver {
     pub fn review_end_and_drain(&mut self, s: u64) -> Result<()> {
         self.call(Input::End(s))
     }
+    pub fn review_active_session(&mut self) -> Result<Option<u64>> {
+        self.call(Input::ActiveReviewSession)
+    }
     pub fn read_review_hold(&mut self, s: u64) -> Result<ReviewHold> {
         self.call(Input::Hold(s))
     }
@@ -2779,6 +2783,7 @@ impl Device {
                 self.runtime()?.poll_review(&self.runtime()?.instance()?)?;
                 value(())
             }
+            Input::ActiveReviewSession => value(self.host.review().active_session().map(|session| session.0)),
             Input::Hold(s) => {
                 let c = self.host.collection()?;
                 let hold = c.held_back_run(Some(SessionId(s)))?;
