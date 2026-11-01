@@ -517,6 +517,13 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
         }
         Event::ExchangeEnded { exchange, outcome } if s.exchange.as_ref().is_some_and(|e| e.id == *exchange) => {
             let e = s.exchange.take().expect("matched exchange");
+            let start_media = open
+                && s.settings.media
+                && e.guard == s.guard()
+                && matches!(
+                    outcome,
+                    ExchangeOutcome::Succeeded { .. } | ExchangeOutcome::Incomplete { .. }
+                );
             let record = ExchangeRecord {
                 exchange: e.id,
                 ended_ms: now,
@@ -532,6 +539,13 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
             };
             let mut actions: Vec<_> = a.into_iter().map(|kind| Action { guard: s.guard(), kind }).collect();
             actions.push(record_action);
+            // P12.3 step 7 follows accounting, independently of automatic scheduling.
+            if start_media {
+                actions.push(Action {
+                    guard: s.guard(),
+                    kind: ActionKind::ResumeMedia,
+                });
+            }
             finish_status(&mut s, &mut actions);
             return (s, actions);
         }

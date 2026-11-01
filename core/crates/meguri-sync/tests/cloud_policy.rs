@@ -310,6 +310,183 @@ fn background_and_quit_budgets_include_auto_off_exchange() {
 }
 
 #[test]
+fn manual_exchange_completion_records_before_resuming_media_with_auto_off() {
+    for automatic in [false, true] {
+        for outcome in [
+            ExchangeOutcome::Succeeded {
+                selected: 1,
+                held_back: 0,
+                newer_pending: 0,
+                incoming_waiting: 0,
+                media: MediaFacts::default(),
+            },
+            ExchangeOutcome::Incomplete {
+                outstanding: 1,
+                blocked: 0,
+            },
+        ] {
+            let mut state = ready();
+            state.settings.automatic = automatic;
+            state.settings.media = true;
+            // Step 7 repeats even while media runs and pending byte counts are unknown.
+            state.facts.summary.media.downloads_running = Some(1);
+            let (state, actions) = run(state, Event::SyncNowRequested(Source::Command));
+            assert!(!kinds(&actions).contains(&ActionKind::ResumeMedia));
+            let exchange = state.exchange.as_ref().unwrap().id;
+            let guard = state.guard();
+            let (state, actions) = run(
+                state,
+                Event::ExchangeEnded {
+                    exchange,
+                    outcome: outcome.clone(),
+                },
+            );
+            assert!(state.exchange.is_none());
+            assert_eq!(
+                &kinds(&actions)[..2],
+                &[
+                    ActionKind::RecordExchange(ExchangeRecord {
+                        exchange,
+                        ended_ms: 100_000,
+                        source: Source::Command,
+                        outcome,
+                    }),
+                    ActionKind::ResumeMedia,
+                ]
+            );
+            assert_eq!(actions[0].guard, guard);
+            assert_eq!(actions[1].guard, guard);
+            assert_eq!(actions.iter().filter(|a| a.kind == ActionKind::ResumeMedia).count(), 1);
+            // A duplicate completion cannot start another media run or record again.
+            let (_, actions) = run(
+                state,
+                Event::ExchangeEnded {
+                    exchange,
+                    outcome: ExchangeOutcome::Cancelled,
+                },
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a.kind, ActionKind::RecordExchange(_) | ActionKind::ResumeMedia))
+            );
+        }
+    }
+}
+
+#[test]
+fn exchange_completion_requires_media_preference_and_current_open_gate_to_resume_media() {
+    let rows: &[(&str, fn(&mut State))] = &[
+        ("media off", |s| s.settings.media = false),
+        ("disabled", |s| s.settings.enabled = false),
+        ("paused", |s| s.settings.paused = true),
+        ("no account", |s| s.account.status = AccountStatus::NoAccount),
+        ("setup needed", |s| s.account.status = AccountStatus::Configuration),
+        ("wrong account", |s| s.account.identity = Some(OpaqueBytes(vec![2]))),
+        ("unverified account", |s| {
+            s.facts.binding.as_mut().unwrap().verified = false
+        }),
+        ("unusable binding", |s| s.facts.binding.as_mut().unwrap().usable = false),
+        ("publication pending", |s| {
+            s.facts.binding.as_mut().unwrap().publish_step = Some(PublishStep::Bound)
+        }),
+        ("fenced", |s| s.facts.fence = Fence::DecisionRequired),
+        ("exclusive", |s| s.facts.lifecycle = Lifecycle::ExclusiveBusy),
+        ("closed", |s| s.facts.lifecycle = Lifecycle::NoCollection),
+        ("unknown collection", |s| s.facts.summary.collection_known = false),
+        ("scan required", |s| s.facts.summary.scan = Scan::Required),
+        ("scan running", |s| s.facts.summary.scan = Scan::Running),
+        ("unsettled intent", |s| s.facts.summary.unsettled_intents = 1),
+        ("crt mismatch", |s| s.facts.summary.crt_mismatch = true),
+        ("tracking stopped", |s| s.tracking_stop = Some(false)),
+    ];
+    for (reason, close_gate) in rows {
+        let mut state = ready();
+        state.settings.automatic = false;
+        state.settings.media = true;
+        let (mut state, _) = run(state, Event::SyncNowRequested(Source::Command));
+        let exchange = state.exchange.as_ref().unwrap().id;
+        close_gate(&mut state);
+        let (_, actions) = run(
+            state,
+            Event::ExchangeEnded {
+                exchange,
+                outcome: ExchangeOutcome::Incomplete {
+                    outstanding: 1,
+                    blocked: 0,
+                },
+            },
+        );
+        assert!(!kinds(&actions).contains(&ActionKind::ResumeMedia), "{reason}");
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a.kind, ActionKind::RecordExchange(_)))
+                .count(),
+            1,
+            "{reason}"
+        );
+    }
+}
+
+#[test]
+fn early_stop_exchange_outcomes_record_without_resuming_media() {
+    for outcome in [
+        ExchangeOutcome::Waiting {
+            class: OperationError::Offline,
+            retry_after_ms: None,
+        },
+        ExchangeOutcome::Failed {
+            class: OperationError::QuotaFull,
+        },
+        ExchangeOutcome::Cancelled,
+    ] {
+        let mut state = ready();
+        state.settings.automatic = false;
+        state.settings.media = true;
+        let (state, _) = run(state, Event::SyncNowRequested(Source::Command));
+        let exchange = state.exchange.as_ref().unwrap().id;
+        let (_, actions) = run(state, Event::ExchangeEnded { exchange, outcome });
+        assert!(matches!(actions[0].kind, ActionKind::RecordExchange(_)));
+        assert!(!kinds(&actions).contains(&ActionKind::ResumeMedia));
+    }
+}
+
+#[test]
+fn stale_exchange_guard_cannot_resume_media_after_gate_reopens() {
+    for component in 0..3 {
+        let mut state = ready();
+        state.settings.automatic = false;
+        state.settings.media = true;
+        let (mut state, _) = run(state, Event::SyncNowRequested(Source::Command));
+        let original_guard = &mut state.exchange.as_mut().unwrap().guard;
+        match component {
+            0 => original_guard.token += 1,
+            1 => original_guard.generation += 1,
+            _ => original_guard.binding = Some(BindingId([2; 16])),
+        }
+        let original_guard = original_guard.clone();
+        let exchange = state.exchange.as_ref().unwrap().id;
+        assert!(state.gate_open());
+        let (state, actions) = run(
+            state,
+            Event::ExchangeEnded {
+                exchange,
+                outcome: ExchangeOutcome::Incomplete {
+                    outstanding: 1,
+                    blocked: 0,
+                },
+            },
+        );
+        assert!(matches!(actions[0].kind, ActionKind::RecordExchange(_)));
+        assert_eq!(actions[0].guard.generation, original_guard.generation);
+        assert_eq!(actions[0].guard.binding, original_guard.binding);
+        assert_eq!(actions[0].guard.token, state.token);
+        assert!(!kinds(&actions).contains(&ActionKind::ResumeMedia));
+    }
+}
+
+#[test]
 fn repeated_tracking_failures_have_one_local_restart_per_foreground() {
     let mut state = ready();
     for i in 0..200 {

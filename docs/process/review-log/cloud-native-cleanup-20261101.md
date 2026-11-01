@@ -92,3 +92,52 @@ Diagnostic integration results:
   the existing original-media-command timeout. No rejection tag appeared.
   This different failure does not prove that the earlier quiet-point failure
   is repaired. Both remain open; no retry or budget change was added.
+
+Native review P1 media-trigger repair, fixer s-20261025T162405Z-9dc656e4:
+- Source base: ecb521a0f4c089b9e9b0dc894e79926ee3d8abf4. Original U113 start
+  1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a and batch base
+  1416a520542a8c5daa38a23bfe398da704c3d6c9 remain unchanged.
+- Source finding: the matching ExchangeEnded branch recorded the exchange and
+  returned without ResumeMedia. Native captured exchange work covers root and
+  collection, so manual auto-off completion had no production media trigger.
+  sync/policy P12.3 step 7 and P13.1 require that trigger after accounting.
+- Repair: emit the existing ResumeMedia after RecordExchange for Succeeded or
+  Incomplete, only with media enabled, the current gate open and the original
+  exchange guard still current. Automatic scheduling is not a condition.
+  Waiting, Failed and Cancelled do not reach step 7. The gate retains the
+  disabled, paused, account, lifecycle, binding, fence, scan, intent, crt and
+  tracking protections. Guard equality prevents an old completion from starting
+  media after ownership changed even if the gate has since reopened.
+- The accounting guard is unchanged. Collection results remain independent of
+  media completion. The existing native executor handles the new action.
+- Focused tests added to the existing cloud_policy module, not executed here:
+  manual_exchange_completion_records_before_resuming_media_with_auto_off
+  covers both completed outcomes, both automatic settings, existing media
+  activity, unknown byte evidence, record-before-resume ordering, guard identity
+  and duplicate completion suppression.
+  exchange_completion_requires_media_preference_and_current_open_gate_to_resume_media
+  covers preference off and closed-gate cases while preserving result recording.
+  early_stop_exchange_outcomes_record_without_resuming_media covers waiting,
+  failed and cancelled outcomes even with an otherwise open gate.
+  stale_exchange_guard_cannot_resume_media_after_gate_reopens covers every
+  original-guard component and the unchanged RecordExchange guard rule.
+- One bounded source consistency check covers this delta. No builds, tests,
+  Git, history or network operations ran in this filtered session. Root owns
+  focused MG verification and the full App test. No new passing result is claimed.
+  The 18 Card/9 Revlog cells, actual Saved/media, reopen/adoption assertions and
+  original full App timeout budget are untouched, as are the Harness, stream,
+  diagnostics, parallel media fixer files and earlier quiet-point behavior.
+  The original-media-command timeout and earlier quiet-point rejection remain
+  unresolved runtime evidence until root verifies the production path.
+
+Manual-media integration evidence:
+- Independent native_bounds_review: no P0-P2 source findings.
+- core-format/20261101T085604Z-10653: PASS.
+- core-test/20261101T085629Z-11183: 20/20 policy checks PASS.
+- similarity/20261101T085758Z-13355: PASS.
+- private/20261101T085608Z-10898: source files passed; this log passed after
+  rewrite in private/20261101T085644Z-12450.
+- swift-test/20261101T085632Z-11428: FAIL. The original quiet-point action
+  is rejected at execute.quiet-preconditions with pending=1; all its other
+  reported conditions hold. ResumeMedia is now emitted, but its later failure
+  follows the failed exchange. The full workflow remains unaccepted.
