@@ -15,6 +15,10 @@ import Testing
     private let started: AsyncStream<Bool>.Continuation
     private let exchanges: AsyncStream<Bool>
     private let exchanged: AsyncStream<Bool>.Continuation
+    private let assetRetries: AsyncStream<Bool>
+    private let assetRetried: AsyncStream<Bool>.Continuation
+    private(set) var assetRetryStarted = 0
+    private(set) var assetRetryCompleted = 0
     private(set) var closed = false
     private(set) var closeEntered = 0
     private(set) var closeReturned = 0
@@ -47,6 +51,7 @@ import Testing
         (mediaCompletions, mediaCompleted) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (starts, started) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         (exchanges, exchanged) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
+        (assetRetries, assetRetried) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
     }
     private enum DiagnosticStage: String {
         case input, inputThrow = "input.throw", executeOutputs = "execute.outputs", executeError = "execute.error"
@@ -119,11 +124,15 @@ import Testing
         }
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        if case .retryAssetEntries = command.action { assetRetryStarted += 1 }
         let result = await production.execute(command)
         for output in result.outputs { capture(output, stage: .executeOutputs) }
         switch command.action {
         case .startEngine: started.yield(result.error == nil && !result.deferred)
         case .runExchange: exchanged.yield(result.error == nil && !result.deferred)
+        case .retryAssetEntries:
+            assetRetryCompleted += 1
+            assetRetried.yield(result.error == nil && !result.deferred)
         default: break
         }
         if case .resumeMedia = command.action, !result.deferred {
@@ -142,6 +151,9 @@ import Testing
     }
     func waitForStart() async throws { try #require(try await serviceAppSignal(starts, stage: "SDK start")) }
     func waitForExchange() async throws { try #require(try await serviceAppSignal(exchanges, stage: "Sync Now exchange")) }
+    func waitForAssetRetry() async throws {
+        try #require(try await serviceAppSignal(assetRetries, stage: "automatic asset retry command completion"))
+    }
     func waitForInstalledMedia(name: String, bytes: Data, receiptsAfter: Int? = nil) async throws {
         let stream = mediaCompletions
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -186,7 +198,7 @@ import Testing
         }
         closeReturned += 1
         closed = true
-        started.finish(); exchanged.finish(); mediaCompleted.finish()
+        started.finish(); exchanged.finish(); mediaCompleted.finish(); assetRetried.finish()
     }
 }
 private nonisolated struct ServiceMediaCompletion: Sendable {

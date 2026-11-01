@@ -61,6 +61,14 @@ nonisolated struct ServiceSavedReceipt: Sendable {
     let zone: String
     let record: CloudRecord
 }
+// Original accepted Read receipts, never fabricated server records or ACKs.
+nonisolated struct ServiceAssetReadObservation: Sendable {
+    let original: ServiceOriginalReply
+    let zone: String
+    let record: CloudRecord
+    let failedDelivery: Bool
+    let retainedLease: Bool
+}
 extension ServiceSavedReceipt {
     nonisolated func blobBytes() throws -> Data? {
         guard zone == "meguri-media", record.recordType == "MGBlob" else { return nil }
@@ -113,6 +121,33 @@ actor ServiceWorkflowWire {
     let staging: CloudMediaStaging
     private let sourceDirectory: URL
     private(set) var receipts: [ServiceSavedReceipt] = []
+    private struct AssetDeliveryFault {
+        let zone: String
+        let name: String
+        let envelope: Data
+        let systemFields: Data?
+        let payload: Data
+        var missingFetchDelivery = true
+        var failedReadsRemaining = 5
+    }
+    private var assetDeliveryFault: AssetDeliveryFault?
+    private(set) var withheldPayloadDeliveries = 0
+    private(set) var assetReadObservations: [ServiceAssetReadObservation] = []
+
+    // Opt-in and confined to one real Service version/payload. Every other
+    // caller retains the existing transport behavior. Arm only after B closes.
+    func withholdAssetAndFailFiveReads(record: CloudRecord, payload: Data) throws {
+        guard assetDeliveryFault == nil, let zone = record.zone, !payload.isEmpty else {
+            throw ServiceWorkflowFailure.wire
+        }
+        assetDeliveryFault = .init(zone: zone, name: record.name, envelope: record.envelope,
+            systemFields: record.systemFields, payload: payload)
+    }
+    func restoreAssetDelivery() throws {
+        guard let fault = assetDeliveryFault, !fault.missingFetchDelivery,
+              fault.failedReadsRemaining == 0 else { throw ServiceWorkflowFailure.wire }
+        assetDeliveryFault = nil
+    }
     init(process: CloudServiceProcess, directory: URL) throws {
         self.process = process
         sourceDirectory = directory.appending(path: "callback-sources")
@@ -167,6 +202,12 @@ actor ServiceWorkflowWire {
     }
     func retainAsset(_ bytes: Data?, payload: Bool) throws -> CloudMediaStagedAsset? {
         guard let bytes else { return nil }
+        if payload, var fault = assetDeliveryFault, fault.missingFetchDelivery, bytes == fault.payload {
+            fault.missingFetchDelivery = false
+            assetDeliveryFault = fault
+            withheldPayloadDeliveries += 1
+            return nil
+        }
         let source = sourceDirectory.appending(path: UUID().uuidString)
         try bytes.write(to: source, options: .atomic)
         defer { try? FileManager.default.removeItem(at: source) }
@@ -240,7 +281,22 @@ actor ServiceWorkflowWire {
             return .page(records: records, deleted: deleted, next: more ? try serviceRequired(page["token"]).encoded() : nil)
         case .assetRead(let zone, _):
             let row = try ServiceRecordBytes(serviceRequired(try reply.ok()["Record"]))
+            // The original accepted Read has already drained through Service.
+            // Only its delivery fails; selection/accounting stay in Rust.
+            if var fault = assetDeliveryFault, zone == fault.zone, row.name == fault.name {
+                assetReadObservations.append(.init(original: reply, zone: zone,
+                    record: row.record(zone: zone), failedDelivery: true, retainedLease: false))
+                guard row.envelope == fault.envelope, row.systemFields == fault.systemFields,
+                      try row.asset("pa") == fault.payload, fault.failedReadsRemaining > 0 else {
+                    throw ServiceWorkflowFailure.wire
+                }
+                fault.failedReadsRemaining -= 1
+                assetDeliveryFault = fault
+                return .assetRead(.failed)
+            }
             let lease = try retainAsset(row.asset("pa"), payload: true)
+            assetReadObservations.append(.init(original: reply, zone: zone,
+                record: row.record(zone: zone), failedDelivery: false, retainedLease: lease != nil))
             return .assetRead(try .init(record: row.record(zone: zone, lease: lease), asset: lease))
         }
     }
