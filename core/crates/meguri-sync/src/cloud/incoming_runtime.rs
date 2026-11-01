@@ -1878,3 +1878,290 @@ fn preserve_deleted_note(
     meguri_model::faultpoint!("cloud.apply.after_copy").map_err(Error::from)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod same_object_tests {
+    use super::{codec as c, same_object};
+    use meguri_model::proto::{BlobMessage, deck, deck_config, notetype};
+
+    fn payloads() -> [c::Payload; 6] {
+        let mut normal = deck::NormalDeck::default();
+        normal.config_id = 1;
+        let mut template = notetype::TemplateConfig::default();
+        template.q_format = "{{Front}}".into();
+        template.a_format = "{{Back}}".into();
+        [
+            c::Payload::Note(c::Note {
+                id: 100,
+                guid: b"guid".to_vec(),
+                mid: 1,
+                flds: b"front\x1fback".to_vec(),
+                sfld: c::Stored::Text(b"front".to_vec()),
+                nt_struct_gen: 1,
+                ..Default::default()
+            }),
+            c::Payload::Card(c::Card {
+                id: 100,
+                nid: 1,
+                did: 1,
+                data: c::Stored::Text(b"{}".to_vec()),
+                nt_struct_gen: 1,
+                ..Default::default()
+            }),
+            c::Payload::Revlog(c::Revlog {
+                id: 100,
+                cid: 1,
+                ease: 3,
+                ..Default::default()
+            }),
+            c::Payload::Deck(c::Deck {
+                id: 100,
+                name: b"Deck".to_vec(),
+                common: deck::DeckCommon::default().encode(),
+                kind: deck::DeckKindMessage::new(deck::DeckKind::Normal(normal)).encode(),
+                ..Default::default()
+            }),
+            c::Payload::Preset(c::Preset {
+                id: 100,
+                name: b"Preset".to_vec(),
+                config: deck_config::DeckConfigMessage::default().encode(),
+                ..Default::default()
+            }),
+            c::Payload::Notetype(c::Notetype {
+                id: 100,
+                name: b"Type".to_vec(),
+                struct_gen: 1,
+                config: notetype::NotetypeConfig::default().encode(),
+                fields: ["Front", "Back"]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ord, name)| c::Field {
+                        ord: ord as i64,
+                        name: name.as_bytes().to_vec(),
+                        config: notetype::FieldConfig::default().encode(),
+                    })
+                    .collect(),
+                templates: ["Forward", "Reverse"]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ord, name)| c::Template {
+                        ord: ord as i64,
+                        name: name.as_bytes().to_vec(),
+                        config: template.encode(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            }),
+        ]
+    }
+
+    // Preconditions for the pure predicate: canonical wire and valid native rows/blobs.
+    fn canonical(payload: c::Payload) -> c::Payload {
+        use meguri_storage::Record;
+        let bytes = payload.encode().unwrap();
+        let decoded = c::Payload::decode(payload.kind(), &bytes).unwrap();
+        assert_eq!(decoded, payload);
+        assert_eq!(decoded.encode().unwrap(), bytes);
+        for (table, _, row) in crate::cloud::row_payload::payload_rows(&decoded).unwrap() {
+            use meguri_storage::Table;
+            match table {
+                Table::Notes => {
+                    meguri_model::note::Note::from_cells(&row).unwrap();
+                }
+                Table::Cards => {
+                    meguri_model::card::Card::from_cells(&row).unwrap();
+                }
+                Table::Revlog => {
+                    meguri_model::revlog::RevlogEntry::from_cells(&row).unwrap();
+                }
+                Table::Decks => {
+                    meguri_model::deck::Deck::from_cells(&row).unwrap();
+                }
+                Table::DeckConfig => {
+                    meguri_model::deck_config::DeckConfig::from_cells(&row).unwrap();
+                }
+                _ => {}
+            }
+        }
+        if let c::Payload::Notetype(nt) = &decoded {
+            std::str::from_utf8(&nt.name).unwrap();
+            notetype::NotetypeConfig::decode(&nt.config).unwrap();
+            for f in &nt.fields {
+                std::str::from_utf8(&f.name).unwrap();
+                notetype::FieldConfig::decode(&f.config).unwrap();
+            }
+            for t in &nt.templates {
+                std::str::from_utf8(&t.name).unwrap();
+                notetype::TemplateConfig::decode(&t.config).unwrap();
+            }
+        }
+        decoded
+    }
+
+    fn compare(local: &c::Payload, server: c::Payload, expected: bool) {
+        let local = canonical(local.clone());
+        let server = canonical(server);
+        assert_eq!(same_object(Some(&local), &server), expected);
+        assert_eq!(same_object(Some(&server), &local), expected);
+    }
+
+    #[test]
+    fn note_equal_guid_ignores_other_content_but_different_guid_is_a_collision() {
+        let local = canonical(payloads()[0].clone());
+        let c::Payload::Note(mut server) = local.clone() else {
+            unreachable!()
+        };
+        server.id += 1;
+        server.mid = 2;
+        server.modified = 50;
+        server.flds = b"different\x1fcontent".to_vec();
+        server.sfld = c::Stored::Integer(12);
+        server.tags = b" tag ".to_vec();
+        server.data = b"opaque".to_vec();
+        compare(&local, c::Payload::Note(server.clone()), true);
+        server.guid = b"other-guid".to_vec();
+        compare(&local, c::Payload::Note(server), false);
+    }
+
+    #[test]
+    fn card_requires_both_nid_and_ord_and_ignores_other_columns() {
+        let local = canonical(payloads()[1].clone());
+        let c::Payload::Card(mut server) = local.clone() else {
+            unreachable!()
+        };
+        server.id += 1;
+        server.did = 2;
+        server.modified = 50;
+        server.due = c::Stored::Text(b"opaque".to_vec());
+        server.ivl = 31;
+        server.reps = 17;
+        server.data = c::Stored::Blob(vec![0xff]);
+        server.last_review_id = 123;
+        compare(&local, c::Payload::Card(server.clone()), true);
+        let mut changed = server.clone();
+        changed.nid += 1;
+        compare(&local, c::Payload::Card(changed), false);
+        server.ord += 1;
+        compare(&local, c::Payload::Card(server), false);
+    }
+
+    #[test]
+    fn revlog_equal_cid_ignores_other_columns_but_different_cid_is_a_collision() {
+        let local = canonical(payloads()[2].clone());
+        let c::Payload::Revlog(mut server) = local.clone() else {
+            unreachable!()
+        };
+        server.id += 1;
+        server.ease = 2;
+        server.ivl = c::Stored::Real(-6.5);
+        server.last_ivl = c::Stored::Integer(31);
+        server.factor = 2500;
+        server.time = c::Stored::Integer(123);
+        server.review_type = 1;
+        compare(&local, c::Payload::Revlog(server.clone()), true);
+        server.cid += 1;
+        compare(&local, c::Payload::Revlog(server), false);
+    }
+
+    #[test]
+    fn deck_name_uses_pinned_unicase_with_valid_utf8() {
+        for (a, b, equal) in [
+            ("Deck", "dEcK", true),
+            ("Straße", "STRASSE", true),
+            ("\u{fb03}", "iff", true),
+            ("\u{fb03}", "ffi", false),
+            ("Deck", "Other", false),
+        ] {
+            let c::Payload::Deck(mut l) = payloads()[3].clone() else {
+                unreachable!()
+            };
+            l.name = a.as_bytes().to_vec();
+            let mut s = l.clone();
+            s.id += 1;
+            s.name = b.as_bytes().to_vec();
+            s.mtime_secs = 50;
+            let mut common = deck::DeckCommon::default();
+            common.study_collapsed = true;
+            s.common = common.encode();
+            compare(&c::Payload::Deck(l), c::Payload::Deck(s), equal);
+        }
+    }
+
+    #[test]
+    fn preset_name_is_exact_and_ignores_id_and_config() {
+        let local = canonical(payloads()[4].clone());
+        let c::Payload::Preset(mut server) = local.clone() else {
+            unreachable!()
+        };
+        server.id += 1;
+        server.mtime_secs = 50;
+        // Unknown protobuf fact is valid and differs from the local config.
+        server.config.extend_from_slice(&[0x98, 6, 7]);
+        compare(&local, c::Payload::Preset(server.clone()), true);
+        server.name = b"preset".to_vec();
+        compare(&local, c::Payload::Preset(server.clone()), false);
+        server.name = b"Other".to_vec();
+        compare(&local, c::Payload::Preset(server), false);
+    }
+
+    #[test]
+    fn notetype_requires_both_ordered_name_lists_and_ignores_config_and_text() {
+        let local = canonical(payloads()[5].clone());
+        let c::Payload::Notetype(mut server) = local.clone() else {
+            unreachable!()
+        };
+        server.id += 1;
+        server.name = b"Renamed type".to_vec();
+        server.mtime_secs = 50;
+        server.config.extend_from_slice(&[0x98, 6, 7]);
+        server.fields[0].config.extend_from_slice(&[0x98, 6, 9]);
+        let mut template = notetype::TemplateConfig::default();
+        template.q_format = "{{Back}} changed".into();
+        template.a_format = "{{Front}} changed".into();
+        server.templates[0].config = template.encode();
+        server.templates[0].mtime_secs = 51;
+        compare(&local, c::Payload::Notetype(server.clone()), true);
+        for fields in [true, false] {
+            let mut changed = server.clone();
+            if fields {
+                changed.fields[0].name = b"Other".to_vec();
+            } else {
+                changed.templates[0].name = b"Other".to_vec();
+            }
+            compare(&local, c::Payload::Notetype(changed), false);
+            let mut reordered = server.clone();
+            // Keep canonical ord order while reversing the ordered names.
+            if fields {
+                let first = reordered.fields[0].name.clone();
+                reordered.fields[0].name = reordered.fields[1].name.clone();
+                reordered.fields[1].name = first;
+            } else {
+                let first = reordered.templates[0].name.clone();
+                reordered.templates[0].name = reordered.templates[1].name.clone();
+                reordered.templates[1].name = first;
+            }
+            compare(&local, c::Payload::Notetype(reordered), false);
+            let mut shorter = server.clone();
+            if fields {
+                shorter.fields.pop();
+            } else {
+                shorter.templates.pop();
+            }
+            compare(&local, c::Payload::Notetype(shorter), false);
+        }
+    }
+
+    #[test]
+    fn missing_local_and_every_mismatched_kind_pair_are_false() {
+        let payloads = payloads().map(canonical);
+        for server in &payloads {
+            assert!(!same_object(None, server));
+            for local in &payloads {
+                if local.kind() != server.kind() {
+                    assert!(!same_object(Some(local), server));
+                }
+            }
+        }
+    }
+}

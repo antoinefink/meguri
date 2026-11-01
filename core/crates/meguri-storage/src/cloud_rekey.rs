@@ -41,6 +41,19 @@ impl WriteScope<'_> {
         if new > cap || self.row_image(table, &RowKey::Id(new))?.is_some() {
             return Err(StorageError::IdsExhausted { table: table.name() });
         }
+        // I5 allocates from the parent table, so a free parent id can still
+        // own foreign orphan parts. Refuse any ordinal before graph writes,
+        // without loading their bodies or adopting them into the moved type.
+        if table == Table::Notetypes
+            && self.conn().query_row(
+                "SELECT EXISTS(SELECT 1 FROM fields WHERE ntid=?1) \
+                 OR EXISTS(SELECT 1 FROM templates WHERE ntid=?1)",
+                [new],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            return Err(bad_reference());
+        }
         let mut row = self.row_image(table, &RowKey::Id(old))?.ok_or(StorageError::Mode {
             detail: "missing CloudKit identity".into(),
         })?;
@@ -61,19 +74,21 @@ impl WriteScope<'_> {
         row[0] = Cell::Integer(new);
         self.put_cells(table, row, false)?;
         if let Some(cid) = review_card {
-            let card = self.card(meguri_model::ids::CardId(cid))?.ok_or_else(bad_reference)?;
-            self.put_card_forced(&card)?;
+            // Only the projected last_review_id changed. Keep native scheduling
+            // cells and opaque data byte-exact while journalling its local stamp.
+            let card = self
+                .row_image(Table::Cards, &RowKey::Id(cid))?
+                .ok_or_else(bad_reference)?;
+            self.put_cells(Table::Cards, card, true)?;
         }
         if table == Table::Notetypes {
             for part in [Table::Fields, Table::Templates] {
                 let mut after = None;
                 loop {
                     check_cancel(&mut cancelled)?;
-                    let page = if part == Table::Fields {
-                        self.notetype_fields_page(NotetypeId(old), after)?
-                    } else {
-                        self.notetype_templates_page(NotetypeId(old), after)?
-                    };
+                    // The parent has moved on this writer. Public part pagers
+                    // intentionally return nothing for a missing parent.
+                    let page = rekey_parts_page(self, part, old, after)?;
                     if page.is_empty() {
                         break;
                     }
@@ -82,6 +97,11 @@ impl WriteScope<'_> {
                             return Err(bad_reference());
                         };
                         after = Some(ord);
+                        // I5 reserves only the parent table's id. An orphan at
+                        // the new part key must fail, never be upserted over.
+                        if self.row_image(part, &RowKey::Pair(new, ord))?.is_some() {
+                            return Err(bad_reference());
+                        }
                         self.remove_key(part, &RowKey::Pair(old, ord))?;
                         row[0] = Cell::Integer(new);
                         self.put_cells(part, row, false)?;
@@ -288,6 +308,26 @@ fn check_cancel(cancelled: &mut impl FnMut() -> bool) -> Result<(), StorageError
     } else {
         Ok(())
     }
+}
+
+// Private to an identity move inside its caller-owned writer transaction.
+// Read at most one raw part body even though the old parent is gone.
+fn rekey_parts_page(
+    scope: &WriteScope<'_>,
+    table: Table,
+    old: i64,
+    after: Option<i64>,
+) -> Result<Vec<crate::RowImage>, StorageError> {
+    crate::rows::select_where(
+        scope.conn(),
+        table,
+        &format!(
+            "ntid=?1 AND ord IN (SELECT ord FROM {} WHERE ntid=?1 \
+             AND (?2 IS NULL OR ord>?2) ORDER BY ord LIMIT 1)",
+            table.name(),
+        ),
+        &[Cell::Integer(old), after.map_or(Cell::Null, Cell::Integer)],
+    )
 }
 
 // Identity scans keep one body resident; journal images spill independently.
