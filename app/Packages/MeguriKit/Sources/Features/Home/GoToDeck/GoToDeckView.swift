@@ -218,7 +218,7 @@ public struct GoToDeckView: View {
         model = collection.navigation.featureState(GoToDeckModel.self) { GoToDeckModel(collection: collection) }
     }
     public var body: some View {
-        NavigationStack {
+        SheetContainer {
             VStack {
                 #if os(macOS)
                 TextField(text: $model.query, prompt: Text("Search Decks", bundle: .module)) {
@@ -289,7 +289,9 @@ public struct GoToDeckView: View {
             #else
             .onSubmit(of: .search) { model.submit(layout: layout) }
             #endif
+            #if !os(macOS)
             .navigationTitle(Text("Go to Deck", bundle: .module))
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { model.cancel() } label: { Text("Cancel", bundle: .module) }
@@ -306,9 +308,13 @@ public struct GoToDeckView: View {
             }
         }
         #if os(macOS)
-        .presentationSizing(.page)
+        .frame(width: 480, height: 420)
         #endif
         .interactiveDismissDisabled(model.busy || collection.goToDeckBusy)
+        #if os(macOS)
+        // Without a navigation stack, the sheet's identifier needs its own container.
+        .accessibilityElement(children: .contain)
+        #endif
         .accessibilityIdentifier("home.goToDeck.sheet")
         .onChange(of: layout, initial: true) { _, value in model.liveLayout = value }
         .task(id: collection.goToDeckPresentation) { await reload() }
@@ -328,5 +334,17 @@ public struct GoToDeckView: View {
         case .tooDeep: Text("This path has too many new parent decks. Choose a shorter path.", bundle: .module)
         case .saved: Text("The deck was saved. Couldn’t open it. Try Go again, or cancel.", bundle: .module)
         }
+    }
+}
+
+/// A Mac sheet has no navigation bar; its toolbar actions sit along the bottom.
+private struct SheetContainer<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        #if os(macOS)
+        content()
+        #else
+        NavigationStack { content() }
+        #endif
     }
 }

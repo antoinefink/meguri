@@ -134,7 +134,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         let home = element(app, "shell.root.sidebar.home")
         XCTAssertTrue(home.waitForExistence(timeout: 20))
         try click(home, app: app, bundle: bundle)
-        XCTAssertTrue(element(app, "home.deck.header").waitForExistence(timeout: 20),
+        XCTAssertTrue(element(app, "home.collection.screen").waitForExistence(timeout: 20),
             "Stage the generated local-review-1 fixture through tools/mg")
     }
 
@@ -198,7 +198,7 @@ final class MacHomeHierarchyTests: XCTestCase {
     }
 
     private func assertDecksRoot(_ app: XCUIApplication) {
-        XCTAssertTrue(element(app, "home.deck.header").exists)
+        XCTAssertTrue(element(app, "home.collection.screen").exists)
         XCTAssertFalse(app.buttons["home.deck.study"].exists, "Disclosure must not select a deck or start Study")
     }
 

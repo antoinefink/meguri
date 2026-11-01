@@ -10,4 +10,6 @@ nonisolated public enum ContentWidth {
     public static let readable: CGFloat = 640
     /// The widest a full-width primary action grows in regular width.
     public static let primaryAction: CGFloat = 320
+    /// One Mac answer button: four stay equal whatever their label (N3).
+    public static let answerButton: CGFloat = 96
 }

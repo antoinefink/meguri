@@ -18,6 +18,8 @@ nonisolated public enum ColorToken: String, CaseIterable, Sendable {
     case backgroundSecondary
     /// Raised content on a grouped background (rows, panels).
     case surface
+    /// The default card page in `base.css`: the review's toolbar and answer row share it.
+    case cardPage
 
     // Text
     case textPrimary
@@ -55,10 +57,13 @@ nonisolated public enum ColorToken: String, CaseIterable, Sendable {
     /// What the token is drawn on.
     public var role: ColorRole {
         switch self {
-        case .backgroundPrimary, .backgroundSecondary, .surface:
+        case .backgroundPrimary, .backgroundSecondary, .surface, .cardPage:
             .background
-        case .textPrimary, .textSecondary, .countNew, .countLearn, .countDue, .countZero,
-             .ratingAgain, .ratingGood, .statusAccent, .statusWarning, .statusError, .destructive:
+        // Drawn around the card in a review, too.
+        case .textPrimary, .ratingAgain, .statusWarning:
+            .foreground(.text, on: Self.contentBackgrounds + [.cardPage])
+        case .textSecondary, .countNew, .countLearn, .countDue, .countZero,
+             .ratingGood, .statusAccent, .statusError, .destructive:
             .foreground(.text, on: Self.contentBackgrounds)
         case .progressFill:
             .foreground(.nonText, on: Self.contentBackgrounds)

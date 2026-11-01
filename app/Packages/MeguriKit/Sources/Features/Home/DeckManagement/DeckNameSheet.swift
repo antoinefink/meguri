@@ -10,8 +10,71 @@ public struct DeckNameSheet: View {
     public init(model: DeckActionsModel) { self.model = model }
 
     public var body: some View {
-        NavigationStack {
+        #if os(macOS)
+        // A Mac sheet has no navigation bar: the form leads, buttons along the bottom.
+        content.frame(width: 420)
+        #else
+        NavigationStack { content }
+        #endif
+    }
+
+    private var content: some View {
+        Group {
             Form {
+                #if os(macOS)
+                Section { nameRows } header: { title.font(.headline).foregroundStyle(.primary) }
+                #else
+                nameRows
+                #endif
+            }
+            #if os(macOS)
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
+            #endif
+            #if !os(macOS)
+            .navigationTitle(title)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { model.cancel() } label: {
+                        if model.finalName != nil { Text("Close", bundle: .module) }
+                        else { Text("Cancel", bundle: .module) }
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.cancelling && model.busy)
+                    .accessibilityIdentifier("home.deckName.cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if model.finalName != nil {
+                        Button { model.cancel() } label: { Text("Done", bundle: .module) }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(model.busy)
+                            .accessibilityIdentifier("home.deckName.done")
+                    } else {
+                        Button { model.submit() } label: { Text(confirmation, bundle: .module) }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(!model.canSubmit)
+                            .accessibilityIdentifier("home.deckName.confirm")
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(model.busy)
+        #if os(macOS)
+        // Without a navigation stack, the sheet's identifier needs its own container.
+        .accessibilityElement(children: .contain)
+        #endif
+        .accessibilityIdentifier("home.deckName.sheet")
+        .task {
+            nameFocused = true
+            await Task.yield()
+            // Supported native selection keeps the subdeck prefix intact while typing.
+            selection = TextSelection(insertionPoint: model.name.endIndex)
+        }
+    }
+
+    @ViewBuilder private var nameRows: some View {
                 if let finalName = model.finalName {
                     LabeledContent { Text(verbatim: finalName) } label: {
                         Text("Saved name", bundle: .module)
@@ -50,44 +113,6 @@ public struct DeckNameSheet: View {
                     }
                     .accessibilityIdentifier("home.deckName.refresh")
                 }
-            }
-            #if os(macOS)
-            .padding()
-            #endif
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { model.cancel() } label: {
-                        if model.finalName != nil { Text("Close", bundle: .module) }
-                        else { Text("Cancel", bundle: .module) }
-                    }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(model.cancelling && model.busy)
-                    .accessibilityIdentifier("home.deckName.cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if model.finalName != nil {
-                        Button { model.cancel() } label: { Text("Done", bundle: .module) }
-                            .keyboardShortcut(.defaultAction)
-                            .disabled(model.busy)
-                            .accessibilityIdentifier("home.deckName.done")
-                    } else {
-                        Button { model.submit() } label: { Text(confirmation, bundle: .module) }
-                            .keyboardShortcut(.defaultAction)
-                            .disabled(!model.canSubmit)
-                            .accessibilityIdentifier("home.deckName.confirm")
-                    }
-                }
-            }
-        }
-        .interactiveDismissDisabled(model.busy)
-        .accessibilityIdentifier("home.deckName.sheet")
-        .task {
-            nameFocused = true
-            await Task.yield()
-            // Supported native selection keeps the subdeck prefix intact while typing.
-            selection = TextSelection(insertionPoint: model.name.endIndex)
-        }
     }
 
     private var title: Text {

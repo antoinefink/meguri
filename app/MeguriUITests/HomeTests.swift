@@ -152,7 +152,9 @@ final class HomeTests: XCTestCase {
         let home = nodes.filter { $0.identifier.hasPrefix("home.deck.") }
         let identifiers = home.map(\.identifier)
         XCTAssertEqual(Set(identifiers).count, identifiers.count, "Home identifiers must be unique across the actual native hierarchy")
+        #if !os(macOS) // The Mac root has no header: the sidebar's All Decks row names it.
         XCTAssertEqual(home.filter { $0.identifier == "home.deck.header" }.count, 1)
+        #endif
         // Inspect every native control under each disclosure, including the native
         // chevron. An identified outer element does not excuse an unnamed button.
         for branch in home where branch.identifier.hasPrefix("home.deck.disclosure.") {

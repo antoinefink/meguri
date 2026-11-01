@@ -135,57 +135,79 @@ struct ReviewLayout<Card: View>: View {
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
+        #if os(macOS)
+        macBody
+        #else
+        touchBody
+        #endif
+    }
+    #if os(macOS)
+    /// The window's own toolbar holds the corners (N3); the card sits between it and the answers.
+    private var macBody: some View {
         VStack(spacing: 0) {
-            #if os(macOS)
-            HStack(spacing: Spacing.small) {
+            cardRegion
+            ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
                 Button(action: close) {
                     Label { Text("Back to Decks", bundle: .module) } icon: { Image(systemName: "chevron.backward") }
-                        .frame(minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
+                        .labelStyle(.iconOnly)
                 }
+                .help(Text("Back to Decks", bundle: .module))
                 .accessibilityIdentifier("review.session.close")
-                Spacer(minLength: Spacing.small)
+            }
+            ToolbarSpacer()
+            ToolbarItemGroup(placement: .primaryAction) {
                 timer
                 status
             }
-            .buttonStyle(.borderless)
-            .padding(Spacing.small)
-            .fixedSize(horizontal: false, vertical: true)
-            #else
+        }
+        .toolbar(removing: .title)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .background(.token(.cardPage))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review.session.screen")
+        .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
+        .accessibilityAction(named: Text(verbatim: undoDescription)) { if canUndo { undo() } }
+        .accessibilityAction(named: Text("Redo Answer", bundle: .module)) { if canRedo { redo() } }
+    }
+    #else
+    private var touchBody: some View {
+        VStack(spacing: 0) {
             header
                 .buttonStyle(.borderless)
                 .controlSize(.regular)
                 .padding(.horizontal, Spacing.small)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
-            #endif
-            GeometryReader { middle in
-                VStack(spacing: 0) {
-                    if let notice {
-                        let noticeLimit = max(0, middle.size.height) * 0.4
-                        ScrollView(.vertical) {
-                            Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
-                                .padding(Spacing.small)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
-                                .accessibilityIdentifier("review.session.notice")
-                        }
-                        .scrollIndicators(.visible)
-                        .frame(height: min(noticeContentHeight ?? noticeLimit, noticeLimit))
-                    }
-                    card().frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            cardRegion
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
         }
         .background(.token(.backgroundPrimary))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.screen")
-        #if os(macOS)
-        .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
-        .accessibilityAction(named: Text(verbatim: undoDescription)) { if canUndo { undo() } }
-        .accessibilityAction(named: Text("Redo Answer", bundle: .module)) { if canRedo { redo() } }
-        #endif
+    }
+    #endif
+    /// The card under any notice; a long notice scrolls within its limit, so the answers stay in reach.
+    private var cardRegion: some View {
+        GeometryReader { middle in
+            VStack(spacing: 0) {
+                if let notice {
+                    let noticeLimit = max(0, middle.size.height) * 0.4
+                    ScrollView(.vertical) {
+                        Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
+                            .padding(Spacing.small)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
+                            .accessibilityIdentifier("review.session.notice")
+                    }
+                    .scrollIndicators(.visible)
+                    .frame(height: min(noticeContentHeight ?? noticeLimit, noticeLimit))
+                }
+                card().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
     }
     @ViewBuilder private var header: some View {
         if dynamicTypeSize.isAccessibilitySize {
@@ -292,6 +314,58 @@ public struct ReviewAnswerBar: View {
         self.phase = phase; self.states = states; self.enabled = enabled; self.reveal = reveal; self.rate = rate
     }
     public var body: some View {
+        #if os(macOS)
+        if phase == .question || phase == .answer || phase == .transition { macBar }
+        #else
+        touchBar
+        #endif
+    }
+    #if os(macOS)
+    private func macRating(_ value: ReviewRating, _ title: LocalizedStringKey, _ label: ReviewAnswerLabel?, again: Bool = false, prominent: Bool = false) -> some View {
+        let interval = label.map(Self.interval) ?? "—"
+        return Button { rate(value) } label: {
+            HStack(spacing: Spacing.xSmall) {
+                Text(title, bundle: .module)
+                    .foregroundStyle(again ? AnyShapeStyle(.token(.ratingAgain)) : AnyShapeStyle(.foreground))
+                Text(verbatim: interval)
+                    .monospacedDigit()
+                    .foregroundStyle(prominent ? AnyShapeStyle(.foreground) : AnyShapeStyle(.secondary))
+            }
+            .frame(width: ContentWidth.answerButton)
+        }
+        .frame(minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        .disabled(!enabled || phase != .answer)
+        .accessibilityLabel(Text("\(Text(title, bundle: .module)), \(interval)"))
+        .accessibilityIdentifier("review.session.rate.\(ReviewCoordinator.name(value))")
+    }
+    private var macRatings: some View {
+        HStack {
+            macRating(.again, "Again", states?.again.label, again: true).buttonStyle(.bordered)
+            macRating(.hard, "Hard", states?.hard.label).buttonStyle(.bordered)
+            macRating(.good, "Good", states?.good.label, prominent: true).buttonStyle(.borderedProminent)
+            macRating(.easy, "Easy", states?.easy.label).buttonStyle(.bordered)
+        }
+    }
+    private var macBar: some View {
+        ZStack {
+            // Reserved on both sides so reveal never moves the card (N3).
+            if phase == .answer { macRatings.allowsHitTesting(enabled) }
+            else { macRatings.hidden().allowsHitTesting(false).accessibilityHidden(true) }
+            if phase == .question {
+                Button(action: reveal) { Text("Show Answer", bundle: .module) }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    .disabled(!enabled)
+                    .accessibilityIdentifier("review.session.reveal")
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+    }
+    #endif
+    @ViewBuilder private var touchBar: some View {
         if phase == .question || phase == .answer || phase == .transition {
             ZStack {
                 // Kept in layout on both sides, including at large text sizes.

@@ -560,7 +560,7 @@ final class LocalReviewJourneyTests: XCTestCase {
     private func waitForDeckCounts(_ app: XCUIApplication, due: Int) -> Bool {
         #if os(macOS)
         var ready = true
-        for (name, label, value) in [("new", "New", 0), ("learning", "Learning", 0), ("due", "Due", due)] {
+        for (name, label, value) in [("new", "New", 0), ("learning", "Learning", 0), ("due", "To Review", due)] {
             let fields = app.staticTexts.matching(identifier: "home.deck.counts.\(name)")
             let predicate = NSPredicate(format: "exists == true AND label == %@ AND value == %@", label, String(value))
             let matched = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: fields.firstMatch)], timeout: 20) == .completed
