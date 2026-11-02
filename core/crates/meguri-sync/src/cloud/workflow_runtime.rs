@@ -1573,10 +1573,10 @@ impl Runtime {
                         )
                     })
                     .ok();
-                if s.actions.smoke_batches.len() == 256 {
-                    if let Some(key) = s.actions.smoke_batches.keys().next().cloned() {
-                        s.actions.smoke_batches.remove(&key);
-                    }
+                if s.actions.smoke_batches.len() == 256
+                    && let Some(key) = s.actions.smoke_batches.keys().next().cloned()
+                {
+                    s.actions.smoke_batches.remove(&key);
                 }
                 s.actions.smoke_batches.insert((instance.to_owned(), id), proof);
             }

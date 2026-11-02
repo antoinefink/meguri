@@ -33,3 +33,9 @@ member sending, remote adoption and rollback, generation status, recovery and
 cleanup integration, large-member performance evidence and the complete Q11
 scenarios. The codec and ledger tests do not substitute for those workflows.
 No P24 item, gate or milestone is closed by this foundation commit.
+
+Filtered37448, fixer4626 from67787244, corrects only the smoke runtime's
+clippy style finding, with an equivalent let-chain and unchanged cap/order.
+Independent review is clear. Core-lint39203 now passes formatting, layering
+and source policy but exposes a second existing clippy finding in the FFI
+smoke check. That check remains enabled and red, pending a filtered repair.
