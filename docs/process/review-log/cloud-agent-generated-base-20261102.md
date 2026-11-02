@@ -51,3 +51,13 @@ populate only its valid empty-fixtures case and keeps absent or malformed
 metadata intact. All existing cases, mutations and assertions remain unchanged.
 Independent review found no required finding. Production checks do not change.
 Focused execution after this test-builder correction remains pending.
+
+The next focused run compiled and executed 69 tests: 68 passed and one failed
+with two assertions. The remaining corruption test wrote byte value 3 over
+unit-3 media, whose original bytes already had that value. This did not change
+the input and correctly did not trigger validator refusal.
+Filtered follow-up cleanroom/20261102T122354Z-48603 flips one original bit
+at the same length for each of the three selected paths. Existing rejection
+and file-absence assertions are unchanged. Independent review found no issue.
+The validator and production behavior remain unchanged. Focused confirmation
+of this actual corruption witness is pending.

@@ -222,8 +222,10 @@ import Testing
         try refuses(mutate: { try $0.put("fixture-input.json", Data(" ".utf8) + Data(contentsOf: $0.url("fixture-input.json"))) })
         for path in ["collection.anki2", "manifest.json", "collection.media/unit-3.png"] {
             try refuses(mutate: { run in
-                let target = "fixture-evidence/parent/" + path, data = try Data(contentsOf: run.url(target))
-                try run.put(target, Data(repeating: 3, count: data.count))
+                let target = "fixture-evidence/parent/" + path
+                var data = try Data(contentsOf: run.url(target))
+                data[data.startIndex] ^= 1
+                try run.put(target, data)
             })
         }
     }
