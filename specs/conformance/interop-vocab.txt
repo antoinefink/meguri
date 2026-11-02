@@ -448,3 +448,10 @@ product-evidence/build-result.json
 product-evidence/agent-build.json
 product-evidence/deployment-result.json
 product-evidence/agent-deployment.json
+# Fixed device-local fixture input roles (cloudkit-agent.md J2.3).
+fixture-evidence/fixtures-result.json
+fixture-evidence/generation.json
+fixture-evidence/parent/
+fixture-evidence/preparation-result.json
+fixture-evidence/prepared/
+data/

@@ -278,7 +278,7 @@ that does not add a requirement to inspect each packet.
 
 `fixture_delivery` contains `base`, `fixtures_receipt`, `source`, `manifest`, `frozen_input` and, only when preparation is needed, `preparation_receipt`. Receipt references are `{job, run_id}` under J2.1's MG resolution rules. `fixtures_receipt` identifies the real passing MG `fixtures` run. `source` is its declared generated fixture artifact. `manifest` and `frozen_input` each contain `path`, `sha256` and `bytes`. The manifest path is relative to `source`. The frozen-input path is exactly `fixture-input.json` in this device's run directory, outside the fixture source. Resolve neither through links or a parent-path escape. They identify exact input files, not a later export from the app.
 
-`base` names the Q4.2 base the selected work requires. The initial producer may implement only `small`; it must not claim that other bases or a complete leg ran. `small` is not a currently defined literal MG fixture-job argument. The producer needs a real generated request and, if necessary, an actual MG preparation run that establishes Q4.2's base. Missing that producer or its checks is implementation work, never proof supplied by a `generated` marker.
+`base` names the Q4.2 base the selected work requires. The initial producer may implement only `small`; it must not claim that other bases or a complete leg ran. The MG `fixtures` target for that base is `cloud-small`, not a literal `small` argument. The producer needs the real generated request and, only when necessary, an actual preparation run. Missing that producer or its checks is implementation work, never proof supplied by a `generated` marker.
 
 For `small`, verify the actual output against Q4.2's marked deck roles, pinned
 clock, 20 single-card notes, five distinct media references and 60 history rows
@@ -291,9 +291,93 @@ The frozen JSON input contains exactly `protocol_version`, `run_id`, `device`, `
 
 Freeze those inputs before launch. The header binds the frozen input's bytes; its run/device/source fields bind it back without a circular header hash. The full maps and their generated media names are fixture input, never text to copy into logs or signed evidence. Public observations use fixed file labels, sizes and digests only. A returned collection or later app state cannot become the expected source.
 
-Deliver a copy to a directory owned by this run and device, using the existing frozen-input and `FixtureInstaller` patterns. Check owner, non-writable-by-other paths, stable no-follow regular files and the complete frozen file set before installation. The destination is a new collection directory owned by this run inside the development app container; it is never the app's default collection or the daily-driver collection. Require its absence before the initial install, and check copied bytes before opening `CoreHost`.
+#### Fixed device-local fixture roles
 
-Run the installer once, during the device's first `launch`, after durable `started` and before opening the local core. On relaunch, open the same collection and tracking owned by this run; do not install again. After a kill during that first install, check the actual state against the planned recovery. Do not delete the destination or copy the source again to obtain a passing result. The fixture's identity does not prove a study operation. Retain J4's actual operation evidence and all Q5 checks.
+`source` and `prepared_source` retain their original host artifact paths as
+receipt bindings only. The device never opens those paths or treats them as
+local destinations. Use these fixed roles below the device's run-owned directory inside the development app container:
+
+| Role | Fixed relative path |
+|---|---|
+| Original referenced MG fixtures receipt bytes | `fixture-evidence/fixtures-result.json` |
+| Selected original generation JSON bytes | `fixture-evidence/generation.json` |
+| Original generated source directory copy | `fixture-evidence/parent/` |
+| Optional referenced preparation receipt bytes | `fixture-evidence/preparation-result.json` |
+| Optional prepared source directory copy | `fixture-evidence/prepared/` |
+| Existing frozen input | `fixture-input.json` |
+| Collection installed once for this run | `data/` |
+
+The original manifest is read only at `fixture-evidence/parent/` plus the
+header's source-relative `manifest.path`. Match its exact bytes, size and digest
+to the header. Preserve it separately from any prepared manifest/database.
+For a direct `small` delivery with no preparation, require
+`prepared_source == source` and exact map equality `parent_files == files`.
+Use the parent copy directly; the optional receipt and prepared-copy roles must
+be absent. Do not create a link or duplicate prepared directory for this case.
+
+When preparation is present, its receipt must match `preparation_receipt` and
+declare the `prepared_source` artifact. Validate the actual preparation and
+readback evidence required by that producer, with the original parent binding.
+The parent copy still matches `parent_files`; the prepared copy matches `files`
+and supplies the installation bytes. Missing knowledge of the actual preparer
+or its proof fails `implementation_missing`; a passing envelope alone proves
+no preparation. This clarification does not define a new preparation format.
+
+Apply J2.1/Q13.1 exact reference, complete-envelope, clean-source, passing-result
+and artifact-declaration checks to the copied original receipts. A copied
+receipt remains its original bytes, not a new receipt with local paths. Require
+the header's exact fixtures/preparation job and run ids and source commit.
+`source` must be the declared original fixture artifact; the manifest and
+selected generation output must be declared by that same fixtures run.
+Interpret each fixed local role only after its original declaration matches.
+No JSON pathname selects another local file or substitutes another receipt.
+
+For `base: small`, select the actual `cloud-small` generation from the passing
+MG `fixtures` receipt. Exactly one `details.fixtures` entry must have target and
+kind `cloud-small`. Its `request`, `manifest` and `observed` values must equal
+those three values in the declared original generation JSON. Compare this
+projection, not the complete MG entry: its added `target` and `kind` metadata
+are not generation-output fields. Require the real request to satisfy Q4.2:
+seed, pinned clock, UTC/rollover, 20 notes/cards, five 10,240-byte media files,
+three Again answers per card on the three fixed days, and ordinal answer times.
+The generation manifest must match the persisted parent manifest. The observed
+counts and logical dump digest must match that manifest. A `generated` flag,
+requested counts or the word `cloud-small` alone supplies none of this proof.
+
+Check the complete parent/prepared file sets and their actual SHA-256/byte
+counts against the frozen maps, including the database, manifest, required WAL
+and every media file. Match the exact frozen-input bytes to the header's
+`frozen_input` reference, then its run/device/source/base fields to the header.
+Retain stable no-follow file/directory authority, ownership and no-write-by-other
+checks. Reject links, path escapes, duplicate/aliased paths, special files,
+missing entries, extra entries or changed bytes. These original receipt copies,
+maps and generated contents are fixture inputs, never public log text.
+
+After durable initial `launch/started`, validate these inputs, require an absent
+run-owned `data/`, install its selected copy once, and verify the installed
+bytes before opening Core. Never use the default/daily-driver collection.
+On relaunch, open the existing run-owned data and tracking without installation.
+Keep the original fixture and frozen maps unchanged. Modified live data and
+later exports cannot become those inputs. After a kill during the first install,
+check the actual state against the planned recovery. That recovery code must
+exist and pass its checks before continuation. Do not delete the destination or
+copy the source again to obtain a passing result. J4 operation proof and Q5
+checks remain required.
+
+#### Fixture-delivery refusals
+
+- Host-only or substituted source/prepared path used as a device pathname.
+- Wrong original receipt/job/run/source/outcome or undeclared artifact.
+- Missing, duplicate or mismatched selected cloud-small generation/request/readback.
+- Parent manifest replaced by a prepared manifest, or unchanged manifest claimed
+  as proof of a changed prepared database.
+- No-preparation delivery with unequal sources/maps or unexpected prepared roles.
+- Missing/extra/aliased/linked files, changed bytes, invalid authority or wrong
+  frozen-input/header binding.
+- Existing initial destination, default collection target, or Core opened before
+  durable start and verified installation.
+- Relaunch that repeats installation, adopts changed live data as fixture input,
+  or deletes a partial installation instead of proving recovery.
 
 ## J3. Ordered command delivery
 
