@@ -310,6 +310,58 @@ class AdmissionTests(unittest.TestCase):
         self.profile["Entitlements"]["com.apple.developer.aps-environment"] = "production"
         self.reject_product("profile-grants")
 
+    def test_profile_authorizes_documented_cloud_services_and_environments(self):
+        for services in ("*", ["CloudKit"], ["CloudKit", "CloudDocuments"], ["CloudDocuments", "CloudKit"]):
+            for environment in ("Development", ["Development"],
+                                ["Development", "Production"], ["Production", "Development"]):
+                with self.subTest(services=services, environment=environment):
+                    self.profile["Entitlements"]["com.apple.developer.icloud-services"] = services
+                    self.profile["Entitlements"]["com.apple.developer.icloud-container-environment"] = environment
+                    self.check_product()
+
+    def test_profile_rejects_undocumented_or_non_authorizing_cloud_grants(self):
+        for key, invalid in (
+            ("com.apple.developer.icloud-services", (
+                "CloudKit", "CloudDocuments", "**", "", [], ["CloudDocuments"], ["*"],
+                ["CloudKit", "*"], ["CloudKit", "CloudKit"], ["CloudKit", "Unknown"],
+                ["cloudkit"], ["CloudKit", True], ["CloudKit", ["CloudDocuments"]], True, {})),
+            ("com.apple.developer.icloud-container-environment", (
+                "Production", "development", "*", "", [], ["Production"], ["*"],
+                ["Development", "Development"], ["Development", "Unknown"], ["development"],
+                ["Development", False], ["Development", ["Production"]], False, {})),
+            ("com.apple.developer.icloud-container-identifiers", (
+                ["*"], ["iCloud.example.*"], ["iCloud.example.daily"], [CONTAINER, "iCloud.example.daily"])),
+            ("com.apple.developer.aps-environment", ("production", ["development"], "*")),
+        ):
+            original = self.profile["Entitlements"].pop(key)
+            with self.subTest(key=key, missing=True):
+                self.reject_product("profile-grants")
+            for value in invalid:
+                with self.subTest(key=key, value=value):
+                    self.profile["Entitlements"][key] = value
+                    self.reject_product("profile-grants")
+            self.profile["Entitlements"][key] = original
+
+    def test_authorizing_profile_does_not_relax_exact_signed_cloud_claims(self):
+        self.profile["Entitlements"]["com.apple.developer.icloud-services"] = "*"
+        self.profile["Entitlements"]["com.apple.developer.icloud-container-environment"] = ["Production", "Development"]
+        for key, invalid in (
+            ("com.apple.developer.icloud-services", (["CloudDocuments"], ["*"], "*", ["CloudKit", "CloudDocuments"])),
+            ("com.apple.developer.icloud-container-environment", ("Production", ["Development"], "development")),
+            ("com.apple.developer.icloud-container-identifiers", (["iCloud.example.daily"], ["*"], [CONTAINER, "iCloud.example.daily"])),
+            ("com.apple.developer.aps-environment", ("production", ["development"])),
+        ):
+            original = self.ent.pop(key)
+            with self.subTest(key=key, missing=True):
+                self.reject_product("product-cloud-grants")
+            for value in invalid:
+                with self.subTest(key=key, value=value):
+                    self.ent[key] = value
+                    self.reject_product("product-cloud-grants")
+            self.ent[key] = original
+        self.ent["com.apple.developer.ubiquity-container-identifiers"] = [CONTAINER]
+        self.reject_product("product-cloud-grants")
+
     def test_profile_wrong_device_expiry_and_signer(self):
         self.profile["ProvisionedDevices"] = ["other"]
         self.reject_product("profile-device")

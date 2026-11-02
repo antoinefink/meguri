@@ -293,6 +293,27 @@ def snapshot(boundary, product):
     return entries, pins
 
 
+def profile_authorizes(key, grant, claim):
+    """Only services/environment have authorization forms beyond exact equality."""
+    if key == "com.apple.developer.icloud-services":
+        if claim != ["CloudKit"]:
+            return False
+        if grant == "*":
+            return True
+        choices, required = ("CloudKit", "CloudDocuments"), "CloudKit"
+    elif key == "com.apple.developer.icloud-container-environment":
+        if claim != "Development":
+            return False
+        if grant == "Development":
+            return True
+        choices, required = ("Development", "Production"), "Development"
+    else:
+        return grant == claim
+    return (isinstance(grant, list) and bool(grant) and
+            all(isinstance(item, str) and item in choices for item in grant) and
+            len(grant) == len(set(grant)) and required in grant)
+
+
 def profile_check(profile, ent, cert, device, kind):
     team = ent.get("com.apple.developer.team-identifier")
     identity = ent.get("com.apple.application-identifier", ent.get("application-identifier"))
@@ -317,7 +338,7 @@ def profile_check(profile, ent, cert, device, kind):
          (kind == "mac" or grants.get("get-task-allow") is True), "profile-development")
     for key, value in ent.items():
         if protected(key):
-            need(grants.get(key) == value, "profile-grants")
+            need(profile_authorizes(key, grants.get(key), value), "profile-grants")
     for key in ("keychain-access-groups", "com.apple.security.application-groups"):
         need(all(isinstance(v, str) and any(isinstance(g, str) and fnmatch.fnmatchcase(v, g)
                                           for g in grants.get(key, []))

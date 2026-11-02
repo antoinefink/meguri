@@ -621,6 +621,99 @@ PY
   done
 }
 
+# Mutate only the generated profile; signed product claims stay independent.
+personal_profile_cloud_grant() {
+  python3 - "$FX_APP_PROFILE" "$1" "$2" <<'PY'
+import json, plistlib, sys
+with open(sys.argv[1], "rb") as stream:
+    profile = plistlib.load(stream)
+if sys.argv[3] == "missing":
+    profile["Entitlements"].pop(sys.argv[2], None)
+else:
+    profile["Entitlements"][sys.argv[2]] = json.loads(sys.argv[3])
+with open(sys.argv[1], "wb") as stream:
+    plistlib.dump(profile, stream)
+PY
+}
+
+@test "personal preview accepts documented profile service and environment authorizations" {
+  personal_facts
+  local services environment
+  for services in '"*"' '["CloudKit"]' '["CloudKit","CloudDocuments"]' '["CloudDocuments","CloudKit"]'; do
+    for environment in '"Development"' '["Development"]' '["Development","Production"]' '["Production","Development"]'; do
+      personal_profile_cloud_grant com.apple.developer.icloud-services "$services"
+      personal_profile_cloud_grant com.apple.developer.icloud-container-environment "$environment"
+      mg build-app --platform mac --personal-preview
+      [ "$status" -eq 0 ]
+      [ "$(field .status)" = pass ]
+      [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
+      not_called '^codesign .*--(sign|remove-signature)'
+    done
+  done
+}
+
+@test "personal preview rejects malformed or non authorizing profile cloud grants" {
+  local key value values
+  for key in com.apple.developer.icloud-services com.apple.developer.icloud-container-environment \
+    com.apple.developer.icloud-container-identifiers com.apple.developer.aps-environment; do
+    case "$key" in
+      com.apple.developer.icloud-services)
+        values=(missing '"CloudKit"' '"CloudDocuments"' '"**"' '""' '[]' '["CloudDocuments"]' '["*"]'
+          '["CloudKit","*"]' '["CloudKit","CloudKit"]' '["CloudKit","Unknown"]' '["cloudkit"]'
+          '["CloudKit",true]' '["CloudKit",["CloudDocuments"]]' true '{}') ;;
+      com.apple.developer.icloud-container-environment)
+        values=(missing '"Production"' '"development"' '"*"' '""' '[]' '["Production"]' '["*"]'
+          '["Development","Development"]' '["Development","Unknown"]' '["development"]'
+          '["Development",false]' '["Development",["Production"]]' false '{}') ;;
+      com.apple.developer.icloud-container-identifiers)
+        values=(missing '["*"]' '["iCloud.example.*"]' '["iCloud.example.daily"]'
+          '["iCloud.example.isolated","iCloud.example.daily"]') ;;
+      com.apple.developer.aps-environment)
+        values=(missing '"production"' '["development"]' '"*"') ;;
+    esac
+    for value in "${values[@]}"; do
+      personal_facts
+      personal_profile_cloud_grant "$key" "$value"
+      mg build-app --platform mac --personal-preview
+      [ "$status" -eq 1 ]
+      [ "$(field '.failures[0].id')" = personal-preview-product ]
+      [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+    done
+  done
+}
+
+@test "personal preview keeps exact signed cloud claims with authorizing profile grants" {
+  local mutation
+  for mutation in \
+    '.["com.apple.developer.icloud-services"] = ["CloudDocuments"]' \
+    '.["com.apple.developer.icloud-services"] = ["*"]' \
+    '.["com.apple.developer.icloud-services"] = "*"' \
+    '.["com.apple.developer.icloud-services"] = ["CloudKit","CloudDocuments"]' \
+    'del(.["com.apple.developer.icloud-services"])' \
+    '.["com.apple.developer.icloud-container-environment"] = "Production"' \
+    '.["com.apple.developer.icloud-container-environment"] = ["Development"]' \
+    '.["com.apple.developer.icloud-container-environment"] = "development"' \
+    'del(.["com.apple.developer.icloud-container-environment"])' \
+    '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]' \
+    '.["com.apple.developer.icloud-container-identifiers"] = ["*"]' \
+    '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated","iCloud.example.daily"]' \
+    'del(.["com.apple.developer.icloud-container-identifiers"])' \
+    '.["com.apple.developer.aps-environment"] = "production"' \
+    '.["com.apple.developer.aps-environment"] = ["development"]' \
+    'del(.["com.apple.developer.aps-environment"])' \
+    '.["com.apple.developer.ubiquity-container-identifiers"] = ["iCloud.example.isolated"]'; do
+    personal_facts
+    personal_profile_cloud_grant com.apple.developer.icloud-services '"*"'
+    personal_profile_cloud_grant com.apple.developer.icloud-container-environment '["Production","Development"]'
+    jq "$mutation" "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/signed-fault.json"
+    mv "$BATS_TEST_TMPDIR/signed-fault.json" "$FX_APP_ENT"
+    mg build-app --platform mac --personal-preview
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = personal-preview-product ]
+    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
+  done
+}
+
 @test "personal preview rejects fixture scope debug grants stale core invalid provisioning and source changes" {
   local fault mutation
   for fault in fixture debug keychain group stamp profile expired device grant platform certificates profile-debug signer source signature arch cloud-container cloud-environment cloud-push widget-cloud info-container info-environment info-string info-ready profile-cloud; do

@@ -265,6 +265,26 @@ mg_app_personal_profile() {
   fi
   security cms -D -i "$bundle/Contents/embedded.provisionprofile" | python3 -I -c '
 import datetime, fnmatch, json, plistlib, sys
+def profile_authorizes(key, grant, claim):
+    # Only services/environment have authorization forms beyond exact equality.
+    if key == "com.apple.developer.icloud-services":
+        if claim != ["CloudKit"]:
+            return False
+        if grant == "*":
+            return True
+        choices, required = ("CloudKit", "CloudDocuments"), "CloudKit"
+    elif key == "com.apple.developer.icloud-container-environment":
+        if claim != "Development":
+            return False
+        if grant == "Development":
+            return True
+        choices, required = ("Development", "Production"), "Development"
+    else:
+        return grant == claim
+    return (isinstance(grant, list) and bool(grant) and
+            all(isinstance(item, str) and item in choices for item in grant) and
+            len(grant) == len(set(grant)) and required in grant)
+
 try:
     profile = plistlib.loads(sys.stdin.buffer.read())
     signed = json.loads(sys.argv[1])
@@ -287,7 +307,7 @@ try:
     if "com.apple.developer.icloud-container-identifiers" in signed:
         assert grants.get("com.apple.developer.icloud-container-identifiers") == signed["com.apple.developer.icloud-container-identifiers"], "isolated cloud container grant"
         for key in ("com.apple.developer.icloud-services", "com.apple.developer.icloud-container-environment", "com.apple.developer.aps-environment"):
-            assert grants.get(key) == signed[key], "cloud/push grant"
+            assert profile_authorizes(key, grants.get(key), signed[key]), "cloud/push grant"
     for key in ("keychain-access-groups", "com.apple.security.application-groups"):
         for value in signed.get(key, []):
             assert any(fnmatch.fnmatchcase(value, grant) for grant in grants.get(key, [])), "signed group grant"
