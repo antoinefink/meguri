@@ -110,6 +110,22 @@ Verified on 2026-10-17 from the U8d worktree, with a watcher that polled `lsappi
 - `run --platform mac --route sample/screen --seconds 8` (20261017T174331Z-63793): passed, `UIElement` and never in front. During a second run (20261017T174422Z-66727) the hidden app's window (1180×780, layer 0, off screen) was in the window list, which is what `screencapture -l` captures.
 - `screenshot --platform mac` (20261017T174357Z-64876) was blocked before launching: the session that ran it has no Screen Recording permission (user step `screen-recording`).
 
+## Fold positions (2026-11-01)
+
+Only Device Hub's buttons change the iPhone Duo's fold position. `tools/vm/duo-fold.sh` reaches them from the headless VM over Tart's VNC server: `start`, then `tools/mg sim acquire foldable`, `hub <udid>`, `fold closed|half|open`, `shot <udid> <display> <file>` and `stop`. Display 1 is outer and 3 is inner. `tools/mg` jobs still work during the session.
+
+Keep one VNC connection. Reconnecting for each click crashed Tart twice (an assertion in `_VZVirtualMachineAccessor addAccessorObserver`) and took down what ran in the VM; `tools/vm/vnc-holder.py` holds the connection for the whole session. A restart shuts the simulators down and voids their leases.
+
+## Growing the disk (2026-11-01)
+
+The disk went from its first size to 300 GB. `tart set meguri-mac --disk-size 300` with the VM stopped grows the image, but the recovery partition after the system container blocks the container. macOS refuses to remove it from the host, and in the guest while SIP is on. Recovery mode can:
+
+1. Boot with `tart run meguri-mac --recovery --no-graphics --vnc-experimental`, and open Terminal over VNC.
+2. Check that `diskutil list` shows `disk0s3` as `Apple_APFS_Recovery`. Stop here if it does not.
+3. Run `diskutil eraseVolume free free disk0s3`, `yes | diskutil repairDisk disk0` and `diskutil apfs resizeContainer disk0s2 0`, then shut down.
+
+The partition stays removed. Recovery mode has not been booted since, so a second growth may need another route.
+
 ## Limits
 
 - The T9 drive must be connected and mounted. Without it, there is no VM.

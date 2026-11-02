@@ -374,7 +374,7 @@ Decided by Antoine in chat on 2026-11-01, from captures on the iPhone Duo simula
 
 ### N13.4 Not covered yet
 
-- U168's UI tests: nothing in `simctl` or XCUITest can change the fold position, so positions are checked by hand in Device Hub. `FoldAvoidingRow` has unit tests. Its code is in DesignSystem, not U168's `app/Meguri/Shell/FoldAwareLayout.swift`, because review and the shell both need it.
+- U168's UI tests: nothing in `simctl` or XCUITest can change the fold position, so positions are checked by hand in Device Hub (`tools/vm/duo-fold.sh`). `FoldAvoidingRow` has unit tests. Its code is in DesignSystem, not U168's `app/Meguri/Shell/FoldAwareLayout.swift`, because review and the shell both need it.
 - Foldable snapshot cells stay deferred until the snapshot job renders on the foldable lane's iOS 27.1 runtime.
 - A card's own background doesn't yet reach the toolbar and answer row (N11.1, R335).
 
