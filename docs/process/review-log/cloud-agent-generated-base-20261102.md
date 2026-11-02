@@ -1,6 +1,6 @@
 # Generated collection installation for the signed agent
 
-Status: reviewed WIP; compilation and focused execution are pending.
+Status: generated-base focused tests pass; app-hosted checks remain pending.
 Component source base: 60b8cc90. Integration start: 60e54c56.
 U113 start: 1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a.
 Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
@@ -61,3 +61,8 @@ at the same length for each of the three selected paths. Existing rejection
 and file-absence assertions are unchanged. Independent review found no issue.
 The validator and production behavior remain unchanged. Focused confirmation
 of this actual corruption witness is pending.
+
+Final focused swift-test/20261102T122816Z-51352 passed all 14 selected
+generated-base tests, no skips. The other three agent suites passed unchanged
+in the preceding 69-test run, which remains failed overall. No complete
+passing combined run or signed execution is inferred from these receipts.

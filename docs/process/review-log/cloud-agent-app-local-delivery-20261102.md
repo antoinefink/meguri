@@ -1,6 +1,6 @@
 # App-local CloudKit agent delivery
 
-Status: independently reviewed WIP; compilation and focused checks are pending.
+Status: focused Swift admission checks pass; tooling has one failing witness.
 Prepared base: a15dd42b34e624371be4efe4e96e151c3340669a.
 Integration start: 5ed45bb5c9c235f0f2df880229f752071a4298a1.
 U113 start: 1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a.
@@ -40,3 +40,13 @@ acceptance. The earlier failed full gate remains retained.
 Integration removes redundant helper comments and renames two internal names
 after the staged privacy check. Call sites and generated source use the same
 names; process behavior and scanner rules remain unchanged.
+
+Focused Swift check swift-test/20261102T123819Z-59895 passed 7/7, no skips,
+on clean ad4ce8fb. These are generated filesystem/OS-root-admission tests;
+actual app-hosted preflight and VM transport remain unrun.
+Tooling selftest/20261102T123819Z-59960 passed 13/14 wrappers. Its nested
+38-case handoff suite has one failure: cancel-during-launch expects an input
+communication event, although cancellation correctly stops and joins the new
+child before communication begins. The original child/group and final join
+are observed. This test expectation needs focused repair and verification;
+the original failed result remains retained.
