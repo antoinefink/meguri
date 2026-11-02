@@ -311,9 +311,10 @@ Examples, commands, journals and public artifacts contain no account IDs. Keep t
 The host reads `Meguri/CloudKitSignedPrivate/approved-accounts.json` below
 its own OS Application Support directory. This is the reusable input from
 completed, user-approved Q7.2 setup. It contains only already approved identity
-bytes; no fresh/current account read can approve, create or update it. The
-coordinator treats it as read-only. The device reads only its bound per-run
-input, never this host source.
+bytes. A current account read alone never approves, creates or updates it.
+Only the owner-triggered procedure in J2.2.1 can publish those values after
+explicit approval. The coordinator treats the source as read-only. The device
+reads only its bound per-run input, never this host source.
 
 Apply the private owner/mode, single-link, strict JSON and stable no-follow
 rules above to this source and its directories. Its object contains exactly
@@ -354,6 +355,129 @@ binding, SDK and batch guards and the same guarded factory for all account
 reads. Keep CKSyncEngine automatic scheduling. Do not claim to intercept each
 internal SDK network start. An app may also check its native transport boundary;
 that does not add a requirement to inspect each packet.
+
+### J2.2.1 Owner-triggered test-account setup
+
+`tools/mg cloudkit-account-setup --label acct1` prepares J2.2's reusable source.
+Use `acct2` only after `acct1` exists. The utility belongs to Q7.2's existing
+`cloudkit-test-accounts` user step. Only Antoine invokes it and enters approval.
+Agents may prepare its products and instructions; gates and catch-up never run
+it. A dry run performs no lookup or source write.
+
+Before invoking it, the owner confirms the intended dedicated test account in
+the VM's account settings. The utility must not guess the account from a label,
+an email address, a cached identity or the host's account.
+
+#### Product and execution boundary
+
+Use the dedicated VM Mac destination and retain its exclusive lease. Reuse the
+real Debug `CloudAgent` build, install and private transport machinery. Apply
+J2.1's actual signature, provisioning, source, loaded-product, container,
+environment and schema-readiness checks before account lookup. A compiled
+product, development suffix or caller Boolean is insufficient. Do not change
+readiness flags or infer that the owner configured the portal or schema.
+
+Select a separate setup-only app-hosted entry before normal App initialization.
+It opens no collection, Core host, coordinator or engine. It performs only native
+account-status and identity lookup, using V9.1's exact identity encoding. It
+performs no zone, record, asset, cleanup or other database operation.
+Release and AppStore builds exclude this entry and its startup selector.
+
+This producer needs no approved account input for its read-only candidate lookup.
+It cannot select the normal agent entry or bypass that entry's expected-account
+checks. A candidate is not approval, a Core identity proof or signed-lane evidence.
+
+#### One invocation and one deliberate approval
+
+The invocation accepts only the fixed label `acct1` or `acct2`; it accepts no
+identity, container, environment, account hash or candidate path from the caller.
+The verified development product supplies the container and environment.
+
+1. Admit and pin the existing approved source, if present, under J2.2's rules.
+   Refuse a malformed source or another container or environment. `acct2` needs
+   an existing approved `acct1`.
+2. Obtain a fresh available native identity in the verified app. Retain that
+   candidate privately, with its original product, VM and container authority.
+3. Require input from Antoine's interactive terminal: `approve acct1` or
+   `approve acct2`. If this changes an existing approved value, require
+   `replace acct1` or `replace acct2`. Display only the requested label,
+   verified development container and whether the stored entry changes.
+4. After that entry, perform another fresh read in the same original app process.
+   Require available status and exactly the candidate's identity bytes. Recheck
+   the original product, VM, container, lease and source authority.
+5. Publish only the approved label's value. Preserve every other approved
+   label unchanged. Require distinct identity bytes for `acct1` and `acct2`.
+
+Piped input, a default, an environment variable, a flag or process ownership
+cannot supply approval. The terminal is an interaction channel, not independent
+proof that an arbitrary caller is Antoine. R1969's owner-only rule still applies.
+Refusal, EOF, cancellation or a failed recheck before publication leaves the source
+unchanged. Do not repeat a lookup or approval automatically after failure.
+
+Candidate bytes stay in process or private owned file descriptors during this
+invocation. Use the existing private transport; keep no candidate for later
+invocations and no public capture artifact. If the original app or transport ends before
+publication, discard the candidate. A new invocation needs new capture and approval.
+
+#### Private publication and outcome
+
+Publish at the host's OS-derived Application Support location already fixed in
+J2.2. Canonicalize the trusted OS root, then admit every private component through
+stable no-follow authority. Keep directories `0700` and regular files `0600`,
+current-user-owned and single-link. Reject substituted or linked components.
+
+The source retains exactly `protocol_version`, `container`, `environment` and
+`accounts`, version `1`, with J2.2's exact byte arrays and strict JSON rules.
+Write a new private temporary file in the same admitted directory. Flush it,
+recheck the original source and directory bindings, then publish atomically.
+Flush the directory and verify the published bytes through retained authority.
+Never modify an existing source through a stale file descriptor or silently
+replace a source that changed during approval.
+
+Once atomic publication starts, cancellation or a lost completion can leave its
+outcome uncertain. Report failure and retain private evidence; do not report an
+unchanged source, undo the approved write or repeat it automatically. A later
+owner invocation must inspect the actual source before deciding another update.
+
+The utility exports only fixed outcomes and account labels. It exports no
+identity, identity digest, candidate bytes, private path or raw SDK error.
+Keep private transport and SDK diagnostics out of logs, XCTest attachments,
+result exports and copied run artifacts. Cancel and join original work before
+releasing the lease or finalizing the outcome.
+
+| Observed outcome | Required result |
+|---|---|
+| Explicit approval, same fresh identity, valid atomic publication | Setup-only success; the source contains the approved value |
+| Owner declines, EOF or cancellation before publication | No approval and no source change; join original work |
+| Missing required owner setup or no signed-in test account | Existing `awaiting_user` disposition and matching Q7.2 step |
+| Wrong product, changed authority or identity, or invalid source before publication | Failure; preserve the source and fixed refusal category |
+| Publication completion is uncertain | Failure with private evidence; no automatic rollback or repeat |
+| Missing producer or required verification code | `implementation_missing`, never a user-setup or passing result |
+
+Machine unavailability follows the existing MG placement rules. An attempted
+operation that fails is not an unrun queued check. An account read error supplies
+no identity proof and cannot approve a value or trigger an automatic repeat.
+
+Setup success fills no `cloud-signed`, leg, soak or release scope cell. It does
+not complete all Q7.2 account steps: required device sign-ins and later `acct2`
+setup still need their own evidence. A changed approved value needs a new
+normal run and header; existing run input never changes.
+
+#### Focused producer checks
+
+Generated tests must cover valid creation, idempotent approval, explicit
+replacement, and preservation of the other label. They must also cover:
+
+- No lookup before failed product or container admission; no Core or database work.
+- No publication from a candidate alone, piped/default approval, refusal or EOF.
+- Changed identity, product, VM, lease or source during approval; no source change.
+- Invalid private modes, owners, links, duplicate keys, byte types and equal accounts.
+- Interrupted publication, original-process loss and cancellation; original joins.
+- Private markers in SDK failures and candidate data; no public value or digest.
+- Setup-only success never produces normal-agent or signed-lane acceptance evidence.
+
+Generated checks prove the producer's refusals and ownership only. Actual owner
+setup still requires the verified signed product and the deliberate approval above.
 
 ### J2.3 Initial generated data
 
