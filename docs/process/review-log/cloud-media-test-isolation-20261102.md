@@ -28,3 +28,8 @@ in order in the same serialized suite. Privacy50815 passes.
 The original full gate and VM Unit result are retained as failures. This repair
 removes the source-proven conflict; it does not establish that the entire VM
 suite is repaired or accept a unit or milestone.
+
+Focused similarity/20261102T163303Z-53396 passes the changed test file.
+Static-checks/20261102T163304Z-53636 passes3/3 for commits afterf6e0b036.
+The earlier full-batch similarity6474 and static5554 receipts cover the
+unchanged prior inputs; the original batch base is unchanged.

@@ -48,3 +48,24 @@ After this gate, U114's two approved extra repairs and the generated-base and
 VM-input components were saved as separately reviewed WIP. Native verification
 remains required. No Unit trailer was added. R554 retains only its previously
 approved interim scope; its enabled limits and final closure requirement stay.
+
+## Later focused diagnostics
+
+The NoCollection preview case passes standalone Swift923 and paired Swift47937.
+Source review then found a separate media fixture's real global close could
+overlap the serialized collection-host suite. The unchanged case now joins that
+suite; focused Swift51142 passes10/10. See cloud-media-test-isolation-20261102.
+The original failure's cause and full VM Unit closure remain unproven.
+
+Read-only audio review finds the retained R554 gap101.204ms against100ms,
+with94.807ms before the native completion delegate. The existing5ms scheduling
+margin does not explain the historical216ms pre-delegate delays. No timing
+limit, stop barrier or native scheduling change is justified by this evidence.
+The full Kit run remains incomplete; the audio failure does not prove its stall.
+
+Read-only Mac UI review identifies VM xcodebuild PID20674 around11:10:36UTC,
+exit139. No completed crash summary, exception signal or faulting image is
+retained. Other suites passed in the same run. The signal and the reason for
+the crash remain unknown. The next diagnostic must match
+only that process and time in the VM and export fixed signal/library fields,
+without raw reports, stacks or screenshots. No broad diagnostic copy occurred.
