@@ -161,10 +161,101 @@ fn assert_deleted_by_sdk(pair: &mut Pair, blob: &str, after: u64) {
     assert!(!pair.sender.sdk_pending().contains_key(blob));
 }
 
-fn exercise_delayed_ack(tombstone: bool) {
+#[derive(Clone, Copy)]
+enum DelayedAck {
+    ReplacementUploadQuota,
+    RemovalQuota,
+    ReplacementNameQuota,
+}
+
+fn assert_pending_replacement(pair: &mut Pair, initial: &EntityFacts) {
+    let pending = name(&pair.sender);
+    assert_eq!(pending.name, initial.name);
+    assert_eq!(pending.key, b"photo.jpg");
+    assert!(pending.local_rev > pending.acked_rev);
+    assert_eq!(pending.acked_rev, initial.acked_rev);
+    assert_eq!(pending.acked_payload, initial.acked_payload);
+    assert_eq!(pending.acked_envelope, initial.acked_envelope);
+    assert_eq!(pending.acked_system_fields, initial.acked_system_fields);
+    assert!(!ack_tombstone(&pending));
+    assert!(matches!(&pending.payload, Payload::MediaName(value)
+        if value.sha256 == codec::sha256(REMOTE)));
+    let state = pair.service.inspect(&scope()).unwrap().unwrap();
+    let server = &state.zones[&pair.sender.collection_zone().unwrap()].records[&initial.name];
+    assert_eq!(server.system_fields.bytes(), initial.acked_system_fields);
+    assert!(matches!(server.fields.get("e"), Some(Field::EncryptedBytes(envelope))
+        if envelope == &initial.acked_envelope.0));
+}
+
+fn exercise_delayed_ack(mode: DelayedAck) {
+    let tombstone = matches!(mode, DelayedAck::RemovalQuota);
+    let name_quota = matches!(mode, DelayedAck::ReplacementNameQuota);
     let mut pair = Pair::published();
-    let (blob, original, initial) = publish_old(&mut pair);
-    quota(&mut pair, Some(0));
+    let (blob, original, mut initial) = publish_old(&mut pair);
+    let replacement_upload = if name_quota {
+        // Warm the replacement through the same exact name, then ACK its old
+        // content again. No second name can protect either blob in this case.
+        let after = cursor(&pair);
+        pair.sender.driver().put_media("photo.jpg", REMOTE).unwrap();
+        sync(&mut pair);
+        let uploaded = name(&pair.sender);
+        assert_eq!(uploaded.local_rev, uploaded.acked_rev);
+        assert!(matches!(&uploaded.acked_payload, Some(Payload::MediaName(value))
+            if value.sha256 == codec::sha256(REMOTE)));
+        let tracked = pair.sender.driver().media_blobs().unwrap();
+        let replacement = tracked
+            .iter()
+            .find(|(_, value)| value.metadata.sha256 == codec::sha256(REMOTE))
+            .map(|(name, value)| {
+                assert_eq!(value.upload, Transfer::Complete);
+                assert_eq!(value.server, ServerState::Present);
+                name.clone()
+            })
+            .expect("ordinary SDK upload of the replacement blob");
+        assert_ne!(replacement, blob);
+        let upload = pair
+            .service
+            .request_log()
+            .unwrap()
+            .into_iter()
+            .find(|request| {
+                request.request_id > after
+                    && request.kind == RequestKind::Modify
+                    && request.zone.as_deref() == Some(MEDIA)
+                    && request
+                        .records
+                        .iter()
+                        .any(|record| record.name == replacement && record.outcome == LogOutcome::Success)
+            })
+            .expect("original successful replacement blob save");
+        assert!(upload.caller.instance.is_some() && upload.caller.own_operation.is_none());
+        let sent = pair.sender.sent_request(upload.request_id).unwrap();
+        assert!(sent.backend_batch_id > 0);
+        assert!(sent.mutations.iter().any(|mutation| matches!(mutation,
+            Mutation::Save { record, .. } if record.name == replacement
+                && record.record_type == "MGBlob"
+                && matches!(record.fields.get("a"), Some(Field::Asset(asset)) if !asset.bytes().is_empty()))));
+        assert!(pair.service.outcomes().unwrap().iter().any(|outcome| {
+            outcome.request_id == upload.request_id
+                && matches!(&outcome.result, Ok(ReplyReference::Modified(items))
+                    if items.iter().any(|item| item.name == replacement && matches!(&item.result, Ok(Some(_)))))
+        }));
+        pair.sender.driver().put_media("photo.jpg", LOCAL).unwrap();
+        sync(&mut pair);
+        let restored = name(&pair.sender);
+        assert_eq!(restored.name, initial.name);
+        assert_eq!(restored.key, initial.key);
+        assert_eq!(restored.local_rev, restored.acked_rev);
+        assert!(restored.mark.is_none() && !ack_tombstone(&restored));
+        assert_eq!(restored.acked_payload, initial.acked_payload);
+        assert!(!restored.acked_system_fields.is_empty());
+        initial = restored;
+        assert_retained(&mut pair, &blob, &original);
+        Some((replacement, upload.request_id))
+    } else {
+        quota(&mut pair, Some(0));
+        None
+    };
     if tombstone {
         pair.sender.driver().trash_media("photo.jpg").unwrap();
         assert!(pair.sender.driver().media_files().unwrap().is_empty());
@@ -173,6 +264,35 @@ fn exercise_delayed_ack(tombstone: bool) {
         assert_eq!(pair.sender.driver().media_files().unwrap()["photo.jpg"], REMOTE);
     }
     let failed_after = cursor(&pair);
+    let held_mutations = if let Some((replacement, uploaded_at)) = &replacement_upload {
+        pair.sender.hold(Point::BeforeCollectionSave).unwrap();
+        sync(&mut pair);
+        assert!(pair.sender.is_held(Point::BeforeCollectionSave));
+        let held = pair.sender.held_request().unwrap();
+        let Operation::Modify { zone, atomic, changes } = held.operation else {
+            panic!("original held collection save required")
+        };
+        assert_eq!(zone, pair.sender.collection_zone().unwrap());
+        assert!(!atomic);
+        assert!(held.caller.instance.is_some() && held.caller.own_operation.is_none());
+        assert!(pair.service.request_log().unwrap().iter().all(|request| {
+            request.request_id <= failed_after
+                || request.kind != RequestKind::Modify
+                || !request.records.iter().any(|record| record.name == initial.name)
+        }));
+        let state = pair.service.inspect(&scope()).unwrap().unwrap();
+        let available = &state.zones[MEDIA].records[replacement];
+        assert_eq!(available.record_type, "MGBlob");
+        assert!(matches!(available.fields.get("a"), Some(Field::Asset(asset)) if !asset.bytes().is_empty()));
+        assert!(*uploaded_at <= failed_after);
+        assert_pending_replacement(&mut pair, &initial);
+        assert_retained(&mut pair, &blob, &original);
+        quota(&mut pair, Some(0));
+        pair.sender.release(Point::BeforeCollectionSave).unwrap();
+        Some(changes)
+    } else {
+        None
+    };
     sync(&mut pair);
     let failed = pair
         .service
@@ -182,7 +302,7 @@ fn exercise_delayed_ack(tombstone: bool) {
         .find(|r| {
             r.request_id > failed_after
                 && r.records.iter().any(|record| {
-                    (if tombstone {
+                    (if tombstone || name_quota {
                         record.name == initial.name
                     } else {
                         record.name == initial.name || r.zone.as_deref() == Some(MEDIA) && record.name != blob
@@ -190,6 +310,51 @@ fn exercise_delayed_ack(tombstone: bool) {
                 })
         })
         .expect("the retiring tombstone save or replacement upload/save must really fail quota");
+    if let Some(held) = held_mutations {
+        assert_eq!(failed.kind, RequestKind::Modify);
+        assert_eq!(failed.zone, Some(pair.sender.collection_zone().unwrap()));
+        assert!(failed.caller.instance.is_some() && failed.caller.own_operation.is_none());
+        let attempted = pair.sender.sent_request(failed.request_id).unwrap();
+        assert!(attempted.backend_batch_id > 0);
+        assert_eq!(attempted.mutations, held, "resume the original held SDK batch");
+        assert_eq!(failed.caller.instance.as_deref(), Some(attempted.instance.as_str()));
+        assert!(matches!(&attempted.response.result, Ok(Reply::Modified(items))
+            if items.iter().any(|item| item.name == initial.name
+                && matches!(&item.result, Err(error) if error.code == ErrorCode::QuotaExceeded))));
+        assert!(pair.service.outcomes().unwrap().iter().any(|outcome| {
+            outcome.request_id == failed.request_id
+                && matches!(&outcome.result, Ok(ReplyReference::Modified(items))
+                    if items.iter().any(|item| item.name == initial.name
+                        && matches!(&item.result, Err(error) if error.code == ErrorCode::QuotaExceeded)))
+        }));
+        let key = pair.sender.facts().unwrap().current.unwrap().facts.record_key;
+        let (record, system_fields) = attempted
+            .mutations
+            .iter()
+            .find_map(|mutation| match mutation {
+                Mutation::Save { record, if_unchanged } if record.name == initial.name => Some((record, if_unchanged)),
+                _ => None,
+            })
+            .expect("specific original changed MediaName save");
+        assert_eq!(record.record_type, "MGEntity");
+        assert_eq!(system_fields.as_ref().unwrap().bytes(), initial.acked_system_fields);
+        let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+            panic!("original encrypted MediaName envelope required")
+        };
+        let received = codec::receive(&key.0, &record.name, envelope, codec::AssetInput::Absent).unwrap();
+        assert_eq!(received.entity.fields.kind, codec::Kind::MediaName);
+        assert_eq!(received.entity.fields.key, initial.key);
+        assert_eq!(received.entity.fields.key, b"photo.jpg");
+        assert!(!received.entity.fields.tombstone);
+        let Some(Payload::MediaName(changed)) = received.payload else {
+            panic!("original changed MediaName payload required")
+        };
+        assert_eq!(changed.name, b"photo.jpg");
+        assert_eq!(changed.sha256, codec::sha256(REMOTE));
+        assert_eq!(changed.size, REMOTE.len() as u64);
+        assert!(replacement_upload.as_ref().unwrap().1 < failed.request_id);
+        assert_pending_replacement(&mut pair, &initial);
+    }
     if tombstone {
         let attempted = pair.sender.sent_request(failed.request_id).unwrap();
         assert!(attempted.backend_batch_id > 0);
@@ -222,12 +387,18 @@ fn exercise_delayed_ack(tombstone: bool) {
         assert_eq!(pending.acked_envelope, initial.acked_envelope);
         assert!(pending.local_rev > pending.acked_rev);
         assert!(!ack_tombstone(&pending));
+        if name_quota {
+            assert_pending_replacement(&mut pair, &initial);
+        }
         assert_retained(&mut pair, &blob, &original);
     }
     reopen(&mut pair, 31 * DAY);
     assert_retained(&mut pair, &blob, &original);
     sync(&mut pair);
     assert_eq!(name(&pair.sender).acked_envelope, initial.acked_envelope);
+    if name_quota {
+        assert_pending_replacement(&mut pair, &initial);
+    }
     quota(&mut pair, None);
     sync(&mut pair);
     let retired = name(&pair.sender);
@@ -263,12 +434,17 @@ fn exercise_delayed_ack(tombstone: bool) {
 
 #[test]
 fn replacement_ack_controls_retention() {
-    exercise_delayed_ack(false);
+    exercise_delayed_ack(DelayedAck::ReplacementUploadQuota);
 }
 
 #[test]
 fn removal_ack_controls_retention() {
-    exercise_delayed_ack(true);
+    exercise_delayed_ack(DelayedAck::RemovalQuota);
+}
+
+#[test]
+fn changed_name_quota_after_blob_upload_controls_retention() {
+    exercise_delayed_ack(DelayedAck::ReplacementNameQuota);
 }
 
 #[test]

@@ -16,3 +16,12 @@ This component adds explicit changed-name quota evidence after making the
 new blob available. Keep existing upload-quota coverage, daily drains, cutoff
 and fetched-name assertions. No production defect or live SDK result is claimed.
 Filtered authoring starts from clean39eddde7, original20312, one test file only.
+
+Filtered70296 completes with one new case. The same name is first uploaded
+with the new content, then ACKed with its old content again. The test holds
+the original changed-name request, verifies the blob and its successful save,
+sets quota, and checks that exact request's error and unchanged prior ACK.
+Independent review finds no P0–P2 issues and confirms existing coverage stays.
+Core72126 passes19/19 without skips; privacy72394 and similarity72732 pass.
+Lint73054 reports repeated enum suffixes. A naming-only fix remains required;
+no lint suppression or test-limit change is permitted.
