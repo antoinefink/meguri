@@ -21,6 +21,7 @@ import Foundation
     private var owner: ReviewCollection?
     private let originalHeaderBytes: Data
     private var admission: AgentAccountAdmission?
+    private var runningProduct: AgentRunningProductBinding?
     private var mutation: NoteMutation?
     private var expectedFields: [String] = []
     private var backend: CloudKitSmokeBackend?
@@ -42,16 +43,26 @@ import Foundation
         }
     }
     private func checkActualProduct(_ header: AgentHeader) throws {
+        if let runningProduct {
+            try runningProduct.requireHeader(header, originalHeaderBytes: originalHeaderBytes)
+        } else {
+            let receipts = try AgentProductReceiptBinding(admittedRunDirectory: directory,
+                                                         originalHeaderBytes: originalHeaderBytes)
+            let observed = try AgentRunningProductBinding.inspectActual(receipts: receipts)
+            try observed.requireHeader(header, originalHeaderBytes: originalHeaderBytes)
+            runningProduct = observed
+        }
         guard let configuration = CloudBuildConfiguration.fromBundle else {
             userSteps = ["cloudkit-dev-container"]; throw AgentFailure.implementationMissing
         }
         guard case .development = configuration.environment, configuration.container == header.container,
               header.environment == "development" else { throw AgentFailure.wrongContainer }
         if !configuration.schemaConfigured { userSteps.append("cloudkit-dev-container") }
-        guard Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String == header.app_build else { throw AgentFailure.binding }
-        // Bundle checks cannot verify signing, grants, executable or receipts.
-        // Keep this live failure until an independent actual verifier exists.
-        throw AgentFailure.implementationMissing
+        // Live client observations do not admit the independent signature,
+        // full delivery, launch-plan or live VM/lease/install counterpart. The
+        // four copied roles cannot supply it; preserve implementationMissing.
+        guard let runningProduct else { throw AgentFailure.implementationMissing }
+        try runningProduct.requireIndependentCounterpart()
     }
     private static func applicationSupportRoot() throws -> URL {
         // The OS chooses the current app-container root, never run.json/env.
@@ -66,13 +77,15 @@ import Foundation
         } catch { throw AgentFailure.storage }
     }
     private func retainedAdmission() throws -> AgentAccountAdmission {
+        guard let runningProduct else { throw AgentFailure.implementationMissing }
+        try runningProduct.revalidate()
         guard let admission else { throw AgentFailure.implementationMissing }
         try admission.revalidate()
         return admission
     }
     private func resolveAccount(container: CKContainer) async throws -> CloudResolvedAccount {
         let admission = try retainedAdmission()
-        return try await admission.resolveAccount {
+        let resolved = try await admission.resolveAccount {
             switch try await container.accountStatus() {
             case .available:
                 let record = try await container.userRecordID()
@@ -84,6 +97,8 @@ import Foundation
             @unknown default: return .init(status: .couldNotDetermine, identity: nil)
             }
         }
+        _ = try retainedAdmission()
+        return resolved
     }
     private func freshAccount() async throws {
         _ = try retainedAdmission()
