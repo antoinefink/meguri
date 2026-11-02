@@ -106,6 +106,25 @@ impl PartialEq<c::Payload> for FlightPayload {
         self.canonical() == Some(payload)
     }
 }
+/// Test-only in-process facts. Names and session ids never enter a journal.
+#[cfg(feature = "test-hooks")]
+#[derive(Clone)]
+pub struct SmokeReviewImage {
+    pub name: String,
+    pub envelope_digest: Option<[u8; 32]>,
+    pub digest: Option<[u8; 32]>,
+    pub image_seq: u64,
+    pub held: bool,
+}
+#[cfg(feature = "test-hooks")]
+#[derive(Clone)]
+pub struct SmokeBatchProof {
+    pub generation: u64,
+    pub seq: u64,
+    pub session: Option<u64>,
+    pub saves: u64,
+    pub images: Vec<SmokeReviewImage>,
+}
 /// Compact test evidence; historical images never cross this API.
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -427,6 +446,8 @@ pub(crate) struct MediaBatch {
 }
 #[derive(Default)]
 pub(crate) struct Actions {
+    #[cfg(feature = "test-hooks")]
+    pub smoke_batches: BTreeMap<(String, u64), Option<SmokeBatchProof>>,
     pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
     pub payload_uploads: BTreeMap<(String, u64), Vec<tempfile::TempPath>>,
     pub payload_upload_sends: BTreeMap<(String, u64), BTreeSet<u64>>,

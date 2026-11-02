@@ -36,6 +36,7 @@ pub struct CloudSmokeEntity {
     pub revision: u64,
     pub acked_revision: u64,
     pub digest: Vec<u8>,
+    pub acked_envelope_digest: Vec<u8>,
     pub acknowledged: bool,
     pub media_bytes: Option<u64>,
     pub media_sha256: Option<Vec<u8>>,
@@ -45,6 +46,7 @@ pub struct CloudSmokeEntity {
 #[derive(Clone, uniffi::Record)]
 pub struct CloudSmokeObservation {
     pub generation: u64,
+    pub active_session: Option<u64>,
     pub seq: u64,
     pub publication_id: Option<Vec<u8>>,
     pub publication_reason: Option<u8>,
@@ -58,6 +60,45 @@ pub struct CloudSmokeObservation {
     pub entities: Vec<CloudSmokeEntity>,
     pub card_note_id: Option<i64>,
     pub last_review_id: Option<i64>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct SmokeReviewImage {
+    pub name: String,
+    pub envelope_digest: Option<Vec<u8>>,
+    pub digest: Option<Vec<u8>>,
+    pub image_seq: u64,
+    pub held: bool,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct SmokeBatchProof {
+    pub generation: u64,
+    pub seq: u64,
+    pub session: Option<u64>,
+    pub saves: u64,
+    pub images: Vec<SmokeReviewImage>,
+}
+impl From<meguri_sync::cloud::workflow::SmokeBatchProof> for SmokeBatchProof {
+    fn from(v: meguri_sync::cloud::workflow::SmokeBatchProof) -> Self {
+        Self { generation: v.generation, seq: v.seq, session: v.session, saves: v.saves,
+            images: v.images.into_iter().map(|i| SmokeReviewImage {
+                name: i.name, envelope_digest: i.envelope_digest.map(|d| d.to_vec()), digest: i.digest.map(|d| d.to_vec()), image_seq: i.image_seq, held: i.held,
+            }).collect() }
+    }
+}
+pub fn batch(sdk: String, id: u64) -> Result<SmokeBatchProof, CoreError> {
+    let host = runtime::host()?;
+    let core = host.cloud_runtime().ok_or_else(|| cloud_error("smoke runtime absent"))?;
+    core.validate_sdk(&sdk).map_err(cloud_error)?;
+    Ok(core.smoke_batch_for_testing(&sdk, id).map_err(cloud_error)?.into())
+}
+pub fn review(sdk: String, card: i64, review: i64) -> Result<SmokeBatchProof, CoreError> {
+    let host = runtime::host()?;
+    let core = host.cloud_runtime().ok_or_else(|| cloud_error("smoke runtime absent"))?;
+    core.validate_sdk(&sdk).map_err(cloud_error)?;
+    let collection = host.collection()?;
+    Ok(core.smoke_review_for_testing(&sdk, &collection, card, review)
+        .map_err(cloud_error)?.into())
 }
 
 pub fn observe(
@@ -83,6 +124,7 @@ pub fn observe(
         core.validate_sdk(engine).map_err(cloud_error)?;
     }
     let mut result = CloudSmokeObservation {
+        active_session: host.review().active_session().map(|s| s.0),
         generation: snapshot.generation().0,
         seq: snapshot.seq().0,
         publication_id: op.as_ref().map(|p| p.id.to_vec()),
@@ -212,6 +254,7 @@ pub fn observe(
             revision: e.local_rev,
             acked_revision: e.acked_rev,
             digest: digest.to_vec(),
+            acked_envelope_digest: c::sha256(&e.acked_envelope.0).to_vec(),
             acknowledged: e.local_rev > 0
                 && e.acked_rev == e.local_rev
                 && e.acked_payload_digest == digest

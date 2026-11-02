@@ -105,6 +105,9 @@ public struct CloudOwnMetadata: Sendable {
     public let operationID: Data
     public let attempt: UInt64
     public let kind: CloudOwnKind
+    init(operationID: Data, attempt: UInt64, kind: CloudOwnKind) {
+        self.operationID = operationID; self.attempt = attempt; self.kind = kind
+    }
     init(_ v: MeguriCoreBindings.CloudOwnMetadata) {
         operationID = v.operationId; attempt = v.attempt
         kind = switch v.kind { case .createZones: .createZones; case .saveMediaRoot: .saveMediaRoot; case .savePublishingEpoch: .savePublishingEpoch; case .saveCompleteEpoch: .saveCompleteEpoch; case .readOwnEpoch: .readOwnEpoch; case .saveActive: .saveActive; case .readResetMediaRoot: .readResetMediaRoot }

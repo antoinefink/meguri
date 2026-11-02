@@ -55,17 +55,21 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
 
     static func make(workflow: CoreCloudWorkflowService, factory: any CloudKitEngineFactory,
                      ownTransport: any CloudOwnTransport, mediaTransport: any CloudMediaTransport,
-                     persisted: @escaping @Sendable () async -> Void) async throws -> NativeCollectionCloudBackend {
+                     persisted: @escaping @Sendable () async -> Void,
+                     observeEvent: (@Sendable (CloudSDKObservation) async -> Void)? = nil,
+                     observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)? = nil,
+                     observeOwn: (@Sendable (CloudOwnObservation) -> Void)? = nil) async throws -> NativeCollectionCloudBackend {
         let policy = try await workflow.policy()
         let connection = try await workflow.connection()
         let media = try await workflow.media()
         let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
             eventDidPersist: { _ in await persisted() }, assetReadTransport: ownTransport,
             assetReadDidFinish: persisted, exchangeDidJoin: persisted,
-            appOwnsAccountObservation: true, accountReadRequested: persisted)
+            appOwnsAccountObservation: true, accountReadRequested: persisted,
+            observeEvent: observeEvent, observeBatch: observeBatch)
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
             mediaService: media, mediaTransport: mediaTransport, ownTransport: ownTransport)
-        let own = CloudOwnExecutor(core: connection, transport: ownTransport)
+        let own = CloudOwnExecutor(core: connection, transport: ownTransport, observe: observeOwn)
         return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)
     }

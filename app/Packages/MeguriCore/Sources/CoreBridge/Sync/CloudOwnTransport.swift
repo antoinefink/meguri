@@ -77,12 +77,16 @@ private struct AdmittedCloudOwnQueue: CloudPublicationQueue {
 public actor CloudOwnExecutor {
     private let core: CoreCloudConnectionService
     private let transport: any CloudOwnTransport
+    private let observe: (@Sendable (CloudOwnObservation) -> Void)?
     private var active: (id: UUID, task: Task<CloudConnectionProgress, any Error>)?
     private var prepared: (any CloudPreparedOwnOperation)?
     private var previewTask: Task<CloudConnectionPreviewWork, any Error>?
     private var stopping = false
     private var closed = false
-    public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport) { self.core = core; self.transport = transport }
+    public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport,
+                observe: (@Sendable (CloudOwnObservation) -> Void)? = nil) {
+        self.core = core; self.transport = transport; self.observe = observe
+    }
 
     public func runNext(admission: CloudOwnWorkAdmission? = nil,
                         beforeActivation: (@Sendable () async throws -> Void)? = nil,
@@ -190,11 +194,17 @@ public actor CloudOwnExecutor {
         case .local(let handle, _, _), .scan(let handle):
             try checkStopping()
             try await core.performLocal(handle)
-        case .own(let request, let command, _, _):
+        case .own(let request, let command, _, let metadata):
+            let identity = UUID()
+            let observation = observe
+            let emit: @Sendable (CloudOwnObservationPhase) -> Void = { phase in
+                observation?(.init(metadata: metadata, identity: identity, phase: phase))
+            }
             let op: any CloudPreparedOwnOperation
             do {
                 try checkStopping()
                 op = try transport.prepare(.publication(command)); prepared = op
+                emit(.prepared)
             } catch {
                 // No enqueue occurred. Runtime owns the exact attempt and
                 // decides whether this not-started report is still admissible.
@@ -204,8 +214,12 @@ public actor CloudOwnExecutor {
             let accepted: Bool
             do {
                 let queue: any CloudPublicationQueue
-                if let admission { queue = AdmittedCloudOwnQueue(admission: admission, operation: op) }
-                else { queue = op }
+                let observed: any CloudPublicationQueue
+                if observation != nil {
+                    observed = ObservedCloudPublicationQueue(original: op, observe: { emit(.enqueued($0)) })
+                } else { observed = op }
+                if let admission { queue = AdmittedCloudOwnQueue(admission: admission, operation: observed) }
+                else { queue = observed }
                 accepted = try await core.submitPublicationRequest(request, queue: queue)
             } catch {
                 op.cancel(); prepared = nil
@@ -222,7 +236,9 @@ public actor CloudOwnExecutor {
                 let reply = try await op.reply() // Rust has returned.
                 prepared = nil
                 guard case .publication(let result) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                emit(.replied(result))
                 try await core.publicationResult(request, result: result)
+                emit(.committed)
             } catch {
                 prepared = nil
                 // An absent reply remains durably uncertain. A terminal native

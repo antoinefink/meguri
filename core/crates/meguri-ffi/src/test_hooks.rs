@@ -794,7 +794,23 @@ pub fn test_cloud_installed_sdk_owner() -> Result<Option<String>, CoreError> {
 
 #[path = "test_hooks_cloud_smoke.rs"]
 mod cloud_smoke;
-pub use cloud_smoke::{CloudSmokeEntity, CloudSmokeObservation, SmokeIntegrityObservation};
+pub use cloud_smoke::{
+    CloudSmokeEntity, CloudSmokeObservation, SmokeBatchProof, SmokeIntegrityObservation, SmokeReviewImage,
+};
+
+/// Inspect only an already committed batch, without building or sending one.
+#[uniffi::export]
+pub fn test_cloud_smoke_batch(sdk: String, batch_id: u64) -> Result<SmokeBatchProof, CoreError> {
+    callback::enter("test_cloud_smoke_batch");
+    cloud_smoke::batch(sdk, batch_id)
+}
+
+/// Fixed Card/Revlog eligible projection for the current real review session.
+#[uniffi::export]
+pub fn test_cloud_smoke_review(sdk: String, card_id: i64, revlog_id: i64) -> Result<SmokeBatchProof, CoreError> {
+    callback::enter("test_cloud_smoke_review");
+    cloud_smoke::review(sdk, card_id, revlog_id)
+}
 
 /// Fixed owned Q5 snapshot. No SQL, path or expected verdict enters this API.
 #[uniffi::export]

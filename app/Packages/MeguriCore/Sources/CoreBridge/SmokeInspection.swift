@@ -18,6 +18,7 @@ public struct SmokeCloudEntity: Sendable, Equatable {
     public let revision: UInt64
     public let ackedRevision: UInt64
     public let digest: Data
+    public let ackedEnvelopeDigest: Data
     public let acknowledged: Bool
     public let mediaBytes: UInt64?
     public let mediaSHA256: Data?
@@ -26,6 +27,7 @@ public struct SmokeCloudEntity: Sendable, Equatable {
 }
 public struct SmokeCloudObservation: Sendable {
     public let generation: UInt64
+    public let activeSession: UInt64?
     public let seq: UInt64
     public let publicationID: Data?
     public let publicationReason: UInt8?
@@ -40,10 +42,41 @@ public struct SmokeCloudObservation: Sendable {
     public let cardNoteID: Int64?
     public let lastReviewID: Int64?
 }
+public struct SmokeReviewImage: Sendable {
+    public let name: String
+    public let envelopeDigest: Data?
+    public let digest: Data?
+    public let imageSeq: UInt64
+    public let held: Bool
+}
+public struct SmokeBatchProof: Sendable {
+    public let generation: UInt64
+    public let seq: UInt64
+    public let session: UInt64?
+    public let saves: UInt64
+    public let images: [SmokeReviewImage]
+    init(generation: UInt64, seq: UInt64, session: UInt64?, saves: UInt64, images: [SmokeReviewImage]) {
+        self.generation = generation; self.seq = seq; self.session = session; self.saves = saves; self.images = images
+    }
+    init(_ r: MeguriCoreBindings.SmokeBatchProof) {
+        generation = r.generation; seq = r.seq; session = r.session; saves = r.saves
+        images = r.images.map { .init(name: $0.name, envelopeDigest: $0.envelopeDigest, digest: $0.digest, imageSeq: $0.imageSeq, held: $0.held) }
+    }
+}
 public actor CoreSmokeInspection {
     public init() {}
     public nonisolated static func samePreview(_ lhs: CloudConnectionPreview, _ rhs: CloudConnectionPreview) -> Bool {
         lhs.raw === rhs.raw
+    }
+    public func batch(sdk: String, id: UInt64) async throws -> SmokeBatchProof {
+        try await QueryLane.shared.call(.testCloudSmokeBatch) {
+            try SmokeBatchProof(MeguriCoreBindings.testCloudSmokeBatch(sdk: sdk, batchId: id))
+        }
+    }
+    public func review(sdk: String, cardID: Int64, revlogID: Int64) async throws -> SmokeBatchProof {
+        try await QueryLane.shared.call(.testCloudSmokeReview) {
+            try SmokeBatchProof(MeguriCoreBindings.testCloudSmokeReview(sdk: sdk, cardId: cardID, revlogId: revlogID))
+        }
     }
     public func integrity() async throws -> SmokeLocalIntegrity {
         try await QueryLane.shared.call(.testSmokeIntegrity) {
@@ -57,13 +90,13 @@ public actor CoreSmokeInspection {
         try await QueryLane.shared.call(.testCloudSmokeObservation) {
             let r = try MeguriCoreBindings.testCloudSmokeObservation(noteId: noteID, cardId: cardID,
                                                                    revlogId: revlogID, mediaName: mediaName)
-            return .init(generation: r.generation, seq: r.seq, publicationID: r.publicationId,
+            return .init(generation: r.generation, activeSession: r.activeSession, seq: r.seq, publicationID: r.publicationId,
                 publicationReason: r.publicationReason, publicationCompleting: r.publicationCompleting,
                 publicationBindingID: r.publicationBindingId, bindingID: r.bindingId, publicationInitial: r.publicationInitial,
                 publicationComplete: r.publicationComplete, bindingUsable: r.bindingUsable, engine: r.engine,
                 entities: r.entities.map { .init(label: $0.label, recordName: $0.recordName,
                     revision: $0.revision, ackedRevision: $0.ackedRevision, digest: $0.digest,
-                    acknowledged: $0.acknowledged, mediaBytes: $0.mediaBytes,
+                    ackedEnvelopeDigest: $0.ackedEnvelopeDigest, acknowledged: $0.acknowledged, mediaBytes: $0.mediaBytes,
                     mediaSHA256: $0.mediaSha256, blobPresent: $0.blobPresent, mediaChangeCounter: $0.mediaChangeCounter) },
                 cardNoteID: r.cardNoteId, lastReviewID: r.lastReviewId)
         }

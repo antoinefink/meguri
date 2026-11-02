@@ -40,6 +40,9 @@ mod publication_impl;
 mod resume_impl;
 #[path = "workflow_runtime.rs"]
 mod workflow_impl;
+#[cfg(feature = "test-hooks")]
+#[path = "smoke_runtime.rs"]
+mod smoke_impl;
 #[path = "zone_deletion_runtime.rs"]
 mod zone_deletion_impl;
 pub use super::publication::{KeyByteSource, KeySourceError};

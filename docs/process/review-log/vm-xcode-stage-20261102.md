@@ -43,3 +43,12 @@ temporary base before mktemp. Directory admission remains strict. Private
 diagnostics now retain fixed error classes and own function/line frames only.
 Independent review found no required issue; staged privacy63117 passes.
 Focused checks and actual execution after this repair remain pending.
+
+Focused selftest/20261102T144627Z-64013 passed 8/8 wrappers after the
+bootstrap repair. Actual vm-xcode-stage/20261102T144741Z-64375 then refused
+the selected host Xcode's group-write metadata during source inventory,
+before guest copy or activation. Fixed private diagnostics identify walk242.
+The owned worker produced its safe-release proof; no guard cleanup was needed.
+Read-only diagnosis found 673 root-owned wheel-group entries with group-write
+bits, no world-write or set-id bits. No installed bundle or permission changed.
+This source-authority issue remains open; no staging or activation pass.

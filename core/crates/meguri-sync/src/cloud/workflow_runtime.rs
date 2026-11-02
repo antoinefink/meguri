@@ -989,6 +989,52 @@ impl Runtime {
             (true, None),
         )
     }
+    pub(super) fn project_send_row(
+        &self,
+        guard: &ScanGuard,
+        collection: &Collection,
+        view: &impl View,
+        e: &EntityFacts,
+        publishing: bool,
+        row: &[Cell],
+    ) -> Result<codec::Payload, Error> {
+        row_payload::project(view, e.kind, row, |id| {
+            let tracked = self
+                .with_scan(guard, collection, |s| {
+                    let name = codec::entity_name(
+                        &s.bound
+                            .as_ref()
+                            .ok_or(RuntimeError::StaleIncarnation)?
+                            .binding
+                            .facts
+                            .record_key
+                            .0,
+                        codec::Kind::Notetype,
+                        &codec::id_key(id),
+                    )
+                    .map_err(|_| Error::InvalidData)?;
+                    Ok(s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .entity_facts(guard.binding, &name)?)
+                })
+                .map_err(|_| Error::InvalidData)?;
+            if let Some(e) = tracked
+                && let codec::Payload::Notetype(n) = if e.mark.is_some() {
+                    e.payload
+                } else {
+                    e.acked_payload.unwrap_or(e.payload)
+                }
+            {
+                return Ok(n);
+            }
+            if publishing {
+                let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                return row_payload::notetype(view, &row, 1);
+            }
+            Err(Error::InvalidData)
+        })
+    }
     pub fn build_collection_batch(
         &self,
         instance: &str,
@@ -1170,42 +1216,7 @@ impl Runtime {
                     }
                     return Ok(None);
                 };
-                let payload = row_payload::project(&view, e.kind, &row, |id| {
-                    let tracked = self
-                        .with_scan(&guard, collection, |s| {
-                            let name = codec::entity_name(
-                                &s.bound
-                                    .as_ref()
-                                    .ok_or(RuntimeError::StaleIncarnation)?
-                                    .binding
-                                    .facts
-                                    .record_key
-                                    .0,
-                                codec::Kind::Notetype,
-                                &codec::id_key(id),
-                            )
-                            .map_err(|_| Error::InvalidData)?;
-                            Ok(s.store
-                                .as_ref()
-                                .ok_or(Error::Database)?
-                                .entity_facts(guard.binding, &name)?)
-                        })
-                        .map_err(|_| Error::InvalidData)?;
-                    if let Some(e) = tracked
-                        && let codec::Payload::Notetype(n) = if e.mark.is_some() {
-                            e.payload
-                        } else {
-                            e.acked_payload.unwrap_or(e.payload)
-                        }
-                    {
-                        return Ok(n);
-                    }
-                    if publishing {
-                        let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
-                        return row_payload::notetype(&view, &row, 1);
-                    }
-                    Err(Error::InvalidData)
-                });
+                let payload = self.project_send_row(&guard, collection, &view, e, publishing, &row);
                 let payload = match payload {
                     Ok(payload) => payload,
                     Err(Error::InvalidData) => {
@@ -1461,6 +1472,13 @@ impl Runtime {
                 asset_path,
             });
         }
+        #[cfg(feature = "test-hooks")]
+        let smoke_images = saves.iter().filter_map(|input| {
+            let e = facts.get(&input.name)?;
+            matches!(e.kind, codec::Kind::Card | codec::Kind::Revlog).then_some(e)
+        }).map(|e| self.smoke_project_image(
+            &guard, collection, &*snapshot, &runs, snapshot.seq(), e,
+        )).collect::<Result<Vec<_>, _>>();
         self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
             if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
@@ -1532,6 +1550,22 @@ impl Runtime {
                     (instance.to_owned(), id),
                     saves.iter().map(|v| v.name.clone()).collect(),
                 );
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                // The proof uses the same pinned snapshot/held runs as this
+                // batch, then checks the durable flights and exact envelopes.
+                let proof = smoke_images.and_then(|images| self.smoke_built_batch_locked(
+                    s, instance, id,
+                    (snapshot.generation().0, snapshot.seq().0, snapshot.active_session().map(|v| v.0)),
+                    &saves, images,
+                )).ok();
+                if s.actions.smoke_batches.len() == 256 {
+                    if let Some(key) = s.actions.smoke_batches.keys().next().cloned() {
+                        s.actions.smoke_batches.remove(&key);
+                    }
+                }
+                s.actions.smoke_batches.insert((instance.to_owned(), id), proof);
             }
             Ok(BuiltBatch { id, saves })
         })

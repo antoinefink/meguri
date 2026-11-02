@@ -93,6 +93,7 @@ public actor CloudKitSyncAdapter {
         var batches: [UInt64: UInt32] = [:]
         var failed = false
         var operationSaved: UInt64 = 0
+        var observationOrdinal: UInt64 = 0
         var mediaSendFailure: CloudKitSDKOperationFailure?
         init(engine: any CloudKitEngine, zone: String) { self.engine = engine; self.zone = zone }
     }
@@ -109,6 +110,8 @@ public actor CloudKitSyncAdapter {
     private var suspending = false
     private let exchangeDidJoin: @Sendable () async -> Void
     private let eventDidPersist: @Sendable (CloudEngineEvent) async -> Void
+    private let observeEvent: (@Sendable (CloudSDKObservation) async -> Void)?
+    private let observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)?
     // Scheduling observation only; supplies no validity or Core outcome.
     private let delegateWorkValidated: @Sendable () async -> Void
     private var owned: [String: Instance] = [:]
@@ -156,13 +159,16 @@ public actor CloudKitSyncAdapter {
                 exchangeDidJoin: @escaping @Sendable () async -> Void = {},
                 appOwnsAccountObservation: Bool = false,
                 accountReadRequested: @escaping @Sendable () async -> Void = {},
-                delegateWorkValidated: @escaping @Sendable () async -> Void = {}) {
+                delegateWorkValidated: @escaping @Sendable () async -> Void = {},
+                observeEvent: (@Sendable (CloudSDKObservation) async -> Void)? = nil,
+                observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)? = nil) {
         self.core = core; factory = engineFactory; self.eventDidPersist = eventDidPersist
         self.exchangeDidJoin = exchangeDidJoin
         self.assetReadTransport = assetReadTransport; self.assetReadDidFinish = assetReadDidFinish
         self.appOwnsAccountObservation = appOwnsAccountObservation
         self.accountReadRequested = accountReadRequested
         self.delegateWorkValidated = delegateWorkValidated
+        self.observeEvent = observeEvent; self.observeBatch = observeBatch
     }
     private func changed() {
         version &+= 1
@@ -627,6 +633,10 @@ public actor CloudKitSyncAdapter {
     }
     fileprivate func handleEvent(_ event: CloudEngineEvent, origin: String) async {
         guard !suspended, await valid(origin), let instance = owned[origin] else { return }
+        instance.observationOrdinal += 1
+        let ordinal = instance.observationOrdinal
+        await observeEvent?(.init(origin: origin, ordinal: ordinal, event: event, phase: .delivered))
+        guard await valid(origin), owned[origin] === instance else { return }
         do {
             switch event {
             case .deliveryFailed:
@@ -659,6 +669,8 @@ public actor CloudKitSyncAdapter {
             case .willSend, .didSend: break
             }
             guard await valid(origin) else { return }
+            await observeEvent?(.init(origin: origin, ordinal: ordinal, event: event, phase: .committed))
+            guard await valid(origin), owned[origin] === instance else { return }
             await eventDidPersist(event)
             guard await valid(origin) else { return }
             // No deferred list is applied here. The immutable callback origin
@@ -673,6 +685,9 @@ public actor CloudKitSyncAdapter {
         if case .sent = event, await valid(origin), !instance.failed {
             do { try await core.handlerReturned(sdk: origin) }
             catch { lastFailure = error; instance.failed = true }
+        }
+        if !instance.failed, await valid(origin), owned[origin] === instance {
+            await observeEvent?(.init(origin: origin, ordinal: instance.observationOrdinal, event: event, phase: .returned))
         }
         instance.handlers = max(0, instance.handlers - 1)
         changed()
@@ -900,7 +915,11 @@ public actor CloudKitSyncAdapter {
             }
             let batch = try await core.buildBatch(sdk: origin, zone: zone, pending: pending)
             guard await valid(origin), !quiescing, !suspended, !suspending else { return nil }
-            if let batch { instance.batches[batch.id] = UInt32(batch.saves.count + batch.deletes.count) }
+            if let batch {
+                instance.batches[batch.id] = UInt32(batch.saves.count + batch.deletes.count)
+                await observeBatch?(origin, zone, batch)
+                guard await valid(origin), owned[origin] === instance, !quiescing, !suspended, !suspending else { return nil }
+            }
             return batch
         } catch { lastFailure = error; instance.failed = true; _ = beginStop(origin, policyStop: false); return nil }
     }

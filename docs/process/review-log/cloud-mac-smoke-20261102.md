@@ -56,3 +56,11 @@ validates current step encodings and retained observations. Independent review
 found no required finding. Command 3 explicitly remains Missing for SDK order;
 the app/core evidence repair runs separately. No signed pass is claimed.
 Integration removes one redundant docstring after the privacy finding.
+
+Filtered evidence export cleanroom/20261102T142707Z-55686 adds the bounded
+SDK, own-operation and held-image observations. Fixer session:
+s-20261102T142603Z-4626b865. Source start: 5e58e13a; integration start:5999cc58.
+Independent review and all new focused checks remain pending. The host keeps
+its explicit Missing boundary until it validates the exact added facts.
+Integration renames one generated-test local binding after the privacy finding;
+the assertion and executable checks are unchanged. Privacy68716 passes.

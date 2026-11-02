@@ -28,6 +28,7 @@ import Foundation
     private var backend: CloudKitSmokeBackend?
     private let inspection = CoreSmokeInspection()
     private let changes = CloudKitSmokeChanges()
+    private let evidence = CloudKitSmokeEvidence()
     private var preview: CloudConnectionPreview?
     private var deckID: Int64?
     private var marker: String?
@@ -125,9 +126,16 @@ import Foundation
         try command.requireSmokePosition()
         guard command.command_seq == nextCommand else { throw AgentFailure.sequence }
         // A failed operation never advances this program.
-        let checks = try await executeStep(command, observe: observe)
-        nextCommand += 1
-        return checks
+        do {
+            let checks = try await executeStep(command, observe: observe)
+            for fact in evidence.drain() { try observe(fact) }
+            try evidence.check()
+            nextCommand += 1
+            return checks
+        } catch {
+            for fact in evidence.drain() { try observe(fact) }
+            throw error
+        }
     }
     private func executeStep(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         // Closing/draining owned work does not depend on renewed authority.
@@ -166,7 +174,21 @@ import Foundation
                 try admission.revalidate()
                 let workflow = CoreCloudWorkflowService()
                 let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
-                    factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted)
+                    factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
+                    observeEvent: { [evidence] event in
+                        evidence.sdk(event)
+                        do {
+                            let current = try await CoreSmokeInspection().cloud()
+                            evidence.validate(origin: event.origin, current: current)
+                        } catch { evidence.fail() }
+                    }, observeBatch: { [evidence] origin, zone, batch in
+                        do {
+                            let inspection = CoreSmokeInspection()
+                            let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
+                            let current = try await inspection.cloud()
+                            evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
+                        } catch { evidence.fail() }
+                    }, observeOwn: { [evidence] in evidence.own($0) })
                 try admission.revalidate()
                 let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
                 backend = wrapper
@@ -184,6 +206,7 @@ import Foundation
             guard collection.state == .ready, !sync.operationFailed, let backend else { throw AgentFailure.execution }
             let local = try await inspection.cloud()
             guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
+            try evidence.setGeneration(collection.generation)
             try await resolveGeneratedRoles(collection)
             try observe(.init(name: .coreOpened, count: collection.generation))
             try backend.checkFailure()
@@ -211,12 +234,15 @@ import Foundation
             let completed = try await backend.publicationCompleted()
             guard !owner.sync.operationFailed, owner.sync.preview == nil,
                   owner.sync.status?.controls.bindingUsable == true,
+                  completed.generation == owner.generation,
                   completed.publicationComplete, completed.bindingUsable, completed.engine != nil,
                   let issued = backend.publicationOperations.first,
-                  issued.publicationReason == 1, issued.publicationInitial,
+                  issued.generation == owner.generation, issued.publicationReason == 1, issued.publicationInitial,
                   issued.publicationID != nil, completed.publicationID == nil,
                   backend.publicationOperations.allSatisfy({ $0.publicationID == issued.publicationID && $0.publicationInitial }),
                   backend.publicationOperations.contains(where: { $0.publicationCompleting && $0.publicationBindingID == completed.bindingID }) else { throw AgentFailure.execution }
+            guard let publicationID = issued.publicationID else { throw AgentFailure.execution }
+            try evidence.requirePublication(publicationID)
             backend.watchPublication = false
             let fact = AgentFact(name: .stateSaved, count: completed.seq, engine: "engine1", operation: "p1")
             try observe(fact)
@@ -267,6 +293,8 @@ import Foundation
             guard before.generation == owner.generation,
                   let baseline = before.entities.first(where: { $0.label == "c1" }) else { throw AgentFailure.execution }
             headRevision = baseline
+            try observe(.init(name: .localDurable, count: baseline.revision,
+                digest: CloudKitSmokeGeneratedInput.hex(baseline.digest), operation: "c1-before-answer"))
             lastReviewID = before.lastReviewID
             await owner.sync.waitForInputs()
             try backend.checkFailure()
@@ -301,6 +329,11 @@ import Foundation
                   let prior = headRevision, let card = rows.entities.first(where: { $0.label == "c1" }),
                   card.revision > prior.revision, card.digest != prior.digest else { throw AgentFailure.execution }
             try retain(rows, labels: ["c1", "r1"])
+            guard let engine = rows.engine, let revlog = retainedEntities["r1"] else { throw AgentFailure.execution }
+            let projection = try await inspection.review(sdk: engine, cardID: cardID, revlogID: row)
+            let heldFacts = try evidence.held(projection, session: sessionID, answerSeq: committed.seq,
+                card: card, review: revlog, baseline: prior)
+            for fact in heldFacts { try observe(fact) }
             let facts = [AgentFact(name: .localCommitted, count: committed.seq, operation: "s1"), try entityFact("c1"), try entityFact("r1")]
             for fact in facts { try observe(fact) }
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
@@ -372,6 +405,7 @@ import Foundation
             guard current.generation == owner.generation, current.entities.count == 4 else { throw AgentFailure.execution }
             var facts = try CloudKitSmokeProof.acknowledgements(current: current.entities,
                 retained: retainedEntities, observations: observations)
+            facts += try evidence.requireAcknowledgements(current.entities, observations: observations)
             for fact in facts { try observe(fact) }
             try await requirePhysicalMedia(owner)
             let result = AgentFact(name: .syncResult, count: exchange.exchange, operation: "exchange1")
@@ -383,9 +417,12 @@ import Foundation
             guard await owner.close() else { throw AgentFailure.execution }
             self.owner = nil
             changes.finish()
+            let proof = try evidence.joined()
+            for fact in proof { try observe(fact) }
             let joined = AgentFact(name: .ownedWorkJoined)
             try observe(joined)
-            return [integrity, .init(name: .localDurability, outcome: .pass, facts: [joined])]
+            return [integrity, .init(name: .coordinatorResult, outcome: .pass, facts: proof),
+                    .init(name: .localDurability, outcome: .pass, facts: [joined])]
         }
     }
     private func requireInitialPreview(_ summary: CloudConnectionSummary) throws {
