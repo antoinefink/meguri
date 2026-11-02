@@ -180,6 +180,7 @@ mg_app_build_action() {
       mg_status fail
       return 1
     fi
+
   fi
   if [ "$config" = Profile ] && [ "$plan" = Performance ]; then
     sdk=iphonesimulator
@@ -909,8 +910,59 @@ mg_app_quit_mac() {
 # ---------------------------------------------------------------------------
 # Jobs
 
+# Freeze only actual team-signed CloudAgent products, after all build mutations.
+# Ad-hoc or initially dirty builds compile without agent_build proof.
+mg_app_agent_freeze() {
+  local platform="$1" source_commit="$2" sdk=iphonesimulator products xctestrun
+  local settings="$MG_RUN_DIR/agent-settings.json" policy="$MG_RUN_DIR/agent-cloud-settings.json"
+  local manifest="$MG_RUN_DIR/agent-build.json" reference="$MG_RUN_DIR/agent-build-reference.json"
+  if [ "${MEGURI_APP_SIGNING-adhoc}" != team ] || [ -z "$source_commit" ]; then
+    mg_detail agent_compile_only true
+    return 0
+  fi
+  [ "$platform" != mac ] || sdk=macosx
+  products="$MG_ROOT/$MG_APP_DD/Build/Products"
+  xctestrun="$(MG_APP_TEST_SCHEME=Meguri mg__vm_xctestrun CloudAgent "$sdk" Debug)"
+  if [ -z "$xctestrun" ] || ! xcodebuild build-for-testing -showBuildSettings -json -project app/Meguri.xcodeproj \
+      -scheme Meguri -testPlan CloudAgent -configuration Debug -sdk "$sdk" -derivedDataPath "$MG_APP_DD" \
+      MEGURI_SIGNING=team >"$settings"; then
+    mg_failure agent-build "CloudAgent build inputs or resolved settings are missing"
+    mg_status fail
+    return 1
+  fi
+  # Retain app policy and agent host bindings; omit raw signing settings.
+  if ! jq '[.[] | select(.target == "Meguri" or .target == "MeguriSnapshotTests") | {target, buildSettings:
+    (.buildSettings | with_entries(.key as $k | select([
+      "CONFIGURATION", "PRODUCT_BUNDLE_IDENTIFIER", "MEGURI_BUNDLE_ID_SUFFIX", "TEST_HOST", "BUNDLE_LOADER",
+      "MEGURI_CORE_FEATURES", "SWIFT_ACTIVE_COMPILATION_CONDITIONS",
+      "MEGURI_CLOUD_CONFIGURATION", "MEGURI_CLOUD_CONTAINER", "MEGURI_CLOUD_ENVIRONMENT",
+      "MEGURI_CLOUD_CONTAINER_development", "MEGURI_CLOUD_CONTAINER_production",
+      "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT", "MEGURI_CLOUD_PUSH_ENVIRONMENT",
+      "INFOPLIST_KEY_MeguriCloudContainer", "INFOPLIST_KEY_MeguriCloudEnvironment",
+      "MEGURI_CLOUD_SCHEMA_CONFIGURED_development", "MEGURI_CLOUD_SCHEMA_CONFIGURED_production",
+      "MEGURI_CLOUD_SCHEMA_CONFIGURED", "MEGURI_CLOUD_SCHEMA_BOOLEAN"
+    ] | index($k))))}]' "$settings" >"$policy"; then
+    mg_failure agent-build "could not retain CloudAgent policy settings"
+    mg_status fail
+    return 1
+  fi
+  rm -f "$settings"
+  if ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-verify.py" --freeze-build \
+      --root "$MG_ROOT" --run-id "$MG_RUN_ID" --source-commit "$source_commit" \
+      --platform "$platform" --products "$products" --xctestrun "$xctestrun" \
+      --manifest "$manifest" >"$reference"; then
+    mg_failure agent-build "CloudAgent product freezing failed; no signed build admission"
+    mg_status fail
+    return 1
+  fi
+  mg_artifact directory "$products" "frozen CloudAgent build inputs"
+  mg_artifact json "$manifest" "CloudAgent app, agent, xctestrun and product inventory"
+  mg_artifact json "$policy" "CloudAgent cloud/debug policy settings"
+  mg_detail agent_build "$(cat "$reference")"
+}
+
 mg_build_app() {
-  local platform="" config=Debug config_given=false plan=UI standalone=false personal=false input="" app
+  local platform="" config=Debug config_given=false plan=UI standalone=false personal=false input="" app agent_source="" agent_tree=""
   # Bash dynamic scope constrains this override to this CLI build and its
   # product lookup; later/nested test jobs retain the default DerivedData.
   local MG_APP_DD="$MG_APP_DD"
@@ -937,6 +989,14 @@ mg_build_app() {
   if [ "$plan" = CloudAgent ] && { [ "$config" != Debug ] || [ "$standalone" = true ] || [ "$personal" = true ]; }; then
     mg_drive__usage "--test-plan CloudAgent requires Debug on mac or ios-sim, without --standalone or --personal-preview"
     return 0
+  fi
+  if [ "$plan" = CloudAgent ] && [ "${MEGURI_APP_SIGNING-adhoc}" = team ]; then
+    if ! agent_source="$(git -C "$MG_ROOT" rev-parse HEAD)" ||
+        ! agent_tree="$(git -C "$MG_ROOT" status --porcelain=v1 --untracked-files=all)" ||
+        [ -z "$agent_source" ] || [ -n "$agent_tree" ]; then
+      # Keep the real MG dirty receipt; only a clean start can freeze proof.
+      agent_source=""
+    fi
   fi
   if [ "$personal" = true ]; then
     if [ "$platform" != mac ] || [ "$standalone" = true ] || { [ "$config_given" = true ] && [ "$config" != Release ]; }; then
@@ -973,6 +1033,9 @@ mg_build_app() {
     app="$(mg_app_products "$platform" "$config")/Meguri.app"
   fi
   mg_artifact app "$app"
+  if [ "$plan" = CloudAgent ]; then
+    mg_app_agent_freeze "$platform" "$agent_source" || return 0
+  fi
   mg_message "build-app: $platform $config built: $app"
   mg_status pass
 }

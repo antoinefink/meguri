@@ -650,6 +650,13 @@ runs:
     pending: U118
 
   # --- T3: milestone and release ----------------------------------------------
+  - id: u248-soak
+    job: cloudkit-signed
+    tier: T3
+    placement: [host, vm]
+    needs: [vm, simulator]
+    class: sync
+    budget_s: 7200
   - id: similarity-whole-tree
     job: similarity
     args: [--rev, "{tip}"]
