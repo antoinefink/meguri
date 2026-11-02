@@ -163,9 +163,9 @@ fn assert_deleted_by_sdk(pair: &mut Pair, blob: &str, after: u64) {
 
 #[derive(Clone, Copy)]
 enum DelayedAck {
-    ReplacementUploadQuota,
-    RemovalQuota,
-    ReplacementNameQuota,
+    ReplacementUpload,
+    Removal,
+    ReplacementName,
 }
 
 fn assert_pending_replacement(pair: &mut Pair, initial: &EntityFacts) {
@@ -188,8 +188,8 @@ fn assert_pending_replacement(pair: &mut Pair, initial: &EntityFacts) {
 }
 
 fn exercise_delayed_ack(mode: DelayedAck) {
-    let tombstone = matches!(mode, DelayedAck::RemovalQuota);
-    let name_quota = matches!(mode, DelayedAck::ReplacementNameQuota);
+    let tombstone = matches!(mode, DelayedAck::Removal);
+    let name_quota = matches!(mode, DelayedAck::ReplacementName);
     let mut pair = Pair::published();
     let (blob, original, mut initial) = publish_old(&mut pair);
     let replacement_upload = if name_quota {
@@ -434,17 +434,17 @@ fn exercise_delayed_ack(mode: DelayedAck) {
 
 #[test]
 fn replacement_ack_controls_retention() {
-    exercise_delayed_ack(DelayedAck::ReplacementUploadQuota);
+    exercise_delayed_ack(DelayedAck::ReplacementUpload);
 }
 
 #[test]
 fn removal_ack_controls_retention() {
-    exercise_delayed_ack(DelayedAck::RemovalQuota);
+    exercise_delayed_ack(DelayedAck::Removal);
 }
 
 #[test]
 fn changed_name_quota_after_blob_upload_controls_retention() {
-    exercise_delayed_ack(DelayedAck::ReplacementNameQuota);
+    exercise_delayed_ack(DelayedAck::ReplacementName);
 }
 
 #[test]

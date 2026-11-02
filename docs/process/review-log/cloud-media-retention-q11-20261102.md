@@ -25,3 +25,21 @@ Independent review finds no P0–P2 issues and confirms existing coverage stays.
 Core72126 passes19/19 without skips; privacy72394 and similarity72732 pass.
 Lint73054 reports repeated enum suffixes. A naming-only fix remains required;
 no lint suppression or test-limit change is permitted.
+
+Fixer624641 exports75118 from clean52e39eaa. Only three enum names and their
+five uses change. Independent comparison confirms identical behavior and
+assertions. Final lint75689 passes4/4, selected case76176 passes1/1 and
+privacy75688 passes. The earlier19-case pass remains valid for the unchanged
+cases; no limits or assertions change. The initial sandboxed fixer start74677
+cannot reach the runtime; authorized75118 completes with its boundaries checked.
+
+The reviewer maps the exact first P24 retention item to the passing suite:
+empty replacement for unsyncable files; upload, removal and changed-name quota;
+the fetched-name builder and retained-batch checks; old-mark expiry; the
+30-minute/2-hour stale-present repair; and ready, refused, intent and format
+inbox protection. The spec-writer removes only that P24 item and keeps the
+mandatory Q11 test text with this evidence. Independent review clears that
+scoped closure. It does not close full Q5/Q6/Q11, signed media, U113 or a gate.
+
+Final code/spec/log privacy and exact-source similarity76861 pass. The full
+integration batch remains open; its original gate and other failures remain.
