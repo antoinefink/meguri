@@ -49,7 +49,7 @@ import XCTest
             XCTAssertTrue(session.setupOnly)
             XCTAssertNil(session.shell)
             XCTAssertNil(session.error)
-            XCTAssertEqual(session.options, LaunchOptions())
+            XCTAssertEqual(session.options, TestHooks.LaunchOptions())
         }
     }
 }

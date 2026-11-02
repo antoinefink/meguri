@@ -57,3 +57,11 @@ call. Original process/group/join/lease checks
 remain intact, and both existing streamed forms now exercise this mode.
 Independent review found no required finding. Production is unchanged.
 Focused Docker execution of this repaired witness remains pending.
+
+Focused selftest/20261102T130332Z-83481 passed both selected wrappers,
+covering the repaired handoff lifecycle suite and approved-input helper.
+The separate Mac build build-app/20261102T130335Z-83746 failed at the
+new preflight test's unqualified LaunchOptions name. Filtered cleanup
+cleanroom/20261102T131245Z-89682 qualifies the existing nested type only.
+Independent review found no issue; the assertion is unchanged. Compilation
+after this cleanup and actual VM preflight remain pending.
