@@ -212,7 +212,6 @@ SH
     mg_detail() { :; }
     mg_message() { :; }
     mg_lint_ui_first() { :; }
-    mg__xcframework() { :; }
     mg_sim_begin() { MG_SIM_RUNNER=vm; MG_MAC_VM='"'"'{"ssh":"generated-ssh","name":"generated-vm"}'"'"'; }
     mg_sim_take() { :; }
     mg_tap_report() { [ "$2" = 0 ] && mg_status pass; }
@@ -221,6 +220,7 @@ SH
     mkdir -p "$MG_STATE"
     source "$REPO_ROOT/tools/mg.d/bridge.sh"
     source "$REPO_ROOT/tools/mg.d/xcode.sh"
+    mg__xcframework() { :; }
     mg_xcode_check --mac-unit-only
   '
   [ "$status" -eq 0 ]
