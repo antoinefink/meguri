@@ -133,6 +133,15 @@ impl<'a> Reader<'a> {
         }
         Err(CodecError::NonCanonical)
     }
+    /// Read a scalar from a length-delimited packed field. Canonical message
+    /// re-encoding checks minimal varints, just as for ordinary scalar fields.
+    pub fn packed_varint(&mut self) -> Result<Option<u64>> {
+        if self.pos == self.bytes.len() {
+            Ok(None)
+        } else {
+            self.varint().map(Some)
+        }
+    }
     pub fn next(&mut self) -> Result<Option<(u32, Value<'a>)>> {
         if self.pos == self.bytes.len() {
             return Ok(None);

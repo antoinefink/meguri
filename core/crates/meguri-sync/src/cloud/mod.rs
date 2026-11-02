@@ -13,6 +13,7 @@ mod cleanup_store;
 mod conflict_expiry;
 pub mod control_codec;
 pub mod entity_codec;
+pub mod generation_codec;
 mod held_view;
 pub mod policy;
 mod policy_store;
