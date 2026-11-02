@@ -75,7 +75,8 @@ if action == 'command':
         'TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE=' + sys.argv[2] + '/vm-unit-inputs/initial-adoption-fixture.json',
         'TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI=' + sys.argv[2] + '/vm-unit-inputs/meguri-cli', 'xcodebuild']))
 else:
-    assert action == 'deliver' and len(sys.argv) == 4
+    assert action in ('start', 'verify-inputs', 'deliver')
+    assert len(sys.argv) == (3 if action == 'start' else 4)
 PYINPUT
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
@@ -1588,4 +1589,87 @@ SH
   tap_line 'ok [0-9]+ mac-unit # SKIP queued: meguri-mac unavailable during Mac Unit input delivery \(user step mac-vm\)'
   not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
   called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+}
+
+# Generated tooling execution only: keep the real MG routing, input admission,
+# devices script and VM transport; producers and native tools are doubles.
+focused_wrapper() (
+  cd "$SB" || exit 1
+  export MG_ROOT="$SB" MG_STATE="$MG_RUN_DIR/state"
+  mkdir -p "$MG_STATE"
+  MG_JOB=xcode-check MG_DEFAULT_REPRO='tools/mg xcode-check --mac-unit-only' MG_QUEUED_PARTS='[]'
+  MG_MAC_VM="$(jq -nc --arg ssh "$STUBS/vm-ssh" '{ssh:$ssh,name:"meguri-mac"}')"
+  mg_job() { :; }
+  mg_status() { echo "$1" >"$MG_STATE/status"; }
+  mg_failure() { echo "$1" >>"$MG_STATE/failures.jsonl"; }
+  mg_artifact() { :; }
+  mg_count() { :; }
+  mg_message() { echo "$*"; }
+  mg_detail() { echo "$1=$2" >>"$MG_STATE/details"; }
+  mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
+  mg__xcframework() { echo core-build >>"$STUB_LOG"; }
+  mg_sim_begin() { echo vm-begin >>"$STUB_LOG"; MG_SIM_RUNNER=vm; MG_MAC_VM_REASON='generated VM unavailable'; [ "${STUB_NO_VM:-0}" = 0 ] || { MG_SIM_RUNNER=''; return 2; }; }
+  mg_sim_take() { echo vm-take >>"$STUB_LOG"; }
+  mg__mac_vm_stop_orphans() { echo stop-orphans >>"$STUB_LOG"; }
+  mg__mac_vm_unreachable() { MG_QUEUED_PARTS='["mac-unit"]'; }
+  mg_queued_parts_text() { echo mac-unit; }
+  mg_queued_settle() { [ "$MG_QUEUED_PARTS" = '[]' ] || mg_status warn; }
+  source "$REPO_ROOT/tools/mg.d/selftest.sh"
+  source "$REPO_ROOT/tools/mg.d/xcode.sh"
+  mg__swift_initial_adoption_fixture() { echo fixture-producer >>"$STUB_LOG"; MEGURI_INITIAL_ADOPTION_RESULT=producer-result; [ "${STUB_PRODUCER_FAIL:-0}" = 0 ]; }
+  mg__swift_cloud_service_helper() { echo cli-producer >>"$STUB_LOG"; }
+  mg_xcode_check "$@"
+)
+
+@test "focused MG runs only the whole Mac Unit plan through named producers and VM, with focused scope" {
+  fake_vm
+  add_test_inputs
+  run focused_wrapper --mac-unit-only
+  [ "$status" -eq 0 ]
+  [ "$(cat "$MG_RUN_DIR/state/status")" = pass ]
+  grep -qx 'scope="focusedMacUnit"' "$MG_RUN_DIR/state/details"
+  [[ "$output" == *'full Xcode matrix, T0/gate and broader-platform coverage not evaluated'* ]]
+  called '^fixture-producer$'
+  called '^cli-producer$'
+  called '^unit-input-verify-inputs$'
+  called '^unit-input-deliver$'
+  called '^vm-xcodebuild test-without-building .*Meguri_Unit_macosx.* -destination platform=macOS,arch=arm64 .* -collect-test-diagnostics never$'
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -c '^xcodebuild build-for-testing ' "$STUB_LOG")" -eq 1 ]
+  not_called 'only-testing|skip-testing|^sim-pool|^open |^vm-open |^xcodebuild (build |test|-[a-z])'
+}
+
+@test "focused public and internal admission refuses incompatible and malformed routing before side effects" {
+  for option in --no-ui --cloud-signing-matrix '--iphone ID' '--ipad ID' '--phase devices' '--vm-ssh command' --no-sims '--continue-from 1' --unknown --mac-unit-only=bad --mac-unit-only; do
+    run focused_wrapper --mac-unit-only $option
+    [ "$(cat "$MG_RUN_DIR/state/status")" = error ]
+    [ ! -s "$STUB_LOG" ]
+    run /bin/bash "$SB/tools/tests/xcode_project_check.sh" "$SB/rejected" --phase devices --continue-from 0 --no-sims --mac-unit-only $option
+    [ "$status" -eq 2 ]
+    [ ! -d "$SB/rejected" ]
+    [ ! -s "$STUB_LOG" ]
+  done
+}
+
+@test "focused absent VM queues, producer failure prevents launch, and actual results stay red" {
+  fake_vm
+  add_test_inputs
+  STUB_NO_VM=1 run focused_wrapper --mac-unit-only
+  [ "$(cat "$MG_RUN_DIR/state/status")" = warn ]
+  tap_line 'ok 1 mac-unit # SKIP queued: no test VM \(user step mac-vm\)'
+  not_called '^unit-input-|^fixture-producer|^cli-producer|^xcodebuild |^vm-xcodebuild '
+  : >"$STUB_LOG"
+  STUB_PRODUCER_FAIL=1 run focused_wrapper --mac-unit-only
+  [ "$(cat "$MG_RUN_DIR/state/status")" = fail ]
+  not_called '^xcodebuild |^vm-xcodebuild |^unit-input-deliver$'
+  for failure in build summary exit; do
+    : >"$STUB_LOG"
+    case "$failure" in
+      build) STUB_MAC_UNIT_BUILD_FAIL=1 run focused_wrapper --mac-unit-only ;;
+      summary) STUB_UNIT_SUMMARY='{"result":"Failed","passedTests":0,"failedTests":1,"skippedTests":0}' run focused_wrapper --mac-unit-only ;;
+      exit) FAKE_VM_TEST_RC=65 run focused_wrapper --mac-unit-only ;;
+    esac
+    [ "$(cat "$MG_RUN_DIR/state/status")" = fail ]
+    tap_line 'not ok 1 mac-unit: .*'
+  done
 }

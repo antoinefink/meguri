@@ -191,3 +191,43 @@ PY
   [ ! -e "$MG_RUN_DIR/xcode-unit-delivery.json" ]
   [ ! -e "$UNIT_LAUNCH" ]
 }
+
+@test "focused MG preparation retains real named producers and recorded input authority" {
+  mkdir -p "$MG_ROOT/tools/tests"
+  cat >"$MG_ROOT/tools/tests/xcode_project_check.sh" <<'SH'
+#!/bin/bash
+# Routing double only; real devices/VM/result behavior is in the project tests.
+[ "$*" = "build/xcode-check --phase devices --continue-from 0 --vm-ssh generated-ssh --vm-name generated-vm --mac-unit-only" ] || exit 97
+[ -s "$MG_RUN_DIR/xcode-unit-inputs.json" ] || exit 97
+echo 'ok 1 generated routing only'
+echo '1..1'
+SH
+  unit_fixture_setup "$MG_ROOT" focused-input-run
+  run bash -c '
+    cd "$MG_ROOT" || exit 1
+    mg_job() { :; }
+    mg_failure() { echo "failure=$1"; }
+    mg_status() { echo "$1" >"$MG_STATE/status"; }
+    mg_artifact() { :; }
+    mg_detail() { :; }
+    mg_message() { :; }
+    mg_lint_ui_first() { :; }
+    mg__xcframework() { :; }
+    mg_sim_begin() { MG_SIM_RUNNER=vm; MG_MAC_VM='"'"'{"ssh":"generated-ssh","name":"generated-vm"}'"'"'; }
+    mg_sim_take() { :; }
+    mg_tap_report() { [ "$2" = 0 ] && mg_status pass; }
+    mg_queued_settle() { :; }
+    MG_STATE="$MG_RUN_DIR/state" MG_QUEUED_PARTS="[]"
+    mkdir -p "$MG_STATE"
+    source "$REPO_ROOT/tools/mg.d/bridge.sh"
+    source "$REPO_ROOT/tools/mg.d/xcode.sh"
+    mg_xcode_check --mac-unit-only
+  '
+  [ "$status" -eq 0 ]
+  [ "$(cat "$MG_RUN_DIR/state/status")" = pass ]
+  [ "$(cat "$UNIT_CALLS")" = 'rust-producer
+native-cargo' ]
+  [ -s "$MG_RUN_DIR/xcode-unit-source.json" ]
+  [ -s "$MG_RUN_DIR/xcode-unit-inputs.json" ]
+  [ ! -e "$UNIT_LAUNCH" ]
+}

@@ -2,7 +2,7 @@
 # (xcodebuild, codesign), with the simulator pool in the macOS test VM (U8c).
 
 mg_job xcode-check host mg_xcode_check \
-  "Xcode project checks after lint-ui: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, DriveScriptTests, TestHooksTests (simulators in the macOS test VM, queued without it; on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); all launches and test runs use the VM's lease; args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, else leased from the simulator pool; --no-ui)"
+  "Xcode project checks after lint-ui: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, DriveScriptTests, TestHooksTests (simulators in the macOS test VM, queued without it; on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); all launches and test runs use the VM's lease; args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, else leased from the simulator pool; --no-ui); --mac-unit-only alone focuses the whole Mac Unit Debug plan in the dedicated VM, without full matrix/gate coverage"
 
 # Reuse the real Swift producers, with source authority retained by this MG
 # run. This is ordinary Unit input routing, not signed-agent evidence.
@@ -35,7 +35,17 @@ mg_xcode_check() {
   export MEGURI_SIM_ALLOW_HOST
   [ "${1:-}" = "--" ] && shift
   local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin lease=0 take part reason
-  local vmq=build/xcode-check/vm-queued.tsv arg unit_inputs=1
+  local vmq=build/xcode-check/vm-queued.tsv arg unit_inputs=1 focused=0
+  for arg in "$@"; do case "$arg" in --mac-unit-only*) focused=1 ;; esac; done
+  if [ "$focused" -eq 1 ]; then
+    if [ "$#" -ne 1 ] || [ "$1" != --mac-unit-only ]; then
+      mg_failure arguments "--mac-unit-only accepts no other arguments"
+      mg_status error
+      return 0
+    fi
+    mg_detail scope '"focusedMacUnit"'
+    mg_detail focusedMacUnit '{"scheme":"Meguri","plan":"Unit","configuration":"Debug","destination":"platform=macOS,arch=arm64","runner":"vm"}'
+  fi
   for arg in "$@"; do [ "$arg" != --no-ui ] || unit_inputs=0; done
   mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
@@ -44,6 +54,7 @@ mg_xcode_check() {
     return 0
   fi
   MG_VM_PART="the devices phase (hidden Mac launches, simulators, test runs)"
+  [ "$focused" -eq 0 ] || MG_VM_PART="focusedMacUnit"
   mg_sim_begin
   begin=$?
   case "$begin" in
@@ -51,8 +62,14 @@ mg_xcode_check() {
     2) queued=1 sims=(--no-sims) ;;
     *) return 0 ;;
   esac
-  /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds ${1+"$@"} | tee "$tap"
-  rc=${PIPESTATUS[0]}
+  rc=0
+  if [ "$focused" -eq 0 ]; then
+    /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds ${1+"$@"} | tee "$tap"
+    rc=${PIPESTATUS[0]}
+  else
+    : >"$tap"
+    [ "$MG_SIM_RUNNER" = vm ] || { queued=1 sims=(--no-sims); }
+  fi
   mg_artifact tap "$tap"
   mg_artifact logs build/xcode-check/logs "xcodebuild logs"
   if [ "$MG_SIM_RUNNER" = vm ]; then
@@ -69,13 +86,22 @@ mg_xcode_check() {
   if [ "$lease" -ne 0 ]; then
     # The builds' results stand; the launches and test runs did not run.
     mg_tap_report "$tap" "$rc" ""
-    mg_message "xcode-check: the builds were checked; the launches, simulators and test runs did not run (see the failures)"
+    if [ "$focused" -eq 1 ]; then
+      mg_message "xcode-check: focusedMacUnit did not run (see the failures)"
+    else
+      mg_message "xcode-check: the builds were checked; the launches, simulators and test runs did not run (see the failures)"
+    fi
     mg_status error
     return 0
   fi
   if [ "$unit_inputs" -eq 1 ] && [ "$MG_SIM_RUNNER" = vm ]; then
     if ! mg__xcode_unit_inputs; then
       unset MEGURI_INITIAL_ADOPTION_FIXTURE MEGURI_INITIAL_ADOPTION_RESULT MEGURI_CLOUD_SERVICE_CLI
+      if [ "$focused" -eq 1 ]; then
+        mg_failure xcode-unit-inputs "focusedMacUnit input preparation failed; Unit did not launch"
+        mg_status fail
+        return 0
+      fi
       mg_failure xcode-unit-inputs "Mac Unit input preparation failed; independent device checks continue"
       mg_status fail
       rc=1
@@ -101,8 +127,8 @@ mg_xcode_check() {
       [ -z "$part" ] || mg__mac_vm_unreachable "$reason" "$part"
     done <"$vmq"
   fi
-  case "$(cat "$MG_STATE/status")" in
-    pass | warn)
+  case "$(cat "$MG_STATE/status"):$focused" in
+    pass:0 | warn:0)
       if [ -n "$queued" ]; then
         mg_message "xcode-check: builds checked; VM execution queued: $MG_MAC_VM_REASON (user step mac-vm)"
       elif [ "$MG_QUEUED_PARTS" != '[]' ]; then
@@ -111,4 +137,8 @@ mg_xcode_check() {
       ;;
   esac
   mg_queued_settle
+  if [ "$focused" -eq 1 ]; then
+    [ "$MG_QUEUED_PARTS" = '[]' ] || queued=1
+    mg_message "xcode-check: focusedMacUnit, whole Meguri Unit Debug in the dedicated VM: $(cat "$MG_STATE/status")${queued:+; VM execution queued}; full Xcode matrix, T0/gate and broader-platform coverage not evaluated"
+  fi
 }

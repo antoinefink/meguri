@@ -5,6 +5,7 @@
 # usage: xcode_project_check.sh <work dir> [--phase builds|devices [--continue-from N]]
 #          [--iphone UDID] [--ipad UDID] [--no-ui] [--cloud-signing-matrix]
 #          [--vm-ssh <wrapper> --vm-name <name> | --no-sims]
+#          [--mac-unit-only] (fixed MG devices routing only)
 #
 # Builds every configuration for the Mac and the iPhone and iPad simulators
 # into <work dir>/DerivedData and checks build settings, zero warnings, the
@@ -52,6 +53,22 @@ set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 WORK="${1:?usage: xcode_project_check.sh <work dir> [--iphone UDID] [--ipad UDID] [--no-ui]}"
 shift
+# Focused mode is internal routing from MG, never a caller-selected command
+# or test selector. Admit its exact generated shape before any work/helper.
+MAC_UNIT_ONLY=false
+for arg in "$@"; do case "$arg" in --mac-unit-only*) MAC_UNIT_ONLY=true ;; esac; done
+if [ "$MAC_UNIT_ONLY" = true ]; then
+  if [ "$#" -ge 6 ] && [ "$1" = --phase ] && [ "$2" = devices ] &&
+     [ "$3" = --continue-from ] && [ "$4" = 0 ] &&
+     { { [ "$#" -eq 6 ] && [ "$5" = --no-sims ] && [ "$6" = --mac-unit-only ]; } ||
+       { [ "$#" -eq 9 ] && [ "$5" = --vm-ssh ] && [ -n "$6" ] && [[ "$6" != --* ]] &&
+         [ "$7" = --vm-name ] && [ -n "$8" ] && [[ "$8" != --* ]] && [ "$9" = --mac-unit-only ]; }; }; then
+    :
+  else
+    echo "xcode_project_check: --mac-unit-only requires fixed MG VM/queued devices routing" >&2
+    exit 2
+  fi
+fi
 IPHONE=""
 IPAD=""
 UI=true
@@ -70,6 +87,7 @@ while [ "$#" -gt 0 ]; do
     --vm-name) VM_NAME="${2:?}" && shift ;;
     --no-sims) SIMS=false ;;
     --cloud-signing-matrix) CLOUD_SIGNING_MATRIX=true ;;
+    --mac-unit-only) ;;
     --phase)
       case "${2:-}" in builds | devices) PHASE="$2" ;; *) echo "xcode_project_check: --phase takes builds or devices" >&2 && exit 2 ;; esac
       shift
@@ -121,8 +139,8 @@ check() { # check <name> <command...>: ok when the command succeeds; its output 
   shift
   if out="$("$@" 2>&1)"; then ok "$name"; else not_ok "$name" "${out:-exit $?}"; fi
 }
-builds_phase() { [ "$PHASE" != devices ]; }
-devices_phase() { [ "$PHASE" != builds ]; }
+builds_phase() { [ "$MAC_UNIT_ONLY" = false ] && [ "$PHASE" != devices ]; }
+devices_phase() { [ "$MAC_UNIT_ONLY" = false ] && [ "$PHASE" != builds ]; }
 # Written by the builds phase when mac-Debug built: the devices phase
 # launches that app.
 MAC_DEBUG_BUILT="$WORK/mac-debug-built"
@@ -156,6 +174,7 @@ cleanup() {
   for udid in ${LEASED[@]+"${LEASED[@]}"}; do
     "$POOL" release "$udid" >&2
   done
+  [ "$MAC_UNIT_ONLY" = false ] || return 0
   forget_mac_app Release
   forget_mac_app AppStore
   rm -f "$REPO/app/Meguri/App/SyncedFolderProbe"*.swift
@@ -346,7 +365,9 @@ routes_from_source() {
   [ -n "$routes" ] || { echo "no route registration in $dir" && return 1; }
   echo "$routes"
 }
-if ! builds_phase; then
+if [ "$MAC_UNIT_ONLY" = true ]; then
+  ROUTES=""
+elif ! builds_phase; then
   ROUTES="$(routes_from_source 2>/dev/null)" || ROUTES=""
 elif ROUTES="$(routes_from_source 2>&1)"; then
   ok "test-hook routes are registered with literal paths: ${ROUTES//$'\n'/ }"
@@ -1069,7 +1090,9 @@ if devices_phase; then
   [ -z "$IPAD" ] || build "ipad-Debug" Debug "$(sim_dest "$IPAD")"
 fi
 
-if devices_phase && [ "$UI" = true ]; then
+if [ "$MAC_UNIT_ONLY" = true ]; then
+  run_tests mac-unit Meguri Unit Debug "platform=macOS,arch=arm64"
+elif devices_phase && [ "$UI" = true ]; then
   run_tests mac-unit Meguri Unit Debug "platform=macOS,arch=arm64"
   run_tests mac-app-hosted Meguri Snapshot Debug "platform=macOS,arch=arm64"
   # Mac XCUITest takes over the cursor and keyboard: it runs only through
