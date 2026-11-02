@@ -149,3 +149,91 @@ impl Pair {
         self.sender.close_clean().unwrap();
     }
 }
+
+pub fn assert_replay_convergence(pair: &mut Pair, binding: meguri_sync::cloud::BindingId) {
+    let expected = notes(&mut pair.receiver);
+    for _ in 0..2 {
+        pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+        pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    }
+    assert_eq!(notes(&mut pair.receiver), expected);
+    assert_eq!(notes(&mut pair.sender), expected);
+    assert!(pair.receiver.driver().apply_intents(binding).unwrap().is_empty());
+    assert!(pair.receiver.driver().inbox_entries(binding).unwrap().is_empty());
+    let files = pair.receiver.driver().media_files().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files["photo.jpg"], REMOTE);
+    assert_eq!(files[&hash_name()], LOCAL);
+    assert_eq!(pair.sender.driver().media_files().unwrap(), files);
+    assert_eq!(
+        pair.receiver.driver().media_rows().unwrap(),
+        pair.sender.driver().media_rows().unwrap()
+    );
+
+    let facts = pair.receiver.facts().unwrap();
+    let key = facts.current.as_ref().unwrap().facts.record_key.0;
+    let database = pair.service.inspect(&scope()).unwrap().unwrap();
+    let zone = &database.zones[&pair.receiver.collection_zone().unwrap()];
+    let mut rows: Vec<_> = expected.into_iter().map(Payload::Note).collect();
+    rows.extend(pair.receiver.driver().media_rows().unwrap());
+    for row in rows {
+        let name = codec::entity_name(
+            &key,
+            row.kind(),
+            &meguri_sync::cloud::row_payload::payload_key(&row).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(facts.entities[&name].payload, row);
+        assert!(facts.entities[&name].tombstone_at.is_none());
+    }
+    // Match durable acknowledgements to real Service versions, including any
+    // deleted note. A cleared dirty mark alone cannot satisfy this witness.
+    for entity in facts
+        .entities
+        .values()
+        .filter(|entity| matches!(entity.kind, codec::Kind::Note | codec::Kind::MediaName))
+    {
+        let record = &zone.records[&entity.name];
+        let meguri_testkit::cloud::Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+            panic!("expected an actual encrypted Service entity")
+        };
+        let received = codec::receive(&key, &entity.name, envelope, codec::AssetInput::Absent).unwrap();
+        assert_eq!(received.entity.fields.tombstone, entity.tombstone_at.is_some());
+        if entity.tombstone_at.is_none() {
+            assert_eq!(received.payload.as_ref(), Some(&entity.payload));
+        }
+        assert_eq!(entity.acked_envelope.0, *envelope);
+        assert_eq!(entity.acked_system_fields, record.system_fields.bytes());
+        assert_eq!(entity.server_erev, received.entity.fields.erev);
+        assert!(entity.acked_rev > 0);
+        assert_eq!(entity.local_rev, entity.acked_rev);
+        assert!(entity.mark.is_none());
+    }
+    let moved_name = codec::entity_name(&key, codec::Kind::MediaName, hash_name().as_bytes()).unwrap();
+    assert_eq!(
+        facts
+            .entities
+            .values()
+            .filter(|entity| matches!(&entity.payload,
+                Payload::MediaName(media) if media.name == hash_name().as_bytes()))
+            .count(),
+        1
+    );
+    let mut moved_versions = 0;
+    for change in &zone.changes {
+        use meguri_testkit::cloud::{Field, RecordChange};
+        match &change.change {
+            RecordChange::Saved(record) if record.name == moved_name => {
+                let Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+                    panic!("expected an actual encrypted Service version")
+                };
+                let received = codec::receive(&key, &moved_name, envelope, codec::AssetInput::Absent).unwrap();
+                assert!(!received.entity.fields.tombstone);
+                moved_versions += 1;
+            }
+            RecordChange::Deleted { name, .. } => assert_ne!(name, &moved_name),
+            _ => {}
+        }
+    }
+    assert!(moved_versions > 0);
+}

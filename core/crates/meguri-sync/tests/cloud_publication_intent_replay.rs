@@ -1,12 +1,11 @@
-//! Tests FIRST: all four Q11 K15.9/K9.3/K10.3 move/rewrite replay variants.
-//! Enabled missing-path RED. Root extracts, reviews, observes RED and commits
-//! this target and support/publication_incoming.rs BEFORE production application.
-//! Additional Point values below must gate actual source-process work. They
-//! must never be implemented by advancing a rig-owned model or clearing rows.
+//! Q11 K15.9/K9.3/K10.3 move/rewrite replay witnesses over actual child work.
 #[path = "support/publication_incoming.rs"]
 mod support;
 
-use meguri_sync::cloud::{BindingId, entity_codec::Payload};
+use meguri_sync::cloud::{
+    BindingId,
+    entity_codec::{self as codec, Payload},
+};
 use meguri_testkit::cloud::coordinator::Point;
 use support::*;
 
@@ -189,6 +188,146 @@ fn q11_kill_after_rerun_commit_settles_recorded_digests_without_a_third_run() {
     assert!(!pair.receiver.is_held(Point::ResolutionRewriteCommitted));
     assert_eq!(notes(&mut pair.receiver), rewritten);
     assert_finished(&mut pair, binding);
+    pair.close();
+}
+
+#[test]
+fn q11_kill_after_rewrite_with_download_held_keeps_intervening_edit_without_rewrite() {
+    let (mut pair, binding) = conflict(Point::ResolutionRewriteCommitted, false);
+    let rewritten = notes(&mut pair.receiver);
+    assert!(rewritten.len() >= 2);
+    for note in &rewritten {
+        assert_eq!(
+            note.flds,
+            format!("<img src=\"{}\">\x1flocal back", hash_name()).as_bytes()
+        );
+    }
+    // This is the real download callback, paused after the note COMMIT and
+    // before installing its staged bytes under the incoming name.
+    let intents = pair.receiver.driver().apply_intents(binding).unwrap();
+    let staged = intents[0].media.as_ref().unwrap().staged.as_ref().unwrap();
+    assert_eq!(std::fs::read(staged).unwrap(), REMOTE);
+    let files = pair.receiver.driver().media_files().unwrap();
+    assert_eq!(files[&hash_name()], LOCAL);
+    assert!(!files.contains_key("photo.jpg"));
+    let killed = pair.receiver.kill().unwrap();
+    assert_eq!(killed.signal, Some(libc::SIGKILL));
+    assert!(!killed.clean_close);
+
+    pair.reopen_before_identity();
+    assert_eq!(notes(&mut pair.receiver), rewritten);
+    let edited_id = rewritten[0].id;
+    let front = format!("synthetic edit after crash <img src=\"{}\">", hash_name());
+    pair.receiver
+        .driver()
+        .edit_note_fields(edited_id, &[&front, "synthetic changed back"])
+        .unwrap();
+    let edited = notes(&mut pair.receiver);
+    assert_eq!(
+        edited.iter().find(|note| note.id == edited_id).unwrap().flds,
+        format!("{front}\x1fsynthetic changed back").as_bytes()
+    );
+    let before = pair.receiver.driver().incoming_observation(binding).unwrap();
+    pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
+    pair.receiver.hold(Point::IntentSettlementComplete).unwrap();
+    pair.verify_and_drive();
+    assert!(pair.receiver.is_held(Point::IntentSettlementComplete));
+    assert!(!pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_eq!(notes(&mut pair.receiver), edited);
+    assert_eq!(
+        pair.receiver.driver().incoming_observation(binding).unwrap().seq,
+        before.seq
+    );
+    assert!(pair.receiver.driver().apply_intents(binding).unwrap().is_empty());
+    let facts = pair.receiver.facts().unwrap();
+    let moved = facts
+        .entities
+        .values()
+        .find(|entity| matches!(&entity.payload, Payload::MediaName(media) if media.name == hash_name().as_bytes()))
+        .unwrap();
+    assert!(moved.tombstone_at.is_none());
+    pair.receiver.release(Point::IntentSettlementComplete).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_replay_convergence(&mut pair, binding);
+    assert!(!pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_eq!(notes(&mut pair.receiver), edited);
+    pair.close();
+}
+
+#[test]
+fn q11_deleted_note_key_is_skipped_while_replay_reruns_surviving_notes() {
+    let (mut pair, binding) = conflict(Point::ResolutionMoveBeforeRewrite, true);
+    let planned = pair.receiver.driver().apply_intents(binding).unwrap();
+    let killed = pair.receiver.kill().unwrap();
+    assert_eq!(killed.signal, Some(libc::SIGKILL));
+    assert!(!killed.clean_close);
+    pair.reopen_before_identity();
+    let rows = notes(&mut pair.receiver);
+    assert!(rows.len() >= 2);
+    let deleted_id = rows[0].id;
+    assert!(
+        planned[0]
+            .keys
+            .iter()
+            .any(|key| key.kind == codec::Kind::Note && key.key == deleted_id.to_be_bytes())
+    );
+    pair.receiver.driver().delete_note(deleted_id).unwrap();
+    let surviving = notes(&mut pair.receiver);
+    assert_eq!(surviving.len(), rows.len() - 1);
+    assert!(surviving.iter().all(|note| note.id != deleted_id));
+    for note in &surviving {
+        let front = format!("row {} <img src=\"photo.jpg\"><img src=\"{}\">", note.id, hash_name());
+        pair.receiver
+            .driver()
+            .edit_note_fields(note.id, &[&front, "tail"])
+            .unwrap();
+    }
+    assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap(), planned);
+    pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
+    pair.verify_and_drive();
+    assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    let rewritten = notes(&mut pair.receiver);
+    assert_eq!(
+        rewritten.iter().map(|note| note.id).collect::<Vec<_>>(),
+        surviving.iter().map(|note| note.id).collect::<Vec<_>>()
+    );
+    for note in &rewritten {
+        assert_eq!(
+            note.flds,
+            format!(
+                "row {} <img src=\"{}\"><img src=\"{}\">\x1ftail",
+                note.id,
+                hash_name(),
+                hash_name()
+            )
+            .as_bytes()
+        );
+    }
+    let pending = pair.receiver.driver().apply_intents(binding).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, planned[0].id);
+    let media = pending[0].media.as_ref().unwrap();
+    assert_eq!(media.incoming, planned[0].media.as_ref().unwrap().incoming);
+    assert_eq!(std::fs::read(media.staged.as_ref().unwrap()).unwrap(), REMOTE);
+    pair.receiver.release(Point::ResolutionRewriteCommitted).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_finished(&mut pair, binding);
+    assert_replay_convergence(&mut pair, binding);
+    assert_eq!(notes(&mut pair.receiver), rewritten);
+    let facts = pair.receiver.facts().unwrap();
+    let deleted = facts
+        .entities
+        .values()
+        .find(|entity| matches!(&entity.payload, Payload::Note(note) if note.id == deleted_id))
+        .unwrap();
+    assert!(deleted.tombstone_at.is_some());
+    for rig in [&mut pair.receiver, &mut pair.sender] {
+        assert!(!rig.driver().collection_rows().unwrap().iter().any(|row| match row {
+            Payload::Note(note) => note.id == deleted_id,
+            Payload::Card(card) => card.nid == deleted_id,
+            _ => false,
+        }));
+    }
     pair.close();
 }
 
