@@ -34,3 +34,17 @@ cleanroom/20261102T135550Z-27512 reads i64 and checks conversion; independent
 review found no required finding. After that fix,
 core-test/20261102T135755Z-29493 passed all three selected storage/FFI tests,
 with no skips. This is local generated-data proof, not CloudKit execution.
+
+Independent reviewer cloud_smoke_review reported P1, the
+coreOpened shape mismatch above; P2, missing actual SDK/state-save ordering
+and outgoing review hold-back evidence. The explicit completion Missing fence
+also remains open. A filtered shared repair is in progress; no SDK run starts
+before independent re-review.
+
+On clean b139641a, focused checks pass:
+selftest/20261102T140138Z-34631 (3/3 host wrappers),
+swift-test/20261102T140139Z-34902 (1/1 real bridge inspection),
+swift-test/20261102T140336Z-38293 (41/41 protocol/product tests), and
+build-app/20261102T140512Z-40625 (Mac Debug CloudAgent compile only).
+No test skips are reported in these focused results. The Mac build does not
+launch the test host, prove signing or exercise CloudKit.
