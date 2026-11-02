@@ -49,6 +49,12 @@ setup() {
 MG_SIM_RUNNER=vm
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
+# Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
+# the real preparation helper with generated descriptors/command doubles.
+mg_app_cloud_agent_build() {
+  echo cloud-agent-prepare >>"$STUB_LOG"
+  xcodebuild "$@"
+}
 mg_host_lease() { echo "host-lease $*" >>"$STUB_LOG"; [ "$*" = --no-session ]; }
 mg_sim_begin() { echo sim-begin >>"$STUB_LOG"; MG_SIM_RUNNER=vm; }
 mg_sim_check_given() { echo "sim-check $*" >>"$STUB_LOG"; }
@@ -188,6 +194,11 @@ EOF
       called '^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/DerivedData '
       [ "$(field .details.build.test_plan)" = CloudAgent ]
       [ "$(field .details.build.action)" = build-for-testing ]
+      if [ "$platform" = mac ]; then
+        called '^cloud-agent-prepare$'
+      else
+        not_called '^cloud-agent-prepare$'
+      fi
       not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
     done
   done

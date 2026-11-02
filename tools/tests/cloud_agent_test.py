@@ -601,6 +601,23 @@ class AdmissionTests(unittest.TestCase):
                     agent.build_product(str(self.root), self.build, self.expected)
                 self.inject_library.write_bytes(original)
 
+    def test_final_freeze_binds_generated_nested_and_outer_signature_bytes(self):
+        # Byte markers exercise inventory timing, never simulate valid signing.
+        self.inject_library.write_bytes(b"generated-copy-plus-final-nested-signature")
+        signature = self.product / "Contents/_CodeSignature/CodeResources"
+        signature.parent.mkdir(parents=True, exist_ok=True)
+        signature.write_bytes(b"generated-final-outer-signature")
+        frozen = self.refresh_manifest()
+        entries = frozen["products"]["entries"]
+        for path in (self.inject_library, signature):
+            entry = entries[str(path.relative_to(self.products))]
+            self.assertEqual(entry["sha256"], agent.digest(path.read_bytes()))
+            original = path.read_bytes()
+            path.write_bytes(original + b"post-freeze-change")
+            with self.assertRaisesRegex(agent.Refused, "^product-inventory$"):
+                agent.build_product(str(self.root), self.build, self.expected)
+            path.write_bytes(original)
+
     def test_captured_embedded_loader_library_is_required(self):
         for lane in ("mac", "sim"):
             with self.subTest(lane=lane):

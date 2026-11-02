@@ -926,38 +926,47 @@ mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
             wrapper.close()
 
 
+@contextlib.contextmanager
+def selected_source(private):
+    """Hold the verified OS-selected Xcode authority through a local consumer."""
+    need(type(private) is Directory)
+    s = os.fstat(private.fd)
+    need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+    env = dict(os.environ)
+    for key in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"):
+        env.pop(key, None)
+
+    def selection():
+        _, raw = command(["/usr/bin/xcode-select", "-p"], env=env)
+        path = raw.decode().strip()
+        need(path.endswith(".app/Contents/Developer") and os.path.realpath(path) == path)
+        return path
+
+    selected = selection()
+    with Directory(selected) as developer, \
+            Directory(selected[:-len("/Contents/Developer")]) as bundle:
+        authority = InstalledSource(bundle)
+        authority.identity = authority.system_identity()
+        authority.check()
+        root = os.fstat(bundle.fd)
+        entry_mode(stat.S_IMODE(root.st_mode), False, installed_source=authority, metadata=root)
+        # Retain the original binding/authority even when facts() refuses.
+        write_new(private, "source-check.json", {
+            "selected": selected, "bundle": bundle.path, "bundle_pins": bundle.check(),
+            "developer_pins": developer.check(), "authority": authority.identity})
+        facts(bundle, source_diagnostics=private)
+        yield developer, bundle, authority
+        need(selection() == selected)
+        developer.check()
+        authority.check()
+
+
 def check_source(context):
     # A fresh derived host selection only: no supplied bundle, route or facts.
     need(set(context) == {"private"})
     with Directory(context["private"]) as private:
-        s = os.fstat(private.fd)
-        need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
-        env = dict(os.environ)
-        for key in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"):
-            env.pop(key, None)
-
-        def selection():
-            _, raw = command(["/usr/bin/xcode-select", "-p"], env=env)
-            path = raw.decode().strip()
-            need(path.endswith(".app/Contents/Developer") and os.path.realpath(path) == path)
-            return path
-
-        selected = selection()
-        with Directory(selected) as developer, \
-                Directory(selected[:-len("/Contents/Developer")]) as bundle:
-            authority = InstalledSource(bundle)
-            authority.identity = authority.system_identity()
-            authority.check()
-            root = os.fstat(bundle.fd)
-            entry_mode(stat.S_IMODE(root.st_mode), False, installed_source=authority, metadata=root)
-            # Retain the original binding/authority even when facts() refuses.
-            write_new(private, "source-check.json", {
-                "selected": selected, "bundle": bundle.path, "bundle_pins": bundle.check(),
-                "developer_pins": developer.check(), "authority": authority.identity})
-            facts(bundle, source_diagnostics=private)
-            need(selection() == selected)
-            developer.check()
-            authority.check()
+        with selected_source(private):
+            pass
         print(json.dumps({"scope": SOURCE_SCOPE, "outcome": "source-checked",
                           "checks": {"source_facts": True, "source_signature": True,
                                      "source_binding": True, "source_authority": True}}))

@@ -5,6 +5,21 @@ PRODUCT_NAME = Meguri
 PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
 
+// Only tools/mg's explicit Mac Debug CloudAgent build enables this input.
+// Standard CopyFiles source filtering also applies to direct ordinary builds.
+MEGURI_CLOUD_AGENT_INJECTION = NO
+MEGURI_CLOUD_AGENT_INJECTION_DIR = $(DERIVED_FILE_DIR)/MeguriCloudAgentDisabled
+MEGURI_CLOUD_AGENT_EMBED = NO
+MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=macosx*] = $(MEGURI_CLOUD_AGENT_INJECTION)
+MEGURI_CLOUD_AGENT_EXCLUDE_NO = libXCTestBundleInject.dylib
+MEGURI_CLOUD_AGENT_EXCLUDE_YES =
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_CLOUD_AGENT_EXCLUDE_$(MEGURI_CLOUD_AGENT_EMBED))
+// Declare the disabled cleanup's exact sandbox write. When CopyFiles owns
+// the library output, the cleanup phase does no writing and declares a marker.
+MEGURI_CLOUD_AGENT_CLEANUP_NO = libXCTestBundleInject.dylib
+MEGURI_CLOUD_AGENT_CLEANUP_YES = .meguri-cloud-agent-cleanup-unused
+MEGURI_CLOUD_AGENT_CLEANUP = $(MEGURI_CLOUD_AGENT_CLEANUP_$(MEGURI_CLOUD_AGENT_EMBED))
+
 // Info.plist: the generated keys merged into the per-platform file, which
 // holds the keys other areas rely on (R499, R1629, KTD12), the `meguri` URL
 // scheme (R319; never `anki`, R321) and, on iOS, the one-scene manifest (R7).

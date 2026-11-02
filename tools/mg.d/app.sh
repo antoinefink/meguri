@@ -65,12 +65,18 @@ mg_app_build() {
   mg_app_build_action build-for-testing "$@"
 }
 
+# Only the explicit native-test build caller selects this preparation boundary.
+mg_app_cloud_agent_build() {
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-injection.py" --build "$MG_RUN_DIR" \
+    "$(mg_app_products mac Debug)/Meguri.app/Contents/Frameworks" -- "$@"
+}
+
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
 # Only explicit preview actions select build; no ambient switch changes callers.
 mg_app_build_action() {
   local action="$1" standalone_arg="" plan_arg="" personal=false test_args=()
   shift
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(xcodebuild)
   case "$action" in
     build)
       standalone_arg=" --standalone"
@@ -151,11 +157,14 @@ mg_app_build_action() {
   if [ "$platform" = mac ]; then
     mg_app_remove_embedded_widget "$config" || return 1
   fi
+  if [ "$action" = build-for-testing ] && [ "$platform/$config/$plan/$scheme" = mac/Debug/CloudAgent/Meguri ]; then
+    build_command=(mg_app_cloud_agent_build)
+  fi
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"
   echo "$MG_JOB: xcodebuild $action ($platform, $config)" >&2
-  xcodebuild "$action" -project app/Meguri.xcodeproj -scheme "$scheme" ${test_args[0]+"${test_args[@]}"} -configuration "$config" \
+  "${build_command[@]}" "$action" -project app/Meguri.xcodeproj -scheme "$scheme" ${test_args[0]+"${test_args[@]}"} -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" ${settings[0]+"${settings[@]}"} >"$log" 2>&1
   rc=$?
   mg_artifact log "$log" "xcodebuild $action ($platform, $config)"

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4D4547555249000000000114 /* libXCTestBundleInject.dylib in Embed CloudAgent injection */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000025 /* libXCTestBundleInject.dylib */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
 		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
 		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -41,6 +42,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		4D4547555249000000000107 /* Embed CloudAgent injection */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				4D4547555249000000000114 /* libXCTestBundleInject.dylib in Embed CloudAgent injection */,
+			);
+			name = "Embed CloudAgent injection";
+		};
 		4D4547555249000000000105 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			dstPath = "";
@@ -53,6 +63,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		4D4547555249000000000025 /* libXCTestBundleInject.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libXCTestBundleInject.dylib; path = "$(MEGURI_CLOUD_AGENT_INJECTION_DIR)/libXCTestBundleInject.dylib"; sourceTree = "<absolute>"; };
 		4D4547555249000000000020 /* Meguri.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Meguri.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4547555249000000000021 /* MeguriWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeguriWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4547555249000000000022 /* MeguriUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeguriUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -173,6 +184,7 @@
 				4D4547555249000000000011 /* MeguriWidget */,
 				4D4547555249000000000012 /* MeguriUITests */,
 				4D4547555249000000000024 /* MeguriBuildUnderTest */,
+				4D4547555249000000000025 /* libXCTestBundleInject.dylib */,
 				4D4547555249000000000013 /* MeguriSnapshotTests */,
 				4D4547555249000000000018 /* CloudKitAgentSupport */,
 				4D4547555249000000000003 /* Products */,
@@ -228,6 +240,8 @@
 				4D4547555249000000000103 /* Frameworks */,
 				4D4547555249000000000104 /* Resources */,
 				4D4547555249000000000105 /* Embed Foundation Extensions */,
+				4D4547555249000000000106 /* Exclude stale CloudAgent injection */,
+				4D4547555249000000000107 /* Embed CloudAgent injection */,
 			);
 			buildRules = (
 			);
@@ -398,6 +412,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		4D4547555249000000000106 /* Exclude stale CloudAgent injection */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			inputPaths = (
+				"$(SRCROOT)/../tools/scripts/cloud-agent-injection.py",
+				"$(SRCROOT)/../tools/scripts/vm-xcode-stage.py",
+			);
+			name = "Exclude stale CloudAgent injection";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/$(MEGURI_CLOUD_AGENT_CLEANUP)",
+			);
+			shellPath = /bin/bash;
+			shellScript = "python3 -B -I \"${SRCROOT}/../tools/scripts/cloud-agent-injection.py\" --cleanup\n";
+			showEnvVarsInLog = 0;
+		};
 		4D4547555249000000000101 /* Check core configuration */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
