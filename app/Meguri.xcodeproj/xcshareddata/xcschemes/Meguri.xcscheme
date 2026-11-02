@@ -58,6 +58,9 @@
          <TestPlanReference
             reference = "container:TestPlans/Snapshot.xctestplan">
          </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/CloudAgent.xctestplan">
+         </TestPlanReference>
       </TestPlans>
    </TestAction>
    <LaunchAction

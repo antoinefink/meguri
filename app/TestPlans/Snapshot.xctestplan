@@ -22,7 +22,10 @@
         "containerPath" : "container:Meguri.xcodeproj",
         "identifier" : "4D4547555249000000000400",
         "name" : "MeguriSnapshotTests"
-      }
+      },
+      "skippedTests" : [
+        "CloudKitSoakTests"
+      ]
     }
   ],
   "version" : 1
