@@ -80,3 +80,20 @@ Darwin FD identity case. Independent comparison clears privacy rewrite18901;
 only test-local names/prose change. Format21447 and privacy21733 pass.
 Lint21993 finds one type-complexity diagnostic in the C12 service helper;
 that source cleanup remains required. No lint suppression is permitted.
+
+Filtered22490 names the existing tuple with a private alias. Independent
+review confirms identical representation and behavior with no suppression.
+Core-lint53959 then passes4/4 and privacy54419 passes. Final rewritten
+regression22763 passes1/1. Static22858 passes3/3 against the original batch
+base; similarity23238 passes11 code files with no flags or exceptions.
+
+Team-signed standalone Mac build31742 passes with no warnings or errors;
+signature, cloud configuration, app/widget architecture and normal sandbox
+checks pass. It contains source0798da7f, before the equivalent alias cleanup.
+Xcode MCP stops the older debugged copy. CUA launches exactly that new product,
+but cannot capture a window. Doctor54708 confirms host-session is missing:
+the Mac is locked or its display is asleep. A bounded app-only stack sample
+shows a normal idle main event loop; it establishes no repaired reopen result.
+The operator has been asked to unlock the Mac for direct visual verification.
+No manual journal reset, collection replacement or security bypass occurred.
+Actual user-collection reopen and real CloudKit network proof remain unverified.

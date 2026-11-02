@@ -2965,16 +2965,13 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
     }
 }
 
-fn native_binding(
-    c: &Collection,
-) -> Result<
-    (
-        (u64, u64),
-        meguri_storage::persistent_identity::PersistentIdentity,
-        [u64; 2],
-    ),
-    EngineError,
-> {
+type NativeBinding = (
+    (u64, u64),
+    meguri_storage::persistent_identity::PersistentIdentity,
+    [u64; 2],
+);
+
+fn native_binding(c: &Collection) -> Result<NativeBinding, EngineError> {
     c.core
         .exec
         .control(crate::suspend::Control::ReviewIdentity)
