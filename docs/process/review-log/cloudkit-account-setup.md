@@ -30,3 +30,12 @@ No signed execution, unit acceptance or owner action is claimed.
 
 Integration renames generated test/local names and removes a redundant comment
 after the privacy findings. Assertions, operator input and control flow stay.
+
+Repair95512 permits the required standalone type import while retaining checks
+against runtime and database construction. Independent review found no required
+repair. Privacy99391 passes. Selftest/20261102T161855Z-99389 passes all22
+focused owner and signed-agent wrappers, zero skips. Mac CloudAgent compile
+build-app/20261102T161521Z-96048 passes on23ceb29d, compile-only.
+The separate startup predicate executes in the VM at
+mac-hosted-test/20261102T162208Z-2868: one pass, zero skips or failures.
+No owner setup utility, account approval or native CloudKit lookup was invoked.

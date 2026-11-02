@@ -73,3 +73,30 @@ Source-check design, exact signature predicate, staging and join behavior stay
 unchanged. One source consistency pass only; no tests, native source checks,
 builds, VM, SDK or account operations run here. Root owns independent re-review,
 focused tests and the read-only actual source check; no verification pass claimed.
+
+Independent re-review accepts the bounded diagnostic repair88807. Its first
+Docker selftest94432 failed six new Python cases because simulated Darwin
+selection also selected a Darwin-only publication primitive on Linux. Repair
+98136 keeps the actual OS publication primitive and all admission assertions.
+
+Original source-only check95765 retained codesign exit1 for a missing
+requirement file. Apple's local codesign documentation requires a leading
+equals sign for literal source.
+Repair98136 changes only the argument to `=anchor apple`, preserving the
+expression and deep, strict and all-architecture verification. All exact argv
+assertions match. Independent review found no required repair. Privacy152 passes.
+
+On cleanf6e0b036, selftest/20261102T161929Z-563 passes12/12 wrappers,
+including57 generated Python cases. Actual source-only check
+vm-xcode-stage/20261102T161931Z-998 exits3: integrity checks succeeded but the
+explicit Apple-anchor requirement did not. This is distinct from the earlier
+argument error. No VM probe, copy, lease or activation occurred in either
+source-only run. Original output stays private and bounded.
+
+Independent review found no Apple primary source supporting a replacement
+publisher identity pin. A generic Apple anchor admits other publishers; the
+observed bundle identifier, team and self-designated requirement alone do not
+establish publisher authority. Staging remains refused with its guards intact.
+Ordinary generated app-hosted tests can still run on the existing VM toolchain;
+they do not satisfy the stricter signed-lane toolchain requirement.
+References: Apple TN3127, TN3161 and DTS forum thread694904.

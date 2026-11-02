@@ -100,3 +100,17 @@ selftest/20261102T151720Z-78500 passed all 3 selected host wrappers and
 swift-test/20261102T151719Z-78108 passed 60/60 coordinator, presentation,
 protocol and running-product tests, no skips. App-hosted evidence tests and
 actual signed execution remain unrun.
+
+On cleanf6e0b036, all11 CloudKitSmokeObservationTests execute as separate
+focused app-hosted VM checks with one pass and zero skips/failures each:
+4281,33328,34734,36373,37770,39151,40557,41947,43408,44804,46282
+(mac-hosted-test/20261102T16*). They cover exact current ACK revisions and
+blob proof, generated media blocks, original operation phases, typed media-root
+conflicts, actual callback ordering checks, zero batch admission, held images
+and ACK/batch/returned-state linkage. These tests supply generated observations;
+none is a live SDK publication or real account proof.
+
+Static-checks/20261102T162332Z-5554 passes3/3 at the original batch base.
+Similarity/20261102T162335Z-6474 scans708 files with zero flags and zero
+allowlisted matches. The original failed full gate remains open; no Unit
+trailer, milestone acceptance or signed-smoke pass is added.
