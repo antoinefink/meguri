@@ -34,6 +34,10 @@ DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 SHUTDOWN = 10
 COPY_WAIT = 3600
+COPY_CWD_SOURCE = '''import os, sys
+os.fchdir(int(sys.argv[1]))
+os.execv("/bin/bash", ["/bin/bash", "-c", sys.argv[2], "vm-xcode-copy"] + sys.argv[3:])
+'''
 
 
 class Refused(Exception):
@@ -881,7 +885,6 @@ class VM:
 
     def copy(self, bundle, context, on_join=lambda: None, *, copy_diagnostics=None):
         self.check()
-        source = "/dev/fd/" + str(bundle.fd) + "/."
         dest = context["state"]["root"] + "/" + context["state"]["work"] + "/Xcode.app"
         # mvl_copy_to supplies the original symlink-preserving tar producer.
         # Its exact remote preamble is checked, NEVER evaluated. The only SSH
@@ -899,9 +902,11 @@ mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
 '''
         local_uncertain = False
         try:
-            command(["/bin/bash", "-c", shell, "vm-xcode-copy",
+            # Darwin tar cannot chdir via /dev/fd/N. Enter the original inherited
+            # bundle descriptor in the child, then exec within its owned session.
+            command([sys.executable, "-B", "-I", "-c", COPY_CWD_SOURCE, str(bundle.fd), shell,
                      str(Path(__file__).with_name("mac-vm-lib.sh")), self.ssh,
-                     self.guest_command("receive", context), source, dest],
+                     self.guest_command("receive", context), ".", dest],
                     pass_fds=(bundle.fd,), timeout=COPY_WAIT, copy_diagnostics=copy_diagnostics)
         except Uncertain:
             local_uncertain = True

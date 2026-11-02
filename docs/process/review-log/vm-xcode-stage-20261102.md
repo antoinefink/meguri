@@ -140,3 +140,15 @@ zero skips; privacy50076 passes. Earlier selftest49432 could not reach Docker
 inside the restricted command sandbox and ran zero tests. The authorized
 OrbStack run49837 supplies the focused evidence. Actual failure diagnosis under
 this correction remains pending.
+
+Native diagnostic50823 then retains copy exit1. Its bounded original stderr
+identifies tar failing to enter the inherited directory via `/dev/fd/N`.
+Both original joins and lease-safe evidence are present. This identifies the
+producer failure without claiming activation or weakening source admission.
+
+Filtered implementer264d export80424 enters the original inherited directory
+descriptor in an isolated Python child, then executes the unchanged copy shell
+from `.` in that same process and session. The parent working directory,
+receiver preamble, original source pins, signature checks and joins stay intact.
+Independent review found no required repair. Selftest83320 passes12/12 wrappers,
+zero skips; privacy83571 passes. Actual staging under this repair remains unrun.

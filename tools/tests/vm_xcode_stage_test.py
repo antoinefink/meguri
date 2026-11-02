@@ -850,8 +850,11 @@ class Staging(unittest.TestCase):
 
             def __init__(self, argv, **kwargs):
                 self.returncode = None
-                test.assertEqual(argv[:2], ["/bin/bash", "-c"])
-                test.assertEqual(argv[3], "vm-xcode-copy")
+                test.assertEqual(argv[:5], [sys.executable, "-B", "-I", "-c", m.COPY_CWD_SOURCE])
+                test.assertEqual(kwargs["pass_fds"], (int(argv[5]),))
+                test.assertEqual(m.pin(os.fstat(int(argv[5]))), m.pin(test.source.stat()))
+                test.assertEqual(argv[-2:], [".", str(test.root / "generated-work/Xcode.app")])
+                test.assertTrue(kwargs["start_new_session"])
                 for name, raw in streams.items():
                     kwargs[name].write(raw)
                     kwargs[name].flush()
@@ -896,7 +899,7 @@ class Staging(unittest.TestCase):
                 events.append("close")
 
         def dispatch(argv, **kwargs):
-            if argv[:2] == ["/bin/bash", "-c"]:
+            if argv[:4] == [sys.executable, "-B", "-I", "-c"]:
                 test.assertIs(type(kwargs.get("copy_diagnostics")), m.Directory)
                 test.assertEqual(kwargs["copy_diagnostics"].path, str(private))
                 return self.real_command(argv, **kwargs)
@@ -1194,6 +1197,77 @@ class Staging(unittest.TestCase):
 
 
 class Transport(unittest.TestCase):
+    def copy_command(self, bundle):
+        vm = m.VM.__new__(m.VM)
+        vm.ssh, vm.check = "/generated/ssh", lambda: None
+        vm.guest_command = lambda *args: "generated-receiver"
+        state = {"root": "/generated/applications", "work": "work", "receiver": "generated-token"}
+        with patch.object(m, "command", return_value=(0, b"")) as command, \
+                patch.object(vm, "call", return_value={"joined": True, "token": "generated-token", "returncode": 0}) as join:
+            vm.copy(bundle, {"state": state})
+        command.assert_called_once()
+        join.assert_called_once_with("join-receiver", {"state": state})
+        return command.call_args.args[0], command.call_args.kwargs
+
+    def test_copy_producer_argv_inherits_original_fd_and_preserves_receiver_shell(self):
+        shell = r'''
+set -u
+. "$1"
+original_ssh="$2" receiver="$3" source_bundle="$4" destination="$5"
+expected="rm -rf $(mvl_q "$destination/.") && mkdir -p $(mvl_q "$destination") && tar -C $(mvl_q "$destination") -xf -"
+vm_xcode_receiver() {
+  [ "$#" -eq 1 ] && [ "$1" = "$expected" ] || return 1
+  "$original_ssh" "$receiver"
+}
+mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
+'''
+        with tempfile.TemporaryDirectory() as temp, m.Directory(str(Path(temp).resolve())) as bundle:
+            argv, kwargs = self.copy_command(bundle)
+            self.assertEqual(argv, [sys.executable, "-B", "-I", "-c", m.COPY_CWD_SOURCE,
+                                    str(bundle.fd), shell, str(Path(SPEC.origin).with_name("mac-vm-lib.sh")),
+                                    "/generated/ssh", "generated-receiver", ".", "/generated/applications/work/Xcode.app"])
+            self.assertEqual(kwargs, {"pass_fds": (bundle.fd,), "timeout": m.COPY_WAIT, "copy_diagnostics": None})
+
+    def test_copy_cwd_shim_fchdirs_then_execs_fixed_bash_in_same_process(self):
+        events = []
+        arguments = ["-c", "12345", "generated-shell", "generated-library", "generated-ssh",
+                     "generated-receiver", ".", "generated-destination"]
+        with patch.object(sys, "argv", arguments), \
+                patch.object(os, "fchdir", side_effect=lambda fd: events.append(("fchdir", fd))), \
+                patch.object(os, "execv", side_effect=lambda path, argv: events.append(("execv", path, argv))):
+            exec(m.COPY_CWD_SOURCE, {})
+        self.assertEqual(events, [("fchdir", 12345), ("execv", "/bin/bash", [
+            "/bin/bash", "-c", "generated-shell", "vm-xcode-copy", "generated-library", "generated-ssh",
+            "generated-receiver", ".", "generated-destination"])])
+
+    def test_copy_cwd_shim_reads_original_inode_after_path_replacement_without_parent_chdir(self):
+        parent_cwd, parent_pin = os.getcwd(), m.pin(os.stat("."))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            source, original = root / "Source.app", root / "Renamed.app"
+            source.mkdir()
+            (source / "payload").write_text("original generated inode\n")
+            with m.Directory(str(source)) as bundle:
+                argv, kwargs = self.copy_command(bundle)
+                admitted = bundle.fd
+                source.rename(original)
+                source.mkdir()
+                (source / "payload").write_text("replacement generated inode\n")
+                self.assertNotEqual(m.pin(source.stat()), m.pin(os.fstat(admitted)))
+                self.assertEqual(m.pin(original.stat()), m.pin(os.fstat(admitted)))
+                # Replace only the trusted copy shell with a generated builtin-only
+                # cwd probe: no tar, SSH, VM or staging operation is executed.
+                argv[6:] = ['[ . -ef "$1" ] || exit 1\nIFS= read -r payload < ./payload\nprintf "%s\\n%s\\n" "$$" "$payload"',
+                            str(original)]
+                with subprocess.Popen(argv, pass_fds=kwargs["pass_fds"], start_new_session=True,
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                    output, error = child.communicate(timeout=10)
+                    self.assertEqual(child.returncode, 0)
+                    self.assertEqual(error, b"")
+                    self.assertEqual(output.decode().splitlines(), [str(child.pid), "original generated inode"])
+            self.assertEqual(os.getcwd(), parent_cwd)
+            self.assertEqual(m.pin(os.stat(".")), parent_pin)
+
     def test_linked_private_candidates_are_rejected_before_selection_or_vm(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp).resolve()
