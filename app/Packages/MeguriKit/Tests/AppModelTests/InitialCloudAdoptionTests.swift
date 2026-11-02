@@ -738,7 +738,11 @@ extension ReviewCollectionStartupTests {
                 }
             case .resume:
                 try await harness.prepareStoppedResume()
-                configure(try #require(harness.backends.last))
+                let backend = try #require(harness.backends.last)
+                harness.sync.observeResumePolicyDrain = { stage in
+                    guard case .finished = stage else { return }
+                    configure(backend)
+                }
                 observe(harness.sync)
                 original = Task { await harness.sync.confirmResume() }
             }
@@ -768,6 +772,7 @@ extension ReviewCollectionStartupTests {
             }
             backend.beforeExecution = nil; backend.afterExecution = nil
             harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
+            harness.sync.observeResumePolicyDrain = nil
             #expect(await harness.owner.close())
         } catch {
             // Release and join the original command/read, including a failed
@@ -778,6 +783,7 @@ extension ReviewCollectionStartupTests {
             _ = try? await original?.value
             target?.beforeExecution = nil; target?.afterExecution = nil
             harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
+            harness.sync.observeResumePolicyDrain = nil
             await harness.cleanup()
             throw error
         }

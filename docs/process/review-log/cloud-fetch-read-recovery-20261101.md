@@ -216,3 +216,20 @@ Compiler cleanup within the existing round-8 test:
   or repair round and does not address the documented shutdown P2.
 
 Actual regression execution after these compiler corrections remains pending.
+
+## Approved final test-only correction
+
+The isolated native check swift-test/20261102T121644Z-41198 compiled and
+passed 46/47 tests, with no skips. All three original failures passed. The
+remaining new account-proof case failed only in its Resume window: it held
+old status work before Resume while waiting for account-proof drain afterward.
+Independent review identified that test cycle; production ordering is retained.
+
+Antoine explicitly approved one final test-only round. The resolution of
+E-20261102T122155Z-e1eb records the scope. Filtered export
+cleanroom/20261102T123736Z-57870 arms the existing hold at the original
+Resume drain's finished callback and clears it in both cleanup paths. Reopen
+keeps its factory-time hold. All assertions, command identities, counts,
+release/ACK paths, joins and timing limits remain unchanged. Independent
+review found no required finding. No production behavior or shutdown P2 fix
+is included. Focused native execution of the corrected window remains pending.
