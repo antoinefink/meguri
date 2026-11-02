@@ -309,6 +309,8 @@ Antoine approved this 5 ms budget on 2026-10-21 to prioritize instant visible re
 
 One device-only `meguri-pending-answers.jsonl` beside the collection, never inside it or synced. Its versioned header binds a random local incarnation to the canonical collection path and native file identity; capture that identity from the locked open file, not a later path lookup. Normal WAL writes retain it. Controlled file replacement, including maintenance that replaces the file, follows C12.7; a different native identity is not adopted silently. A registered U32 worker owns ordered append, full sync and atomic compaction. Journal **every accepted answer**, not only answers accepted during a published delay. Enqueue its immutable intent before returning Accepted; durable file coverage or a durable database commit must cover every acceptance within 1 second, including late-starting long writes and ordinary queue bursts. UI answer latency remains C9's budget; no file-sync wait occurs on that path.
 
+On Darwin, the durable native identity is the filesystem volume UUID (16 bytes, not all zero) and inode, obtained from the original retained collection descriptor. Device number is not its cross-restart key. Borrow that descriptor for `fgetattrlist` with `ATTR_VOL_INFO | ATTR_VOL_UUID` and request `ATTR_CMN_RETURNED_ATTRS`; validate the returned length and attribute presence, and obtain the inode with `fstat` on the same descriptor. Check the live device/inode before and after the attribute read. Never reopen the collection to obtain this identity: closing another descriptor can release POSIX locks. An unavailable, unsupported, zero or malformed UUID refuses open; no pathname lookup, generated UUID or device-number fallback replaces it. Keep every existing in-process device/inode, pathname and SQLite replacement check. Non-Darwin platforms retain their existing device/inode identity under a distinct identity tag.
+
 An event is identified by journal incarnation and sequence. Its intent records card id, rating, effective applied `answeredAtMs` after C9 validation, elapsed time, queue kind, accepted current/chosen transition, recorded day/next_day_at/offset context, and card RowDigest or predecessor sequence. Persist the transition actually accepted, not a new choice made at reopen. A same-card predecessor resolves to its actual resulting card digest; retain these dependencies until the whole chain is terminal.
 
 ### C12.2 Semantic guards
@@ -337,6 +339,21 @@ States: Intent -> Prepared -> SQLite committed -> WAL covered -> durable Done. K
 ### C12.5 Recovery before Ready
 
 Under the collection lock and privileged open handle, validate the journal and resolve sequences before study/sync/Ready. Recheck identity and base in the writer transaction:
+
+Create version-2 headers for new journals. Store the canonical collection path, local incarnation, next-event high-water value and a typed file identity from C12.1. If migration occurred, an optional notice records its fixed reason and the SHA-256 of the exact archived file. Use the volume UUID and inode for the Darwin variant, and the existing device/inode pair for other platforms. Reject an identity variant from another platform, an unknown variant or header version, or an invalid header or notice. Retain the current frame numbers, checksums, event representation and prepared receipts. The header and any notice stay local to this device.
+
+Version-1 headers bind device number and inode. Upgrade them only as follows:
+
+| Legacy evidence | Action before Ready |
+|---|---|
+| canonical path and current device/inode match | Run normal C12 recovery. After every event is durably terminal and WAL coverage is established, archive and atomically compact into version 2. Preserve the incarnation and the recovered state's next-event high-water value, including all decoded events, rather than the original header's older counter. |
+| exactly one complete valid Header frame, exact EOF after its newline, same canonical path and inode, device number alone differs | Archive the exact bytes and publish a fresh version-2 binding with a new incarnation. Replay nothing. This journal contains no event to apply or discard. |
+| any event frame with a mismatched native identity, even when the visible events are terminal | Retain and refuse/report; the legacy header has no volume UUID from which to establish its durable binding. Never guess, replay or rewrite its identity. |
+| wrong path or inode, malformed complete frame, invalid checksum, missing/incomplete header, or extra tail in the header-only mismatch case | Retain and refuse under the existing identity/corruption rules. |
+
+Before either upgrade, publish a permanent archive through the existing exclusive, nofollow atomic-file rules, named by SHA-256 of the original journal bytes. An existing archive must contain exactly those bytes. Full-sync the archive and its directory, then recheck the retained journal and live collection bindings before publishing the version-2 header. Full-sync the new active header and directory before Ready or answer acceptance. Failure at any step preserves evidence and refuses open. Repeating after a crash verifies existing archives and completes only known durable steps; archived events never replay through a landed version-2 binding. The header's optional notice permits migration reporting after a crash.
+
+After these durability steps and before OpenStepReady, emit a structured Rust tracing event with only `event=pending_answer_identity_migration`, a fixed `reason` (`legacy_header_only_rebound` or `legacy_identity_upgraded`), and `migration_replayed_answers=0`. The count covers migration alone; normal matched-version-1 recovery can replay real answers and retains its existing evidence. The notice may cause this event to be emitted again after a crash; it is not exactly-once delivery. Introduce no Swift, FFI, UI or aggregate replay count. Log no volume UUID, inode, path, archive hash or journal content. Migration reporting is separate from stale/drop and corruption reporting.
 
 | Evidence | Action |
 |---|---|
@@ -373,8 +390,8 @@ Apply the frozen accepted transition with its recorded instant/day/boundary. Its
 | UI undo | optimistic restoration may run before the writer completes the required order |
 | controlled file replacement | drain accepted events -> WAL coverage and terminal durability -> invalidate incarnation durably -> replace |
 | worker callback | matching incarnation and live generation required |
-| ordinary reopen | retain the bound incarnation despite a new process generation |
-| unexpected file identity | retain/quarantine journal and report before Ready |
+| ordinary reopen | retain the bound incarnation despite a new process generation and, on Darwin, a changed device number with equal durable identity |
+| unexpected file identity | retain/quarantine journal and report before Ready; only C12.5's exact version-1 header-only case may establish a fresh binding |
 
 No synced UUID or configuration token is introduced. These rules prevent an old accepted event from being applied after its committed undo or to a replacement collection.
 
@@ -385,6 +402,8 @@ No synced UUID or configuration token is introduced. These rules prevent an old 
 | versioned JSON; contiguous record numbers; valid per-record checksum | validate sequence and dependencies |
 | final frame without newline | retain valid prefix; ignore/report tail; no durable acknowledgement or COMMIT permission came from that frame |
 | complete malformed frame; checksum error; missing/interior frame; invalid dependency; unknown version | retain file; explicit corruption error; Ready forbidden |
+
+Header versions 1 and 2 follow C12.5. A complete valid header with no event frames is a valid journal, including terminal compaction with a next-event value above 1. A zero-byte file or incomplete header is not that case. A missing journal permits normal new-header creation; a dangling link does not count as absence. Retired incarnations still follow the existing controlled-replacement rules, not a general identity-rebinding exception.
 
 Header creation and compaction follow U32's atomic-file and directory-sync rules. A valid stale/conflict report is separate from corruption.
 

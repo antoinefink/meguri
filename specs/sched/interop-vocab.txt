@@ -241,3 +241,14 @@ Interrupted
 evaluate_with_time_series_splits
 log_loss
 rmse_bins
+
+# Pending-answer journal durable identity and fixed migration report (C12).
+fgetattrlist
+fstat
+ATTR_VOL_INFO
+ATTR_VOL_UUID
+ATTR_CMN_RETURNED_ATTRS
+pending_answer_identity_migration
+legacy_header_only_rebound
+legacy_identity_upgraded
+migration_replayed_answers
