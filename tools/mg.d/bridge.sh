@@ -42,6 +42,12 @@ mg_core_xcframework() {
 # producer stops verification before Apple compilation.
 mg__swift_initial_adoption_fixture() {
   local fixture="$MG_RUN_DIR/initial-adoption-fixture.json" result
+  unset MEGURI_INITIAL_ADOPTION_FIXTURE MEGURI_INITIAL_ADOPTION_RESULT
+  if [ -e "$fixture" ] || [ -L "$fixture" ]; then
+    mg_failure initial-adoption-fixture "Rust fixture publication must be fresh"
+    mg_status fail
+    return 1
+  fi
   if ! result="$(MEGURI_INITIAL_ADOPTION_FIXTURE="/work/${fixture#"$MG_ROOT"/}" \
     "$MG_ROOT/tools/mg" core-test -- --test cloud_initial_app_fixture \
       -E 'package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)')"; then
@@ -62,6 +68,7 @@ mg__swift_initial_adoption_fixture() {
     --arg sha256 "$(shasum -a 256 "$fixture" | awk '{print $1}')" \
     '{result: $result, path: $path, sha256: $sha256}')"
   export MEGURI_INITIAL_ADOPTION_FIXTURE="$fixture"
+  export MEGURI_INITIAL_ADOPTION_RESULT="$result"
 }
 
 # Host-only synthetic Service helper for headless MeguriKit tests. Cargo owns

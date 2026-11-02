@@ -236,3 +236,24 @@ swift-test' ]
   [[ "$output" == *failure=swift-test-exit*status=fail* ]]
   [ -f "$MG_RUN_DIR/cloud-service-code.json" ]
 }
+
+@test "native helper admits only current swift-test or xcode-check run scopes" {
+  export MG_JOB=xcode-check MG_RUN_ID=xcode-inputs
+  export MG_RUN_DIR="$MG_ROOT/build/mg/xcode-check/$MG_RUN_ID"
+  mkdir -p "$MG_RUN_DIR"
+  prepare
+  [ "$status" -eq 0 ]
+  [ -x "$MG_RUN_DIR/cloud-service-code/meguri-cli" ]
+  for scope in ui-test arbitrary swift-test/nested xcode-check/nested; do
+    export MG_RUN_DIR="$MG_ROOT/build/mg/$scope/foreign"
+    mkdir -p "$MG_RUN_DIR"
+    prepare
+    [ "$status" -ne 0 ]
+    [ ! -e "$MG_RUN_DIR/cloud-service-code" ]
+  done
+  export MG_RUN_DIR="$MG_ROOT/build/mg/xcode-check/not-current"
+  mkdir -p "$MG_RUN_DIR"
+  prepare
+  [ "$status" -ne 0 ]
+  [ ! -e "$MG_RUN_DIR/cloud-service-code" ]
+}

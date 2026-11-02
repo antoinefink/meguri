@@ -60,6 +60,23 @@ setup() {
   if [ -f "$REPO_ROOT/tools/scripts/mac-hidden-launch.sh" ]; then
     cp "$REPO_ROOT/tools/scripts/mac-hidden-launch.sh" "$SB/tools/scripts/"
   fi
+  # Wiring double only: producer and guest verification behavior is exercised
+  # by xcode_unit_inputs.bats with the actual Python helper.
+  export MG_RUN_DIR="$SB/build/mg/xcode-check/wiring-run"
+  cat >"$SB/tools/scripts/xcode-unit-inputs.py" <<'PYINPUT'
+import os, shlex, sys
+assert sys.argv[2] == os.environ['MG_RUN_DIR']
+action = sys.argv[1]
+with open(os.environ['STUB_LOG'], 'a') as f: f.write('unit-input-' + action + '\n')
+if os.environ.get('STUB_UNIT_INPUT_FAIL') == action: raise SystemExit(70)
+if os.environ.get('STUB_UNIT_INPUT_UNAVAILABLE') == action: raise SystemExit(72)
+if action == 'command':
+    print(shlex.join(['env',
+        'TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE=' + sys.argv[2] + '/vm-unit-inputs/initial-adoption-fixture.json',
+        'TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI=' + sys.argv[2] + '/vm-unit-inputs/meguri-cli', 'xcodebuild']))
+else:
+    assert action == 'deliver' and len(sys.argv) == 4
+PYINPUT
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -279,6 +296,12 @@ EOF
 #!/usr/bin/env bash
 unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
+case "$*" in
+  *Meguri_Unit_macosx*)
+    [ -n "${TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ] && [ -n "${TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI:-}" ] || exit 97
+    echo "unit-env $(unmap "$TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE") $(unmap "$TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI")" >>"$STUB_LOG" ;;
+  *) [ -z "${TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ] && [ -z "${TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI:-}" ] || exit 97 ;;
+esac
 other="$(pgrep -f 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')" && echo "vm-overlap with $other" >>"$STUB_LOG"
 echo "$$" >>"$FAKE_VM/tests.pids"
 only=""
@@ -1456,4 +1479,113 @@ EOF
   tap_line 'ok [0-9]+ mac-unit: Passed passed=1 failed=0 skipped=0'
   ! grep -Eq '^not ok [0-9]+ mac-unit' <<<"$output"
   not_called '^xcodebuild test( |-)'
+}
+
+@test "only Mac Unit receives delivered cloud inputs with unchanged test selection" {
+  MEGURI_ALLOW_MAC_UI=1 check_project --phase devices
+  no_vm_failure
+  [ "$(grep -c '^unit-input-deliver$' "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -c '^unit-input-command$' "$STUB_LOG")" -eq 1 ]
+  called '^unit-env .*/build/mg/xcode-check/wiring-run/vm-unit-inputs/initial-adoption-fixture.json .*/build/mg/xcode-check/wiring-run/vm-unit-inputs/meguri-cli$'
+  called '^vm-xcodebuild test-without-building .*Meguri_Unit_macosx.* -destination platform=macOS,arch=arm64 .* -collect-test-diagnostics never$'
+  called '^vm-xcodebuild .*Meguri_UI_macosx.* -only-testing:MeguriUITests/TestHooksTests$'
+  called '^vm-xcodebuild .*Meguri_UI_iphonesimulator.* -only-testing:MeguriUITests/DriveScriptTests$'
+}
+
+@test "Mac Unit missing or failed input delivery is a prelaunch failure while other lanes remain independent" {
+  for step in missing deliver command; do
+    : >"$STUB_LOG"
+    if [ "$step" = missing ]; then unset MG_RUN_DIR; fi
+    STUB_UNIT_INPUT_FAIL="$step" check_project --phase devices
+    [ "$status" -ne 0 ]
+    tap_line 'not ok [0-9]+ mac-unit: .*'
+    tap_line '# xcode_project_check: Mac Unit input delivery failed before launch'
+    not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
+    called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+    export MG_RUN_DIR="$SB/build/mg/xcode-check/wiring-run"
+  done
+}
+
+@test "xcode-check preparation failure retains producer evidence and still runs independent device lanes" {
+  fake_vm
+  add_test_inputs
+  # Keep the real devices phase below the MG wrapper. Only host builds and
+  # preparation are doubles; no native or VM execution evidence is claimed.
+  mv "$SB/tools/tests/xcode_project_check.sh" "$SB/tools/tests/xcode_project_check.real.sh"
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'SH'
+#!/bin/bash
+case " $* " in
+  *" --phase builds "*) echo 'ok 1 builds'; exit 0 ;;
+esac
+[ "${MEGURI_INITIAL_ADOPTION_FIXTURE+present}" != present ] || exit 97
+[ "${MEGURI_CLOUD_SERVICE_CLI+present}" != present ] || exit 97
+exec /bin/bash "$(dirname "$0")/xcode_project_check.real.sh" "$@"
+SH
+  mv "$FAKE_VM_BIN/xcodebuild" "$FAKE_VM_BIN/xcodebuild-real"
+  cat >"$FAKE_VM_BIN/xcodebuild" <<'SH'
+#!/bin/bash
+[ "${TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE+present}" != present ] || exit 97
+[ "${TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI+present}" != present ] || exit 97
+exec "$(dirname "$0")/xcodebuild-real" "$@"
+SH
+  chmod +x "$FAKE_VM_BIN/xcodebuild"
+  check_wrapper() (
+    cd "$SB" || exit 1
+    export MG_ROOT="$SB" MG_JOB=xcode-check MG_STATE="$MG_RUN_DIR/state"
+    mkdir -p "$MG_STATE"
+    MG_DEFAULT_REPRO='tools/mg xcode-check'
+    MG_QUEUED_PARTS='[]'
+    MG_MAC_VM="$(jq -nc --arg ssh "$STUBS/vm-ssh" '{ssh: $ssh, name: "meguri-mac"}')"
+    mg_job() { :; }
+    mg_status() { printf '%s\n' "$1" >"$MG_STATE/status"; }
+    mg_failure() { printf '%s\n' "$1" >>"$MG_STATE/failures.jsonl"; }
+    mg_artifact() { :; }
+    mg_count() { :; }
+    mg_message() { :; }
+    mg_lint_ui_first() { :; }
+    mg__xcframework() { :; }
+    mg_sim_begin() { MG_SIM_RUNNER=vm; }
+    mg_sim_take() { :; }
+    mg__mac_vm_stop_orphans() { :; }
+    mg_queued_settle() { :; }
+    source "$REPO_ROOT/tools/mg.d/selftest.sh"
+    source "$REPO_ROOT/tools/mg.d/xcode.sh"
+    mg__xcode_unit_inputs() {
+      printf 'failed producer evidence\n' >"$MG_RUN_DIR/producer.log"
+      export MEGURI_INITIAL_ADOPTION_FIXTURE=partial-fixture MEGURI_CLOUD_SERVICE_CLI=partial-helper
+      mg_failure producer-failed
+      mg_status fail
+      return 1
+    }
+    mg_xcode_check
+  )
+  MEGURI_ALLOW_MAC_UI=1 STUB_UNIT_INPUT_FAIL=deliver \
+    TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE=ambient-fixture TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI=ambient-helper \
+    run check_wrapper
+  [ "$status" -eq 0 ]
+  [ "$(cat "$MG_RUN_DIR/state/status")" = fail ]
+  grep -qx producer-failed "$MG_RUN_DIR/state/failures.jsonl"
+  grep -qx xcode-unit-inputs "$MG_RUN_DIR/state/failures.jsonl"
+  [ "$(cat "$MG_RUN_DIR/producer.log")" = 'failed producer evidence' ]
+  tap_line 'not ok [0-9]+ mac-unit: .*'
+  not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
+  called '^unit-input-deliver$'
+  called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
+  called '^vm-xcodebuild .*Meguri_UI_macosx.*TestHooksTests'
+  called '^vm-xcodebuild .*Meguri_Snapshot_iphonesimulator'
+  called '^vm-xcodebuild .*Meguri_UI_iphonesimulator.*DriveScriptTests'
+}
+
+@test "no UI or no VM retains the absence of cloud input delivery" {
+  check_project --phase devices --no-ui
+  not_called '^unit-input-'
+  check_project --phase devices --no-sims
+  not_called '^unit-input-'
+}
+
+@test "unreachable VM during Unit input delivery queues that lane before launch" {
+  STUB_UNIT_INPUT_UNAVAILABLE=deliver check_project --phase devices
+  tap_line 'ok [0-9]+ mac-unit # SKIP queued: meguri-mac unavailable during Mac Unit input delivery \(user step mac-vm\)'
+  not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
+  called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
 }

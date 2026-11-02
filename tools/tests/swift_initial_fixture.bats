@@ -82,3 +82,13 @@ generate() {
   [ "$status" -ne 0 ]
   [ ! -e "$MG_RUN_DIR/detail.json" ]
 }
+
+@test "Swift fixture generation never adopts a preexisting publication or ambient path" {
+  export MEGURI_INITIAL_ADOPTION_FIXTURE=/ambient/unverified
+  echo stale >"$MG_RUN_DIR/initial-adoption-fixture.json"
+  generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Rust fixture publication must be fresh'* ]]
+  [ "$(cat "$MG_RUN_DIR/initial-adoption-fixture.json")" = stale ]
+  [ ! -e "$MG_RUN_DIR/producer.json" ]
+}

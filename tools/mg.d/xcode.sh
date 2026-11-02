@@ -4,6 +4,27 @@
 mg_job xcode-check host mg_xcode_check \
   "Xcode project checks after lint-ui: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, DriveScriptTests, TestHooksTests (simulators in the macOS test VM, queued without it; on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); all launches and test runs use the VM's lease; args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, else leased from the simulator pool; --no-ui)"
 
+# Reuse the real Swift producers, with source authority retained by this MG
+# run. This is ordinary Unit input routing, not signed-agent evidence.
+mg__xcode_unit_inputs() {
+  local script="$MG_ROOT/tools/scripts/xcode-unit-inputs.py"
+  unset MEGURI_INITIAL_ADOPTION_FIXTURE MEGURI_INITIAL_ADOPTION_RESULT MEGURI_CLOUD_SERVICE_CLI
+  if ! python3 "$script" start "$MG_RUN_DIR"; then
+    mg_failure xcode-unit-inputs "Mac Unit input source admission failed"
+    mg_status fail
+    return 1
+  fi
+  mg__swift_initial_adoption_fixture || return 1
+  mg__swift_cloud_service_helper || return 1
+  if ! python3 "$script" verify-inputs "$MG_RUN_DIR" "$MEGURI_INITIAL_ADOPTION_RESULT"; then
+    mg_failure xcode-unit-inputs "Mac Unit input publication verification failed"
+    mg_status fail
+    return 1
+  fi
+  mg_artifact json "$MG_RUN_DIR/xcode-unit-source.json" "Mac Unit input source authority"
+  mg_artifact json "$MG_RUN_DIR/xcode-unit-inputs.json" "Mac Unit input identities"
+}
+
 # Static checks and builds stay on the host. One pool-VM lease covers the
 # devices phase: hidden Mac launches, Mac plans and simulator tests. Without
 # the VM only those executions queue; independent build failures stand.
@@ -14,7 +35,8 @@ mg_xcode_check() {
   export MEGURI_SIM_ALLOW_HOST
   [ "${1:-}" = "--" ] && shift
   local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin lease=0 take part reason
-  local vmq=build/xcode-check/vm-queued.tsv
+  local vmq=build/xcode-check/vm-queued.tsv arg unit_inputs=1
+  for arg in "$@"; do [ "$arg" != --no-ui ] || unit_inputs=0; done
   mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
@@ -50,6 +72,14 @@ mg_xcode_check() {
     mg_message "xcode-check: the builds were checked; the launches, simulators and test runs did not run (see the failures)"
     mg_status error
     return 0
+  fi
+  if [ "$unit_inputs" -eq 1 ] && [ "$MG_SIM_RUNNER" = vm ]; then
+    if ! mg__xcode_unit_inputs; then
+      unset MEGURI_INITIAL_ADOPTION_FIXTURE MEGURI_INITIAL_ADOPTION_RESULT MEGURI_CLOUD_SERVICE_CLI
+      mg_failure xcode-unit-inputs "Mac Unit input preparation failed; independent device checks continue"
+      mg_status fail
+      rc=1
+    fi
   fi
   # The script's simulator runs in the VM outlive it when the job is
   # cancelled: the job then stops them before it releases the VM's lease

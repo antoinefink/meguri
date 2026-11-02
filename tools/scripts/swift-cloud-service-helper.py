@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a native Cargo executable for one host headless Swift test run."""
+"""Publish a native Cargo executable for an admitted Swift or Xcode Unit run."""
 import importlib.util
 import os
 from pathlib import Path
@@ -17,7 +17,13 @@ require = review.require
 
 
 def publish(run, source):
-    require(run.parent == review.ROOT / "build/mg/swift-test", "headless Swift run scope")
+    require(run.parent in (review.ROOT / "build/mg/swift-test",
+                           review.ROOT / "build/mg/xcode-check"), "Swift/Xcode Unit run scope")
+    require(run.name not in ("", ".", "..", "latest") and str(run) == os.environ.get("MG_RUN_DIR")
+            and run == run.resolve(strict=True), "current canonical MG run required")
+    if run.parent.name == "xcode-check":
+        require(os.environ.get("MG_JOB") == "xcode-check"
+                and os.environ.get("MG_RUN_ID") == run.name, "current Xcode MG run required")
     require(source.is_absolute(), "absolute Cargo executable required")
     with review.owned_directory(run) as (_, verify_run):
         with review.export.retained_directory(source.parent) as (parent, verify_parent):
@@ -77,7 +83,8 @@ def publish(run, source):
                         review.write(run / "cloud-service-code.json", {
                             "version": 1, "run": str(run), "compiler": str(source),
                             "compiler_pin": pin, "compiled": actual, "published": str(binary),
-                            "executable": actual, "build_profile": "dev",
+                            "executable": actual, "published_pin": review.code_signature(os.fstat(out)),
+                            "mode": 0o500, "build_profile": "dev",
                             "build": review.identity(run / "cloud-service-build.jsonl"),
                         })
                         verify_destination()

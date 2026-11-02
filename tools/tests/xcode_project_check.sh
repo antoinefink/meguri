@@ -834,6 +834,7 @@ vm_session_result() {
 test_in_vm() {
   local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc policy_report sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
   local signing="${MEGURI_APP_SIGNING-adhoc}" signing_args=()
+  local unit_command="env -u TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE -u TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI xcodebuild"
   local DD_TESTS="$WORK/DerivedData-tests"
   # Other configurations can prune retained Profile products during a build.
   if [ "$config" = Profile ] || [ "$plan" = Performance ]; then
@@ -921,7 +922,27 @@ test_in_vm() {
     fi
     VM_INPUTS_COPIED=1
   fi
-  "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && xcodebuild test-without-building -xctestrun $(mvl_q "$xctestrun") \
+  # Only the full Mac Unit invocation consumes the real Rust fixture/native
+  # helper. Delivery is exclusive and verified; no stale/ambient fallback.
+  if [ "$name" = mac-unit ] && [ "$scheme" = Meguri ] && [ "$plan" = Unit ] &&
+    [ "$config" = Debug ] && [ "$sdk" = macosx ]; then
+    if [ -z "${MG_RUN_DIR:-}" ]; then
+      echo "xcode_project_check: Mac Unit input delivery failed before launch" >>"$log"
+      return 70
+    fi
+    python3 "$REPO/tools/scripts/xcode-unit-inputs.py" deliver "$MG_RUN_DIR" "$VM_SSH" >>"$log" 2>&1
+    rc=$?
+    if [ "$rc" -eq 72 ]; then
+      VM_QUEUE_REASON="$VM_NAME unavailable during Mac Unit input delivery"
+      return 72
+    fi
+    if [ "$rc" -ne 0 ] ||
+      ! unit_command="$(python3 "$REPO/tools/scripts/xcode-unit-inputs.py" command "$MG_RUN_DIR" 2>>"$log")"; then
+      echo "xcode_project_check: Mac Unit input delivery failed before launch" >>"$log"
+      return 70
+    fi
+  fi
+  "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && $unit_command test-without-building -xctestrun $(mvl_q "$xctestrun") \
     -destination $(mvl_q "$dest") -resultBundlePath $(mvl_q "$result") -collect-test-diagnostics never ${1+$(mvl_q "$@")}; };
     rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >>"$log" 2>&1
   rc=$?
