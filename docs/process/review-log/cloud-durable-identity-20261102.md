@@ -16,7 +16,9 @@ Keep all live replacement guards. Use the retained writer descriptor for a
 separate stable Darwin identity, with exact birthtime and strict legacy rules.
 The first independent contract review finds three P2 issues: an older-reader
 fence, invalidation of previous-open scan proof, and pairing the captured file
-with the live birthtime before bind. Resolve them before filtered authoring.
+with the live birthtime before bind. The second review clears all three after
+the contract changes. Capture failure blocks CloudKit while local reviews
+remain available. Privacy17976 passes both amended specification files.
 
 Live Mac verification awaits an unlocked session. The saved collection stays
 intact. Signed SDK evidence and the batch gate are outstanding. This component
