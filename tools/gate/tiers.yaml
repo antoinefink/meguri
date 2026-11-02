@@ -765,6 +765,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: vm-crash-info, why: "Explicit bounded retained Mac UI crash taxonomy with original-receipt unzoned admission and guest-completion lease fencing only; no app or gate acceptance"}
   - {job: cloudkit-account-setup, why: "OWNER ONLY J2.2.1 explicit interactive account source producer; setup-only, never gates or catch-up"}
   - {job: vm-xcode-stage, why: "Explicit dedicated-VM Xcode staging and existing prompt-free activation only; no signed execution or app gate coverage"}
   - {job: cloudkit-agent-install, why: "Explicit J2.1 product transfer from admitted build inputs to the parent's frozen VM selection; runtime evidence remains incomplete"}
