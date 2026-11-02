@@ -35,6 +35,7 @@ pub mod open;
 pub mod package_inspection;
 pub mod paging;
 pub mod paths;
+pub mod persistent_identity;
 mod pragmas;
 pub mod queries;
 #[cfg(feature = "test-hooks")]

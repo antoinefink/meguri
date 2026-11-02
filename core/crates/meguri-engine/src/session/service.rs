@@ -2965,7 +2965,16 @@ fn work_item(inner: &Arc<Inner>, work: Work) -> Result<(), EngineError> {
     }
 }
 
-fn native_binding(c: &Collection) -> Result<((u64, u64), [u64; 2]), EngineError> {
+fn native_binding(
+    c: &Collection,
+) -> Result<
+    (
+        (u64, u64),
+        meguri_storage::persistent_identity::PersistentIdentity,
+        [u64; 2],
+    ),
+    EngineError,
+> {
     c.core
         .exec
         .control(crate::suspend::Control::ReviewIdentity)
@@ -3083,10 +3092,24 @@ impl OpenStep for ReviewService {
         "review-session"
     }
     fn run(&self, c: &Collection) -> Result<(), EngineError> {
-        let (identity, incarnation) = native_binding(c)?;
-        let journal = Journal::open(c.path(), identity, incarnation, c.generation(), &self.threads)?;
+        let (identity, persistent, incarnation) = native_binding(c)?;
+        let journal = Journal::open(
+            c.path(),
+            identity,
+            persistent,
+            incarnation,
+            c.generation(),
+            &self.threads,
+            || native_binding(c).map(|(_, _, incarnation)| incarnation),
+        )?;
         *c.core.exec.review_journal.lock().unwrap() = Some(Arc::downgrade(&journal));
-        if let Err(e) = replay(c, &journal) {
+        let recovery = replay(c, &journal).and_then(|()| {
+            // Re-read through the retained Writer descriptor after recovery,
+            // before the file worker publishes a migrated identity.
+            let (live, persistent, _) = native_binding(c)?;
+            journal.finish_identity_migration(live, persistent)
+        });
+        if let Err(e) = recovery {
             *c.core.exec.review_journal.lock().unwrap() = None;
             return Err(e);
         }
@@ -3159,11 +3182,12 @@ impl SuspendParticipant for ReviewService {
         Ok(())
     }
     fn resume_with_collection(&self, c: &Collection) -> Result<(), EngineError> {
-        let (native, _) = native_binding(c)?;
+        let (native, persistent, _) = native_binding(c)?;
         let mut state = self.inner.state.lock().unwrap();
         if let Some(b) = &state.binding {
             b.journal.check(c.generation())?;
             b.journal.check_identity(native)?;
+            b.journal.check_persistent_identity(persistent)?;
         }
         state.paused = false;
         c.core.exec.review_accepting.store(true, Ordering::Release);

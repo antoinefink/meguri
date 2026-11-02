@@ -2,6 +2,7 @@
 use super::frozen::{Base, FrozenAnswer, error};
 use crate::{EngineError, Generation, Qos, Seq, ThreadRegistry, monotonic};
 use meguri_storage::atomic_file::{AtomicFile, Purpose, full_sync};
+use meguri_storage::persistent_identity::PersistentIdentity;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -36,9 +37,69 @@ type StageHook = Arc<dyn Fn(JournalStage) + Send + Sync>;
 struct Header {
     version: u32,
     path: Vec<u8>,
-    native: (u64, u64),
+    native: Native,
     incarnation: [u64; 2],
     next_event: u64,
+    #[serde(default, deserialize_with = "decode_notice", skip_serializing_if = "Option::is_none")]
+    notice: Option<MigrationNotice>,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Native {
+    Legacy((u64, u64)),
+    Persistent(PersistentIdentity),
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MigrationReason {
+    LegacyHeaderOnlyRebound,
+    LegacyIdentityUpgraded,
+}
+impl MigrationReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyHeaderOnlyRebound => "legacy_header_only_rebound",
+            Self::LegacyIdentityUpgraded => "legacy_identity_upgraded",
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct MigrationNotice {
+    reason: MigrationReason,
+    archive_sha256: [u8; 32],
+}
+fn decode_notice<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<Option<MigrationNotice>, D::Error> {
+    MigrationNotice::deserialize(decoder).map(Some)
+}
+fn corruption() -> EngineError {
+    error("pending_answer_journal_corruption")
+}
+fn identity_mismatch() -> EngineError {
+    error("pending_answer_identity_mismatch")
+}
+fn migration_io() -> EngineError {
+    error("pending_answer_identity_migration_io")
+}
+fn migration_failure(failure: EngineError) -> EngineError {
+    if matches!(&failure,EngineError::Storage(meguri_storage::StorageError::Io { detail })
+        if detail == "pending_answer_identity_mismatch")
+    {
+        identity_mismatch()
+    } else {
+        migration_io()
+    }
+}
+fn require_migration_source(binding: &RecoveryBinding, path: &Path) -> Result<(), meguri_storage::StorageError> {
+    binding.require(path).map_err(|_| meguri_storage::StorageError::Io {
+        detail: "pending_answer_identity_mismatch".into(),
+    })
+}
+fn identity_matches(native: Native, durable: Native, live: (u64, u64)) -> bool {
+    match native {
+        Native::Legacy(pair) => pair == live,
+        Native::Persistent(_) => native == durable,
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +148,7 @@ enum Work {
     Append(Box<Record>, Option<mpsc::SyncSender<Result<(), EngineError>>>, Duration),
     Barrier(mpsc::SyncSender<Result<(), EngineError>>),
     Compact(mpsc::SyncSender<Result<(), EngineError>>),
+    Migrate(PersistentIdentity, mpsc::SyncSender<Result<(), EngineError>>),
     #[cfg(feature = "test-hooks")]
     Fault(JournalStage, mpsc::SyncSender<()>),
     #[cfg(feature = "test-hooks")]
@@ -98,6 +160,7 @@ pub(crate) struct Journal {
     state: Arc<Mutex<State>>,
     worker: Mutex<Option<JoinHandle<()>>>,
     generation: Generation,
+    live_native: (u64, u64),
 }
 fn encode(number: u64, record: &Record) -> Result<Vec<u8>, EngineError> {
     let payload = serde_json::to_string(record).map_err(error)?;
@@ -180,29 +243,48 @@ fn apply(state: &mut State, record: Record) -> Result<(), EngineError> {
     }
     Ok(())
 }
+#[cfg(test)]
 fn read(path: &Path, expected: &Header) -> Result<(State, u64, usize), EngineError> {
     read_bytes(&std::fs::read(path).map_err(error)?, expected)
 }
+#[cfg(test)]
 fn read_bytes(bytes: &[u8], expected: &Header) -> Result<(State, u64, usize), EngineError> {
+    let live = match expected.native {
+        Native::Legacy(pair) => pair,
+        Native::Persistent(PersistentIdentity::NonDarwin { device, inode }) => (device, inode),
+        Native::Persistent(PersistentIdentity::Darwin { inode, .. }) => (7, inode),
+    };
+    read_bytes_bound(bytes, expected, live)
+}
+fn read_bytes_bound(bytes: &[u8], expected: &Header, live: (u64, u64)) -> Result<(State, u64, usize), EngineError> {
     let complete = bytes.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
-    let mut header = None;
+    if complete == 0 {
+        return Err(corruption());
+    }
     let mut state = None;
     let mut number = 0;
-    for line in bytes[..complete.saturating_sub(1)].split(|b| *b == b'\n') {
-        let frame: Frame = serde_json::from_slice(line).map_err(error)?;
+    for line in bytes[..complete - 1].split(|b| *b == b'\n') {
+        let frame: Frame = serde_json::from_slice(line).map_err(|_| corruption())?;
         number += 1;
         if frame.number != number || frame.checksum != checksum(frame.number, frame.payload.as_bytes()) {
-            return Err(error("frame number/checksum mismatch; evidence retained"));
+            return Err(corruption());
         }
-        let record: Record = serde_json::from_str(&frame.payload).map_err(error)?;
+        let record: Record = serde_json::from_str(&frame.payload).map_err(|_| corruption())?;
         if number == 1 {
             let Record::Header(h) = record else {
-                return Err(error("missing header"));
+                return Err(corruption());
             };
-            if h.version != 1 || h.path != expected.path {
-                return Err(error("version/path mismatch"));
+            let valid = match (h.version, h.native) {
+                (1, Native::Legacy(_)) => h.notice.is_none(),
+                (2, Native::Persistent(identity)) => identity.valid_for_platform(),
+                _ => false,
+            };
+            if !valid || h.next_event == 0 {
+                return Err(corruption());
             }
-            header = Some(h.clone());
+            if h.path != expected.path {
+                return Err(identity_mismatch());
+            }
             state = Some(State {
                 next_event: h.next_event,
                 header: h,
@@ -211,13 +293,20 @@ fn read_bytes(bytes: &[u8], expected: &Header) -> Result<(State, u64, usize), En
                 retired: false,
             });
         } else {
-            apply(state.as_mut().ok_or_else(|| error("missing header"))?, record)?;
+            apply(state.as_mut().ok_or_else(corruption)?, record).map_err(|_| corruption())?;
         }
     }
-    let header = header.ok_or_else(|| error("missing complete header"))?;
-    let state = state.unwrap();
-    if !state.retired && header.native != expected.native {
-        return Err(error("unexpected native collection identity; evidence retained"));
+    let state = state.ok_or_else(corruption)?;
+    if !state.retired && !identity_matches(state.header.native, expected.native, live) {
+        // The sole legacy admission exception is one complete Header frame,
+        // exact EOF, same path and inode, and device number alone changed.
+        let header_only = matches!(state.header.native, Native::Legacy((device,inode))
+            if device != live.0 && inode == live.1)
+            && number == 1
+            && complete == bytes.len();
+        if !header_only {
+            return Err(identity_mismatch());
+        }
     }
     if bytes.len() != complete {
         tracing::warn!("ignoring incomplete pending-answer final frame");
@@ -263,21 +352,25 @@ impl RecoveryJournal {
         let main = recovery_file(collection)?;
         let native = main.metadata().map_err(error)?;
         let expected = Header {
-            version: 1,
+            version: 2,
             path: collection
                 .canonicalize()
                 .map_err(error)?
                 .as_os_str()
                 .as_bytes()
                 .to_vec(),
-            native: (native.dev(), native.ino()),
+            native: Native::Persistent(meguri_storage::persistent_identity::read_from(
+                &main,
+                (native.dev(), native.ino()),
+            )?),
             incarnation: [0, 0],
             next_event: 1,
+            notice: None,
         };
         let original = RecoveryBinding::read(&path)?;
-        let (loaded, _, _) = read_bytes(&original.bytes, &expected)?;
+        let (loaded, _, _) = read_bytes_bound(&original.bytes, &expected, (native.dev(), native.ino()))?;
         // Even a retired file must bind to this old main in this recovery path.
-        if loaded.header.native != expected.native {
+        if !identity_matches(loaded.header.native, expected.native, (native.dev(), native.ino())) {
             return Err(error("unexpected recovery journal native identity; evidence retained"));
         }
         if loaded.retired {
@@ -303,7 +396,7 @@ impl RecoveryJournal {
         let mut marker = encode(1, &Record::Header(header))?;
         marker.extend(encode(2, &Record::Retired)?);
         let current = std::fs::symlink_metadata(collection).map_err(error)?;
-        if !current.is_file() || (current.dev(), current.ino()) != expected.native {
+        if !current.is_file() || (current.dev(), current.ino()) != (native.dev(), native.ino()) {
             return Err(error("recovery main identity changed; evidence retained"));
         }
         let mut publication = AtomicFile::new(&path, Purpose::Sidecar)?;
@@ -313,7 +406,7 @@ impl RecoveryJournal {
         let guard = Self {
             path,
             collection: collection.to_owned(),
-            native: expected.native,
+            native: (native.dev(), native.ino()),
             original,
             marker: RecoveryBinding {
                 file: publication.file_mut().try_clone().map_err(error)?,
@@ -451,47 +544,228 @@ fn recovery_bytes(path: &Path) -> Result<Vec<u8>, EngineError> {
     Ok(bytes)
 }
 
+fn same_file(left: &File, right: &File) -> Result<(), EngineError> {
+    use std::os::unix::fs::MetadataExt;
+    let left = left.metadata().map_err(error)?;
+    let right = right.metadata().map_err(error)?;
+    if !left.is_file() || left.nlink() != 1 || (left.dev(), left.ino()) != (right.dev(), right.ino()) {
+        return Err(identity_mismatch());
+    }
+    Ok(())
+}
+fn append_file(path: &Path) -> Result<File, EngineError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let retained = recovery_file(path)?;
+    let file = OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(error)?;
+    same_file(&file, &retained)?;
+    Ok(file)
+}
+fn require_live(collection: &Path, native: (u64, u64), canonical: &[u8]) -> Result<(), meguri_storage::StorageError> {
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+    let metadata = std::fs::metadata(collection)?;
+    if !metadata.is_file()
+        || (metadata.dev(), metadata.ino()) != native
+        || collection.canonicalize()?.as_os_str().as_bytes() != canonical
+    {
+        return Err(meguri_storage::StorageError::Io {
+            detail: "pending_answer_identity_mismatch".into(),
+        });
+    }
+    Ok(())
+}
+struct Migration {
+    collection: PathBuf,
+    live: (u64, u64),
+    original: RecoveryBinding,
+    current_bytes: Vec<u8>,
+    next: Header,
+    reason: MigrationReason,
+}
+impl Migration {
+    fn archive_path(&self) -> PathBuf {
+        let hash = Sha256::digest(&self.original.bytes);
+        let name: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        self.collection
+            .with_file_name(format!("meguri-pending-answers.{name}.identity.jsonl"))
+    }
+    fn publish(&self, path: &Path, state: &State) -> Result<Header, EngineError> {
+        self.publish_with(path, state, || {})
+    }
+    fn publish_with(&self, path: &Path, state: &State, archive_durable: impl FnOnce()) -> Result<Header, EngineError> {
+        if state.retired || state.events.values().any(|e| e.terminal.is_none()) {
+            return Err(corruption());
+        }
+        let current = RecoveryBinding {
+            file: self.original.file.try_clone().map_err(|_| migration_io())?,
+            bytes: self.current_bytes.clone(),
+        };
+        current.require(path).map_err(|_| identity_mismatch())?;
+        require_live(&self.collection, self.live, &self.next.path).map_err(|_| identity_mismatch())?;
+        // A permanent exclusive archive must stand durably before publication.
+        // A crash may have already published it: verify exact bytes and repeat
+        // file/directory sync, without ever overwriting a collision or link.
+        let archive = self.archive_path();
+        let archival = (|| -> Result<(), EngineError> {
+            match std::fs::symlink_metadata(&archive) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let mut copy = AtomicFile::new(&archive, Purpose::Sidecar)?;
+                    copy.file_mut().write_all(&self.original.bytes).map_err(error)?;
+                    copy.publish_new(|_| require_migration_source(&current, path))?;
+                }
+                Err(e) => return Err(error(e)),
+                Ok(_) => {}
+            }
+            let archived = RecoveryBinding::read(&archive)?;
+            if archived.bytes != self.original.bytes {
+                return Err(migration_io());
+            }
+            archived.sync(&archive)?;
+            Ok(())
+        })();
+        archival.map_err(migration_failure)?;
+        archive_durable();
+        current.require(path).map_err(|_| identity_mismatch())?;
+        require_live(&self.collection, self.live, &self.next.path).map_err(|_| identity_mismatch())?;
+        let mut h = self.next.clone();
+        h.next_event = if self.reason == MigrationReason::LegacyIdentityUpgraded {
+            state.next_event
+        } else {
+            self.next.next_event
+        };
+        h.notice = Some(MigrationNotice {
+            reason: self.reason,
+            archive_sha256: Sha256::digest(&self.original.bytes).into(),
+        });
+        let bytes = encode(1, &Record::Header(h.clone()))?;
+        let publication = (|| -> Result<(), EngineError> {
+            let mut next = AtomicFile::new(path, Purpose::Sidecar)?;
+            next.file_mut().write_all(&bytes).map_err(error)?;
+            let landed = RecoveryBinding {
+                file: next.file_mut().try_clone().map_err(error)?,
+                bytes,
+            };
+            next.publish(|_| {
+                require_migration_source(&current, path)?;
+                require_live(&self.collection, self.live, &self.next.path)
+            })?;
+            landed.sync(path)?;
+            Ok(())
+        })();
+        publication.map_err(migration_failure)?;
+        Ok(h)
+    }
+}
+
 impl Journal {
     pub(crate) fn open(
         collection: &Path,
         native: (u64, u64),
+        persistent: PersistentIdentity,
         incarnation: [u64; 2],
         generation: Generation,
         threads: &ThreadRegistry,
+        fresh_incarnation: impl FnOnce() -> Result<[u64; 2], EngineError>,
     ) -> Result<Arc<Self>, EngineError> {
         use std::os::unix::ffi::OsStrExt;
         let path = collection.with_file_name("meguri-pending-answers.jsonl");
-        let header = Header {
-            version: 1,
+        let mut header = Header {
+            version: 2,
             path: collection
                 .canonicalize()
                 .map_err(error)?
                 .as_os_str()
                 .as_bytes()
                 .to_vec(),
-            native,
+            native: Native::Persistent(persistent),
             incarnation,
             next_event: 1,
+            notice: None,
         };
-        if !path.try_exists().map_err(error)? {
-            create(&path, &header, false)?;
+        if !persistent.valid_for_platform() {
+            return Err(identity_mismatch());
         }
-        let (mut loaded, mut number, complete) = read(&path, &header)?;
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                require_live(collection, native, &header.path)?;
+                create(&path, &header, false)?;
+            }
+            Err(e) => return Err(error(e)),
+            Ok(_) => {}
+        }
+        let original = RecoveryBinding::read(&path)?;
+        let (mut loaded, mut number, complete) = read_bytes_bound(&original.bytes, &header, native)?;
+        let mut migration = None;
+        let was_retired = loaded.retired;
+        let rebound = loaded.header.version == 1 && loaded.header.native != Native::Legacy(native);
+        if (loaded.retired || rebound) && header.incarnation == loaded.header.incarnation {
+            header.incarnation = fresh_incarnation()?;
+            if header.incarnation == loaded.header.incarnation {
+                return Err(identity_mismatch());
+            }
+        }
         if loaded.retired {
+            original.require(&path)?;
+            require_live(collection, native, &header.path)?;
             create(&path, &header, true)?;
-            loaded = read(&path, &header)?.0;
+            loaded = read_bytes_bound(&RecoveryBinding::read(&path)?.bytes, &header, native)?.0;
             number = 1;
         } else {
-            // No acknowledgement came from a torn frame. Remove only that tail,
-            // after validating the complete prefix and its bound identity.
-            let file = OpenOptions::new().write(true).open(&path).map_err(error)?;
-            if file.metadata().map_err(error)?.len() != complete as u64 {
+            if loaded.header.version == 1 {
+                let reason = if loaded.header.native == Native::Legacy(native) {
+                    MigrationReason::LegacyIdentityUpgraded
+                } else {
+                    MigrationReason::LegacyHeaderOnlyRebound
+                };
+                let mut next = header.clone();
+                if reason == MigrationReason::LegacyIdentityUpgraded {
+                    next.incarnation = loaded.header.incarnation;
+                }
+                migration = Some(Migration {
+                    collection: collection.to_owned(),
+                    live: native,
+                    current_bytes: original.bytes[..complete].to_vec(),
+                    original: RecoveryBinding {
+                        file: original.file.try_clone().map_err(error)?,
+                        bytes: original.bytes.clone(),
+                    },
+                    next,
+                    reason,
+                });
+            }
+            // No acknowledgement came from a torn frame. Keep the original
+            // legacy bytes for its permanent archive, including that tail.
+            let retained = &original;
+            retained.require(&path)?;
+            if retained.bytes.len() != complete {
+                use std::os::unix::fs::OpenOptionsExt;
+                let file = OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&path)
+                    .map_err(error)?;
+                same_file(&file, &retained.file)?;
                 file.set_len(complete as u64).map_err(error)?;
                 full_sync(&file)?;
             }
         }
+        // Re-establish durability even when a prior process died after rename.
+        let active = RecoveryBinding::read(&path)?;
+        if !was_retired {
+            same_file(&active.file, &original.file)?;
+            if active.bytes != original.bytes[..complete] {
+                return Err(identity_mismatch());
+            }
+        }
+        active.sync(&path)?;
+        require_live(collection, native, &header.path)?;
         loaded.header.next_event = loaded.next_event;
-        let file = OpenOptions::new().append(true).open(&path).map_err(error)?;
+        let file = append_file(&path)?;
+        same_file(&file, &active.file)?;
+        active.require(&path)?;
         let state = Arc::new(Mutex::new(loaded));
         let (tx, rx) = mpsc::channel();
         let shared = state.clone();
@@ -501,7 +775,7 @@ impl Journal {
                 Qos::UserInitiated,
                 "review-session",
                 move |activity| {
-                    file_loop(rx, file, path, shared, number, activity);
+                    file_loop(rx, file, path, shared, number, migration, activity);
                 },
             )
             .map_err(error)?;
@@ -510,10 +784,39 @@ impl Journal {
             state,
             worker: Mutex::new(Some(worker)),
             generation,
+            live_native: native,
         }))
     }
+    pub(crate) fn finish_identity_migration(
+        &self,
+        native: (u64, u64),
+        persistent: PersistentIdentity,
+    ) -> Result<(), EngineError> {
+        self.check_identity(native)?;
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.tx.send(Work::Migrate(persistent, tx)).map_err(error)?;
+        rx.recv().map_err(error)??;
+        let state = self.state.lock().unwrap();
+        if state.header.native != Native::Persistent(persistent) {
+            return Err(identity_mismatch());
+        }
+        if let Some(notice) = &state.header.notice {
+            tracing::info!(
+                event = "pending_answer_identity_migration",
+                reason = notice.reason.as_str(),
+                migration_replayed_answers = 0u64
+            );
+        }
+        Ok(())
+    }
+    pub(crate) fn check_persistent_identity(&self, persistent: PersistentIdentity) -> Result<(), EngineError> {
+        if self.state.lock().unwrap().header.native != Native::Persistent(persistent) {
+            return Err(identity_mismatch());
+        }
+        Ok(())
+    }
     pub(crate) fn check_identity(&self, native: (u64, u64)) -> Result<(), EngineError> {
-        if self.state.lock().unwrap().header.native != native {
+        if self.live_native != native {
             return Err(error(
                 "unexpected native collection identity on resume; evidence retained",
             ));
@@ -696,6 +999,7 @@ fn file_loop(
     path: PathBuf,
     state: Arc<Mutex<State>>,
     mut number: u64,
+    mut migration: Option<Migration>,
     activity: &crate::threads::ThreadActivity,
 ) {
     #[cfg(feature = "test-hooks")]
@@ -724,8 +1028,40 @@ fn file_loop(
             Work::Barrier(reply) => {
                 let _ = reply.send(state.lock().unwrap().failure.clone().map_or(Ok(()), Err));
             }
+            Work::Migrate(persistent, reply) => {
+                let result = (|| {
+                    if let Some(e) = &state.lock().unwrap().failure {
+                        return Err(e.clone());
+                    }
+                    if let Some(pending) = &migration {
+                        if pending.next.native != Native::Persistent(persistent) {
+                            return Err(identity_mismatch());
+                        }
+                        let snapshot = state.lock().unwrap().clone();
+                        let h = pending.publish(&path, &snapshot)?;
+                        file = append_file(&path)?;
+                        {
+                            let mut s = state.lock().unwrap();
+                            s.next_event = h.next_event;
+                            s.header = h.clone();
+                            s.events.clear();
+                            validated = s.clone();
+                        }
+                        number = 1;
+                        migration = None;
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = &result {
+                    state.lock().unwrap().failure = Some(e.clone());
+                }
+                let _ = reply.send(result);
+            }
             Work::Compact(reply) => {
                 let result = (|| {
+                    if migration.is_some() {
+                        return Ok(());
+                    }
                     let h = {
                         let s = state.lock().unwrap();
                         if let Some(e) = &s.failure {
@@ -795,6 +1131,9 @@ fn file_loop(
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[0])?;
                         file.write_all(&bytes).map_err(error)?;
+                        if let Some(pending) = &mut migration {
+                            pending.current_bytes.extend(&bytes);
+                        }
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[1])?;
                         written += 1;
@@ -878,6 +1217,375 @@ fn stage(fault: &mut Option<JournalStage>, hook: &Option<StageHook>, stage: Jour
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn c12_v2_durable_identity_changes_and_compacted_highwater() {
+        let mut h = header_v2();
+        h.next_event = 41;
+        let bytes = encode(1, &Record::Header(h.clone())).unwrap();
+        let (loaded, frames, complete) = read_bytes(&bytes, &h).unwrap();
+        assert_eq!(loaded.next_event, 41);
+        assert_eq!(frames, 1);
+        assert_eq!(complete, bytes.len());
+        for changed in [
+            Native::Persistent(test_persistent((8, 10))),
+            Native::Persistent(PersistentIdentity::Darwin {
+                volume_uuid: [4; 16],
+                inode: 9,
+            }),
+        ] {
+            let mut expected = h.clone();
+            expected.native = changed;
+            assert!(read_bytes(&bytes, &expected).is_err());
+        }
+        let mut expected = h.clone();
+        expected.path.push(b'x');
+        assert!(read_bytes(&bytes, &expected).is_err());
+        // The durable Darwin key has no live device field to compare.
+        let uuid = PersistentIdentity::Darwin {
+            volume_uuid: [3; 16],
+            inode: 9,
+        };
+        assert!(identity_matches(
+            Native::Persistent(uuid),
+            Native::Persistent(uuid),
+            (7, 9)
+        ));
+        assert!(identity_matches(
+            Native::Persistent(uuid),
+            Native::Persistent(uuid),
+            (8, 9)
+        ));
+        for changed in [
+            PersistentIdentity::Darwin {
+                volume_uuid: [4; 16],
+                inode: 9,
+            },
+            PersistentIdentity::Darwin {
+                volume_uuid: [3; 16],
+                inode: 10,
+            },
+        ] {
+            assert!(!identity_matches(
+                Native::Persistent(uuid),
+                Native::Persistent(changed),
+                (7, 9)
+            ));
+        }
+    }
+
+    #[test]
+    fn c12_legacy_header_only_rebind_is_exact_and_event_mismatches_never_replay() {
+        let h = header();
+        let mut expected = header_v2();
+        expected.path = h.path.clone();
+        let bytes = encode(1, &Record::Header(h.clone())).unwrap();
+        let (state, _, complete) = read_bytes_bound(&bytes, &expected, (8, 9)).unwrap();
+        assert!(state.events.is_empty());
+        assert_eq!(complete, bytes.len());
+        let mut compacted = h.clone();
+        compacted.next_event = 37;
+        assert!(read_bytes_bound(&encode(1, &Record::Header(compacted)).unwrap(), &expected, (8, 9)).is_ok());
+        for tail in [b"torn".as_slice(), b"\n", b"bad\n"] {
+            let mut bad = bytes.clone();
+            bad.extend(tail);
+            assert!(read_bytes_bound(&bad, &expected, (8, 9)).is_err());
+        }
+        for terminal in [
+            None,
+            Some(Terminal::Done),
+            Some(Terminal::Cancelled),
+            Some(Terminal::Dropped),
+        ] {
+            let mut records = vec![Record::Header(h.clone()), intent()];
+            if terminal == Some(Terminal::Done) {
+                records.push(Record::Prepared {
+                    event: 1,
+                    receipt: receipt(),
+                });
+            }
+            if let Some(status) = terminal {
+                records.push(Record::Terminal { event: 1, status });
+            }
+            let bytes = records
+                .iter()
+                .enumerate()
+                .flat_map(|(i, r)| encode(i as u64 + 1, r).unwrap())
+                .collect::<Vec<_>>();
+            assert!(read_bytes_bound(&bytes, &expected, (8, 9)).is_err());
+        }
+        for native in [(8, 10), (7, 10)] {
+            assert!(read_bytes_bound(&bytes, &expected, native).is_err());
+        }
+    }
+
+    #[test]
+    fn c12_strict_v2_identity_notice_version_and_empty_input_refuse() {
+        let h = header_v2();
+        for bytes in [vec![], b"incomplete".to_vec()] {
+            assert!(read_bytes(&bytes, &h).is_err());
+        }
+        for payload in [
+            r#"{"Header":{"version":2,"path":[],"native":{"platform":"unknown","inode":9},"incarnation":[1,2],"next_event":1}}"#,
+            r#"{"Header":{"version":2,"path":[],"native":{"platform":"darwin","volume_uuid":[1],"inode":9},"incarnation":[1,2],"next_event":1}}"#,
+        ] {
+            let bytes = raw_frame(payload);
+            assert!(read_bytes(&bytes, &h).is_err());
+        }
+        for case in [
+            "zero_uuid",
+            "platform",
+            "tag",
+            "short_uuid",
+            "short_hash",
+            "reason",
+            "notice_extra",
+            "null_notice",
+            "native_extra",
+            "zero_counter",
+            "version_native",
+        ] {
+            let mut record = serde_json::to_value(Record::Header(h.clone())).unwrap();
+            let header = &mut record["Header"];
+            match case {
+                "zero_uuid" => {
+                    header["native"] = serde_json::json!({"platform":"darwin","volume_uuid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"inode":9})
+                }
+                "platform" => {
+                    header["native"] = if cfg!(target_vendor = "apple") {
+                        serde_json::json!({"platform":"non_darwin","device":7,"inode":9})
+                    } else {
+                        serde_json::json!({"platform":"darwin","volume_uuid":[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],"inode":9})
+                    };
+                }
+                "tag" => header["native"]["platform"] = "unknown".into(),
+                "short_uuid" => header["native"] = serde_json::json!({"platform":"darwin","volume_uuid":[3],"inode":9}),
+                "short_hash" => {
+                    header["notice"] = serde_json::json!({"reason":"legacy_identity_upgraded","archive_sha256":[1]})
+                }
+                "reason" | "notice_extra" => {
+                    header["notice"] = serde_json::to_value(MigrationNotice {
+                        reason: MigrationReason::LegacyIdentityUpgraded,
+                        archive_sha256: [5; 32],
+                    })
+                    .unwrap();
+                    if case == "reason" {
+                        header["notice"]["reason"] = "unknown".into();
+                    } else {
+                        header["notice"]["extra"] = true.into();
+                    }
+                }
+                "null_notice" => header["notice"] = serde_json::Value::Null,
+                "native_extra" => header["native"]["extra"] = true.into(),
+                "zero_counter" => header["next_event"] = 0.into(),
+                "version_native" => header["version"] = 1.into(),
+                _ => unreachable!(),
+            }
+            assert!(
+                read_bytes(&raw_frame(&serde_json::to_string(&record).unwrap()), &h).is_err(),
+                "{case}"
+            );
+        }
+        let mut notice = h.clone();
+        notice.notice = Some(MigrationNotice {
+            reason: MigrationReason::LegacyIdentityUpgraded,
+            archive_sha256: [5; 32],
+        });
+        assert!(read_bytes(&encode(1, &Record::Header(notice)).unwrap(), &h).is_ok());
+        let mut invalid = h.clone();
+        invalid.version = 99;
+        assert!(read_bytes(&encode(1, &Record::Header(invalid)).unwrap(), &h).is_err());
+    }
+
+    fn raw_frame(payload: &str) -> Vec<u8> {
+        let mut bytes = serde_json::to_vec(&Frame {
+            number: 1,
+            payload: payload.into(),
+            checksum: checksum(1, payload.as_bytes()),
+        })
+        .unwrap();
+        bytes.push(b'\n');
+        bytes
+    }
+    fn header_v2() -> Header {
+        Header {
+            version: 2,
+            native: Native::Persistent(test_persistent((7, 9))),
+            notice: None,
+            ..header()
+        }
+    }
+    fn test_persistent((device, inode): (u64, u64)) -> PersistentIdentity {
+        #[cfg(target_vendor = "apple")]
+        {
+            let _ = device;
+            PersistentIdentity::Darwin {
+                volume_uuid: [3; 16],
+                inode,
+            }
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            PersistentIdentity::NonDarwin { device, inode }
+        }
+    }
+
+    fn migration_fixture(reason: MigrationReason) -> (tempfile::TempDir, PathBuf, Migration, State) {
+        use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+        let dir = tempfile::tempdir().unwrap();
+        let collection = dir.path().join("collection.anki2");
+        std::fs::write(&collection, b"generated, no SQLite").unwrap();
+        let metadata = std::fs::metadata(&collection).unwrap();
+        let live = (metadata.dev(), metadata.ino());
+        let mut h = header();
+        h.path = collection.canonicalize().unwrap().as_os_str().as_bytes().to_vec();
+        h.native = Native::Legacy(if reason == MigrationReason::LegacyHeaderOnlyRebound {
+            (live.0 ^ 1, live.1)
+        } else {
+            live
+        });
+        h.next_event = 17;
+        let path = collection.with_file_name("meguri-pending-answers.jsonl");
+        let bytes = encode(1, &Record::Header(h.clone())).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let next = Header {
+            version: 2,
+            native: Native::Persistent(test_persistent(live)),
+            incarnation: if reason == MigrationReason::LegacyHeaderOnlyRebound {
+                [31, 32]
+            } else {
+                h.incarnation
+            },
+            next_event: 1,
+            notice: None,
+            ..h.clone()
+        };
+        let state = read_bytes_bound(&bytes, &next, live).unwrap().0;
+        let migration = Migration {
+            original: RecoveryBinding::read(&path).unwrap(),
+            current_bytes: bytes,
+            collection,
+            live,
+            next,
+            reason,
+        };
+        (dir, path, migration, state)
+    }
+    #[test]
+    fn c12_migration_archives_exact_bytes_and_preserves_recovered_highwater_not_header_counter() {
+        for reason in [
+            MigrationReason::LegacyHeaderOnlyRebound,
+            MigrationReason::LegacyIdentityUpgraded,
+        ] {
+            let (_dir, path, mut migration, mut state) = migration_fixture(reason);
+            let original = migration.original.bytes.clone();
+            if reason == MigrationReason::LegacyIdentityUpgraded {
+                let answer = super::super::frozen::test_answer();
+                for record in [
+                    Record::Intent { event: 17, answer },
+                    Record::Terminal {
+                        event: 17,
+                        status: Terminal::Cancelled,
+                    },
+                ] {
+                    apply(&mut state, record.clone()).unwrap();
+                    migration
+                        .current_bytes
+                        .extend(encode(if state.events[&17].terminal.is_some() { 3 } else { 2 }, &record).unwrap());
+                }
+                std::fs::write(&path, &migration.current_bytes).unwrap();
+                assert_eq!(state.next_event, 18);
+                assert_eq!(state.header.next_event, 17);
+            }
+            let header = migration.publish(&path, &state).unwrap();
+            assert_eq!(std::fs::read(migration.archive_path()).unwrap(), original);
+            assert_eq!(
+                header.next_event,
+                if reason == MigrationReason::LegacyIdentityUpgraded {
+                    state.next_event
+                } else {
+                    1
+                }
+            );
+            assert_eq!(header.incarnation, migration.next.incarnation);
+            assert_eq!(header.notice.as_ref().unwrap().reason, reason);
+            let landed = read_bytes_bound(&std::fs::read(&path).unwrap(), &header, migration.live)
+                .unwrap()
+                .0;
+            assert!(landed.events.is_empty());
+            assert_eq!(landed.header, header);
+        }
+    }
+    #[test]
+    fn c12_migration_refuses_unresolved_replacement_and_archive_collision() {
+        for failure in ["unresolved", "source", "main", "archive", "symlink"] {
+            let (dir, path, migration, mut state) = migration_fixture(MigrationReason::LegacyIdentityUpgraded);
+            match failure {
+                "unresolved" => {
+                    let mut record = intent();
+                    if let Record::Intent { event, .. } = &mut record {
+                        *event = 17;
+                    }
+                    apply(&mut state, record).unwrap();
+                }
+                "source" => {
+                    std::fs::rename(&path, dir.path().join("original")).unwrap();
+                    std::fs::write(&path, &migration.current_bytes).unwrap();
+                }
+                "main" => {
+                    std::fs::rename(&migration.collection, dir.path().join("original-main")).unwrap();
+                    std::fs::write(&migration.collection, b"replacement").unwrap();
+                }
+                "archive" => std::fs::write(migration.archive_path(), b"different").unwrap(),
+                "symlink" => std::os::unix::fs::symlink(&path, migration.archive_path()).unwrap(),
+                _ => unreachable!(),
+            }
+            let before = std::fs::read(&path).unwrap();
+            assert!(migration.publish(&path, &state).is_err(), "{failure}");
+            assert_eq!(std::fs::read(&path).unwrap(), before, "{failure}");
+        }
+    }
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn c12_migration_faults_preserve_exact_archive_and_refuse_until_durable_publication() {
+        use meguri_model::faultpoint::{self, Fault};
+        for active in [false, true] {
+            for point in [
+                "storage.atomic.after_write",
+                "storage.atomic.after_sync",
+                "storage.atomic.before_rename",
+                "storage.atomic.after_rename",
+            ] {
+                let (_dir, path, migration, state) = migration_fixture(MigrationReason::LegacyHeaderOnlyRebound);
+                let original = std::fs::read(&path).unwrap();
+                if !active {
+                    faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+                }
+                let failed = migration.publish_with(&path, &state, || {
+                    if active {
+                        faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+                    }
+                });
+                faultpoint::disarm(point);
+                assert!(failed.is_err(), "{active} {point}");
+                let now = std::fs::read(&path).unwrap();
+                if now != original {
+                    // Rename landed but directory durability was not acknowledged.
+                    let landed = RecoveryBinding::read(&path).unwrap();
+                    landed.sync(&path).unwrap();
+                    let recovered = read_bytes_bound(&now, &migration.next, migration.live).unwrap().0;
+                    assert_eq!(recovered.header.version, 2);
+                    assert!(recovered.events.is_empty());
+                    assert_eq!(std::fs::read(migration.archive_path()).unwrap(), original);
+                } else {
+                    // Known original binding: completing the same verified steps
+                    // reuses an exact archive rather than replacing evidence.
+                    migration.publish(&path, &state).unwrap();
+                    assert_eq!(std::fs::read(migration.archive_path()).unwrap(), original);
+                }
+            }
+        }
+    }
+
     fn recovery_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Header) {
         use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
         let dir = tempfile::tempdir().unwrap();
@@ -886,7 +1594,7 @@ mod tests {
         let metadata = std::fs::metadata(&main).unwrap();
         let h = Header {
             path: main.canonicalize().unwrap().as_os_str().as_bytes().to_vec(),
-            native: (metadata.dev(), metadata.ino()),
+            native: Native::Legacy((metadata.dev(), metadata.ino())),
             ..header()
         };
         let journal = main.with_file_name("meguri-pending-answers.jsonl");
@@ -918,7 +1626,7 @@ mod tests {
         // archived bytes; a new native identity may bind, never replaying them.
         drop(RecoveryJournal::prepare(&main).unwrap());
         let mut next = h;
-        next.native.1 += 1;
+        next.native = Native::Legacy((7, 99));
         assert!(read(&journal, &next).unwrap().0.retired);
         assert_eq!(std::fs::read(archive.path()).unwrap(), original);
     }
@@ -929,7 +1637,7 @@ mod tests {
             let (dir, main, journal, mut h) = recovery_fixture();
             match case {
                 "identity" => {
-                    h.native.1 += 1;
+                    h.native = Native::Legacy((7, 99));
                     std::fs::write(&journal, encode(1, &Record::Header(h)).unwrap()).unwrap();
                 }
                 "checksum" => {
@@ -961,9 +1669,10 @@ mod tests {
         Header {
             version: 1,
             path: b"/synthetic/collection.anki2".to_vec(),
-            native: (7, 9),
+            native: Native::Legacy((7, 9)),
             incarnation: [11, 12],
             next_event: 1,
+            notice: None,
         }
     }
     fn write_frames(records: &[Record]) -> (tempfile::TempDir, PathBuf) {
@@ -1075,7 +1784,7 @@ mod tests {
     fn c12_codec_unexpected_native_identity_is_retained_and_retired_identity_can_rebind() {
         let (_dir, path) = write_frames(&[Record::Header(header())]);
         let mut expected = header();
-        expected.native.1 += 1;
+        expected.native = Native::Legacy((7, 10));
         assert!(read(&path, &expected).is_err());
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(&encode(2, &Record::Retired).unwrap()).unwrap();

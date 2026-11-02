@@ -760,6 +760,300 @@ fn change_record(bytes: &[u8], index: usize, change: impl FnOnce(&mut serde_json
     result
 }
 
+fn legacy_journal(bytes: &[u8], path: &Path, different_device: bool) -> Vec<u8> {
+    let (device, inode) = native(path);
+    change_record(bytes, 0, |record| {
+        let header = record["Header"].as_object_mut().unwrap();
+        header.insert("version".into(), 1.into());
+        header.insert(
+            "native".into(),
+            serde_json::json!([device ^ u64::from(different_device), inode]),
+        );
+        header.remove("notice");
+    })
+}
+fn journal_header(bytes: &[u8]) -> serde_json::Value {
+    let frame: serde_json::Value = serde_json::from_slice(bytes.split(|b| *b == b'\n').next().unwrap()).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(frame["payload"].as_str().unwrap()).unwrap();
+    payload["Header"].clone()
+}
+fn identity_archive(path: &Path, bytes: &[u8]) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
+    path.with_file_name(format!("meguri-pending-answers.{hash}.identity.jsonl"))
+}
+
+#[derive(Clone, Default)]
+struct MigrationTrace(Arc<Mutex<Vec<std::collections::BTreeMap<String, String>>>>);
+impl tracing::Subscriber for MigrationTrace {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct Fields(std::collections::BTreeMap<String, String>);
+        impl tracing::field::Visit for Fields {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                self.0.insert(field.name().into(), format!("{value:?}"));
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                self.0.insert(field.name().into(), value.into());
+            }
+            fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+                self.0.insert(field.name().into(), value.to_string());
+            }
+        }
+        let mut fields = Fields(Default::default());
+        event.record(&mut fields);
+        if fields
+            .0
+            .get("event")
+            .is_some_and(|s| s == "pending_answer_identity_migration")
+        {
+            self.0.lock().unwrap().push(fields.0);
+        }
+    }
+}
+impl MigrationTrace {
+    fn require(&self, reason: &str) {
+        let expected = std::collections::BTreeMap::from([
+            ("event".into(), "pending_answer_identity_migration".into()),
+            ("reason".into(), reason.into()),
+            ("migration_replayed_answers".into(), "0".into()),
+        ]);
+        assert_eq!(
+            *self.0.lock().unwrap(),
+            vec![expected],
+            "fixed fields only, with migration-only zero replay evidence"
+        );
+    }
+}
+
+#[test]
+fn c12_matched_v1_unresolved_answer_recovers_before_upgrade_preserving_incarnation_and_recovered_counter() {
+    for prepared in [false, true] {
+        let a = capture_answer(|_| {});
+        let original = legacy_journal(if prepared { &a.prepared } else { &a.intent }, &a.path, false);
+        let old_header = journal_header(&original);
+        assert_eq!(old_header["next_event"], 1);
+        restore_uncommitted(&a, &original);
+        let trace = MigrationTrace::default();
+        let (engine, _review, stream, result) =
+            tracing::subscriber::with_default(trace.clone(), || try_review(&a.path, NOW, UtcOffset::UTC));
+        let c = result.unwrap();
+        trace.require("legacy_identity_upgraded");
+        assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+        assert_eq!(
+            common::steps::dump(&c),
+            a.after,
+            "normal recovery applied the actual frozen answer"
+        );
+        assert!(dropped(&stream).is_empty());
+        let landed = journal_header(&fs::read(journal_path(&a.path)).unwrap());
+        assert_eq!(landed["version"], 2);
+        assert_eq!(landed["incarnation"], old_header["incarnation"]);
+        assert_eq!(landed["next_event"], 2, "decoded Intent advanced the recovered counter");
+        assert_eq!(landed["notice"]["reason"], "legacy_identity_upgraded");
+        assert_eq!(fs::read(identity_archive(&a.path, &original)).unwrap(), original);
+        engine.close().unwrap();
+        reopen_twice_matches(&a, &a.after);
+    }
+}
+
+#[test]
+fn c12_exact_v1_header_device_change_archives_rebinds_and_replays_zero_including_compacted_header() {
+    for highwater in [1, 37] {
+        let h = Harness::new(3);
+        let path = h.collection.path().to_owned();
+        let before = common::steps::dump(&h.collection);
+        h.engine.close().unwrap();
+        let current = fs::read(journal_path(&path)).unwrap();
+        assert_eq!(current.iter().filter(|b| **b == b'\n').count(), 1);
+        let legacy = legacy_journal(&current, &path, true);
+        let original = change_record(&legacy, 0, |r| r["Header"]["next_event"] = highwater.into());
+        fs::write(journal_path(&path), &original).unwrap();
+        let old_incarnation = journal_header(&original)["incarnation"].clone();
+        let trace = MigrationTrace::default();
+        let (engine, _review, stream, result) =
+            tracing::subscriber::with_default(trace.clone(), || try_review(&path, NOW, UtcOffset::UTC));
+        let c = result.unwrap();
+        trace.require("legacy_header_only_rebound");
+        assert_eq!(common::steps::dump(&c), before);
+        assert!(dropped(&stream).is_empty());
+        let bytes = fs::read(journal_path(&path)).unwrap();
+        assert_eq!(bytes.iter().filter(|b| **b == b'\n').count(), 1);
+        let landed = journal_header(&bytes);
+        assert_eq!(landed["version"], 2);
+        // A fresh binding needs a different incarnation even when a seeded
+        // reopen would otherwise repeat the first generated random pair.
+        assert_ne!(landed["incarnation"], old_incarnation);
+        assert_eq!(landed["notice"]["reason"], "legacy_header_only_rebound");
+        assert_eq!(fs::read(identity_archive(&path, &original)).unwrap(), original);
+        engine.close().unwrap();
+        let reemitted = MigrationTrace::default();
+        let (engine, c, _) =
+            tracing::subscriber::with_default(reemitted.clone(), || session_support::open(&path, h.clock.clone()));
+        reemitted.require("legacy_header_only_rebound");
+        assert_eq!(common::steps::dump(&c), before);
+        engine.close().unwrap();
+    }
+}
+
+#[test]
+fn c12_v1_event_bearing_device_mismatch_and_header_tails_retain_every_byte_and_forbid_ready() {
+    let a = capture_answer(|_| {});
+    let header_end = a.intent.iter().position(|b| *b == b'\n').unwrap() + 1;
+    for mode in [
+        "intent",
+        "prepared",
+        "done",
+        "cancelled",
+        "dropped",
+        "tail",
+        "blank",
+        "zero",
+        "incomplete",
+    ] {
+        let original = match mode {
+            "intent" => legacy_journal(&a.intent, &a.path, true),
+            "prepared" => legacy_journal(&a.prepared, &a.path, true),
+            "done" | "cancelled" | "dropped" => {
+                let mut bytes = legacy_journal(&a.prepared, &a.path, true);
+                // Reuse the framing/checksum helper on a generated extra frame.
+                let frame = serde_json::json!({"number":4,"payload":"null", "checksum":[]});
+                bytes.extend(serde_json::to_vec(&frame).unwrap());
+                bytes.push(b'\n');
+                change_record(
+                    &bytes,
+                    3,
+                    |r| *r = serde_json::json!({"Terminal":{"event":1,"status":match mode { "done" => "Done", "cancelled" => "Cancelled", _ => "Dropped" }}}),
+                )
+            }
+            "tail" | "blank" => {
+                let mut bytes = legacy_journal(&a.intent[..header_end], &a.path, true);
+                bytes.extend(if mode == "tail" { b"torn".as_slice() } else { b"\n" });
+                bytes
+            }
+            "zero" => vec![],
+            "incomplete" => a.intent[..header_end - 1].to_vec(),
+            _ => unreachable!(),
+        };
+        restore_uncommitted(&a, &original);
+        let (engine, review, _, result) = try_review(&a.path, NOW, UtcOffset::UTC);
+        assert!(result.is_err(), "{mode}");
+        assert!(matches!(engine.state(), LifecycleState::Failed { .. }), "{mode}");
+        assert!(review.start(DeckId(1), None).is_err());
+        assert_eq!(fs::read(journal_path(&a.path)).unwrap(), original, "{mode}");
+        assert!(!identity_archive(&a.path, &original).exists(), "{mode}");
+        drop(review);
+        drop(engine);
+        let (engine, c) = no_review(&a.path, NOW);
+        assert_eq!(common::steps::dump(&c), a.before, "{mode}");
+        engine.close().unwrap();
+    }
+}
+
+static MIGRATION_FAULT_POINT: Mutex<Option<&'static str>> = Mutex::new(None);
+fn fail_active_migration_publication() {
+    use meguri_model::faultpoint::{self, Fault};
+    let point = MIGRATION_FAULT_POINT.lock().unwrap().unwrap();
+    faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+}
+struct ArmMigrationFault {
+    point: &'static str,
+    active: bool,
+}
+impl meguri_engine::OpenStep for ArmMigrationFault {
+    fn name(&self) -> &str {
+        "arm-generated-migration-fault"
+    }
+    fn run(&self, _: &Collection) -> Result<(), EngineError> {
+        use meguri_model::faultpoint::{self, Fault};
+        *MIGRATION_FAULT_POINT.lock().unwrap() = Some(self.point);
+        faultpoint::arm(
+            self.point,
+            if self.active {
+                Fault::Callback(fail_active_migration_publication)
+            } else {
+                Fault::IoError(std::io::ErrorKind::Other)
+            },
+        );
+        Ok(())
+    }
+}
+#[test]
+fn c12_migration_archive_and_active_sync_rename_directory_failures_forbid_ready_and_lose_no_accepted_answer() {
+    use meguri_model::faultpoint;
+    for matched in [false, true] {
+        for active in [false, true] {
+            for point in [
+                "storage.atomic.after_write",
+                "storage.atomic.after_sync",
+                "storage.atomic.before_rename",
+                "storage.atomic.after_rename",
+            ] {
+                let a = capture_answer(|_| {});
+                let header_end = a.prepared.iter().position(|b| *b == b'\n').unwrap() + 1;
+                let original = legacy_journal(
+                    if matched {
+                        &a.prepared
+                    } else {
+                        &a.prepared[..header_end]
+                    },
+                    &a.path,
+                    !matched,
+                );
+                restore_uncommitted(&a, &original);
+                let engine = Engine::new(EngineConfig::default()).unwrap();
+                let queue = Arc::new(QueueProvider::default());
+                let review = ReviewService::new(&engine, queue.clone()).unwrap();
+                let ports = Ports::new()
+                    .observer(queue.clone())
+                    .generation_listener(queue)
+                    .open_step(Arc::new(ArmMigrationFault { point, active }))
+                    .open_step(review.clone())
+                    .observer(review.clone())
+                    .generation_listener(review.clone())
+                    .suspend_participant(review.clone());
+                let trace = MigrationTrace::default();
+                let result = tracing::subscriber::with_default(trace.clone(), || {
+                    engine.open_raw(
+                        &a.path,
+                        OpenConfig::new(
+                            Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC")),
+                            Arc::new(SeededRandom::new(43)),
+                        )
+                        .ports(ports),
+                    )
+                });
+                faultpoint::disarm(point);
+                assert!(result.is_err(), "{matched} {active} {point}");
+                assert!(matches!(engine.state(), LifecycleState::Failed { .. }));
+                assert!(review.start(DeckId(1), None).is_err());
+                assert!(
+                    trace.0.lock().unwrap().is_empty(),
+                    "failed durability cannot report migration complete"
+                );
+                if identity_archive(&a.path, &original).exists() {
+                    assert_eq!(fs::read(identity_archive(&a.path, &original)).unwrap(), original);
+                }
+                drop(review);
+                drop(engine);
+                // WAL-covered normal recovery can already have applied the
+                // accepted answer. Finishing migration must not apply it twice.
+                let expected = if matched { &a.after } else { &a.before };
+                reopen_twice_matches(&a, expected);
+            }
+        }
+    }
+}
+
 #[test]
 fn c12_torn_final_tail_replays_valid_prefix_once_and_preserves_complete_rows() {
     let a = capture_answer(|_| {});

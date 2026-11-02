@@ -22,7 +22,7 @@ mg_native_durability() {
   mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
   local package suite target_name kind json log rc binary counts passed failed skipped
-  local suites="suspend wal_durability collection_ffi cloud_records cloud_recovery cloud_unit"
+  local suites="suspend wal_durability collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity"
   local total_passed=0 total_failed=0 total_skipped=0 broken=false
   local target="$MG_ROOT/build/native-durability/target"
   # Synthetic benchmark collections only, regardless of a caller's override.
@@ -31,7 +31,7 @@ mg_native_durability() {
   # caller's Cargo environment normally cross-compiles. Reuse this dedicated
   # target cache across runs without replacing Xcode's shared core products.
   # Missing locked test dependencies may download here, outside measurement.
-  for package in meguri-engine meguri-ffi meguri-sync; do
+  for package in meguri-engine meguri-ffi meguri-sync meguri-storage; do
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
@@ -40,6 +40,10 @@ mg_native_durability() {
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     elif [ "$package" = meguri-ffi ]; then
       (cd core && cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi \
+        --target aarch64-apple-darwin --target-dir "$target" --no-run \
+        --message-format json-render-diagnostics) >"$json" 2>"$log"
+    elif [ "$package" = meguri-storage ]; then
+      (cd core && cargo test --locked -p meguri-storage --lib \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     else
@@ -66,6 +70,7 @@ mg_native_durability() {
       collection_ffi) package=meguri-ffi;;
       cloud_records|cloud_recovery) package=meguri-sync;;
       cloud_unit) package=meguri-sync; target_name=meguri_sync; kind=lib;;
+      persistent_identity) package=meguri-storage; target_name=meguri_storage; kind=lib;;
     esac
     binary="$(jq -ser --arg suite "$target_name" --arg kind "$kind" '
       if ([.[] | select(.reason == "build-finished")] | length) == 1
@@ -89,7 +94,10 @@ mg_native_durability() {
   for suite in $suites; do
     binary="$(cat "$MG_RUN_DIR/$suite-executable.txt")"
     log="$MG_RUN_DIR/$suite.log"
-    if [ "$suite" = cloud_unit ]; then
+    if [ "$suite" = persistent_identity ]; then
+      "$binary" persistent_identity::tests::darwin_generated_regular_fd_reads_full_volume_uuid_and_retains_binding \
+        --exact --test-threads=1 --nocapture >"$log" 2>&1
+    elif [ "$suite" = cloud_unit ]; then
       # Keep the private cloud settings proof; frozen server tests stay out.
       "$binary" cloud:: --test-threads=1 --nocapture >"$log" 2>&1
     else

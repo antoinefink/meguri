@@ -43,3 +43,18 @@ build/cloud-agent-injection-reviewed-seed-20261102.patch. It passed the shared
 and privacy. Actual embedding, signing and frozen launch remain unverified.
 Xcode's automatic catalog extraction is preserved separately in
 build/direct-mac-catalog-extraction-20261102.patch, outside accepted UI changes.
+
+The generated-file API probe subsequently succeeds inside the running Mac app:
+fgetattrlist returns0 with40 bytes and the requested nonzero UUID attribute.
+Only result flags and layout are retained; the temporary file is closed and
+removed. This proves current app access to the API, not the Rust implementation.
+
+Filtered8862 implements the storage reader, versioned journal migration and
+recovery integration. MG formatting completes. Focused Docker run14064 passes
+17/17 storage/journal unit cases; run15044 passes21/21 production recovery cases.
+Privacy14339 passes every changed source file. Independent code review finds
+one P2: the worker must retain the published journal binding through append
+reopen. A file substituted in that interval must refuse open. That repair and
+its boundary case remain required, along with native C12 suite selection and
+gate triggers. No repaired app launch, native Rust result or Unit acceptance
+is claimed by this WIP checkpoint.

@@ -62,6 +62,7 @@ pub struct Writer {
     pub(crate) conn: Connection,
     // Dropped after SQLite: closing another descriptor earlier releases POSIX locks.
     identity_file: std::fs::File,
+    identity_bound: (u64, u64),
     #[cfg(feature = "test-hooks")]
     pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
@@ -72,6 +73,11 @@ impl Writer {
         use std::os::unix::fs::MetadataExt;
         let metadata = self.identity_file.metadata()?;
         Ok((metadata.dev(), metadata.ino()))
+    }
+
+    /// Cross-restart C12 binding from the original retained descriptor.
+    pub fn persistent_identity(&self) -> Result<crate::persistent_identity::PersistentIdentity, StorageError> {
+        crate::persistent_identity::read_from(&self.identity_file, self.identity_bound)
     }
 
     /// Opens the writer: read-write, never create, then C5 and C4's settings
@@ -139,6 +145,7 @@ impl Writer {
         Ok(Writer {
             conn,
             identity_file,
+            identity_bound: file_identity,
             #[cfg(feature = "test-hooks")]
             fail_next_wal_sync: std::cell::Cell::new(false),
         })

@@ -47,7 +47,11 @@ pub(crate) enum Control {
     Resume,
 }
 pub(crate) struct ControlReply {
-    pub review_identity: Option<((u64, u64), [u64; 2])>,
+    pub review_identity: Option<(
+        (u64, u64),
+        meguri_storage::persistent_identity::PersistentIdentity,
+        [u64; 2],
+    )>,
     pub external_change: bool,
     pub factory: Option<ReaderFactory>,
 }
@@ -276,6 +280,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
                 .ok_or_else(|| EngineError::unavailable("collection closed"))?;
             reply.review_identity = Some((
                 collection.writer().native_identity()?,
+                collection.writer().persistent_identity()?,
                 [env.reopen.random.next_u64(), env.reopen.random.next_u64()],
             ));
         }
