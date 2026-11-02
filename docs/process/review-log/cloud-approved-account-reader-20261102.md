@@ -1,6 +1,6 @@
 # Approved CloudKit account input reader
 
-Status: independently reviewed WIP; focused tests and actual platform query unrun.
+Status: focused generated tests pass; actual platform query remains unrun.
 Prepared base: ad4ce8fbb02d98f0e108b9e03cbfcd6e43f6d095.
 Integration start: 703db4f2.
 U113 start: 1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a.
@@ -22,3 +22,7 @@ values are generated. No actual private input or OS query was read or run in
 authoring/review. Parent product/header checks, private delivery/readback and
 runtime admission remain separate integration work. Missing guards are retained.
 No signed execution, Unit acceptance or passing full gate is claimed.
+
+Focused Docker verification selftest/20261102T130332Z-83481 passed both
+selected wrappers, including this reader's generated cases. This does not
+exercise the actual Foundation query or read approved account input.

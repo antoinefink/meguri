@@ -1,6 +1,6 @@
 # App-local CloudKit agent delivery
 
-Status: focused Swift admission checks pass; tooling has one failing witness.
+Status: focused Swift and tooling checks pass; actual VM delivery is unrun.
 Prepared base: a15dd42b34e624371be4efe4e96e151c3340669a.
 Integration start: 5ed45bb5c9c235f0f2df880229f752071a4298a1.
 U113 start: 1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a.
@@ -65,3 +65,10 @@ new preflight test's unqualified LaunchOptions name. Filtered cleanup
 cleanroom/20261102T131245Z-89682 qualifies the existing nested type only.
 Independent review found no issue; the assertion is unchanged. Compilation
 after this cleanup and actual VM preflight remain pending.
+
+Build verification after the type cleanup passed on both platforms:
+build-app/20261102T133030Z-3010 (Mac, source e8faf485) and
+build-app/20261102T134456Z-15587 (iOS simulator, source c147f244).
+Both built the Debug CloudAgent app and test target with no compiler warnings
+or errors. Neither launched tests or exercised signed CloudKit execution.
+Actual VM preflight, input delivery and private account admission remain unrun.
