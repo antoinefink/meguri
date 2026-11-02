@@ -2,6 +2,7 @@
 @testable import Meguri
 import AppModel
 import CloudKit
+import CoreBridge
 import Darwin
 import Foundation
 import XCTest

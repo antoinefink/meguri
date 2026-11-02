@@ -693,6 +693,8 @@ def admit_product(root, results, expected, vm_device=None):
     sha = source(root)
     need(expected["source_commit"] == sha, "source-changed")
     build, receipt_hash = receipt(root, results, expected["build_receipt"], sha)
+    if "build_receipt_sha256" in expected:
+        need(receipt_hash == expected["build_receipt_sha256"], "build-receipt-bytes")
     manifest, frozen = build_product(root, build, expected)
     settings_path = os.path.join(results, build["job"], build["run_id"], "agent-cloud-settings.json")
     settings_hash = digest(declared_file(root, build, settings_path))

@@ -6,6 +6,8 @@ private duplex transport and process memory. No candidate file or attachment.
 """
 import argparse
 import contextlib
+import ctypes
+import fcntl
 import importlib.util
 import inspect
 import json
@@ -29,6 +31,7 @@ _spec.loader.exec_module(s)
 a, h, v, i = s.a, s.h, s.v, s.i
 need, strict, CAP, WAIT = s.need, s.strict, s.CAP, s.WAIT
 NAME = "approved-accounts.json"
+LOCK_NAME = ".approved-accounts.lock"  # Stable authority: never unlink/replace.
 
 
 def identity(value):
@@ -52,6 +55,27 @@ def approved(raw, container):
 
 class PublicationUncertain(v.Refused):
     pass
+
+
+def exchange(source, name, destination, leaf):
+    """Exchange both existing entries atomically; no replace fallback."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        fn, flag = libc.renameatx_np, 0x00000002  # RENAME_SWAP
+    elif sys.platform == "linux":
+        fn, flag = libc.renameat2, 2  # RENAME_EXCHANGE (generated tests)
+    else:
+        raise v.Refused("setup-exchange-unavailable")
+    fn.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    fn.restype = ctypes.c_int
+    need(fn(source, os.fsencode(name), destination, os.fsencode(leaf), flag) == 0, "setup-exchange-failed")
+
+
+def exchanged_pin(info):
+    # An exchange may change ctime on both inodes. Nothing else in the original
+    # pin (including mtime), nor either file's bytes, may change.
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_uid, info.st_gid)
 
 
 class Source:
@@ -87,6 +111,13 @@ class Source:
                 self.dirs.append((fd, name, child, h.directory_pin(info)))
                 fd = child
             self.parent = fd
+            self.writer_fd = os.open(LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                     0o600, dir_fd=fd)
+            self.held.callback(os.close, self.writer_fd)
+            info = os.fstat(self.writer_fd)
+            need(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600 and
+                 info.st_uid == os.getuid() and info.st_nlink == 1 and info.st_size == 0, "setup-writer")
+            self.writer_pin = h.file_pin(info)
             if self.events:
                 for directory in [*self.base.held, *(item[2] for item in self.dirs)]:
                     self.watch(directory, False)
@@ -98,6 +129,7 @@ class Source:
             else:
                 self.held.callback(os.close, self.fd)
                 self.pin = h.file_pin(os.fstat(self.fd))
+                self.prior_pin = exchanged_pin(os.fstat(self.fd))
                 self.regular(os.fstat(self.fd))
                 self.watch(self.fd, True)
                 self.raw = self.read(self.fd)
@@ -129,6 +161,8 @@ class Source:
         for parent, name, fd, pin in self.dirs:
             need(h.directory_pin(os.fstat(fd)) == pin and h.directory_pin(
                 os.stat(name, dir_fd=parent, follow_symlinks=False)) == pin, "setup-directory-changed")
+        for info in (os.fstat(self.writer_fd), os.stat(LOCK_NAME, dir_fd=self.parent, follow_symlinks=False)):
+            need(h.file_pin(info) == self.writer_pin, "setup-writer-changed")
         if self.events:
             need(not self.events.control(None, 1, 0), "setup-source-changed")
 
@@ -168,46 +202,71 @@ class Source:
         return raw
 
     def publish(self, raw, recheck):
-        """No retries/rollback; any failure from rename onward is uncertain."""
+        """Serialize cooperative writers; never retry or roll back an exchange."""
+        try:
+            fcntl.flock(self.writer_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                self._publish(raw, recheck)
+            finally:
+                fcntl.flock(self.writer_fd, fcntl.LOCK_UN)
+        except BaseException:
+            if self.started:
+                raise PublicationUncertain("publication-uncertain") from None
+            raise
+
+    def _publish(self, raw, recheck):
         self.check()
         name = ".approved-" + os.urandom(16).hex()
         fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=self.parent)
+        self.held.callback(os.close, fd)
+        with os.fdopen(os.dup(fd), "wb") as out:
+            out.write(raw)
+            out.flush()
+            os.fsync(out.fileno())
+        self.regular(os.fstat(fd))
+        pin = h.file_pin(os.fstat(fd))
+        new_pin = exchanged_pin(os.fstat(fd))
+        need(self.read(fd) == raw, "setup-write-readback")
+        recheck()
+        self.check()
+        need(h.file_pin(os.stat(name, dir_fd=self.parent, follow_symlinks=False)) == pin, "setup-temp-changed")
+        self.started = True
         try:
-            with os.fdopen(os.dup(fd), "wb") as out:
-                out.write(raw)
-                out.flush()
-                os.fsync(out.fileno())
-            self.regular(os.fstat(fd))
-            pin = h.file_pin(os.fstat(fd))
-            need(self.read(fd) == raw, "setup-write-readback")
-            recheck()
-            self.check()
-            need(h.file_pin(os.stat(name, dir_fd=self.parent, follow_symlinks=False)) == pin, "setup-temp-changed")
-            self.started = True
-            try:
-                if self.fd is None:
-                    h.publish_exclusive(self.parent, name, self.parent, NAME)
-                else:
-                    os.replace(name, NAME, src_dir_fd=self.parent, dst_dir_fd=self.parent)
-                os.fsync(self.parent)
-                # Old source descriptor now names the replaced inode. Validate
-                # directories separately, excluding that intentional event.
-                self.directories()
-                published = os.open(NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.parent)
+            if self.fd is None:
+                h.publish_exclusive(self.parent, name, self.parent, NAME)
+            else:
                 try:
-                    self.regular(os.fstat(published))
-                    need(h.file_pin(os.fstat(published)) == h.file_pin(os.fstat(fd)) and self.read(published) == raw,
-                         "setup-publication-readback")
-                    need(h.file_pin(os.stat(NAME, dir_fd=self.parent, follow_symlinks=False)) ==
-                         h.file_pin(os.fstat(published)), "setup-publication-changed")
+                    exchange(self.parent, name, self.parent, NAME)
                 finally:
-                    os.close(published)
-                recheck()
-            except BaseException:
-                raise PublicationUncertain("publication-uncertain") from None
-        finally:
-            os.close(fd)
-            # Keep private temporary evidence on failure. Never undo/retry.
+                    # Even lost completion/cancellation retains the entry
+                    # privately through its own nofollow descriptor. Never
+                    # unlink it: it may carry a competing label's approval.
+                    prior = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.parent)
+                    self.held.callback(os.close, prior)
+            os.fsync(self.parent)
+            if self.fd is not None:
+                for info in (os.fstat(prior), os.fstat(self.fd),
+                             os.stat(name, dir_fd=self.parent, follow_symlinks=False)):
+                    self.regular(info)
+                    need(exchanged_pin(info) == self.prior_pin, "setup-prior-changed")
+                need(self.read(prior) == self.raw and self.read(self.fd) == self.raw,
+                     "setup-prior-changed")
+            # Old source descriptor now names the replaced inode. Validate
+            # directories separately, excluding that intentional event.
+            self.directories()
+            published = os.open(NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.parent)
+            try:
+                self.regular(os.fstat(published))
+                need(exchanged_pin(os.fstat(fd)) == new_pin and
+                     h.file_pin(os.fstat(published)) == h.file_pin(os.fstat(fd)) and self.read(published) == raw,
+                     "setup-publication-readback")
+                need(h.file_pin(os.stat(NAME, dir_fd=self.parent, follow_symlinks=False)) ==
+                     h.file_pin(os.fstat(published)), "setup-publication-changed")
+            finally:
+                os.close(published)
+            recheck()
+        except BaseException:
+            raise PublicationUncertain("publication-uncertain") from None
 
     def close(self):
         self.invalid = True

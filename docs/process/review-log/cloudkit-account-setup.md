@@ -14,8 +14,18 @@ guards remain required. The entry opens no Core host or collection and uses
 only native account reads. Only Antoine may invoke and approve actual setup.
 
 Independent reviewer cloud_smoke_review found one P2: existing-source replace
-can lose a concurrent update after its last check and report success. Repair
-is pending. All generated checks and native builds after this export are unrun.
+can lose a concurrent update after its last check and report success. Filtered
+repair89048 adds a stable writer lock and validates the actual prior entry
+after an atomic exchange. A conflict retains private evidence and reports
+an uncertain result. Independent review found no required repair after89048.
+
+Focused selftest/20261102T160214Z-89822 failed 1/22 wrappers: receipt-byte
+binding occurred after consuming product fields. Mac compile89823 also failed
+with a Swift compiler error. Filtered repair91356 restores the byte
+check immediately after the same receipt read and adds the required import.
+Review clears those changes but identifies a generated test that forbids that
+import; its narrow correction remains pending. No assertions are discarded.
+All verification after these repairs remains unrun.
 No signed execution, unit acceptance or owner action is claimed.
 
 Integration renames generated test/local names and removes a redundant comment

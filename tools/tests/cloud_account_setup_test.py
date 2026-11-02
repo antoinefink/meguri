@@ -75,6 +75,17 @@ class Producer(unittest.TestCase):
         return terminal, transport
     def unchanged(self, original):
         self.assertEqual(self.path.read_bytes() if self.path.exists() else None, original)
+    def private_priors(self):
+        return [path for path in self.path.parent.glob(".approved-*") if path.name != p.LOCK_NAME]
+    def assert_private_prior(self, raw, inode):
+        matching = [path for path in self.private_priors() if path.read_bytes() == raw]
+        self.assertEqual(len(matching), 1)
+        info = matching[0].stat()
+        self.assertEqual(info.st_ino, inode)
+        self.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
+        self.assertEqual(info.st_uid, os.getuid())
+        self.assertEqual(info.st_nlink, 1)
+        self.assertEqual(stat.S_IMODE(matching[0].parent.stat().st_mode), 0o700)
 
     def test_creation_idempotence_replacement_and_preservation(self):
         for accounts, label, changed in ((None, "acct1", False), ({"acct1": CANDIDATE}, "acct1", False),
@@ -201,6 +212,7 @@ class Producer(unittest.TestCase):
         # Private aliases never receive the trusted-root canonicalization.
         source.close()
         private = physical / "Meguri/CloudKitSignedPrivate"
+        (private / p.LOCK_NAME).unlink()  # Fixture teardown after authority closes.
         private.rmdir()
         private.symlink_to(self.root, target_is_directory=True)
         with self.assertRaises(OSError):
@@ -218,16 +230,142 @@ class Producer(unittest.TestCase):
 
     def test_interrupted_atomic_publication_is_uncertain_once_and_never_rolled_back(self):
         source = self.source({"acct1": [77]})
-        replace = os.replace
+        original, inode = self.path.read_bytes(), self.path.stat().st_ino
+        exchange = p.exchange
         def lost(*args, **kwargs):
-            replace(*args, **kwargs)
+            exchange(*args, **kwargs)
             raise OSError("GENERATED_PRIVATE_COMPLETION_MARKER")
-        with mock.patch.object(p.os, "replace", side_effect=lost) as operation:
+        with mock.patch.object(p, "exchange", side_effect=lost) as operation:
             with self.assertRaises(p.PublicationUncertain):
                 source.publish(source.proposed("acct1", CANDIDATE), lambda: None)
         self.assertEqual(operation.call_count, 1)
         self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"]["acct1"], CANDIDATE)
         self.assertTrue(source.started)
+        self.assert_private_prior(original, inode)
+
+    def test_existing_exchange_succeeds_and_retains_exact_private_prior(self):
+        source = self.source({"acct1": [77], "acct2": [88]})
+        original, inode = self.path.read_bytes(), self.path.stat().st_ino
+        writer = self.path.parent / p.LOCK_NAME
+        writer_inode = writer.stat().st_ino
+        with mock.patch.object(p, "exchange", wraps=p.exchange) as operation:
+            self.perform(source)
+        self.assertEqual(operation.call_count, 1)
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"],
+                         {"acct1": CANDIDATE, "acct2": [88]})
+        self.assert_private_prior(original, inode)
+        self.assertEqual(writer.stat().st_ino, writer_inode)
+        self.assertEqual(stat.S_IMODE(writer.stat().st_mode), 0o600)
+
+    def test_competing_existing_source_at_exchange_is_private_uncertain_and_no_success(self):
+        source = self.source({"acct1": [77], "acct2": [88]})
+        transport, exchange = Transport(), p.exchange
+        competing = encoded({"acct1": [77], "acct2": [99]})
+        competing_inode, retained = [], []
+        opened = os.open
+        def record_open(name, flags, *args, **kwargs):
+            fd = opened(name, flags, *args, **kwargs)
+            if str(name).startswith(".approved-") and flags & os.O_NOFOLLOW and not flags & os.O_CREAT:
+                retained.append(fd)
+            return fd
+        def conflict(*args):
+            temp = self.path.parent / "generated-competing"
+            temp.write_bytes(competing)
+            os.chmod(temp, 0o600)
+            competing_inode.append(temp.stat().st_ino)
+            os.replace(temp, self.path)
+            exchange(*args)  # Actual OS operation at the last-check race point.
+        with mock.patch.object(p, "exchange", side_effect=conflict) as operation, \
+             mock.patch.object(p.os, "open", side_effect=record_open):
+            with self.assertRaises(p.PublicationUncertain) as raised:
+                self.perform(source, transport=transport)
+        self.assertEqual(str(raised.exception), "publication-uncertain")
+        self.assertEqual(operation.call_count, 1)
+        self.assertTrue(source.started)
+        self.assertEqual(transport.actions, ["capture", "fresh", "hold"])
+        self.assert_private_prior(competing, competing_inode[0])
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(os.fstat(retained[0]).st_ino, competing_inode[0])
+        self.assertEqual(os.pread(retained[0], p.a.LIMIT, 0), competing)
+        # No rollback: the approved temporary is now published, and the other
+        # label's competing value survives in the private prior inode.
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"],
+                         {"acct1": CANDIDATE, "acct2": [88]})
+
+    def test_cooperative_writer_cannot_enter_during_publication(self):
+        source = self.source({"acct1": [77], "acct2": [88]})
+        other = self.source()
+        attempts = []
+        def concurrent():
+            attempts.append(True)
+            with self.assertRaises(BlockingIOError):
+                other.publish(other.proposed("acct2", [99]), lambda: self.fail("contending writer entered"))
+            self.assertFalse(other.started)
+        source.publish(source.proposed("acct1", CANDIDATE), concurrent)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"],
+                         {"acct1": CANDIDATE, "acct2": [88]})
+        self.assertEqual(len(self.private_priors()), 1)
+        # Release never replaces the stable lock; a stale snapshot must still
+        # fail its original-source check after acquiring that same authority.
+        with self.assertRaises(p.v.Refused):
+            other.publish(other.proposed("acct2", [99]), lambda: None)
+        self.assertFalse(other.started)
+
+    def test_stable_writer_authority_substitution_refuses(self):
+        source = self.source({"acct1": [77]})
+        original = self.path.read_bytes()
+        writer = self.path.parent / p.LOCK_NAME
+        replacement = self.path.parent / "generated-writer"
+        replacement.touch(mode=0o600)
+        os.replace(replacement, writer)
+        with self.assertRaises(p.v.Refused):
+            source.publish(source.proposed("acct1", CANDIDATE), lambda: None)
+        self.assertFalse(source.started)
+        self.unchanged(original)
+
+    def test_in_place_source_edit_at_exchange_is_uncertain(self):
+        source = self.source({"acct1": [77], "acct2": [88]})
+        exchange, before = p.exchange, self.path.stat()
+        edited = encoded({"acct1": [77], "acct2": [99]})
+        inode = self.path.stat().st_ino
+        def conflict(*args):
+            self.path.write_bytes(edited)
+            # Preserve all post-exchange metadata we can legitimately compare;
+            # the prior-byte check must still reject the unrelated edit.
+            os.utime(self.path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            exchange(*args)
+        with mock.patch.object(p, "exchange", side_effect=conflict):
+            with self.assertRaises(p.PublicationUncertain):
+                self.perform(source)
+        self.assert_private_prior(edited, inode)
+
+    def test_unrelated_mtime_edit_at_exchange_is_uncertain_even_with_same_bytes(self):
+        source = self.source({"acct1": [77]})
+        exchange, before = p.exchange, self.path.stat()
+        def conflict(*args):
+            os.utime(self.path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+            exchange(*args)
+        with mock.patch.object(p, "exchange", side_effect=conflict):
+            with self.assertRaises(p.PublicationUncertain):
+                self.perform(source)
+
+    def test_cancellation_after_exchange_preserves_prior_without_rollback_or_finish(self):
+        source = self.source({"acct1": [77], "acct2": [88]})
+        original, inode = self.path.read_bytes(), self.path.stat().st_ino
+        transport, exchange = Transport(), p.exchange
+        def cancelled(*args):
+            exchange(*args)
+            raise KeyboardInterrupt()
+        with mock.patch.object(p, "exchange", side_effect=cancelled) as operation:
+            with self.assertRaises(p.PublicationUncertain):
+                self.perform(source, transport=transport)
+        self.assertEqual(operation.call_count, 1)
+        self.assertTrue(source.started)
+        self.assertNotIn("finish", transport.actions)
+        self.assert_private_prior(original, inode)
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"],
+                         {"acct1": CANDIDATE, "acct2": [88]})
 
     def test_new_source_refuses_an_existing_target(self):
         source = self.source()
@@ -335,19 +473,23 @@ class SourceBoundaries(unittest.TestCase):
 
     def test_public_errors_never_include_sdk_marker_candidate_or_digest(self):
         private = "GENERATED_PRIVATE_SDK_MARKER"
-        out = io.StringIO()
-        with mock.patch.object(p.sys, "argv", ["generated", "--root", "/generated", "--run-id", "20261102T000000Z-1", "--label", "acct1"]), \
-             mock.patch.object(p.os, "dup", return_value=3), \
-             mock.patch.object(p.os, "fdopen", return_value=contextlib.nullcontext(io.BytesIO(b"{}"))), \
-             mock.patch.object(p.signal, "signal"), \
-             mock.patch.object(p, "run", side_effect=OSError(private + str(CANDIDATE))), \
-             contextlib.redirect_stdout(out):
-            self.assertEqual(p.main(), 1)
-        result = json.loads(out.getvalue())
-        self.assertEqual(result, {"scope": "SETUP-ONLY", "outcome": "failed_evidence", "category": "setup-refused",
-                                  "label": "acct1", "signed_execution": False})
-        self.assertNotIn(private, out.getvalue())
-        self.assertNotIn(p.v.digest(bytes(CANDIDATE)), out.getvalue())
+        for error, category in ((OSError(private + str(CANDIDATE)), "setup-refused"),
+                                (p.PublicationUncertain(private + str(CANDIDATE)), "publication-uncertain")):
+            out = io.StringIO()
+            with mock.patch.object(p.sys, "argv", ["generated", "--root", "/generated", "--run-id", "20261102T000000Z-1", "--label", "acct1"]), \
+                 mock.patch.object(p.os, "dup", return_value=3), \
+                 mock.patch.object(p.os, "fdopen", return_value=contextlib.nullcontext(io.BytesIO(b"{}"))), \
+                 mock.patch.object(p.signal, "signal"), \
+                 mock.patch.object(p, "run", side_effect=error), \
+                 contextlib.redirect_stdout(out):
+                self.assertEqual(p.main(), 1)
+            result = json.loads(out.getvalue())
+            self.assertEqual(result, {"scope": "SETUP-ONLY", "outcome": "failed_evidence", "category": category,
+                                      "label": "acct1", "signed_execution": False})
+            self.assertNotIn("setup_completed", out.getvalue())
+            self.assertNotIn(private, out.getvalue())
+            self.assertNotIn(str(CANDIDATE), out.getvalue())
+            self.assertNotIn(p.v.digest(bytes(CANDIDATE)), out.getvalue())
 
 
 if __name__ == "__main__":
