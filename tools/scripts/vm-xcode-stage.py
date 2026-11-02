@@ -881,7 +881,8 @@ class VM:
 
     def call(self, operation, context):
         return json.loads(self.call_command(self.guest_command(operation, context),
-                                           timeout=45 if operation == "join-receiver" else 180)[1])
+                                           timeout=COPY_WAIT if operation == "publish" else
+                                           45 if operation == "join-receiver" else 180)[1])
 
     def copy(self, bundle, context, on_join=lambda: None, *, copy_diagnostics=None):
         self.check()

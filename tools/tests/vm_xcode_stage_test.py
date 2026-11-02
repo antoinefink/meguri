@@ -717,7 +717,7 @@ class Staging(unittest.TestCase):
 
                             def transport(argv, **kwargs):
                                 self.assertEqual(argv, [vm.ssh, "generated-publish"])
-                                self.assertEqual(kwargs["timeout"], 180)
+                                self.assertEqual(kwargs["timeout"], m.COPY_WAIT)
                                 self.assertTrue(safety["pending"])
                                 self.assertFalse(safety["joined"])
                                 self.assertFalse((private / "lease-safe.json").exists())
@@ -1197,6 +1197,32 @@ class Staging(unittest.TestCase):
 
 
 class Transport(unittest.TestCase):
+    def test_control_call_routes_only_publish_to_whole_xcode_budget(self):
+        vm = m.VM.__new__(m.VM)
+        context = {"generated": "context"}
+        for operation, timeout in (("publish", m.COPY_WAIT), ("join-receiver", 45),
+                                   ("prepare", 180), ("receive", 180), ("extract", 180),
+                                   ("identity", 180), ("probe", 180), ("generated-default", 180)):
+            with self.subTest(operation=operation), \
+                    patch.object(vm, "guest_command", return_value="generated-control") as guest, \
+                    patch.object(vm, "call_command", return_value=(0, b'{"generated":true}')) as control:
+                self.assertEqual(vm.call(operation, context), {"generated": True})
+                guest.assert_called_once_with(operation, context)
+                control.assert_called_once_with("generated-control", timeout=timeout)
+
+    def test_direct_identity_and_probe_commands_keep_default_budget(self):
+        vm = m.VM.__new__(m.VM)
+        vm.ssh = "/generated/ssh"
+        vm.safety = {"pending": True, "joined": True, "uncertain": False}
+        for cmd in ("/usr/sbin/ioreg -a -r -d 1 -c IOPlatformExpertDevice",
+                    "/usr/sbin/sysctl -n kern.boottime", "generated-probe"):
+            with self.subTest(cmd=cmd), patch.object(vm, "check") as check, \
+                    patch.object(m, "command", return_value=(0, b"generated")) as command:
+                self.assertEqual(vm.call_command(cmd), (0, b"generated"))
+                command.assert_called_once_with([vm.ssh, cmd], timeout=180)
+                self.assertEqual(check.call_count, 2)
+                self.assertEqual(vm.safety, {"pending": True, "joined": True, "uncertain": False})
+
     def copy_command(self, bundle):
         vm = m.VM.__new__(m.VM)
         vm.ssh, vm.check = "/generated/ssh", lambda: None

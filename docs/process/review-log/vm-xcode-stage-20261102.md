@@ -152,3 +152,31 @@ from `.` in that same process and session. The parent working directory,
 receiver preamble, original source pins, signature checks and joins stay intact.
 Independent review found no required repair. Selftest83320 passes12/12 wrappers,
 zero skips; privacy83571 passes. Actual staging under this repair remains unrun.
+
+## Publication deadline and maintenance recovery
+
+Native run84684 completes the descriptor-bound copy and joins its original
+receiver. Its later publication call exceeds the default180-second control
+budget while performing full bundle checks. The original local process group
+was joined, but guest publication completion remains unknown. The failed run
+and retained lease fence are preserved; no staging or activation pass is inferred.
+
+Review covered a temporary recovery script. It keeps the original receipt,
+context, timeout log, receiver proof, worker and holder identities, lease,
+guard, VM selection and wrapper files bound throughout the operation. The
+first review found ordinary reads of three evidence files. Retained no-follow
+Original handles now protect those reads; the next review requires no repair.
+Antoine's VM permission covers this recovery. The script stops that VM,
+requires its authoritative stopped state, then removes only the empty guard
+under the lease mutex. Private evidence and a fixed JSON report record that
+shutdown. Neither marks run84684 passing or its guest operation complete.
+
+The first shell-background startup did not persist. The existing session-detached
+mvl_start helper then starts the dedicated VM headlessly. Fresh readiness and
+bundle validation remain required; no app or SDK operation has run here.
+
+Filtered implementer264d export90837 uses the existing3600-second whole-Xcode
+maintenance budget only for publication. Receiver join remains45 and other
+control calls remain180. Every signature, content, cancellation and lease check,
+and all app timing limits, remain unchanged. Independent review is clear.
+Selftest92631 passes12/12 wrappers, zero skips; privacy92864 passes.
