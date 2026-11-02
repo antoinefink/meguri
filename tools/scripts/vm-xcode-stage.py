@@ -435,7 +435,7 @@ def facts(directory, *, source_diagnostics=None):
          info.get("CFBundleShortVersionString") == v)
     diagnostics = {} if source_diagnostics is None else {"source_diagnostics": source_diagnostics}
     command(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--all-architectures",
-             "-R", "anchor apple", directory.path], **diagnostics)
+             "-R", "=anchor apple", directory.path], **diagnostics)
     directory.check()
     return {"version": v, "build": b}
 

@@ -179,7 +179,15 @@ class SourceOnly(unittest.TestCase):
         self.commands = []
         self.real_command = m.command
         self.addCleanup(patch.stopall)
+        actual_platform, actual_no_replace = sys.platform, m.no_replace
+
+        def no_replace(src_dir, src, dst_dir, dst):
+            # Simulate Darwin admission, but publish using the executing OS.
+            with patch.object(m.sys, "platform", actual_platform):
+                return actual_no_replace(src_dir, src, dst_dir, dst)
+
         patch.object(m.sys, "platform", "darwin").start()
+        patch.object(m, "no_replace", side_effect=no_replace).start()
         patch.object(m.InstalledSource, "system_identity", return_value=self.identity).start()
         patch.object(m, "command", side_effect=self.command).start()
         for name in ("VM", "host", "guest", "instance", "inventory", "free_space", "guest_root",
@@ -191,7 +199,7 @@ class SourceOnly(unittest.TestCase):
         if argv == ["/usr/bin/xcode-select", "-p"]:
             return 0, str(self.developer).encode()
         self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                "--all-architectures", "-R", "anchor apple", str(self.source)])
+                                "--all-architectures", "-R", "=anchor apple", str(self.source)])
         self.assertEqual(kwargs["source_diagnostics"].path, str(self.private))
         return 0, b""
 
@@ -276,7 +284,7 @@ class SourceOnly(unittest.TestCase):
             def __init__(self, argv, **kwargs):
                 self_test.assertEqual(argv[-1], str(self_test.source))
                 self_test.assertEqual(argv[1:-1], ["--verify", "--deep", "--strict",
-                                                  "--all-architectures", "-R", "anchor apple"])
+                                                  "--all-architectures", "-R", "=anchor apple"])
                 kwargs["stdout"].write(raw_out)
                 kwargs["stderr"].write(raw_err)
 
@@ -324,7 +332,7 @@ class SourceOnly(unittest.TestCase):
 
         def generated_child(argv, **kwargs):
             self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                    "--all-architectures", "-R", "anchor apple", str(self.source)])
+                                    "--all-architectures", "-R", "=anchor apple", str(self.source)])
             child = original_popen([sys.executable, "-B", "-c", program], **kwargs)
             children.append(child)
             return child
@@ -450,7 +458,7 @@ class Staging(unittest.TestCase):
         self.assertEqual(a.st_ino, b.st_ino)
         with m.Directory(str(self.target)) as d:
             self.assertEqual(m.inventory(d)["content"], self.expected["content"])
-        self.assertTrue(any("anchor apple" in argv for argv, _ in self.commands))
+        self.assertTrue(any("=anchor apple" in argv for argv, _ in self.commands))
         self.assertEqual(self.selection, str(self.target / "Contents/Developer"))
 
     def test_existing_identical_bundle_is_reused_without_copy(self):
