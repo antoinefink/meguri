@@ -18,3 +18,19 @@ checks and compilation are not signed execution evidence.
 
 Integration removes one redundant comment after a privacy finding; executable
 code is unchanged. Staged privacy scan private/20261102T135313Z-24442 passes.
+
+Host integration start: 394edd34. Filtered export
+cleanroom/20261102T133203Z-5702 adds the tools-only parent and generated tests.
+Its completion validator remains implementation_missing. Review also found
+that coreOpened's actual count field is rejected by the parent's current fact
+parser. Both need one shared serialization repair before execution. Integration
+renames internal tooling names and removes redundant comments after the privacy
+scan; no command, assertion or process behavior changes.
+
+The first focused Rust invocation lacked the required test-hooks feature and
+did not compile tests. The corrected invocation then found an unsupported
+rusqlite u64 conversion. Filtered compiler cleanup
+cleanroom/20261102T135550Z-27512 reads i64 and checks conversion; independent
+review found no required finding. After that fix,
+core-test/20261102T135755Z-29493 passed all three selected storage/FFI tests,
+with no skips. This is local generated-data proof, not CloudKit execution.

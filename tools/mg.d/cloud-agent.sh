@@ -1,11 +1,12 @@
-# Signed-agent J2.1 admission and delivery. Neither launches the agent.
+# Signed-agent J2.1 admission, plus the explicitly selected single-Mac smoke.
 mg_job cloudkit-signed host mg_cloudkit_signed \
-  "Signed CloudKit agent: exact receipt and independent product admission; VM Mac/reserved simulator scope; missing install/runtime proof fails"
+  "Signed CloudKit agent: --header input admission only, or --smoke single-Mac generated-data execution in the configured VM"
 
 mg_cloudkit_signed() {
-  local header="" results="$MG_ROOT/build/mg" report="$MG_RUN_DIR/input-admission.json" rc outcome
+  local header="" smoke="" results="$MG_ROOT/build/mg" report="$MG_RUN_DIR/input-admission.json" rc outcome
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --smoke) smoke=1; shift ;;
       --header|--results-directory)
         if [ "$#" -lt 2 ]; then
           mg_failure usage "cloudkit-signed requires an input path"
@@ -16,12 +17,21 @@ mg_cloudkit_signed() {
         shift 2
         ;;
       *)
-        mg_failure usage "usage: tools/mg cloudkit-signed --header <run.json> [--results-directory <directory>]"
+        mg_failure usage "usage: tools/mg cloudkit-signed --smoke | --header <run.json> [--results-directory <directory>]"
         mg_status error
         return 0
         ;;
     esac
   done
+  if [ -n "$smoke" ]; then
+    if [ -n "$header" ] || [ "$results" != "$MG_ROOT/build/mg" ]; then
+      mg_failure usage "--smoke cannot use external header or receipt inputs"
+      mg_status error
+      return 0
+    fi
+    mg_cloudkit_signed_smoke
+    return 0
+  fi
   if [ -z "$header" ]; then
     mg_failure implementation_missing "signed command, journal, account and generated-data coordination are not implemented"
     mg_detail outcome '"implementation_missing"'
@@ -132,7 +142,23 @@ mg_cloudkit_agent_install() {
       --parent-run "$parent" --source-commit "$MG_COMMIT_SHA" --header-template "$template" >"$report" 2>"$private/prepare.err"
   )
   rc=$?
-  if [ "$rc" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && [ -n "${MG_CLOUD_AGENT_SMOKE_CONTEXT_FD:-}" ]; then
+    # The real parent supplies a private inherited descriptor, never a route
+    # option. Python proves the holder's parent run and process ancestry. The
+    # child reuses that retained VM instead of taking/draining a second lease.
+    case "$MG_CLOUD_AGENT_SMOKE_CONTEXT_FD" in
+      *[!0-9]*|'') rc=1 ;;
+      *)
+        (umask 077
+          python3 -B -I "$MG_TOOLS/scripts/cloud-agent-smoke.py" --install-child \
+            --root "$MG_ROOT" --parent-run "$parent" --run-id "$MG_RUN_ID" \
+            --run-directory "$MG_RUN_DIR" --source-commit "$MG_COMMIT_SHA" \
+            3<&"$MG_CLOUD_AGENT_SMOKE_CONTEXT_FD" >"$report" 2>"$private/helpers.log"
+        )
+        rc=$?
+        ;;
+    esac
+  elif [ "$rc" -eq 0 ]; then
     (umask 077; mg_cloudkit_agent_install_private "$private" "$parent" "$lease_run") \
       >"$private/helpers.log" 2>&1
     rc=$?
@@ -183,6 +209,99 @@ mg_cloudkit_agent_install() {
       mg_status fail
       ;;
   esac
+}
+
+# One parent-owned VM lifecycle through the original app-hosted process join
+# and checked orphan drain. Helper routes, OS roots and diagnostics stay private.
+mg_cloudkit_signed_smoke_private() (
+  local private="$1" report="$2" rc
+  MG_EXIT_CMDS=()
+  MG_STATE="$private/state"
+  MG_RUN_DIR="$private"
+  mkdir -m 700 "$MG_STATE" || exit 1
+  mg_mac_vm_probe
+  rc=$?
+  case "$rc" in 0) ;; 1) exit 75 ;; *) exit 1 ;; esac
+  MG_MAC_VMS="$(jq -c '[.[0]]' <<<"$MG_MAC_VMS")" || exit 1
+  MG_SIM_RUNNER=vm
+  MG_MAC_RUNNER=vm
+  mg_mac_vm_take --no-copy --running-only
+  rc=$?
+  case "$rc" in 0) ;; 2) exit 75 ;; *) exit 1 ;; esac
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  jq -nc --argjson selection "$MG_MAC_VM" --arg slot "$MG_LEASE_SLOT" \
+    '{selection:$selection,lease_slot:$slot}' >"$private/context.json" || exit 1
+  MG_MAC_VM_TESTING=1
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-smoke.py" \
+    --root "$MG_ROOT" --parent-run "$MG_RUN_ID" \
+    3<"$private/context.json" >"$report"
+  rc=$?
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  mg__mac_vm_stop_orphans
+  if [ -n "$MG_MAC_VM_STOP_REASON" ]; then
+    case "$rc" in 0|75) ;; *) exit "$rc" ;; esac
+    [ -z "$MG_MAC_VM_STOP_UNREACHABLE" ] || exit 75
+    exit 1
+  fi
+  exit "$rc"
+)
+
+mg_cloudkit_signed_smoke() {
+  local private rc category report="$MG_RUN_DIR/smoke-report.json" file
+  if [ "${MG_JOB:-}" != cloudkit-signed ] || [ "${MG_COMMIT_DIRTY:-true}" != false ]; then
+    mg_failure smoke-source "Mac smoke requires its clean MG parent source"
+    mg_status fail
+    return 0
+  fi
+  private="$(mktemp -d "${TMPDIR:-/tmp}/meguri-cloud-smoke-parent.XXXXXX")" || return 1
+  chmod 700 "$private" || return 1
+  # Keep private original launch and helper evidence outside all MG exports.
+  (umask 077; mg_cloudkit_signed_smoke_private "$private" "$report") >"$private/helpers.log" 2>&1
+  rc=$?
+  mg_detail lane '"cloud-signed"'
+  mg_detail scope '"SMOKE"'
+  case "$rc" in
+    0)
+      if jq -e '. == {scope:"SMOKE",outcome:"smoke_completed",signed_execution:true,commands:10,closed_journal:true,original_app_hosted_joined:true}' "$report" >/dev/null 2>&1; then
+        mg_detail outcome '"smoke_completed"'
+        mg_status pass
+      else rc=1; fi
+      ;;
+    75)
+      jq -nc '{scope:"SMOKE",outcome:"queued",category:"vm-unavailable",signed_execution:false}' >"$report"
+      mg_detail outcome '"queued"'
+      mg_user_step mac-vm missing true "Make the configured test VM ready for the Mac smoke" \
+        "The same configured dedicated VM must remain reachable through original app-hosted termination. No host fallback."
+      mg_queued_part mac-vm "CloudAgent Mac smoke" "configured VM unavailable"
+      mg_queued_settle
+      ;;
+    76)
+      category="$(jq -r '.category | select(. == "cloudkit-test-accounts" or . == "cloudkit-dev-container")' "$report" 2>/dev/null)"
+      if [ -n "$category" ]; then
+        mg_detail outcome '"awaiting_user"'
+        mg_user_step "$category" missing true "Complete the existing development CloudKit setup" \
+          "The actual smoke observed a missing approved account or development-container/schema prerequisite."
+        mg_status warn
+      else rc=1; fi
+      ;;
+    78)
+      mg_detail outcome '"implementation_missing"'
+      mg_failure implementation_missing "Required Mac smoke counterpart or observation capability is missing"
+      mg_status fail
+      ;;
+  esac
+  case "$rc" in 0|75|76|78) ;; *)
+    jq -nc '{scope:"SMOKE",outcome:"failed_evidence",category:"smoke-refused",signed_execution:false}' >"$report"
+    mg_detail outcome '"failed_evidence"'
+    mg_failure smoke-evidence "Mac smoke failed input, transport, runtime or original-process checks"
+    mg_status fail
+    ;;
+  esac
+  mg_artifact json "$report" "Single-Mac SMOKE outcome only"
+  for file in commands.jsonl steps.jsonl launch-selection.json; do
+    [ ! -f "$MG_RUN_DIR/$file" ] || mg_artifact file "$MG_RUN_DIR/$file" "Original Mac smoke command, journal or launch selection"
+  done
+  mg_message "cloudkit-signed: Mac SMOKE scope only; full lane and soak remain unaccepted"
 }
 
 # Internal parent-only stage, called after the synchronous install child has

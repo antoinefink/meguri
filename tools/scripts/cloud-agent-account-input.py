@@ -165,6 +165,7 @@ class _Projection:
         except FileNotFoundError:
             raise InputFailure("setup") from None
         self._root = h.Directory(root)
+        self._support_path = root
         if sys.platform == "darwin":
             self._events = select.kqueue()
             for fd in self._root.held:
@@ -238,6 +239,11 @@ class _Projection:
         """Exact existing J2.2 JSON bytes, for the private delivery caller only."""
         self.revalidate()
         return self._projected
+
+    def host_application_support(self):
+        """Private materializer seam; the retained, OS-observed host root only."""
+        self.revalidate()
+        return self._support_path
 
     def _close(self):
         self._invalid = True

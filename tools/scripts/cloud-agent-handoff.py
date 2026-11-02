@@ -853,7 +853,7 @@ class VM(i.VM):
             return result
 
 
-def handoff_product_evidence(root, parent_run, install_run, vm, lease_check):
+def handoff_product_evidence(root, parent_run, install_run, vm, lease_check, consume=None):
     """Internal producer API. MG retains its selected VM lease throughout.
 
     This stage prepares paths and delivers originals only. It does not select
@@ -964,6 +964,11 @@ def handoff_product_evidence(root, parent_run, install_run, vm, lease_check):
                 need(vm.evidence(support, parent_run, expected["device"], header, files, False, support_state) == copied,
                      "evidence-readback-changed")
                 recheck_layout()
+                # The real parent may continue while every original receipt,
+                # destination, layout and product authority is still retained.
+                # The receipt-only caller keeps its original behavior.
+                if consume is not None:
+                    return consume(expected, header, files, support_state, copied, recheck_layout)
     return {"scope": "PRODUCT-EVIDENCE-ONLY", "outcome": "product_evidence_delivered", "signed_execution": False}
 
 
