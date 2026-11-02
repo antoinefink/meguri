@@ -7,7 +7,8 @@ import CryptoKit
 nonisolated enum AgentJSON {
     indirect enum Value {
         case object([String: Value]), array([Value]), scalar
-        func object(required: Set<String>, optional: Set<String> = []) throws -> [String: Value] {
+        case string(String), number(String), boolean(Bool), null
+        nonisolated func object(required: Set<String>, optional: Set<String> = []) throws -> [String: Value] {
             guard case .object(let fields) = self,
                   required.isSubset(of: Set(fields.keys)),
                   Set(fields.keys).isSubset(of: required.union(optional)) else { throw AgentFailure.shape }
@@ -26,8 +27,15 @@ nonisolated enum AgentJSON {
         }
     }
     static func parse(_ data: Data) throws -> Value {
-        guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil else { throw AgentFailure.json }
-        var parser = Parser(bytes: Array(data))
+        try parse(data, limit: 1_048_576, evidenceScalars: false)
+    }
+    // Evidence alone has a larger bound and retains original numeric tokens.
+    static func parseEvidence(_ data: Data) throws -> Value {
+        try parse(data, limit: 16 * 1024 * 1024, evidenceScalars: true)
+    }
+    private static func parse(_ data: Data, limit: Int, evidenceScalars: Bool) throws -> Value {
+        guard data.count <= limit, String(data: data, encoding: .utf8) != nil else { throw AgentFailure.json }
+        var parser = Parser(bytes: Array(data), evidenceScalars: evidenceScalars)
         let value = try parser.value(depth: 0)
         parser.space()
         guard parser.index == parser.bytes.count else { throw AgentFailure.json }
@@ -46,6 +54,7 @@ nonisolated enum AgentJSON {
     }
     private struct Parser {
         let bytes: [UInt8]
+        let evidenceScalars: Bool
         var index = 0
         mutating func space() { while index < bytes.count && [9, 10, 13, 32].contains(bytes[index]) { index += 1 } }
         mutating func take(_ byte: UInt8) -> Bool {
@@ -70,7 +79,7 @@ nonisolated enum AgentJSON {
             guard depth < 32 else { throw AgentFailure.json }
             space()
             guard index < bytes.count else { throw AgentFailure.json }
-            if bytes[index] == 34 { _ = try string(); return .scalar }
+            if bytes[index] == 34 { let text = try string(); return evidenceScalars ? .string(text) : .scalar }
             if take(123) {
                 var fields: [String: Value] = [:]
                 space(); if take(125) { return .object(fields) }
@@ -94,7 +103,11 @@ nonisolated enum AgentJSON {
             }
             for literal in ["true", "false", "null"] {
                 let token = Array(literal.utf8)
-                if bytes[index...].starts(with: token) { index += token.count; return .scalar }
+                if bytes[index...].starts(with: token) {
+                    index += token.count
+                    if !evidenceScalars { return .scalar }
+                    return literal == "null" ? .null : .boolean(literal == "true")
+                }
             }
             let start = index
             _ = take(45)
@@ -110,7 +123,7 @@ nonisolated enum AgentJSON {
                 let before = index; digits(); guard index > before else { throw AgentFailure.json }
             }
             guard let number = Double(String(decoding: bytes[start..<index], as: UTF8.self)), number.isFinite else { throw AgentFailure.json }
-            return .scalar
+            return evidenceScalars ? .number(String(decoding: bytes[start..<index], as: UTF8.self)) : .scalar
         }
         mutating func digits() { while index < bytes.count && (48...57).contains(bytes[index]) { index += 1 } }
     }
