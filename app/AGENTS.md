@@ -58,6 +58,8 @@
 
 ## Test hooks
 
+- `CloudKitAccountSetupTests/testOwnerSetup` is a separate Debug owner entry. Select only through the verified owner producer; keep it out of default CloudAgent selections and skipped by Snapshot. Its private live channel carries no XCTest attachment.
+
 - `HomeDeckListPreview` renders the production tree with DTO data; it proves appearance only. Full `-MeguriFixture` launches replace the destination collection. A `.dev` id does not isolate current development data; use an isolated test container or the VM for those launches.
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.

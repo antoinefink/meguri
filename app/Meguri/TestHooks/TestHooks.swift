@@ -49,6 +49,12 @@ enum TestHooks {
             return Session(setupOnly: true)
         }
         #endif
+        #if DEBUG && os(macOS)
+        if CloudAccountSetupStartup.requested() {
+            CloudAccountSetupStartup.excludeNormalStartup()
+            return Session(setupOnly: true)
+        }
+        #endif
         // Performance tests ask for a warmed web content process (R1866).
         WebContentWarmup.shared.listen()
         do throws(TestHookError) {

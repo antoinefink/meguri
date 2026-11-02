@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""Generated J2.2.1 checks only: synthetic identities, temporary OS roots.
+No native/VM/SDK/build/setup entry or actual owner approval is executed.
+"""
+import ast
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import stat
+import tempfile
+import unittest
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location("generated_cloud_account_setup", ROOT / "tools/scripts/cloud-account-setup.py")
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+CONTAINER = "iCloud.generated.setup"
+CANDIDATE = [41, 12, 255]  # Synthetic test data only.
+
+
+def encoded(accounts):
+    return p.i.raw_json({"protocol_version": 1, "container": CONTAINER, "environment": "development", "accounts": accounts})
+
+
+class Terminal:
+    def __init__(self, result=True, callback=lambda: None):
+        self.result, self.callback, self.prompts = result, callback, []
+    def approve(self, label, container, changed):
+        self.prompts.append((label, container, changed))
+        self.callback()
+        return self.result
+
+
+class Transport:
+    def __init__(self, fresh=None, fail=None, status="available"):
+        self.fresh = CANDIDATE if fresh is None else fresh
+        self.fail, self.status, self.actions = fail, status, []
+    def request(self, action):
+        self.actions.append(action)
+        if action == self.fail:
+            raise OSError("GENERATED_PRIVATE_SDK_MARKER")
+        if action in ("capture", "fresh"):
+            return {"status": self.status, "identity": CANDIDATE if action == "capture" else self.fresh,
+                    "observation": {"generated_loaded_product": True}}, b""
+        if action == "hold":
+            return {"observation": {"generated_loaded_product": True}}, b""
+        if action == "finish":
+            return {"joined": True}, b""
+        raise AssertionError(action)
+
+
+class Producer(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        os.chmod(self.root, 0o700)
+        self.path = self.root / "Meguri/CloudKitSignedPrivate/approved-accounts.json"
+    def source(self, accounts=None):
+        if accounts is not None:
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(self.path.parent.parent, 0o700)
+            self.path.write_bytes(encoded(accounts))
+            os.chmod(self.path, 0o600)
+        source = p.Source(str(self.root), CONTAINER)
+        self.addCleanup(source.close)
+        return source
+    def perform(self, source, label="acct1", terminal=None, transport=None, check=lambda current=None: None):
+        terminal, transport = terminal or Terminal(), transport or Transport()
+        p.perform(label, source, terminal, transport, check)
+        return terminal, transport
+    def unchanged(self, original):
+        self.assertEqual(self.path.read_bytes() if self.path.exists() else None, original)
+
+    def test_creation_idempotence_replacement_and_preservation(self):
+        for accounts, label, changed in ((None, "acct1", False), ({"acct1": CANDIDATE}, "acct1", False),
+                ({"acct1": [77], "acct2": [88]}, "acct1", True), ({"acct1": [77]}, "acct2", False)):
+            with self.subTest(accounts=accounts):
+                if self.path.exists():
+                    self.path.unlink()
+                source = self.source(accounts)
+                terminal, transport = self.perform(source, label)
+                self.assertEqual(terminal.prompts, [(label, CONTAINER, changed)])
+                result = p.approved(self.path.read_bytes(), CONTAINER)["accounts"]
+                self.assertEqual(result[label], CANDIDATE)
+                for other in set(accounts or {}) - {label}:
+                    self.assertEqual(result[other], accounts[other])
+                self.assertEqual(transport.actions, ["capture", "fresh", "hold", "hold", "finish"])
+                self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+                self.assertEqual(self.path.stat().st_nlink, 1)
+                source.close()
+                # close is an idempotent context boundary in production too.
+                self._cleanups.pop()
+
+    def test_acct2_needs_acct1_and_equal_accounts_refuse_before_prompt(self):
+        source, terminal, transport = self.source(), Terminal(), Transport()
+        with self.assertRaises(p.s.UserStep):
+            self.perform(source, "acct2", terminal, transport)
+        self.assertEqual(terminal.prompts, [])
+        self.assertFalse(self.path.exists())
+        source2 = self.source({"acct1": CANDIDATE})
+        with self.assertRaises(p.v.Refused):
+            self.perform(source2, "acct2", terminal, Transport())
+        self.assertEqual(terminal.prompts, [])
+        self.unchanged(encoded({"acct1": CANDIDATE}))
+
+    def test_failed_product_admission_never_looks_up(self):
+        source, transport = self.source(), Transport()
+        def failed(current=None):
+            raise p.v.Refused("generated-product-refusal")
+        with self.assertRaises(p.v.Refused):
+            self.perform(source, transport=transport, check=failed)
+        self.assertEqual(transport.actions, [])
+        self.assertFalse(self.path.exists())
+
+    def test_no_write_without_approval_and_fresh_identity(self):
+        for terminal, transport in ((Terminal(False), Transport()), (Terminal(), Transport(fresh=[1])),
+                (Terminal(), Transport(fail="fresh")), (Terminal(), Transport(status="unavailable"))):
+            source = self.source()
+            with self.assertRaises((p.v.Refused, OSError)):
+                self.perform(source, terminal=terminal, transport=transport)
+            self.assertNotIn("finish", transport.actions)
+            self.assertFalse(self.path.exists())
+
+    def test_changed_product_vm_lease_during_approval_refuses(self):
+        for category in ("product", "vm", "lease", "loaded-image", "source-commit"):
+            source, state, transport = self.source(), {"changed": False}, Transport()
+            def check(current=None):
+                if state["changed"]:
+                    raise p.v.Refused("generated-" + category)
+            terminal = Terminal(callback=lambda: state.update(changed=True))
+            with self.assertRaises(p.v.Refused):
+                self.perform(source, terminal=terminal, transport=transport, check=check)
+            self.assertEqual(transport.actions, ["capture"])
+            self.assertFalse(self.path.exists())
+
+    def test_original_source_replacement_and_absent_source_creation_refuse(self):
+        for existing in (False, True):
+            if self.path.exists():
+                self.path.unlink()
+            source = self.source({"acct1": [77]} if existing else None)
+            replacement = encoded({"acct1": [99]})
+            def mutate():
+                temp = self.path.parent / "generated-other"
+                temp.write_bytes(replacement)
+                os.chmod(temp, 0o600)
+                os.replace(temp, self.path)
+            with self.assertRaises(p.v.Refused):
+                self.perform(source, terminal=Terminal(callback=mutate))
+            self.unchanged(replacement)
+
+    def test_invalid_source_types_duplicates_labels_container_and_equal_values(self):
+        invalid = [b'{"protocol_version":1,"protocol_version":1}', encoded({"acct1": [True]}),
+                   encoded({"acct1": []}), encoded({"acct1": [256]}), encoded({"acct1": [1.0]}),
+                   encoded({"acct2": [1]}), encoded({"acct1": [1], "acct2": [1]}),
+                   encoded({"acct1": [1], "unknown": [2]}), encoded({"acct1": [1]}).replace(b'development', b'production'),
+                   encoded({"acct1": [1]}).replace(CONTAINER.encode(), b'iCloud.other'),
+                   encoded({"acct1": [1]}).replace(b'"protocol_version": 1', b'"protocol_version": true')]
+        for raw in invalid:
+            with self.subTest(raw=raw), self.assertRaises((p.v.Refused, ValueError)):
+                p.approved(raw, CONTAINER)
+
+    def test_modes_links_owner_and_binding_refuse(self):
+        source = self.source({"acct1": [77]})
+        original = self.path.read_bytes()
+        os.chmod(self.path, 0o644)
+        with self.assertRaises(p.v.Refused):
+            source.check()
+        self.unchanged(original)
+        os.chmod(self.path, 0o600)
+        linked = self.path.parent / "generated-link"
+        os.link(self.path, linked)
+        with self.assertRaises(p.v.Refused):
+            p.Source(str(self.root), CONTAINER)
+        linked.unlink()
+        self.path.unlink()
+        self.path.symlink_to(linked)
+        with self.assertRaises((p.v.Refused, OSError)):
+            p.Source(str(self.root), CONTAINER)
+        self.path.unlink()
+        self.source({"acct1": [77]})
+        os.chmod(self.path.parent, 0o755)
+        with self.assertRaises(p.v.Refused):
+            p.Source(str(self.root), CONTAINER)
+        os.chmod(self.path.parent, 0o700)
+        with mock.patch.object(p.os, "getuid", return_value=os.getuid() + 1), self.assertRaises(p.v.Refused):
+            p.Source(str(self.root), CONTAINER)
+
+    def test_canonicalize_trusted_root_before_private_suffix(self):
+        alias = self.root / "generated-alias"
+        physical = self.root / "generated-physical"
+        physical.mkdir(mode=0o700)
+        alias.symlink_to(physical, target_is_directory=True)
+        source = p.Source(str(alias), CONTAINER)
+        self.addCleanup(source.close)
+        self.assertEqual(source.base.bindings[-1][1], "generated-physical")
+        # Private aliases never receive the trusted-root canonicalization.
+        source.close()
+        private = physical / "Meguri/CloudKitSignedPrivate"
+        private.rmdir()
+        private.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(OSError):
+            p.Source(str(alias), CONTAINER)
+
+    def test_cancel_before_publish_preserves_source(self):
+        source = self.source({"acct1": [77]})
+        original = self.path.read_bytes()
+        def cancelled():
+            raise p.v.Refused("setup-cancelled")
+        with self.assertRaises(p.v.Refused):
+            source.publish(source.proposed("acct1", CANDIDATE), cancelled)
+        self.assertFalse(source.started)
+        self.unchanged(original)
+
+    def test_interrupted_atomic_publication_is_uncertain_once_and_never_rolled_back(self):
+        source = self.source({"acct1": [77]})
+        replace = os.replace
+        def lost(*args, **kwargs):
+            replace(*args, **kwargs)
+            raise OSError("GENERATED_PRIVATE_COMPLETION_MARKER")
+        with mock.patch.object(p.os, "replace", side_effect=lost) as operation:
+            with self.assertRaises(p.PublicationUncertain):
+                source.publish(source.proposed("acct1", CANDIDATE), lambda: None)
+        self.assertEqual(operation.call_count, 1)
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"]["acct1"], CANDIDATE)
+        self.assertTrue(source.started)
+
+    def test_new_source_refuses_an_existing_target(self):
+        source = self.source()
+        exclusive = p.h.publish_exclusive
+        competing = encoded({"acct1": [77]})
+        def conflict(*args):
+            self.path.write_bytes(competing)
+            os.chmod(self.path, 0o600)
+            exclusive(*args)
+        with mock.patch.object(p.h, "publish_exclusive", side_effect=conflict) as operation:
+            with self.assertRaises(p.PublicationUncertain):
+                source.publish(source.proposed("acct1", CANDIDATE), lambda: None)
+        self.assertEqual(operation.call_count, 1)
+        self.unchanged(competing)
+
+    def test_lost_original_app_or_transport_after_publication_is_uncertain(self):
+        source = self.source()
+        transport = Transport(fail="finish")
+        with self.assertRaises(p.PublicationUncertain):
+            self.perform(source, transport=transport)
+        self.assertEqual(p.approved(self.path.read_bytes(), CONTAINER)["accounts"]["acct1"], CANDIDATE)
+        self.assertEqual(transport.actions.count("capture"), 1)
+
+    def test_original_transport_join_even_after_failure(self):
+        transport = p.Transport.__new__(p.Transport)
+        original = mock.Mock()
+        transport.child, transport.closed = original, False
+        transport.out, transport.err = io.BytesIO(), io.BytesIO()
+        with mock.patch.object(p.h, "setup_join") as joined:
+            transport.close()
+            joined.assert_called_once_with(original)
+            original.stdin.close.assert_called_once()
+            original.stdout.close.assert_called_once()
+            transport.close()
+            self.assertEqual(joined.call_count, 1)
+
+
+class TerminalChecks(unittest.TestCase):
+    def test_piped_input_refuses_before_open_or_lookup(self):
+        with mock.patch.object(p.os, "isatty", return_value=False), mock.patch.object(p.os, "open") as opened:
+            with self.assertRaises(p.v.Refused):
+                p.Terminal()
+            opened.assert_not_called()
+
+    def test_exact_phrases_eof_refusal_replace_and_no_private_prompt(self):
+        # Generated descriptor/TTY only, never an actual owner approval.
+        with tempfile.TemporaryFile() as descriptor:
+            terminal = p.Terminal.__new__(p.Terminal)
+            terminal.fd = descriptor.fileno()
+            terminal.pin = p.h.directory_pin(os.fstat(terminal.fd))
+            for changed, expected_input in ((False, b"approve acct1"), (True, b"replace acct1")):
+                for wire, allowed in ((expected_input + b"\n", True), (expected_input + b"", False), (b"\n", False),
+                                      (b"yes\n", False), (b"approve acct2\n", False), (b" replace acct1\n", False)):
+                    chunks = [bytes([byte]) for byte in wire] + [b""]
+                    output = []
+                    with mock.patch.object(p.os, "tcgetpgrp", return_value=os.getpgrp()), \
+                         mock.patch.object(p.os, "write", side_effect=lambda fd, raw: output.append(raw)), \
+                         mock.patch.object(p.os, "read", side_effect=chunks):
+                        self.assertEqual(terminal.approve("acct1", CONTAINER, changed), allowed)
+                    self.assertNotIn(b"GENERATED_PRIVATE", b"".join(output))
+                    self.assertNotIn(str(CANDIDATE).encode(), b"".join(output))
+            with mock.patch.object(p.os, "tcgetpgrp", return_value=os.getpgrp() + 1), self.assertRaises(p.v.Refused):
+                terminal.approve("acct1", CONTAINER, False)
+
+
+class SourceBoundaries(unittest.TestCase):
+    def test_private_wire_compiles_and_preserves_original_group_join(self):
+        source = p.guest_source().decode()
+        ast.parse(source)
+        tree = ast.parse(source)
+        entry = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "guest_setup")
+        finalizers = [node.finalbody for node in ast.walk(entry) if isinstance(node, ast.Try) and node.finalbody]
+        self.assertTrue(any("h.setup_join(child)" in "\n".join(ast.unparse(n) for n in body) for body in finalizers))
+        self.assertIn('peer.getsockopt(0, 2)', source)
+        self.assertNotIn('XCTAttachment', source)
+
+    def test_startup_entry_excluded_normal_plans_and_no_core_database_calls(self):
+        entry = (ROOT / "app/MeguriSnapshotTests/TestHooks/CloudKitAccountSetupTests.swift").read_text()
+        self.assertTrue(entry.startswith("#if DEBUG && MEGURI_TEST_HOOKS && os(macOS)"))
+        for forbidden in ("import CoreBridge", "ReviewCollection(", "SyncCoordinator(", "CKSyncEngine(",
+                          "privateCloudDatabase", "CKRecord(", "CKAsset(", "XCTAttachment", "Attachment.record", "localizedDescription"):
+            self.assertNotIn(forbidden, entry)
+        snapshot = json.loads((ROOT / "app/TestPlans/Snapshot.xctestplan").read_text())
+        self.assertIn("CloudKitAccountSetupTests", snapshot["testTargets"][0]["skippedTests"])
+        plan = json.loads((ROOT / "app/TestPlans/CloudAgent.xctestplan").read_text())
+        self.assertEqual(plan["testTargets"][0]["selectedTests"], ["CloudKitSoakTests", "CloudKitPathPreflightTests"])
+        hooks = (ROOT / "app/Meguri/TestHooks/TestHooks.swift").read_text()
+        self.assertLess(hooks.index("CloudAccountSetupStartup.requested()"), hooks.index("WebContentWarmup.shared.listen()"))
+
+    def test_setup_keeps_normal_admission_separate(self):
+        source = (ROOT / "tools/scripts/cloud-account-setup.py").read_text()
+        self.assertNotIn('"job": "cloudkit-signed"', source)
+        self.assertNotIn('AgentHeader', source)
+        self.assertNotIn('approved_account_input(', source)
+        self.assertIn('v.admit_product(', source)
+        self.assertIn('h.admit_preflight(', source)
+        wrapper = (ROOT / "tools/mg.d/cloud-account-setup.sh").read_text()
+        self.assertNotIn('mg_detail lane', wrapper)
+        self.assertIn('scope:\"SETUP-ONLY\"', wrapper)
+        catchup = (ROOT / "tools/mg.d/catch-up.sh").read_text()
+        self.assertIn('if [ "$job" = cloudkit-account-setup ]; then', catchup)
+        tiers = (ROOT / "tools/gate/tiers.yaml").read_text()
+        self.assertNotIn('job: cloudkit-account-setup', tiers.split('utilities:')[0])
+        self.assertIn('job: cloudkit-account-setup', tiers.split('utilities:')[1])
+
+    def test_public_errors_never_include_sdk_marker_candidate_or_digest(self):
+        private = "GENERATED_PRIVATE_SDK_MARKER"
+        out = io.StringIO()
+        with mock.patch.object(p.sys, "argv", ["generated", "--root", "/generated", "--run-id", "20261102T000000Z-1", "--label", "acct1"]), \
+             mock.patch.object(p.os, "dup", return_value=3), \
+             mock.patch.object(p.os, "fdopen", return_value=contextlib.nullcontext(io.BytesIO(b"{}"))), \
+             mock.patch.object(p.signal, "signal"), \
+             mock.patch.object(p, "run", side_effect=OSError(private + str(CANDIDATE))), \
+             contextlib.redirect_stdout(out):
+            self.assertEqual(p.main(), 1)
+        result = json.loads(out.getvalue())
+        self.assertEqual(result, {"scope": "SETUP-ONLY", "outcome": "failed_evidence", "category": "setup-refused",
+                                  "label": "acct1", "signed_execution": False})
+        self.assertNotIn(private, out.getvalue())
+        self.assertNotIn(p.v.digest(bytes(CANDIDATE)), out.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

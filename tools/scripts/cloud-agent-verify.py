@@ -517,7 +517,7 @@ def test_inputs(products, path, app, platform):
                     # surrounding inventory pins its bytes across --deep --strict.
                     binary(products, resolve(injection))
                 continue
-            need(name != "LD_PRELOAD" and
+            need(not name.startswith("MEGURI_CLOUD_ACCOUNT_") and name != "LD_PRELOAD" and
                  (not name.startswith(("DYLD_", "__XPC_DYLD_")) or name in searches),
                  "agent-environment")
             if name in searches:
@@ -684,15 +684,15 @@ def independent_agent(root, manifest, team):
     binary_platform(os.path.join(path, actual["executable"]), platform, "agent-platform")
 
 
-def admit_build(root, results, path, run, vm_device=None):
-    """Reusable admission; only a live delivery caller supplies VM coverage."""
-    root, results = os.path.abspath(root), os.path.abspath(results)
-    need(isinstance(run, str) and MG_RUN_ID.fullmatch(run), "header-run")
+def admit_product(root, results, expected, vm_device=None):
+    """Non-account J2.1 product checks. No normal header or account authority.
+
+    Setup supplies only measurements from its original build receipt/product.
+    The normal caller still admits and rechecks its complete immutable header.
+    """
     sha = source(root)
-    header_witness = {}
-    expected = header(root, path, run, sha, header_witness)
+    need(expected["source_commit"] == sha, "source-changed")
     build, receipt_hash = receipt(root, results, expected["build_receipt"], sha)
-    need(receipt_hash == expected["build_receipt_sha256"], "build-receipt-bytes")
     manifest, frozen = build_product(root, build, expected)
     settings_path = os.path.join(results, build["job"], build["run_id"], "agent-cloud-settings.json")
     settings_hash = digest(declared_file(root, build, settings_path))
@@ -721,6 +721,19 @@ def admit_build(root, results, path, run, vm_device=None):
     need(digest(declared_file(root, build, settings_path)) == settings_hash, "input-changed")
     declared_reference(root, build, build["details"]["agent_build"])
     need(receipt(root, results, expected["build_receipt"], sha)[1] == receipt_hash, "receipt-changed")
+    need(source(root) == sha, "source-changed")
+    return build, receipt_hash, manifest, frozen
+
+
+def admit_build(root, results, path, run, vm_device=None):
+    """Reusable admission; only a live delivery caller supplies VM coverage."""
+    root, results = os.path.abspath(root), os.path.abspath(results)
+    need(isinstance(run, str) and MG_RUN_ID.fullmatch(run), "header-run")
+    sha = source(root)
+    header_witness = {}
+    expected = header(root, path, run, sha, header_witness)
+    build, receipt_hash, manifest, frozen = admit_product(root, results, expected, vm_device)
+    need(receipt_hash == expected["build_receipt_sha256"], "build-receipt-bytes")
     new_witness = {}
     need(header(root, path, run, sha, new_witness) == expected and new_witness == header_witness
          and source(root) == sha, "input-changed")

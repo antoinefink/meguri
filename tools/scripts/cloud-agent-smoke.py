@@ -1007,12 +1007,15 @@ def guest_source():
 
 class Transport:
     """One owned original bridge/SSH process, never detached or rediscovered."""
+    def source(self):
+        return guest_source()
+
     def __init__(self, vm):
         self.vm, self.child, self.buffer = vm, None, bytearray()
         self.out = tempfile.TemporaryFile()
         self.err = tempfile.TemporaryFile()
         self.closed = False
-        cmd = " ".join(shlex.quote(w) for w in ("/usr/bin/python3", "-B", "-I", "-c", guest_source().decode(),
+        cmd = " ".join(shlex.quote(w) for w in ("/usr/bin/python3", "-B", "-I", "-c", self.source().decode(),
                                                "xcodebuild test-without-building"))
         environment = dict(os.environ, MG_ROOT=vm.root, CLOUD_AGENT_VM=json.dumps(vm.selection))
         try:
