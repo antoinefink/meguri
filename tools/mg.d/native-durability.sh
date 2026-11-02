@@ -1,7 +1,7 @@
-# U32/U37 Apple WAL/collection-FFI durability and U113 cloud tracking proof.
+# U32/U37 Apple WAL/collection-FFI, C12 recovery and U113 cloud tracking proof.
 # Ordinary Rust checks stay in Docker; these exact suites prove native sync.
 mg_job native-durability host mg_native_durability \
-  "Apple silicon native U32/U37 suspend, WAL/collection FFI and U113 cloud tracking durability; no arguments, retries or UI"
+  "Apple silicon native U32/U37 suspend, WAL/collection FFI, C12 recovery and U113 cloud tracking durability; no arguments, retries or UI"
 
 mg_native_durability() {
   if [ "$#" -ne 0 ]; then
@@ -21,8 +21,8 @@ mg_native_durability() {
   fi
   mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
-  local package suite target_name kind json log rc binary counts passed failed skipped
-  local suites="suspend wal_durability collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity"
+  local package package_id suite target_name kind json log rc binary counts passed failed skipped
+  local suites="suspend wal_durability session_recovery collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity"
   local total_passed=0 total_failed=0 total_skipped=0 broken=false
   local target="$MG_ROOT/build/native-durability/target"
   # Synthetic benchmark collections only, regardless of a caller's override.
@@ -31,11 +31,24 @@ mg_native_durability() {
   # caller's Cargo environment normally cross-compiles. Reuse this dedicated
   # target cache across runs without replacing Xcode's shared core products.
   # Missing locked test dependencies may download here, outside measurement.
+  json="$MG_RUN_DIR/packages.json"
+  log="$MG_RUN_DIR/packages.log"
+  (cd core && cargo metadata --locked --no-deps --format-version 1) >"$json" 2>"$log"
+  rc=$?
+  mg_artifact build-jsonl "$json" "Cargo workspace package identities"
+  mg_artifact build-log "$log" "Cargo workspace metadata diagnostics"
+  cat "$log" >&2
+  if [ "$rc" -ne 0 ]; then
+    mg_failure build/metadata "native Cargo package metadata failed (exit $rc); see build artifacts"
+    mg_status fail
+    return 0
+  fi
   for package in meguri-engine meguri-ffi meguri-sync meguri-storage; do
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
-      (cd core && cargo test --locked -p meguri-engine --test suspend --test wal_durability \
+      (cd core && cargo test --locked -p meguri-engine --features test-hooks \
+        --test suspend --test wal_durability --test session_recovery \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     elif [ "$package" = meguri-ffi ]; then
@@ -72,13 +85,20 @@ mg_native_durability() {
       cloud_unit) package=meguri-sync; target_name=meguri_sync; kind=lib;;
       persistent_identity) package=meguri-storage; target_name=meguri_storage; kind=lib;;
     esac
-    binary="$(jq -ser --arg suite "$target_name" --arg kind "$kind" '
+    package_id="$(jq -er --arg package "$package" '
+      .workspace_members as $members
+      | [.packages[] | select(.name == $package) | .id
+         | select(. as $id | $members | index($id))]
+      | if length == 1 then .[0] else error("expected one workspace package") end
+      ' "$MG_RUN_DIR/packages.json" 2>/dev/null)" || package_id=""
+    binary="$(jq -ser --arg package "$package_id" --arg suite "$target_name" --arg kind "$kind" '
       if ([.[] | select(.reason == "build-finished")] | length) == 1
         and .[-1].reason == "build-finished" and .[-1].success == true
       then . else error("expected a complete successful Cargo stream") end
       |
       [.[] | select(.reason == "compiler-artifact" and .profile.test == true
-        and .target.name == $suite and (.target.kind | index($kind)) != null)
+        and $package != "" and .package_id == $package
+        and .target.name == $suite and .target.kind == [$kind])
         | .executable | select(type == "string" and length > 0)]
       | if length == 1 then .[0] else error("expected one native test executable") end
       ' "$MG_RUN_DIR/$package-build.jsonl" 2>/dev/null)"
@@ -118,6 +138,14 @@ mg_native_durability() {
         mg_failure "empty/$suite" "$suite executed no tests"
         broken=true
       fi
+      case "$suite" in
+        persistent_identity|session_recovery)
+          if [ "$skipped" -ne 0 ] || { [ "$suite" = persistent_identity ] && [ "$passed" -ne 1 ]; }; then
+            mg_failure "test/$suite" "$suite must execute its full selection without ignored tests; the exact FD selection requires one pass"
+            broken=true
+          fi
+          ;;
+      esac
       mg_detail "$suite" "$(jq -nc --argjson passed "$passed" --argjson failed "$failed" \
         --argjson skipped "$skipped" --argjson exit_code "$rc" \
         '{passed: $passed, failed: $failed, skipped: $skipped, exit_code: $exit_code}')"

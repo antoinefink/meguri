@@ -63,3 +63,10 @@ During Antoine's direct Mac pass, Xcode MCP builds and launches the ordinary
 Debug product with this preparation disabled. That result does not prove the
 enabled copy, stale-copy removal, actual nested signature or frozen SDK launch.
 Those explicit native checks remain pending. No unit or gate is accepted here.
+
+Subsequent native host build10934 passes with team signing and the CloudAgent
+plan. The actual copy, nested/app signatures and frozen product inventory pass.
+Ordinary incremental build12285 also passes and removes the app-local injector.
+These are build-only checks. The ordinary build changes the shared products,
+so runtime proof requires a fresh enabled build. Frozen SDK launch and actual
+CloudKit operations remain unrun; no signed runtime acceptance is claimed.

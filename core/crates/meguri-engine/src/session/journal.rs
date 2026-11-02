@@ -27,6 +27,7 @@ pub enum JournalStage {
     TerminalWrite,
     TerminalSync,
     TerminalSynced,
+    MigrationPublished,
     Compact,
 }
 #[cfg(feature = "test-hooks")]
@@ -592,10 +593,15 @@ impl Migration {
         self.collection
             .with_file_name(format!("meguri-pending-answers.{name}.identity.jsonl"))
     }
-    fn publish(&self, path: &Path, state: &State) -> Result<Header, EngineError> {
+    fn publish(&self, path: &Path, state: &State) -> Result<(Header, RecoveryBinding), EngineError> {
         self.publish_with(path, state, || {})
     }
-    fn publish_with(&self, path: &Path, state: &State, archive_durable: impl FnOnce()) -> Result<Header, EngineError> {
+    fn publish_with(
+        &self,
+        path: &Path,
+        state: &State,
+        archive_durable: impl FnOnce(),
+    ) -> Result<(Header, RecoveryBinding), EngineError> {
         if state.retired || state.events.values().any(|e| e.terminal.is_none()) {
             return Err(corruption());
         }
@@ -641,7 +647,7 @@ impl Migration {
             archive_sha256: Sha256::digest(&self.original.bytes).into(),
         });
         let bytes = encode(1, &Record::Header(h.clone()))?;
-        let publication = (|| -> Result<(), EngineError> {
+        let publication = (|| -> Result<RecoveryBinding, EngineError> {
             let mut next = AtomicFile::new(path, Purpose::Sidecar)?;
             next.file_mut().write_all(&bytes).map_err(error)?;
             let landed = RecoveryBinding {
@@ -653,10 +659,10 @@ impl Migration {
                 require_live(&self.collection, self.live, &self.next.path)
             })?;
             landed.sync(path)?;
-            Ok(())
+            Ok(landed)
         })();
-        publication.map_err(migration_failure)?;
-        Ok(h)
+        let landed = publication.map_err(migration_failure)?;
+        Ok((h, landed))
     }
 }
 
@@ -1038,8 +1044,15 @@ fn file_loop(
                             return Err(identity_mismatch());
                         }
                         let snapshot = state.lock().unwrap().clone();
-                        let h = pending.publish(&path, &snapshot)?;
-                        file = append_file(&path)?;
+                        let (h, landed) = pending.publish(&path, &snapshot)?;
+                        #[cfg(feature = "test-hooks")]
+                        stage(&mut fault, &hook, JournalStage::MigrationPublished)?;
+                        require_live(&pending.collection, pending.live, &h.path)?;
+                        let append = append_file(&path)?;
+                        same_file(&append, &landed.file)?;
+                        landed.require(&path).map_err(|_| identity_mismatch())?;
+                        require_live(&pending.collection, pending.live, &h.path)?;
+                        file = append;
                         {
                             let mut s = state.lock().unwrap();
                             s.next_event = h.next_event;
@@ -1470,6 +1483,131 @@ mod tests {
         };
         (dir, path, migration, state)
     }
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn c12_migration_published_single_link_replacement_refuses_append_and_ready_retaining_evidence() {
+        use crate::{Collection, Engine, EngineConfig, LifecycleState, OpenConfig, OpenStep, Ports};
+        use meguri_model::{
+            clock::{StepClock, UtcOffset},
+            rng::SeededRandom,
+        };
+        use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct ExchangeAfterPublish {
+            registry: ThreadRegistry,
+            offset_legacy_device: bool,
+            exchange_count: Arc<AtomicUsize>,
+            inspection_count: Arc<AtomicUsize>,
+        }
+        impl OpenStep for ExchangeAfterPublish {
+            fn name(&self) -> &str {
+                "journal-publication-inode-exchange"
+            }
+            fn run(&self, opened: &Collection) -> Result<(), EngineError> {
+                let file_stat = std::fs::metadata(opened.path()).unwrap();
+                let native_pair = (file_stat.dev(), file_stat.ino());
+                let stable_identity = test_persistent(native_pair);
+                let v1_header = Header {
+                    path: opened.path().canonicalize().unwrap().as_os_str().as_bytes().to_vec(),
+                    native: Native::Legacy((native_pair.0 ^ u64::from(self.offset_legacy_device), native_pair.1)),
+                    ..header()
+                };
+                let v1_bytes = encode(1, &Record::Header(v1_header)).unwrap();
+                let fixture_path = opened.path().with_file_name("meguri-pending-answers.jsonl");
+                std::fs::write(&fixture_path, &v1_bytes).unwrap();
+                let pending_log = Journal::open(
+                    opened.path(),
+                    native_pair,
+                    stable_identity,
+                    [31, 32],
+                    opened.generation(),
+                    &self.registry,
+                    || Ok([33, 34]),
+                )?;
+                let retained_path = fixture_path.with_file_name("retained-publication.jsonl");
+                let captured_path = fixture_path.clone();
+                let captured_retained_path = retained_path.clone();
+                let exchange_count = self.exchange_count.clone();
+                pending_log.set_hook(Arc::new(move |checkpoint| {
+                    if checkpoint == JournalStage::MigrationPublished {
+                        let v2_bytes = std::fs::read(&captured_path).unwrap();
+                        std::fs::rename(&captured_path, &captured_retained_path).unwrap();
+                        std::fs::write(&captured_path, &v2_bytes).unwrap();
+                        let file_stat = std::fs::symlink_metadata(&captured_path).unwrap();
+                        assert!(file_stat.is_file() && file_stat.nlink() == 1);
+                        assert!(file_stat.ino() != std::fs::metadata(&captured_retained_path).unwrap().ino());
+                        exchange_count.fetch_add(1, Ordering::SeqCst);
+                    }
+                }))?;
+                let migration_outcome = pending_log.finish_identity_migration(native_pair, stable_identity);
+                assert_eq!(self.exchange_count.load(Ordering::SeqCst), 1);
+                assert!(
+                    migration_outcome.is_err(),
+                    "migration must reject an exchanged inode even when its bytes match"
+                );
+                assert_eq!(pending_log.state.lock().unwrap().header.version, 1);
+                assert!(pending_log.check(opened.generation()).is_err());
+                assert!(pending_log.barrier().is_err());
+                let v2_bytes = std::fs::read(&retained_path).unwrap();
+                assert!(std::fs::read(&fixture_path).unwrap() == v2_bytes);
+                let decoded = read_bytes_bound(
+                    &v2_bytes,
+                    &v2_binding_header(opened.path(), stable_identity),
+                    native_pair,
+                )
+                .unwrap()
+                .0;
+                assert_eq!(decoded.header.version, 2);
+                let digest_text: String = Sha256::digest(&v1_bytes)
+                    .iter()
+                    .map(|octet| format!("{octet:02x}"))
+                    .collect();
+                let archive_path =
+                    fixture_path.with_file_name(format!("meguri-pending-answers.{digest_text}.identity.jsonl"));
+                assert!(std::fs::read(archive_path).unwrap() == v1_bytes);
+                self.inspection_count.fetch_add(1, Ordering::SeqCst);
+                migration_outcome
+            }
+        }
+        fn v2_binding_header(fixture_path: &Path, stable_identity: PersistentIdentity) -> Header {
+            Header {
+                path: fixture_path.canonicalize().unwrap().as_os_str().as_bytes().to_vec(),
+                native: Native::Persistent(stable_identity),
+                ..header_v2()
+            }
+        }
+        for offset_legacy_device in [false, true] {
+            let scratch = tempfile::tempdir().unwrap();
+            let fixture_path = scratch.path().join("collection.anki2");
+            let time_source = Arc::new(StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC"));
+            crate::bootstrap::create(&fixture_path, time_source.as_ref(), &SeededRandom::new(43)).unwrap();
+            let runtime = Engine::new(EngineConfig::default()).unwrap();
+            let exchange_count = Arc::new(AtomicUsize::new(0));
+            let inspection_count = Arc::new(AtomicUsize::new(0));
+            let integrations = Ports::new().open_step(Arc::new(ExchangeAfterPublish {
+                registry: runtime.threads().clone(),
+                offset_legacy_device,
+                exchange_count: exchange_count.clone(),
+                inspection_count: inspection_count.clone(),
+            }));
+            assert!(
+                runtime
+                    .open_raw(
+                        &fixture_path,
+                        OpenConfig::new(time_source, Arc::new(SeededRandom::new(43))).ports(integrations)
+                    )
+                    .is_err()
+            );
+            assert_eq!(exchange_count.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                inspection_count.load(Ordering::SeqCst),
+                1,
+                "the open step reached every evidence assertion"
+            );
+            assert!(matches!(runtime.state(), LifecycleState::Failed { .. }));
+        }
+    }
     #[test]
     fn c12_migration_archives_exact_bytes_and_preserves_recovered_highwater_not_header_counter() {
         for reason in [
@@ -1496,7 +1634,7 @@ mod tests {
                 assert_eq!(state.next_event, 18);
                 assert_eq!(state.header.next_event, 17);
             }
-            let header = migration.publish(&path, &state).unwrap();
+            let (header, _binding) = migration.publish(&path, &state).unwrap();
             assert_eq!(std::fs::read(migration.archive_path()).unwrap(), original);
             assert_eq!(
                 header.next_event,

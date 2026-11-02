@@ -1,6 +1,6 @@
 # C12 Darwin reopen repair
 
-Status: implementation pending; no Unit acceptance.
+Status: repair under focused verification; no Unit acceptance.
 Component start: 5b0a661d100019136038a4562500b83af08eccd5.
 Code start: b264c2a67f5cb3af54ef617935c0e822a0538567.
 Integration base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
@@ -58,3 +58,25 @@ reopen. A file substituted in that interval must refuse open. That repair and
 its boundary case remain required, along with native C12 suite selection and
 gate triggers. No repaired app launch, native Rust result or Unit acceptance
 is claimed by this WIP checkpoint.
+
+Fixer4626 exports15841 from c8d179b1. Round2 independent review clears the
+published-binding repair and native suite routing with no remaining P0–P2.
+The worker retains the landed file through append and checks its inode, exact
+bytes, path and live collection before changing state. Both migration reasons
+are covered by a byte-identical substitution onto another single-link inode.
+Focused Docker17656 passes18/18 selected unit cases; Docker18392 passes100/100
+recovery, lifecycle, fault, suspend and WAL cases without skips. Wrapper17418
+passes16/16. The unprivileged formatting attempt16774 cannot reach Docker;
+the authorized OrbStack run17131 completes. No test assertion or limit changes.
+
+Privacy18131 flags only the new regression function. A filtered whole-region
+rewrite18901 is required before committing; production code stays unchanged.
+The original native-durability process is now running directly on this Mac.
+No repaired user-collection launch or actual CloudKit network pass is claimed.
+
+Native19394 completes165/165 without skips:19 suspend,20 WAL,21 recovery,
+1 collection FFI,15 cloud records,29 cloud recovery,59 cloud unit and the exact
+Darwin FD identity case. Independent comparison clears privacy rewrite18901;
+only test-local names/prose change. Format21447 and privacy21733 pass.
+Lint21993 finds one type-complexity diagnostic in the C12 service helper;
+that source cleanup remains required. No lint suppression is permitted.
