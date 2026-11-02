@@ -35,6 +35,10 @@ fn generate_a_size_then_reuse_it_from_the_cache() {
     assert_eq!(first["cached"], false);
     let manifest = &first["manifest"];
     assert_eq!(manifest["kind"], "profile");
+    assert_eq!(manifest["now_ms"], 1_894_701_600_000i64);
+    assert_eq!(manifest["generator_version"], 5);
+    assert!(first.get("request").is_none());
+    assert!(first.get("observed").is_none());
     assert_eq!(manifest["seed"], 3);
     let cards = manifest["counts"]["cards"].as_u64().unwrap();
     assert!((1900..=2100).contains(&cards), "{cards} cards");
@@ -283,5 +287,151 @@ fn bad_arguments_are_usage_errors() {
             "{args:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+}
+
+#[test]
+fn cloud_small_generates_real_files_and_retains_request_and_readback_on_cache_hits() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = temp.path().join("small");
+    let first = json(&cli(&["generate", "cloud-small", "--seed", "63", "--out", path(&out)]));
+    assert_eq!(first["cached"], false);
+    let request = &first["request"];
+    assert_eq!(request["seed"], 63);
+    assert_eq!(request["now_ms"], 1_735_689_600_000i64);
+    assert_eq!(request["utc_offset_secs"], 0);
+    assert_eq!(request["rollover_hour"], 4);
+    assert_eq!(request["media"], "files");
+    assert_eq!(request["reviews_per_card"], 3);
+    assert_eq!(request["review_days_before_pinned"], serde_json::json!([3, 2, 1]));
+    assert_eq!(request["answer_seconds_after_day_start"], 28800);
+    assert_eq!(request["answer_ordinal_seconds"], true);
+    assert_eq!(first["manifest"]["kind"], "cloud-small");
+    assert_eq!(
+        first["observed"]["counts"],
+        serde_json::json!({
+            "notes": 20, "cards": 20, "revlog": 60, "decks": 2, "presets": 1,
+            "notetypes": 1, "tags": 20, "media_refs": 5, "media_files": 5, "media_bytes": 51200,
+        })
+    );
+    let manifest = meguri_testkit::generate::Manifest::load(&out).unwrap();
+    assert_eq!(serde_json::to_value(manifest).unwrap(), first["manifest"]);
+    assert_eq!(first["observed"]["counts"], first["manifest"]["counts"]);
+    assert_eq!(first["observed"]["dump_sha256"], first["manifest"]["dump_sha256"]);
+    let files: Vec<_> = std::fs::read_dir(out.join("collection.media"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 5);
+    for file in &files {
+        assert_eq!(std::fs::read(file).unwrap().len(), 10240);
+    }
+    let again = json(&cli(&[
+        "generate",
+        "cloud-small",
+        "--seed",
+        "63",
+        "--out",
+        path(&out),
+        "--cache",
+        "--cards",
+        "20",
+        "--media",
+        "files",
+        "--now",
+        "2025-01-01T00:00:00Z",
+    ]));
+    assert_eq!(again["cached"], true);
+    assert_eq!(again["request"], first["request"]);
+    assert_eq!(again["observed"], first["observed"]);
+    assert_eq!(again["manifest"], first["manifest"]);
+    let other = json(&cli(&[
+        "generate",
+        "cloud-small",
+        "--seed",
+        "64",
+        "--out",
+        path(&out),
+        "--cache",
+    ]));
+    assert_eq!(other["cached"], false);
+    assert_ne!(other["manifest"]["dump_sha256"], first["manifest"]["dump_sha256"]);
+    let missing = std::fs::read_dir(out.join("collection.media"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::remove_file(missing).unwrap();
+    let broken = cli(&[
+        "generate",
+        "cloud-small",
+        "--seed",
+        "64",
+        "--out",
+        path(&out),
+        "--cache",
+    ]);
+    assert_eq!(broken.status.code(), Some(1));
+    assert!(
+        broken.stdout.is_empty(),
+        "a damaged cache produces no successful receipt"
+    );
+}
+
+#[test]
+fn cloud_small_cache_rejects_a_changed_media_byte_without_a_receipt() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = temp.path().join("small");
+    let first = json(&cli(&["generate", "cloud-small", "--seed", "63", "--out", path(&out)]));
+    assert_eq!(first["cached"], false);
+    let manifest = std::fs::read(out.join("manifest.json")).unwrap();
+    let file = std::fs::read_dir(out.join("collection.media"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut bytes = std::fs::read(&file).unwrap();
+    assert_eq!(bytes.len(), 10240);
+    bytes[5120] ^= 1;
+    std::fs::write(&file, &bytes).unwrap();
+    assert_eq!(std::fs::metadata(&file).unwrap().len(), 10240);
+    let broken = cli(&[
+        "generate",
+        "cloud-small",
+        "--seed",
+        "63",
+        "--out",
+        path(&out),
+        "--cache",
+    ]);
+    assert_eq!(broken.status.code(), Some(1));
+    assert!(
+        broken.stdout.is_empty(),
+        "a damaged cache produces no successful receipt"
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    assert_eq!(std::fs::read(out.join("manifest.json")).unwrap(), manifest);
+}
+
+#[test]
+fn cloud_small_refuses_shape_clock_and_references_only_overrides_before_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = temp.path().join("never-created");
+    for flags in [
+        vec!["--cards", "21"],
+        vec!["--profile", "missing.json"],
+        vec!["--now", "2030-01-15T10:00:00Z"],
+        vec!["--media", "references"],
+        vec!["--media", "references", "--media", "files"],
+        vec!["--rollover", "3"],
+        vec!["--utc-offset", "3600"],
+    ] {
+        let mut args = vec!["generate", "cloud-small", "--out", path(&out)];
+        args.extend(flags);
+        let result = cli(&args);
+        assert_eq!(result.status.code(), Some(2));
+        assert!(!out.exists());
     }
 }

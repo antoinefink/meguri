@@ -21,7 +21,7 @@
 # recipes load through the launch option".
 
 mg_job fixtures docker:dev mg_fixtures \
-  "Synthetic collections into build/fixtures: <size> (10k 100k 150k 500k 1m, or a card count) | <worst case> | <recipe> | worst-cases | recipes ... [--seed N] [--media files] [--cards N (worst cases)]"
+  "Synthetic collections into build/fixtures: cloud-small | <size> (10k 100k 150k 500k 1m, or a card count) | <worst case> | <recipe> | worst-cases | recipes ... [--seed N] [--media files] [--cards N (worst cases)]"
 mg_job fixtures-check host mg_fixtures_check \
   "Oracle checks of generated collections (F11 T1): [target...] (default 10k 100k worst-cases recipes) [--seed N]; runs tools/mg fixtures, then tools/mg oracle check on each: no Check Database problem, nothing changed but col and config, counts equal the manifest's, the pinned day; the due worst case's deck count and the large-field worst case's render; recipes also launched through -MeguriFixture in the app in the test VM (RecipeFixtureTests)"
 
@@ -42,7 +42,7 @@ mg__fixtures_names() {
 }
 
 mg__fixtures_usage() {
-  mg_failure usage "$1; usage: tools/mg fixtures <size|worst case|recipe|worst-cases|recipes>... [--seed N] [--media files] [--cards N]" "tools/mg fixtures 10k"
+  mg_failure usage "$1; usage: tools/mg fixtures <cloud-small|size|worst case|recipe|worst-cases|recipes>... [--seed N] [--media files] [--cards N]" "tools/mg fixtures 10k"
   mg_status error
 }
 
@@ -99,7 +99,17 @@ mg_fixtures() {
   # Classify every target before building anything.
   local kinds=() kind
   for t in "${targets[@]}"; do
-    if [ -f "$MG_FIXTURES_WORST/$t.json" ]; then
+    if [ "$t" = cloud-small ]; then
+      kind=cloud-small
+      if [ -n "$media" ] && [ "$media" != files ]; then
+        mg__fixtures_usage "cloud-small requires --media files"
+        return 0
+      fi
+      if [ -n "$cards" ] && [ "$cards" != 20 ]; then
+        mg__fixtures_usage "cloud-small requires exactly 20 cards"
+        return 0
+      fi
+    elif [ -f "$MG_FIXTURES_WORST/$t.json" ]; then
       kind=worst-case
     elif [ -f "$MG_FIXTURES_RECIPES/$t.yaml" ]; then
       kind=recipe
@@ -134,6 +144,11 @@ mg_fixtures() {
     i=$((i + 1))
     args=(generate)
     case "$kind" in
+      cloud-small)
+        args+=(cloud-small)
+        dir="build/fixtures/cloud-small-$seed"
+        [ -z "$cards" ] || args+=(--cards "$cards")
+        ;;
       worst-case)
         args+=(worst-case "$t")
         dir="build/fixtures/$shape-$seed-$t"
@@ -160,8 +175,34 @@ mg_fixtures() {
       failed=$((failed + 1))
       continue
     fi
+    if [ "$kind" = cloud-small ] && ! jq -e --arg seed "$seed" '
+      .request.seed == ($seed | tonumber)
+      and .request.now_ms == 1735689600000
+      and .request.utc_offset_secs == 0 and .request.rollover_hour == 4
+      and .request.notes == 20 and .request.cards == 20 and .request.media == "files"
+      and .request.media_files == 5 and .request.media_file_bytes == 10240
+      and .request.reviews_per_card == 3 and .request.review_days_before_pinned == [3,2,1]
+      and .request.answer_seconds_after_day_start == 28800 and .request.answer_ordinal_seconds == true
+      and .manifest.kind == "cloud-small" and .manifest.name == "cloud-small"
+      and .manifest.seed == .request.seed and .manifest.now_ms == .request.now_ms
+      and .manifest.utc_offset_secs == 0 and .manifest.media == "files"
+      and .manifest.cards_requested == 20
+      and .manifest.counts == {notes:20,cards:20,revlog:60,notetypes:1,decks:2,presets:1,tags:20,
+                              media_refs:5,media_files:5,media_bytes:51200}
+      and .observed.counts == .manifest.counts
+      and (.observed.dump_sha256 | test("^[a-f0-9]{64}$"))
+      and .observed.dump_sha256 == .manifest.dump_sha256
+    ' <"$out" >/dev/null 2>&1; then
+      mg_failure "fixtures/$t/receipt" "cloud-small request or persisted readback is missing or inconsistent; see generation stdout" "$repro"
+      failed=$((failed + 1))
+      continue
+    fi
     jq -c --arg target "$t" --arg kind "$kind" '{target: $target, kind: $kind} + .' <"$out" >>"$summaries"
     mg_artifact fixture "$dir" "$t"
+    if [ "$kind" = cloud-small ]; then
+      mg_artifact generation "$out" "cloud-small request and readback"
+      mg_artifact manifest "$dir/manifest.json" "cloud-small manifest"
+    fi
     elapsed="$(jq -r .elapsed_ms <"$out")"
     peak="$(jq -r '.peak_rss_kb // 0' <"$out")"
     if [ "$(jq -r .cached <"$out")" = false ] && [ "$elapsed" -gt "$MG_FIXTURES_BUDGET_MS" ]; then
@@ -209,6 +250,7 @@ mg__fixtures_check_one() {
   manifest="$(jq -c .manifest <<<"$summary")"
   today="$profile_today"
   [ "$kind" != recipe ] || today="$MG_FIXTURES_RECIPE_DAYS"
+  [ "$kind" != cloud-small ] || today=4
   worst='{}'
   [ "$kind" != worst-case ] || worst="$(jq -c . "$MG_FIXTURES_WORST/$target.json")"
   if jq -e '.due_deck' >/dev/null <<<"$worst"; then

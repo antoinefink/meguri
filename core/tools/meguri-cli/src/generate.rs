@@ -1,6 +1,7 @@
 //! `meguri-cli generate`: synthetic collections (U11, R1804, R1805, R1963).
 //!
 //! ```text
+//! meguri-cli generate cloud-small --out DIR [--seed N] [--cache]
 //! meguri-cli generate <size> --out DIR [options]           10k, 100k, 150k, 500k, 1m or a card count
 //! meguri-cli generate worst-case <name|path.json> --out DIR [options]
 //! meguri-cli generate recipe <name|path.yaml> --out DIR [--seed N] [--cache]
@@ -34,6 +35,7 @@ use meguri_testkit::wallclock::Stopwatch;
 use serde_json::json;
 
 enum What {
+    CloudSmall,
     Size(u64),
     WorstCase(String),
     Recipe(String),
@@ -53,7 +55,7 @@ struct Options {
 fn usage(message: &str) -> i32 {
     eprintln!("meguri-cli generate: {message}");
     eprintln!(
-        "usage: meguri-cli generate <size>|worst-case <name|path.json>|recipe <name|path.yaml> --out DIR \
+        "usage: meguri-cli generate cloud-small|<size>|worst-case <name|path.json>|recipe <name|path.yaml> --out DIR \
          [--seed N] [--profile PATH] [--cards N] [--now RFC3339] [--media references|files] [--cache]"
     );
     2
@@ -62,19 +64,29 @@ fn usage(message: &str) -> i32 {
 fn parse(args: &[String]) -> Result<Options, String> {
     let mut rest = args.iter();
     let what = match rest.next().map(String::as_str) {
+        Some("cloud-small") => What::CloudSmall,
         Some("worst-case") => What::WorstCase(rest.next().ok_or("worst-case needs a name")?.clone()),
         Some("recipe") => What::Recipe(rest.next().ok_or("recipe needs a name")?.clone()),
         Some(size) => What::Size(parse_size(size).ok_or_else(|| format!("not a size: {size}"))?),
         None => return Err("nothing to generate".to_owned()),
     };
+    let cloud_small = matches!(&what, What::CloudSmall);
     let mut options = Options {
         what,
         out: PathBuf::new(),
         seed: 1,
         profile: None,
         cards: None,
-        now_ms: DEFAULT_NOW_MS,
-        media: MediaMode::References,
+        now_ms: if cloud_small {
+            generate::cloud_small::NOW_MS
+        } else {
+            DEFAULT_NOW_MS
+        },
+        media: if cloud_small {
+            MediaMode::Files
+        } else {
+            MediaMode::References
+        },
         cache: false,
     };
     while let Some(flag) = rest.next() {
@@ -82,18 +94,35 @@ fn parse(args: &[String]) -> Result<Options, String> {
         match flag.as_str() {
             "--out" => options.out = PathBuf::from(value()?),
             "--seed" => options.seed = value()?.parse().map_err(|_| "--seed takes an integer")?,
-            "--profile" => options.profile = Some(PathBuf::from(value()?)),
-            "--cards" => options.cards = Some(parse_size(&value()?).ok_or("--cards takes a size")?),
+            "--profile" => {
+                if cloud_small {
+                    return Err("cloud-small has a fixed shape; --profile is incompatible".to_owned());
+                }
+                options.profile = Some(PathBuf::from(value()?));
+            }
+            "--cards" => {
+                let cards = parse_size(&value()?).ok_or("--cards takes a size")?;
+                if cloud_small && cards != 20 {
+                    return Err("cloud-small requires exactly 20 cards".to_owned());
+                }
+                options.cards = Some(cards);
+            }
             "--now" => {
                 let text = value()?;
                 let ts: jiff::Timestamp = text.parse().map_err(|e| format!("--now {text}: {e}"))?;
                 options.now_ms = ts.as_millisecond();
+                if cloud_small && options.now_ms != generate::cloud_small::NOW_MS {
+                    return Err("cloud-small requires --now 2025-01-01T00:00:00Z".to_owned());
+                }
             }
             "--media" => {
                 options.media = match value()?.as_str() {
                     "references" => MediaMode::References,
                     "files" => MediaMode::Files,
                     other => return Err(format!("--media is references or files, not {other}")),
+                };
+                if cloud_small && options.media != MediaMode::Files {
+                    return Err("cloud-small requires --media files".to_owned());
                 }
             }
             "--cache" => options.cache = true,
@@ -160,6 +189,9 @@ pub fn main(args: &[String]) -> i32 {
         Err(message) => return usage(&message),
     };
     let watch = Stopwatch::start();
+    if matches!(&options.what, What::CloudSmall) {
+        return cloud_small(&options, &watch);
+    }
     let profile = || -> Result<Profile, String> {
         match &options.profile {
             Some(path) => Profile::load(path),
@@ -193,7 +225,7 @@ pub fn main(args: &[String]) -> i32 {
                     (Some(case), cards, "worst-case", name)
                 }
                 What::Size(cards) => (None, *cards, "profile", cards.to_string()),
-                What::Recipe(_) => unreachable!("handled above"),
+                What::CloudSmall | What::Recipe(_) => unreachable!("handled above"),
             };
             let mut request = Request::new(profile, cards, options.seed);
             request.now_ms = options.now_ms;
@@ -254,6 +286,29 @@ pub fn main(args: &[String]) -> i32 {
     }
 }
 
+fn cloud_small(options: &Options, watch: &Stopwatch) -> i32 {
+    let request = generate::cloud_small::Request::new(options.seed);
+    let _lock = match OutputLock::acquire(&options.out) {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("meguri-cli generate: locking the output: {e}");
+            return 1;
+        }
+    };
+    if options.cache
+        && let Some(have) = cached(&options.out, &request.manifest())
+    {
+        return report(&options.out, true, watch, &have, None);
+    }
+    match generate::cloud_small::generate(&request, &options.out) {
+        Ok(manifest) => report(&options.out, false, watch, &manifest, None),
+        Err(e) => {
+            eprintln!("meguri-cli generate: {e}");
+            1
+        }
+    }
+}
+
 fn report(dir: &Path, cached: bool, watch: &Stopwatch, manifest: &Manifest, large_fields: Option<u64>) -> i32 {
     let mut summary = json!({
         "dir": dir.display().to_string(),
@@ -262,6 +317,20 @@ fn report(dir: &Path, cached: bool, watch: &Stopwatch, manifest: &Manifest, larg
         "peak_rss_kb": peak_rss_kb(),
         "manifest": manifest,
     });
+    if manifest.kind == "cloud-small" {
+        let observed = generate::cloud_small::readback(dir);
+        let logical_hash = generate::dump::logical_sha256(&dir.join("collection.anki2"));
+        match (observed, logical_hash) {
+            (Ok(counts), Ok(hash)) if counts == manifest.counts && hash == manifest.dump_sha256 => {
+                summary["request"] = json!(generate::cloud_small::Request::new(manifest.seed));
+                summary["observed"] = json!({ "counts": counts, "dump_sha256": hash });
+            }
+            _ => {
+                eprintln!("meguri-cli generate: cloud-small persisted output does not match its manifest");
+                return 1;
+            }
+        }
+    }
     if let Some(bytes) = large_fields {
         match generate::notes_with_field_of(&dir.join("collection.anki2"), bytes) {
             Ok(ids) => summary["large_field_notes"] = json!(ids),

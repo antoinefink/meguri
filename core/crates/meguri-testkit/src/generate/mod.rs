@@ -14,6 +14,7 @@
 //! `manifest.json`.
 
 pub mod cards;
+pub mod cloud_small;
 pub mod decks;
 pub mod dump;
 pub mod media;
@@ -191,9 +192,9 @@ pub struct Counts {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub generator_version: u32,
-    /// `profile`, `worst-case` or `recipe`.
+    /// `profile`, `worst-case`, `recipe` or `cloud-small`.
     pub kind: String,
-    /// The worst case or recipe name; the size for a profile run.
+    /// The target name; the size for a profile run.
     pub name: String,
     pub seed: u64,
     pub cards_requested: u64,
