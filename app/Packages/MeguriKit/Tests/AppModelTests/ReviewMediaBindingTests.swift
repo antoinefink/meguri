@@ -155,23 +155,6 @@ import Testing
         #expect(await next.model.end())
     }
 
-    @Test func closeDuringIndexRefreshCannotDeliverOrReopenResolver() async throws {
-        let binding = try Binding()
-        await binding.start()
-        let gate = Gate()
-        let snapshot = binding.snapshot(["late.png"])
-        binding.owner.loadMediaIndex = { await gate.wait(); return snapshot }
-        binding.owner.scheduleMediaRefresh(names: ["late.png"], generation: 0)
-        let refreshing = Task { await binding.owner.mediaResolverForReview() }
-        await gate.requested()
-        // No core host is open in this focused owner fixture.
-        #expect(await binding.owner.close())
-        gate.release()
-        #expect(await refreshing.value == nil)
-        #expect(binding.review.surface.arrivals.isEmpty)
-        #expect(binding.review.model.phase == .ended)
-    }
-
     @Test func retryFailureUsesExistingErrorRecoveryWithoutRawDiagnostic() async throws {
         let fixture = ReviewCoordinatorTests.Fixture()
         await fixture.model.start()
@@ -217,7 +200,7 @@ import Testing
         #expect(await fixture.model.end())
     }
 
-    private final class Binding {
+    fileprivate final class Binding {
         let review = ReviewCoordinatorTests.Fixture()
         let directory: URL
         let root: URL
@@ -243,7 +226,7 @@ import Testing
         isolated deinit { try? FileManager.default.removeItem(at: directory) }
     }
 
-    private final class Gate {
+    fileprivate final class Gate {
         private var pending: CheckedContinuation<Void, Never>?
         private var observer: CheckedContinuation<Void, Never>?
         private var waiting = false
@@ -259,4 +242,24 @@ import Testing
         }
         func release() { pending?.resume(); pending = nil }
     }
+}
+
+extension ReviewCollectionStartupTests {
+    @Test func closeDuringIndexRefreshCannotDeliverOrReopenResolver() async throws {
+        let binding = try ReviewMediaBindingTests.Binding()
+        await binding.start()
+        let gate = ReviewMediaBindingTests.Gate()
+        let snapshot = binding.snapshot(["late.png"])
+        binding.owner.loadMediaIndex = { await gate.wait(); return snapshot }
+        binding.owner.scheduleMediaRefresh(names: ["late.png"], generation: 0)
+        let refreshing = Task { await binding.owner.mediaResolverForReview() }
+        await gate.requested()
+        // No core host is open in this focused owner fixture.
+        #expect(await binding.owner.close())
+        gate.release()
+        #expect(await refreshing.value == nil)
+        #expect(binding.review.surface.arrivals.isEmpty)
+        #expect(binding.review.model.phase == .ended)
+    }
+
 }
