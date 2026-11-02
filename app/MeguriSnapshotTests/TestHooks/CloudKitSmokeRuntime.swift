@@ -111,8 +111,8 @@ import Foundation
         try await freshAccount()
     }
     private func requireVerifiedGeneratedBase() throws {
-        // File existence alone is not authenticated fixture delivery (J2.3).
-        throw AgentFailure.implementationMissing
+        try AgentGeneratedBase(admittedRunDirectory: directory, originalHeaderBytes: originalHeaderBytes)
+            .requireInstalled(at: directory.appendingPathComponent("data", isDirectory: true))
     }
     func execute(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         // Closing/draining owned work does not depend on renewed authority.

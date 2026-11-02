@@ -84,7 +84,7 @@ nonisolated struct AgentReceiptEnvelopeBinding {
     let fields: [String: AgentJSON.Value]
     struct Artifact { let kind: String, path: String, label: String? }
 
-    fileprivate init(bytes: Data, expected: AgentHeader.Receipt, commit: String) throws {
+    init(bytes: Data, expected: AgentHeader.Receipt, commit: String) throws {
         let f = try AgentJSON.parseEvidence(bytes).record("schema_version job run_id status exit_code placement service dry_run args root started_at finished_at duration_ms commit message summary failures artifacts user_steps details")
         guard try f.integer("schema_version") == 1 else { throw AgentFailure.version }
         job = try f.text("job"); runID = try f.text("run_id"); root = try f.text("root")
@@ -131,9 +131,11 @@ nonisolated struct AgentReceiptEnvelopeBinding {
               !steps.contains(where: { (try? $0.dictionary().bool("required")) == true }) else { throw AgentFailure.binding }
         sourceCommit = commit; fields = f
     }
-    fileprivate func requireArtifact(_ path: String, kind: String? = nil) throws {
+    func requireArtifact(_ path: String, kind: String? = nil) throws {
+        let declarations = artifacts.filter { $0.path == path }
         guard ReceiptBindingSchema.hostBuildPath(path, root: root),
-              artifacts.contains(where: { $0.path == path && (kind == nil || $0.kind == kind) }) else { throw AgentFailure.binding }
+              declarations.count == 1, let declaration = declarations.first,
+              kind == nil || declaration.kind == kind else { throw AgentFailure.binding }
     }
     fileprivate func manifestReference(_ key: String, filename: String) throws -> AgentReceiptFileReference {
         let reference = try AgentReceiptFileReference(details.value(key), absolute: true)
@@ -351,7 +353,7 @@ private nonisolated enum ReceiptBindingSchema {
     }
 }
 
-private extension AgentJSON.Value {
+extension AgentJSON.Value {
     nonisolated func dictionary() throws -> [String: AgentJSON.Value] {
         guard case .object(let f) = self else { throw AgentFailure.shape }; return f
     }
@@ -367,17 +369,17 @@ private extension AgentJSON.Value {
         return number
     }
 }
-private extension Dictionary where Key == String, Value == AgentJSON.Value {
+extension Dictionary where Key == String, Value == AgentJSON.Value {
     nonisolated func value(_ key: String) throws -> Value { guard let v = self[key] else { throw AgentFailure.shape }; return v }
     nonisolated func text(_ key: String) throws -> String { try value(key).text() }
     nonisolated func integer(_ key: String) throws -> UInt64 { try value(key).integer() }
     nonisolated func bool(_ key: String) throws -> Bool {
         guard case .boolean(let b) = try value(key) else { throw AgentFailure.shape }; return b
     }
-    nonisolated func nullableText(_ key: String) throws -> String? {
+    fileprivate nonisolated func nullableText(_ key: String) throws -> String? {
         if case .null = try value(key) { return nil }; return try text(key)
     }
-    nonisolated func nullableBool(_ key: String) throws -> Bool? {
+    fileprivate nonisolated func nullableBool(_ key: String) throws -> Bool? {
         if case .null = try value(key) { return nil }; return try bool(key)
     }
     nonisolated func list(_ key: String) throws -> [Value] {
