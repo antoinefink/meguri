@@ -201,3 +201,18 @@ failed; it predates this patch and supplies no passing coverage for it.
 This is an unaccepted WIP checkpoint. Storage is below the required 40 GB, so
 new builds are held while source review and integration continue. No Unit
 trailer, milestone acceptance or signed-SDK result is granted.
+
+Compiler cleanup within the existing round-8 test:
+
+- swift-test/20261102T114910Z-2067 did not execute tests because the separate
+  generated-base helper used a deprecated initializer. Its cleanup is logged
+  with that component.
+- swift-test/20261102T120034Z-21563 did not execute tests because Swift rejects
+  a captured mutable Bool in closeDuringResumeDrainJoinsOriginalStatusWithoutAdmittingResume.
+- Filtered cleanup cleanroom/20261102T120443Z-27714 replaces only that capture
+  with a MainActor reference cell. Independent review found no P0-P2 finding.
+  All eight expectations, the require, releases, joins and cleanup order remain
+  unchanged. This makes the existing test compile; it adds no policy behavior
+  or repair round and does not address the documented shutdown P2.
+
+Actual regression execution after these compiler corrections remains pending.

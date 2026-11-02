@@ -786,7 +786,7 @@ extension ReviewCollectionStartupTests {
     @Test func closeDuringResumeDrainJoinsOriginalStatusWithoutAdmittingResume() async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
         var releaseCommand: CheckedContinuation<Void, Never>?
-        var released = false
+        let releaseState = InitialCloudResumeDrainReleaseState()
         var confirmation: Task<Void, Never>?, closing: Task<Bool, Never>?
         defer { releaseCommand?.resume(); harness.release(); harness.removeTemporaryStorage() }
         do {
@@ -800,7 +800,7 @@ extension ReviewCollectionStartupTests {
                 guard case .statusChanged(let status) = command.action,
                       status.controls.userPaused == true, heldCommand == nil else { return }
                 heldCommand = command
-                if !released { await withCheckedContinuation { releaseCommand = $0 } }
+                if !releaseState.released { await withCheckedContinuation { releaseCommand = $0 } }
             }
             backend.afterExecution = { command, result in
                 guard heldCommand?.raw === command.raw else { return }
@@ -825,7 +825,7 @@ extension ReviewCollectionStartupTests {
             try await initialCloudSignal(quiescing.stream, stage: "resume-drain-close-ownership")
             // Close has cancelled the retained originals and entered quiesce.
             // Only the actual held command is released; Resume is never forced.
-            released = true
+            releaseState.released = true
             releaseCommand?.resume(); releaseCommand = nil
             await confirmation?.value
             #expect(await closing?.value == true)
@@ -838,7 +838,7 @@ extension ReviewCollectionStartupTests {
             harness.sync.observeResumePolicyDrain = nil
             #expect(await harness.owner.close())
         } catch {
-            released = true
+            releaseState.released = true
             releaseCommand?.resume(); releaseCommand = nil
             await confirmation?.value; _ = await closing?.value
             await harness.cleanup()
@@ -884,6 +884,10 @@ extension ReviewCollectionStartupTests {
 nonisolated enum InitialCloudProofWindow: Sendable { case reopen, resume }
 nonisolated enum InitialCloudHold: Sendable { case pause, background }
 nonisolated enum InitialCloudInterruption: Sendable { case account, close }
+
+@MainActor private final class InitialCloudResumeDrainReleaseState {
+    var released = false
+}
 
 nonisolated struct InitialCloudFixture: Sendable {
     struct Note: Sendable { let id: Int64; let fields: [String] }
