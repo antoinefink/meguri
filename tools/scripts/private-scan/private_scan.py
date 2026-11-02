@@ -90,6 +90,10 @@ PUBLIC_IDENTIFIERS = ("ResizeObserver.prototype.disconnect", "MutationObserver.p
 PUBLIC_COMPILER_URL = "https://github.com/sass/dart-sass/releases/download/1.102.0/dart-sass-1.102.0-linux-arm64.tar.gz"
 # Fixed Xcode 27 public interface call. The receiver remains outside its span.
 PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
+# E-20261102T070407Z-6a04: only this case-sensitive public Swift import.
+# SHA256 identifies its exact UTF-8 bytes, without quotes or a line ending.
+PUBLIC_SWIFT_IMPORT = "import MachO"
+PUBLIC_SWIFT_IMPORT_SHA256 = "0cd4593e5b7c20a193357a8d46e91ae8d04f5d92d0ecf4aa3167ac4dc0379c5a"
 # Docker's security option, approved in E-20261024T181932Z-5d69. Quotes are
 # required; bare words and matches crossing the literal remain private.
 # https://docs.docker.com/reference/cli/docker/container/run/#optional-security-options---security-opt
@@ -152,6 +156,9 @@ PUBLIC_LITERAL = re.compile(
     r'''|(?P<docker_quote>["'])''' + re.escape(PUBLIC_DOCKER_OPTION) + r"(?P=docker_quote)"
     r"|(?<![^\s\"'`<>()\[\]{},;=|&])(?:" + "|".join(map(re.escape, PUBLIC_RUST_PATHS)) +
     r")(?=$|[\s\"'`<>()\[\]{},;=|&])"
+    r'''|(?<![^\s<>()\[\]{},;=|])(?P<swift_quote>["'`]?)'''
+    r"(?P<swift_import>" + re.escape(PUBLIC_SWIFT_IMPORT) + r")(?P=swift_quote)"
+    r"(?=$|[\s<>()\[\]{},;=|])"
 )
 
 
@@ -195,6 +202,22 @@ def rust_path_context(text, start, end, context):
             any(after.lstrip().startswith(("::", "/*", "//")) for after in afters))
 
 
+def swift_import_context(text, start, end, context):
+    """Check nearby file text for import continuations and comments."""
+    befores, afters = [text[:start]], [text[end:]]
+    if context is not None:
+        source, first, stop = context
+        prefix, suffix = source[:first], source[stop:]
+        if isinstance(source, bytes):
+            prefix = prefix.decode("utf-8", errors="replace")
+            suffix = suffix.decode("utf-8", errors="replace")
+        befores = [v + text[:start] for v in variants(prefix)]
+        afters = [text[end:] + v for v in variants(suffix)]
+    return (any(before.rstrip().endswith((".", ":", "_", "-", "*/")) or
+                "//" in before.rstrip().rsplit("\n", 1)[-1] for before in befores) or
+            any(after.lstrip().startswith((".", ":", "_", "-", "/*", "//")) for after in afters))
+
+
 class Matcher:
     """Finds tokens (tuples of words) in a word list, at word boundaries."""
 
@@ -228,11 +251,16 @@ class Matcher:
     def scan_tokens(self, text, rust_context=None):
         """Retain every match except those fully inside fixed public facts."""
         text = unicodedata.normalize("NFC", text)
-        # Whitespace and comments do not establish a complete Rust path.
-        spans = [(len(text[:m.start()].casefold()), len(text[:m.end()].casefold()))
-                 for m in PUBLIC_LITERAL.finditer(text)
-                 if m.group() not in PUBLIC_RUST_PATHS or not
-                 rust_path_context(text, m.start(), m.end(), rust_context)]
+        spans = []
+        for m in PUBLIC_LITERAL.finditer(text):
+            start, end = m.span()
+            if m.group("swift_import") is not None:
+                if swift_import_context(text, start, end, rust_context):
+                    continue
+                start, end = m.span("swift_import")
+            elif m.group() in PUBLIC_RUST_PATHS and rust_path_context(text, start, end, rust_context):
+                continue
+            spans.append((len(text[:start].casefold()), len(text[:end].casefold())))
         if not spans:
             yield from self.find(words(text))
             return
@@ -632,7 +660,9 @@ def build(candidates, repo, out):
     matcher = Matcher(tokens)
     in_repo = set()
     for text in committed_texts(repo):
-        in_repo.update(matcher.find(words(text)))
+        # Keep committed_texts' raw-only learning: fixed facts are not evidence
+        # that a candidate's ordinary spelling outside their spans is public.
+        in_repo.update(matcher.scan_tokens(text))
     final = sorted(" ".join(t) for t in tokens - in_repo)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tmp = out + ".tmp"
@@ -891,7 +921,7 @@ def scan_staged(matcher, repo):
                 exact_public_line = public_lines.get(path, {}).get(line_no) == raw[1:] + b"\n"
                 decoded = variants(line[1:])
                 context = None
-                if any(fact in v for fact in PUBLIC_RUST_PATHS for v in decoded):
+                if any(fact in v for fact in PUBLIC_RUST_PATHS + (PUBLIC_SWIFT_IMPORT,) for v in decoded):
                     if path not in index_context:
                         source = git(repo, "cat-file", "blob", ":" + path).decode("utf-8", errors="replace")
                         offsets = [0] + [m.end() for m in re.finditer("\n", source)]

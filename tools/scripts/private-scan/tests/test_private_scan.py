@@ -231,6 +231,71 @@ class Build(unittest.TestCase):
         # A committed tracked file still counts, as committed.
         self.assertNotIn("wiese", tokens)
 
+    def test_committed_fixed_import_does_not_learn_its_contained_candidate(self):
+        fact = private_scan.PUBLIC_SWIFT_IMPORT
+        module = fact.split(" ", 1)[1]
+        write(self.candidates, json.dumps({"kind": "deck", "text": module}) + "\n")
+        public = os.path.join(self.repo, "public.swift")
+        bare = os.path.join(self.dir, "bare.txt")
+        write(bare, module + "\n")
+        for text in (fact, '"' + fact + '"', "'" + fact + "'"):
+            with self.subTest(text=text):
+                write(public, text + "\n")
+                git(self.repo, "add", "public.swift")
+                git(self.repo, "commit", "-qm", "fixed fact")
+                r, tokens = self.build()
+                self.assertEqual(tokens, [module.casefold()])
+                self.assertEqual(json.loads(r.stdout)["in_repository"], 0)
+                self.assertEqual(run("scan", "--tokens", self.out, public).returncode, 0)
+                result = run("scan", "--tokens", self.out, bare)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["files"], [{"path": bare, "lines": [1]}])
+        # The same file's ordinary occurrence still establishes public usage.
+        write(public, fact + "\n" + module + "\n")
+        git(self.repo, "add", "public.swift")
+        git(self.repo, "commit", "-qm", "ordinary occurrence")
+        r, tokens = self.build()
+        self.assertEqual(tokens, [])
+        self.assertEqual(json.loads(r.stdout)["in_repository"], 1)
+
+    def test_committed_learning_keeps_raw_text_semantics_for_encoded_imports(self):
+        fact = private_scan.PUBLIC_SWIFT_IMPORT
+        prefix, module = fact.split(" ", 1)
+        write(self.candidates, json.dumps({"kind": "deck", "text": module}) + "\n")
+        public = os.path.join(self.repo, "public.txt")
+        encoders = (lambda value: "".join("&#%d;" % ord(c) for c in value),
+                    lambda value: "".join("\\u%04x" % ord(c) for c in value),
+                    lambda value: "".join("\\U%08x" % ord(c) for c in value),
+                    lambda value: "".join("%%%02X" % byte for byte in value.encode("utf-8")))
+        for encode in encoders:
+            for text in (encode(fact), encode(module)):
+                with self.subTest(text=text):
+                    write(public, text + "\n")
+                    git(self.repo, "add", "public.txt")
+                    git(self.repo, "commit", "-qm", "encoded text")
+                    self.assertIn(text + "\n", list(private_scan.committed_texts(self.repo)))
+                    _, tokens = self.build()
+                    self.assertEqual(tokens, [module.casefold()])
+        # No decoding is added to learning: a raw ordinary word after an
+        # encoded prefix remains an outside-fact committed occurrence.
+        write(public, encoders[1](prefix) + " " + module + "\n")
+        git(self.repo, "add", "public.txt")
+        git(self.repo, "commit", "-qm", "raw word beside encoded text")
+        _, tokens = self.build()
+        self.assertEqual(tokens, [])
+
+    def test_committed_cross_span_match_is_still_learned(self):
+        fact = private_scan.PUBLIC_SWIFT_IMPORT
+        module = fact.split(" ", 1)[1]
+        candidate = module + " sentinelprivate"
+        write(self.candidates, json.dumps({"kind": "deck", "text": candidate}) + "\n")
+        public = os.path.join(self.repo, "public.swift")
+        write(public, fact + " sentinelprivate\n")
+        git(self.repo, "add", "public.swift")
+        git(self.repo, "commit", "-qm", "crossing occurrence")
+        _, tokens = self.build()
+        self.assertEqual(tokens, [])
+
     def test_committed_private_results_never_make_a_token_public(self):
         # conformance/reports/private/ holds results from the collection: a
         # word there is no evidence that the word is public.
@@ -1058,6 +1123,126 @@ class PublicDockerOptionTests(unittest.TestCase):
                  (literal + ", " + literal, (self.option_words[-1], self.option_words[0])))
         for text, token in cases:
             self.check_decoded_and_files(text, True, private_scan.Matcher({token}))
+
+
+class PublicSwiftImportTests(unittest.TestCase):
+    """E-20261102T070407Z-6a04 approves one complete compiler fact."""
+
+    check_all = PublicInterfaceTests.check_all
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.fact = private_scan.PUBLIC_SWIFT_IMPORT
+        self.prefix, self.module = self.fact.split(" ", 1)
+        self.ws = private_scan.words(self.fact)
+        self.matcher = private_scan.Matcher({(word,) for word in self.ws})
+
+    def check_decoded_and_files(self, text, expected, matcher=None):
+        matcher = matcher or self.matcher
+        encoders = (lambda value: value,
+                    lambda value: "".join("&#%d;" % ord(c) for c in value),
+                    lambda value: "".join("\\u%04x" % ord(c) for c in value),
+                    lambda value: "".join("\\U%08x" % ord(c) for c in value),
+                    lambda value: "".join("%%%02X" % c for c in value.encode("utf-8")))
+        for encode in encoders:
+            encoded = encode(text)
+            with self.subTest(text=text, encoded=encoded):
+                self.assertEqual(any(matcher.hit(v) for v in private_scan.variants(encoded)), expected)
+                self.assertEqual(bool(private_scan.line_hits(matcher, encoded)), expected)
+                self.check_all(encoded, expected, matcher)
+
+    def test_exact_approved_literal_digest_and_restored_source(self):
+        self.assertEqual(self.fact, "import MachO")
+        self.assertEqual(private_scan.PUBLIC_SWIFT_IMPORT_SHA256,
+                         "0cd4593e5b7c20a193357a8d46e91ae8d04f5d92d0ecf4aa3167ac4dc0379c5a")
+        self.assertEqual(hashlib.sha256(self.fact.encode("utf-8")).hexdigest(),
+                         private_scan.PUBLIC_SWIFT_IMPORT_SHA256)
+        root = Path(SCRIPT).resolve().parents[3]
+        source = root / "app/Packages/MeguriKit/Tests/AppModelTests/CloudKitAgent/Support/AgentRunningProduct.swift"
+        lines = source.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines.count(self.fact), 1)
+        self.assertEqual(lines[:4], ["import Darwin", "import Foundation", self.fact, "import ObjectiveC"])
+
+    def test_only_complete_raw_and_quoted_spans_hide_contained_matches(self):
+        for text in (self.fact, '"' + self.fact + '"', "'" + self.fact + "'", '`' + self.fact + '`'):
+            for matcher in (self.matcher, private_scan.Matcher({tuple(self.ws)})):
+                self.check_decoded_and_files(text, False, matcher)
+        self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(self.fact)], [self.fact])
+
+    def test_bare_module_case_spacing_and_incomplete_quotes_stay_checked(self):
+        for text in (self.module, self.fact.lower(), self.fact.upper(), self.fact.swapcase(),
+                     self.prefix + "  " + self.module, self.prefix + "\t" + self.module,
+                     self.prefix + " /* note */ " + self.module,
+                     self.prefix + "\n" + self.module,
+                     '"' + self.fact, self.fact + '"', '"' + self.fact + "'",
+                     '"prefix ' + self.fact + '"', '"' + self.fact + ' suffix"'):
+            self.check_decoded_and_files(text, True)
+        other = self.prefix + " CustomSDK"
+        self.check_decoded_and_files(other, True, private_scan.Matcher({tuple(private_scan.words(other))}))
+
+    def test_custom_compounds_qualification_and_unicode_remain_checked(self):
+        for prefix in ("custom.", ".", "custom::", "x", "_", "-", "\u0301", "\u034f", "\u03bb"):
+            self.check_decoded_and_files(prefix + self.fact, True)
+        for suffix in (".Custom", "::Custom", "x", "_extra", "-extra", "\u0301", "\u034f", "\u03bb"):
+            self.check_decoded_and_files(self.fact + suffix, True)
+        for quote in ('"', "'", '`'):
+            self.check_decoded_and_files("custom." + quote + self.fact + quote, True)
+            self.check_decoded_and_files(quote + self.fact + quote + ".Custom", True)
+
+    def test_surrounding_and_crossing_tokens_are_never_hidden(self):
+        sentinel = "sentinelprivate"
+        for quote in ("", '"', "'", '`'):
+            literal = quote + self.fact + quote
+            for text, token in ((sentinel + " " + literal, (sentinel,)),
+                                (literal + " " + sentinel, (sentinel,)),
+                                (sentinel + " " + literal, (sentinel, self.ws[0])),
+                                (literal + " " + sentinel, (self.ws[-1], sentinel)),
+                                (literal + " " + literal, (self.ws[-1], self.ws[0]))):
+                self.check_decoded_and_files(text, True, private_scan.Matcher({token}))
+        # One approved line does not exempt any other line of the file.
+        self.check_all(self.fact + "\n" + self.module, True)
+        self.check_all(self.module + "\n" + self.fact, True)
+
+    def test_whitespace_and_comments_cannot_separate_qualification(self):
+        gaps = (" \t", "\n ", " /* note */ ", " // note\n ",
+                " /* first\n second */\n ", " /* outer /* inner */ tail */ ")
+        for gap in gaps:
+            for text in ("custom." + gap + self.fact, self.fact + gap + ".Custom",
+                         "custom::" + gap + self.fact, self.fact + gap + "::Custom",
+                         self.fact + gap + "_extra"):
+                self.check_decoded_and_files(text, True)
+        # Preserve real line/run boundaries while encoding the adjacent trivia.
+        contexts = (("custom&#46; &#47;&#47; note\n", ""),
+                    ("custom\\x2e \\x2f\\x2f note\n", ""),
+                    ("custom%2E %2F%2F note\n", ""),
+                    ("", "\n&#46;Custom"), ("", "\n\\x2eCustom"), ("", "\n%2ECustom"),
+                    ("", "\n&#47;&#42; note &#42;&#47; .Custom"),
+                    ("", "\n\\x2f\\x2a note \\x2a\\x2f .Custom"),
+                    ("", "\n%2F%2A note %2A%2F .Custom"))
+        for prefix, suffix in contexts:
+            text = prefix + self.fact + suffix
+            self.assertTrue(private_scan.line_hits(self.matcher, text))
+            self.check_all(text, True)
+
+    def test_index_context_uses_staged_bytes_and_unchanged_adjacent_lines(self):
+        full = os.path.join(self.repo, "report.swift")
+        # The qualification is committed; only the newly added import is scanned.
+        write(full, "custom.\n")
+        git(self.repo, "add", "report.swift")
+        git(self.repo, "commit", "-qm", "qualification context")
+        for binary in (False, True):
+            tail = b"\0" if binary else b"\n"
+            for text in ("custom.\n" + self.fact, self.fact + "\n.Custom",
+                         self.fact + " /* note */\n.Custom"):
+                write(full, text.encode("utf-8") + tail, "wb")
+                git(self.repo, "add", "report.swift")
+                write(full, self.fact.encode("utf-8") + tail, "wb")
+                self.assertFalse(private_scan.scan_paths(self.matcher, [full], self.repo)[0])
+                self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
+                git(self.repo, "reset", "-q")
 
 
 class PublicLibraryTests(unittest.TestCase):

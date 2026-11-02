@@ -26,6 +26,9 @@ strict UTF-8 conversion replaced them. Existing public imports expose the
 required declarations, so a redundant import was removed without changing the
 privacy guard or adding an exception. Final review has no findings.
 
+Correction: the iOS build requires the explicit compiler import. Approval and
+build evidence: `cloud-agent-public-import-20261102.md`.
+
 Source exports: `cleanroom/20261102T054124Z-29018`,
 `cleanroom/20261102T055752Z-36209`, and
 `cleanroom/20261102T060728Z-41541`.

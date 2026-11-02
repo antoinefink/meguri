@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import MachO
 import ObjectiveC
 
 // Compiled with the agent's shared support in MeguriSnapshotTests. Bundle(for:)
