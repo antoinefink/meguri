@@ -1,6 +1,6 @@
 # Real cloud inputs for VM Unit checks
 
-Status: independently reviewed WIP; focused tests and VM execution are unrun.
+Status: focused tooling checks pass; actual VM execution remains unrun.
 Prepared source base: 60b8cc90. Integration start: 87775197.
 Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
 Fixer session: s-20261025T162405Z-9dc656e4.
@@ -26,9 +26,16 @@ remaining required finding. Eight other seed files remain unchanged.
 
 Generated tooling tests cover the producer receipts, strict current-run scope,
 retained file authority, exact guest copies, input propagation and early failure.
-Focused tooling execution and actual VM execution remain pending disk recovery.
+Tooling execution was initially held for disk recovery; its result follows.
+Actual VM execution remains unrun.
 No test selector, assertion, limit, privacy exception or production Swift/Rust
 behavior changes. No Unit trailer or passing integration gate is claimed.
 
 One internal action/function name was replaced after a privacy check. This is
 a consistent rename across its call sites. No scanner rule changes.
+
+Focused selftest/20261102T114909Z-1823 passed 38/38, no skips, on clean
+a15dd42b. It covers the changed producers, helper publication, guest routing
+and Xcode failure paths. Similarity/20261102T115039Z-10392 passed the
+11 scanned files in the combined integration; excluded paths remain excluded.
+Actual VM use and a required full integration gate remain open.
