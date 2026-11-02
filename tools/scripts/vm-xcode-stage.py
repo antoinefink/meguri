@@ -29,6 +29,7 @@ import uuid
 
 GIB = 1024 ** 3
 SCOPE = "VM-XCODE-MAINTENANCE-ONLY"
+SOURCE_SCOPE = "SOURCE-CHECK-ONLY"
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 SHUTDOWN = 10
@@ -179,7 +180,36 @@ def join_original(child):
                     raise Uncertain() from None
 
 
-def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180):
+def retain_source_failure(directory, argv, returncode, out, err):
+    """Only the original failed source verification, never a public artifact."""
+    need(type(directory) is Directory)
+    directory.check()
+    s = os.fstat(directory.fd)
+    need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+    limit, streams = 1024 * 1024, {}
+    for name, stream in (("stdout", out), ("stderr", err)):
+        directory.check()
+        original_bytes = os.fstat(stream.fileno()).st_size
+        fd = os.open("source-command." + name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory.fd)
+        retained_bytes = 0
+        with os.fdopen(fd, "wb") as retained:
+            stream.seek(0)
+            while retained_bytes < limit:
+                raw = stream.read(min(64 * 1024, limit - retained_bytes))
+                if not raw:
+                    break
+                retained.write(raw)
+                retained_bytes += len(raw)
+        streams[name] = {"original_bytes": original_bytes, "retained_bytes": retained_bytes,
+                         "overflow": original_bytes > limit}
+    write_new(directory, "source-command.json", {"argv": argv, "returncode": returncode,
+                                                 "streams": streams})
+    directory.check()
+
+
+def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180,
+            source_diagnostics=None):
     """One original owned session; inherited output pipes cannot block join."""
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         child = None
@@ -198,9 +228,12 @@ def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180):
                 finally:
                     if child.stdin is not None:
                         child.stdin.close()
+        if child.returncode != 0 and source_diagnostics is not None:
+            retain_source_failure(source_diagnostics, argv, child.returncode, out, err)
         if check:
             need(child.returncode == 0)
-        need(out.tell() <= 1024 * 1024 and err.tell() <= 1024 * 1024)
+        need(os.fstat(out.fileno()).st_size <= 1024 * 1024 and
+             os.fstat(err.fileno()).st_size <= 1024 * 1024)
         out.seek(0)
         return child.returncode, out.read(1024 * 1024 + 1)
 
@@ -380,7 +413,7 @@ def free_space(directory, size=0, entries=0):
     need(s.f_bavail * s.f_frsize > 40 * GIB + size + overhead)
 
 
-def facts(directory):
+def facts(directory, *, source_diagnostics=None):
     # Critical metadata is opened nofollow, even if a source changes after
     # inventory. Do not read an arbitrary replacement link before refusing it.
     with Directory(directory.path + "/Contents") as contents:
@@ -400,8 +433,9 @@ def facts(directory):
     need(isinstance(v, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", v) and
          isinstance(b, str) and re.fullmatch(r"[A-Za-z0-9]+", b) and
          info.get("CFBundleShortVersionString") == v)
+    diagnostics = {} if source_diagnostics is None else {"source_diagnostics": source_diagnostics}
     command(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--all-architectures",
-             "-R", "anchor apple", directory.path])
+             "-R", "anchor apple", directory.path], **diagnostics)
     directory.check()
     return {"version": v, "build": b}
 
@@ -840,6 +874,44 @@ mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
             wrapper.close()
 
 
+def check_source(context):
+    # A fresh derived host selection only: no supplied bundle, route or facts.
+    need(set(context) == {"private"})
+    with Directory(context["private"]) as private:
+        s = os.fstat(private.fd)
+        need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+        env = dict(os.environ)
+        for key in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"):
+            env.pop(key, None)
+
+        def selection():
+            _, raw = command(["/usr/bin/xcode-select", "-p"], env=env)
+            path = raw.decode().strip()
+            need(path.endswith(".app/Contents/Developer") and os.path.realpath(path) == path)
+            return path
+
+        selected = selection()
+        with Directory(selected) as developer, \
+                Directory(selected[:-len("/Contents/Developer")]) as bundle:
+            authority = InstalledSource(bundle)
+            authority.identity = authority.system_identity()
+            authority.check()
+            root = os.fstat(bundle.fd)
+            entry_mode(stat.S_IMODE(root.st_mode), False, installed_source=authority, metadata=root)
+            # Retain the original binding/authority even when facts() refuses.
+            write_new(private, "source-check.json", {
+                "selected": selected, "bundle": bundle.path, "bundle_pins": bundle.check(),
+                "developer_pins": developer.check(), "authority": authority.identity})
+            facts(bundle, source_diagnostics=private)
+            need(selection() == selected)
+            developer.check()
+            authority.check()
+        print(json.dumps({"scope": SOURCE_SCOPE, "outcome": "source-checked",
+                          "checks": {"source_facts": True, "source_signature": True,
+                                     "source_binding": True, "source_authority": True}}))
+        return 0
+
+
 def host(context):
     need(set(context) == {"selection", "lease_slot", "root", "run", "private"})
     with contextlib.ExitStack() as held:
@@ -935,7 +1007,10 @@ def main():
             return 0
         print(json.dumps(guest(sys.argv[2], context)))
         return 0
-    need(len(sys.argv) == 1 and sys.platform == "darwin")
+    need(sys.platform == "darwin")
+    if sys.argv[1:] == ["--check-source"]:
+        return check_source(json.load(os.fdopen(os.dup(3))))
+    need(len(sys.argv) == 1)
     # The host never accepts supplied success facts.
     return host(json.load(os.fdopen(os.dup(3))))
 
@@ -959,7 +1034,8 @@ def run():
                     frames.append({"function": tb.tb_frame.f_code.co_name, "line": tb.tb_lineno})
                 tb = tb.tb_next
             print(json.dumps({"exception": kind, "stack": frames}), file=sys.stderr)
-            print(json.dumps(report("refused")))
+            print(json.dumps({"scope": SOURCE_SCOPE, "outcome": "refused", "checks": {}}
+                             if sys.argv[1:] == ["--check-source"] else report("refused")))
         return 1
 
 

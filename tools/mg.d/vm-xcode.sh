@@ -97,10 +97,41 @@ mg_vm_xcode_stage_private() (
   exit "$rc"
 )
 
+mg_vm_xcode_check_source() {
+  local private temp_base report="$MG_RUN_DIR/stage-report.json" rc=0
+  temp_base="$(CDPATH= cd -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P 2>/dev/null)" || return 1
+  private="$(mktemp -d "${temp_base%/}/meguri-vm-xcode.XXXXXX" 2>/dev/null)" || return 1
+  chmod 700 "$private" 2>/dev/null || return 1
+  # No probe, lease, receiver or guest context in this diagnostic path.
+  (
+    umask 077
+    exec >"$private/helpers.log" 2>&1
+    jq -nc --arg private "$private" '{private:$private}' >"$private/context.json" || exit 1
+    python3 -B -I "$MG_TOOLS/scripts/vm-xcode-stage.py" --check-source \
+      3<"$private/context.json" >"$report"
+  ) || rc=$?
+  if [ ! -s "$report" ]; then
+    jq -nc '{scope:"SOURCE-CHECK-ONLY",outcome:"refused",checks:{}}' >"$report"
+  fi
+  mg_artifact json "$report" "SOURCE-CHECK-ONLY; selected host source signature and facts"
+  if [ "$rc" -eq 0 ] && jq -e \
+    '.scope == "SOURCE-CHECK-ONLY" and .outcome == "source-checked"' "$report" >/dev/null 2>&1; then
+    mg_message "vm-xcode-stage: SOURCE-CHECK-ONLY; selected host source check completed"
+    mg_status pass
+  else
+    mg_failure vm-xcode-source "SOURCE-CHECK-ONLY; selected host source check failed"
+    mg_status error
+  fi
+}
+
 mg_vm_xcode_stage() {
   local private temp_base report="$MG_RUN_DIR/stage-report.json" rc=0 outcome
+  if [ "$#" -eq 1 ] && [ "$1" = --check-source ]; then
+    mg_vm_xcode_check_source
+    return $?
+  fi
   if [ "$#" -ne 0 ]; then
-    mg_failure usage "usage: tools/mg vm-xcode-stage"
+    mg_failure usage "usage: tools/mg vm-xcode-stage [--check-source]"
     return 1
   fi
   # Resolve only the OS temporary base, before creating our owned directory.

@@ -6,6 +6,102 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   python3 -B "$REPO_ROOT/tools/tests/vm_xcode_stage_test.py"
 }
 
+@test "vm-xcode-stage source-only avoids normal helper leases and VM and keeps diagnostics private" {
+  mkdir -m 700 "$BATS_TEST_TMPDIR/temp" "$BATS_TEST_TMPDIR/run"
+  run bash -c '
+    mg_job() { :; }
+    MG_TOOLS="$1/tools" MG_RUN_DIR="$2/run" TMPDIR="$2/temp"
+    source "$1/tools/mg.d/vm-xcode.sh"
+    mg_vm_xcode_stage_private() { echo forbidden-normal; return 1; }
+    mg_mac_vm_probe() { echo forbidden-probe; return 1; }
+    mg_mac_vm_take() { echo forbidden-lease; return 1; }
+    mvl_stop_tests() { echo forbidden-drain; return 1; }
+    mg_vm_xcode_join() { echo forbidden-join; return 1; }
+    python3() {
+      [ "$#" -eq 4 ] && [ "$1" = -B ] && [ "$2" = -I ] &&
+        [ "$3" = "$MG_TOOLS/scripts/vm-xcode-stage.py" ] && [ "$4" = --check-source ] || return 1
+      local context private
+      context="$(cat <&3)"
+      [ "$(jq -c keys <<<"$context")" = '\''["private"]'\'' ] || return 1
+      private="$(jq -r .private <<<"$context")"
+      [ -d "$private" ] || return 1
+      echo "generated private identity/route/source path" >&2
+      printf "%s\n" '\''{"scope":"SOURCE-CHECK-ONLY","outcome":"source-checked","checks":{}}'\''
+    }
+    mg_artifact() { [ "$1" = json ] && [ "$2" = "$MG_RUN_DIR/stage-report.json" ]; }
+    mg_message() { echo "$1"; }
+    mg_failure() { echo forbidden-failure; return 1; }
+    mg_status() { [ "$1" = pass ]; }
+    mg_vm_xcode_stage --check-source || exit 1
+    command python3 -B - "$TMPDIR" <<"PY"
+import json, pathlib, stat, sys
+directories = list(pathlib.Path(sys.argv[1]).iterdir())
+assert len(directories) == 1
+private = directories[0]
+assert stat.S_IMODE(private.stat().st_mode) == 0o700
+assert {p.name for p in private.iterdir()} == {"context.json", "helpers.log"}
+assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in private.iterdir())
+assert json.loads((private / "context.json").read_bytes()) == {"private": str(private)}
+assert "generated private identity/route/source path" in (private / "helpers.log").read_text()
+PY
+  ' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "vm-xcode-stage: SOURCE-CHECK-ONLY; selected host source check completed" ]
+  [ "$(jq -r .scope "$BATS_TEST_TMPDIR/run/stage-report.json")" = SOURCE-CHECK-ONLY ]
+}
+
+@test "vm-xcode-stage source-only failures never become queued steps passes or VM matches" {
+  mkdir -m 700 "$BATS_TEST_TMPDIR/temp" "$BATS_TEST_TMPDIR/run"
+  for failure_rc in 1 23 75 130; do
+    run bash -c '
+      mg_job() { :; }
+      MG_TOOLS="$1/tools" MG_RUN_DIR="$2/run" TMPDIR="$2/temp"
+      source "$1/tools/mg.d/vm-xcode.sh"
+      mg_vm_xcode_stage_private() { echo forbidden-normal; return 1; }
+      python3() {
+        echo "generated private failure" >&2
+        printf "%s\n" '\''{"scope":"SOURCE-CHECK-ONLY","outcome":"refused","checks":{}}'\''
+        return "$failure_rc"
+      }
+      mg_artifact() { :; }
+      mg_user_step() { echo forbidden-user-step; return 1; }
+      mg_queued_part() { echo forbidden-queued; return 1; }
+      mg_message() { echo forbidden-message; return 1; }
+      mg_failure() { [ "$1" = vm-xcode-source ] && echo "$2"; }
+      mg_status() { [ "$1" = error ]; }
+      failure_rc="$3"
+      mg_vm_xcode_stage --check-source
+    ' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR" "$failure_rc"
+    [ "$status" -eq 0 ]
+    [ "$output" = "SOURCE-CHECK-ONLY; selected host source check failed" ]
+    [ "$(jq -r .scope "$BATS_TEST_TMPDIR/run/stage-report.json")" = SOURCE-CHECK-ONLY ]
+  done
+}
+
+@test "vm-xcode-stage rejects source-only overrides before any helper" {
+  run bash -c '
+    mg_job() { :; }
+    source "$1/tools/mg.d/vm-xcode.sh"
+    mg_vm_xcode_check_source() { echo forbidden-source; return 0; }
+    mg_vm_xcode_stage_private() { echo forbidden-normal; return 0; }
+    mg_failure() { [ "$1" = usage ]; }
+    for option in --bundle --route --expected --authority --signature; do
+      if mg_vm_xcode_stage --check-source "$option" generated; then exit 1; fi
+    done
+  ' _ "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "vm-xcode-stage source-only dry run is inert" {
+  mkdir -m 700 "$BATS_TEST_TMPDIR/temp"
+  run env TMPDIR="$BATS_TEST_TMPDIR/temp" "$REPO_ROOT/tools/mg" vm-xcode-stage --check-source --dry-run
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/temp")" ]
+  [ "$(jq -r .dry_run "$output")" = true ]
+  [ ! -e "$(dirname "$output")/stage-report.json" ]
+}
+
 @test "vm-xcode-stage resolves logical temporary base before private directory creation" {
   mkdir -m 700 "$BATS_TEST_TMPDIR/physical temp"
   ln -s "$BATS_TEST_TMPDIR/physical temp" "$BATS_TEST_TMPDIR/logical temp"

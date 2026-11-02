@@ -61,3 +61,15 @@ ownership grants no authority. World-write/set-id and all other guards stay.
 Independent review found no required finding. Integration changes only two
 invalid-group fixture names; their wrong-name predicate is unchanged.
 Staged privacy81912 passes. Focused checks and actual maintenance are pending.
+
+P2 diagnostic-retention repair resumes reviewed source-check seed patch86308
+in existing fixer s-20261025T162405Z-9dc656e4. Each original failed command
+stream retains at most the existing 1 MiB; private metadata records its original
+byte count, retained count, explicit overflow and unchanged command exit status.
+Size admission uses original file sizes after retention rather than read offsets.
+The added generated failed-child regression exceeds both stream caps and checks
+bounded private prefixes, original exit/size/overflow and public redaction.
+Source-check design, exact signature predicate, staging and join behavior stay
+unchanged. One source consistency pass only; no tests, native source checks,
+builds, VM, SDK or account operations run here. Root owns independent re-review,
+focused tests and the read-only actual source check; no verification pass claimed.

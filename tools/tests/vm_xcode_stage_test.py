@@ -160,6 +160,211 @@ class SourceAuthority(unittest.TestCase):
             m.inventory(directory, installed_source=m.InstalledSource(directory))
 
 
+class SourceOnly(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.source = self.base / "Selected Original.app"
+        self.developer = self.source / "Contents/Developer"
+        self.developer.mkdir(parents=True)
+        self.private = self.base / "private"
+        self.private.mkdir(mode=0o700)
+        self.context = {"private": str(self.private)}
+        for name, value in (
+                ("Info.plist", {"CFBundleIdentifier": "com.apple.dt.Xcode", "CFBundleShortVersionString": "27.2"}),
+                ("version.plist", {"CFBundleShortVersionString": "27.2", "ProductBuildVersion": "18C123"})):
+            (self.source / "Contents" / name).write_bytes(plistlib.dumps(value))
+        self.identity = ("generated root", "generated wheel", (501, 501, 20, 20, (20,)))
+        self.commands = []
+        self.real_command = m.command
+        self.addCleanup(patch.stopall)
+        patch.object(m.sys, "platform", "darwin").start()
+        patch.object(m.InstalledSource, "system_identity", return_value=self.identity).start()
+        patch.object(m, "command", side_effect=self.command).start()
+        for name in ("VM", "host", "guest", "instance", "inventory", "free_space", "guest_root",
+                     "activation", "receive", "release_proof"):
+            patch.object(m, name, side_effect=AssertionError("forbidden source-only operation: " + name)).start()
+
+    def command(self, argv, **kwargs):
+        self.commands.append((argv, kwargs))
+        if argv == ["/usr/bin/xcode-select", "-p"]:
+            return 0, str(self.developer).encode()
+        self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
+                                "--all-architectures", "-R", "anchor apple", str(self.source)])
+        self.assertEqual(kwargs["source_diagnostics"].path, str(self.private))
+        return 0, b""
+
+    def check(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(m.check_source(self.context), 0)
+        return json.loads(output.getvalue())
+
+    def test_derived_original_source_authority_without_vm_inventory_or_source_writes(self):
+        before = {str(p.relative_to(self.source)): (p.stat().st_mode, p.read_bytes() if p.is_file() else None)
+                  for p in self.source.rglob("*")}
+        with patch.dict(os.environ, {"DEVELOPER_DIR": "/generated/override", "SDKROOT": "override",
+                                     "TOOLCHAINS": "override"}):
+            public = self.check()
+        self.assertEqual(public, {"scope": "SOURCE-CHECK-ONLY", "outcome": "source-checked",
+                                 "checks": {"source_facts": True, "source_signature": True,
+                                            "source_binding": True, "source_authority": True}})
+        self.assertEqual(len(self.commands), 3)
+        for argv, kwargs in (self.commands[0], self.commands[-1]):
+            self.assertEqual(argv, ["/usr/bin/xcode-select", "-p"])
+            self.assertFalse({"DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"} & set(kwargs["env"]))
+        binding = json.loads((self.private / "source-check.json").read_bytes())
+        self.assertEqual(binding["selected"], str(self.developer))
+        self.assertEqual(binding["bundle"], str(self.source))
+        self.assertEqual(binding["authority"], json.loads(json.dumps(self.identity)))
+        with m.Directory(str(self.source)) as original, m.Directory(str(self.developer)) as developer:
+            self.assertEqual(binding["bundle_pins"], original.check())
+            self.assertEqual(binding["developer_pins"], developer.check())
+        self.assertEqual((self.private / "source-check.json").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(set(p.name for p in self.private.iterdir()), {"source-check.json"})
+        self.assertEqual(before, {str(p.relative_to(self.source)): (p.stat().st_mode, p.read_bytes() if p.is_file() else None)
+                                  for p in self.source.rglob("*")})
+        self.assertNotIn(str(self.base), json.dumps(public))
+
+    def test_original_binding_substitution_refuses(self):
+        original = self.command
+        def changed(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[0] == "/usr/bin/codesign":
+                self.source.rename(self.base / "Saved.app")
+                self.developer.mkdir(parents=True)
+            return result
+        with patch.object(m, "command", side_effect=changed), self.assertRaises(m.Refused):
+            self.check()
+
+    def test_changed_selection_refuses(self):
+        def changed(argv, **kwargs):
+            result = self.command(argv, **kwargs)
+            if len(self.commands) == 3:
+                return 0, str(self.base / "Other.app/Contents/Developer").encode()
+            return result
+        with patch.object(m, "command", side_effect=changed), self.assertRaises(m.Refused):
+            self.check()
+
+    def test_changed_authority_refuses(self):
+        with patch.object(m.InstalledSource, "system_identity",
+                          side_effect=[self.identity, self.identity, ("changed",)]), self.assertRaises(m.Refused):
+            self.check()
+
+    def test_no_caller_accepted_values_or_bundle_route_options(self):
+        for key in ("facts", "expected", "selection", "bundle", "route", "authority", "signature", "verified"):
+            with self.subTest(key=key), self.assertRaises(m.Refused):
+                m.check_source(dict(self.context, **{key: True}))
+        for args in (["--check-source", "--bundle", str(self.source)],
+                     ["--check-source", "--route", "generated"], ["--source", str(self.source)]):
+            with patch.object(sys, "argv", [str(SPEC.origin)] + args), \
+                    patch.object(signal, "signal"), \
+                    patch.object(os, "dup", side_effect=AssertionError("must reject before context")), \
+                    self.assertRaises(m.Refused):
+                m.main()
+        self.assertEqual(self.commands, [])
+
+    def test_failed_signature_keeps_original_private_streams_and_status(self):
+        # Run the real command wrapper around one generated Popen handle only.
+        original_command = m.command.side_effect
+        raw_out, raw_err = b"generated private stdout\x00", b"generated nested requirement failure\n/private/identity"
+        self_test = self
+        class FailedChild:
+            pid, stdin, returncode = 12345, None, None
+
+            def __init__(self, argv, **kwargs):
+                self_test.assertEqual(argv[-1], str(self_test.source))
+                self_test.assertEqual(argv[1:-1], ["--verify", "--deep", "--strict",
+                                                  "--all-architectures", "-R", "anchor apple"])
+                kwargs["stdout"].write(raw_out)
+                kwargs["stderr"].write(raw_err)
+
+            def communicate(self, data, timeout):
+                self.returncode = 23
+
+            def wait(self, timeout):
+                return self.returncode
+
+        def dispatch(argv, **kwargs):
+            if argv[0] == "/usr/bin/codesign":
+                return self.real_command(argv, **kwargs)
+            return original_command(argv, **kwargs)
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(m, "command", side_effect=dispatch), patch.object(subprocess, "Popen", FailedChild), \
+                patch.object(os, "killpg"), patch.object(sys, "argv", [str(SPEC.origin), "--check-source"]), \
+                patch.object(m, "main", side_effect=lambda: m.check_source(self.context)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(m.run(), 1)
+        self.assertEqual(json.loads(out.getvalue()), {"scope": "SOURCE-CHECK-ONLY", "outcome": "refused", "checks": {}})
+        self.assertEqual((self.private / "source-command.stdout").read_bytes(), raw_out)
+        self.assertEqual((self.private / "source-command.stderr").read_bytes(), raw_err)
+        failed = json.loads((self.private / "source-command.json").read_bytes())
+        self.assertEqual(failed["returncode"], 23)
+        self.assertEqual(failed["argv"][-1], str(self.source))
+        self.assertTrue((self.private / "source-check.json").is_file())
+        for p in self.private.iterdir():
+            self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+        for private in (str(self.base), raw_out.decode(), raw_err.decode(), "Selected Original.app"):
+            self.assertNotIn(private, out.getvalue() + err.getvalue())
+        self.assertNotIn("queued", out.getvalue())
+
+    def test_failed_generated_child_overflow_retention_is_bounded_and_private(self):
+        limit, exit_status = 1024 * 1024, 29
+        markers = {"stdout": b"generated private stdout /private/output\x00",
+                   "stderr": b"generated private stderr /private/error\n"}
+        tails = {"stdout": b"private stdout overflow tail", "stderr": b"private stderr overflow tail"}
+        original_command, original_popen = m.command.side_effect, subprocess.Popen
+        children = []
+        program = "import sys\n" + "".join(
+            f"sys.{name}.buffer.write({markers[name]!r} + b'x' * {limit} + {tails[name]!r})\n"
+            f"sys.{name}.buffer.flush()\n" for name in ("stdout", "stderr"))
+        program += f"raise SystemExit({exit_status})\n"
+
+        def generated_child(argv, **kwargs):
+            self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
+                                    "--all-architectures", "-R", "anchor apple", str(self.source)])
+            child = original_popen([sys.executable, "-B", "-c", program], **kwargs)
+            children.append(child)
+            return child
+
+        def dispatch(argv, **kwargs):
+            if argv[0] == "/usr/bin/codesign":
+                return self.real_command(argv, **kwargs)
+            return original_command(argv, **kwargs)
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(m, "command", side_effect=dispatch), \
+                patch.object(subprocess, "Popen", side_effect=generated_child), \
+                patch.object(sys, "argv", [str(SPEC.origin), "--check-source"]), \
+                patch.object(m, "main", side_effect=lambda: m.check_source(self.context)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(m.run(), 1)
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].poll(), exit_status)
+        self.assertEqual(json.loads(out.getvalue()),
+                         {"scope": "SOURCE-CHECK-ONLY", "outcome": "refused", "checks": {}})
+        failed = json.loads((self.private / "source-command.json").read_bytes())
+        self.assertEqual(failed["returncode"], exit_status)
+        self.assertEqual(failed["argv"][-1], str(self.source))
+        for name in ("stdout", "stderr"):
+            retained = self.private / ("source-command." + name)
+            self.assertEqual(retained.stat().st_size, limit)
+            self.assertEqual(retained.read_bytes(), markers[name] + b"x" * (limit - len(markers[name])))
+            self.assertEqual(failed["streams"][name], {
+                "original_bytes": len(markers[name]) + limit + len(tails[name]),
+                "retained_bytes": limit, "overflow": True})
+            for marker in (markers[name].decode(), tails[name].decode()):
+                self.assertNotIn(marker, out.getvalue() + err.getvalue())
+        self.assertEqual({p.name for p in self.private.iterdir()}, {
+            "source-check.json", "source-command.json", "source-command.stdout", "source-command.stderr"})
+        for p in self.private.iterdir():
+            self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+        for private in (str(self.base), "Selected Original.app", "original_bytes", "retained_bytes", "overflow"):
+            self.assertNotIn(private, out.getvalue() + err.getvalue())
+
+
 class Staging(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
