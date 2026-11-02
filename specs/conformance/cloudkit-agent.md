@@ -53,6 +53,196 @@ Account-changing legs retain the original header and scope. They observe only th
 
 `build_receipt` and `deployment_receipt` each contain `{job, run_id}`. Resolve the exact MG receipts and only their declared artifacts using Q13.1's path and envelope rules. Require the run's clean source commit and the actual device/product binding. The coordinator independently checks the product signature, required CloudKit and push grants, provisioning under the existing platform rules, Debug/test-hook configuration, development container and environment, and the product actually delivered to this device. The running executable's bytes must match `executable_sha256` and that checked delivery. An executable hash alone proves none of the signing or account conditions. A caller-written receipt or a standalone preview's product details cannot substitute for these checks.
 
+Q7.2 and Q7.3 require the Mac app and the reserved iPhone and iPad **simulators
+in the test VM**, using real CloudKit and approved test accounts. Physical iOS
+devices are not a new requirement. A generic simulator compile, a host-screen
+run or a fake engine supplies none of the required signed execution evidence.
+The header keeps `device_kind` values `mac`, `iphone`, `ipad`.
+
+#### Build identity
+
+`app_build` is exactly the nonempty string `CFBundleVersion` from the actual
+app's Info.plist. It is neither the marketing version nor a concatenation with
+the OS, source commit or configuration. Reject another type or value.
+
+The build receipt is an actual passing `build-app` MG receipt for scheme
+`Meguri`, configuration `Debug`, explicit test plan `CloudAgent`, and platform
+`mac` or `ios-sim`. The public build command must explicitly select that plan;
+an environment variable that only selects test execution does not select it.
+`CloudAgent` must select the app-hosted `MeguriSnapshotTests/CloudKitSoakTests`
+target from this source commit. A normal UI build, standalone preview, package
+test, Profile, Release or AppStore product cannot substitute.
+
+The receipt declares the actual products directory and one JSON artifact
+`agent-build.json`. `details.agent_build` contains its exact
+`{path, sha256, bytes}` reference. Thus J2's build-receipt hash also binds the
+manifest bytes, not merely a mutable artifact pathname. Its object contains exactly:
+
+| Field | Value |
+|---|---|
+| `protocol_version` | integer `1` |
+| `job`, `run_id`, `source_commit` | the enclosing build receipt's identity and clean commit |
+| `scheme`, `configuration`, `test_plan`, `platform`, `signing` | `Meguri`, `Debug`, `CloudAgent`, `mac` or `ios-sim`, and `team` |
+| `app_build` | the actual app CFBundleVersion string |
+| `app`, `agent` | each `{path, bundle_id, executable, executable_sha256}`; paths are products-relative; executable is relative to its bundle |
+| `xctestrun` | `{path, sha256, bytes}` for the actual CloudAgent xctestrun, relative to products |
+| `products` | `{path, entries}`: the declared products root and complete frozen input inventory described below |
+
+`app` identifies the real development Meguri host. `agent` identifies the actual
+app-hosted MeguriSnapshotTests bundle, with its built Info identity and binary.
+The coordinator checks both signatures and the actual app's existing platform
+grants, configuration, development container and environment. It checks the
+resolved build settings against the actual products, not producer Booleans.
+For iOS simulation, verify that the built binary targets the simulator OS and
+supports the selected device class. Use the existing team-signing policy,
+development entitlements and schema-readiness checks. This requires no profile
+for physical hardware and no xcdevice result. An ad-hoc build remains compile-only
+evidence. On Mac, verify development signing and profile permission for the
+chosen test VM under the existing rules.
+
+`entries` maps every relative input path to one exact entry:
+
+- file: `{type: "file", sha256, bytes, mode}`;
+- directory: `{type: "directory", mode}`;
+- symbolic link: `{type: "symlink", target}`.
+
+Modes are integer POSIX permission bits, without timestamps, owners or inode
+numbers. Inventory the host app, its debug dylib when present, the agent bundle,
+their product dependencies/resources, and the selected xctestrun. Include every
+input the selected xctestrun or its environment uses to load Meguri/agent code.
+Do not silently omit a dependency or bind only the main executable. The exact
+file set and actual bytes must match; extra test code is not harmless metadata.
+Links may describe normal internal bundle links only: relative targets must
+remain inside this frozen product root and resolve to an inventoried entry.
+Hash terminal files through their direct physical paths without following
+links. Reject external links, missing targets, link cycles, parent escapes,
+special files and ambiguous paths. Use J2.1/Q13.1 stable no-follow authority
+checks around the inventory and independent signature inspection.
+
+The producer freezes this manifest only after the final build and signing
+steps. No later re-sign, widget recopy or test-bundle substitution may keep the
+same proof. A required product transformation needs a new real build receipt.
+The actual source commit and clean-tree state must remain the same through
+build completion and freezing; recording a clean value only at job start is
+insufficient.
+
+#### Intended destination
+
+The coordinator assigns run-local device labels once, using the configured
+test VM and Q7.2's reserved pool devices. Before delivery it freezes a private
+`destinations.json` below host Application Support at
+`Meguri/CloudKitSignedPrivate/<run_id>/destinations.json`. Apply J2.2's private
+owner/mode, strict JSON and stable no-follow rules; do not export this file or
+its digest. This is coordinator-selected routing, not account self-enrollment.
+
+Use exactly `protocol_version`, `job`, `run_id`, `source_commit`, `destinations`
+in this object. Version is `1`. Match job, run and source to the parent
+`cloudkit-signed` run. Each destination label has exactly
+`{device_kind, vm, vm_instance, simulator}`. Select `vm` from the configured
+test VMs; it cannot contain an SSH command or a path. Read `vm_instance` from
+that VM's actual instance. Set `simulator` to `null` on Mac. For iOS simulation,
+use `{udid, lease_receipt}` and identify the real MG pool acquire or renew run.
+Match the lease to Q7.2's selected device, its type and the owning checkout.
+Only the checked VM and live pool supply routing. Keep those values private;
+the run header cannot choose them. Writing this map is automatic coordinator
+work, with no added user step.
+
+Reuse the approved private account data from completed Q7.2 setup for later
+runs. The coordinator copies those unchanged values and applies each new
+header binding under J2.2 automatically. This creates no repeated user step.
+A current account lookup cannot supply the expected account. This text adds
+no setup UI or storage format for setup secrets.
+
+Hold the existing VM/pool lease while checking routing, copying, installing,
+launching and reading proof. Verify the VM instance again, and for a simulator
+verify the actual live UDID, kind, ownership/lease, booted runtime and OS build
+with the pool's existing checks. A matching OS version or first available
+device of that kind is insufficient. `header.os_build` equals this actual
+destination's build. Changing the VM instance, lease target or device requires
+a new run/header; do not silently route a relaunch elsewhere.
+
+#### Actual delivery receipt
+
+`deployment_receipt` names a real passing MG `cloudkit-agent-install` receipt.
+That job first allocates its MG run id. The coordinator then freezes the header
+that references the id. A pass covers actual delivery and its checks only;
+signed scenario/soak cells remain unfilled. Its envelope uses the same clean
+source commit. Declare `run.json`, `agent-deployment.json` and the actual bounded
+copy/install observation artifacts used by the job.
+`details.agent_deployment` is the exact `{path, sha256, bytes}` reference to
+its manifest. The child job can freeze the parent header using its already
+assigned deployment run id; the reference binds an id, not the future receipt
+bytes. There is no circular hash of the header and final deployment receipt.
+
+`agent-deployment.json` contains exactly `protocol_version`, `job`, `run_id`,
+`source_commit`, `parent_run`, `device`, `device_kind`, `os_build`,
+`header_sha256`, `build_receipt`, `build_receipt_sha256`, `build_manifest`,
+`delivered_manifest`, `xctestrun`, `installation`.
+Version is `1`; own job/run/source equal its envelope. `parent_run` is the
+`cloudkit-signed` MG run id. Header/device/build fields equal the immutable
+run header and exact resolved build receipt. Each manifest and xctestrun
+reference is `{path, sha256, bytes}`, declared by the applicable receipt.
+
+`delivered_manifest` has the same entry-map format as `products`, produced by
+an actual no-follow inventory in the intended VM after transfer. Relative
+bytes/entries equal the frozen build input; only its root path may differ.
+Use the existing MG copy routines and verify the result, not tar/SSH exit status
+alone. `installation` is `null` for the Mac; for a simulator it is a reference
+to an actual MG/VM simctl installation observation for the frozen destination
+and verified development app. A caller-written installed/success Boolean or
+an inventory of attached devices is not delivery proof.
+
+The coordinator launches `test-without-building` with that exact verified
+xctestrun, explicit CloudAgent selection and frozen destination. Preserve its
+original xctestrun bytes. Record run-specific launch environment separately;
+allow only the existing fixed agent-run-directory input and normal MG/Xcode
+test variables, never arbitrary code paths or injected libraries. Any necessary
+derived xctestrun must have its exact bytes declared in delivery, retain the
+build template hash, and restrict changes to those documented routing/run-path
+fields. No test target, binary, test selection or checker policy may change.
+
+Before the first CloudKit call, the agent observes its actual OS/build, host
+executable and loaded test-bundle identity and bytes, and matches this verified
+build/delivery. A bundle found at a requested path alone is not proof that it
+is the bundle executing the agent. The coordinator retains the original launch
+and app-hosted test observations with the real agent journal. Recheck frozen
+input authority before a relaunch and preserve the original product and device.
+Copy/install proof, successful launch, a bootstrap check and a smoke each remain
+only their own scope; none supplies Q7.4's whole-lane outcome.
+
+#### Required refusal cases
+
+Reject a UI/standalone build as CloudAgent proof; CFBundleVersion substitutions;
+stale agent or debug-dylib bytes with an unchanged main executable; a changed
+xctestrun target/selection/environment; wrong live VM or simulator with a
+matching OS; expired/wrong-kind/wrong-checkout lease; recreated VM under the
+same name; missing post-copy inventory; claimed install without actual
+observation; changed product after signing/copy; external product links; and
+source/header/build/deployment reference substitutions. Fake inspectors remain
+unit-test evidence only. Missing producer, transport, inspector or loaded-agent
+binding code fails `implementation_missing`, not `awaiting_user`.
+
+#### Product evidence delivered to the agent
+
+Before launching the test, the parent coordinator copies the exact finalized
+build receipt and manifest and the exact finalized deployment receipt and
+manifest into this agent's run directory. Fixed relative paths are
+`product-evidence/build-result.json`, `product-evidence/agent-build.json`,
+`product-evidence/deployment-result.json`, and
+`product-evidence/agent-deployment.json`. No credentials, expected-account file
+or destination mapping enters this directory. Stable no-follow reads and
+strict duplicate-key rejection apply to every copy.
+
+The original receipt bytes remain unchanged, including their host artifact
+paths. These four fixed copies are a transport of those exact bytes, not new
+receipts. Verify the header's build receipt hash, exact receipt ids, source,
+outcomes and manifest references/hashes before using them. Resolve a copied
+manifest only by its fixed role above after verifying its original declaration
+and bound digest; never treat an arbitrary host path from JSON as a device path.
+These checks bind observations of the running app and agent to the source
+manifest. The host must verify what it actually copied and where it went.
+Evidence copied from another product or destination does not pass these checks.
+
 ### J2.2 Protected expected accounts
 
 The host reads `Meguri/CloudKitSignedPrivate/<run_id>/<device>/expected-accounts.json` under the current user's Application Support directory. The device reads the same relative path under its app container's Application Support directory. Keep both copies outside the checkout, `build/`, fixture directories and public MG artifacts. The coordinator copies only the account choice supplied by approved Q7.2 setup, with this run and device binding. Reading the current account cannot create or change the expected account.
@@ -62,6 +252,27 @@ The private directories have mode `0700`. The input is a regular file with mode 
 The JSON object contains exactly `protocol_version`, `header_sha256`, `job`, `run_id`, `source_commit`, `device`, `executable_sha256`, `container`, `environment`, `account_scope` and `accounts`. The version is `1`; every binding field equals J2's header. `accounts` maps exactly the header's account labels to the actual expected CloudKit user-record identities supplied by completed Q7.2 setup. Each value is a nonempty array of integers from 0 through 255: the exact opaque identity bytes the core uses under `sync/cloudkit-recovery#V9.1`, with no case conversion or hashing. Parse strictly, including duplicate-key rejection. Compare the actual core-verified current identity with this private input before database work, using J2's startup order.
 
 Examples, commands, journals and public artifacts contain no account IDs. Keep the private input and its digest out of exports. Do not export an account hash or another value that identifies the same account between runs. Report failures with fixed labels and check results only. If the user has not supplied the approved expected accounts, await Q7.2 setup. A current identity that differs fails `wrong-container`. Missing code to read, deliver or compare the input fails under J6; it is not a user setup step.
+
+#### Expected scope for one run
+
+J2/J2.2 require stable private input admission and a fresh actual account match
+before CloudKit database work. They do not define the private input file as a
+per-network-start revocation switch for CKSyncEngine's autonomous operations.
+Keep the approved expected-account values fixed for the run. A change to that
+scope requires a new header and directory. Never substitute other expected
+values within this run.
+
+Revalidate retained private authority at agent delivery/command admission,
+before and after an awaited fresh account read, and at app/Core operation
+admission already owned by this test agent. A change before the account match
+refuses all CloudKit database work. A later observed change fails the run,
+revokes future agent admission and cancels/joins owned work under J5. Original
+terminal callbacks may drain as J5 permits; they are not another successful
+operation or authority to start a successor. Preserve Core's actual identity,
+binding, SDK and batch guards and the same guarded factory for all account
+reads. Keep CKSyncEngine automatic scheduling. Do not claim to intercept each
+internal SDK network start. An app may also check its native transport boundary;
+that does not add a requirement to inspect each packet.
 
 ### J2.3 Initial generated data
 
