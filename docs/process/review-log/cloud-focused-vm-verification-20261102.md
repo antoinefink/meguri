@@ -88,3 +88,19 @@ later tooling commits. No acceptance boundary changed.
 Retained diagnostic vm-crash-info/20261102T174242Z-5740 exited2 with
 error/refused. It supplies no crash attribution or repair evidence. No full
 gate was repeated, and no Unit acceptance trailer was added.
+
+## Physical installation after approved setup
+
+Antoine explicitly authorized screen control and isolated development setup,
+then approved the exact development-only access assignment at its save step.
+Root created the intended isolated container and saved that app assignment.
+Reopening the app configuration showed one container, CloudKit support and
+push enabled. No production assignment or schema readiness changed.
+
+Ui-test/20261102T175312Z-9378, source9e7a3871, passes1/1 with zero failures
+and zero skips. The signed app build succeeds; the prior profile-grant errors
+are resolved. The selected NavigationLayoutTests method uses an isolated
+review UI stand-in. This proves physical installation and that interaction
+only, not actual review storage, media or CloudKit exchanges. The earlier
+failed device receipt remains retained. Encrypted schema, approved account
+inputs and real signed sync verification remain outstanding.
