@@ -301,6 +301,8 @@ Agents never perform these (R2065, `docs/process/one-time-setup.md`). The lane r
 
 ### Q7.3 Devices and the agent
 
+The executable command and durable JSON-lines journal protocol is `conformance/cloudkit-agent`. Its smoke and protocol tests do not replace this lane's required signed legs or Q7.4's whole-lane evidence.
+
 - Devices: the signed Debug Meguri app on the macOS test VM, and on the reserved iPhone and iPad simulators there. Nothing runs on the host Mac's screen (AGENTS rules); `tools/mg cloudkit-signed` coordinates from the host.
 - Each device runs `CloudKitSoakTests` as an agent: an app-hosted test in the signed Debug app with test hooks (it uses the real `CloudKitSyncAdapter`, `SyncCoordinator` and CKSyncEngine). The coordinator gives each agent its steps (Q4.3's names, those a real device can do) through a command file in the run directory and reads its JSON-lines step log back.
 - Offline on one device: the agent pauses sync (V16), or the coordinator terminates the app for that period and relaunches it after (as for kills, below); a leg that needs the network itself unavailable (A22) cuts the VM's network for all devices, through the VM tooling.
