@@ -66,7 +66,12 @@ impl crate::snapshot::ReadSnapshot<'_> {
         let integrity_ok = check(conn, "PRAGMA main.integrity_check")?.is_ok();
         let objects = crate::schema::expected_objects::check(&self.reader().schema_objects()?);
         let version: i64 = conn.query_row("SELECT ver FROM col WHERE id=1", [], |r| r.get(0))?;
-        let count = |sql: &str| -> Result<u64, StorageError> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
+        let count = |sql: &str| -> Result<u64, StorageError> {
+            Ok(conn.query_row(sql, [], |r| {
+                let count: i64 = r.get(0)?;
+                u64::try_from(count).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, count))
+            })?)
+        };
         Ok(SmokeIntegrity {
             integrity_ok,
             schema_ok: version == crate::schema::SCHEMA_VERSION
