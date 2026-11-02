@@ -1,6 +1,6 @@
 # Focused VM verification
 
-Status: tooling checks pass; native execution remains queued.
+Status: tooling checks pass; native execution is incomplete.
 U113 start: 1dfe87bc7138adc058a1a8af9d0a3b2a0f99957a.
 Batch base: 1416a520542a8c5daa38a23bfe398da704c3d6c9.
 Source start: b0e80d60.
@@ -61,3 +61,30 @@ confirms the VM answers again and the host session is unlocked. It still
 reports the host/VM Xcode version difference and missing Xcode account.
 Physical inventory ui-test/20261102T172709Z-65434 finds one available iPhone
 on iOS27.2. No device installation, account setup or iCloud result is claimed.
+
+## Native execution after VM recovery
+
+Xcode-check/20261102T173043Z-67535 used source7a2d9404 and actual
+fixture/helper inputs in the VM. The log contains413 passing test markers
+and no failing test marker. This is partial progress, not a suite result.
+Its last test marker is nativePreparedResourcesSurvivePauseSeekUntilStop;
+there was no further test progress for several minutes. The test has no
+intentional playback wait or time limit. A read-only trace identifies native
+player setup/control calls as possible waits, without proving which call held.
+Root cancelled original81146 through MG. It exited2, recorded error/cancelled,
+and ran its VM orphan cleanup. No passing Unit or full-gate result is claimed.
+
+Physical ui-test/20261102T173417Z-70773 failed during development signing,
+before installation or tests. The selected app profile lacks required iCloud
+grants. The source requests the documented isolated development grants;
+independent audit found no basis for changing them. Owner account refresh is
+acknowledged; correcting capability/profile setup remains owner-only.
+No device identity, account value or credential is recorded here.
+
+Static-checks/20261102T173810Z-75460 passes3/3 against the original batch
+base. Similarity/20261102T174010Z-4732 passes against b0e80d60, covering the
+later tooling commits. No acceptance boundary changed.
+
+Retained diagnostic vm-crash-info/20261102T174242Z-5740 exited2 with
+error/refused. It supplies no crash attribution or repair evidence. No full
+gate was repeated, and no Unit acceptance trailer was added.
