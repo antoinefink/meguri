@@ -484,6 +484,144 @@ The coordinator durably retains each returned complete journal prefix before del
 
 Repeated delivery of identical accepted commands causes no repeated operation. A completed command retains its existing result. An incomplete command enters J5 recovery. A failed command stays failed. The coordinator does not rewrite a command, advance past failure or automatically run it again under another sequence number.
 
+### J3.1 First generated-data smoke
+
+For selection `smoke` with direct base `small`, the first Mac workflow is the
+following exact sequence. Use `acct1` for both account fields of each command.
+These are J3 command arguments, not native IDs or content. Require exactly the
+listed keys, types and literals; reject other keys or values. An empty object
+has no keys. This form adds no header field or protocol version.
+
+| Action | Exact `arguments` object |
+|---|---|
+| `launch` | `{}` |
+| `connect` | `{"preview":"p1"}` |
+| `publish` | `{"preview":"p1"}` |
+| `add_note` | `{"note":"n1","deck":"D2"}` |
+| `start_session` | `{"session":"s1","deck":"D2","card":"c1"}` |
+| `answer` | `{"session":"s1","card":"c1","rating":"good"}` |
+| `end_session` | `{"session":"s1"}` |
+| `add_media` | `{"media":"m1"}` |
+| `sync_now` | `{}` |
+| `close` | `{}` |
+
+Labels `p1`, `n1`, `s1`, `c1` and `m1` belong only to this run. The agent maps
+them to actual preview, note, session, current card and stored media facts.
+`D2` is Q4.2's logical child-deck role, not its actual marked name. A command
+cannot provide a native identifier, path, field text, file name, bytes, SQL,
+code, account choice, requested result or replacement override. This first
+producer supports no kill/relaunch or other selected leg; missing recovery
+cannot be claimed as covered. The existing failure and no-repeat rules apply.
+
+#### Startup and first publication
+
+`launch` performs J2's actual product/container checks, durable start,
+J2.3's verified one-time install, protected fresh account match and real Core
+open in the existing order. The generated collection starts without a cloud
+binding. This local state is allowed. Do not create substitute tracking records
+or require a prior signed-lane pass. Record actual initial local integrity
+under the check below. No engine or publication starts as a side effect of
+this local open. Guarded read-only account lookup and V13 preview work remain
+permitted in their specified order.
+
+`connect` runs the real V13 connection flow outside a review session. It
+waits for the actual account-bound root read and completed connection preview,
+then retains that exact preview as `p1`. For this first publication, accept
+only V13.3's existing-local-collection/no-active-epoch case, with the generated
+local counts and no prior remote collection to replace. A remote epoch,
+account mismatch, unreadable preview or another offered decision fails this
+smoke without adopting, replacing, clearing or deleting remote data.
+
+`publish` consumes `p1` once through V26.2's existing publication confirmation,
+reason 1 and absent active change tag. Use the actual root read; creating a
+replacement empty root or skipping current-preview/account checks is forbidden. A changed preview or a
+concurrent publisher fails rather than choosing Replace again. Wait for the
+real V15 publication to reach `done`, with its row removed, the actual binding
+usable and its engine admitted under the existing gates. An enabled flag,
+queued request or requested epoch is not completion. Existing publication,
+root-confirmation, media and account guards remain unchanged.
+
+#### Local review and media mutations
+
+For `add_note`, resolve Q4.2's own `QA` type and `D2`. Generate the fields inside
+the agent from the base marker `M`: `M-smoke-n1-Q` and `M-smoke-n1-A`, with no
+tags. Use the normal add operation, flush, and read back the committed note
+and its one card. Preserve its actual operation receipt and revisions under
+`n1`; do not emit those field values or native IDs.
+
+`start_session` opens the real review queue for `D2` and registers its actual
+current card as `c1` in session `s1`. It does not force a card to the head or
+change its scheduling state. An empty queue fails. `answer` reveals that card
+and applies Good (rating 3) through the real review coordinator/session using
+its current token, answer instant and elapsed-time seam. A stale/non-head or
+failed answer fails; do not answer another card or retry. Wait for the actual
+accepted answer to be committed and settled. Retain the card revision and
+exact new durable review row; a count or optimistic acceptance is insufficient. `end_session`
+finishes that same session through the normal path and observes its hold-back
+release and pending-change handoff; it does not send a fabricated flush result.
+
+For `add_media`, choose the desired name `M-smoke-m1.bin` in process. Its bytes
+are the concatenation of 320 SHA-256 blocks, each hashing the UTF-8 string
+`MeguriCloudSmoke/<run_id>/<device>/m1/<i>`, where `i` is decimal 0 through 319
+without padding. This is one deterministic 10,240-byte generated test input,
+not a new fixture base or evidence-signing format. Register it through the
+normal media add service and use its returned stored name. Flush and verify
+the actual physical file bytes and tracked media fact against that input.
+Never overwrite a fixture file or export actual names/content. Retain the
+actual media operation and resulting tracked revision under `m1`.
+
+#### Required operation observations
+
+Use J4's existing check entries and content-free observation records. Each
+command's `done` requires its corresponding actual observations below; a
+command cannot supply them as expected-success values. Fixed entity labels,
+counts, sizes, canonical payload digests, typed statuses and references to
+actual operation/engine observations are permitted; native IDs and content
+remain private to the process.
+
+| Action/check | Required actual facts |
+|---|---|
+| `launch.integrity` | coherent owned read: collection opens; full `integrity_check` is `ok`; exact U22 expected schema objects; no missing card-note/deck or note-type reference and no wrong note field count |
+| `connect.preview` | `p1`, available approved account, generated local counts, absent active epoch and first-publication choice actually offered |
+| `publish.completed` | `p1`, actual publication operation and its `done` transition, removed op row, usable binding and current engine instance; preserve actual SDK/own-operation order |
+| `add_note.committed` | `n1`, real committed operation, one added note/card, durable readback and corresponding canonical digests/revisions |
+| `start_session.head` | `s1`, `c1`, actual queue/head and its current state token checked in process |
+| `answer.committed` | `s1`, `c1`, Good, actual accepted operation, settled durable card revision and exactly one distinct new committed review row with its canonical digest |
+| `end_session.released` | actual end of `s1`, held answer released and real pending-work handoff |
+| `add_media.committed` | `m1`, actual operation, physical and tracked byte count 10,240, equal SHA-256 and resulting tracked revision |
+| `sync_now.result` | original coordinator-issued exchange, its actual terminal RecordExchange result/accounting, current pending/missing media state and revision-specific acknowledgement proof described below |
+| `close.integrity` | the same full local integrity/schema/reference checks at a coherent safe final snapshot after owned work is joined |
+| `close.joined` | actual coordinator cancellation/drain, owned work joined and Core closed, in that order; terminal journal remains durable/readable |
+
+`sync_now` invokes the existing manual exchange once and observes that original
+operation through its terminal result. Check the actual acknowledged current
+revisions for `n1`, the answered card and new review row, the `m1` media-name
+entity and its blob. Include actual per-record results/durable tracking and
+blob-upload acknowledgement or verified existing-blob observation; neither
+selected-count greater than zero nor a successful note readback proves these
+facts. Earlier automatic acknowledgements may satisfy a current revision when
+their actual operation/event and durable state are retained; do not falsely
+attribute them to this manual exchange. A successful collection exchange may
+still report pending media. Preserve that real result: until required media
+proof exists, this smoke has no successful upload check. Observe existing work
+within its current limits. Never reissue Sync Now or add another attempt.
+This smoke proves no cross-device convergence. Unavailable required proof fails the smoke.
+
+`close` is an explicit final command. Stop and join the actual coordinator's
+owned work before the final integrity snapshot and Core close. Only then
+record joined shutdown. The host retains that terminal journal and joins the
+original app-hosted process; process exit or a lost connection alone is not
+clean close. Failure follows J4 cancellation/join rules and starts no successor.
+
+The local integrity observations must inspect actual storage/schema/references;
+open/quick-check alone is insufficient. Q5's final-copy oracle clause applies
+to its named Rust/property/fuzz/fault programs, not this Mac signed smoke. Run
+Q5's applicable always checks throughout. This single-device smoke reports
+only its observed operation coverage; it fills no Q7.5 leg, assumption ledger,
+whole-lane/soak cell or Q13 first-sync/release acceptance. Required full-lane
+and trial evidence remains outstanding, not a prerequisite for this first
+SDK execution. Missing inspection or operation code is `implementation_missing`.
+
 ## J4. Durable content-free journal
 
 `steps.jsonl` is an append-only UTF-8 JSON Lines file owned by the agent. Each complete line is one record. J5 permits repair of an incomplete final line only. The agent durably writes `started` before the command's first effect. It durably writes `done` or `failed` before reporting a terminal result. A durable append includes the storage flush needed for survival of an app kill. The directory entry must also survive the initial creation.
