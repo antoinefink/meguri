@@ -42,3 +42,12 @@ as a warning. Filtered cleanup cleanroom/20261102T115252Z-12925 replaces
 only that spelling with validatingCString. Independent review found no issue;
 UTF-8 validation, nil rejection and all directory checks remain unchanged.
 Compilation and execution after this cleanup are still pending.
+
+Native attempt swift-test/20261102T120857Z-34696 compiled, then crashed in
+the generated receipt builder when a test removed its details field. The
+force cast prevented the real validator from receiving that invalid receipt.
+Filtered follow-up cleanroom/20261102T121645Z-41489 changes the builder to
+populate only its valid empty-fixtures case and keeps absent or malformed
+metadata intact. All existing cases, mutations and assertions remain unchanged.
+Independent review found no required finding. Production checks do not change.
+Focused execution after this test-builder correction remains pending.

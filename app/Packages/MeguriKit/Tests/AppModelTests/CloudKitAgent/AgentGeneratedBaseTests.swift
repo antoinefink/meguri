@@ -64,9 +64,11 @@ import Testing
             try edit?(&d)
             var selected = d.generation; selected["target"] = "cloud-small"; selected["kind"] = "cloud-small"
             selected["mg_only_metadata"] = "unit"
-            var details = d.receipt["details"] as! [String: Any]
-            if (details["fixtures"] as? [[String: Any]])?.isEmpty == true { details["fixtures"] = [selected] }
-            d.receipt["details"] = details
+            if var details = d.receipt["details"] as? [String: Any],
+               (details["fixtures"] as? [[String: Any]])?.isEmpty == true {
+                details["fixtures"] = [selected]
+                d.receipt["details"] = details
+            }
             let frozenBytes = try AgentGeneratedBaseTests.encode(d.frozen)
             var manifestRef = AgentGeneratedBaseTests.identity(d.files["manifest.json"]!); manifestRef["path"] = "manifest.json"
             var frozenRef = AgentGeneratedBaseTests.identity(frozenBytes); frozenRef["path"] = "fixture-input.json"
