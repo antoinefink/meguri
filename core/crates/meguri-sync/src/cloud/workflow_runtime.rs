@@ -1473,12 +1473,14 @@ impl Runtime {
             });
         }
         #[cfg(feature = "test-hooks")]
-        let smoke_images = saves.iter().filter_map(|input| {
-            let e = facts.get(&input.name)?;
-            matches!(e.kind, codec::Kind::Card | codec::Kind::Revlog).then_some(e)
-        }).map(|e| self.smoke_project_image(
-            &guard, collection, &*snapshot, &runs, snapshot.seq(), e,
-        )).collect::<Result<Vec<_>, _>>();
+        let smoke_images = saves
+            .iter()
+            .filter_map(|input| {
+                let e = facts.get(&input.name)?;
+                matches!(e.kind, codec::Kind::Card | codec::Kind::Revlog).then_some(e)
+            })
+            .map(|e| self.smoke_project_image(&guard, collection, &*snapshot, &runs, snapshot.seq(), e))
+            .collect::<Result<Vec<_>, _>>();
         self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
             if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
@@ -1555,11 +1557,22 @@ impl Runtime {
             {
                 // The proof uses the same pinned snapshot/held runs as this
                 // batch, then checks the durable flights and exact envelopes.
-                let proof = smoke_images.and_then(|images| self.smoke_built_batch_locked(
-                    s, instance, id,
-                    (snapshot.generation().0, snapshot.seq().0, snapshot.active_session().map(|v| v.0)),
-                    &saves, images,
-                )).ok();
+                let proof = smoke_images
+                    .and_then(|images| {
+                        self.smoke_built_batch_locked(
+                            s,
+                            instance,
+                            id,
+                            (
+                                snapshot.generation().0,
+                                snapshot.seq().0,
+                                snapshot.active_session().map(|v| v.0),
+                            ),
+                            &saves,
+                            images,
+                        )
+                    })
+                    .ok();
                 if s.actions.smoke_batches.len() == 256 {
                     if let Some(key) = s.actions.smoke_batches.keys().next().cloned() {
                         s.actions.smoke_batches.remove(&key);

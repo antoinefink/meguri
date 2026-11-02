@@ -80,25 +80,44 @@ pub struct SmokeBatchProof {
 }
 impl From<meguri_sync::cloud::workflow::SmokeBatchProof> for SmokeBatchProof {
     fn from(v: meguri_sync::cloud::workflow::SmokeBatchProof) -> Self {
-        Self { generation: v.generation, seq: v.seq, session: v.session, saves: v.saves,
-            images: v.images.into_iter().map(|i| SmokeReviewImage {
-                name: i.name, envelope_digest: i.envelope_digest.map(|d| d.to_vec()), digest: i.digest.map(|d| d.to_vec()), image_seq: i.image_seq, held: i.held,
-            }).collect() }
+        Self {
+            generation: v.generation,
+            seq: v.seq,
+            session: v.session,
+            saves: v.saves,
+            images: v
+                .images
+                .into_iter()
+                .map(|i| SmokeReviewImage {
+                    name: i.name,
+                    envelope_digest: i.envelope_digest.map(|d| d.to_vec()),
+                    digest: i.digest.map(|d| d.to_vec()),
+                    image_seq: i.image_seq,
+                    held: i.held,
+                })
+                .collect(),
+        }
     }
 }
 pub fn batch(sdk: String, id: u64) -> Result<SmokeBatchProof, CoreError> {
     let host = runtime::host()?;
-    let core = host.cloud_runtime().ok_or_else(|| cloud_error("smoke runtime absent"))?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| cloud_error("smoke runtime absent"))?;
     core.validate_sdk(&sdk).map_err(cloud_error)?;
     Ok(core.smoke_batch_for_testing(&sdk, id).map_err(cloud_error)?.into())
 }
 pub fn review(sdk: String, card: i64, review: i64) -> Result<SmokeBatchProof, CoreError> {
     let host = runtime::host()?;
-    let core = host.cloud_runtime().ok_or_else(|| cloud_error("smoke runtime absent"))?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| cloud_error("smoke runtime absent"))?;
     core.validate_sdk(&sdk).map_err(cloud_error)?;
     let collection = host.collection()?;
-    Ok(core.smoke_review_for_testing(&sdk, &collection, card, review)
-        .map_err(cloud_error)?.into())
+    Ok(core
+        .smoke_review_for_testing(&sdk, &collection, card, review)
+        .map_err(cloud_error)?
+        .into())
 }
 
 pub fn observe(
