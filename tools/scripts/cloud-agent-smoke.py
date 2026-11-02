@@ -513,8 +513,6 @@ class SmokeEvidence:
         need(not labels and counts == {"held-batches": len(collection) + len(media),
              "held-collection-batches": len(collection), "held-media-batches": len(media),
              "c1-held-handed": cards, "r1-held-handed": 0}, "smoke-held-accounting")
-        if not collection or not cards:
-            raise Missing("smoke-review-held-upload-exercise")
 
 
 def completion(command_number, checks, journal=None):

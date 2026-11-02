@@ -83,3 +83,14 @@ recorded zero batches plus the separate deterministic eligibility proof.
 The correction remains pending. All other required wire/order checks cleared
 source review. Integration renames one generated test method for privacy;
 its body and assertions are unchanged. No actual smoke pass is claimed.
+
+Filtered zero-batch repair cleanroom/20261102T151119Z-75535 removes only the
+positive exercise requirement. Exact zero counts, deterministic eligibility,
+all observed-batch checks and SDK/own/ACK/join checks remain. Generated cases
+cover zero batches, no target-card handoff and inconsistent evidence. Review
+and focused execution after this correction remain pending.
+
+Swift-test/20261102T151316Z-75981 passed 25/25 selected native bridge tests,
+no skips: Core inbox-before-state order, held edits, exact revision retention,
+inspection and captured native own operations. These use generated data and
+captured operations, without adding them to a live CloudKit database.

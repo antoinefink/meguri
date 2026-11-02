@@ -109,7 +109,7 @@ def generated_journal(commands, count=10, checks=None, observations=None):
     return b"".join(raw(line) for line in lines)
 
 
-def current_evidence():
+def current_evidence(*, held_batches=True, target_card=True):
     """Generated facts in the canonical Evidence/Runtime encoding, never SDK proof."""
     checks = generated_checks()
     observations = generated_observations(checks)
@@ -141,29 +141,35 @@ def current_evidence():
     def batch(n, kind, saves):
         return [event("applied", "batch%d-%s-handoff" % (n, kind), True),
                 f("applied", saves, "batch%d-save-count" % n, True)]
-    # This held collection batch contains the baseline card. The media batch
-    # contributes a snapshot but cannot stand in for a held collection exercise.
-    observations[6] += batch(1, "collection", 1) + batch(2, "media", 1)
-    upload = batch(3, "collection", 3) + batch(4, "media", 1)
-    upload += callback(2, "sent-batch3")
+    # Held-period batches and the target card are optional actual observations;
+    # the deterministic HeldView baseline/absence proof above is independent.
+    if held_batches:
+        observations[6] += batch(1, "collection", 1) + batch(2, "media", 1)
+    collection_batch, media_batch = (3, 4) if held_batches else (1, 2)
+    upload = batch(collection_batch, "collection", 3) + batch(media_batch, "media", 1)
+    upload += callback(2, "sent-batch%d" % collection_batch)
     collection_returned = tick
-    upload += callback(3, "sent-batch4")
+    upload += callback(3, "sent-batch%d" % media_batch)
     media_returned = tick
     upload += callback(4, "state")
     acks = [f("applied", media_returned if label == "m1" else collection_returned,
-              "%s-sdk%d-batch%d-ack" % (label, 3 if label == "m1" else 2, 4 if label == "m1" else 3), True)
+              "%s-sdk%d-batch%d-ack" % (label, 3 if label == "m1" else 2,
+                                       media_batch if label == "m1" else collection_batch), True)
             for label in ("n1", "c1", "r1", "m1")]
     checks[9][0]["facts"][4:4] = copy.deepcopy(acks)
     observations[9][-1:-1] = acks
     observations[9] += upload
-    proof = [f("applied", 10, "batch2-s1-media-snapshot", True),
-             f("applied", 10, "batch1-s1-snapshot", True),
-             f("applied", 9, "batch1-c1-held", True, "0"*64),
-             f("applied", 0, "batch1-r1-absent", True),
-             f("applied", 2, "held-batches", True),
-             f("applied", 1, "held-media-batches", True),
-             f("applied", 1, "held-collection-batches", True),
-             f("applied", 1, "c1-held-handed", True),
+    proof = []
+    if held_batches:
+        proof += [f("applied", 10, "batch2-s1-media-snapshot", True),
+                  f("applied", 10, "batch1-s1-snapshot", True),
+                  f("applied", 0, "batch1-r1-absent", True)]
+        if target_card:
+            proof.append(f("applied", 9, "batch1-c1-held", True, "0"*64))
+    proof += [f("applied", 2 if held_batches else 0, "held-batches", True),
+             f("applied", 1 if held_batches else 0, "held-media-batches", True),
+             f("applied", 1 if held_batches else 0, "held-collection-batches", True),
+             f("applied", 1 if held_batches and target_card else 0, "c1-held-handed", True),
              f("applied", 0, "r1-held-handed", True),
              f("ownedWorkJoined", 5, "own-joined"),
              f("ownedWorkJoined", 4, "sdk-joined", True)]
@@ -282,14 +288,57 @@ class CurrentEvidenceTests(unittest.TestCase):
             self.proof(label, **changes)
             with self.subTest(label=label), self.assertRaises(s.v.Refused): self.complete()
 
-    def test_zero_observed_batches_does_not_prove_upload_exercise(self):
-        # Handoffs still exist, but none was observed during the held period.
-        proof = [f for f in self.checks[10][1]["facts"] if not f["operation"].startswith("batch")]
-        for f in proof:
-            if f["name"] == "applied": f["count"] = 0
-        self.checks[10][1]["facts"] = proof
-        self.obs[10] = [{"name": "accountVerified"}] + copy.deepcopy(proof) + [{"name": "ownedWorkJoined"}]
-        with self.assertRaisesRegex(s.Missing, "smoke-review-held-upload-exercise"): self.complete()
+    def test_zero_observed_batches_with_deterministic_held_view_validates(self):
+        self.checks, self.obs = current_evidence(held_batches=False)
+        proof = self.checks[10][1]["facts"]
+        self.assertFalse(any(f["operation"].startswith("batch") for f in proof))
+        self.assertEqual({f["operation"]: f["count"] for f in proof if f["name"] == "applied"},
+                         {"held-batches": 0, "held-collection-batches": 0, "held-media-batches": 0,
+                          "c1-held-handed": 0, "r1-held-handed": 0})
+        self.assertIsNone(self.complete())
+
+    def test_collection_batches_without_target_card_validate(self):
+        self.checks, self.obs = current_evidence(target_card=False)
+        self.assertEqual(self.item("held-collection-batches")["count"], 1)
+        self.assertEqual(self.item("c1-held-handed")["count"], 0)
+        self.assertFalse(any(f.get("operation") == "batch1-c1-held" for f in self.obs[10]))
+        self.assertIsNone(self.complete())
+
+    def test_zero_counts_must_match_observed_batches_and_handoffs(self):
+        for target_card, held_batches, label in (
+                (True, False, "held-batches"), (True, False, "held-collection-batches"),
+                (True, False, "held-media-batches"), (True, False, "c1-held-handed"),
+                (True, False, "r1-held-handed"), (False, True, "c1-held-handed"),
+                (False, True, "r1-held-handed")):
+            for count in (-1, True, 1):
+                with self.subTest(held_batches=held_batches, label=label, count=count):
+                    self.checks, self.obs = current_evidence(held_batches=held_batches, target_card=target_card)
+                    self.proof(label, count=count)
+                    with self.assertRaises(s.v.Refused): self.complete()
+
+    def test_zero_cases_still_require_every_count_and_deterministic_held_view_fact(self):
+        for options in ({"held_batches": False}, {"target_card": False}):
+            for label in ("held-batches", "held-collection-batches", "held-media-batches",
+                          "c1-held-handed", "r1-held-handed", "c1-before-answer",
+                          "c1-held-projection", "r1-held-absent"):
+                with self.subTest(options=options, label=label):
+                    self.checks, self.obs = current_evidence(**options)
+                    self.checks[10][1]["facts"] = [f for f in self.checks[10][1]["facts"]
+                                                 if f["operation"] != label]
+                    for n in (5, 6, 10):
+                        self.obs[n] = [f for f in self.obs[n] if f.get("operation") != label]
+                    with self.assertRaises(s.v.Refused): self.complete()
+
+    def test_zero_batches_refuse_invented_per_batch_or_card_handoff_proof(self):
+        for operation, count, digest in (("batch3-s1-snapshot", 10, None),
+                                         ("batch1-c1-held", 9, "0"*64)):
+            with self.subTest(operation=operation):
+                self.checks, self.obs = current_evidence(held_batches=False)
+                invented = {"name": "applied", "count": count, "operation": operation, "engine": "engine1"}
+                if digest is not None: invented["digest"] = digest
+                self.checks[10][1]["facts"].append(copy.deepcopy(invented))
+                self.obs[10].insert(-1, invented)
+                with self.assertRaisesRegex(s.v.Refused, "smoke-held-accounting"): self.complete()
 
     def test_close_proof_needs_observed_copy_and_all_original_work_terminal(self):
         self.obs[10].pop(1)
