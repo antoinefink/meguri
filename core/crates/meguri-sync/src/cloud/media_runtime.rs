@@ -44,6 +44,12 @@ fn text(bytes: &[u8]) -> Result<&str, RuntimeError> {
 fn same(a: Option<&codec::MediaName>, b: Option<&codec::MediaName>) -> bool {
     a == b
 }
+fn same_media_content(a: &codec::MediaName, b: &codec::MediaName) -> bool {
+    let (Ok(a_name), Ok(b_name)) = (text(&a.name), text(&b.name)) else {
+        return false;
+    };
+    a_name.to_lowercase() == b_name.to_lowercase() && a.sha256 == b.sha256 && a.sha1 == b.sha1 && a.size == b.size
+}
 impl Runtime {
     #[cfg(feature = "test-hooks")]
     pub fn cleanup_observation_for_testing(
@@ -326,6 +332,21 @@ impl Runtime {
         for item in &feed.items {
             let case = item.name.to_lowercase();
             let previous = feed_state.names.get(&case).cloned().unwrap_or_default();
+            // A case-only rename can register the new spelling before the
+            // old spelling's absence. That retired spelling must not erase
+            // the actual M4 destination already observed for this case key.
+            if matches!(item.state, MediaFileState::Absent(_))
+                && previous.withheld.is_none()
+                && previous.superseded.is_none()
+                && !previous.file_missing
+                && !previous.removal_held
+                && previous.tombstone_at.is_none()
+                && let Some(physical) = &previous.local
+                && physical.name != item.name.as_bytes()
+                && Self::current_media(media, &item.name)?.as_ref() == Some(physical)
+            {
+                continue;
+            }
             let mut flags = previous.clone();
             let source = match &item.state {
                 MediaFileState::Present(f) => Some((f.sha1.clone(), f.size, f.mtime_secs, f.mtime_nanos)),
@@ -333,7 +354,7 @@ impl Runtime {
             };
             let payload = match &item.state {
                 MediaFileState::Present(f) if (1..=MAX_ASSET_BYTES).contains(&f.size) => {
-                    if source == flags.source {
+                    if source == flags.source && flags.local.as_ref().is_some_and(|p| p.name == item.name.as_bytes()) {
                         flags.local.clone()
                     } else {
                         let file = media
@@ -388,6 +409,27 @@ impl Runtime {
                     None
                 }
             });
+            // K15.9 may retain a canonical ACK spelling different from the
+            // physical M4 name. Only the exact facts already observed by that
+            // settle are exempt; a later name, content or journal change goes
+            // through the ordinary observer path.
+            let retained_spelling = previous.local == payload
+                && previous.source == flags.source
+                && previous.withheld.is_none()
+                && previous.superseded.is_none()
+                && !previous.file_missing
+                && !previous.removal_held
+                && previous.tombstone_at.is_none()
+                && tracked.as_ref().is_some_and(|e| {
+                    e.server_erev > 0
+                        && e.acked_rev > 0
+                        && !e.acked_media_tombstone()
+                        && e.mark.is_none()
+                        && e.acked_payload.as_ref() == Some(&e.payload)
+                })
+                && ack.zip(payload.as_ref()).is_some_and(|(canonical, physical)| {
+                    canonical.name != physical.name && same_media_content(canonical, physical)
+                });
             if let Some(p) = &payload {
                 flags.file_missing = false;
                 flags.unsyncable = false;
@@ -412,7 +454,9 @@ impl Runtime {
                 }
                 if flags.withheld.is_none() && flags.superseded.is_none() {
                     flags.tombstone_at = None;
-                    file_changes.push((codec::Payload::MediaName(p.clone()), self.publication_random_id()?));
+                    if !retained_spelling {
+                        file_changes.push((codec::Payload::MediaName(p.clone()), self.publication_random_id()?));
+                    }
                 } else if tracked.is_none() {
                     file_changes.push((codec::Payload::MediaName(p.clone()), self.publication_random_id()?));
                 }
@@ -2058,8 +2102,25 @@ impl Runtime {
             if e.origin == [0; 16] {
                 e.origin = self.publication_random_id()?;
             }
-            e.payload = payload;
-            e.local_rev = e.local_rev.checked_add(1).ok_or(Error::InvalidData)?;
+            let stays_clean = e.server_erev > 0
+                && e.acked_rev > 0
+                && !e.acked_media_tombstone()
+                && matches!(&e.acked_payload, Some(codec::Payload::MediaName(acked))
+                    if same_media_content(acked, moved))
+                && ledger
+                    .names
+                    .get(text(&moved.name)?.to_lowercase().as_str())
+                    .is_none_or(|f| f.withheld.is_none() && f.tombstone_at.is_none() && !f.removal_held);
+            if stays_clean {
+                // The Service ACK remains canonical. Observing M4's physical
+                // spelling is not another save or an acknowledgement.
+                e.payload = e.acked_payload.clone().ok_or(Error::InvalidData)?;
+                e.mark = None;
+                e.base_payload = None;
+            } else {
+                e.payload = payload;
+                e.local_rev = e.local_rev.checked_add(1).ok_or(Error::InvalidData)?;
+            }
             updates.push((old, e));
             let key = self.publication_media_state()?.ok_or(Error::InvalidData)?.0;
             let metadata = blob::Blob::from(moved);
@@ -2072,6 +2133,23 @@ impl Runtime {
             f.superseded = None;
             f.file_missing = false;
             f.local = Some(moved.clone());
+            if stays_clean {
+                let sha1 = m::io::sha1_text(&moved.sha1);
+                let observed = media
+                    .store()
+                    .sync_entry(text(&moved.name)?)
+                    .map_err(media_error)?
+                    .filter(|entry| {
+                        entry.live && entry.size == moved.size && entry.sha1.as_deref() == Some(sha1.as_str())
+                    })
+                    .ok_or(Error::RecoveryRequired)?;
+                f.source = Some((
+                    observed.sha1.ok_or(Error::InvalidData)?,
+                    observed.size,
+                    observed.mtime_secs,
+                    observed.mtime_nanos,
+                ));
+            }
         }
         if moved_ran {
             for key in &intent.keys {
