@@ -807,7 +807,10 @@ pub fn test_smoke_integrity() -> Result<SmokeIntegrityObservation, CoreError> {
 /// stay inside the test process and never become journal labels.
 #[uniffi::export]
 pub fn test_cloud_smoke_observation(
-    note_id: Option<i64>, card_id: Option<i64>, revlog_id: Option<i64>, media_name: Option<String>,
+    note_id: Option<i64>,
+    card_id: Option<i64>,
+    revlog_id: Option<i64>,
+    media_name: Option<String>,
 ) -> Result<CloudSmokeObservation, CoreError> {
     callback::enter("test_cloud_smoke_observation");
     cloud_smoke::observe(note_id, card_id, revlog_id, media_name)
