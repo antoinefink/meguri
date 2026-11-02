@@ -8,6 +8,7 @@ there is deliberately no recursive cleanup and no provisioning operation.
 import base64
 import contextlib
 import ctypes
+import grp
 import hashlib
 import json
 import os
@@ -227,7 +228,82 @@ def links_inside(entries):
                 pending = item[2].split("/") + pending
 
 
-def inventory(directory):
+class InstalledSource:
+    """Local OS identity, retained only for this selected source descriptor."""
+    def __init__(self, directory):
+        self.directory, self.identity = directory, None
+
+    @staticmethod
+    def system_identity():
+        need(sys.platform == "darwin")
+        root = pwd.getpwnam("root")
+        wheel = grp.getgrnam("wheel")
+        need(root.pw_name == "root" and root.pw_uid == 0 and root.pw_gid == 0 and
+             wheel.gr_name == "wheel" and wheel.gr_gid == 0 and
+             pwd.getpwuid(0) == root and grp.getgrgid(0) == wheel)
+        members = tuple(pwd.getpwnam(name) for name in wheel.gr_mem)
+        need(all(member.pw_uid == 0 for member in members))
+        credentials = (os.getuid(), os.geteuid(), os.getgid(), os.getegid(), tuple(sorted(os.getgroups())))
+        need(credentials[0] == credentials[1] and
+             (credentials[0] == 0 or 0 not in (credentials[2], credentials[3], *credentials[4])))
+        return (tuple(root), tuple(wheel[:3]) + (tuple(wheel.gr_mem),),
+                tuple(tuple(member) for member in members), credentials)
+
+    def check(self):
+        self.directory.check()
+        if self.identity is not None:
+            need(self.system_identity() == self.identity)
+
+    def group_write(self, s):
+        identity = self.system_identity()
+        if self.identity is None:
+            self.identity = identity
+        need(identity == self.identity)
+        root = os.fstat(self.directory.fd)
+        need(root.st_uid == 0 and root.st_gid == 0 and not root.st_mode & 0o6002 and
+             s.st_uid == 0 and s.st_gid == 0)
+
+
+def copied_tree_check(root, directory):
+    # root is the retained, locally opened guest_root(), never archive/context
+    # ownership or a caller assertion. Check its binding through the tree too.
+    need(type(root) is Directory and type(directory) is Directory and
+         directory.path.startswith(root.path + "/"))
+    root_pins = root.check()
+    tree_pins = directory.check()
+    s = os.fstat(root.fd)
+    need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+    count = len(root.bindings)
+    need(tree_pins[:count] == root_pins)
+    for _, _, fd, _ in directory.bindings[count:]:
+        s = os.fstat(fd)
+        need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+
+
+def entry_mode(mode, symlink, *, installed_source=None, private_root=None, metadata=None):
+    need(private_root is None or type(private_root) is Directory)
+    need(not mode & 0o6000)
+    if symlink:  # Symlink permission bits do not grant access to their target.
+        return
+    need(not mode & 0o002)
+    if mode & 0o020:
+        if private_root is None:
+            need(type(installed_source) is InstalledSource and metadata is not None)
+            installed_source.group_write(metadata)
+
+
+def inventory(directory, *, installed_source=None, private_root=None):
+    need(installed_source is None or type(installed_source) is InstalledSource and
+         installed_source.directory is directory and private_root is None)
+
+    def authority_check():
+        if installed_source is not None:
+            installed_source.check()
+            s = os.fstat(directory.fd)
+            entry_mode(stat.S_IMODE(s.st_mode), False, installed_source=installed_source, metadata=s)
+        if private_root is not None:
+            copied_tree_check(private_root, directory)
+
     entries, pins, inodes = {}, {}, {}
     total = 0
 
@@ -239,7 +315,10 @@ def inventory(directory):
             relative = prefix + name
             s = os.stat(name, dir_fd=fd, follow_symlinks=False)
             mode = stat.S_IMODE(s.st_mode)
-            need(stat.S_ISLNK(s.st_mode) or not mode & 0o022 and not mode & 0o6000)
+            if private_root is not None:
+                need(s.st_uid == os.getuid())
+            entry_mode(mode, stat.S_ISLNK(s.st_mode), installed_source=installed_source,
+                       private_root=private_root, metadata=s)
             pins[relative] = file_pin(s) if not stat.S_ISDIR(s.st_mode) else pin(s)
             if stat.S_ISLNK(s.st_mode):
                 # Symlink modes on macOS are 755; Linux reports 777.
@@ -278,6 +357,7 @@ def inventory(directory):
              before.st_ctime_ns == after.st_ctime_ns and names == sorted(os.listdir(fd)))
 
     directory.check()
+    authority_check()
     walk(directory.fd, "")
     for group in inodes.values():
         need(all(n == len(group) for _, n in group))  # no external hard links
@@ -287,6 +367,7 @@ def inventory(directory):
                 entries[name].append(names[0])
     links_inside(entries)
     directory.check()
+    authority_check()
     return {"content": digest(entries), "pins": digest(pins), "bytes": total, "entries": len(entries)}
 
 
@@ -357,8 +438,8 @@ def guest_root():
     return Directory(home + "/Applications/MeguriXcode")
 
 
-def verify_bundle(bundle, expected):
-    current = inventory(bundle)
+def verify_bundle(bundle, expected, root):
+    current = inventory(bundle, private_root=root)
     need(current["content"] == expected["content"] and facts(bundle) == expected["facts"])
     return current
 
@@ -375,9 +456,11 @@ def no_replace(src_dir, src, dst_dir, dst):
         raise OSError(ctypes.get_errno(), "exclusive publication refused")
 
 
-def receive(stage, expected):
+def receive(stage, expected, *, private_root=None):
     """Extract tar without any unlink, replacement, or filesystem link traversal."""
     directory_modes, hardlinks = [], []
+    if private_root is not None:
+        copied_tree_check(private_root, stage)
     count, size = 0, 0
     need(type(expected["entries"]) is int and expected["entries"] >= 0 and
          type(expected["bytes"]) is int and expected["bytes"] >= 0)
@@ -405,10 +488,14 @@ def receive(stage, expected):
                 for part in parts[:-1]:
                     child = os.open(part, DIR_FLAGS, dir_fd=parent)
                     stack.callback(os.close, child)
+                    if private_root is not None:
+                        need(os.fstat(child).st_uid == os.getuid())
                     parent = child
                 leaf = parts[-1]
                 mode = member.mode & 0o777
-                need(not mode & 0o022 and not member.mode & 0o6000 or member.issym())
+                if private_root is not None:
+                    copied_tree_check(private_root, stage)
+                entry_mode(member.mode, member.issym(), private_root=private_root)
                 if member.isdir():
                     os.mkdir(leaf, 0o700, dir_fd=parent)
                     directory_modes.append((parts, mode))
@@ -425,6 +512,7 @@ def receive(stage, expected):
                     fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  mode, dir_fd=parent)
                     with os.fdopen(fd, "wb") as out, archive.extractfile(member) as source:
+                        need(os.fstat(out.fileno()).st_uid == os.getuid())
                         remaining = member.size
                         while remaining:
                             data = source.read(min(1024 * 1024, remaining))
@@ -442,14 +530,22 @@ def receive(stage, expected):
         with Directory(posixpath.join(stage.path, posixpath.dirname(link)).rstrip("/")) as source_parent, \
                 Directory(posixpath.join(stage.path, *parts[:-1])) as dest_parent:
             name = posixpath.basename(link)
-            need(stat.S_ISREG(os.stat(name, dir_fd=source_parent.fd, follow_symlinks=False).st_mode))
+            s = os.stat(name, dir_fd=source_parent.fd, follow_symlinks=False)
+            need(stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid())
+            if private_root is not None:
+                copied_tree_check(private_root, stage)
             os.link(name, parts[-1], src_dir_fd=source_parent.fd, dst_dir_fd=dest_parent.fd,
                     follow_symlinks=False)
     for parts, mode in reversed(directory_modes):
         with Directory(stage.path + "/" + "/".join(parts)) as d:
+            need(os.fstat(d.fd).st_uid == os.getuid())
+            if private_root is not None:
+                copied_tree_check(private_root, stage)
             os.fchmod(d.fd, mode)
     # tar's root mode isn't applied: root is deliberately run-owned/private.
     stage.check()
+    if private_root is not None:
+        inventory(stage, private_root=private_root)
 
 
 def write_new(directory, name, value):
@@ -495,13 +591,14 @@ def extract(context):
     # The original supervisor checks instance identity. Its child does only
     # descriptor-bound extraction, with no independently launched subprocesses.
     state = context["state"]
-    with Directory(state["root"]) as root, Directory(state["root"] + "/" + state["work"]) as work, \
+    with guest_root() as root, Directory(root.path + "/" + state["work"]) as work, \
             Directory(work.path + "/Xcode.app") as bundle:
+        need(root.path == state["root"])
         root.check(state["root_pins"])
         work.check(state["work_pins"])
         bundle.check(state["bundle_pins"])
         need(not os.listdir(bundle.fd))
-        receive(bundle, context["expected"])
+        receive(bundle, context["expected"], private_root=root)
 
 
 def run_receiver_owner(bundle, work, context):
@@ -594,7 +691,7 @@ def guest(operation, context):
             if os.path.lexists(root.path + "/" + name):
                 with Directory(root.path + "/" + name) as existing:
                     need(os.fstat(existing.fd).st_uid == os.getuid())
-                    verified = verify_bundle(existing, expected)
+                    verified = verify_bundle(existing, expected, root)
                     return {"root": root.path, "root_pins": root.check(), "existing": True,
                             "bundle_pins": existing.check(), "inventory": verified}
             free_space(root, expected["bytes"], expected["entries"])
@@ -629,7 +726,7 @@ def guest(operation, context):
                 root.check(state["root_pins"])
                 return {"received": True}
             need(operation == "publish")
-            verified = verify_bundle(bundle, expected)
+            verified = verify_bundle(bundle, expected, root)
             if state["existing"]:
                 need(verified == state["inventory"])
             need(instance() == context["instance"])
@@ -641,9 +738,9 @@ def guest(operation, context):
         with Directory(root.path + "/" + name) as published:
             # Publication is a rename, so retain the original bundle inode.
             need(pin(os.fstat(published.fd)) == state["bundle_pins"][-1])
-            verify_bundle(published, expected)
+            verify_bundle(published, expected, root)
             outcome, match = activation(published, expected["facts"])
-            verify_bundle(published, expected)
+            verify_bundle(published, expected, root)
             root.check(state["root_pins"])
             need(instance() == context["instance"])
             return {"outcome": outcome, "match": match}
@@ -779,14 +876,18 @@ def host(context):
 
         selected = selection()
         bundle = held.enter_context(Directory(selected[:-len("/Contents/Developer")]))
-        before = inventory(bundle)
+        source_authority = InstalledSource(bundle)
+        before = inventory(bundle, installed_source=source_authority)
         actual = facts(bundle)
+        source_authority.check()
         expected = {"content": before["content"], "bytes": before["bytes"],
                     "entries": before["entries"], "facts": actual}
 
         def source_check():
             lease_check()
-            need(selection() == selected and inventory(bundle) == before and facts(bundle) == actual)
+            need(selection() == selected and inventory(bundle, installed_source=source_authority) == before and
+                 facts(bundle) == actual)
+            source_authority.check()
 
         vm = VM(context["selection"], lease_check, safety)
         held.callback(vm.close)

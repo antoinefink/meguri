@@ -24,6 +24,142 @@ m = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m)
 
 
+@contextlib.contextmanager
+def metadata_view(overrides):
+    """Generated ownership evidence; never chown or access installed bundles."""
+    actual_stat, actual_fstat = os.stat, os.fstat
+
+    def view(s):
+        values = overrides.get((s.st_dev, s.st_ino))
+        if values is None:
+            return s
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_size",
+                  "st_mtime_ns", "st_ctime_ns", "st_nlink")
+        result = {name: getattr(s, name) for name in fields}
+        result.update(values)
+        return types.SimpleNamespace(**result)
+
+    with patch.object(os, "stat", side_effect=lambda *a, **kw: view(actual_stat(*a, **kw))), \
+            patch.object(os, "fstat", side_effect=lambda fd: view(actual_fstat(fd))):
+        yield
+
+
+class SourceAuthority(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.source = Path(self.temp.name).resolve() / "Generated.app"
+        self.source.mkdir(mode=0o755)
+        self.directory = self.source / "Contents"
+        self.directory.mkdir(mode=0o775)
+        self.directory.chmod(0o775)
+        self.file = self.directory / "payload"
+        self.file.write_bytes(b"generated")
+        self.file.chmod(0o664)
+        self.executable = self.directory / "executable"
+        self.executable.write_bytes(b"generated executable")
+        self.executable.chmod(0o775)
+        self.overrides = {}
+        for path in (self.source, self.directory, self.file, self.executable):
+            s = path.stat()
+            self.overrides[(s.st_dev, s.st_ino)] = {"st_uid": 0, "st_gid": 0}
+        self.root_user = m.pwd.struct_passwd(("root", "*", 0, 0, "root", "/var/root", "/bin/sh"))
+        self.wheel = m.grp.struct_group(("wheel", "*", 0, ["root"]))
+        self.addCleanup(patch.stopall)
+        patch.object(m.sys, "platform", "darwin").start()
+        self.by_name = patch.object(m.grp, "getgrnam", side_effect=lambda name: self.wheel).start()
+        self.by_gid = patch.object(m.grp, "getgrgid", side_effect=lambda gid: self.wheel).start()
+        patch.object(m.pwd, "getpwnam", side_effect=lambda name: self.root_user).start()
+        patch.object(m.pwd, "getpwuid", side_effect=lambda uid: self.root_user).start()
+
+    def test_root_system_group_modes_are_admitted_with_exact_content_and_pins(self):
+        with metadata_view(self.overrides), m.Directory(str(self.source)) as directory:
+            authority = m.InstalledSource(directory)
+            original = m.inventory(directory, installed_source=authority)
+            self.assertIsNotNone(authority.identity)
+            self.assertEqual(original["entries"], 3)
+            self.assertEqual(original["bytes"], len(b"generatedgenerated executable"))
+            self.assertEqual(m.inventory(directory, installed_source=authority), original)
+            self.file.write_bytes(b"different")
+            self.assertNotEqual(m.inventory(directory, installed_source=authority), original)
+        self.by_name.assert_called_with("wheel")
+        self.by_gid.assert_called_with(0)
+        self.assertEqual(self.directory.stat().st_mode & 0o7777, 0o775)
+        self.assertEqual(self.file.stat().st_mode & 0o7777, 0o664)
+        self.assertEqual(self.executable.stat().st_mode & 0o7777, 0o775)
+
+    def test_untrusted_entry_group_owner_and_bundle_owner_are_refused(self):
+        for path, field in ((self.file, "st_gid"), (self.file, "st_uid"), (self.source, "st_uid")):
+            s = path.stat()
+            values = self.overrides[(s.st_dev, s.st_ino)]
+            with self.subTest(path=path.name, field=field):
+                values[field] = 12345
+                try:
+                    with metadata_view(self.overrides), self.assertRaises(m.Refused):
+                        with m.Directory(str(self.source)) as directory:
+                            m.inventory(directory, installed_source=m.InstalledSource(directory))
+                finally:
+                    values[field] = 0
+
+    def test_group_name_number_members_and_bidirectional_lookup_are_verified(self):
+        for group in (m.grp.struct_group(("wheel", "*", 20, ["root"])),
+                      m.grp.struct_group(("other", "*", 0, ["root"]))):
+            self.wheel = group
+            with self.subTest(group=tuple(group)), metadata_view(self.overrides), \
+                    m.Directory(str(self.source)) as directory, self.assertRaises(m.Refused):
+                m.inventory(directory, installed_source=m.InstalledSource(directory))
+        self.wheel = m.grp.struct_group(("wheel", "*", 0, ["root", "untrusted"]))
+        foreign = m.pwd.struct_passwd(("untrusted", "*", 501, 20, "", "/generated", "/bin/sh"))
+        with patch.object(m.pwd, "getpwnam", side_effect=lambda name: self.root_user if name == "root" else foreign), \
+                metadata_view(self.overrides), m.Directory(str(self.source)) as directory, \
+                self.assertRaises(m.Refused):
+            m.inventory(directory, installed_source=m.InstalledSource(directory))
+        self.wheel = m.grp.struct_group(("wheel", "*", 0, ["root"]))
+        with patch.object(m.grp, "getgrgid", return_value=m.grp.struct_group(("other", "*", 0, []))), \
+                metadata_view(self.overrides), m.Directory(str(self.source)) as directory, \
+                self.assertRaises(m.Refused):
+            m.inventory(directory, installed_source=m.InstalledSource(directory))
+
+    def test_pinned_identity_and_source_owner_mode_changes_are_refused(self):
+        with metadata_view(self.overrides), m.Directory(str(self.source)) as directory:
+            authority = m.InstalledSource(directory)
+            m.inventory(directory, installed_source=authority)
+            self.wheel = m.grp.struct_group(("wheel", "*", 0, []))
+            with self.assertRaises(m.Refused):
+                m.inventory(directory, installed_source=authority)
+        self.wheel = m.grp.struct_group(("wheel", "*", 0, ["root"]))
+        with metadata_view(self.overrides), m.Directory(str(self.source)) as directory:
+            authority = m.InstalledSource(directory)
+            before = m.inventory(directory, installed_source=authority)
+            self.file.chmod(0o644)
+            self.assertNotEqual(m.inventory(directory, installed_source=authority), before)
+            s = self.file.stat()
+            self.overrides[(s.st_dev, s.st_ino)]["st_uid"] = 12345
+            self.assertNotEqual(m.inventory(directory, installed_source=authority), before)
+
+    def test_world_write_and_set_id_are_never_admitted(self):
+        for mode in (0o666, 0o777, 0o4664, 0o2664):
+            self.file.chmod(mode)
+            with self.subTest(mode=oct(mode)), metadata_view(self.overrides), \
+                    m.Directory(str(self.source)) as directory, self.assertRaises(m.Refused):
+                m.inventory(directory, installed_source=m.InstalledSource(directory))
+
+    def test_no_unscoped_or_boolean_authority(self):
+        with metadata_view(self.overrides), m.Directory(str(self.source)) as directory:
+            for kwargs in ({}, {"installed_source": True}, {"private_root": True},
+                           {"installed_source": {"uid": 0, "gid": 0, "trusted": True}}):
+                with self.subTest(kwargs=kwargs), self.assertRaises(m.Refused):
+                    m.inventory(directory, **kwargs)
+
+    def test_current_unprivileged_membership_is_not_os_source_authority(self):
+        caller = os.getuid() or 501
+        with patch.object(os, "getuid", return_value=caller), patch.object(os, "geteuid", return_value=caller), \
+                patch.object(os, "getgid", return_value=20), patch.object(os, "getegid", return_value=20), \
+                patch.object(os, "getgroups", return_value=[0, 20]), metadata_view(self.overrides), \
+                m.Directory(str(self.source)) as directory, self.assertRaises(m.Refused):
+            m.inventory(directory, installed_source=m.InstalledSource(directory))
+
+
 class Staging(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -120,6 +256,179 @@ class Staging(unittest.TestCase):
         before = set(self.root.iterdir())
         self.assertEqual(m.guest("publish", self.context)["outcome"], "already-selected")
         self.assertEqual(set(self.root.iterdir()), before)
+
+    def private_group_archive(self):
+        # Generate a private current-user-owned input independently of the
+        # installed-source authority, with the audited copied permission kinds.
+        source = self.root / "generated-input.app"
+        self.source.rename(source)
+        self.source = source
+        source.chmod(0o700)
+        (source / "Contents").chmod(0o775)
+        (source / "Contents/Info.plist").chmod(0o664)
+        (source / "Contents/Developer/usr/bin/xcodebuild").chmod(0o775)
+        with m.Directory(str(self.root)) as root, m.Directory(str(source)) as bundle:
+            original = m.inventory(bundle, private_root=root)
+        self.expected.update(content=original["content"], bytes=original["bytes"], entries=original["entries"])
+        raw = io.BytesIO()
+
+        def archive_identity(member):
+            member.uid, member.gid = 12345, 54321
+            member.uname, member.gname = "untrusted-archive-owner", "untrusted-archive-group"
+            return member
+
+        with tarfile.open(fileobj=raw, mode="w") as archive:
+            archive.add(source, arcname=".", filter=archive_identity)
+        raw.seek(0)
+        return raw
+
+    def test_private_copy_preserves_group_write_without_archive_ownership_and_reuses(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        with patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)):
+            m.extract(self.context)
+        stage = self.stage_path()
+        for relative, mode in (("Contents", 0o775), ("Contents/Info.plist", 0o664),
+                               ("Contents/Developer/usr/bin/xcodebuild", 0o775)):
+            s = (stage / relative).stat()
+            self.assertEqual(s.st_mode & 0o7777, mode)
+            self.assertEqual(s.st_uid, os.getuid())
+            self.assertEqual(s.st_gid, stage.stat().st_gid)
+        with m.Directory(str(stage)) as bundle, self.assertRaises(m.Refused):
+            m.inventory(bundle)
+        self.assertEqual(m.guest("publish", self.context), {"outcome": "activated", "match": True})
+        self.assertTrue(self.prepare()["existing"])
+        self.assertEqual(m.guest("publish", self.context), {"outcome": "already-selected", "match": True})
+
+    def test_private_root_mode_changes_block_extraction_and_reuse(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        for mode in (0o750, 0o770, 0o777):
+            self.root.chmod(mode)
+            try:
+                with self.subTest(mode=oct(mode)), patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), \
+                        self.assertRaises(m.Refused):
+                    m.extract(self.context)
+            finally:
+                self.root.chmod(0o700)
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+        with patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)):
+            m.extract(self.context)
+        m.guest("publish", self.context)
+        self.root.chmod(0o750)
+        try:
+            with self.assertRaises(m.Refused):
+                self.prepare()
+        finally:
+            self.root.chmod(0o700)
+
+    def test_private_root_owner_changes_block_extraction_and_inventory(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        s = self.root.stat()
+        # UID 0 is otherwise admitted by Directory for ancestors; it cannot
+        # replace current-user ownership of the private copy authority.
+        foreign = 0 if os.getuid() else 12345
+        with metadata_view({(s.st_dev, s.st_ino): {"st_uid": foreign}}):
+            with patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+                m.extract(self.context)
+            with self.assertRaises(m.Refused):
+                self.prepare()
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+
+    def test_foreign_copied_files_directories_and_links_block_publication_and_reuse(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        with patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)):
+            m.extract(self.context)
+        for published in (False, True):
+            if published:
+                m.guest("publish", self.context)
+            bundle_path = self.target if published else self.stage_path()
+            for relative in ("Contents/Info.plist", "Contents/Developer", "Contents/Developer/current"):
+                s = (bundle_path / relative).lstat()
+                foreign = 0 if os.getuid() else 12345
+                with self.subTest(published=published, relative=relative), \
+                        metadata_view({(s.st_dev, s.st_ino): {"st_uid": foreign}}), self.assertRaises(m.Refused):
+                    if published:
+                        self.prepare()
+                    else:
+                        m.guest("publish", self.context)
+
+    def test_private_root_pins_remain_required_during_copy(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        with m.Directory(str(self.root)) as root, m.Directory(str(self.stage_path())) as bundle:
+            actual_read = m.tarfile.open
+
+            def changed_root(*args, **kwargs):
+                self.root.chmod(0o750)
+                return actual_read(*args, **kwargs)
+
+            try:
+                with patch.object(m.tarfile, "open", side_effect=changed_root), \
+                        patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+                    m.receive(bundle, self.expected, private_root=root)
+            finally:
+                self.root.chmod(0o700)
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+
+    def test_copied_group_write_has_no_boolean_or_outside_root_bypass(self):
+        self.prepare()
+        (self.source / "Contents/Info.plist").chmod(0o664)
+        with m.Directory(str(self.root)) as root, m.Directory(str(self.source)) as outside:
+            with self.assertRaises(m.Refused):
+                m.inventory(outside, private_root=root)
+        for authority in (None, True, {"owned": True, "mode": 0o700}):
+            raw = io.BytesIO()
+            with tarfile.open(fileobj=raw, mode="w") as archive:
+                member = tarfile.TarInfo("payload")
+                member.mode = 0o664
+                archive.addfile(member)
+            raw.seek(0)
+            with m.Directory(str(self.stage_path())) as bundle, \
+                    patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+                m.receive(bundle, {"entries": 1, "bytes": 0}, private_root=authority)
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+
+    def test_private_copy_still_refuses_world_write_and_set_id(self):
+        self.prepare()
+        for mode in (0o666, 0o777, 0o4664, 0o2664):
+            raw = io.BytesIO()
+            with tarfile.open(fileobj=raw, mode="w") as archive:
+                member = tarfile.TarInfo("payload")
+                member.mode = mode
+                archive.addfile(member)
+            raw.seek(0)
+            with self.subTest(mode=oct(mode)), m.Directory(str(self.root)) as root, \
+                    m.Directory(str(self.stage_path())) as bundle, \
+                    patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+                m.receive(bundle, {"entries": 1, "bytes": 0}, private_root=root)
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+
+    def test_supplied_context_root_is_not_copy_authority(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        self.context["state"]["root"] = str(self.base)
+        with patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+            m.extract(self.context)
+        self.assertEqual(list(self.stage_path().iterdir()), [])
+
+    def test_receiver_checks_actual_copied_link_owner(self):
+        raw = self.private_group_archive()
+        self.prepare()
+        owners = {}
+        actual_symlink = os.symlink
+
+        def foreign_link(*args, **kwargs):
+            actual_symlink(*args, **kwargs)
+            s = os.stat(args[1], dir_fd=kwargs["dir_fd"], follow_symlinks=False)
+            owners[(s.st_dev, s.st_ino)] = {"st_uid": 0 if os.getuid() else 12345}
+
+        with metadata_view(owners), patch.object(os, "symlink", side_effect=foreign_link), \
+                patch.object(sys, "stdin", types.SimpleNamespace(buffer=raw)), self.assertRaises(m.Refused):
+            m.extract(self.context)
+        self.assertFalse(self.target.exists())
 
     def test_activation_completion_is_required_after_successful_receiver_join(self):
         # The guest is a generated local process, with fake Apple command

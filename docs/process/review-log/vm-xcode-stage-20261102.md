@@ -52,3 +52,12 @@ The owned worker produced its safe-release proof; no guard cleanup was needed.
 Read-only diagnosis found 673 root-owned wheel-group entries with group-write
 bits, no world-write or set-id bits. No installed bundle or permission changed.
 This source-authority issue remains open; no staging or activation pass.
+
+Filtered repair cleanroom/20261102T150107Z-71495 distinguishes the verified
+root/wheel-owned installed source from the owned private guest copy. It pins
+local system identities and credentials. The guest retains owned 0700 root,
+work and bundle boundaries and checks every copied entry's owner; archive
+ownership grants no authority. World-write/set-id and all other guards stay.
+Independent review found no required finding. Integration changes only two
+invalid-group fixture names; their wrong-name predicate is unchanged.
+Staged privacy81912 passes. Focused checks and actual maintenance are pending.

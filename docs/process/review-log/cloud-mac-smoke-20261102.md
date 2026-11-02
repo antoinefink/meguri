@@ -94,3 +94,9 @@ Swift-test/20261102T151316Z-75981 passed 25/25 selected native bridge tests,
 no skips: Core inbox-before-state order, held edits, exact revision retention,
 inspection and captured native own operations. These use generated data and
 captured operations, without adding them to a live CloudKit database.
+
+Independent re-review cleared the zero-batch correction. On clean57ffce27,
+selftest/20261102T151720Z-78500 passed all 3 selected host wrappers and
+swift-test/20261102T151719Z-78108 passed 60/60 coordinator, presentation,
+protocol and running-product tests, no skips. App-hosted evidence tests and
+actual signed execution remain unrun.
