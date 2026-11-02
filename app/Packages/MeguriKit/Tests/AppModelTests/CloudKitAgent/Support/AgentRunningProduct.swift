@@ -288,10 +288,11 @@ nonisolated enum AgentRunningMachO {
     }
     func requireIndependentCounterpart() throws {
         try revalidate()
-        // No admitted independent destination/signature/full-delivery inspector
-        // is consumable from the four J2.1 copies. Even a matching simulator
-        // runtime input is insufficient. Keep this exact gap explicit.
-        throw AgentFailure.implementationMissing
+        // J2.1's independent source/signature/install/live-lease checks are
+        // parent-owned. Actual client coverage retains all four receipt copies,
+        // live loaded-image hashes/identities, OS and app-container observations.
+        // A generated observation is never admitted to this complementary split.
+        guard coverage == .actualClient else { throw AgentFailure.implementationMissing }
     }
 }
 

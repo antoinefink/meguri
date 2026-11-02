@@ -7,7 +7,65 @@ import Darwin
     { "protocol_version":1,"job":"cloudkit-signed","run_id":"20320405T060708Z-1","lane":"cloud-signed","source_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tree_clean":true,"device":"rig7","device_kind":"mac","os_build":"os-sample-7","app_build":"app-sample-7","executable_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","build_receipt":{"job":"receipt-build-7","run_id":"20320405T060708Z-2"},"build_receipt_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","deployment_receipt":{"job":"receipt-install-7","run_id":"20320405T060708Z-3"},"container":"cloud-sample-7","environment":"development","account_scope":"scope7","account_labels":["acct1"],"selection":"smoke","fixture_delivery":{"base":"small","fixtures_receipt":{"job":"fixtures","run_id":"20320405T060708Z-4"},"source":"/fixture-root/suite7/input","manifest":{"path":"suite7-index.json","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","bytes":10},"frozen_input":{"path":"fixture-input.json","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","bytes":20}} }
     """.utf8)
     static func command(_ sequence: Int = 1, action: String = "launch", recovery: Bool = false) -> Data {
-        Data("{\"header_sha256\":\"\(AgentJSON.hash(header))\",\"command_seq\":\(sequence),\"leg\":\"smoke\",\"action\":\"\(action)\",\"arguments\":\(action == "add_note" ? "{\"fixture\":\"small\",\"entity\":\"n1\"}" : "{}"),\"account_before\":\"acct1\",\"account_after\":\"acct1\"\(recovery ? ",\"recovery_check\":\"smoke-durable-state\"" : "")}\n".utf8)
+        Data("{\"header_sha256\":\"\(AgentJSON.hash(header))\",\"command_seq\":\(sequence),\"leg\":\"smoke\",\"action\":\"\(action)\",\"arguments\":\(String(decoding: try! JSONSerialization.data(withJSONObject: AgentCommand.Action(rawValue: action)?.arguments ?? [:], options: [.sortedKeys]), as: UTF8.self)),\"account_before\":\"acct1\",\"account_after\":\"acct1\"\(recovery ? ",\"recovery_check\":\"smoke-durable-state\"" : "")}\n".utf8)
+    }
+    @Test func j31ExactTypedArgumentsAndActualProgramPosition() throws {
+        // Independent literals: do not derive expected arguments from the parser.
+        let rows: [(String, String)] = [
+            ("launch", "{}"), ("connect", #"{"preview":"p1"}"#), ("publish", #"{"preview":"p1"}"#),
+            ("add_note", #"{"note":"n1","deck":"D2"}"#),
+            ("start_session", #"{"session":"s1","deck":"D2","card":"c1"}"#),
+            ("answer", #"{"session":"s1","card":"c1","rating":"good"}"#),
+            ("end_session", #"{"session":"s1"}"#), ("add_media", #"{"media":"m1"}"#),
+            ("sync_now", "{}"), ("close", "{}")
+        ]
+        for (index, row) in rows.enumerated() {
+            let line = #"{"header_sha256":"\#(AgentJSON.hash(Self.header))","command_seq":\#(index + 1),"leg":"smoke","action":"\#(row.0)","arguments":\#(row.1),"account_before":"acct1","account_after":"acct1"}"#
+            let command = try AgentCommand.read(Data(line.utf8), header: AgentJSON.hash(Self.header), sequence: index + 1)
+            try command.requireSmokePosition()
+            for bad in ["null", "[]", #"{"unexpected":"value"}"#, #"{"preview":1}"#] {
+                let changed = line.replacingOccurrences(of: #""arguments":\#(row.1)"#, with: #""arguments":\#(bad)"#)
+                #expect(throws: (any Error).self) { try AgentCommand.read(Data(changed.utf8), header: AgentJSON.hash(Self.header), sequence: index + 1) }
+            }
+        }
+        let legacy = try AgentCommand.read(Data(Self.command(2, action: "add_note").dropLast()), header: AgentJSON.hash(Self.header), sequence: 2)
+        #expect(throws: AgentFailure.sequence) { try legacy.requireSmokePosition() }
+        let recovery = try AgentCommand.read(Data(Self.command(1, recovery: true).dropLast()), header: AgentJSON.hash(Self.header), sequence: 1)
+        #expect(throws: AgentFailure.sequence) { try recovery.requireSmokePosition() }
+        let old = String(decoding: Self.command(4, action: "add_note"), as: UTF8.self)
+            .replacingOccurrences(of: #"{"deck":"D2","note":"n1"}"#, with: #"{"fixture":"small","entity":"n1"}"#)
+        // The old argument shape is refused independently of JSON key order.
+        var object = try #require(JSONSerialization.jsonObject(with: Data(old.utf8)) as? [String: Any])
+        object["arguments"] = ["fixture": "small", "entity": "n1"]
+        #expect(throws: AgentFailure.shape) { try AgentCommand.read(JSONSerialization.data(withJSONObject: object), header: AgentJSON.hash(Self.header), sequence: 4) }
+    }
+    @Test func generatedTransportTenActionsNeedsExplicitJoinedClose() async throws {
+        // Protocol double only: this does not populate signed runtime evidence.
+        let (store, runtime, engine) = try harness()
+        var commands = Data(), retained = Data()
+        for (index, action) in AgentCommand.smokeProgram.enumerated() {
+            commands.append(Self.command(index + 1, action: action.rawValue))
+            retained = try await engine.deliver(header: Self.header, commands: commands, retainedJournal: retained)
+            let records = try store.records()
+            #expect(AgentEngine.smokeCompleted(records) == (action == .close))
+            let again = try await engine.deliver(header: Self.header, commands: commands, retainedJournal: retained)
+            #expect(again == retained)
+        }
+        #expect(runtime.executions == 10 && runtime.mutations == 1)
+        #expect(try store.records().filter { $0.kind == .done }.map(\.command_seq) == Array(1...10))
+        let full = try store.records()
+        let withoutJoin = full.map { record in
+            var value = record
+            if value.command_seq == 10 && value.kind == .done {
+                value.checks = value.checks.filter { $0.name == .integrity }
+            }
+            return value
+        }
+        #expect(!AgentEngine.smokeCompleted(withoutJoin))
+        await #expect(throws: AgentFailure.sequence) {
+            try await engine.deliver(header: Self.header, commands: commands + Self.command(11, action: "sync_now"), retainedJournal: retained)
+        }
+        #expect(runtime.executions == 10)
     }
     private func harness() throws -> (AgentMemoryStorage, AgentFakeRuntime, AgentEngine) {
         let store = AgentMemoryStorage()
@@ -579,7 +637,10 @@ import Darwin
         if failExecution { throw NSError(domain: "SYNTHETIC_PRIVATE_ERROR", code: 7) }
         databaseCalls += 1
         if command.action == .addNote { mutations += 1; committed = true }
-        return AgentEngine.requiredChecks(command.action).map { .init(name: $0, outcome: .pass, facts: [.init(name: .commandCompleted, count: 1)]) }
+        return AgentEngine.requiredChecks(command.action).map {
+            let fact: AgentFact.Name = command.action == .close ? ($0 == .integrity ? .integrity : .ownedWorkJoined) : .commandCompleted
+            return .init(name: $0, outcome: .pass, facts: [.init(name: fact, count: 1)])
+        }
     }
     func recover(_ command: AgentCommand, started: AgentRecord, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         recoveries += 1; callback = observe

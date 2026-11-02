@@ -106,7 +106,28 @@ nonisolated struct AgentHeader: Codable, Equatable {
 }
 
 nonisolated struct AgentCommand: Codable {
-    enum Action: String, Codable { case launch, addNote = "add_note", syncNow = "sync_now", close }
+    enum Action: String, Codable, CaseIterable {
+        case launch, connect, publish, addNote = "add_note", startSession = "start_session"
+        case answer, endSession = "end_session", addMedia = "add_media", syncNow = "sync_now", close
+        var arguments: [String: String] {
+            switch self {
+            case .launch, .syncNow, .close: [:]
+            case .connect, .publish: ["preview": "p1"]
+            case .addNote: ["note": "n1", "deck": "D2"]
+            case .startSession: ["session": "s1", "deck": "D2", "card": "c1"]
+            case .answer: ["session": "s1", "card": "c1", "rating": "good"]
+            case .endSession: ["session": "s1"]
+            case .addMedia: ["media": "m1"]
+            }
+        }
+    }
+    // The actual signed runtime enforces this complete J3.1 program. Protocol
+    // transport doubles may exercise individual actions; they prove no SDK work.
+    static let smokeProgram: [Action] = [.launch, .connect, .publish, .addNote, .startSession, .answer, .endSession, .addMedia, .syncNow, .close]
+    func requireSmokePosition() throws {
+        guard Self.smokeProgram.indices.contains(command_seq - 1),
+              Self.smokeProgram[command_seq - 1] == action, recovery_check == nil else { throw AgentFailure.sequence }
+    }
     let header_sha256: String
     let command_seq: Int
     let leg: String
@@ -122,12 +143,7 @@ nonisolated struct AgentCommand: Codable {
         guard command.header_sha256 == header else { throw AgentFailure.binding }
         guard command.command_seq == sequence else { throw AgentFailure.sequence }
         guard command.leg == "smoke", command.account_before == "acct1", command.account_after == "acct1" else { throw AgentFailure.unsupported }
-        switch command.action {
-        case .addNote:
-            guard command.arguments == ["fixture": "small", "entity": "n1"] else { throw AgentFailure.shape }
-        case .launch, .syncNow, .close:
-            guard command.arguments.isEmpty else { throw AgentFailure.shape }
-        }
+        guard command.arguments == command.action.arguments else { throw AgentFailure.shape }
         if let check = command.recovery_check, check != "smoke-durable-state" { throw AgentFailure.unsupported }
         guard sequence == 1 ? command.action == .launch : command.action != .launch else { throw AgentFailure.sequence }
         return command

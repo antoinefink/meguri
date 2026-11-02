@@ -167,6 +167,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let collectionActivationResultOutcome = BridgeCall("CollectionActivationResult.outcome")
     public static let jobProgressSetListener = BridgeCall("JobProgress.setListener")
 
+    public static let testSmokeIntegrity = BridgeCall("test_smoke_integrity")
+    public static let testCloudSmokeObservation = BridgeCall("test_cloud_smoke_observation")
     public static let testCloudStartNativePolicyOpen = BridgeCall("test_cloud_start_native_policy_open")
     public static let testCloudRequireNativePolicyBaseline = BridgeCall("test_cloud_require_native_policy_baseline")
     public static let testCloudPolicyExchangeObservation = BridgeCall("test_cloud_policy_exchange_observation")
@@ -479,7 +481,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startCreateBackup, createBackupResultOutcome, startRestoreBackup, restoreBackupResultOutcome, startRunDueMaintenance, dueMaintenanceResultOutcome, listBackups, backupLimits, setBackupLimits, maintenanceStatus,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
-        testCloudStartNativePolicyOpen, testCloudRequireNativePolicyBaseline, testCloudPolicyExchangeObservation, startOpen, prepareCloudConnectionHost, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
+        testSmokeIntegrity, testCloudSmokeObservation, testCloudStartNativePolicyOpen, testCloudRequireNativePolicyBaseline, testCloudPolicyExchangeObservation, startOpen, prepareCloudConnectionHost, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,

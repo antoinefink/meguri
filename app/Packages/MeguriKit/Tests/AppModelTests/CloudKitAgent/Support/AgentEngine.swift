@@ -20,9 +20,21 @@ import Foundation
     static func requiredChecks(_ action: AgentCommand.Action) -> Set<AgentCheck.Name> {
         switch action {
         case .launch: [.integrity]
-        case .addNote, .close: [.localDurability]
+        case .addNote, .startSession, .answer, .endSession, .addMedia: [.localDurability]
+        case .close: [.integrity, .localDurability]
+        case .connect, .publish: [.coordinatorResult]
         case .syncNow: [.coordinatorResult]
         }
+    }
+    static func smokeCompleted(_ records: [AgentRecord]) -> Bool {
+        guard !records.contains(where: { $0.kind == .failed }) else { return false }
+        let starts = records.filter { $0.kind == .started }
+        let done = records.filter { $0.kind == .done }
+        guard starts.map(\.action) == AgentCommand.smokeProgram.map(Optional.some),
+              starts.map(\.command_seq) == Array(1...10), done.map(\.command_seq) == Array(1...10),
+              let close = done.last else { return false }
+        return close.checks.contains { $0.name == .integrity && $0.outcome == .pass && $0.facts.contains { $0.name == .integrity } }
+            && close.checks.contains { $0.name == .localDurability && $0.outcome == .pass && $0.facts.contains { $0.name == .ownedWorkJoined } }
     }
     private func validateChecks(_ checks: [AgentCheck], command: AgentCommand, recovered: Bool) throws {
         let names = Set(checks.map(\.name))
@@ -138,6 +150,7 @@ import Foundation
         let candidateCommands = try candidateBytes.enumerated().map {
             try AgentCommand.read($0.element, header: candidateHash, sequence: $0.offset + 1)
         }
+        if let close = candidateCommands.first(where: { $0.action == .close }), close.command_seq != candidateCommands.count { throw AgentFailure.sequence }
         let accepted = try storage.read(.commands)
         let completeCommands = candidateBytes.reduce(into: Data()) { $0.append($1); $0.append(10) }
         guard completeCommands.starts(with: accepted) else { throw AgentFailure.prefix }

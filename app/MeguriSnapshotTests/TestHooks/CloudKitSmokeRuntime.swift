@@ -15,7 +15,7 @@ import Foundation
         case integrityInspector = "smoke-integrity-inspector"
         case recoveryInspector = "durable-smoke-recovery-inspector"
     }
-    let missing: [Dependency] = [.signedProductVerifier, .generatedBase, .integrityInspector, .recoveryInspector]
+    let missing: [Dependency] = [.recoveryInspector]
     private(set) var userSteps: [String] = []
     private let admittedRun: AgentRunDirectory
     private let directory: URL
@@ -26,6 +26,20 @@ import Foundation
     private var mutation: NoteMutation?
     private var expectedFields: [String] = []
     private var backend: CloudKitSmokeBackend?
+    private let inspection = CoreSmokeInspection()
+    private let changes = CloudKitSmokeChanges()
+    private var preview: CloudConnectionPreview?
+    private var deckID: Int64?
+    private var marker: String?
+    private var sessionID: UInt64?
+    private var head: ReviewHeadItem?
+    private var headRevision: SmokeCloudEntity?
+    private var lastReviewID: Int64?
+    private var reviewRowID: Int64?
+    private var retainedEntities: [String: SmokeCloudEntity] = [:]
+    private var mediaName: String?
+    private var mediaBytes: Data?
+    private var nextCommand = 1
 
     init(admittedRun: AgentRunDirectory) {
         self.admittedRun = admittedRun
@@ -56,14 +70,15 @@ import Foundation
             runningProduct = observed
         }
         guard let configuration = CloudBuildConfiguration.fromBundle else {
-            userSteps = ["cloudkit-dev-container"]; throw AgentFailure.implementationMissing
+            userSteps = ["cloudkit-dev-container"]; throw AgentFailure.awaitingUser
         }
         guard case .development = configuration.environment, configuration.container == header.container,
               header.environment == "development" else { throw AgentFailure.wrongContainer }
-        if !configuration.schemaConfigured { userSteps.append("cloudkit-dev-container") }
-        // Live client observations do not admit the independent signature,
-        // full delivery, launch-plan or live VM/lease/install counterpart. The
-        // four copied roles cannot supply it; preserve implementationMissing.
+        if !configuration.schemaConfigured {
+            userSteps.append("cloudkit-dev-container"); throw AgentFailure.awaitingUser
+        }
+        // Parent owns source/signature/install/live-lease admission. This
+        // client owns retained receipts and actual image/OS/container checks.
         guard let runningProduct else { throw AgentFailure.implementationMissing }
         try runningProduct.requireIndependentCounterpart()
     }
@@ -107,6 +122,14 @@ import Foundation
             .requireInstalled(at: directory.appendingPathComponent("data", isDirectory: true))
     }
     func execute(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
+        try command.requireSmokePosition()
+        guard command.command_seq == nextCommand else { throw AgentFailure.sequence }
+        // A failed operation never advances this program.
+        let checks = try await executeStep(command, observe: observe)
+        nextCommand += 1
+        return checks
+    }
+    private func executeStep(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         // Closing/draining owned work does not depend on renewed authority.
         if command.action != .close {
             try await freshAccount()
@@ -141,10 +164,11 @@ import Foundation
                 let ownTransport = try NativeCloudOwnTransport(database: database, staging: staging)
                 let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
                 try admission.revalidate()
-                let production = try await NativeCollectionCloudBackend.make(workflow: CoreCloudWorkflowService(),
+                let workflow = CoreCloudWorkflowService()
+                let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
                     factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted)
                 try admission.revalidate()
-                let wrapper = CloudKitSmokeBackend(production: production)
+                let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
                 backend = wrapper
                 return wrapper
             }, defaults: nil, clock: .system, directory: data, observeSignals: false)
@@ -153,66 +177,264 @@ import Foundation
             let collection = ReviewCollection(configuration: launch, navigation: AppNavigation(), sync: sync)
             owner = collection
             _ = try retainedAdmission()
+            try await ChangeFanout.shared.subscribe(changes)
             await collection.start()
             _ = try retainedAdmission()
             await sync.prepareConnectionAuthority()
             guard collection.state == .ready, !sync.operationFailed, let backend else { throw AgentFailure.execution }
-            // No new recovery/publication decision is invented for an unbound
-            // base. The existing production connection must already be usable.
-            guard sync.status?.controls.bindingUsable == true else { throw AgentFailure.execution }
+            let local = try await inspection.cloud()
+            guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
+            try await resolveGeneratedRoles(collection)
             try observe(.init(name: .coreOpened, count: collection.generation))
             try backend.checkFailure()
-            // Full integrity inspection has no existing public service here.
-            // Opening a collection alone must never be called Q5 integrity.
-            throw AgentFailure.implementationMissing
+            return [try await integrityCheck(collection)]
+        case .connect:
+            guard let owner, preview == nil, owner.review == nil else { throw AgentFailure.execution }
+            try await owner.prepareCloudConnectionPreview()
+            await owner.sync.waitForConnectionPreview()
+            guard !owner.sync.operationFailed, case .ready(let current, let summary) = owner.sync.preview else { throw AgentFailure.execution }
+            try requireInitialPreview(summary)
+            preview = current
+            let fact = AgentFact(name: .applied, count: summary.localCounts[.note], operation: "p1")
+            try observe(fact)
+            return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact])]
+        case .publish:
+            guard let owner, let backend, let preview,
+                  case .ready(let current, let summary) = owner.sync.preview,
+                  CoreSmokeInspection.samePreview(preview, current) else { throw AgentFailure.execution }
+            try requireInitialPreview(summary)
+            self.preview = nil // consumed once, including failure
+            backend.watchPublication = true
+            await owner.sync.confirmPublication()
+            await owner.sync.waitForInputs()
+            try backend.checkFailure()
+            let completed = try await backend.publicationCompleted()
+            guard !owner.sync.operationFailed, owner.sync.preview == nil,
+                  owner.sync.status?.controls.bindingUsable == true,
+                  completed.publicationComplete, completed.bindingUsable, completed.engine != nil,
+                  let issued = backend.publicationOperations.first,
+                  issued.publicationReason == 1, issued.publicationInitial,
+                  issued.publicationID != nil, completed.publicationID == nil,
+                  backend.publicationOperations.allSatisfy({ $0.publicationID == issued.publicationID && $0.publicationInitial }),
+                  backend.publicationOperations.contains(where: { $0.publicationCompleting && $0.publicationBindingID == completed.bindingID }) else { throw AgentFailure.execution }
+            backend.watchPublication = false
+            let fact = AgentFact(name: .stateSaved, count: completed.seq, engine: "engine1", operation: "p1")
+            try observe(fact)
+            return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact])]
         case .addNote:
             guard let owner, owner.state == .ready, mutation == nil else { throw AgentFailure.execution }
             let types = try await CoreNotetypeService().notetypeNames()
-            guard let type = types.first else { throw AgentFailure.execution }
+            guard types.count == 1, let type = types.first, type.name == "QA",
+                  let deckID, let marker else { throw AgentFailure.execution }
             _ = try retainedAdmission()
             let record = try await CoreNotetypeService().readNotetype(id: type.id)
-            guard record.fields.count == 2, let deck = owner.decks.first(where: { !$0.filtered }) else { throw AgentFailure.execution }
-            // Generated in process. Only the fixed entity label and receipt
-            // sequence leave the process, never these values or native ids.
-            expectedFields = ["synthetic-smoke-Q-" + UUID().uuidString, "synthetic-smoke-A-" + UUID().uuidString]
+            guard record.fields.map(\.name) == ["Q", "A"], record.templates.count == 1 else { throw AgentFailure.execution }
+            expectedFields = [marker + "-smoke-n1-Q", marker + "-smoke-n1-A"]
             _ = try retainedAdmission()
             let result = try await CoreNoteService().addNote(.init(notetypeId: type.id, fields: expectedFields,
-                tags: [], deckId: deck.id, guid: nil, updateAddDefaults: false))
-            guard result.written, !result.cards.isEmpty else { throw AgentFailure.execution }
+                tags: [], deckId: deckID, guid: nil, updateAddDefaults: false))
+            guard result.written, result.cards.count == 1 else { throw AgentFailure.execution }
             mutation = result
-            try observe(.init(name: .localCommitted, count: result.summary.seq, operation: "local1"))
+            try observe(.init(name: .localCommitted, count: result.summary.seq, operation: "n1"))
             _ = try retainedAdmission()
             try await CoreCollectionService().flushForBackground()
             _ = try retainedAdmission()
             let durable = try await CoreNoteService().readNote(id: result.id)
-            guard durable.fields == expectedFields, durable.notetypeId == type.id else { throw AgentFailure.execution }
-            let fact = AgentFact(name: .localDurable, count: result.summary.seq, operation: "local1")
+            guard durable.fields == expectedFields, durable.tags.isEmpty, durable.notetypeId == type.id else { throw AgentFailure.execution }
+            guard result.summary.generation == owner.generation,
+                  result.summary.changes.notes.filter({ $0.change == .added }).map(\.id) == [result.id],
+                  result.summary.changes.cards.filter({ $0.change == .added }).map(\.id) == result.cards else { throw AgentFailure.execution }
+            let rows = try await inspection.cloud(noteID: result.id, cardID: result.cards[0])
+            guard rows.generation == owner.generation, rows.seq >= result.summary.seq,
+                  rows.cardNoteID == result.id else { throw AgentFailure.execution }
+            try retain(rows, labels: ["n1"])
+            let fact = try entityFact("n1")
+            try observe(fact)
+            let receipt = AgentFact(name: .localCommitted, count: result.summary.seq, operation: "n1")
+            return [.init(name: .localDurability, outcome: .pass, facts: [receipt, fact])]
+        case .startSession:
+            guard let owner, let backend, let deckID, sessionID == nil, mutation != nil else { throw AgentFailure.execution }
+            if owner.policy != .ok { await owner.enableFsrs() }
+            guard owner.policy == .ok else { throw AgentFailure.execution }
+            await owner.startStudy(deckID: deckID)
+            guard let review = owner.review, review.phase == .question,
+                  let session = review.sessionID, let item = review.item else { throw AgentFailure.execution }
+            let current = try await CoreReviewSessionClient().head(sessionID: session)
+            guard current.items.first?.cardId == item.cardId,
+                  current.items.first?.stateToken == item.stateToken else { throw AgentFailure.execution }
+            sessionID = session; head = item
+            let before = try await inspection.cloud(cardID: item.cardId)
+            guard before.generation == owner.generation,
+                  let baseline = before.entities.first(where: { $0.label == "c1" }) else { throw AgentFailure.execution }
+            headRevision = baseline
+            lastReviewID = before.lastReviewID
+            await owner.sync.waitForInputs()
+            try backend.checkFailure()
+            let fact = AgentFact(name: .applied, count: 1, operation: "c1")
             try observe(fact)
             return [.init(name: .localDurability, outcome: .pass, facts: [fact])]
+        case .answer:
+            guard let owner, let review = owner.review, let sessionID, let head,
+                  review.sessionID == sessionID, review.record.answers.isEmpty,
+                  review.item?.cardId == head.cardId, review.item?.stateToken == head.stateToken else { throw AgentFailure.execution }
+            let current = try await CoreReviewSessionClient().head(sessionID: sessionID)
+            guard current.items.first?.cardId == head.cardId,
+                  current.items.first?.stateToken == head.stateToken else { throw AgentFailure.execution }
+            let before = changes.events.last?.seq ?? 0
+            review.reveal(); await review.settled()
+            guard review.phase == .answer, review.item?.stateToken == head.stateToken else { throw AgentFailure.execution }
+            review.rate(.good); await review.settled()
+            guard review.phase != .error, review.record.answers.count == 1,
+                  review.record.answers.first?.cardID == head.cardId else { throw AgentFailure.execution }
+            try await CoreCollectionService().flushForBackground()
+            let cardID = head.cardId, generation = owner.generation
+            let committed = try await changes.next(after: before) {
+                guard $0.generation == generation, case .changes(let c) = $0.kind else { return false }
+                return c.cards.contains { $0.id == cardID } && !c.revlogAdded.isEmpty
+            }
+            guard case .changes(let c) = committed.kind, c.revlogAdded.count == 1,
+                  let row = c.revlogAdded.first, row > (lastReviewID ?? 0),
+                  review.record.answers.first?.durable == true else { throw AgentFailure.execution }
+            reviewRowID = row
+            let rows = try await inspection.cloud(cardID: cardID, revlogID: row)
+            guard rows.generation == generation, rows.seq >= committed.seq, rows.lastReviewID == row,
+                  let prior = headRevision, let card = rows.entities.first(where: { $0.label == "c1" }),
+                  card.revision > prior.revision, card.digest != prior.digest else { throw AgentFailure.execution }
+            try retain(rows, labels: ["c1", "r1"])
+            let facts = [AgentFact(name: .localCommitted, count: committed.seq, operation: "s1"), try entityFact("c1"), try entityFact("r1")]
+            for fact in facts { try observe(fact) }
+            return [.init(name: .localDurability, outcome: .pass, facts: facts)]
+        case .endSession:
+            guard let owner, let backend, let sessionID, reviewRowID != nil,
+                  owner.review?.sessionID == sessionID else { throw AgentFailure.execution }
+            let before = changes.events.last?.seq ?? 0
+            await owner.finishReview()
+            guard owner.review == nil, owner.previousRecord?.answers.count == 1,
+                  owner.previousRecord?.answers.first?.durable == true else { throw AgentFailure.execution }
+            _ = try await changes.next(after: before) {
+                if case .sessionEnded(let ended) = $0.kind { return ended == sessionID }; return false
+            }
+            await owner.sync.waitForInputs()
+            let observations = try await backend.workflow.observations()
+            guard let ended = observations.lastIndex(where: {
+                if case .sessionEnded(let actual) = $0 { return actual == sessionID }; return false
+            }), observations.dropFirst(ended + 1).contains(where: {
+                if case .corePendingEmitted = $0 { return true }; return false
+            }) else { throw AgentFailure.execution }
+            let fact = AgentFact(name: .applied, count: 1, operation: "s1")
+            try observe(fact)
+            return [.init(name: .localDurability, outcome: .pass, facts: [fact])]
+        case .addMedia:
+            guard let owner, let marker, owner.review == nil, reviewRowID != nil, mediaName == nil else { throw AgentFailure.execution }
+            let header = try AgentHeader.read(originalHeaderBytes)
+            let bytes = CloudKitSmokeGeneratedInput.media(run: header.run_id, device: header.device)
+            guard bytes.count == 10_240 else { throw AgentFailure.execution }
+            let desired = marker + "-smoke-m1.bin"
+            let before = try await CoreMediaService().trackedNames()
+            guard !before.names.contains(where: { $0.caseKey == desired.lowercased() }) else { throw AgentFailure.execution }
+            let baseline = changes.events.last?.seq ?? 0
+            let stored = try await CoreMediaService().addMedia(name: desired, bytes: Array(bytes))
+            let operation = try await changes.next(after: baseline) {
+                if case .mediaArrived(let names) = $0.kind { return names == [stored] }; return false
+            }
+            guard operation.generation == owner.generation else { throw AgentFailure.execution }
+            mediaName = stored; mediaBytes = bytes
+            try await CoreCollectionService().flushForBackground()
+            try await requirePhysicalMedia(owner)
+            let tracked = try await inspection.cloud(mediaName: stored)
+            try retain(tracked, labels: ["m1"])
+            guard let counter = retainedEntities["m1"]?.mediaChangeCounter, counter > 0,
+                  retainedEntities["m1"]?.mediaBytes == UInt64(bytes.count),
+                  retainedEntities["m1"]?.mediaSHA256.map(CloudKitSmokeGeneratedInput.hex) == AgentJSON.hash(bytes) else { throw AgentFailure.execution }
+            let facts = [AgentFact(name: .localCommitted, count: counter, operation: "m1"), try entityFact("m1"), AgentFact(name: .localDurable, count: UInt64(bytes.count), digest: AgentJSON.hash(bytes), operation: "m1")]
+            for fact in facts { try observe(fact) }
+            return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         case .syncNow:
-            guard let owner, let backend, let mutation else { throw AgentFailure.execution }
+            guard let owner, let backend, let mutation, let head, let reviewRowID, let mediaName,
+                  owner.review == nil, retainedEntities.count == 4 else { throw AgentFailure.execution }
             try backend.prepareForSyncNow()
-            owner.sync.syncNow()
+            guard owner.requestSyncNow() else { throw AgentFailure.execution }
             await owner.sync.waitForInputs()
             guard owner.sync.syncNowUnavailable == nil, !owner.sync.operationFailed else { throw AgentFailure.execution }
-            // This stream observes the original policy-issued RecordExchange
-            // after real execution; it does not supply expected results.
             let exchange = try await backend.requestedExchangeResult()
             await owner.sync.waitForInputs()
             guard !owner.sync.operationFailed,
-                  case .succeeded(let selected, let held, _, let incoming, _) = exchange.outcome,
-                  selected > 0, held == 0, incoming == 0 else { throw AgentFailure.execution }
-            _ = try retainedAdmission()
-            let note = try await CoreNoteService().readNote(id: mutation.id)
-            guard note.fields == expectedFields else { throw AgentFailure.execution }
+                  case .succeeded(_, let held, let newer, let incoming, let media) = exchange.outcome,
+                  held == 0, newer == 0, incoming == 0 else { throw AgentFailure.execution }
+            // Record actual media state even if the required upload proof fails.
+            for (label, count) in [("media-pending", media.uploadFiles), ("media-missing", media.missingNames), ("media-unknown", media.unknownBlobs)] {
+                guard let count else { throw AgentFailure.implementationMissing }
+                try observe(.init(name: .syncResult, count: count, operation: label))
+            }
+            let current = try await inspection.cloud(noteID: mutation.id, cardID: head.cardId,
+                                                     revlogID: reviewRowID, mediaName: mediaName)
+            let observations = try await backend.workflow.observations()
+            guard current.generation == owner.generation, current.entities.count == 4 else { throw AgentFailure.execution }
+            var facts = try CloudKitSmokeProof.acknowledgements(current: current.entities,
+                retained: retainedEntities, observations: observations)
+            for fact in facts { try observe(fact) }
+            try await requirePhysicalMedia(owner)
             let result = AgentFact(name: .syncResult, count: exchange.exchange, operation: "exchange1")
-            try observe(result)
-            return [.init(name: .coordinatorResult, outcome: .pass, facts: [result])]
+            try observe(result); facts.append(result)
+            return [.init(name: .coordinatorResult, outcome: .pass, facts: facts)]
         case .close:
-            guard let owner, await owner.close() else { throw AgentFailure.execution }
+            guard let owner, owner.review == nil, await owner.sync.cancelAndDrain() else { throw AgentFailure.execution }
+            let integrity = try await integrityCheck(owner)
+            guard await owner.close() else { throw AgentFailure.execution }
             self.owner = nil
-            return [.init(name: .localDurability, outcome: .pass, facts: [.init(name: .ownedWorkJoined)])]
+            changes.finish()
+            let joined = AgentFact(name: .ownedWorkJoined)
+            try observe(joined)
+            return [integrity, .init(name: .localDurability, outcome: .pass, facts: [joined])]
         }
+    }
+    private func requireInitialPreview(_ summary: CloudConnectionSummary) throws {
+        guard summary.localCollectionPresent, !summary.initialAdoptionRequired, !summary.localEmpty,
+              summary.decision == .confirmUpload, summary.manifestCounts == nil,
+              summary.publishedAtMilliseconds == nil, summary.resumeBindingId == nil,
+              summary.localCounts[.note] == 20, summary.localCounts[.card] == 20,
+              summary.localCounts[.revlog] == 60, summary.localCounts[.deck] == 2,
+              summary.localCounts[.notetype] == 1, summary.localCounts[.mediaName] == 5 else { throw AgentFailure.execution }
+    }
+    private func resolveGeneratedRoles(_ owner: ReviewCollection) async throws {
+        let names = try await CoreDeckService().allDeckNames()
+        guard names.generation == owner.generation, names.decks.count == 2,
+              let parent = names.decks.first(where: { $0.id == 1 && !$0.filtered }),
+              parent.fullName.hasSuffix("-D1") else { throw AgentFailure.execution }
+        let marker = String(parent.fullName.dropLast(3))
+        guard !marker.isEmpty, let child = names.decks.first(where: {
+            !$0.filtered && $0.fullName == marker + "-D1::" + marker + "-D2"
+        }) else { throw AgentFailure.execution }
+        self.marker = marker; deckID = child.id
+    }
+    private func integrityCheck(_ owner: ReviewCollection) async throws -> AgentCheck {
+        let result = try await inspection.integrity()
+        guard result.generation == owner.generation, result.integrityOK, result.schemaOK,
+              result.referenceFailures == 0 else { throw AgentFailure.execution }
+        return .init(name: .integrity, outcome: .pass, facts: [.init(name: .integrity, count: result.seq)])
+    }
+    private func retain(_ rows: SmokeCloudObservation, labels: Set<String>) throws {
+        for label in labels {
+            guard let entity = rows.entities.first(where: { $0.label == label }),
+                  entity.revision > 0, entity.digest.count == 32 else { throw AgentFailure.execution }
+            retainedEntities[label] = entity
+        }
+    }
+    private func entityFact(_ label: String) throws -> AgentFact {
+        guard let entity = retainedEntities[label] else { throw AgentFailure.execution }
+        return .init(name: .localDurable, count: entity.revision,
+                     digest: CloudKitSmokeGeneratedInput.hex(entity.digest), operation: label)
+    }
+    private func requirePhysicalMedia(_ owner: ReviewCollection) async throws {
+        guard let mediaName, let mediaBytes else { throw AgentFailure.execution }
+        let snapshot = try await CoreMediaService().trackedNames()
+        guard snapshot.generation == owner.generation,
+              snapshot.root.standardizedFileURL == directory.appendingPathComponent("data/collection.media").standardizedFileURL,
+              snapshot.names.filter({ $0.name == mediaName }).count == 1 else { throw AgentFailure.execution }
+        let path = snapshot.root.appendingPathComponent(mediaName)
+        let values = try path.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              try Data(contentsOf: path) == mediaBytes else { throw AgentFailure.execution }
     }
     func recover(_ command: AgentCommand, started: AgentRecord, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         _ = try retainedAdmission()
@@ -225,6 +447,7 @@ import Foundation
         guard await owner.sync.cancelAndDrain() else { throw AgentFailure.execution }
         guard await owner.close() else { throw AgentFailure.execution }
         self.owner = nil
+        changes.finish()
     }
 }
 
@@ -232,15 +455,36 @@ import Foundation
 // native transport, tracking, admission or cancellation.
 @MainActor private final class CloudKitSmokeBackend: SyncCoordinatorBackend {
     let production: NativeCollectionCloudBackend
+    let workflow: CoreCloudWorkflowService
+    var watchPublication = false
+    private(set) var publicationOperations: [SmokeCloudObservation] = []
     var connection: CoreCloudConnectionService? { production.connection }
     var own: CloudOwnExecutor? { production.own }
     private let exchanges = AgentExchangeEvents<CloudPolicyExchangeRecord>()
+    private let publications = AgentExchangeEvents<SmokeCloudObservation>()
     private var requestedExchange: UInt64?
-    init(production: NativeCollectionCloudBackend) {
-        self.production = production
+    init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService) {
+        self.production = production; self.workflow = workflow
+    }
+    private func observePublication() async throws {
+        guard watchPublication else { return }
+        let value = try await CoreSmokeInspection().cloud()
+        if value.publicationID != nil {
+            guard publicationOperations.count < 256 else { throw AgentFailure.execution }
+            publicationOperations.append(value)
+        }
+        publications.yield(value)
+    }
+    func publicationCompleted() async throws -> SmokeCloudObservation {
+        try checkFailure()
+        return try await publications.next(where: { $0.publicationComplete && $0.bindingUsable && $0.engine != nil })
     }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+        do { try await observePublication() }
+        catch { publications.fail(.execution); exchanges.fail(.execution); throw error }
         let output = try await production.input(event)
+        do { try await observePublication() }
+        catch { publications.fail(.execution); exchanges.fail(.execution); throw error }
         if case .syncNowRequested(let source) = event {
             requestedExchange = nil
             // Observe only the original command issued for this input. Activity
@@ -257,12 +501,14 @@ import Foundation
         return output
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        do { try await observePublication() } catch { exchanges.fail(.execution); publications.fail(.execution) }
         let result = await production.execute(command)
-        if result.error != nil { exchanges.fail(.execution) }
+        do { try await observePublication() } catch { exchanges.fail(.execution); publications.fail(.execution) }
+        if result.error != nil { exchanges.fail(.execution); publications.fail(.execution) }
         if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action { exchanges.yield(record) }
         return result
     }
-    func checkFailure() throws { try exchanges.checkFailure() }
+    func checkFailure() throws { try exchanges.checkFailure(); try publications.checkFailure() }
     func prepareForSyncNow() throws {
         try checkFailure()
         requestedExchange = nil
@@ -287,6 +533,6 @@ import Foundation
         await production.resumeAfterCoreResume()
     }
     func quiesce() async throws { try await production.quiesce() }
-    func close() async throws { try await production.close(); exchanges.finish() }
+    func close() async throws { try await production.close(); exchanges.finish(); publications.finish() }
 }
 #endif

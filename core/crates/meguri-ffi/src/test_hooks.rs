@@ -791,3 +791,24 @@ pub fn test_cloud_installed_sdk_owner() -> Result<Option<String>, CoreError> {
         .ok_or_else(|| crate::sync::cloud_error("cloud fixture unavailable"))?;
     Ok(core.incoming_sdk_instance_for_testing())
 }
+
+#[path = "test_hooks_cloud_smoke.rs"]
+mod cloud_smoke;
+pub use cloud_smoke::{CloudSmokeEntity, CloudSmokeObservation, SmokeIntegrityObservation};
+
+/// Fixed owned Q5 snapshot. No SQL, path or expected verdict enters this API.
+#[uniffi::export]
+pub fn test_smoke_integrity() -> Result<SmokeIntegrityObservation, CoreError> {
+    callback::enter("test_smoke_integrity");
+    cloud_smoke::integrity()
+}
+
+/// Bounded read-only inspection of run-local generated mutations. Identifiers
+/// stay inside the test process and never become journal labels.
+#[uniffi::export]
+pub fn test_cloud_smoke_observation(
+    note_id: Option<i64>, card_id: Option<i64>, revlog_id: Option<i64>, media_name: Option<String>,
+) -> Result<CloudSmokeObservation, CoreError> {
+    callback::enter("test_cloud_smoke_observation");
+    cloud_smoke::observe(note_id, card_id, revlog_id, media_name)
+}

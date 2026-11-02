@@ -28,15 +28,12 @@ import Testing
                 try admitted.revalidate()
                 let records = try AgentJSON.lines(journal).complete.map { try AgentRecord.read($0) }
                 guard !records.contains(where: { $0.kind == .failed }) else { throw AgentFailure.execution }
-                // A launch receipt alone or a requested outcome cannot finish
-                // this smoke. Keep serving the next durable host delivery.
-                let mutation = records.contains { $0.kind == .done && $0.checks.contains { $0.name == .localDurability && $0.outcome == .pass && $0.facts.contains { $0.name == .localDurable } } }
-                let exchange = records.contains { $0.kind == .done && $0.checks.contains { $0.name == .coordinatorResult && $0.outcome == .pass && $0.facts.contains { $0.name == .syncResult } } }
-                if mutation && exchange { completed = true; break }
+                // Serve the exact ten-action program through its durable,
+                // explicit joined close terminal. A mutation/exchange is partial.
+                if AgentEngine.smokeCompleted(records) { completed = true; break }
                 if records.contains(where: { $0.kind == .started && $0.action == .close }) { throw AgentFailure.execution }
             }
             guard completed else { throw AgentFailure.execution }
-            try await runtime.cancelAndJoin()
             try admitted.revalidate()
             try storage.replace(.status, with: JSONEncoder().encode(SmokeStatus(outcome: "smoke-completed", failure: nil, user_steps: [], dependencies: [])))
         } catch {

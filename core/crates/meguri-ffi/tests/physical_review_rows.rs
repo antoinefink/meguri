@@ -5,7 +5,7 @@ use meguri_ffi::{
     CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
     collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
     physical_review_rows::PhysicalReviewCell,
-    test_hooks::{collection_for_testing, test_physical_review_rows},
+    test_hooks::{collection_for_testing, test_physical_review_rows, test_smoke_integrity},
 };
 use meguri_model::{
     card::{CardQueue, CardType},
@@ -184,6 +184,11 @@ fn physical_observer_matches_actual_card_history_and_one_snapshot_without_mutati
                 .unwrap(),
         );
     }
+    let integrity = test_smoke_integrity().unwrap();
+    assert_eq!(integrity.generation, observed.generation);
+    assert_eq!(integrity.seq, observed.seq);
+    assert!(integrity.integrity_ok && integrity.schema_ok);
+    assert_eq!(integrity.reference_failures, 0);
     let missing = test_physical_review_rows(i64::MAX, i64::MAX).unwrap();
     assert!(missing.card.is_none() && missing.revlog.is_none());
     let one_missing = test_physical_review_rows(card_id.0, i64::MAX).unwrap();
@@ -193,5 +198,6 @@ fn physical_observer_matches_actual_card_history_and_one_snapshot_without_mutati
     assert_eq!(test_physical_review_rows(card_id.0, revlog_id.0).unwrap(), observed);
     meguri_ffi::lifecycle::close_collection().unwrap();
     assert!(test_physical_review_rows(card_id.0, revlog_id.0).is_err());
+    assert!(test_smoke_integrity().is_err());
     assert!(meguri_ffi::physical_review_rows::observe(&collection, card_id.0, revlog_id.0).is_err());
 }
