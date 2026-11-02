@@ -24,8 +24,11 @@ Diagnostic prints were removed.
 
 Final `swift-test/20261102T032234Z-79890` passed 38 tests, no skips: 25 protocol
 tests plus 13 account-input tests. Privacy `private/20261102T032247Z-81241`
-and similarity `similarity/20261102T031807Z-78856` passed. The later account
-test-only change also passed `similarity/20261102T032333Z-81566`.
+and app-hosted source similarity `similarity/20261102T031807Z-78856` passed.
+That scan skipped its directory argument. Exact shared-file coverage passed
+`similarity/20261102T032536Z-82945`; the account test file passed
+`similarity/20261102T032333Z-81566`. Together these cover all ten Swift files.
+Committed-tree static checks `static-checks/20261102T032452Z-82604` passed.
 
 Actual product and receipt checks, fixture delivery, operation recovery,
 runtime integration and the app-hosted signed lane remain required. Missing

@@ -22,7 +22,9 @@ All four refusal assertions and negative authority cases remain.
 
 Final `swift-test/20261102T032234Z-79890` passed all 38 focused tests, no skips,
 including this helper's 13 tests. Privacy `private/20261102T032247Z-81241`
-and final-file similarity `similarity/20261102T032333Z-81566` passed.
+passed. The helper source passed exact-file similarity
+`similarity/20261102T032536Z-82945`; its test file passed
+`similarity/20261102T032333Z-81566`.
 No actual account, SDK request, VM operation or user setup was used.
 
 Runtime lookup, database-start ordering, private delivery and signed execution
