@@ -27,3 +27,7 @@ It finds no P0–P2 issue or missing witness for this one obligation. The
 spec-writer may remove only the K17.4/A9a P24 confirmed bullet; its required
 Q11 test remains. Signed A9a/A9b, broader Q5/Q6, Q11 and U113 acceptance remain
 pending, with the original integration batch and gates still open.
+
+Closure36734582 removes that P24 item and retains the Q11 test cell. Final
+static81394 passes3/3. No runtime or test source changes were needed; earlier
+Rust lint and similarity evidence still covers the unchanged code.
