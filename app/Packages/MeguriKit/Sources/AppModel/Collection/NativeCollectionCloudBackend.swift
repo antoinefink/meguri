@@ -105,7 +105,17 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         try await accounts.begin(transition: transition)
     }
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
-        let result = await accounts.read(id)
+        let complete = await prepareAccountRead(id)
+        return await complete(true)
+    }
+    func prepareAccountRead(_ id: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        let complete = await accounts.prepareRead(id)
+        return { [self] admitted in
+            guard admitted else { return .init(outputs: [], error: CancellationError(), deferred: false) }
+            return await projectAccountRead(await complete())
+        }
+    }
+    private func projectAccountRead(_ result: CloudAppAccountReadResult) async -> SyncCommandResult {
         guard result.verified, result.error == nil, !closed, !Task.isCancelled else {
             return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
         }

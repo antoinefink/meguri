@@ -607,6 +607,245 @@ extension ReviewCollectionStartupTests {
         } catch { await harness.cleanup(); throw error }
     }
 
+    @Test(arguments: [false, true])
+    func explicitResumeJoinsPreissuedStatusBeforeRotatingOwner(pauseDuringDrain: Bool) async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        var releaseCommand: CheckedContinuation<Void, Never>?
+        defer { releaseCommand?.resume(); harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.prepareStoppedResume()
+            let backend = try #require(harness.backends.last)
+            let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var held = false, returned = false, waited = false, admitted = false
+            let starts = harness.factory.created.count
+            let accountReads = harness.factory.accountReads
+            backend.beforeExecution = { command in
+                guard case .statusChanged(let status) = command.action,
+                      status.controls.userPaused == true, !held else { return }
+                held = true
+                await withCheckedContinuation {
+                    releaseCommand = $0
+                    entered.continuation.yield(())
+                }
+                #expect(!Task.isCancelled)
+            }
+            backend.afterExecution = { command, result in
+                guard case .statusChanged(let status) = command.action,
+                      status.controls.userPaused == true else { return }
+                #expect(result.error == nil && !result.deferred)
+                returned = true
+            }
+            // Hold an actual Core-issued command before native admission.
+            // Unpausing may issue more work; none may cross the Resume boundary.
+            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            try await initialCloudSignal(entered.stream, stage: "resume-preissued-status")
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            await harness.sync.waitForInputs()
+            harness.sync.observeResumePolicyDrain = { stage in
+                switch stage {
+                case .waiting:
+                    guard !waited else { return }
+                    waited = true
+                    #expect(!returned && !harness.sync.settings.enabled)
+                    #expect(harness.factory.created.count == starts)
+                    if pauseDuringDrain {
+                        harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+                    }
+                    releaseCommand?.resume(); releaseCommand = nil
+                case .finished:
+                    admitted = true
+                    #expect(returned && !pauseDuringDrain)
+                    #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+                }
+            }
+            await harness.sync.confirmResume()
+            #expect(waited && returned && admitted == !pauseDuringDrain)
+            #expect(harness.sync.preview == nil && harness.sync.connectionFailure == nil)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            #expect(harness.sync.settings.enabled == !pauseDuringDrain)
+            #expect(harness.persistedEnabled == !pauseDuringDrain)
+            if pauseDuringDrain {
+                #expect(harness.factory.created.count == starts && harness.factory.live.isEmpty)
+                #expect(harness.factory.accountReads == accountReads)
+            } else {
+                try await backend.waitForStart()
+                #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1)
+                #expect(harness.factory.created.last?.serialization == nil)
+                #expect(harness.factory.accountReads == accountReads + 1)
+                #expect(harness.sync.status?.controls.bindingActive == true)
+            }
+            harness.sync.observeResumePolicyDrain = nil
+            backend.beforeExecution = nil; backend.afterExecution = nil
+            #expect(await harness.owner.close())
+        } catch {
+            releaseCommand?.resume(); releaseCommand = nil
+            await harness.cleanup()
+            throw error
+        }
+    }
+
+    @Test(arguments: [InitialCloudProofWindow.reopen, .resume])
+    func firstAccountProofJoinsPreissuedRealStatus(window: InitialCloudProofWindow) async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        var releaseCommand: CheckedContinuation<Void, Never>?
+        var released = false
+        var original: Task<Void, any Error>?
+        var target: InitialCloudBackend?
+        defer { releaseCommand?.resume(); harness.release(); harness.removeTemporaryStorage() }
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var heldCommand: CloudPolicyCommand?
+        var returned = false, waited = false, admitted = false
+        var starts = 0, reads = 0, verified = 0
+        func observe(_ sync: SyncCoordinator) {
+            sync.observeAccountPolicyDrain = { stage in
+                switch stage {
+                case .waiting:
+                    guard !waited else { return }
+                    waited = true
+                    #expect(heldCommand != nil && !returned)
+                    waiting.continuation.yield(())
+                case .finished:
+                    guard !admitted else { return }
+                    admitted = true
+                    // This runs only after the real command result was ACKed.
+                    #expect(returned && !sync.operationFailed && sync.failureRevision == 0)
+                }
+            }
+        }
+        func configure(_ backend: InitialCloudBackend) {
+            target = backend
+            starts = harness.factory.created.count; reads = harness.factory.accountReads
+            verified = backend.verifiedAccountReads.count
+            backend.beforeExecution = { command in
+                guard case .statusChanged = command.action, heldCommand == nil else { return }
+                heldCommand = command
+                if !released { await withCheckedContinuation { releaseCommand = $0 } }
+            }
+            backend.afterExecution = { command, result in
+                guard heldCommand?.raw === command.raw else { return }
+                #expect(result.error == nil && !result.deferred)
+                returned = true
+            }
+        }
+        do {
+            switch window {
+            case .reopen:
+                original = Task {
+                    try await harness.prepareStoppedResume(discover: false, beforeReopen: { sync in
+                        harness.configureBackend = configure
+                        observe(sync)
+                    })
+                }
+            case .resume:
+                try await harness.prepareStoppedResume()
+                configure(try #require(harness.backends.last))
+                observe(harness.sync)
+                original = Task { await harness.sync.confirmResume() }
+            }
+            try await initialCloudSignal(waiting.stream, stage: "first-proof-status-drain")
+            let backend = try #require(target)
+            // The SDK resolver really returned, but Core has not accepted proof.
+            #expect(harness.factory.accountReads == reads + 1)
+            #expect(backend.verifiedAccountReads.count == verified)
+            #expect(!returned && !admitted && harness.factory.created.count == starts)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            released = true
+            releaseCommand?.resume(); releaseCommand = nil
+            try await original?.value
+            await harness.sync.prepareConnectionAuthority()
+            #expect(waited && returned && admitted)
+            #expect(backend.verifiedAccountReads.count > verified)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            #expect(!harness.sync.settings.automatic)
+            if window == .resume {
+                try await backend.waitForStart()
+                #expect(backend.starts.count == 1 && backend.starts.first?.succeeded == true)
+                #expect(backend.starts.first?.automatic == false)
+                #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1)
+            } else {
+                #expect(backend.starts.isEmpty && harness.factory.created.count == starts)
+                #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            }
+            backend.beforeExecution = nil; backend.afterExecution = nil
+            harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
+            #expect(await harness.owner.close())
+        } catch {
+            // Release and join the original command/read, including a failed
+            // native result and its ACK; no test result or proof is substituted.
+            released = true
+            releaseCommand?.resume(); releaseCommand = nil
+            harness.release()
+            _ = try? await original?.value
+            target?.beforeExecution = nil; target?.afterExecution = nil
+            harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
+            await harness.cleanup()
+            throw error
+        }
+    }
+
+    @Test func closeDuringResumeDrainJoinsOriginalStatusWithoutAdmittingResume() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        var releaseCommand: CheckedContinuation<Void, Never>?
+        var released = false
+        var confirmation: Task<Void, Never>?, closing: Task<Bool, Never>?
+        defer { releaseCommand?.resume(); harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.prepareStoppedResume()
+            let backend = try #require(harness.backends.last)
+            let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var heldCommand: CloudPolicyCommand?
+            var returned = false, admitted = false
+            let starts = harness.factory.created.count, reads = harness.factory.accountReads
+            backend.beforeExecution = { command in
+                guard case .statusChanged(let status) = command.action,
+                      status.controls.userPaused == true, heldCommand == nil else { return }
+                heldCommand = command
+                if !released { await withCheckedContinuation { releaseCommand = $0 } }
+            }
+            backend.afterExecution = { command, result in
+                guard heldCommand?.raw === command.raw else { return }
+                #expect(result.error == nil && !result.deferred)
+                returned = true
+            }
+            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            await harness.sync.waitForInputs()
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            harness.sync.observeResumePolicyDrain = { stage in
+                switch stage {
+                case .waiting: waiting.continuation.yield(())
+                case .finished: admitted = true
+                }
+            }
+            confirmation = Task { await harness.sync.confirmResume() }
+            try await initialCloudSignal(waiting.stream, stage: "close-during-resume-drain")
+            #expect(heldCommand != nil && !returned && !admitted)
+            let quiescing = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            backend.observeQuiesce = { quiescing.continuation.yield(()) }
+            closing = Task { await harness.sync.cancelAndDrain() }
+            try await initialCloudSignal(quiescing.stream, stage: "resume-drain-close-ownership")
+            // Close has cancelled the retained originals and entered quiesce.
+            // Only the actual held command is released; Resume is never forced.
+            released = true
+            releaseCommand?.resume(); releaseCommand = nil
+            await confirmation?.value
+            #expect(await closing?.value == true)
+            backend.observeQuiesce = nil
+            #expect(returned && !admitted && backend.closeCount == 1)
+            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+            #expect(harness.factory.accountReads == reads && harness.factory.created.count == starts)
+            #expect(harness.factory.live.isEmpty && !harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            backend.beforeExecution = nil; backend.afterExecution = nil
+            harness.sync.observeResumePolicyDrain = nil
+            #expect(await harness.owner.close())
+        } catch {
+            released = true
+            releaseCommand?.resume(); releaseCommand = nil
+            await confirmation?.value; _ = await closing?.value
+            await harness.cleanup()
+            throw error
+        }
+    }
+
     @Test func pausedOrCancelledResumeNeverEnablesAndAConsumedPreviewCannotChangeDirection() async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
         defer { harness.release(); harness.removeTemporaryStorage() }
@@ -642,6 +881,7 @@ extension ReviewCollectionStartupTests {
     }
 }
 
+nonisolated enum InitialCloudProofWindow: Sendable { case reopen, resume }
 nonisolated enum InitialCloudHold: Sendable { case pause, background }
 nonisolated enum InitialCloudInterruption: Sendable { case account, close }
 
@@ -691,6 +931,7 @@ nonisolated struct InitialCloudFixture: Sendable {
     let factory: InitialCloudSDKFactory
     let fixture: InitialCloudFixture
     var backends: [InitialCloudBackend] = []
+    var configureBackend: (@MainActor (InitialCloudBackend) -> Void)?
     private(set) var original: Task<Void, Never>?
     lazy var sync = makeSync()
 
@@ -702,6 +943,7 @@ nonisolated struct InitialCloudFixture: Sendable {
             #expect(backends.allSatisfy { $0.closeCount == 1 })
             let backend = try await InitialCloudBackend.make(transport: InitialCloudTransport(fixture: fixture, page: page, requests: requests),
                 mediaTransport: InitialCloudMediaTransport(), factory: factory, persisted: persisted)
+            configureBackend?(backend)
             backends.append(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
@@ -732,7 +974,7 @@ nonisolated struct InitialCloudFixture: Sendable {
         original = Task { [self] in await sync.waitForConnectionPreview(); page.finishedBeforeAdmission() }
         try await page.waitForAdmission()
     }
-    func prepareStoppedResume(discover: Bool = true) async throws {
+    func prepareStoppedResume(discover: Bool = true, beforeReopen: (@MainActor (SyncCoordinator) -> Void)? = nil) async throws {
         try await beginAndWaitForPage()
         try requireHealthy(stage: "adoption-admitted")
         release()
@@ -764,6 +1006,7 @@ nonisolated struct InitialCloudFixture: Sendable {
         let starts = factory.created.count
         sync = makeSync()
         owner = makeOwner()
+        beforeReopen?(sync)
         await owner.start()
         try requireHealthy(stage: "stopped-owner-reopened")
         try #require(owner.state == .ready)
@@ -799,6 +1042,9 @@ nonisolated struct InitialCloudFixture: Sendable {
     func removeTemporaryStorage() {
         sync.observeInitialAdoptionPreview = nil
         sync.observeInitialAdoptionAcceptance = nil
+        sync.observeResumePolicyDrain = nil
+        sync.observeAccountPolicyDrain = nil
+        configureBackend = nil
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
@@ -952,6 +1198,9 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     private let backend: NativeCollectionCloudBackend
     var connection: CoreCloudConnectionService? { backend.connection }
     var own: CloudOwnExecutor? { backend.own }
+    var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
+    var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
+    var observeQuiesce: (@MainActor () -> Void)?
     let workflow: CoreCloudWorkflowService
     private(set) var closeCount = 0
     private(set) var localRefreshes = 0
@@ -1034,7 +1283,9 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
             do { before = try await InitialCloudExchangeObservation.read(command) }
             catch { Issue.record("Original exchange observation failed: \(String(describing: error))") }
         }
+        await beforeExecution?(command)
         let result = await backend.execute(command)
+        afterExecution?(command, result)
         if case .deleteZones = command.action { lastZoneDeletion = command; zoneDeletions.continuation.yield(()) }
         if case .statusChanged = command.action { lastStatusCommand = command }
         lastExecute = "\(stage): returned; deferred=\(result.deferred); failed=\(result.error != nil)"
@@ -1054,7 +1305,18 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     func beginAccountRead(transition: Bool) async throws -> UInt64 { try await backend.beginAccountRead(transition: transition) }
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
         lastRead = "account-read: awaiting"
-        let result = await backend.readAccount(id)
+        let complete = await prepareAccountRead(id)
+        return await complete(true)
+    }
+    func prepareAccountRead(_ id: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        lastRead = "account-read: resolving"
+        let complete = await backend.prepareAccountRead(id)
+        return { [self] admitted in
+            lastRead = "account-read: committing"
+            return recordAccountRead(await complete(admitted), id: id)
+        }
+    }
+    private func recordAccountRead(_ result: SyncCommandResult, id: UInt64) -> SyncCommandResult {
         lastRead = "account-read: returned; verified=\(result.accountVerified); failed=\(result.error != nil)"
         lastReadError = result.error.map { String(describing: $0) }
         if result.accountVerified { verifiedAccountReads.append(id) }
@@ -1064,7 +1326,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     func takeAccountReadRequest() async -> Bool { await backend.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await backend.freezeForSuspend() }
     func resumeAfterCoreResume() async { await backend.resumeAfterCoreResume() }
-    func quiesce() async throws { try await backend.quiesce() }
+    func quiesce() async throws { observeQuiesce?(); try await backend.quiesce() }
     func close() async throws {
         try await backend.close()
         zoneDeletions.continuation.finish()

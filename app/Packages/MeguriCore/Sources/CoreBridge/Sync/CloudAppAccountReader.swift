@@ -46,12 +46,22 @@ public final class CloudAppAccountReader {
         return id
     }
     public func read(_ id: UInt64) async -> CloudAppAccountReadResult {
+        let complete = await prepareRead(id)
+        return await complete()
+    }
+    /// Resolve outside the app input lane. The returned completion performs the
+    /// actual Core proof and rechecks its original read/epoch at admission.
+    public func prepareRead(_ id: UInt64) async -> @MainActor () async -> CloudAppAccountReadResult {
         let expected = epoch
-        guard admits(id, epoch: expected) else { return cancelled() }
+        guard admits(id, epoch: expected) else { return { self.cancelled() } }
         let permit = replayPermit
         let resolved: Result<CloudResolvedAccount?, any Error>
         do { resolved = .success(try await factory.resolveAccount()) }
         catch { resolved = .failure(error) }
+        return { [self] in await completeRead(id, epoch: expected, permit: permit, resolved: resolved) }
+    }
+    private func completeRead(_ id: UInt64, epoch expected: UInt64, permit: CloudAccountReplayPermit,
+                              resolved: Result<CloudResolvedAccount?, any Error>) async -> CloudAppAccountReadResult {
         guard admits(id, epoch: expected) else { return cancelled() }
         committing += 1
         defer {

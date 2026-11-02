@@ -35,6 +35,9 @@ protocol SyncCoordinatorBackend: AnyObject {
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult
     func beginAccountRead(transition: Bool) async throws -> UInt64
     func readAccount(_ read: UInt64) async -> SyncCommandResult
+    // Resolve only. The completion commits proof only when admitted == true;
+    // cancellation still returns its original failure through result admission.
+    func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult
     func takeAccountReadRequest() async -> Bool
     func freezeForSuspend() async throws
     func resumeAfterCoreResume() async
@@ -42,6 +45,12 @@ protocol SyncCoordinatorBackend: AnyObject {
     func close() async throws
 }
 extension SyncCoordinatorBackend {
+    // Transport-only test results already completed; retain their failures
+    // even when admission closes. Native backends defer the actual proof.
+    func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        let result = await readAccount(read)
+        return { _ in result }
+    }
     func takeAccountReadRequest() async -> Bool { false }
     func freezeForSuspend() async throws {}
     func resumeAfterCoreResume() async {}
@@ -101,8 +110,18 @@ public final class SyncCoordinator {
         case account(Bool)
         case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
         case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool, acknowledged: CheckedContinuation<Void, Never>?)
+        case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                             complete: @MainActor (Bool) async -> SyncCommandResult,
+                             acknowledged: CheckedContinuation<Bool, Never>)
+        case resumeBinding(CloudConnectionPreview, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
+                           acknowledged: CheckedContinuation<ResumeAdmission, any Error>)
         case barrier(CheckedContinuation<Void, Never>)
     }
+    private enum ResumeAdmission { case pending, cancelled, resumed }
+    enum ResumePolicyDrainStage { case waiting, finished }
+    // Scheduling observation only; never supplies a result or a capability.
+    @ObservationIgnored var observeAccountPolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
+    @ObservationIgnored var observeResumePolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
     private struct Issued { let command: CloudPolicyCommand; let generation: UInt64; let sequence: UInt64 }
     @ObservationIgnored private let bootstrap: @MainActor () async throws -> Void
     @ObservationIgnored private let makeBackend: @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend
@@ -424,7 +443,12 @@ public final class SyncCoordinator {
                 switch intent {
                 case .adoption: _ = try await connection.confirmAdoption(handle)
                 case .publication: _ = try await connection.confirmPublication(handle)
-                case .resume: try await connection.resumeBinding(handle)
+                case .resume:
+                    guard try await resumeBindingAfterPolicyDrain(handle, service: connection,
+                        generation: expected, revision: revision) else {
+                        try await connection.cancelPreview(handle)
+                        return
+                    }
                 }
                 guard expected == generation, revision == hostRevision,
                       self.backend === backend, backend.connection === connection else { return }
@@ -457,6 +481,24 @@ public final class SyncCoordinator {
             }
         }
         await ownTask?.value
+    }
+    private func resumeBindingAfterPolicyDrain(_ handle: CloudConnectionPreview, service: CoreCloudConnectionService,
+                                              generation expected: UInt64, revision: UInt64) async throws -> Bool {
+        while true {
+            let admission: ResumeAdmission = try await withCheckedThrowingContinuation {
+                enqueue(.resumeBinding(handle, service: service, generation: expected, revision: revision, acknowledged: $0))
+            }
+            switch admission {
+            case .resumed: return true
+            case .cancelled: return false
+            case .pending:
+                observeResumePolicyDrain?(.waiting)
+                await prepareConnectionAuthority()
+                // Do not join ownTask: it owns this confirmation. Results and
+                // their follow-up commands still run on the ordinary input lane.
+                for original in Array(operationTasks.values) { await original.value }
+            }
+        }
     }
     public func resumeConnection() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
@@ -640,6 +682,46 @@ public final class SyncCoordinator {
     private func reduce(_ input: Input) async {
         switch input {
         case .barrier(let continuation): continuation.resume()
+        case .completeAccount(let read, let original, let expected, let revision, let complete, let acknowledged):
+            guard !closing, !suspended, !replacing, accountTask?.isCancelled == false,
+                  expected == generation, revision == hostRevision, backend === original else {
+                let result = await complete(false)
+                await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+                acknowledged.resume(returning: true)
+                return
+            }
+            guard operationTasks.isEmpty, !inputQueue.contains(where: { if case .result = $0 { true } else { false } }) else {
+                acknowledged.resume(returning: false)
+                return
+            }
+            // Lookup has returned, but no proof has been committed yet. Only
+            // this lane may rotate authority, after all original command ACKs.
+            observeAccountPolicyDrain?(.finished)
+            let result = await complete(true)
+            await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+            if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
+            acknowledged.resume(returning: true)
+        case .resumeBinding(let handle, let service, let expected, let revision, let acknowledged):
+            guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
+                  expected == generation, revision == hostRevision, backend?.connection === service else {
+                acknowledged.resume(returning: .cancelled)
+                return
+            }
+            // Returned outputs and their follow-up commands must be fully
+            // acknowledged before Resume can replace their native owner.
+            let queuedResult = inputQueue.contains { if case .result = $0 { return true }; return false }
+            guard operationTasks.isEmpty, accountTask == nil, pendingAccountRead == nil, !queuedResult else {
+                acknowledged.resume(returning: .pending)
+                return
+            }
+            // Resume rotates Core's command owner and backend guard. Admit it
+            // only after every old command result was acknowledged, and keep
+            // policy/account inputs ordered behind the actual native call.
+            observeResumePolicyDrain?(.finished)
+            do {
+                try await service.resumeBinding(handle)
+                acknowledged.resume(returning: .resumed)
+            } catch { acknowledged.resume(throwing: error) }
         case .result(let result, let expected, let revision, let shutdownCancelled, let acknowledged):
             if expected == generation, revision == hostRevision, !replacing, !suspended {
                 for output in result.outputs {
@@ -900,9 +982,20 @@ public final class SyncCoordinator {
             while let read = pendingAccountRead, !closing, !Task.isCancelled {
                 pendingAccountRead = nil
                 let expected = generation, revision = hostRevision
-                let result = await backend.readAccount(read)
-                enqueue(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
-                if result.accountVerified { enqueue(.ownAccountProof(read, generation: expected, revision: revision)) }
+                let complete = await backend.prepareAccountRead(read)
+                while true {
+                    let finished = await withCheckedContinuation {
+                        enqueue(.completeAccount(read, backend: backend, generation: expected, revision: revision,
+                            complete: complete, acknowledged: $0))
+                    }
+                    if finished { break }
+                    observeAccountPolicyDrain?(.waiting)
+                    // Never join accountTask here: this is that original task.
+                    // Its completion/result must leave the input lane available
+                    // to acknowledge older operations and their follow-up work.
+                    for original in Array(operationTasks.values) { await original.value }
+                    await waitForInputs()
+                }
             }
         }
     }

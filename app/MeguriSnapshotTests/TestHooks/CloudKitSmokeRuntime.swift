@@ -286,6 +286,9 @@ import Foundation
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
         await production.readAccount(id)
     }
+    func prepareAccountRead(_ id: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        await production.prepareAccountRead(id)
+    }
     func takeAccountReadRequest() async -> Bool { await production.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }
     func resumeAfterCoreResume() async {

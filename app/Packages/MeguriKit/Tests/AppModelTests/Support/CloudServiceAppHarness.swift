@@ -218,10 +218,17 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         }
     }
     func readAccount(_ read: UInt64) async -> SyncCommandResult {
-        let result = await production.readAccount(read)
-        if let error = result.error { capture(error, stage: .readAccountError) }
-        for output in result.outputs { capture(output, stage: .readAccountOutputs) }
-        return result
+        let complete = await prepareAccountRead(read)
+        return await complete(true)
+    }
+    func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        let complete = await production.prepareAccountRead(read)
+        return { [self] admitted in
+            let result = await complete(admitted)
+            if let error = result.error { capture(error, stage: .readAccountError) }
+            for output in result.outputs { capture(output, stage: .readAccountOutputs) }
+            return result
+        }
     }
     func takeAccountReadRequest() async -> Bool { await production.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }

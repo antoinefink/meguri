@@ -153,3 +153,51 @@ it is not a passing receipt. Its export repair has separate focused evidence.
 The original batch base above remains in force. No Unit trailer, P24 closure,
 milestone, signed-device or release acceptance is granted by this component.
 No VM job ran while Antoine was resizing it.
+
+## Authorized rounds 7 and 8, 2026-11-02
+
+Antoine approved two focused additional rounds and then confirmed continued work
+using best judgment. The resolution of E-20261101T232833Z-dbc5 records this
+bounded scope. It grants no acceptance or assertion change. The original U114
+start and batch base above remain in force. Both patches began from 60b8cc90;
+integration began at 2de2d8ae after the approval and spec-only commits.
+
+Round 7 orders Resume on the existing input lane. It joins original operations
+and result acknowledgements before rotating Core ownership, then checks current
+policy, connection and generation again. A held real status result and a pause
+control cover the race. Independent review found no required finding.
+
+Round 8 separates account lookup from admission of its original Core proof.
+The original account read, epoch and replay permit remain bound to completion.
+The input lane waits for earlier command acknowledgements before admitting that
+proof. Native wrappers forward the same completion. No Rust guard, schema,
+account comparison, assertion or timing limit changes. New real-Core cases hold
+status work across account proof after reopen and Resume; another closes while
+Resume drains original status work.
+
+Prepared exports: cleanroom/20261102T104955Z-58830 (round 7) and
+cleanroom/20261102T111045Z-74938 (combined rounds 7 and 8).
+Fixer session: s-20261025T162405Z-9dc656e4.
+Independent reviewer: native_bounds_review, actual combined six-file patch.
+Final source review found no P0/P1 finding and one residual P2:
+
+- Closing while an original account lookup is held rejects its proof, but that
+  cancellation is currently reported without shutdown attribution. The same
+  generation can therefore record an operation failure during intended close.
+  Preserve this finding under the round-3-and-later policy; a repair would need
+  a test that holds an account lookup while close begins. Actual account/Core
+  errors must still be reported.
+
+Replacement during deferred proof admission is a coverage gap. Source inspection
+is not compilation or execution evidence. These rounds exhaust the two approved
+additional rounds. No further repair round is implied.
+
+Verification is pending: native compilation and the unchanged focused regression
+set have not run on this patch. The filter must include firstAccountProof and
+closeDuringResume in addition to the prior cases. Original failed receipts stay
+failed. The full gate gate/20261102T075235Z-35258 completed on 60b8cc90 and
+failed; it predates this patch and supplies no passing coverage for it.
+
+This is an unaccepted WIP checkpoint. Storage is below the required 40 GB, so
+new builds are held while source review and integration continue. No Unit
+trailer, milestone acceptance or signed-SDK result is granted.
