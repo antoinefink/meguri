@@ -233,3 +233,23 @@ keeps its factory-time hold. All assertions, command identities, counts,
 release/ACK paths, joins and timing limits remain unchanged. Independent
 review found no required finding. No production behavior or shutdown P2 fix
 is included. Focused native execution of the corrected window remains pending.
+
+The final approved test-only check swift-test/20261102T124305Z-66693
+compiled and executed six coupled tests: five passed and one failed, no skips.
+The same Resume account-proof case now reaches its later phase but reports
+heldCommand absent at its waiting observation and a changed factory count.
+The separate Resume-drain, close and three original regressions passed.
+No assertion is relaxed and no additional repair round is authorized. The
+unit remains unaccepted while read-only diagnosis and independent U113 work
+continue. These focused results do not replace a full integration gate.
+
+Read-only follow-up separates two test assumptions from the approved contract.
+The waiting observer means any original operation or queued result remains;
+it does not prove that the test's status command has entered its hold.
+Core Resume restores verified identity only after retained binding validation.
+A later pending lookup keeps that process proof; it is not account-loss proof.
+The spec writer confirmed this from sync/cloudkit-recovery V9.1/V9.2 and
+sync/policy P6/P11.1. Reopen still begins unverified and must create no SDK
+instance before its first matching process proof. Actual account/status changes
+still stop or close their gates. No source or assertion was changed after
+this analysis, and no further repair is authorized.
