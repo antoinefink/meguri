@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Generated parent/transport tests only. No signed, VM, SDK or smoke evidence."""
+import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -51,6 +53,214 @@ def pair(commands, n, seq):
     done = record(commands, n, seq+1, "done", checks=[
         {"name": "integrity", "outcome": "pass", "facts": [{"name": "commandCompleted"}]}])
     return raw(start) + raw(done)
+
+
+def generated_checks():
+    # Exact current Swift encodings with generated counts/payload digests.
+    # No fixture here is an actual storage, SDK or signed execution receipt.
+    media = b"".join(hashlib.sha256(
+        ("MeguriCloudSmoke/%s/mac1/m1/%d" % (RUN, n)).encode()).digest() for n in range(320))
+    rows = [
+        ("integrity", [{"name": "integrity", "count": 5}]),
+        ("coordinatorResult", [{"name": "applied", "count": 20, "operation": "p1"}]),
+        ("coordinatorResult", [{"name": "stateSaved", "count": 7, "engine": "engine1", "operation": "p1"}]),
+        ("localDurability", [{"name": "localCommitted", "count": 8, "operation": "n1"},
+                             {"name": "localDurable", "count": 1, "digest": "1"*64, "operation": "n1"}]),
+        ("localDurability", [{"name": "applied", "count": 1, "operation": "c1"}]),
+        ("localDurability", [{"name": "localCommitted", "count": 10, "operation": "s1"},
+                             {"name": "localDurable", "count": 2, "digest": "2"*64, "operation": "c1"},
+                             {"name": "localDurable", "count": 1, "digest": "3"*64, "operation": "r1"}]),
+        ("localDurability", [{"name": "applied", "count": 1, "operation": "s1"}]),
+        ("localDurability", [{"name": "localCommitted", "count": 1, "operation": "m1"},
+                             {"name": "localDurable", "count": 1, "digest": "4"*64, "operation": "m1"},
+                             {"name": "localDurable", "count": 10240,
+                              "digest": hashlib.sha256(media).hexdigest(), "operation": "m1"}]),
+        ("coordinatorResult", [{"name": "stateSaved", "count": 1, "digest": "1"*64, "operation": "n1"},
+                              {"name": "stateSaved", "count": 2, "digest": "2"*64, "operation": "c1"},
+                              {"name": "stateSaved", "count": 1, "digest": "3"*64, "operation": "r1"},
+                              {"name": "stateSaved", "count": 1, "digest": "4"*64, "operation": "m1"},
+                              {"name": "syncResult", "count": 1, "operation": "exchange1"}]),
+        ("integrity", [{"name": "integrity", "count": 12}])]
+    checks = {n: [{"name": name, "outcome": "pass", "facts": facts}]
+              for n, (name, facts) in enumerate(rows, 1)}
+    checks[10].append({"name": "localDurability", "outcome": "pass", "facts": [{"name": "ownedWorkJoined"}]})
+    return checks
+
+
+def generated_observations(checks):
+    observations = {n: [{"name": "accountVerified"}] + copy.deepcopy(c[0]["facts"])
+                    for n, c in checks.items()}
+    observations[1] = [{"name": "accountVerified"}, {"name": "coreOpened", "count": 2}]
+    observations[9][1:1] = [{"name": "syncResult", "count": 0, "operation": label}
+                           for label in ("media-pending", "media-missing", "media-unknown")]
+    observations[10] = [{"name": "accountVerified"}, {"name": "ownedWorkJoined"}]
+    return observations
+
+
+def generated_journal(commands, count=10, checks=None, observations=None):
+    checks = generated_checks() if checks is None else checks
+    observations = generated_observations(checks) if observations is None else observations
+    lines = []
+    for n in range(1, count+1):
+        lines.append(record(commands, n, len(lines)+1, "started", action=s.PROGRAM[n-1][0]))
+        for item in observations[n]:
+            lines.append(record(commands, n, len(lines)+1, "observation", facts=[item]))
+        lines.append(record(commands, n, len(lines)+1, "done", checks=checks[n]))
+    return b"".join(raw(line) for line in lines)
+
+
+class CompletionMappingTests(unittest.TestCase):
+    def setUp(self):
+        self.commands = s.command_bytes(raw(header()))
+        self.checks = generated_checks()
+
+    def completion(self, n, checks=None, observations=None):
+        checks = self.checks if checks is None else checks
+        journal = s.Journal(raw(header()), self.commands)
+        journal.inspect(generated_journal(self.commands, n, checks, observations), n)
+        return s.completion(n, journal.done_checks[n], journal)
+
+    def refused(self, n, checks=None, observations=None):
+        with self.assertRaises(s.v.Refused) as error:
+            self.completion(n, checks, observations)
+        self.assertNotIsInstance(error.exception, s.Missing)
+
+    def test_all_exact_generated_encodings_validate_but_never_prove_smoke(self):
+        for n in range(1, 11):
+            with self.subTest(command=n):
+                if n < 3:
+                    self.assertIsNone(self.completion(n))
+                else:
+                    with self.assertRaisesRegex(s.Missing, "^smoke-publication-sdk-order$"):
+                        self.completion(n)
+
+    def test_core_opened_requires_only_typed_generation(self):
+        for count in (0, 1, 2**64-1):
+            s.fact({"name": "coreOpened", "count": count})
+        for value in ({"name": "coreOpened"}, {"name": "coreOpened", "count": True},
+                      {"name": "coreOpened", "count": -1}, {"name": "coreOpened", "count": 2**64},
+                      {"name": "coreOpened", "count": 1.0}, {"name": "coreOpened", "count": None},
+                      {"name": "coreOpened", "count": "1"},
+                      {"name": "coreOpened", "count": 1, "digest": "a"*64},
+                      {"name": "coreOpened", "count": 1, "operation": "p1"},
+                      {"name": "coreOpened", "count": 1, "extra": 0}, {"name": []}):
+            with self.subTest(value=value), self.assertRaises(s.v.Refused): s.fact(value)
+        for name in ("accountVerified", "ownedWorkJoined"):
+            s.fact({"name": name})
+            with self.assertRaises(s.v.Refused): s.fact({"name": name, "count": 1})
+
+    def test_each_step_rejects_wrong_check_outcome_kind_extra_and_duplicate(self):
+        for n in range(1, 11):
+            for key, value in (("name", "recovery"), ("name", []), ("outcome", "open"), ("outcome", "fail"),
+                               ("facts", []), ("extra", True)):
+                changed = copy.deepcopy(self.checks)
+                changed[n][0][key] = value
+                with self.subTest(command=n, field=key, value=value): self.refused(n, changed)
+            changed = copy.deepcopy(self.checks)
+            changed[n].append(copy.deepcopy(changed[n][0]))
+            self.refused(n, changed)
+            changed = copy.deepcopy(self.checks)
+            changed[n][0]["facts"][0]["name"] = "commandCompleted"
+            self.refused(n, changed)
+            changed = copy.deepcopy(self.checks)
+            changed[n][0]["facts"].append(copy.deepcopy(changed[n][0]["facts"][0]))
+            self.refused(n, changed)
+
+    def test_each_exact_fact_rejects_missing_extra_wrong_label_count_and_digest(self):
+        for n, checks in self.checks.items():
+            for ci, check in enumerate(checks):
+                for fi, item in enumerate(check["facts"]):
+                    mutations = [(key, None) for key in item]
+                    mutations += [("engine", "other"), ("operation", "other"), ("error_domain", "core"),
+                                  ("digest", "F"*64), ("count", True)]
+                    for key, value in mutations:
+                        changed = copy.deepcopy(self.checks)
+                        target = changed[n][ci]["facts"][fi]
+                        if value is None: del target[key]
+                        else: target[key] = value
+                        with self.subTest(command=n, check=ci, fact=fi, key=key, value=value):
+                            self.refused(n, changed)
+        for n, index, value in ((2, 0, 19), (5, 0, 2), (7, 0, 0), (8, 2, 10239),
+                                (4, 1, 0), (6, 1, 0), (6, 2, 0), (8, 1, 0), (9, 4, 0)):
+            changed = copy.deepcopy(self.checks)
+            changed[n][0]["facts"][index]["count"] = value
+            self.refused(n, changed)
+
+    def test_retained_observations_require_account_and_exact_operation_facts(self):
+        for n in range(1, 11):
+            for change in ("account", "operation", "duplicate", "order"):
+                obs = generated_observations(self.checks)
+                if change == "account": obs[n].pop(0)
+                elif change == "operation": obs[n].pop()
+                elif change == "duplicate": obs[n].append(copy.deepcopy(obs[n][-1]))
+                else: obs[n].reverse()
+                with self.subTest(command=n, change=change): self.refused(n, observations=obs)
+        obs = generated_observations(self.checks)
+        obs[4][1]["count"] += 1
+        self.refused(4, observations=obs)
+        for n, baseline in ((3, 4), (4, 6), (4, 7), (6, 7), (6, 8), (10, 9)):
+            changed = copy.deepcopy(self.checks)
+            changed[n][0]["facts"][0]["count"] = baseline
+            self.refused(n, changed)
+
+    def test_acknowledgements_match_each_retained_revision_and_digest(self):
+        for index in range(4):
+            for key, value in (("count", 99), ("digest", "f"*64), ("operation", "n1")):
+                if index == 0 and key == "operation": continue
+                changed = copy.deepcopy(self.checks)
+                changed[9][0]["facts"][index][key] = value
+                with self.subTest(index=index, key=key): self.refused(9, changed)
+        changed = copy.deepcopy(self.checks)
+        changed[9][0]["facts"][:4] = list(reversed(changed[9][0]["facts"][:4]))
+        with self.assertRaises(s.Missing): self.completion(9, changed)
+
+    def test_media_digest_uses_original_header_and_observation_accounting_is_required(self):
+        changed = copy.deepcopy(self.checks)
+        changed[8][0]["facts"][2]["digest"] = "f"*64
+        self.refused(8, changed)
+        for index in range(1, 4):
+            obs = generated_observations(self.checks)
+            obs[9].pop(index)
+            self.refused(9, observations=obs)
+        obs = generated_observations(self.checks)
+        obs[9][1]["operation"] = "media-unknown"
+        self.refused(9, observations=obs)
+        # Nonzero accounting is preserved, never silently rewritten to zero.
+        obs = generated_observations(self.checks)
+        obs[9][1]["count"] = 2
+        with self.assertRaises(s.Missing): self.completion(9, observations=obs)
+
+    def test_late_observation_cannot_supply_missing_preterminal_evidence(self):
+        observations = generated_observations(self.checks)
+        opened = observations[1].pop()
+        prefix = generated_journal(self.commands, 1, self.checks, observations)
+        late = record(self.commands, 1, len(prefix.splitlines())+1, "observation", facts=[opened])
+        journal = s.Journal(raw(header()), self.commands)
+        journal.inspect(prefix + raw(late), 1)
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-open-observation$"):
+            s.completion(1, journal.done_checks[1], journal)
+
+    def test_missing_context_or_changed_terminal_cannot_be_accepted(self):
+        with self.assertRaisesRegex(s.Missing, "^smoke-journal-context$"):
+            s.completion(1, self.checks[1])
+        journal = s.Journal(raw(header()), self.commands)
+        journal.inspect(generated_journal(self.commands, 2), 2)
+        changed = copy.deepcopy(self.checks[1])
+        changed[0]["facts"][0]["count"] += 1
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-terminal-context$"):
+            s.completion(1, changed, journal)
+        del journal.done_checks[1]
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-context$"):
+            s.completion(2, self.checks[2], journal)
+
+    def test_media_digest_cannot_be_reused_for_another_original_header(self):
+        other = header()
+        other["device"] = "mac2"
+        commands = s.command_bytes(raw(other))
+        journal = s.Journal(raw(other), commands)
+        journal.inspect(generated_journal(commands, 8), 8)
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-media-digest$"):
+            s.completion(8, journal.done_checks[8], journal)
 
 
 class JournalTests(unittest.TestCase):
@@ -107,7 +317,7 @@ class JournalTests(unittest.TestCase):
             self.journal.inspect(first.replace(b'"kind": "started"', b'"kind":"started","kind":"done"'), 1)
         _, command_outcomes = self.journal.inspect(first, 1)
         self.assertEqual(command_outcomes, {1: "done"})
-        with self.assertRaises(s.Missing):
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-fact$"):
             s.completion(1, self.journal.done_checks[1])
 
 
@@ -135,7 +345,10 @@ class ParentTransport:
             return {"appended": True}, b""
         if action == "poll":
             n = len(self.commands)
-            self.journal += pair(self.test.commands, n, 2*n-1)
+            if self.test.actual_wire:
+                self.journal = generated_journal(self.test.commands, n, self.test.wire_checks)
+            else:
+                self.journal += pair(self.test.commands, n, 2*n-1)
             if n == self.test.fail_at:
                 lines = self.journal.splitlines()
                 failed = json.loads(lines[-1])
@@ -179,6 +392,7 @@ class ParentTests(unittest.TestCase):
         self.commands = s.command_bytes(self.header.raw)
         self.expected = header()
         self.fail_at = self.change_at = None
+        self.actual_wire, self.wire_checks = False, generated_checks()
         self.check_count = 0
         test = self
         class Projection:
@@ -231,6 +445,25 @@ class ParentTests(unittest.TestCase):
         self.assertEqual(private_file.read_bytes(), self.projection.private_bytes())
         self.assertEqual(private_file.stat().st_mode & 0o777, 0o600)
         self.assertEqual(private_file.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_actual_wire_retains_publication_then_missing_joins_without_successor(self):
+        self.patchers[1].stop()
+        self.actual_wire = True
+        with self.assertRaisesRegex(s.Missing, "^smoke-publication-sdk-order$"): self.run_parent()
+        self.assertEqual(len(self.transport.commands), 3)
+        self.assertEqual(self.transport.events[2:-1], ["append", "poll", "retain"] * 3)
+        self.assertEqual(self.transport.events[-1], "original-transport-joined")
+        self.assertNotIn("finish", self.transport.events)
+        self.assertEqual((self.local_path / "steps.jsonl").read_bytes(), self.transport.retained)
+
+    def test_actual_wire_wrong_preview_never_delivers_publication(self):
+        self.patchers[1].stop()
+        self.actual_wire = True
+        self.wire_checks[2][0]["facts"][0]["count"] = 19
+        with self.assertRaisesRegex(s.v.Refused, "^smoke-fact$"): self.run_parent()
+        self.assertEqual(len(self.transport.commands), 2)
+        self.assertEqual(self.transport.events[-1], "original-transport-joined")
+        self.assertNotIn("finish", self.transport.events)
 
     def test_failed_terminal_and_changed_prefix_never_deliver_successor_and_join_original(self):
         self.fail_at = 3

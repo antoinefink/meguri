@@ -280,9 +280,11 @@ def command_bytes(header_raw):
 def fact(value):
     need(isinstance(value, dict) and {"name"} <= set(value) <=
          {"name", "count", "digest", "engine", "operation", "error_domain", "error_code"} and
-         value["name"] in FACTS, "journal-fact")
-    if value["name"] in ("accountVerified", "coreOpened", "ownedWorkJoined"):
+         isinstance(value["name"], str) and value["name"] in FACTS, "journal-fact")
+    if value["name"] in ("accountVerified", "ownedWorkJoined"):
         need(set(value) == {"name"}, "journal-private-fact")
+    if value["name"] == "coreOpened":
+        need(set(value) == {"name", "count"}, "journal-core-opened")
     if "count" in value:
         need(type(value["count"]) is int and 0 <= value["count"] < 2**64, "journal-count")
     if "digest" in value:
@@ -293,24 +295,142 @@ def fact(value):
     need(("error_domain" in value) == ("error_code" in value), "journal-error")
     if "error_domain" in value:
         need(value["error_domain"] in ("agent", "core", "cloudKit", "cancellation") and
-             type(value["error_code"]) is int, "journal-error")
+             type(value["error_code"]) is int and -2**63 <= value["error_code"] < 2**63, "journal-error")
 
 
-def completion(command_number, checks):
-    """Required J3.1 completion checks remain unimplemented."""
-    raise Missing("smoke-observation-wire")
+def _completion_facts(number, checks):
+    """Current client encoding only; this cannot establish missing J3.1 proof."""
+    need(type(number) is int and 1 <= number <= len(PROGRAM), "smoke-command")
+    names = {1: ["integrity"], 2: ["coordinatorResult"], 3: ["coordinatorResult"],
+             4: ["localDurability"], 5: ["localDurability"], 6: ["localDurability"],
+             7: ["localDurability"], 8: ["localDurability"], 9: ["coordinatorResult"],
+             10: ["integrity", "localDurability"]}[number]
+    need(isinstance(checks, list) and len(checks) == len(names), "smoke-checks")
+    facts = []
+    for check, name in zip(checks, names):
+        need(isinstance(check, dict) and set(check) == {"name", "outcome", "facts"} and
+             check["name"] == name and check["outcome"] == "pass" and
+             isinstance(check["facts"], list) and check["facts"], "smoke-checks")
+        for item in check["facts"]:
+            fact(item)
+        facts.extend(check["facts"])
+
+    def exact(item, name, fields=(), **values):
+        need(set(item) == {"name", *fields, *values} and item["name"] == name and
+             all(item[key] == value for key, value in values.items()), "smoke-fact")
+
+    def revision(item, label):
+        exact(item, "localDurable", ("count", "digest"), operation=label)
+        need(item["count"] > 0, "smoke-revision")
+
+    sizes = {1: 1, 2: 1, 3: 1, 4: 2, 5: 1, 6: 3, 7: 1, 8: 3, 9: 5, 10: 2}
+    need(len(facts) == sizes[number], "smoke-facts")
+    if number in (1, 10):
+        exact(facts[0], "integrity", ("count",))
+        if number == 10:
+            need([len(c["facts"]) for c in checks] == [1, 1], "smoke-close-checks")
+            exact(facts[1], "ownedWorkJoined")
+    elif number == 2:
+        exact(facts[0], "applied", count=20, operation="p1")
+    elif number == 3:
+        exact(facts[0], "stateSaved", ("count",), engine="engine1", operation="p1")
+    elif number in (4, 6, 8):
+        label = {4: "n1", 6: "s1", 8: "m1"}[number]
+        exact(facts[0], "localCommitted", ("count",), operation=label)
+        need(facts[0]["count"] > 0, "smoke-commit")
+        revision(facts[1], {4: "n1", 6: "c1", 8: "m1"}[number])
+        if number == 6:
+            revision(facts[2], "r1")
+        elif number == 8:
+            exact(facts[2], "localDurable", ("digest",), count=10240, operation="m1")
+    elif number in (5, 7):
+        exact(facts[0], "applied", count=1, operation={5: "c1", 7: "s1"}[number])
+    elif number == 9:
+        # Core's entity enumeration order is not a wire guarantee.
+        need({f.get("operation") for f in facts[:4]} == {"n1", "c1", "r1", "m1"},
+             "smoke-ack-labels")
+        for item in facts[:4]:
+            exact(item, "stateSaved", ("count", "digest"), operation=item["operation"])
+            need(item["count"] > 0, "smoke-revision")
+        exact(facts[4], "syncResult", ("count",), operation="exchange1")
+        need(facts[4]["count"] > 0, "smoke-exchange")
+    return facts
+
+
+def completion(command_number, checks, journal=None):
+    _completion_facts(command_number, checks)
+    if journal is None:
+        raise Missing("smoke-journal-context")
+    need(journal.done_checks.get(command_number) == checks, "smoke-terminal-context")
+    previous = {}
+    for number in range(1, command_number + 1):
+        need(number in journal.done_checks and number in journal.done_observations, "smoke-context")
+        facts = _completion_facts(number, journal.done_checks[number])
+        observations = journal.done_observations[number]
+        expected = [{"name": "accountVerified"}]
+        if number == 1:
+            need(len(observations) == 2, "smoke-open-observation")
+            opened = observations[1]
+            fact(opened)
+            need(opened["name"] == "coreOpened", "smoke-open-observation")
+            expected.append(opened)
+        elif number == 10:
+            expected.append(facts[1])
+        elif number == 9:
+            # These are observation-only accounting, not invented done facts.
+            need(len(observations) == 9, "smoke-media-accounting")
+            for item, label in zip(observations[1:4],
+                                   ("media-pending", "media-missing", "media-unknown")):
+                fact(item)
+                need(set(item) == {"name", "count", "operation"} and item["name"] == "syncResult"
+                     and item["operation"] == label, "smoke-media-accounting")
+            expected.extend(observations[1:4])
+            expected.extend(facts)
+            retained = {"n1": previous[4][1], "c1": previous[6][1],
+                        "r1": previous[6][2], "m1": previous[8][1]}
+            for item in facts[:4]:
+                original = retained[item["operation"]]
+                need((item["count"], item["digest"]) == (original["count"], original["digest"]),
+                     "smoke-ack-revision")
+        else:
+            expected.extend(facts)
+        need(observations == expected, "smoke-operation-observations")
+        if number in (3, 4, 6, 10):
+            prior_seq = previous[{3: 1, 4: 3, 6: 4, 10: 6}[number]][0]["count"]
+            need(facts[0]["count"] > prior_seq if number in (4, 6) else
+                 facts[0]["count"] >= prior_seq, "smoke-sequence")
+        if number == 8:
+            header = journal.header_value
+            need(isinstance(header.get("run_id"), str) and isinstance(header.get("device"), str),
+                 "smoke-media-context")
+            media = b"".join(bytes.fromhex(v.digest(
+                ("MeguriCloudSmoke/%s/%s/m1/%d" % (header["run_id"], header["device"], n)).encode()))
+                for n in range(320))
+            need(facts[2]["digest"] == v.digest(media), "smoke-media-digest")
+        previous[number] = facts
+    # p1's stateSaved summary has no SDK/own-operation order. Review's applied
+    # head and durable answer facts also omit the held image/baseline and its
+    # release order. Later revision ACKs have no per-record SDK/state-save order.
+    # Earliest required absent proof fences every successor in the real parent.
+    missing = {3: "smoke-publication-sdk-order", 5: "smoke-review-held-image",
+               7: "smoke-review-release-order", 9: "smoke-acknowledgement-sdk-order"}
+    for number in range(1, command_number + 1):
+        if number in missing:
+            raise Missing(missing[number])
 
 
 class Journal:
     """Original-prefix and fixed content-free wire validation, no recovery."""
     def __init__(self, header_raw, commands):
         self.header, self.commands, self.retained = v.digest(header_raw), commands, b""
-        self.done_checks = {}
+        self.header_value = strict(header_raw)
+        self.done_checks, self.done_observations = {}, {}
 
     def inspect(self, raw, delivered):
         need(type(raw) is bytes and len(raw) <= CAP and raw.startswith(self.retained), "journal-prefix")
         complete = raw[:raw.rfind(b"\n") + 1]
         started, terminal, instance, done_checks = set(), {}, None, {}
+        observations, done_observations = {}, {}
         for seq, line in enumerate(complete.splitlines(), 1):
             r = strict(line.decode("utf-8"))
             required = {"header_sha256", "record_seq", "command_seq", "command_sha256", "agent_instance",
@@ -337,8 +457,10 @@ class Journal:
                      started == set(range(1, n)) and all(terminal.get(p) == "done" for p in range(1, n)),
                      "journal-start")
                 started.add(n)
+                observations[n] = []
             elif kind == "observation":
                 need(set(r) == required and n in started and r["facts"] and not r["checks"], "journal-observation")
+                observations[n].extend(r["facts"])
             elif kind in ("done", "failed"):
                 need(n in started and n not in terminal and n == len(started), "journal-terminal")
                 if kind == "failed":
@@ -351,6 +473,7 @@ class Journal:
                 names = []
                 for c in r["checks"]:
                     need(isinstance(c, dict) and set(c) == {"name", "outcome", "facts"} and
+                         isinstance(c["name"], str) and
                          c["name"] in {"integrity", "localDurability", "coordinatorResult", "recovery"} and
                          c["outcome"] in ("pass", "fail", "open") and isinstance(c["facts"], list), "journal-check")
                     names.append(c["name"])
@@ -360,10 +483,12 @@ class Journal:
                     need(names and len(names) == len(set(names)) and
                          all(c["outcome"] == "pass" and c["facts"] for c in r["checks"]), "journal-required-checks")
                     done_checks[n] = r["checks"]
+                    done_observations[n] = list(observations[n])
                 terminal[n] = kind
             else:
                 raise v.Refused("journal-kind")
         self.done_checks = done_checks
+        self.done_observations = done_observations
         return complete, terminal
 
     def retain(self, complete):
@@ -858,7 +983,7 @@ def execute(root, parent, vm, expected, header, files, support, copied, recheck,
                             raise Missing("client-capability")
                         raise v.Refused("command-failed")
                     if terminal.get(n) == "done":
-                        completion(n, journal.done_checks[n])
+                        completion(n, journal.done_checks[n], journal)
                         break
                     if not metadata["alive"]:
                         _, status = transport.request("status")

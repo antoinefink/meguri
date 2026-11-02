@@ -48,3 +48,11 @@ swift-test/20261102T140336Z-38293 (41/41 protocol/product tests), and
 build-app/20261102T140512Z-40625 (Mac Debug CloudAgent compile only).
 No test skips are reported in these focused results. The Mac build does not
 launch the test host, prove signing or exercise CloudKit.
+
+The combined repair cleanroom/20261102T140128Z-34085 was cancelled and joined
+after 20 minutes with no source changes. Its error result is retained. Split
+host repair cleanroom/20261102T142316Z-52904 fixes the exact launch fact and
+validates current step encodings and retained observations. Independent review
+found no required finding. Command 3 explicitly remains Missing for SDK order;
+the app/core evidence repair runs separately. No signed pass is claimed.
+Integration removes one redundant docstring after the privacy finding.
