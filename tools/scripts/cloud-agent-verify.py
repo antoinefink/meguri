@@ -146,7 +146,7 @@ def directory_identity(info):
 
 
 @contextlib.contextmanager
-def authority(path):
+def authority(path, witness=None):
     """Hold every physical parent and check its binding before releasing it."""
     need(os.path.isabs(path) and os.path.normpath(path) == path and
          "\x00" not in path, "artifact-path")
@@ -160,11 +160,15 @@ def authority(path):
             pin = directory_identity(os.fstat(child))
             bindings.append((fd, part, child, pin))
             fd = child
+        def check():
+            for parent, name, child, pin in bindings:
+                need(directory_identity(os.fstat(child)) == pin and
+                     directory_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == pin,
+                     "product-changed")
+        if witness is not None:
+            witness["check"] = check
         yield fd
-        for parent, name, child, pin in bindings:
-            need(directory_identity(os.fstat(child)) == pin and
-                 directory_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == pin,
-                 "product-changed")
+        check()
     except OSError:
         raise Refused("product-path") from None
     finally:
@@ -679,7 +683,8 @@ def independent_agent(root, manifest, team):
     binary_platform(os.path.join(path, actual["executable"]), platform, "agent-platform")
 
 
-def admit(root, results, path, run):
+def admit_build(root, results, path, run, vm_device=None):
+    """Reusable admission; only a live delivery caller supplies VM coverage."""
     root, results = os.path.abspath(root), os.path.abspath(results)
     need(isinstance(run, str) and MG_RUN_ID.fullmatch(run), "header-run")
     sha = source(root)
@@ -709,7 +714,7 @@ def admit(root, results, path, run):
          agents[0].get("TEST_HOST") == host and agents[0].get("BUNDLE_LOADER") == host,
          "agent-build-settings")
     product = os.path.join(manifest["products"]["path"], manifest["app"]["path"])
-    team = independent_product(root, product, expected, settings)
+    team = independent_product(root, product, expected, settings, vm_device)
     independent_agent(root, manifest, team)
     need(snapshot(os.path.join(root, "build"), manifest["products"]["path"]) == frozen, "product-changed")
     need(digest(declared_file(root, build, settings_path)) == settings_hash, "input-changed")
@@ -718,6 +723,11 @@ def admit(root, results, path, run):
     new_witness = {}
     need(header(root, path, run, sha, new_witness) == expected and new_witness == header_witness
          and source(root) == sha, "input-changed")
+    return expected, build, manifest, frozen
+
+
+def admit(root, results, path, run):
+    admit_build(root, results, path, run)
     # There is no live VM/pool routing or installation producer in this unit.
     # Do not inspect the host, choose an attached device, trust a header label,
     # or promote caller-written deployment/account/journal flags to proof.

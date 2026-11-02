@@ -227,19 +227,45 @@ mg_mac_ui_take() {
   fi
 }
 
-# mg_mac_vm_take [--no-copy]: a VM lease, the VM running with a logged-in
+# mg_mac_vm_take [--no-copy] [--running-only]: a VM lease, the VM running with a logged-in
 # session, no test run left in it and enough free processes (mvl_wait_procs:
 # it waits for them), and (unless --no-copy) this checkout's test products
 # and fixtures in it. Sets MG_MAC_VM. Returns 1 when the job cannot go on
 # (recorded), 2 when the VM could not be reached (queued,
 # mg__mac_vm_unreachable): the lease is then released at once, since the job
 # runs nothing more there.
+# --running-only queues a stopped VM without starting it (delivery-only jobs).
 mg_mac_vm_take() {
-  local name rc
+  local name rc no_copy="" running_only="" option
+  for option in ${1+"$@"}; do
+    case "$option" in
+      --no-copy) no_copy=1 ;;
+      --running-only) running_only=1 ;;
+      *) return 1 ;;
+    esac
+  done
   mg__mac_vm_lease || return 1
   mg_on_exit mg__mac_vm_stop_orphans
-  mg__mac_vm_boot
-  rc=$?
+  if [ -n "$running_only" ]; then
+    # Delivery must never start/restart a VM. Recheck under its lease and
+    # use the existing read-only readiness wait, without ensure_ready/start.
+    name="$(jq -r .name <<<"$MG_MAC_VM")"
+    if [ "$(mvl_state "$(jq -r .tart <<<"$MG_MAC_VM")" "$name")" != running ]; then
+      mg__mac_vm_unreachable "selected VM is not running"
+      mg__mac_vm_release_queued 2
+      return 2
+    fi
+    mvl_wait_ready "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .tart <<<"$MG_MAC_VM")" \
+      "$name" false "" "$MG_RUN_DIR/mac-vm-ssh.err"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      mg__mac_vm_unreachable "selected VM is not ready"
+      rc=2
+    fi
+  else
+    mg__mac_vm_boot
+    rc=$?
+  fi
   [ "$rc" -eq 0 ] || { mg__mac_vm_release_queued "$rc"; return "$rc"; }
   # A run that an earlier job could not stop (its SSH session was lost, or the
   # job was killed) ends before this job's run starts: until then the VM gets
@@ -262,7 +288,7 @@ mg_mac_vm_take() {
     mg__mac_vm_release_queued 2
     return 2
   fi
-  [ "${1:-}" != --no-copy ] || return 0
+  [ -z "$no_copy" ] || return 0
   mg_mac_vm_copy_in "$MG_ROOT/$MG_APP_DD/Build/Products" "$MG_ROOT/app/Fixtures"
   rc=$?
   case "$rc" in
