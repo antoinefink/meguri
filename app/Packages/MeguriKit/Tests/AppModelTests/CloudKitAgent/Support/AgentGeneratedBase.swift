@@ -265,7 +265,7 @@ import Foundation
                 errno = 0
                 guard let entry = readdir(stream) else { guard errno == 0 else { throw AgentFailure.storage }; break }
                 let decoded = withUnsafePointer(to: &entry.pointee.d_name) {
-                    $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(validatingUTF8: $0) }
+                    $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(validatingCString: $0) }
                 }
                 guard let name = decoded else { throw AgentFailure.storage }
                 if name != "." && name != ".." {

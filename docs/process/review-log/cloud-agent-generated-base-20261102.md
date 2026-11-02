@@ -35,3 +35,10 @@ passing gate or signed acceptance is claimed.
 The staged privacy check initially flagged a redundant two-line test comment.
 Integration removes that comment only. Test statements and scanner rules stay
 unchanged; the original source export remains retained.
+
+Native attempt swift-test/20261102T114910Z-2067 failed before executing tests:
+the current Swift compiler rejects the deprecated C-string initializer spelling
+as a warning. Filtered cleanup cleanroom/20261102T115252Z-12925 replaces
+only that spelling with validatingCString. Independent review found no issue;
+UTF-8 validation, nil rejection and all directory checks remain unchanged.
+Compilation and execution after this cleanup are still pending.
