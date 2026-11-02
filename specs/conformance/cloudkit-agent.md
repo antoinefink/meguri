@@ -47,6 +47,58 @@ Account-changing legs retain the original header and scope. They observe only th
 
 `header_sha256` means SHA-256 of the exact `run.json` bytes. Every command and journal record carries it. A new MG run, product, device or account scope needs a new header and directory. A resumed app uses the original ones. Copying another run's journal never changes these bindings.
 
+#### Device-local run directory
+
+For Mac, iPhone and iPad, use exactly
+`Meguri/CloudKitSigned/<run_id>/<device>/` below the executing development
+app's OS Application Support directory. Obtain that root from the app's OS
+container API; canonicalize the trusted OS root, then append the fixed path
+and validated run/device labels. Do not canonicalize an untrusted candidate
+into acceptance. `MEGURI_CLOUD_AGENT_RUN_DIRECTORY` is an expected absolute
+path, not permission to select a root. Before opening any run file, require
+exact equality with the derived path. Reject aliases, parent escapes, invalid
+labels and another app's container. Then match the header's existing run and
+device fields to those path labels. No new header fields are needed.
+
+The coordinator resolves this location inside the frozen destination VM.
+For iPhone/iPad, use the reserved simulator's actual OS `get_app_container`
+data-container result, not its app-bundle path. The executing app independently
+confirms its own Application Support URL. Neither a host HOME value nor a
+header-supplied pathname establishes the device container.
+
+For Mac, use a bounded automatic app-hosted path preflight in the verified
+VM product, or an equivalent OS observation of that same installed app's
+container. A path string does not prove this observation. The
+setup test reads its OS Application Support URL and checks the loaded app
+and test images. Use a low-level loaded-image check
+that does not depend on the four delivered product receipts: their destination
+is what this preflight is resolving. `AgentRunningProductBinding`, which needs
+those copies, cannot supply this earlier observation. The executing app must
+confirm the exact URL before accepting its run directory.
+
+Select this setup-only entry path before normal App initialization can open
+Core or start the collection/coordinator. The preflight performs no account
+lookup, Core/collection open, collection creation or CloudKit call. It may
+obtain/create the normal Application Support directory through the OS API.
+Its result is only path preparation, never a command, journal outcome, signed
+execution or Q7 pass. It introduces no user setup step. Keep the full J2.1
+product checks before the real agent's account and database work.
+
+Place `run.json` and all four `product-evidence/` files at their existing
+relative paths below this root. J2.3 fixture roles, installed `data/` and J3's
+command/journal paths use that same root without remapping. The device's
+J2.2 private input remains outside it, at that section's separate relative
+path below the same OS Application Support root. Never copy private account
+input or routing data into the run's public evidence roles.
+
+Bind this root to the original header bytes, actual device/VM instance and
+retained filesystem identities. Check these at every handoff, delivery and
+relaunch. Reject a different app container or root. Never move an existing
+run or create another root for its header. Keep the actual OS, copy and
+readback observations under the delivery rules; a copy-success Boolean proves neither
+the root nor its use by the agent. Durable initial `launch/started` and J2.3's
+verified one-time installation still precede opening Core.
+
 ### J2.1 Executable and receipt binding
 
 `executable_sha256` hashes only the executable file, never an undefined whole-bundle encoding. It has the meaning of the existing MG `standalone_product.executable_sha256` field. The producer must provide this check for Mac, iPhone and iPad products; a Mac preview result cannot stand in for another device's product.
@@ -150,8 +202,9 @@ work, with no added user step.
 Reuse the approved private account data from completed Q7.2 setup for later
 runs. The coordinator copies those unchanged values and applies each new
 header binding under J2.2 automatically. This creates no repeated user step.
-A current account lookup cannot supply the expected account. This text adds
-no setup UI or storage format for setup secrets.
+A current account lookup cannot supply the expected account. J2.2 defines
+only the private approved-account input needed for automatic reuse, with no
+new setup UI, password or token storage contract.
 
 Hold the existing VM/pool lease while checking routing, copying, installing,
 launching and reading proof. Verify the VM instance again, and for a simulator
@@ -252,6 +305,34 @@ The private directories have mode `0700`. The input is a regular file with mode 
 The JSON object contains exactly `protocol_version`, `header_sha256`, `job`, `run_id`, `source_commit`, `device`, `executable_sha256`, `container`, `environment`, `account_scope` and `accounts`. The version is `1`; every binding field equals J2's header. `accounts` maps exactly the header's account labels to the actual expected CloudKit user-record identities supplied by completed Q7.2 setup. Each value is a nonempty array of integers from 0 through 255: the exact opaque identity bytes the core uses under `sync/cloudkit-recovery#V9.1`, with no case conversion or hashing. Parse strictly, including duplicate-key rejection. Compare the actual core-verified current identity with this private input before database work, using J2's startup order.
 
 Examples, commands, journals and public artifacts contain no account IDs. Keep the private input and its digest out of exports. Do not export an account hash or another value that identifies the same account between runs. Report failures with fixed labels and check results only. If the user has not supplied the approved expected accounts, await Q7.2 setup. A current identity that differs fails `wrong-container`. Missing code to read, deliver or compare the input fails under J6; it is not a user setup step.
+
+#### Reusable approved source
+
+The host reads `Meguri/CloudKitSignedPrivate/approved-accounts.json` below
+its own OS Application Support directory. This is the reusable input from
+completed, user-approved Q7.2 setup. It contains only already approved identity
+bytes; no fresh/current account read can approve, create or update it. The
+coordinator treats it as read-only. The device reads only its bound per-run
+input, never this host source.
+
+Apply the private owner/mode, single-link, strict JSON and stable no-follow
+rules above to this source and its directories. Its object contains exactly
+`protocol_version`, `container`, `environment` and `accounts`. Version is `1`;
+environment is `development`; container equals the independently verified
+development product. `accounts` has `acct1` and, once approved, `acct2`, with
+exact nonempty identity byte arrays in the existing J2.2 encoding. Reject
+unknown labels and equal identities for the two different test accounts.
+A missing label cannot support a leg that requires it.
+
+For each new run/device, project the required approved labels unchanged into
+the existing per-run input and fill its existing header binding fields. This
+is automatic coordinator work, not a request to rewrite that file by hand.
+Pin and recheck the approved source while materializing the per-run copies.
+Changed source cannot retarget an existing run; different approved setup needs
+a new run/header. Keep all identity bytes and their digests out of public logs
+and artifacts. Missing approved setup data awaits `cloudkit-test-accounts`;
+missing source-reader, materializer or path-preflight code fails
+`implementation_missing`.
 
 #### Expected scope for one run
 
