@@ -450,7 +450,8 @@ def test_inputs(products, path, app, platform):
          target.get("IsUITestBundle", False) is False and
          target.get("IsAppHostedTestBundle") is True and
          target.get("TestHostBundleIdentifier") == app["bundle_id"] and
-         target.get("OnlyTestIdentifiers") == ["CloudKitSoakTests"] and
+         target.get("OnlyTestIdentifiers") in (["CloudKitSoakTests"],
+                                               ["CloudKitSoakTests", "CloudKitPathPreflightTests"]) and
          not target.get("SkipTestIdentifiers"), "agent-selection")
     host_bundle = os.path.join(products, app["path"])
 

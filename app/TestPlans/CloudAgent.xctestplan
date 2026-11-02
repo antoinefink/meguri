@@ -24,7 +24,8 @@
         "name" : "MeguriSnapshotTests"
       },
       "selectedTests" : [
-        "CloudKitSoakTests"
+        "CloudKitSoakTests",
+        "CloudKitPathPreflightTests"
       ]
     }
   ],

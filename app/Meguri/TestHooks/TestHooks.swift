@@ -12,6 +12,7 @@ import SwiftUI
 /// agent can never mistake a half-applied launch for the requested state.
 enum TestHooks {
     struct Session {
+        var setupOnly = false
         var options = LaunchOptions()
         var error: TestHookError?
         /// A shell route's state and features.
@@ -20,7 +21,7 @@ enum TestHooks {
         /// A launch with any hook option starts from a fresh UI state and
         /// leaves none behind, so a run never depends on the previous one;
         /// a launch with none restores the device's as usual.
-        var startsFresh: Bool { error != nil || options != LaunchOptions() }
+        var startsFresh: Bool { setupOnly || error != nil || options != LaunchOptions() }
 
         /// Puts the navigation in the shell route's state and starts the
         /// run-time commands (`ShellCommands`).
@@ -30,7 +31,7 @@ enum TestHooks {
                 AppDelegate.keepsRunningWithoutWindow = integrations
             }
             #endif
-            guard error == nil else { return }
+            guard !setupOnly, error == nil else { return }
             shell?.prepare(navigation)
             ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,
                 nativeCollection: options.nativeReview == nil ? nil : collection)
@@ -42,6 +43,12 @@ enum TestHooks {
         arguments: [String] = ProcessInfo.processInfo.arguments,
         bundleIdentifier: String = Bundle.main.bundleIdentifier ?? ""
     ) -> Session {
+        #if DEBUG
+        if CloudAgentPreflight.requested() {
+            CloudAgentPreflight.excludeNormalStartup()
+            return Session(setupOnly: true)
+        }
+        #endif
         // Performance tests ask for a warmed web content process (R1866).
         WebContentWarmup.shared.listen()
         do throws(TestHookError) {
@@ -81,7 +88,9 @@ enum TestHooks {
         }
 
         var body: some View {
-            if let error = session.error {
+            if session.setupOnly {
+                EmptyView()
+            } else if let error = session.error {
                 ErrorView(error: error)
             } else {
                 // The probe takes a strip below the shell rather than a

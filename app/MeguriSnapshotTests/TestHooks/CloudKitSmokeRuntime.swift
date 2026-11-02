@@ -17,6 +17,7 @@ import Foundation
     }
     let missing: [Dependency] = [.signedProductVerifier, .generatedBase, .integrityInspector, .recoveryInspector]
     private(set) var userSteps: [String] = []
+    private let admittedRun: AgentRunDirectory
     private let directory: URL
     private var owner: ReviewCollection?
     private let originalHeaderBytes: Data
@@ -26,12 +27,14 @@ import Foundation
     private var expectedFields: [String] = []
     private var backend: CloudKitSmokeBackend?
 
-    init(directory: URL, originalHeaderBytes: Data) {
-        self.directory = directory
-        self.originalHeaderBytes = originalHeaderBytes
+    init(admittedRun: AgentRunDirectory) {
+        self.admittedRun = admittedRun
+        self.directory = admittedRun.directory
+        self.originalHeaderBytes = admittedRun.originalHeaderBytes
     }
     func verifyProduct(_ header: AgentHeader) throws {
         userSteps = []
+        try admittedRun.revalidate()
         guard try AgentHeader.read(originalHeaderBytes) == header else { throw AgentFailure.binding }
         if let admission {
             try checkActualProduct(header)
@@ -39,7 +42,7 @@ import Foundation
         } else {
             admission = try AgentAccountAdmission(originalHeaderBytes: originalHeaderBytes, header: header,
                 productCheck: { try self.checkActualProduct(header) },
-                applicationSupportRoot: { try Self.applicationSupportRoot() })
+                applicationSupportRoot: { try self.admittedRun.retainedApplicationSupportRoot() })
         }
     }
     private func checkActualProduct(_ header: AgentHeader) throws {
@@ -64,19 +67,8 @@ import Foundation
         guard let runningProduct else { throw AgentFailure.implementationMissing }
         try runningProduct.requireIndependentCounterpart()
     }
-    private static func applicationSupportRoot() throws -> URL {
-        // The OS chooses the current app-container root, never run.json/env.
-        // Canonicalize this trusted platform root only, before fixed private
-        // descendants; the protected reader opens those with no-follow bindings.
-        do {
-            let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                                   appropriateFor: nil, create: false)
-            guard let resolved = realpath(root.path, nil) else { throw AgentFailure.storage }
-            defer { free(resolved) }
-            return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
-        } catch { throw AgentFailure.storage }
-    }
     private func retainedAdmission() throws -> AgentAccountAdmission {
+        try admittedRun.revalidate()
         guard let runningProduct else { throw AgentFailure.implementationMissing }
         try runningProduct.revalidate()
         guard let admission else { throw AgentFailure.implementationMissing }

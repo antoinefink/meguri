@@ -184,3 +184,81 @@ mg_cloudkit_agent_install() {
       ;;
   esac
 }
+
+# Internal parent-only stage, called after the synchronous install child has
+# returned. It neither registers a job nor completes cloudkit-signed's missing
+# coordination/runtime obligations. The Python reader also checks child exit.
+mg_cloudkit_agent_handoff_private() (
+  local private="$1" child="$2" report="$3" rc
+  MG_EXIT_CMDS=()
+  MG_STATE="$private/state"
+  MG_RUN_DIR="$private"
+  mkdir -m 700 "$MG_STATE" || exit 1
+  mg_mac_vm_probe
+  rc=$?
+  case "$rc" in 0) ;; 1) exit 75 ;; *) exit 1 ;; esac
+  printf '%s\n' "$MG_MAC_VMS" >"$private/configured.json"
+  # Select only the entry already frozen for this header. A later take cannot
+  # choose another free VM, acquire a different simulator, or refresh its lease.
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-handoff.py" --select \
+    --root "$MG_ROOT" --parent-run "$MG_RUN_ID" --install-run "$child" \
+    3<"$private/configured.json" >"$private/selection.json"
+  rc=$?
+  [ "$rc" -eq 0 ] || exit "$rc"
+  MG_MAC_VMS="$(jq -c '[.]' "$private/selection.json")" || exit 1
+  MG_SIM_RUNNER=vm
+  MG_MAC_RUNNER=vm
+  mg_mac_vm_take --no-copy --running-only
+  rc=$?
+  case "$rc" in 0) ;; 2) exit 75 ;; *) exit 1 ;; esac
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  jq -nc --argjson selection "$MG_MAC_VM" --arg slot "$MG_LEASE_SLOT" \
+    '{selection:$selection,lease_slot:$slot}' >"$private/context.json" || exit 1
+  # Arm the take's existing LIFO orphan cleanup before the first possible
+  # app-hosted launch. Python joins its original transport before returning;
+  # the VM drain must then finish under this same retained lease, even on a
+  # normal return (or a timeout/lost SSH reported as queued).
+  MG_MAC_VM_TESTING=1
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-handoff.py" \
+    --root "$MG_ROOT" --parent-run "$MG_RUN_ID" --install-run "$child" \
+    3<"$private/context.json" >"$report"
+  rc=$?
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  mg__mac_vm_stop_orphans
+  # stop_orphans records the checked drain's reason, but deliberately only
+  # logs its failure. Do not turn that unknown completion into a handoff.
+  # Its cleared marker avoids a second stop attempt at exit; the next take
+  # retains the existing mandatory stop/unavailable refusal before any run.
+  if [ -n "$MG_MAC_VM_STOP_REASON" ]; then
+    [ -z "$MG_MAC_VM_STOP_UNREACHABLE" ] || exit 75
+    exit 1
+  fi
+  exit "$rc"
+)
+
+mg_cloudkit_agent_handoff() {
+  local child="${1:-}" private rc report="$MG_RUN_DIR/product-evidence-report.json"
+  [ "$#" -eq 1 ] && [ "${MG_JOB:-}" = cloudkit-signed ] &&
+    [ "${MG_COMMIT_DIRTY:-true}" = false ] || return 1
+  private="$(mktemp -d "${TMPDIR:-/tmp}/meguri-cloud-evidence.XXXXXX")" || return 1
+  chmod 700 "$private" || return 1
+  # Retain private run-owned helper state. Never publish it or recursively
+  # remove a pathname another process could have substituted.
+  (umask 077; mg_cloudkit_agent_handoff_private "$private" "$child" "$report") \
+    >"$private/helpers.log" 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ] && jq -e '.scope == "PRODUCT-EVIDENCE-ONLY" and .outcome == "product_evidence_delivered" and .signed_execution == false' "$report" >/dev/null 2>&1; then
+    mg_detail product_evidence '"product_evidence_delivered"'
+  elif [ "$rc" -eq 78 ] && jq -e '. == {scope:"PRODUCT-EVIDENCE-ONLY",outcome:"implementation_missing",category:"mac-path-preflight-entrypoint",signed_execution:false}' "$report" >/dev/null 2>&1; then
+    mg_detail product_evidence '"implementation_missing"'
+  else
+    [ "$rc" -ne 0 ] || rc=1
+    if [ "$rc" -eq 75 ]; then
+      jq -nc '{scope:"PRODUCT-EVIDENCE-ONLY",outcome:"queued",category:"vm-unavailable",signed_execution:false}' >"$report"
+    else
+      jq -nc '{scope:"PRODUCT-EVIDENCE-ONLY",outcome:"failed_evidence",category:"product-evidence-refused",signed_execution:false}' >"$report"
+    fi
+  fi
+  mg_artifact json "$report" "Finalized four-role receipt transport only; no signed execution"
+  return "$rc"
+}

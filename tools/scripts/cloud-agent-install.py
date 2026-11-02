@@ -367,9 +367,12 @@ try:
     elif action == "copy":
         receive_products(*sys.argv[2:], sys.stdin.buffer)
         result = {"copied": True}
-    elif action == "inventory":
+    elif action in ("inventory", "inventory-pins"):
         boundary, path = sys.argv[2:]
-        result = {"path": path, "entries": snapshot(boundary, path)[0]}
+        entries, pins = snapshot(boundary, path)
+        result = {"path": path, "entries": entries}
+        if action == "inventory-pins":
+            result["pins"] = pins
     elif action == "lease":
         udid = sys.argv[2]
         need(re.fullmatch(r"[0-9A-Fa-f-]{36}", udid), "lease-target")
