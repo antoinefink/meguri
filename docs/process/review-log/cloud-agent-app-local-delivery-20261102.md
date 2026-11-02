@@ -50,3 +50,10 @@ communication event, although cancellation correctly stops and joins the new
 child before communication begins. The original child/group and final join
 are observed. This test expectation needs focused repair and verification;
 the original failed result remains retained.
+
+Filtered follow-up cleanroom/20261102T124326Z-68307 checks launch-time
+cancellation with zero I/O. The other paths keep their expected communication
+call. Original process/group/join/lease checks
+remain intact, and both existing streamed forms now exercise this mode.
+Independent review found no required finding. Production is unchanged.
+Focused Docker execution of this repaired witness remains pending.

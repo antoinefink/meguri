@@ -771,7 +771,13 @@ class SetupLifecycleTests(unittest.TestCase):
         self.assertLess(events.index(("kill-original-group", signal.SIGKILL)), events.index("original-joined"))
         self.assertIn(("wait", 10), events)
         if transport:
-            self.assertIn(("communicate", None if streamed else b"generated-input", 600), events)
+            if mode == "cancel-during-launch":
+                # Cancellation after handle assignment joins without further IO.
+                self.assertEqual([event for event in events
+                                  if isinstance(event, tuple) and event[0] == "communicate"], [])
+                self.assertEqual(payload.tell(), 0)
+            else:
+                self.assertIn(("communicate", None if streamed else b"generated-input", 600), events)
             self.assertEqual(events.count("lease-check"), 2 if mode == "normal" else 1)
             if mode == "normal":
                 self.assertLess(events.index("original-joined"), len(events) - 1)
@@ -787,7 +793,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 self.exercise(True, mode)
 
     def test_private_stream_uses_the_same_owned_transport_join(self):
-        for mode in ("normal", "timeout", "cancel"):
+        for mode in ("normal", "timeout", "cancel", "cancel-during-launch"):
             with self.subTest(mode=mode):
                 self.exercise(True, mode, streamed=True)
 
