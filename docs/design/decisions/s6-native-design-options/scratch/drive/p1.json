@@ -1,0 +1,1 @@
+{"name":"duo-tree","platforms":["ios"],"steps":[{"launch":{"fixture":"/Users/antoine/.herdr/worktrees/meguri/design/build/fixtures/recipes/typical-1","now":"2030-01-15T09:00:00Z","timeZone":"Europe/Paris"}},{"wait":"home.collection.screen"},{"snapshot":"home"}]}

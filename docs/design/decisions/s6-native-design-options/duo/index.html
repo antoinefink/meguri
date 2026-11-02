@@ -1,0 +1,245 @@
+<title>Meguri iPhone Duo Options</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a working review sheet. Each decision shows its options at one shared height, so the two displays compare at true proportions. */
+:root {
+  --bg: #f3f4f6; --panel: #ffffff; --fg: #1b1c20; --muted: #5b5e69; --line: #d8dae0;
+  --accent: #0a62d6; --accent-soft: #e2edfc; --warn: #8a5a00; --warn-soft: #fbf1dc; --fold: rgba(214, 60, 40, .22); --fold-edge: rgba(214, 60, 40, .7);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --panel: #212226; --fg: #eeeff2; --muted: #a2a5b0; --line: #393b42;
+  --accent: #6aa8ff; --accent-soft: #1d2f4a; --warn: #f0c36d; --warn-soft: #3a2f17; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --panel: #212226; --fg: #eeeff2; --muted: #a2a5b0; --line: #393b42;
+  --accent: #6aa8ff; --accent-soft: #1d2f4a; --warn: #f0c36d; --warn-soft: #3a2f17; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 36px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 48px; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0 0 8px; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 21px; margin: 0 0 4px; text-wrap: balance; }
+h3 { font-size: 15px; margin: 0; }
+p { margin: 0; max-width: 72ch; }
+.lede { color: var(--muted); font-size: 16px; }
+section { display: grid; gap: 16px; min-width: 0; }
+.opts { display: grid; gap: 16px; }
+.opt { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.opt.rec { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.chip { background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; }
+.opt p { font-size: 14px; }
+.row { display: flex; gap: 12px; align-items: flex-start; }
+.in { flex: 1.42 1 0; min-width: 0; }
+.out { flex: .687 1 0; min-width: 0; }
+.rows3 { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+figure { margin: 0; display: grid; gap: 4px; min-width: 0; }
+.shot { position: relative; display: block; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: none; cursor: zoom-in; width: 100%; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fold .shot::after { content: ""; position: absolute; top: 0; bottom: 0; left: 47.84%; width: 4.21%; background: var(--fold); border-inline: 1px solid var(--fold-edge); pointer-events: none; }
+.cap { font-size: 12.5px; color: var(--muted); }
+table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+th, td { text-align: left; padding: 5px 16px 5px 0; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; }
+.scroll { overflow-x: auto; }
+ul { margin: 0; padding-left: 20px; max-width: 82ch; display: grid; gap: 5px; }
+.note { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 10px 14px; max-width: 82ch; }
+#zoom { position: fixed; inset: 0; background: rgba(10, 11, 14, .88); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 20; cursor: zoom-out; }
+#zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+@media (max-width: 720px) {
+  .row { flex-direction: column; }
+  .in, .out { flex: none; width: 100%; }
+  .out { max-width: 260px; }
+  .rows3 { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Meguri on iPhone Duo</h1>
+    <p class="lede">Built and on master. These are real captures from the iPhone Duo simulator on iOS 27.1, using a synthetic test collection. The sections below show the options behind each decision.</p>
+  </header>
+
+  <section id="decided">
+    <div>
+      <h2>What shipped</h2>
+      <p class="lede">Your picks were C for the deck layout, A for review and B for deck rows. You left the portrait inner display to my judgment, so those two choices are mine.</p>
+    </div>
+    <div class="row">
+      <figure class="out"><button class="shot"><img src="img/b-outer-home.jpg" alt=""></button><figcaption class="cap">Folded: the same tabs and one quiet number per row.</figcaption></figure>
+      <figure class="in"><button class="shot"><img src="img/g-outerside-deck.jpg" alt=""></button><figcaption class="cap">Folded, on its side. I checked this too, and the system keeps the bars at the side.</figcaption></figure>
+      <figure class="out"><button class="shot"><img src="img/v-walkthrough-iphone-answer.jpg" alt=""></button><figcaption class="cap">A regular iPhone gets the same design, with the bars at the top.</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="portrait">
+    <div>
+      <h2>Inner display held portrait</h2>
+      <p class="lede">Held this way the fold runs across the screen and the bars return to the top, so the wide layouts don't simply carry over. I ran two deck layouts and three review layouts.</p>
+    </div>
+    <div class="opts">
+      <article class="opt">
+        <div class="head"><h3>Decks</h3></div>
+        <div class="rows3">
+          <figure class="rec"><button class="shot"><img src="img/p2-home.jpg" alt=""></button><figcaption class="cap"><span class="chip">Chosen</span> One list, tap to open.</figcaption></figure>
+          <figure><button class="shot"><img src="img/p2-deck.jpg" alt=""></button><figcaption class="cap">The deck page that opens from it.</figcaption></figure>
+          <figure><button class="shot"><img src="img/p1-home.jpg" alt=""></button><figcaption class="cap">Rejected: a split view. The system hides the list behind a toggle, so you'd open on an empty screen.</figcaption></figure>
+        </div>
+        <p>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</p>
+      </article>
+      <article class="opt">
+        <div class="head"><h3>Review, half open</h3></div>
+        <div class="rows3">
+          <figure><button class="shot"><img src="img/p2-half.jpg" alt=""></button><figcaption class="cap"><span class="chip">Chosen</span> One row, the same as every other position.</figcaption></figure>
+          <figure><button class="shot"><img src="img/p3-half.jpg" alt=""></button><figcaption class="cap">Rejected: a 2 × 2 grid. It's larger and moves Good.</figcaption></figure>
+          <figure><button class="shot"><img src="img/p4-half.jpg" alt=""></button><figcaption class="cap">Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</figcaption></figure>
+        </div>
+        <p>These captures predate some final polish: the button names are now a little larger and the intervals darker, for contrast.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="today">
+    <div>
+      <h2>Today's app on the Duo</h2>
+      <p class="lede">It runs and survives folding. It doesn't yet look designed for this phone.</p>
+    </div>
+    <div class="row">
+      <figure class="in"><button class="shot"><img src="img/now-inner-home2.jpg" alt=""></button><figcaption class="cap">Inner display. The deck tree appears twice, and the text buttons stay in a horizontal capsule.</figcaption></figure>
+      <figure class="in fold"><button class="shot"><img src="img/now-half-a.jpg" alt=""></button><figcaption class="cap">Half open, with the fold marked in red. <strong>Good</strong> crosses it, which requirement R9 forbids.</figcaption></figure>
+      <figure class="out"><button class="shot"><img src="img/now-outer-a.jpg" alt=""></button><figcaption class="cap">Outer display, with the capsule buttons you rejected on Mac.</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="measured">
+    <div><h2>What I measured</h2></div>
+    <div class="scroll"><table>
+      <tr><th>Display</th><th>Size in points</th><th>How the system places bars</th></tr>
+      <tr><td>Outer</td><td>466 × 678</td><td>Tab bar, toolbar and status bar in a trailing column</td></tr>
+      <tr><td>Inner, as captured</td><td>951 × 669</td><td>Same trailing column</td></tr>
+      <tr><td>Fold, half open</td><td>x 455–495 (40 wide)</td><td>Split view content moved clear of it by itself</td></tr>
+    </table></div>
+    <p class="cap">Display sizes come from the simulator's framebuffers (2007 × 2853 inner, 1398 × 2034 outer, at 3×). The fold position is from a developer's published measurement, and it matched the half-open captures.</p>
+  </section>
+
+  <section id="settled">
+    <div>
+      <h2>Already in every option</h2>
+      <p class="lede">Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</p>
+    </div>
+    <ul>
+      <li><strong>Toolbar buttons with a symbol and a title.</strong> That alone moved Go to Deck and Create Deck into the system's side column.</li>
+      <li><strong>The album deck page from your Mac choice,</strong> with a small standard Study button.</li>
+      <li><strong>Review on a white page with system toolbar buttons</strong> for Close and Undo, and no sidebar in the way.</li>
+      <li><strong>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</strong></li>
+    </ul>
+  </section>
+
+  <section id="d1">
+    <div>
+      <h2>Decision 1: unfolded deck layout</h2>
+      <p class="lede">The first capture in each option is the inner display. Folded, A and B keep the same deck page and tabs shown here under A.</p>
+    </div>
+    <div class="opts">
+      <article class="opt">
+        <div class="head"><h3>A. Sidebar and deck page</h3></div>
+        <div class="row">
+          <figure class="in"><button class="shot"><img src="img/a-inner-deck.jpg" alt=""></button></figure>
+          <figure class="out"><button class="shot"><img src="img/a-outer-deck.jpg" alt=""></button></figure>
+        </div>
+        <p>Closest to your Mac app and to the current requirement. The sidebar is about a third of the screen, and there's no list-only view of your decks. The switch from side tabs to a sidebar is the biggest visual change when you unfold.</p>
+      </article>
+      <article class="opt">
+        <div class="head"><h3>B. Deck list and deck, Settings behind a toggle</h3></div>
+        <div class="row">
+          <figure class="in"><button class="shot"><img src="img/b-inner-deck.jpg" alt=""></button></figure>
+          <figure class="in fold"><button class="shot"><img src="img/b-half-deck.jpg" alt=""></button></figure>
+        </div>
+        <p>Like Mail on the Duo, with one more level of hierarchy on the big screen. The list gets more room. Settings takes one extra tap. Half open, the system moved the deck page clear of the fold by itself, as the second capture shows. The divider sits at about 418 points, a little short of the fold.</p>
+      </article>
+      <article class="opt rec">
+        <div class="head"><h3>C. Same side tabs on both displays</h3><span class="chip">Recommended</span></div>
+        <div class="row">
+          <figure class="in"><button class="shot"><img src="img/c-inner-deck.jpg" alt=""></button></figure>
+          <figure class="out"><button class="shot"><img src="img/c-outer-home.jpg" alt=""></button></figure>
+        </div>
+        <p>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.<strong></strong></p>
+      </article>
+    </div>
+  </section>
+
+  <section id="d2">
+    <div>
+      <h2>Decision 2: review</h2>
+      <p class="lede">Outer display on the left, half open on the right, with the fold marked in red. None of these has a control on the fold, and the card stayed loaded through folding in B and C.</p>
+    </div>
+    <div class="opts">
+      <article class="opt rec">
+        <div class="head"><h3>A. Answers either side of the fold</h3><span class="chip">Recommended</span></div>
+        <div class="row">
+          <figure class="out"><button class="shot"><img src="img/a-outer-a.jpg" alt=""></button></figure>
+          <figure class="in fold"><button class="shot"><img src="img/a-half-a.jpg" alt=""></button></figure>
+        </div>
+        <p>The same four buttons in the same order, always at the bottom, so your thumbs learn one layout. Unfolded, Again and Hard sit under the left thumb, Good and Easy under the right. Show Answer is wider and heavier than the answers, the one thing here I'd still slim down.</p>
+      </article>
+      <article class="opt">
+        <div class="head"><h3>B. Plain row folded, book layout unfolded</h3></div>
+        <div class="row">
+          <figure class="out"><button class="shot"><img src="img/b-outer-a.jpg" alt=""></button></figure>
+          <figure class="in fold"><button class="shot"><img src="img/b-half-a.jpg" alt=""></button></figure>
+        </div>
+        <p>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</p>
+      </article>
+      <article class="opt">
+        <div class="head"><h3>C. Answer column at the side</h3></div>
+        <div class="row">
+          <figure class="out"><button class="shot"><img src="img/c-outer-a.jpg" alt=""></button></figure>
+          <figure class="in fold"><button class="shot"><img src="img/c-half-a.jpg" alt=""></button></figure>
+        </div>
+        <p>The same place on both displays, within reach of one right thumb. The card can use the full width when unfolded and may cross the fold. Folded, the card loses about 96 points of a 466-point screen, and left-handed use is worse.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="d3">
+    <div>
+      <h2>Decision 3: deck rows</h2>
+      <p class="lede">The outer display, with the same collection in all three.</p>
+    </div>
+    <div class="rows3">
+      <article class="opt">
+        <div class="head"><h3>A. Counts underneath</h3></div>
+        <figure><button class="shot"><img src="img/a-outer-home.jpg" alt=""></button></figure>
+        <p>The most information, in grey. Rows are tall, so fewer decks fit.</p>
+      </article>
+      <article class="opt rec">
+        <div class="head"><h3>B. One number</h3><span class="chip">Recommended</span></div>
+        <figure><button class="shot"><img src="img/b-outer-home.jpg" alt=""></button></figure>
+        <p>Reads like Mail's unread count: new, learning and to-review added together. The breakdown stays on the deck page.</p>
+      </article>
+      <article class="opt">
+        <div class="head"><h3>C. Three coloured numbers</h3></div>
+        <figure><button class="shot"><img src="img/c-outer-home.jpg" alt=""></button></figure>
+        <p>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="open">
+    <div><h2>Not checked yet</h2></div>
+    <ul>
+      <li><strong>Fold positions in automated tests.</strong> Nothing in Apple's test tools can change the fold position, so I checked those by hand in Device Hub. The fold arithmetic has unit tests.</li>
+      <li><strong>Caption withheld: it matched the private-word scan. The full text is on the private page linked from ../../s6-native-design-options.md.</strong></li>
+      <li><strong>iPad sidebar.</strong> Its accessibility audit still fails, mostly on findings the old code had too. iPad also still shows white blocks behind subdeck rows.</li>
+    </ul>
+  </section>
+</div>
+
+<div id="zoom" hidden role="dialog"><img alt=""></div>
+<script>
+  const zoom = document.getElementById('zoom'), big = zoom.querySelector('img');
+  document.querySelectorAll('.shot').forEach(b => b.addEventListener('click', () => {
+    const i = b.querySelector('img'); big.src = i.src; big.alt = i.alt; zoom.hidden = false;
+  }));
+  zoom.addEventListener('click', () => { zoom.hidden = true; });
+  addEventListener('keydown', e => { if (e.key === 'Escape') zoom.hidden = true; });
+</script>

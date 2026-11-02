@@ -1,0 +1,7 @@
+{"name":"walkthroughdark","platforms":["ios"],"steps":[
+ {"launch":{"fixture":"/Users/antoine/.herdr/worktrees/meguri/design/build/fixtures/recipes/typical-1","now":"2030-01-15T09:00:00Z","timeZone":"Europe/Paris","arguments":["-AppleInterfaceStyle","Dark"]}},
+ {"wait":"home.deck.row.1884308400002"},{"snapshot":"home"},
+ {"tap":"home.deck.row.1884308400002"},{"wait":"home.deck.study"},{"snapshot":"deck"},
+ {"tap":"home.deck.study"},{"wait":"review.session.reveal"},{"snapshot":"question"},
+ {"tap":"review.session.reveal"},{"wait":"review.session.rate.good"},{"snapshot":"answer"},
+ {"tap":"review.session.rate.good"},{"wait":"review.session.reveal"},{"tap":"review.session.close"},{"wait":"home.collection.screen"}]}
