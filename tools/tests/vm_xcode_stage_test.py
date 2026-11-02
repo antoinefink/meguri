@@ -199,7 +199,9 @@ class SourceOnly(unittest.TestCase):
         if argv == ["/usr/bin/xcode-select", "-p"]:
             return 0, str(self.developer).encode()
         self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                "--all-architectures", "-R", "=anchor apple", str(self.source)])
+                                "--all-architectures", "-R",
+                                '=identifier "com.apple.dt.Xcode" and (anchor apple or (anchor apple generic and '
+                                'certificate leaf[field.1.2.840.113635.100.6.1.9] exists))', str(self.source)])
         self.assertEqual(kwargs["source_diagnostics"].path, str(self.private))
         return 0, b""
 
@@ -208,6 +210,20 @@ class SourceOnly(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(m.check_source(self.context), 0)
         return json.loads(output.getvalue())
+
+    def test_facts_emits_exact_xcode_identifier_and_apple_or_production_store_requirement(self):
+        # Assert generated argv only; the mock does not evaluate signatures.
+        with m.Directory(str(self.source)) as bundle, m.Directory(str(self.private)) as private:
+            for diagnostics in (None, private):
+                with self.subTest(private_diagnostics=diagnostics is not None), \
+                        patch.object(m, "command", return_value=(0, b"")) as command:
+                    self.assertEqual(m.facts(bundle, source_diagnostics=diagnostics),
+                                     {"version": "27.2", "build": "18C123"})
+                kwargs = {} if diagnostics is None else {"source_diagnostics": private}
+                command.assert_called_once_with(
+                    ["/usr/bin/codesign", "--verify", "--deep", "--strict", "--all-architectures", "-R",
+                     '=identifier "com.apple.dt.Xcode" and (anchor apple or (anchor apple generic and '
+                     'certificate leaf[field.1.2.840.113635.100.6.1.9] exists))', str(self.source)], **kwargs)
 
     def test_derived_original_source_authority_without_vm_inventory_or_source_writes(self):
         before = {str(p.relative_to(self.source)): (p.stat().st_mode, p.read_bytes() if p.is_file() else None)
@@ -284,7 +300,10 @@ class SourceOnly(unittest.TestCase):
             def __init__(self, argv, **kwargs):
                 self_test.assertEqual(argv[-1], str(self_test.source))
                 self_test.assertEqual(argv[1:-1], ["--verify", "--deep", "--strict",
-                                                  "--all-architectures", "-R", "=anchor apple"])
+                                                  "--all-architectures", "-R",
+                                                  '=identifier "com.apple.dt.Xcode" and (anchor apple or '
+                                                  '(anchor apple generic and certificate '
+                                                  'leaf[field.1.2.840.113635.100.6.1.9] exists))'])
                 kwargs["stdout"].write(raw_out)
                 kwargs["stderr"].write(raw_err)
 
@@ -332,7 +351,9 @@ class SourceOnly(unittest.TestCase):
 
         def generated_child(argv, **kwargs):
             self.assertEqual(argv, ["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                    "--all-architectures", "-R", "=anchor apple", str(self.source)])
+                                    "--all-architectures", "-R",
+                                    '=identifier "com.apple.dt.Xcode" and (anchor apple or (anchor apple generic and '
+                                    'certificate leaf[field.1.2.840.113635.100.6.1.9] exists))', str(self.source)])
             child = original_popen([sys.executable, "-B", "-c", program], **kwargs)
             children.append(child)
             return child
@@ -458,7 +479,9 @@ class Staging(unittest.TestCase):
         self.assertEqual(a.st_ino, b.st_ino)
         with m.Directory(str(self.target)) as d:
             self.assertEqual(m.inventory(d)["content"], self.expected["content"])
-        self.assertTrue(any("=anchor apple" in argv for argv, _ in self.commands))
+        self.assertIn((["/usr/bin/codesign", "--verify", "--deep", "--strict", "--all-architectures", "-R",
+                        '=identifier "com.apple.dt.Xcode" and (anchor apple or (anchor apple generic and '
+                        'certificate leaf[field.1.2.840.113635.100.6.1.9] exists))', str(self.target)], {}), self.commands)
         self.assertEqual(self.selection, str(self.target / "Contents/Developer"))
 
     def test_existing_identical_bundle_is_reused_without_copy(self):

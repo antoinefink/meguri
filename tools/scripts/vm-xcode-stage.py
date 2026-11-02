@@ -434,8 +434,11 @@ def facts(directory, *, source_diagnostics=None):
          isinstance(b, str) and re.fullmatch(r"[A-Za-z0-9]+", b) and
          info.get("CFBundleShortVersionString") == v)
     diagnostics = {} if source_diagnostics is None else {"source_diagnostics": source_diagnostics}
+    # Apple TN3127 documents the production Mac App Store leaf OID:
+    # https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements
     command(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--all-architectures",
-             "-R", "=anchor apple", directory.path], **diagnostics)
+             "-R", '=identifier "com.apple.dt.Xcode" and (anchor apple or (anchor apple generic and '
+             'certificate leaf[field.1.2.840.113635.100.6.1.9] exists))', directory.path], **diagnostics)
     directory.check()
     return {"version": v, "build": b}
 

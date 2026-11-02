@@ -100,3 +100,24 @@ establish publisher authority. Staging remains refused with its guards intact.
 Ordinary generated app-hosted tests can still run on the existing VM toolchain;
 they do not satisfy the stricter signed-lane toolchain requirement.
 References: Apple TN3127, TN3161 and DTS forum thread694904.
+
+## Documented App Store identity branch
+
+A bounded primary-source check resolved the earlier authority gap. Apple
+TN3127 documents its production Mac App Store signing certificate field
+1.2.840.113635.100.6.1.9 with the Apple generic anchor. TN3161 explains the
+App Store signature. Apple's app497799835 record confirms the source identity.
+Sources: https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements
+https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates
+https://itunes.apple.com/lookup?id=497799835&entity=macSoftware
+https://apps.apple.com/us/app/xcode/id497799835
+
+Implementer264d produced filtered37753 from67787244, original94887 exit0.
+The requirement now binds the exact Xcode signing identifier to either the
+original Apple-internal anchor or the documented production App Store branch.
+The generic anchor alone, an observed team and developer signatures remain
+insufficient. Deep, strict and all-architecture verification, signed metadata,
+source pins, ownership, copy limits and guest cleanup fences are unchanged.
+Independent review found no required repair. Selftest39184 passes12/12
+wrappers, zero skips. Privacy passes. Native source acceptance, staging and
+activation remain unrun under this correction; no app or SDK result is implied.
