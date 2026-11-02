@@ -21,20 +21,22 @@ MG_MILESTONE_GATE_PY="tools/scripts/gates/milestone_gate.py"
 
 mg_milestone_gate__python() { python3 -B -I "$MG_ROOT/$MG_MILESTONE_GATE_PY" "$@"; }
 
-# mg_milestone_gate__load <out>: milestones.yaml as JSON. PyYAML is in the dev
+# mg_milestone_gate__load <out>: milestones.yaml and the first-sync build's
+# exact historical tier arguments as JSON, bound to HEAD and source hashes.
+# PyYAML is in the dev
 # container; a python3 that has it reads the file here. Call it after
 # mg_gate__load, which checks Docker and builds the dev image when needed.
 # Returns 1 after recording the errors. `tools/mg milestone` (U19) calls it too.
 mg_milestone_gate__load() {
   local out="$1" errors="$MG_RUN_DIR/manifest-errors.json" rel rc
   if python3 -c 'import yaml' >/dev/null 2>&1; then
-    mg_milestone_gate__python load --manifest "$MG_ROOT/$MG_MILESTONES_FILE" --out "$out" >"$errors"
+    mg_milestone_gate__python load --manifest "$MG_ROOT/$MG_MILESTONES_FILE" --root "$MG_ROOT" --out "$out" >"$errors"
     rc=$?
   else
     rel="${MG_RUN_DIR#"$MG_ROOT"/}"
     mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev \
       python3 -B -I "/work/$MG_MILESTONE_GATE_PY" load --manifest "/work/$MG_MILESTONES_FILE" \
-      --out "/work/$rel/$(basename "$out")" </dev/null >"$errors"
+      --root /work --out "/work/$rel/$(basename "$out")" </dev/null >"$errors"
     rc=$?
   fi
   if [ "$rc" -ne 0 ] || [ ! -s "$out" ]; then

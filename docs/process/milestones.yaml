@@ -367,7 +367,7 @@ milestones:
       - id: first-sync
         description: The first real sync with CloudKit, made with a clean-tree build after its M1R sync conformance results passed on its commit and after a backup of the real collection; it starts the M1R trial
         evidence: docs/process/milestone-records/M1R/first-sync.json
-        validator: {type: first-sync, results: [u246-sync-area, u248-soak, u250-sync-classes]}
+        validator: {type: first-sync, results: [u246-sync-area, cloudkit-fake, cloudkit-faults, cloudkit-soak-fake, u248-soak, u250-sync-classes]}
         plan:
           - text: "The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
             items: [u246-sync-area, u248-soak, u250-sync-classes]

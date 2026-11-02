@@ -4,7 +4,8 @@
 tools/mg milestone-gate calls this; tools/mg milestone (U19) runs the suites
 whose results it reads. Commands:
 
-  load      milestones.yaml -> JSON. The only command that reads YAML
+  load      milestones.yaml -> JSON, including exact first-sync historical
+            definitions with --root. The only command that reads YAML
             (PyYAML: the dev container, or a python3 that has it).
   check     the manifest against the tiers config (`gate.py load` output) and
             the plan's Delivery Milestones table and Unit Index.
@@ -29,9 +30,11 @@ input, an unknown milestone (errors as JSON on stdout) or usage. runs: 0, or
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 
@@ -194,6 +197,12 @@ def cmd_load(a):
     try:
         with open(a.manifest, encoding="utf-8") as f:
             data = yaml.load(f, Loader=UniqueKeyLoader)
+        if a.root and isinstance(data, dict):
+            # Compile only the definitions named by committed first-sync
+            # evidence, while the existing load phase has PyYAML available.
+            # Evaluation verifies these source bindings using stdlib alone.
+            data["_first_sync_definitions"] = _load_first_sync_definitions(
+                data, Git(a.root), lambda source: yaml.load(source, Loader=UniqueKeyLoader))
         text = json.dumps(data, default=plain, ensure_ascii=False)
     except (Invalid, OSError) as e:
         print(json.dumps({"errors": [str(e)]}))
@@ -204,6 +213,56 @@ def cmd_load(a):
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text + "\n")
     return 0
+
+
+def _load_first_sync_definitions(manifest, git, decode):
+    head = git.commit("HEAD")
+    compiled = {"head": head, "builds": {}}
+    milestones = manifest.get("milestones")
+    for milestone in milestones if isinstance(milestones, list) else []:
+        steps = milestone.get("user_steps") if isinstance(milestone, dict) else None
+        for step in steps if isinstance(steps, list) else []:
+            validator = step.get("validator") if isinstance(step, dict) else None
+            if (not isinstance(validator, dict) or validator.get("type") != "first-sync"
+                    or not is_rel_path(step.get("evidence"))):
+                continue
+            raw = git.show(head, step["evidence"])
+            try:
+                evidence = json.loads(raw) if raw is not None else {}
+                commit = evidence.get("build", {}).get("commit")
+            except (ValueError, UnicodeError, AttributeError):
+                continue  # the evidence validator reports its own shape error
+            if not isinstance(commit, str) or not SHA.fullmatch(commit) or git.commit(commit) != commit:
+                continue
+            if commit in compiled["builds"]:
+                continue
+            source = git.show(commit, "tools/gate/tiers.yaml")
+            entry = {}
+            compiled["builds"][commit] = entry
+            if source is None:
+                entry["error"] = "historical-definition-missing"
+                continue
+            entry["sha256"] = hashlib.sha256(source).hexdigest()
+            try:
+                definition = decode(source)
+                if not isinstance(definition, dict) or not isinstance(definition.get("runs"), list):
+                    raise Invalid("historical-definition-malformed")
+                runs = {}
+                selected = {r[0] for r in FIRST_SYNC_RESULTS.values()}
+                for run in definition["runs"]:
+                    if not isinstance(run, dict) or not isinstance(run.get("id"), str) or run["id"] not in selected:
+                        continue
+                    if (not SLUG.fullmatch(run["id"]) or run["id"] in runs
+                            or not isinstance(run.get("job"), str) or not SLUG.fullmatch(run["job"])
+                            or not is_str_list(run.get("args", []), nonempty=False)):
+                        raise Invalid("historical-definition-malformed")
+                    runs[run["id"]] = {"job": run["job"], "args": run.get("args", []),
+                                       "pending": bool(run.get("pending")), "disabled": bool(run.get("disabled"))}
+                entry["runs"] = runs
+            except Exception:
+                # YAML diagnostics and values must not escape this boundary.
+                entry["error"] = "historical-definition-malformed"
+    return compiled
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +770,8 @@ def build_model(manifest, config):
     runs = {r["id"]: r for r in config.get("runs", [])}
     if not isinstance(manifest, dict):
         return None, ["the manifest must be a mapping"], []
-    extra = set(manifest) - {"version", "plan", "evidence_paths", "budget_devices", "global", "milestones"}
+    extra = set(manifest) - {"version", "plan", "evidence_paths", "budget_devices", "global", "milestones",
+                             "_first_sync_definitions"}
     if extra:
         errors.append("unknown top-level keys %s" % ", ".join(sorted(extra)))
     if manifest.get("version") != 1:
@@ -737,7 +797,8 @@ def build_model(manifest, config):
         return None, errors, problems
     # The one milestone list and its order: everything else reads it from here.
     model = {"plan": manifest.get("plan"), "evidence_paths": list(evidence), "budget_devices": devices,
-             "global": [], "milestones": [], "order": list(order)}
+             "global": [], "milestones": [], "order": list(order),
+             "_first_sync_definitions": manifest.get("_first_sync_definitions")}
     seen_units, suite_runs, suite_details = {}, {}, {}
     for mi, m in enumerate(ms):
         mid = m["id"]
@@ -1540,57 +1601,312 @@ def v_report(ctx, step, v):
     return "pass", "Antoine reported a pass on %s" % data["date"], {"date": data["date"]}
 
 
+FIRST_SYNC_RESULTS = {
+    # conformance/cloudkit-acceptance Q13. These aliases do not register jobs.
+    "u246-sync-area": ("u246-conformance", "conformance-aggregate", "areas", ("sync",), None),
+    "cloudkit-fake": ("cloud-fake", "cloud-fake", "scenarios", ("cloudkit-fake",), "cloud-fake"),
+    "cloudkit-faults": ("cloud-faults", "cloud-faults", "scenarios", ("cloudkit-faults",), "cloud-faults"),
+    "cloudkit-soak-fake": ("cloud-soak-fake", "soak", "scenarios", ("cloudkit-soak-fake",), "cloud-soak-fake"),
+    "u248-soak": ("cloudkit-signed", "cloudkit-signed", "scenarios", ("cloudkit-signed",), "cloud-signed"),
+    "u250-sync-classes": ("u250-fault", "fault", "classes", ("review", "sync", "backup") + tuple(
+        "cloud-" + name for name in ("send", "fetch", "apply", "media", "rekey", "claim", "tracking",
+                                    "start", "adopt", "publish", "own", "abandon")), None),
+}
+MG_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9]+$")
+
+
+def _first_sync_bytes(boundary, path):
+    """Read one bounded file via nofollow directory descriptors."""
+    if ".." in path.split(os.path.sep) or "\x00" in path:
+        raise Invalid("path-escape")
+    boundary, path = os.path.abspath(boundary), os.path.abspath(path)
+    if os.path.commonpath((boundary, path)) != boundary or path == boundary:
+        raise Invalid("path-escape")
+    fd = None
+    try:
+        fd = os.open(os.path.sep, os.O_RDONLY | os.O_DIRECTORY)
+        parts = path.split(os.path.sep)[1:]
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(file_fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise Invalid("not-regular")
+            raw = stream.read(16 * 1024 * 1024 + 1)
+            if len(raw) > 16 * 1024 * 1024:
+                raise Invalid("oversize")
+    except OSError:
+        raise Invalid("missing-unreadable-or-symlink") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return raw
+
+
+def _first_sync_json(boundary, path, *, witness=None):
+    raw = _first_sync_bytes(boundary, path)
+    def pairs(items):
+        out = {}
+        for key, value in items:
+            if key in out:
+                raise ValueError()
+            out[key] = value
+        return out
+
+    def constant(_):
+        raise ValueError()
+
+    try:
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
+    except (ValueError, UnicodeError, RecursionError):
+        raise Invalid("malformed-json") from None
+    if witness is not None:
+        witness["sha256"] = hashlib.sha256(raw).hexdigest()
+    return value
+
+
+def _first_sync_envelope(r):
+    """Complete fixed v1 MG envelope, stdlib equivalent of mg-result.schema.json.
+
+    Keep this deliberately specific to MG; it is not a JSON Schema engine.
+    Return bounded field categories, never JSON values or schema exceptions.
+    """
+    fields = {"schema_version", "job", "run_id", "status", "exit_code", "placement", "service", "dry_run",
+              "args", "root", "started_at", "finished_at", "duration_ms", "commit", "message", "summary",
+              "failures", "artifacts", "user_steps", "details"}
+    if not isinstance(r, dict) or set(r) != fields:
+        raise Invalid("envelope-schema-fields")
+    integer = lambda n: type(n) is int and n >= 0
+    text = lambda s: isinstance(s, str)
+    nonempty = lambda s: text(s) and bool(s)
+    checks = {
+        "schema_version": type(r["schema_version"]) is int and r["schema_version"] == 1,
+        "job": text(r["job"]), "run_id": text(r["run_id"]) and bool(MG_RUN_ID.fullmatch(r["run_id"])),
+        "status": r["status"] in ("pass", "warn", "fail", "error"),
+        "exit_code": type(r["exit_code"]) is int and r["exit_code"] in (0, 1, 2),
+        "placement": r["placement"] in ("host", "docker", "none"),
+        "service": r["service"] is None or text(r["service"]), "dry_run": type(r["dry_run"]) is bool,
+        "args": isinstance(r["args"], list) and all(text(x) for x in r["args"]),
+        "root": text(r["root"]), "message": text(r["message"]), "duration_ms": integer(r["duration_ms"]),
+        "started_at": as_time(r["started_at"]) is not None,
+        "finished_at": as_time(r["finished_at"]) is not None, "details": isinstance(r["details"], dict),
+    }
+    c, s = r["commit"], r["summary"]
+    checks["commit"] = (isinstance(c, dict) and set(c) == {"sha", "dirty"}
+                        and (c["sha"] is None or (text(c["sha"]) and bool(SHA.fullmatch(c["sha"]))))
+                        and (c["dirty"] is None or type(c["dirty"]) is bool))
+    checks["summary"] = (isinstance(s, dict) and {"total", "passed", "failed", "skipped"} <= set(s)
+                         and all(integer(n) for n in s.values()))
+    checks["failures"] = isinstance(r["failures"], list) and all(
+        isinstance(f, dict) and set(f) == {"id", "message", "repro"}
+        and nonempty(f["id"]) and text(f["message"]) and nonempty(f["repro"]) for f in r["failures"])
+    checks["artifacts"] = isinstance(r["artifacts"], list) and all(
+        isinstance(a, dict) and {"kind", "path"} <= set(a) <= {"kind", "path", "label"}
+        and nonempty(a["kind"]) and text(a["path"]) and a["path"].startswith("/")
+        and ("label" not in a or text(a["label"])) for a in r["artifacts"])
+    checks["user_steps"] = isinstance(r["user_steps"], list) and all(
+        isinstance(u, dict) and set(u) == {"id", "state", "required", "title", "how", "doc"}
+        and text(u["id"]) and re.fullmatch(r"[a-z0-9-]+", u["id"])
+        and u["state"] in ("missing", "unverified") and type(u["required"]) is bool
+        and all(text(u[k]) for k in ("title", "how", "doc")) for u in r["user_steps"])
+    for field, valid in checks.items():
+        if not valid:
+            raise Invalid("envelope-schema-" + field)
+
+
+def _first_sync_run(ctx, commit, run_id):
+    """Use load's exact historical definition, bound to its source bytes."""
+    run = ctx["results"].runs.get(run_id)
+    if not run or run.get("pending") or run.get("disabled"):
+        raise Invalid("run-missing-pending-or-disabled")
+    source = ctx["git"].show(commit, "tools/gate/tiers.yaml")
+    if source is None:
+        raise Invalid("historical-definition-missing")
+    compiled = ctx["model"].get("_first_sync_definitions")
+    if not isinstance(compiled, dict) or compiled.get("head") != ctx["head"]:
+        raise Invalid("historical-definition-unavailable")
+    builds = compiled.get("builds")
+    entry = builds.get(commit) if isinstance(builds, dict) else None
+    if not isinstance(entry, dict):
+        raise Invalid("historical-definition-unavailable")
+    if entry.get("sha256") != hashlib.sha256(source).hexdigest():
+        raise Invalid("historical-definition-mismatch")
+    if entry.get("error"):
+        raise Invalid("historical-definition-malformed")
+    runs = entry.get("runs")
+    old = runs.get(run_id) if isinstance(runs, dict) else None
+    if not isinstance(old, dict) or old.get("pending") or old.get("disabled"):
+        raise Invalid("historical-definition-unavailable")
+    if old.get("job") != run["job"] or not is_str_list(old.get("args", []), nonempty=False):
+        raise Invalid("historical-definition-mismatch")
+    return dict(run, args=old.get("args", []))
+
+
+def _first_sync_artifacts(ctx, rid, receipt):
+    """Load only known required evidence before reporting missing delegates."""
+    loaded, problems = [], []
+    signed = rid == "u248-soak"
+    if signed:
+        declared = [a for a in receipt["artifacts"] if os.path.basename(a["path"]) == "signed-evidence.json"]
+        if len(declared) != 1 or declared[0]["kind"] != "report":
+            problems.append("signed-artifact-declaration")
+        else:
+            path = declared[0]["path"]
+            witness = {}
+            try:
+                value = _first_sync_json(os.path.join(ctx["git"].root, "build"), path, witness=witness)
+                loaded.append(path)
+                # Digest of the very bytes decoded, not a second path read.
+                # This is a loader witness, not a missing schema's hash proof.
+                ctx.setdefault("_first_sync_artifact_hashes", {})[path] = witness["sha256"]
+                if not isinstance(value, dict) or value.get("lane") != FIRST_SYNC_RESULTS[rid][4]:
+                    problems.append("signed-artifact-substitution")
+            except Invalid as e:
+                problems.append("artifact-" + str(e))
+    if not problems:
+        problems.append("signed-validator-unavailable" if signed else "lane-evidence-validator-unavailable")
+    return sorted(set(problems)), loaded
+
+
+def _first_sync_reference(ctx, rid, reference, commit, started, resolving=()):
+    run_id, job, detail, items, lane = FIRST_SYNC_RESULTS[rid]
+    if rid in resolving:
+        raise Invalid("receipt-argument-reference-cycle")
+    if not isinstance(reference, dict):
+        raise Invalid("result-reference-missing")
+    if set(reference) - {"job", "run_id", "commit", "finished_at", "outcome"}:
+        raise Invalid("result-reference-fields")
+    if reference.get("job") != job:
+        raise Invalid("reference-job-mismatch")
+    selected = reference.get("run_id")
+    if not isinstance(selected, str) or not MG_RUN_ID.fullmatch(selected):
+        raise Invalid("reference-run-id-invalid")
+    path = os.path.join(ctx["results"].dir, job, selected, "result.json")
+    try:
+        receipt = _first_sync_json(ctx["results"].dir, path)
+    except Invalid as e:
+        raise Invalid("receipt-" + str(e)) from None
+    _first_sync_envelope(receipt)
+    if receipt["job"] != job or receipt["run_id"] != selected:
+        raise Invalid("receipt-job-or-run-id-mismatch")
+    if receipt["root"] != os.path.abspath(ctx["git"].root):
+        raise Invalid("receipt-root-checkout-mismatch")
+    if receipt["commit"] != {"sha": commit, "dirty": False}:
+        raise Invalid("receipt-build-commit-or-dirty-mismatch")
+    if receipt["dry_run"]:
+        raise Invalid("receipt-dry-run")
+    if receipt["status"] != "pass" or receipt["exit_code"] != 0:
+        raise Invalid("receipt-status-or-exit-not-pass")
+    if receipt["summary"]["failed"] != 0 or receipt["failures"]:
+        raise Invalid("receipt-summary-failed-or-failures")
+    if receipt["details"].get("queued") or receipt["details"].get("outcome") == "awaiting_user" or receipt["user_steps"]:
+        raise Invalid("receipt-queued-or-awaiting-user")
+    if as_time(receipt["started_at"]) > as_time(receipt["finished_at"]) or as_time(receipt["finished_at"]) >= started:
+        raise Invalid("receipt-time-order-or-finish-not-before-sync")
+    for key, actual in (("commit", commit), ("finished_at", receipt["finished_at"]), ("outcome", "pass")):
+        if key in reference and reference[key] != actual:
+            raise Invalid("copied-display-" + key + "-disagrees-with-receipt")
+    run = _first_sync_run(ctx, commit, run_id)
+    exact = Results(ctx["results"].dir, ctx["results"].runs, ctx["milestone"])
+    # This path must never cause args_match's artifact resolution to discover
+    # a latest run. Unreferenced artifact dependencies remain unresolved.
+    exact.selected = {key: None for key in exact.runs}
+    for pattern in run["args"]:
+        match = ARTIFACT.fullmatch(pattern)
+        if not match:
+            continue
+        aliases = [key for key, mapped in FIRST_SYNC_RESULTS.items() if mapped[0] == match.group(1)]
+        if len(aliases) != 1:
+            raise Invalid("receipt-argument-reference-missing")
+        dep = aliases[0]
+        referenced, metadata = _first_sync_reference(
+            ctx, dep, ctx["references"].get(dep), commit, started, resolving + (rid,))
+        paths = [a["path"] for a in referenced["artifacts"] if os.path.basename(a["path"]) == match.group(2)]
+        if len(paths) != 1:
+            raise Invalid("receipt-argument-artifact-declaration")
+        try:
+            _first_sync_bytes(os.path.join(ctx["git"].root, "build"), paths[0])
+        except Invalid as e:
+            raise Invalid("receipt-argument-artifact-" + str(e)) from None
+        exact.selected[match.group(1)] = (metadata["receipt"], referenced)
+    if run["job"] != job or not exact.args_match(run["args"], receipt["args"], commit, (run_id,)):
+        raise Invalid("receipt-arguments-mismatch")
+    if any(a == "--leg" or a.startswith("--leg=") for a in receipt["args"]):
+        raise Invalid("receipt-filtered-leg")
+    if lane and receipt["details"].get("lane") != lane:
+        raise Invalid("receipt-lane-mismatch")
+    scope = {"detail": detail, "items": list(items)}
+    if judge(receipt, [], scope)[0] != "pass":
+        raise Invalid("receipt-required-" + detail + "-scope-not-pass")
+    suites = [s for m in ctx["model"]["milestones"][:ctx["mi"] + 1] for s in m["suites"]
+              if s["id"] == rid and s["run"] == run_id]
+    if not suites or any(s.get("pending") for s in suites):
+        raise Invalid("mapped-suite-missing-or-pending")
+    for owner in [run] + suites:
+        for rule in owner.get("require", []):
+            if judge(receipt, [rule], None)[0] != "pass":
+                # Rule identifiers come from approved configuration, but keep
+                # even those out of diagnostics if they are not bounded slugs.
+                key = rule["id"] if SLUG.fullmatch(rule["id"]) else "rule"
+                raise Invalid("receipt-pass-rule-" + key)
+    # Safe metadata is available even when the lane's evidence cannot pass.
+    return receipt, {"job": job, "run_id": selected, "commit": commit, "finished_at": receipt["finished_at"],
+                     "receipt": path, "receipt_validated": True, "evidence_validated": False}
+
+
 def v_first_sync(ctx, step, v):
-    """The first real sync with AnkiWeb (M1R). It is checked against the
-    results it relied on, never against the gate commit: fixes made during
-    the trial move the gate commit, and the first sync cannot be redone."""
+    """Check the first sync's exact historical receipts, never latest runs."""
     data, missing = evidence_json(ctx, step["evidence"])
     if missing:
         return missing
     path = step["evidence"]
-    shape = ("{build: {commit, dirty}, sync_started_at, results: {<id>: {job, commit, finished_at, outcome}}, "
+    shape = ("{build: {commit, dirty}, sync_started_at, results: {<id>: {job, run_id}}, "
              "backup: {file, taken_at}} (times YYYY-MM-DDTHH:MM:SSZ)")
     if not isinstance(data, dict) or not all(isinstance(data.get(k), dict) for k in ("build", "results", "backup")):
         return "fail", "%s: expected %s" % (path, shape), {}
     build, results, backup = data["build"], data["results"], data["backup"]
+    ctx = dict(ctx, references=results, _first_sync_artifact_hashes={})
     started = as_time(data.get("sync_started_at"))
     if started is None:
         return "fail", "%s: sync_started_at must be YYYY-MM-DDTHH:MM:SSZ" % path, {}
     commit = build.get("commit")
     if not isinstance(commit, str) or not SHA.match(commit) or ctx["git"].commit(commit) != commit:
         return "fail", "%s: build.commit must be a full commit id of this repository" % path, {}
-    bad = []
+    bad, verified = [], {}
     if build.get("dirty") is not False:
-        bad.append("the build is not from a clean tree (build.dirty is %s)" % json.dumps(build.get("dirty")))
-    for rid in v["results"]:
-        r = results.get(rid)
-        if not isinstance(r, dict):
-            bad.append("it records no %s result" % rid)
-            continue
-        finished = as_time(r.get("finished_at"))
-        if not isinstance(r.get("job"), str) or not r["job"] or finished is None:
-            bad.append("the %s result needs its job and finished_at" % rid)
-            continue
-        if r.get("commit") != commit:
-            bad.append("the %s result is on %s, not the build's commit %s"
-                       % (rid, str(r.get("commit"))[:12], commit[:12]))
-        if r.get("outcome") != "pass":
-            bad.append("the %s result is %s, not a pass" % (rid, json.dumps(r.get("outcome"))))
-        if finished >= started:
-            bad.append("the %s result finished at %s, not before the sync started (%s)"
-                       % (rid, r["finished_at"], data["sync_started_at"]))
+        bad.append("the build is not from a clean tree")
+    if set(v["results"]) != set(FIRST_SYNC_RESULTS):
+        bad.append("required-result-list-incomplete")
+    for rid in FIRST_SYNC_RESULTS:
+        try:
+            receipt, metadata = _first_sync_reference(ctx, rid, results.get(rid), commit, started)
+            problems, artifacts = _first_sync_artifacts(ctx, rid, receipt)
+            metadata["artifacts_checked"] = artifacts
+            metadata["artifact_sha256"] = {p: ctx["_first_sync_artifact_hashes"][p] for p in artifacts}
+            if build.get("dirty") is False:
+                verified[rid] = metadata
+            if problems:
+                bad.append("%s: %s" % (rid, ", ".join(problems)))
+        except (Invalid, ValueError, UnicodeError) as error:
+            # Invalid contains only fixed categories from these helpers.
+            # Decoder errors from historical config contain source values.
+            category = str(error) if isinstance(error, Invalid) else "historical-definition-malformed"
+            bad.append("%s: %s" % (rid, category))
     taken = as_time(backup.get("taken_at"))
     if not isinstance(backup.get("file"), str) or not backup["file"] or taken is None:
         bad.append("the backup needs its file and taken_at")
     elif taken >= started:
-        bad.append("the backup %s was taken at %s, not before the sync started (%s)"
-                   % (backup["file"], backup["taken_at"], data["sync_started_at"]))
+        bad.append("backup-time-not-before-sync")
+    details = {"build_commit": commit, "sync_started_at": data["sync_started_at"], "results": verified}
     if bad:
-        return "fail", "%s: %s" % (path, "; ".join(bad)), {}
+        return "fail", "%s: %s" % (path, "; ".join(bad)), details
     return "pass", "first sync at %s, on clean build %s, after passing %s and backup %s" % (
         data["sync_started_at"], commit[:12], ", ".join(v["results"]), backup["file"]), {
         "build_commit": commit, "sync_started_at": data["sync_started_at"], "backup": backup,
-        "results": {rid: results[rid] for rid in v["results"]}}
+        "results": verified}
 
 
 VALIDATORS = {
@@ -1874,7 +2190,7 @@ def evaluate(model, config, a):
 
     ctx = {"git": git, "head": head, "gate": gate, "milestone": a.milestone, "mi": mi, "model": model,
            "today": today, "start": start, "doctor": doctor, "hint": hint, "catalog": catalog,
-           "catalog_error": catalog_error}
+           "catalog_error": catalog_error, "results": results}
     steps = []
     for st in milestone["user_steps"]:
         outcome, message, details = VALIDATORS[st["validator"]["type"]](ctx, st, st["validator"])
@@ -1955,6 +2271,7 @@ def main(argv):
     sub = p.add_subparsers(dest="command", required=True)
     s = sub.add_parser("load")
     s.add_argument("--manifest", required=True)
+    s.add_argument("--root", help="compile first-sync definitions from committed evidence in this checkout")
     s.add_argument("--out", required=True)
     s = sub.add_parser("check")
     s.add_argument("--manifest", required=True, help="the manifest as JSON (load's output)")

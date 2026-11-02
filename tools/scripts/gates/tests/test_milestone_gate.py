@@ -8,6 +8,7 @@ Run: python3 -m unittest discover -s tools/scripts/gates/tests
 """
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(os.path.dirname(HERE), "milestone_gate.py")
@@ -124,6 +126,9 @@ class Sandbox(unittest.TestCase):
         return path
 
     def evaluate(self, man, milestone, doctor=None, extra=()):
+        if any(s.get("validator", {}).get("type") == "first-sync"
+               for m in man["milestones"] for s in m["user_steps"]):
+            man = self.loaded_manifest(man)
         paths = {}
         for name, value in (("manifest", man), ("config", self.config)):
             paths[name] = os.path.join(self.tmp, name + ".json")
@@ -152,6 +157,17 @@ class Sandbox(unittest.TestCase):
         self.assertIn(p.returncode, (0, 1, 3), p.stderr.decode())
         with open(out, encoding="utf-8") as f:
             return p.returncode, json.load(f)
+
+    def loaded_manifest(self, man):
+        source, out = os.path.join(self.tmp, "load-input.json"), os.path.join(self.tmp, "loaded-manifest.json")
+        with open(source, "w", encoding="utf-8") as stream:
+            json.dump(man, stream)
+        p = subprocess.run([sys.executable, "-B", GATE, "load", "--manifest", source,
+                            "--root", self.root, "--out", out],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV)
+        self.assertEqual(p.returncode, 0, (p.stdout, p.stderr))
+        with open(out, encoding="utf-8") as stream:
+            return json.load(stream)
 
     def check(self, man, plan_text):
         with open(os.path.join(self.root, "plan.md"), "w", encoding="utf-8") as f:
@@ -1453,9 +1469,7 @@ class ReviewsFirstCoverageTests(Sandbox):
 
 def first_sync(build, started="2026-11-15T09:00:00Z", **change):
     data = {"build": {"commit": build, "dirty": False}, "sync_started_at": started,
-            "results": {rid: {"job": job, "commit": build, "finished_at": "2026-11-15T08:%02d:00Z" % n, "outcome": "pass"}
-                        for n, (rid, job) in enumerate((("u246-sync-area", "conformance"), ("u248-soak", "sync-soak"),
-                                                         ("u250-sync-classes", "fault")))},
+            "results": {},
             "backup": {"file": "collection-2026-11-15-0850.colpkg", "taken_at": "2026-11-15T08:50:00Z"}}
     for path, value in change.items():
         obj, keys = data, path.split("__")
@@ -1468,56 +1482,58 @@ def first_sync(build, started="2026-11-15T09:00:00Z", **change):
     return data
 
 
-class FirstSyncTests(Sandbox):
+class FirstSyncChecks:
     """U240's first-sync validator (M1R): checked against the results the sync
     relied on and the backup before it, never against the gate commit."""
 
     EVIDENCE = "docs/process/milestone-records/M1R/first-sync.json"
-
-    def setUp(self):
-        super().setUp()
-        self.run_("unit", job="core-test")
-        self.build = self.commit("The build Antoine synced with", {"app/A.swift": "// a\n"})
-        self.commit("A fix made during the trial", {"app/A.swift": "// b\n"})
-        self.result("core-test")
-        self.gate = self.git("rev-parse", "HEAD")
-
-    def man(self):
-        step = {"id": "first-sync", "description": "first sync", "evidence": self.EVIDENCE,
-                "validator": {"type": "first-sync", "results": ["u246-sync-area", "u248-soak", "u250-sync-classes"]}}
-        return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]}, M1R={"user_steps": [step]})
 
     def test_absent_evidence_awaits_antoine(self):
         rc, ev = self.evaluate(self.man(), "M1R")
         self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
         self.assertEqual([a["id"] for a in ev["awaiting"]], ["user-step:first-sync"])
 
-    def test_valid_evidence_on_a_build_older_than_the_gate_commit_is_accepted(self):
-        self.commit("Record the first sync", {self.EVIDENCE: first_sync(self.build)})
+    def test_valid_historical_references_are_retained_without_accepting_missing_lane_proof(self):
+        self.commit("Record the first sync", {self.EVIDENCE: self.data})
         rc, ev = self.evaluate(self.man(), "M1R")
-        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"), ev)
+        self.assertIn("signed-validator-unavailable", self.failure(ev, "user-step:first-sync"))
         self.assertEqual(ev["gate_commit"], self.gate)
         details = ev["user_steps"][0]["details"]
         self.assertEqual(details["build_commit"], self.build)
-        self.assertEqual(sorted(details["results"]), ["u246-sync-area", "u248-soak", "u250-sync-classes"])
+        self.assertEqual(set(details["results"]), {r[0] for r in self.RECEIPTS})
+        for rid, result in details["results"].items():
+            self.assertEqual(result["commit"], self.build)
+            self.assertEqual(result["run_id"], self.receipts[rid]["run_id"])
+            self.assertTrue(result["receipt_validated"])
+            self.assertFalse(result["evidence_validated"])
 
     def test_invalid_evidence_fails_and_names_the_step(self):
         cases = [
-            ({"results__u248-soak__commit": self.gate}, "the u248-soak result is on %s, not the build's commit" % self.gate[:12]),
+            ({"results__u248-soak__commit": self.gate}, "copied-display-commit-disagrees"),
             ({"results__u246-sync-area__finished_at": "2026-11-15T09:00:00Z"},
-             "the u246-sync-area result finished at 2026-11-15T09:00:00Z, not before the sync started"),
-            ({"results__u250-sync-classes__outcome": "fail"}, 'the u250-sync-classes result is "fail", not a pass'),
+             "copied-display-finished_at-disagrees"),
+            ({"results__u250-sync-classes__outcome": "fail"}, "copied-display-outcome-disagrees"),
             ({"build__dirty": True}, "not from a clean tree"),
             ({"build__dirty": None}, "not from a clean tree"),
-            ({"backup__taken_at": "2026-11-15T09:05:00Z"}, "was taken at 2026-11-15T09:05:00Z, not before the sync"),
-            ({"results__u250-sync-classes": None}, "records no u250-sync-classes result"),
+            ({"backup__taken_at": "2026-11-20T11:05:00Z"}, "backup-time-not-before-sync"),
+            ({"results__u250-sync-classes": None}, "u250-sync-classes: result-reference-missing"),
             ({"build__commit": "f" * 40}, "build.commit must be a full commit id of this repository"),
             ({"sync_started_at": "yesterday"}, "sync_started_at must be"),
             ({"backup": None}, "expected {build"),
         ]
         for change, expected in cases:
             with self.subTest(expected):
-                self.commit("Record the first sync", {self.EVIDENCE: first_sync(self.build, **change)})
+                data = copy.deepcopy(self.data)
+                for path, value in change.items():
+                    obj, keys = data, path.split("__")
+                    for key in keys[:-1]:
+                        obj = obj[key]
+                    if value is None:
+                        del obj[keys[-1]]
+                    else:
+                        obj[keys[-1]] = value
+                self.commit("Record the first sync", {self.EVIDENCE: data})
                 rc, ev = self.evaluate(self.man(), "M1R")
                 self.assertEqual((rc, ev["outcome"]), (1, "fail"))
                 message = self.failure(ev, "user-step:first-sync")
@@ -1536,6 +1552,574 @@ class FirstSyncTests(Sandbox):
         self.assertEqual([a["id"] for a in ev["awaiting"]],
                          ["user-step:device-run-iphone", "user-step:device-run-ipad", "user-step:device-run-mac"])
         self.assertIn("device-runs/M1R/iphone.json", ev["awaiting"][0]["message"])
+
+
+class FirstSyncFixture:
+    """Receipt references are authority; all signed claims here are synthetic
+    negative evidence, never a substitute for the missing signed validator."""
+
+    EVIDENCE = FirstSyncChecks.EVIDENCE
+    CLOUD_CLASSES = tuple("cloud-" + name for name in (
+        "send", "fetch", "apply", "media", "rekey", "claim", "tracking", "start",
+        "adopt", "publish", "own", "abandon"))
+    # The normative suite/run/job/scope mapping in cloudkit-acceptance Q13.
+    RECEIPTS = (
+        ("u246-sync-area", "u246-conformance", "conformance-aggregate", "areas", ("sync",), None, ()),
+        ("cloudkit-fake", "cloud-fake", "cloud-fake", "scenarios", ("cloudkit-fake",), "cloud-fake", ()),
+        ("cloudkit-faults", "cloud-faults", "cloud-faults", "scenarios", ("cloudkit-faults",), "cloud-faults", ()),
+        ("cloudkit-soak-fake", "cloud-soak-fake", "soak", "scenarios", ("cloudkit-soak-fake",),
+         "cloud-soak-fake", ("--lane", "cloud-fake")),
+        ("u248-soak", "cloudkit-signed", "cloudkit-signed", "scenarios", ("cloudkit-signed",), "cloud-signed", ()),
+        ("u250-sync-classes", "u250-fault", "fault", "classes", ("review", "sync", "backup") + CLOUD_CLASSES, None, ()),
+    )
+
+    def setUp(self):
+        super().setUp()
+        # A nondefault --results directory, still inside this checkout's build
+        # output. No real receipts, accounts or approval records are consulted.
+        self.results = os.path.join(self.root, "build", "receipt-results")
+        self.run_("unit", job="core-test")
+        for _, run, job, _, _, _, args in self.RECEIPTS:
+            self.run_(run, job=job, args=args, tier="T3",
+                      require=[{"id": "no-notes", "detail": "notes", "only_keys": []}])
+        self.config["runs"][1]["args"] = ["--base", "{base}", "--rev", "{tip}"]
+        self.build = self.commit("Synthetic first-sync build", {
+            ".gitignore": "build/\n/outside-signed.json\n/signed-evidence.json\n", "app/A.swift": "// synthetic build\n",
+            "tools/gate/tiers.yaml": self.source_tiers(), "docs/process/milestones.yaml": self.man()})
+        self.paths, self.receipts = {}, {}
+        self.data = first_sync(self.build, started="2026-11-20T11:00:00Z")
+        self.data["backup"] = {"file": "synthetic.colpkg", "taken_at": "2026-11-20T10:30:00Z"}
+        self.data["results"] = {}
+        for rid, run, job, detail, items, lane, _ in self.RECEIPTS:
+            details = {detail: {item: "pass" for item in items}}
+            if lane:
+                details["lane"] = lane
+            definition = next(r for r in self.config["runs"] if r["id"] == run)
+            args = [a.replace("{base}", self.build).replace("{tip}", self.build) for a in definition["args"]]
+            path = self.result(job, args=args, sha=self.build, details=details)
+            receipt = self.read_receipt(path)
+            self.paths[rid], self.receipts[rid] = path, receipt
+            if rid == "u248-soak":
+                artifact = os.path.join(os.path.dirname(path), "signed-evidence.json")
+                # Only a loader witness: no signed schema or success proof.
+                self.write_receipt(artifact, {"lane": "cloud-signed"})
+                receipt["artifacts"] = [{"kind": "report", "path": artifact}]
+                self.write_receipt(path, receipt)
+            self.data["results"][rid] = {
+                "job": job, "run_id": receipt["run_id"], "commit": self.build,
+                "finished_at": receipt["finished_at"], "outcome": "pass"}
+        self.gate = self.commit("Synthetic change during trial", {"app/A.swift": "// synthetic trial\n"})
+        for rid, run, job, _, _, _, _ in self.RECEIPTS:
+            # Current gate receipts are distinct from the historical receipts
+            # referenced by first-sync.json. Their claims remain synthetic.
+            definition = next(r for r in self.config["runs"] if r["id"] == run)
+            args = [a.replace("{base}", self.gate).replace("{tip}", self.gate) for a in definition["args"]]
+            path = self.result(job, args=args, details=self.receipts[rid]["details"])
+            current = self.read_receipt(path)
+            current.update(started_at="2026-11-20T11:30:00Z", finished_at="2026-11-20T11:31:00Z")
+            self.write_receipt(path, current)
+        self.result("core-test")
+
+    def source_tiers(self):
+        # JSON is YAML-compatible, so the historical source needs no test
+        # parser or invented archive format.
+        keys = ("id", "job", "args", "tier", "class", "require")
+        runs = [dict((k, r[k]) for k in keys) for r in self.config["runs"]]
+        for run in runs:
+            run.update(placement="host", budget_s=60)
+        return {"version": 1, "tiers": {"T0": {"when": "every change"}, "T3": {"when": "milestones"}},
+                "runs": runs}
+
+    @staticmethod
+    def read_receipt(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def write_receipt(path, data):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def man(self):
+        step = {"id": "first-sync", "description": "synthetic receipt check", "evidence": self.EVIDENCE,
+                "validator": {"type": "first-sync", "results": [r[0] for r in self.RECEIPTS]}}
+        suites = [{"id": rid, "run": run, "scope": {"detail": detail, "items": list(items)},
+                   "require": [{"id": "no-skips", "summary": "skipped", "max": 0}]}
+                  for rid, run, _, detail, items, _, _ in self.RECEIPTS]
+        return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]},
+                        M1R={"suites": suites, "user_steps": [step]})
+
+
+class FirstSyncTests(FirstSyncChecks, FirstSyncFixture, Sandbox):
+    pass
+
+
+class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
+    def _internal_validator(self):
+        # Existing importlib/evidence loader seams, confined to this process.
+        # Nothing installs a public validator override or a signed acceptance.
+        spec = importlib.util.spec_from_file_location("first_sync_gate", GATE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.commit("Synthetic evidence for the real load phase", {self.EVIDENCE: self.data})
+        ctx = {"git": mod.Git(self.root), "head": self.git("rev-parse", "HEAD"),
+               "model": self.loaded_manifest(self.man()), "mi": 1, "milestone": "M1R",
+               "results": mod.Results(self.results, {r["id"]: r for r in self.config["runs"]}, "M1R")}
+        step = milestone(self.man(), "M1R")["user_steps"][0]
+        return mod, ctx, step
+
+    def test_each_non_signed_reference_validates_identity_before_missing_lane_dependency(self):
+        mod, ctx, step = self._internal_validator()
+        for reference_only, object_pass in ((False, False), (True, True)):
+            with self.subTest(reference_only=reference_only, object_pass=object_pass):
+                data = copy.deepcopy(self.data)
+                if reference_only:
+                    for ref in data["results"].values():
+                        for key in ("commit", "finished_at", "outcome"):
+                            del ref[key]
+                for rid, _, _, detail, items, _, _ in self.RECEIPTS:
+                    receipt = copy.deepcopy(self.receipts[rid])
+                    if object_pass:
+                        receipt["details"][detail] = {item: {"status": "pass"} for item in items}
+                    self.write_receipt(self.paths[rid], receipt)
+                try:
+                    with mock.patch.object(mod, "evidence_json", return_value=(data, None)), \
+                            mock.patch.object(mod, "_first_sync_envelope", wraps=mod._first_sync_envelope) as envelopes, \
+                            mock.patch.object(mod, "_first_sync_artifacts", wraps=mod._first_sync_artifacts) as artifacts:
+                        outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
+                    self.assertEqual(outcome, "fail")
+                    self.assertIn("signed-validator-unavailable", message)
+                    self.assertEqual(envelopes.call_count, 6)
+                    self.assertEqual([c.args[1] for c in artifacts.call_args_list], [r[0] for r in self.RECEIPTS])
+                    for rid, _, job, _, _, _, _ in self.RECEIPTS:
+                        if rid == "u248-soak":
+                            continue
+                        verified = details["results"][rid]
+                        self.assertEqual((verified["job"], verified["run_id"], verified["commit"], verified["receipt"]),
+                                         (job, self.receipts[rid]["run_id"], self.build, self.paths[rid]))
+                        self.assertTrue(verified["receipt_validated"])
+                        self.assertFalse(verified["evidence_validated"])
+                        # Do not relabel a loader invocation as artifact proof.
+                        self.assertIn(rid + ": lane-evidence-validator-unavailable", message)
+                finally:
+                    for rid, receipt in self.receipts.items():
+                        self.write_receipt(self.paths[rid], receipt)
+
+    def test_only_required_known_artifacts_are_loaded_before_reporting_unavailable_validators(self):
+        mod, ctx, step = self._internal_validator()
+        declared, optional = {}, []
+        for rid, receipt in self.receipts.items():
+            changed = copy.deepcopy(receipt)
+            if rid == "u248-soak":
+                declared[rid] = receipt["artifacts"][0]["path"]
+            for kind, name in (("log", "log.txt"), ("report", "synthetic-evidence.json")):
+                path = os.path.join(os.path.dirname(self.paths[rid]), name)
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write("ordinary optional text, not JSON")
+                changed["artifacts"].append({"kind": kind, "path": path})
+                optional.append(path)
+            self.write_receipt(self.paths[rid], changed)
+        try:
+            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)), \
+                    mock.patch.object(mod, "_first_sync_json", wraps=mod._first_sync_json) as loader:
+                outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
+            self.assertEqual(outcome, "fail")
+            self.assertIn("signed-validator-unavailable", message)
+            for rid, path in declared.items():
+                self.assertEqual(len([c for c in loader.call_args_list if c.args[1] == path]), 1)
+                self.assertEqual(details["results"][rid]["artifacts_checked"], [path])
+                self.assertFalse(details["results"][rid]["evidence_validated"])
+                with open(path, "rb") as stream:
+                    digest = hashlib.sha256(stream.read()).hexdigest()
+                self.assertEqual(details["results"][rid]["artifact_sha256"], {path: digest})
+            self.assertFalse(any(c.args[1] in optional for c in loader.call_args_list))
+            for rid in set(self.receipts) - set(declared):
+                self.assertEqual(details["results"][rid]["artifacts_checked"], [])
+                self.assertFalse(details["results"][rid]["evidence_validated"])
+                self.assertIn(rid + ": lane-evidence-validator-unavailable", message)
+            # An unrelated declaration stays optional, even in the signed
+            # receipt. Malformed required evidence retains its exact error.
+            signed = copy.deepcopy(self.receipts["u248-soak"])
+            extra = os.path.join(os.path.dirname(self.paths["u248-soak"]), "extra-evidence.json")
+            with open(extra, "w", encoding="utf-8") as stream:
+                stream.write("not-json")
+            signed["artifacts"].append({"kind": "report", "path": extra})
+            self.write_receipt(self.paths["u248-soak"], signed)
+            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)):
+                outcome, message, _ = mod.v_first_sync(ctx, step, step["validator"])
+            self.assertEqual(outcome, "fail")
+            self.assertIn("signed-validator-unavailable", message)
+            self.assertNotIn("artifact-malformed-json", message)
+            with open(declared["u248-soak"], "w", encoding="utf-8") as stream:
+                stream.write("not-json")
+            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)):
+                outcome, message, _ = mod.v_first_sync(ctx, step, step["validator"])
+            self.assertEqual(outcome, "fail")
+            self.assertIn("u248-soak: artifact-malformed-json", message)
+            self.assertNotIn("signed-validator-unavailable", message)
+        finally:
+            self.write_receipt(declared["u248-soak"], {"lane": "cloud-signed"})
+            for rid, receipt in self.receipts.items():
+                self.write_receipt(self.paths[rid], receipt)
+
+    def reject(self, data, rid, reason):
+        self.commit("Synthetic first-sync reference evidence", {self.EVIDENCE: data})
+        try:
+            rc, ev = self.evaluate(self.man(), "M1R")
+            self.assertEqual((rc, ev["outcome"]), (1, "fail"), ev)
+            message = self.failure(ev, "user-step:first-sync")
+            self.assertIn(rid, message)
+            self.assertRegex(message.lower(), reason)
+            self.assertFalse(os.path.exists(self.record))
+            return ev
+        finally:
+            if os.path.exists(self.record):
+                os.remove(self.record)
+
+    def test_copied_pass_fields_without_referenced_receipts_fail(self):
+        data = copy.deepcopy(self.data)
+        for result in data["results"].values():
+            del result["run_id"]
+        self.reject(data, "cloudkit-fake", r"run.?id|reference|receipt")
+
+    def test_selected_bad_receipt_never_falls_back_to_newer_pass(self):
+        rid = "cloudkit-fake"
+        original = self.receipts[rid]
+        newer = self.result("cloud-fake", sha=self.build, details=original["details"])
+        os.symlink(os.path.dirname(newer), os.path.join(self.results, "cloud-fake", "latest"))
+        default_receipt = os.path.join(self.root, "build", "mg", "cloud-fake", original["run_id"], "result.json")
+        os.makedirs(os.path.dirname(default_receipt))
+        self.write_receipt(default_receipt, original)
+        bad = copy.deepcopy(original)
+        bad["summary"]["failed"] = 1
+        self.write_receipt(self.paths[rid], bad)
+        try:
+            self.reject(self.data, rid, r"summary|failed")
+        finally:
+            self.write_receipt(self.paths[rid], original)
+
+    def test_wrong_job_and_unsafe_run_ids_fail(self):
+        rid = "cloudkit-fake"
+        cases = [("job", "soak"), ("job", "../cloud-fake"),
+                 ("job", os.path.dirname(self.paths[rid])), ("run_id", "latest"),
+                 ("run_id", "20261120T100000Z-x"), ("run_id", "../outside"),
+                 ("run_id", "20261120T100001Z-101/../../outside"),
+                 ("run_id", self.paths[rid])]
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                data = copy.deepcopy(self.data)
+                data["results"][rid][field] = value
+                self.reject(data, rid, r"job|run.?id|reference|path")
+
+    def test_missing_and_symlink_receipts_fail_without_content_disclosure(self):
+        rid = "cloudkit-fake"
+        path = self.paths[rid]
+        # The symlink target is synthetic and stays within temporary build
+        # output. No test points the evaluator at arbitrary workstation data.
+        outside = os.path.join(self.root, "build", "outside-receipt.json")
+        marker = "SYNTHETIC_RECEIPT_CONTENT_MUST_NOT_APPEAR"
+        linked_receipt = copy.deepcopy(self.receipts[rid])
+        linked_receipt["message"] = marker
+        self.write_receipt(outside, linked_receipt)
+        for kind in ("missing", "file-symlink", "directory-symlink"):
+            with self.subTest(kind=kind):
+                saved = os.path.dirname(path) + "-saved"
+                os.rename(os.path.dirname(path), saved)
+                try:
+                    if kind == "file-symlink":
+                        os.makedirs(os.path.dirname(path))
+                        os.symlink(outside, path)
+                    elif kind == "directory-symlink":
+                        os.symlink(saved, os.path.dirname(path))
+                    ev = self.reject(self.data, rid, r"missing|receipt|symlink|regular|path")
+                    self.assertNotIn(marker, json.dumps(ev))
+                finally:
+                    if os.path.islink(os.path.dirname(path)):
+                        os.unlink(os.path.dirname(path))
+                    elif os.path.exists(os.path.dirname(path)):
+                        shutil.rmtree(os.path.dirname(path))
+                    os.rename(saved, os.path.dirname(path))
+
+    def test_actual_envelope_controls_source_and_pass_facts(self):
+        rid = "cloudkit-fake"
+        cases = [
+            ("schema_version", 2, r"schema"), ("schema_version", None, r"schema"),
+            ("job", "soak", r"job"), ("run_id", "20261120T100059Z-999", r"run.?id"),
+            ("root", os.path.join(self.root, "other-checkout"), r"root|checkout"),
+            ("commit", {"sha": self.gate, "dirty": False}, r"commit|source|build"),
+            ("commit", {"sha": self.build, "dirty": True}, r"dirty|clean"),
+            ("dry_run", True, r"dry"), ("exit_code", 1, r"exit"),
+            ("status", "fail", r"status|pass|fail"),
+            ("summary", {"total": 3, "passed": 2, "failed": 1, "skipped": 0}, r"failed|summary"),
+            ("failures", [{"id": "synthetic-failure", "message": "synthetic", "repro": "tools/mg cloud-fake"}],
+             r"failure"),
+            ("duration_ms", -1, r"duration|schema"), ("args", [1], r"args|argument|schema"),
+            ("placement", "unknown", r"placement|schema"), ("service", [], r"service|schema"),
+            ("message", {}, r"message|schema"), ("user_steps", [{}], r"user.steps|schema"),
+            ("artifacts", [{"path": "relative"}], r"artifact|schema"),
+            ("unexpected", True, r"unexpected|schema|additional"),
+        ]
+        for field, value, reason in cases:
+            with self.subTest(field=field, value=value):
+                bad = copy.deepcopy(self.receipts[rid])
+                if value is None:
+                    del bad[field]
+                else:
+                    bad[field] = value
+                self.write_receipt(self.paths[rid], bad)
+                try:
+                    self.reject(self.data, rid, reason)
+                finally:
+                    self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_queued_awaiting_and_unavailable_receipts_are_not_passes(self):
+        rid = "cloudkit-fake"
+        for details in ({"queued": True}, {"outcome": "awaiting_user"},
+                        {"lane": {"kind": "cloud-fake", "status": "unavailable", "reason": "synthetic"}}):
+            with self.subTest(details=details):
+                bad = copy.deepcopy(self.receipts[rid])
+                bad["status"] = "warn"
+                bad["details"].update(details)
+                self.write_receipt(self.paths[rid], bad)
+                try:
+                    self.reject(self.data, rid, r"warn|queued|awaiting|unavailable|pass")
+                finally:
+                    self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_arguments_lane_and_each_required_scope_cell_control_result(self):
+        for rid, _, _, detail, items, lane, _ in self.RECEIPTS:
+            cases = [("arguments", None), ("missing-table", None)]
+            cases += [("scope", item) for item in items]
+            if lane:
+                cases.append(("lane", None))
+            for kind, item in cases:
+                with self.subTest(rid=rid, kind=kind, item=item):
+                    bad = copy.deepcopy(self.receipts[rid])
+                    if kind == "arguments":
+                        bad["args"] += ["--leg", "sync_now"]
+                        reason = r"args|argument|leg"
+                    elif kind == "missing-table":
+                        del bad["details"][detail]
+                        reason = r"scope|" + detail
+                    elif kind == "scope":
+                        bad["details"][detail][item] = {"status": "pending"}
+                        reason = r"scope|pending|" + item
+                    else:
+                        bad["details"]["lane"] = "manual-transfer"
+                        reason = r"lane|manual.transfer"
+                    self.write_receipt(self.paths[rid], bad)
+                    try:
+                        self.reject(self.data, rid, reason)
+                    finally:
+                        self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_copied_display_facts_must_agree_with_receipt(self):
+        rid = "cloudkit-fake"
+        for field, value in (("commit", self.gate), ("finished_at", "2026-11-20T10:02:00Z"), ("outcome", "fail")):
+            with self.subTest(field=field):
+                data = copy.deepcopy(self.data)
+                data["results"][rid][field] = value
+                self.reject(data, rid, r"disagree|match|copied|display|receipt")
+
+    def test_mapped_run_and_suite_pass_rules_are_required(self):
+        rid = "cloudkit-fake"
+        for kind in ("run-rule", "suite-rule"):
+            with self.subTest(kind=kind):
+                bad = copy.deepcopy(self.receipts[rid])
+                if kind == "run-rule":
+                    bad["details"]["notes"] = {"synthetic": 1}
+                    reason = r"no.notes|notes"
+                else:
+                    bad["summary"].update(passed=2, skipped=1)
+                    reason = r"no.skips|skipped"
+                self.write_receipt(self.paths[rid], bad)
+                try:
+                    self.reject(self.data, rid, reason)
+                finally:
+                    self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_receipt_times_are_valid_ordered_and_strictly_before_sync(self):
+        rid = "cloudkit-fake"
+        cases = [("started_at", "yesterday"), ("finished_at", "2026-11-20T10:01:99Z"),
+                 ("started_at", "2026-11-20T10:02:00Z"),
+                 ("finished_at", self.data["sync_started_at"]), ("finished_at", "2026-11-20T11:01:00Z")]
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                bad = copy.deepcopy(self.receipts[rid])
+                bad[field] = value
+                self.write_receipt(self.paths[rid], bad)
+                try:
+                    self.reject(self.data, rid, r"time|start|finish|before|order")
+                finally:
+                    self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_commit_argument_placeholders_use_first_sync_build(self):
+        rid = "u246-sync-area"
+        bad = copy.deepcopy(self.receipts[rid])
+        bad["args"] = ["--base", self.gate, "--rev", self.gate]
+        self.write_receipt(self.paths[rid], bad)
+        try:
+            self.reject(self.data, rid, r"args|argument|build")
+        finally:
+            self.write_receipt(self.paths[rid], self.receipts[rid])
+
+    def test_changed_run_definition_uses_historical_build_arguments(self):
+        # The source at the build has no cloud-fake arguments. The trial's
+        # source and normalized config acquire an argument. Neither may
+        # reinterpret the old receipt under the new definition.
+        run = next(r for r in self.config["runs"] if r["id"] == "cloud-fake")
+        run["args"] = ["--rev", "{tip}"]
+        self.gate = self.commit("Synthetic tier change during trial", {
+            "tools/gate/tiers.yaml": self.source_tiers()})
+        for rid, run_id, job, _, _, _, _ in self.RECEIPTS:
+            definition = next(r for r in self.config["runs"] if r["id"] == run_id)
+            args = [a.replace("{base}", self.gate).replace("{tip}", self.gate) for a in definition["args"]]
+            path = self.result(job, args=args, details=self.receipts[rid]["details"])
+            current = self.read_receipt(path)
+            current.update(started_at="2026-11-20T11:40:00Z", finished_at="2026-11-20T11:41:00Z")
+            self.write_receipt(path, current)
+        self.result("core-test")
+        # No positive signed witness exists. A valid historical reference
+        # must reach evidence validation, without an argument rejection.
+        ev = self.reject(self.data, "u248-soak", r"signed.*(schema|validator|validation|evidence)")
+        message = self.failure(ev, "user-step:first-sync").lower()
+        self.assertNotRegex(message, r"cloudkit-fake[^;\n]*(argument|args|definition)")
+        verified = ev["user_steps"][0]["details"]["results"]["cloudkit-fake"]
+        self.assertTrue(verified["receipt_validated"])
+        self.assertEqual((verified["commit"], verified["run_id"]),
+                         (self.build, self.receipts["cloudkit-fake"]["run_id"]))
+
+    def test_real_yaml_historical_arguments_are_compiled_by_load_and_bound_to_build(self):
+        # Actual YAML flow arguments, including a quoted comma, defeat both
+        # JSON-only decoding and the old comma-split decoder. No test parser.
+        source = '''version: 1
+runs:
+  - id: cloud-fake
+    job: cloud-fake
+    args: [--base, "{base}", --rev, "{tip}", --label, "ordinary, argument"]
+'''
+        self.build = self.commit("Synthetic historical YAML definition", {"tools/gate/tiers.yaml": source})
+        self.data["build"]["commit"] = self.build
+        rid = "cloudkit-fake"
+        receipt = copy.deepcopy(self.receipts[rid])
+        receipt["commit"]["sha"] = self.build
+        receipt["args"] = ["--base", self.build, "--rev", self.build, "--label", "ordinary, argument"]
+        self.write_receipt(self.paths[rid], receipt)
+        self.data["results"][rid]["commit"] = self.build
+        run = next(r for r in self.config["runs"] if r["id"] == "cloud-fake")
+        run["args"] = ["--current-only"]
+        self.gate = self.commit("Synthetic current definition differs", {"tools/gate/tiers.yaml": self.source_tiers()})
+        mod, ctx, _ = self._internal_validator()
+        ctx["results"].selected["cloud-fake"] = ("unused-current-cache", {"args": ["--current-only"]})
+        with mock.patch.object(mod.Results, "latest", side_effect=AssertionError("latest must not be consulted")), \
+                mock.patch.object(mod, "_first_sync_run", wraps=mod._first_sync_run) as definitions:
+            selected, metadata = mod._first_sync_reference(
+                ctx, rid, self.data["results"][rid], self.build, mod.as_time(self.data["sync_started_at"]))
+        definitions.assert_called_once_with(ctx, self.build, "cloud-fake")
+        self.assertEqual(selected["args"], receipt["args"])
+        self.assertTrue(metadata["receipt_validated"])
+        self.assertFalse(metadata["evidence_validated"])
+        entry = ctx["model"]["_first_sync_definitions"]["builds"][self.build]
+        self.assertEqual(entry["sha256"], hashlib.sha256(source.encode()).hexdigest())
+        self.assertEqual(entry["runs"]["cloud-fake"]["args"],
+                         ["--base", "{base}", "--rev", "{tip}", "--label", "ordinary, argument"])
+        entry["sha256"] = "0" * 64
+        with self.assertRaisesRegex(mod.Invalid, "^historical-definition-mismatch$"):
+            mod._first_sync_run(ctx, self.build, "cloud-fake")
+        del ctx["model"]["_first_sync_definitions"]
+        with self.assertRaisesRegex(mod.Invalid, "^historical-definition-unavailable$"):
+            mod._first_sync_run(ctx, self.build, "cloud-fake")
+
+    def test_reference_only_entries_require_signed_schema_and_validator(self):
+        data = copy.deepcopy(self.data)
+        for result in data["results"].values():
+            for key in ("commit", "finished_at", "outcome"):
+                del result[key]
+        # Pass-shaped cells (including object cells) cannot implement Q7.4.
+        for rid, receipt in self.receipts.items():
+            changed = copy.deepcopy(receipt)
+            for _, _, _, detail, items, _, _ in self.RECEIPTS:
+                if detail in changed["details"]:
+                    for item in items:
+                        if item in changed["details"][detail]:
+                            changed["details"][detail][item] = {"status": "pass"}
+            self.write_receipt(self.paths[rid], changed)
+        try:
+            self.reject(data, "u248-soak", r"signed.*(schema|validator|validation|evidence)")
+        finally:
+            for rid, receipt in self.receipts.items():
+                self.write_receipt(self.paths[rid], receipt)
+
+    def test_required_signed_artifacts_and_substitutions_fail_closed(self):
+        rid = "u248-soak"
+        path = self.paths[rid]
+        artifact = os.path.join(os.path.dirname(path), "signed-evidence.json")
+        outside = os.path.join(self.root, "build", "outside-signed.json")
+        marker = "SYNTHETIC_ACCOUNT_VALUE_MUST_NOT_APPEAR"
+        # Deliberately invalid declarations; these are not signed evidence.
+        fake = {"outcome": "pass", "lane": "cloud-fake", "account": marker}
+        self.write_receipt(outside, fake)
+        mod, ctx, step = self._internal_validator()
+        diagnostics = {"missing": "artifact-missing-unreadable-or-symlink",
+                       "undeclared": "signed-artifact-declaration", "escaping": "artifact-path-escape",
+                       "symlink": "artifact-missing-unreadable-or-symlink", "malformed": "artifact-malformed-json",
+                       "copied-pass": "signed-artifact-substitution", "fake": "signed-artifact-substitution",
+                       "per-leg": "receipt-arguments-mismatch", "wrong-role": "signed-artifact-declaration",
+                       "duplicate": "signed-artifact-declaration", "hardlink": "artifact-not-regular"}
+        os.unlink(artifact)
+        for kind, diagnostic in diagnostics.items():
+            with self.subTest(kind=kind):
+                bad = copy.deepcopy(self.receipts[rid])
+                bad["artifacts"] = [{"kind": "report", "path": artifact}]
+                try:
+                    if kind == "escaping":
+                        # Outside this checkout's build output, but still
+                        # inside the disposable Git repository.
+                        escaped = os.path.join(self.root, "signed-evidence.json")
+                        self.write_receipt(escaped, fake)
+                        bad["artifacts"][0]["path"] = escaped
+                    elif kind == "symlink":
+                        os.symlink(outside, artifact)
+                    elif kind == "hardlink":
+                        os.link(outside, artifact)
+                    elif kind != "missing":
+                        self.write_receipt(artifact, {"outcome": "pass"} if kind == "copied-pass" else fake)
+                        if kind == "undeclared":
+                            bad["artifacts"] = []
+                        elif kind == "malformed":
+                            with open(artifact, "w", encoding="utf-8") as f:
+                                f.write("not-json " + marker)
+                        elif kind == "per-leg":
+                            bad["args"] = ["--leg", "sync_now"]
+                        elif kind == "wrong-role":
+                            bad["artifacts"][0]["kind"] = "log"
+                        elif kind == "duplicate":
+                            bad["artifacts"].append(copy.deepcopy(bad["artifacts"][0]))
+                    self.write_receipt(path, bad)
+                    ev = self.reject(self.data, rid, diagnostic)
+                    self.assertNotIn(marker, json.dumps(ev))
+                    message = self.failure(ev, "user-step:first-sync")
+                    self.assertNotIn("signed-validator-unavailable", message)
+                    with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)), \
+                            mock.patch.object(mod, "_first_sync_json", wraps=mod._first_sync_json) as loader, \
+                            mock.patch.object(mod, "_first_sync_artifacts", wraps=mod._first_sync_artifacts) as delegate:
+                        outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
+                    self.assertEqual(outcome, "fail")
+                    self.assertIn(rid + ": " + diagnostic, message)
+                    self.assertNotIn(marker, json.dumps((message, details)))
+                    signed_calls = [c for c in delegate.call_args_list if c.args[1] == rid]
+                    self.assertEqual(len(signed_calls), 0 if kind == "per-leg" else 1)
+                    selected_artifact = bad["artifacts"][0]["path"] if bad["artifacts"] else artifact
+                    loads = [c for c in loader.call_args_list if c.args[1] == selected_artifact]
+                    self.assertEqual(len(loads), 0 if kind in ("undeclared", "per-leg", "wrong-role", "duplicate") else 1)
+                finally:
+                    if os.path.lexists(artifact):
+                        os.unlink(artifact)
+                    escaped = os.path.join(self.root, "signed-evidence.json")
+                    if os.path.exists(escaped):
+                        os.unlink(escaped)
+                    self.write_receipt(path, self.receipts[rid])
+        self.write_receipt(artifact, {"lane": "cloud-signed"})
 
 
 class MilestoneRunsTests(Sandbox):
