@@ -16,3 +16,5 @@ Two selected `meguri-sync::cloud_publication` tests prove this prerequisite:
 The first test observes the zone 10 days before the attempted save, then reopens one day later. This covers an observation earlier than `done` and the exact 30-day boundary. Independent source review found no P0-P2 gap in this prerequisite. The receipt contains individual passing results for both tests; its other three tests do not expand this closure.
 
 The patch removes only the matching P24 bullet and records this evidence in its Q11 status cell. It retains Q11's required test text and K22.2 previous-epoch retention coverage. Other P24 items, U113/U114, the original batch gate, signed SDK checks and milestone acceptance remain open.
+
+Final static-checks/20261102T225628Z-87024 passes 3/3 at committed source 303ed37a with the original batch base. Privacy scan 86526 passes for the two ledger files and this evidence record.
