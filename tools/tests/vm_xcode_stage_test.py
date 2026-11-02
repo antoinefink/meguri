@@ -416,6 +416,7 @@ class Staging(unittest.TestCase):
         self.license_ready = 0
         self.identity = ["generated-uuid", "generated-boot"]
         self.addCleanup(patch.stopall)
+        self.real_command = m.command
         patch.object(m, "command", side_effect=self.command).start()
         patch.object(m, "instance", side_effect=lambda: self.identity).start()
         patch.object(m, "guest_root", side_effect=lambda: m.Directory(str(self.root))).start()
@@ -828,6 +829,231 @@ class Staging(unittest.TestCase):
 
     def test_original_lease_change_during_copy_blocks_publication(self):
         self.host_refuses_copy_change(lambda holder: holder.write_text("{}"))
+
+    def failed_host_copy(self, private, streams, *, damage=None, guest_join=True, local_join=True,
+                         returncode=31):
+        # Exercise host -> real VM.copy -> real command with one generated
+        # subprocess handle. Nothing invokes bash, SSH, tar or a real VM.
+        lease = private / "lease"
+        lease.mkdir(mode=0o700)
+        holder = lease / "holder.json"
+        holder.write_text(json.dumps({"job": "vm-xcode-stage", "run_id": "generated-run", "pid": os.getpid(),
+                                      "worktree": str(self.base)}))
+        holder.chmod(0o600)
+        self.selection = str(self.source / "Contents/Developer")
+        events, children = [], []
+        before_retention = {p.name for p in private.glob("copy-command.*")}
+        test = self
+
+        class FailedChild:
+            pid, stdin = 12345, None
+
+            def __init__(self, argv, **kwargs):
+                self.returncode = None
+                test.assertEqual(argv[:2], ["/bin/bash", "-c"])
+                test.assertEqual(argv[3], "vm-xcode-copy")
+                for name, raw in streams.items():
+                    kwargs[name].write(raw)
+                    kwargs[name].flush()
+                children.append(self)
+                events.append("original-copy")
+
+            def communicate(self, data, timeout):
+                test.assertIsNone(data)
+                test.assertEqual(timeout, m.COPY_WAIT)
+                self.returncode = returncode
+                if damage is not None:
+                    damage()
+
+            def wait(self, timeout):
+                test.assertEqual(timeout, m.SHUTDOWN)
+                test.assertEqual({p.name for p in private.glob("copy-command.*")}, before_retention)
+                events.append("local-join")
+                if not local_join:
+                    raise subprocess.TimeoutExpired("generated", timeout)
+                return self.returncode
+
+        class FakeVM(m.VM):
+            def __init__(self, selection, lease_check, safety):
+                self.identity, self.safety = test.identity, safety
+                self.ssh = "/generated/private-copy-route-canary"
+                self.check = lease_check
+                self.guest_command = lambda *args: "generated-private-receiver-canary"
+
+            def call(self, operation, context):
+                events.append(operation)
+                if operation == "prepare":
+                    return {"existing": False, "root": str(test.root), "work": "generated-work",
+                            "receiver": "generated-token"}
+                test.assertEqual(operation, "join-receiver", "failed copy must never publish or activate")
+                test.assertGreaterEqual(events.count("local-join"), 2)
+                if not guest_join:
+                    self.safety["uncertain"] = True
+                    raise m.Uncertain("generated-private-join-error-canary")
+                return {"joined": True, "token": "generated-token", "returncode": 0}
+
+            def close(self):
+                events.append("close")
+
+        def dispatch(argv, **kwargs):
+            if argv[:2] == ["/bin/bash", "-c"]:
+                test.assertIs(type(kwargs.get("copy_diagnostics")), m.Directory)
+                test.assertEqual(kwargs["copy_diagnostics"].path, str(private))
+                return self.real_command(argv, **kwargs)
+            return self.command(argv, **kwargs)
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(m, "VM", FakeVM), patch.object(m, "command", side_effect=dispatch), \
+                patch.object(subprocess, "Popen", FailedChild), patch.object(os, "killpg"), \
+                patch.object(m, "main", side_effect=lambda: m.host({
+                    "selection": {}, "lease_slot": str(lease), "root": str(self.base),
+                    "run": "generated-run", "private": str(private)})), \
+                patch.object(sys, "argv", [str(SPEC.origin)]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(m.run(), 1)
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].returncode, returncode)
+        self.assertEqual(events, ["prepare", "original-copy", "local-join", "local-join", "join-receiver", "close"])
+        self.assertEqual(json.loads(out.getvalue()), m.report("refused"))
+        for canary in (str(self.base), "generated-private-", "copy-command", "original_bytes",
+                       "retained_bytes", "overflow", *[raw[:64].decode() for raw in streams.values()]):
+            self.assertNotIn(canary, out.getvalue() + err.getvalue())
+        safe = guest_join and local_join and damage is None
+        self.assertEqual((private / "receiver-joined.json").exists(), safe)
+        self.assertEqual((private / "lease-safe.json").exists(), safe)
+        return json.loads(err.getvalue())
+
+    def test_successful_copy_command_does_not_retain_failure_diagnostics(self):
+        private = self.base / "private"
+        private.mkdir(mode=0o700)
+        child = types.SimpleNamespace(pid=12345, stdin=None, returncode=0,
+                                      communicate=lambda *a, **kw: None, wait=lambda **kw: 0)
+        with m.Directory(str(private)) as directory, \
+                patch.object(subprocess, "Popen", return_value=child) as start, patch.object(os, "killpg"):
+            self.assertEqual(self.real_command(["generated-copy"], copy_diagnostics=directory), (0, b""))
+        start.assert_called_once()
+        self.assertEqual(list(private.iterdir()), [])
+
+    def test_failed_copy_retains_only_original_streams_and_status_privately(self):
+        private = self.base / "private"
+        private.mkdir(mode=0o700)
+        for name in ("stdout", "stderr", "json"):
+            (private / ("source-command." + name)).write_bytes(b"generated source evidence")
+        streams = {"stdout": b"generated-private-copy-output\x00", "stderr": b"generated-private-copy-error\n"}
+        self.failed_host_copy(private, streams)
+        failed = json.loads((private / "copy-command.json").read_bytes())
+        self.assertEqual(set(failed), {"returncode", "streams"})
+        self.assertEqual(failed["returncode"], 31)
+        for name, raw in streams.items():
+            self.assertEqual((private / ("copy-command." + name)).read_bytes(), raw)
+            self.assertEqual(failed["streams"][name], {
+                "original_bytes": len(raw), "retained_bytes": len(raw), "overflow": False})
+        for name in ("stdout", "stderr", "json"):
+            self.assertEqual((private / ("copy-command." + name)).stat().st_mode & 0o777, 0o600)
+            self.assertEqual((private / ("source-command." + name)).read_bytes(), b"generated source evidence")
+
+    def test_failed_copy_caps_each_original_stream_independently(self):
+        limit = 1024 * 1024
+        for sizes in ((limit + 17, limit + 91), (23, limit + 7), (limit + 3, 29)):
+            with self.subTest(sizes=sizes):
+                private = self.base / ("private-" + str(sizes[0]) + "-" + str(sizes[1]))
+                private.mkdir(mode=0o700)
+                streams = {name: b"generated-private-" + byte * (size - 18)
+                           for name, byte, size in zip(("stdout", "stderr"), (b"o", b"e"), sizes)}
+                self.failed_host_copy(private, streams, returncode=37)
+                failed = json.loads((private / "copy-command.json").read_bytes())
+                self.assertEqual(failed["returncode"], 37)
+                for name, raw in streams.items():
+                    self.assertEqual(len(raw), sizes[("stdout", "stderr").index(name)])
+                    self.assertEqual((private / ("copy-command." + name)).read_bytes(), raw[:limit])
+                    self.assertEqual(failed["streams"][name], {
+                        "original_bytes": len(raw), "retained_bytes": min(len(raw), limit),
+                        "overflow": len(raw) > limit})
+
+    def test_failed_copy_retention_errors_still_join_guest_and_never_publish(self):
+        streams = {"stdout": b"generated-private-output-canary", "stderr": b"generated-private-error-canary"}
+        for name in ("stdout", "stderr", "json"):
+            for kind in ("existing", "symlink", "hardlink"):
+                with self.subTest(name=name, kind=kind):
+                    private = self.base / ("private-" + name + "-" + kind)
+                    private.mkdir(mode=0o700)
+                    target = private / ("copy-command." + name)
+                    sentinel = private / "sentinel"
+                    sentinel.write_bytes(b"generated private existing evidence")
+                    if kind == "symlink":
+                        target.symlink_to(sentinel)
+                    elif kind == "hardlink":
+                        os.link(sentinel, target)
+                    else:
+                        target.write_bytes(b"generated private existing evidence")
+                    result = self.failed_host_copy(private, streams)
+                    self.assertEqual(result["exception"], "FileExistsError")
+                    self.assertEqual(target.read_bytes(), b"generated private existing evidence")
+                    self.assertEqual(sentinel.read_bytes(), b"generated private existing evidence")
+
+    def test_failed_copy_retention_requires_original_private_directory_authority(self):
+        streams = {"stdout": b"generated-private-output-canary", "stderr": b"generated-private-error-canary"}
+        for kind in ("mode", "binding", "owner"):
+            with self.subTest(kind=kind):
+                private = self.base / ("private-" + kind)
+                private.mkdir(mode=0o700)
+
+                def damage():
+                    if kind == "mode":
+                        private.chmod(0o750)
+                    elif kind == "binding":
+                        private.rename(private.with_name(private.name + "-saved"))
+                        private.mkdir(mode=0o700)
+                    else:
+                        s = private.stat()
+                        view = metadata_view({(s.st_dev, s.st_ino): {"st_uid": os.getuid() + 1}})
+                        view.__enter__()
+                        self.addCleanup(view.__exit__, None, None, None)
+
+                result = self.failed_host_copy(private, streams, damage=damage)
+                self.assertEqual(result["exception"], "Refused")
+                self.assertFalse(list(private.glob("copy-command.*")))
+
+    def test_failed_copy_retention_rejects_created_file_substitution_or_links(self):
+        streams = {"stdout": b"generated-private-output-canary", "stderr": b"generated-private-error-canary"}
+        real_open = os.open
+        for kind in ("substitution", "hardlink", "mode"):
+            with self.subTest(kind=kind):
+                private = self.base / ("private-file-" + kind)
+                private.mkdir(mode=0o700)
+                target, saved = private / "copy-command.stdout", private / "saved"
+
+                def changed_open(name, flags, *args, **kwargs):
+                    fd = real_open(name, flags, *args, **kwargs)
+                    if name == "copy-command.stdout" and flags & os.O_EXCL:
+                        if kind == "substitution":
+                            target.rename(saved)
+                            target.symlink_to(saved)
+                        elif kind == "hardlink":
+                            os.link(target, saved)
+                        else:
+                            target.chmod(0o640)
+                    return fd
+
+                with patch.object(os, "open", side_effect=changed_open):
+                    result = self.failed_host_copy(private, streams)
+                self.assertEqual(result["exception"], "Refused")
+                self.assertEqual(target.read_bytes(), b"")
+                self.assertFalse((private / "copy-command.json").exists())
+
+    def test_failed_copy_or_retention_error_cannot_release_uncertain_original_join(self):
+        streams = {"stdout": b"generated-private-output-canary", "stderr": b"generated-private-error-canary"}
+        for retention_error in (False, True):
+            for guest_join, local_join in ((False, True), (True, False)):
+                with self.subTest(retention_error=retention_error, guest_join=guest_join, local_join=local_join):
+                    private = self.base / f"private-{retention_error}-{guest_join}-{local_join}"
+                    private.mkdir(mode=0o700)
+                    if retention_error:
+                        (private / "copy-command.stdout").write_bytes(b"generated existing evidence")
+                    result = self.failed_host_copy(private, streams, guest_join=guest_join, local_join=local_join)
+                    self.assertEqual(result["exception"], "Uncertain")
+                    if not local_join:
+                        self.assertFalse((private / "copy-command.json").exists())
 
     def test_external_and_chained_escaping_links_are_not_followed(self):
         link = self.source / "Contents/Developer/current"

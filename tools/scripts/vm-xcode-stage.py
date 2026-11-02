@@ -208,8 +208,49 @@ def retain_source_failure(directory, argv, returncode, out, err):
     directory.check()
 
 
+def retain_copy_failure(directory, returncode, out, err):
+    """Bounded private evidence from the original joined, failed copy only."""
+    need(type(directory) is Directory and type(returncode) is int and returncode != 0)
+    directory.check()
+    s = os.fstat(directory.fd)
+    need(s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+    limit, streams, bindings = 1024 * 1024, {}, []
+
+    def save(name, raw):
+        directory.check()
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory.fd)
+        with os.fdopen(fd, "wb") as retained:
+            original = pin(os.fstat(fd))
+
+            def check_file():
+                directory.check()
+                s = os.fstat(fd)
+                need(stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid() and
+                     stat.S_IMODE(s.st_mode) == 0o600 and s.st_nlink == 1 and pin(s) == original and
+                     file_pin(s) == file_pin(os.stat(name, dir_fd=directory.fd, follow_symlinks=False)))
+
+            check_file()
+            retained.write(raw)
+            retained.flush()
+            check_file()
+            bindings.append((name, file_pin(os.fstat(fd))))
+        directory.check()
+        for saved, expected in bindings:
+            need(file_pin(os.stat(saved, dir_fd=directory.fd, follow_symlinks=False)) == expected)
+
+    for name, stream in (("stdout", out), ("stderr", err)):
+        original_bytes = os.fstat(stream.fileno()).st_size
+        stream.seek(0)
+        raw = stream.read(limit)
+        save("copy-command." + name, raw)
+        streams[name] = {"original_bytes": original_bytes, "retained_bytes": len(raw),
+                         "overflow": original_bytes > limit}
+    save("copy-command.json", json.dumps({"returncode": returncode, "streams": streams}).encode())
+
+
 def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180,
-            source_diagnostics=None):
+            source_diagnostics=None, copy_diagnostics=None):
     """One original owned session; inherited output pipes cannot block join."""
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         child = None
@@ -230,6 +271,8 @@ def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180,
                         child.stdin.close()
         if child.returncode != 0 and source_diagnostics is not None:
             retain_source_failure(source_diagnostics, argv, child.returncode, out, err)
+        if child.returncode != 0 and copy_diagnostics is not None:
+            retain_copy_failure(copy_diagnostics, child.returncode, out, err)
         if check:
             need(child.returncode == 0)
         need(os.fstat(out.fileno()).st_size <= 1024 * 1024 and
@@ -836,7 +879,7 @@ class VM:
         return json.loads(self.call_command(self.guest_command(operation, context),
                                            timeout=45 if operation == "join-receiver" else 180)[1])
 
-    def copy(self, bundle, context, on_join=lambda: None):
+    def copy(self, bundle, context, on_join=lambda: None, *, copy_diagnostics=None):
         self.check()
         source = "/dev/fd/" + str(bundle.fd) + "/."
         dest = context["state"]["root"] + "/" + context["state"]["work"] + "/Xcode.app"
@@ -859,7 +902,7 @@ mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
             command(["/bin/bash", "-c", shell, "vm-xcode-copy",
                      str(Path(__file__).with_name("mac-vm-lib.sh")), self.ssh,
                      self.guest_command("receive", context), source, dest],
-                    pass_fds=(bundle.fd,), timeout=COPY_WAIT)
+                    pass_fds=(bundle.fd,), timeout=COPY_WAIT, copy_diagnostics=copy_diagnostics)
         except Uncertain:
             local_uncertain = True
             raise
@@ -978,7 +1021,7 @@ def host(context):
             def receiver_joined():
                 write_new(private_dir, "receiver-joined.json", {"joined": True})
                 safety["joined"] = True
-            vm.copy(bundle, private, on_join=receiver_joined)
+            vm.copy(bundle, private, on_join=receiver_joined, copy_diagnostics=private_dir)
         # Publication is authorized only after the ORIGINAL source and lease
         # survive the complete copy, not an independently re-opened success flag.
         source_check()

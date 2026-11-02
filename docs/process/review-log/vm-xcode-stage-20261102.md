@@ -121,3 +121,22 @@ source pins, ownership, copy limits and guest cleanup fences are unchanged.
 Independent review found no required repair. Selftest39184 passes12/12
 wrappers, zero skips. Privacy passes. Native source acceptance, staging and
 activation remain unrun under this correction; no app or SDK result is implied.
+
+## Original copy failure evidence
+
+Native source-only run40736 passes the corrected signature requirement. Full
+stage41513 then refuses in the original copy command. Its local worker and
+guest receiver are both joined; no activation or matching toolchain is claimed.
+The original command discarded its stderr, so its copy failure cause remains
+unknown. No retry or copy behavior change was used to label that failure.
+
+Filtered implementer264d export47446 adds private retention of the original
+failed-copy return code and separately capped 1 MiB streams, with byte counts
+and overflow flags. Exclusive no-follow files remain mode0600 within the
+retained current-user mode0700 directory. Source evidence has separate names;
+original worker and receiver joins and uncertain-operation fences are unchanged.
+Independent review found no required repair. Selftest49837 passes12/12 wrappers,
+zero skips; privacy50076 passes. Earlier selftest49432 could not reach Docker
+inside the restricted command sandbox and ran zero tests. The authorized
+OrbStack run49837 supplies the focused evidence. Actual failure diagnosis under
+this correction remains pending.
