@@ -98,12 +98,15 @@ mg_vm_xcode_stage_private() (
 )
 
 mg_vm_xcode_stage() {
-  local private report="$MG_RUN_DIR/stage-report.json" rc=0 outcome
+  local private temp_base report="$MG_RUN_DIR/stage-report.json" rc=0 outcome
   if [ "$#" -ne 0 ]; then
     mg_failure usage "usage: tools/mg vm-xcode-stage"
     return 1
   fi
-  private="$(mktemp -d "${TMPDIR:-/tmp}/meguri-vm-xcode.XXXXXX")" || return 1
+  # Resolve only the OS temporary base, before creating our owned directory.
+  # Directory admission stays nofollow for every subsequent candidate path.
+  temp_base="$(CDPATH= cd -- "${TMPDIR:-/tmp}" && pwd -P)" || return 1
+  private="$(mktemp -d "${temp_base%/}/meguri-vm-xcode.XXXXXX")" || return 1
   chmod 700 "$private" || return 1
   # Retain private diagnostics, never export them or delete a substituted path.
   (umask 077; mg_vm_xcode_stage_private "$private" "$report") >"$private/helpers.log" 2>&1 || rc=$?

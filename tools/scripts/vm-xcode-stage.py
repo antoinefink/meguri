@@ -839,12 +839,28 @@ def main():
     return host(json.load(os.fdopen(os.dup(3))))
 
 
-if __name__ == "__main__":
+def run():
     try:
-        sys.exit(main())
+        return main()
     except Cancelled:
-        sys.exit(130)
-    except (Refused, OSError, ValueError, KeyError, TypeError, tarfile.TarError):
+        return 130
+    except (Refused, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         if "--guest" not in sys.argv:
+            # stderr is already retained in private helpers.log. Use fixed
+            # classes and this script's frame names/lines, never error text.
+            kind = next(kind.__name__ for kind in (
+                Uncertain, Refused, NotADirectoryError, FileNotFoundError,
+                PermissionError, FileExistsError, IsADirectoryError, OSError,
+                ValueError, KeyError, TypeError, tarfile.TarError) if isinstance(error, kind))
+            frames, tb = [], error.__traceback__
+            while tb is not None:
+                if tb.tb_frame.f_globals is globals():
+                    frames.append({"function": tb.tb_frame.f_code.co_name, "line": tb.tb_lineno})
+                tb = tb.tb_next
+            print(json.dumps({"exception": kind, "stack": frames}), file=sys.stderr)
             print(json.dumps(report("refused")))
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run())

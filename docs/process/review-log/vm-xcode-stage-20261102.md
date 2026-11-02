@@ -22,3 +22,24 @@ Staged privacy scan private/20261102T143121Z-57574 passes after internal
 helper/test renames and redundant comment removal. Checks and process behavior
 are unchanged. No actual VM action, app acceptance or signed execution is
 claimed by source review.
+
+Focused selftest/20261102T143250Z-59034 passed all 10 selected wrappers,
+including host smoke checks. Static-checks/20261102T143436Z-59473 passed 3/3.
+Actual vm-xcode-stage/20261102T143513Z-60255 then returned error before the
+worker could start guest control. Its private temporary path used a system
+alias that strict Directory admission rejects. This is not a queued activation
+or staging pass.
+
+Content-free proof retained at build/vm-xcode-stage-60255-admission-proof.json
+checks source53bc57ac and the exact holder, both original processes dead,
+strict admission blocked before guest work, no receiver evidence, and the
+empty owned guard. The system alias predates the run on a read-only root.
+Independent review cleared removal of only that guard under the lease mutex.
+Root performed that narrow cleanup and retained every result and diagnostic.
+Normal MG stale-holder reclamation owns the remaining lease cleanup.
+
+Filtered bootstrap repair cleanroom/20261102T144140Z-61600 resolves the OS
+temporary base before mktemp. Directory admission remains strict. Private
+diagnostics now retain fixed error classes and own function/line frames only.
+Independent review found no required issue; staged privacy63117 passes.
+Focused checks and actual execution after this repair remain pending.

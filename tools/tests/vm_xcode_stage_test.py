@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generated bundles/archives and fake command results only. No Apple operations."""
 import importlib.util
+import contextlib
 import io
 import json
 import os
@@ -422,6 +423,65 @@ class Staging(unittest.TestCase):
 
 
 class Transport(unittest.TestCase):
+    def test_linked_private_candidates_are_rejected_before_selection_or_vm(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            physical = base / "physical"
+            physical.mkdir(mode=0o700)
+            private = physical / "private"
+            private.mkdir(mode=0o700)
+            alias = base / "logical"
+            alias.symlink_to(physical, target_is_directory=True)
+            linked = base / "linked-private"
+            linked.symlink_to(private, target_is_directory=True)
+            for candidate in (alias / "private", linked):
+                with self.subTest(candidate=candidate), patch.object(m, "command") as command, \
+                        patch.object(m, "VM") as vm, self.assertRaises((m.Refused, OSError)):
+                    m.host({"selection": {}, "lease_slot": str(base / "lease"), "root": str(base),
+                            "run": "generated-run", "private": str(candidate)})
+                command.assert_not_called()
+                vm.assert_not_called()
+                self.assertEqual(list(private.iterdir()), [])
+
+    def test_error_diagnostics_are_private_fixed_classes_and_own_frames_only(self):
+        sensitive = "generated-private-message /generated/path route command input"
+
+        class SensitiveName(m.Refused):
+            pass
+
+        def fail():
+            try:
+                m.need(False)
+            except m.Refused as error:
+                error.args = (sensitive,)
+                raise error from ValueError(sensitive)
+
+        for failure, expected, functions in (
+                (fail, "Refused", ["run", "need"]),
+                (SensitiveName(sensitive), "Refused", ["run"]),
+                (NotADirectoryError(sensitive), "NotADirectoryError", ["run"])):
+            for guest in (False, True):
+                public, private = io.StringIO(), io.StringIO()
+                with self.subTest(expected=expected, guest=guest), \
+                        patch.object(m, "main", side_effect=failure), \
+                        patch.object(sys, "argv", ["stage"] + (["--guest"] if guest else [])), \
+                        contextlib.redirect_stdout(public), contextlib.redirect_stderr(private):
+                    self.assertEqual(m.run(), 1)
+                if guest:
+                    self.assertEqual((public.getvalue(), private.getvalue()), ("", ""))
+                    continue
+                self.assertEqual(json.loads(public.getvalue()), m.report("refused"))
+                diagnostic = json.loads(private.getvalue())
+                self.assertEqual(set(diagnostic), {"exception", "stack"})
+                self.assertEqual(diagnostic["exception"], expected)
+                self.assertEqual([frame["function"] for frame in diagnostic["stack"]], functions)
+                for frame in diagnostic["stack"]:
+                    self.assertEqual(set(frame), {"function", "line"})
+                    self.assertIs(type(frame["line"]), int)
+                    self.assertGreater(frame["line"], 0)
+                self.assertNotIn(sensitive, public.getvalue() + private.getvalue())
+                self.assertNotIn("SensitiveName", public.getvalue() + private.getvalue())
+
     def test_control_completion_keeps_pending_receiver(self):
         with tempfile.TemporaryDirectory() as temp, m.Directory(str(Path(temp).resolve())) as directory:
             with m.release_proof(directory) as safety:

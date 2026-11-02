@@ -6,6 +6,44 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   python3 -B "$REPO_ROOT/tools/tests/vm_xcode_stage_test.py"
 }
 
+@test "vm-xcode-stage resolves logical temporary base before private directory creation" {
+  mkdir -m 700 "$BATS_TEST_TMPDIR/physical temp"
+  ln -s "$BATS_TEST_TMPDIR/physical temp" "$BATS_TEST_TMPDIR/logical temp"
+  run bash -c '
+    mg_job() { :; }
+    MG_TOOLS="$1/tools" MG_RUN_DIR="$2"
+    TMPDIR="$2/logical temp"
+    source "$1/tools/mg.d/vm-xcode.sh"
+    mg_vm_xcode_stage_private() {
+      python3 -B -I - "$MG_TOOLS/scripts/vm-xcode-stage.py" "$1" "$TMPDIR" <<"PY"
+import importlib.util
+import os
+from pathlib import Path
+import stat
+import sys
+spec = importlib.util.spec_from_file_location("stage", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+private, base = sys.argv[2:]
+assert private == os.path.realpath(private)
+assert str(Path(private).parent) == os.path.realpath(base)
+with m.Directory(private) as directory:
+    s = os.fstat(directory.fd)
+    assert s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700
+PY
+      [ "$?" -eq 0 ] || return 1
+      printf "%s\n" "{\"scope\":\"VM-XCODE-MAINTENANCE-ONLY\",\"outcome\":\"already-selected\",\"checks\":{}}" >"$2"
+    }
+    mg_artifact() { :; }
+    mg_message() { :; }
+    mg_status() { [ "$1" = pass ]; }
+    mg_failure() { return 1; }
+    mg_vm_xcode_stage
+  ' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "vm-xcode-stage never drains a recording holder through a nested slot" {
   run bash -c '
     mg_job() { :; }
