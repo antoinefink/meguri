@@ -97,3 +97,11 @@ shows a normal idle main event loop; it establishes no repaired reopen result.
 The operator has been asked to unlock the Mac for direct visual verification.
 No manual journal reset, collection replacement or security bypass occurred.
 Actual user-collection reopen and real CloudKit network proof remain unverified.
+
+The final standalone build55910 passes from6759694a, with zero warnings/errors
+and verified team signatures. After the repair, direct Mac Swift58083 passes
+the production-owner review/media/reopen/fresh-adoption method1/1, no skips.
+Focused Docker59157 passes all13 review/media round-trip cases, no skips,
+including offline capture and two-device reopen recovery. Their service is
+generated; neither run supplies actual CloudKit network evidence. Doctor60519
+again observes a locked host session. Visual inspection remains pending.
