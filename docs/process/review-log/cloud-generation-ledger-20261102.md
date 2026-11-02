@@ -39,3 +39,9 @@ clippy style finding, with an equivalent let-chain and unchanged cap/order.
 Independent review is clear. Core-lint39203 now passes formatting, layering
 and source policy but exposes a second existing clippy finding in the FFI
 smoke check. That check remains enabled and red, pending a filtered repair.
+
+Filtered40981, fixer4626 from06f93ebf, changes only the FFI smoke check
+to an equivalent let-chain. Its OR condition remains parenthesized and the
+error is unchanged. Independent review is clear. Core-lint44770 passes4/4,
+including formatting and all-feature/all-target clippy. Earlier failed lint
+receipts remain retained; no full integration gate is accepted.

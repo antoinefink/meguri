@@ -232,10 +232,10 @@ pub fn observe(
         } else {
             e.payload.clone()
         };
-        if let c::Payload::Revlog(review) = &payload {
-            if Some(review.cid) != card_id || review.ease != 3 {
-                return Err(cloud_error("smoke review row does not match the Good answer"));
-            }
+        if let c::Payload::Revlog(review) = &payload
+            && (Some(review.cid) != card_id || review.ease != 3)
+        {
+            return Err(cloud_error("smoke review row does not match the Good answer"));
         }
         let digest = payload.payload_digest().map_err(cloud_error)?;
         if e.payload.payload_digest().map_err(cloud_error)? != digest || e.tombstone_at.is_some() {
