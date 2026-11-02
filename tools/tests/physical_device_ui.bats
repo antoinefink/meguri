@@ -160,6 +160,146 @@ test_tree() {
     subTestNodes:[{nodeType:\"Test Suite\", name:\"MediaTests\", subTestNodes:$1}]}]}]}" >"$FX_TESTS"
 }
 
+trace_app_build() {
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'EOF'
+mg_app_build() {
+  { printf 'app-build'; printf ' <%s>' "$@"; printf '\n'; } >>"$STUB_LOG"
+  mg_app_build_action build-for-testing "$@"
+}
+mg_app_input_digest() { echo input-digest >>"$STUB_LOG"; return 1; }
+EOF
+}
+
+@test "build-app explicit CloudAgent forwards the positional plan and records the actual build choice" {
+  trace_app_build
+  local platform config_args
+  export MG_APP_TEST_PLAN=UI
+  for platform in mac ios-sim; do
+    for config_args in implicit explicit; do
+      : >"$STUB_LOG"
+      if [ "$config_args" = explicit ]; then
+        mg build-app --test-plan CloudAgent --config Debug --platform "$platform"
+      else
+        mg build-app --platform "$platform" --test-plan CloudAgent
+      fi
+      [ "$status" -eq 0 ]
+      [ "$(field .status)" = pass ]
+      called "^app-build <$platform> <Debug> <CloudAgent>$"
+      called '^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/DerivedData '
+      [ "$(field .details.build.test_plan)" = CloudAgent ]
+      [ "$(field .details.build.action)" = build-for-testing ]
+      not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
+    done
+  done
+}
+
+@test "build-app default and explicit UI ignore the ambient test plan for builds" {
+  trace_app_build
+  local platform selection config
+  export MG_APP_TEST_PLAN=CloudAgent
+  for platform in mac ios-sim; do
+    for config in Debug Profile; do
+      for selection in default explicit; do
+        : >"$STUB_LOG"
+        if [ "$selection" = explicit ]; then
+          mg build-app --platform "$platform" --config "$config" --test-plan UI
+        else
+          mg build-app --platform "$platform" --config "$config"
+        fi
+        [ "$status" -eq 0 ]
+        [ "$(field .status)" = pass ]
+        called "^app-build <$platform> <$config> <UI>$"
+        called "^xcodebuild build-for-testing .* -testPlan UI -configuration $config .* -derivedDataPath build/app/DerivedData "
+        [ "$(field .details.build.test_plan)" = UI ]
+        not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
+      done
+    done
+  done
+}
+
+@test "build-app failure reproduction preserves explicit CloudAgent and default UI plans" {
+  trace_app_build
+  local platform plan expected
+  for platform in mac ios-sim; do
+    for plan in CloudAgent UI; do
+      : >"$STUB_LOG"
+      expected="tools/mg build-app --platform $platform --config Debug"
+      if [ "$plan" = CloudAgent ]; then
+        MG_APP_TEST_PLAN=UI FX_BUILD_RC=1 mg build-app --platform "$platform" --test-plan CloudAgent
+        expected="$expected --test-plan CloudAgent"
+      else
+        MG_APP_TEST_PLAN=CloudAgent FX_BUILD_RC=1 mg build-app --platform "$platform"
+      fi
+      [ "$status" -eq 1 ]
+      [ "$(field .status)" = fail ]
+      [ "$(field '.failures[0].id')" = build ]
+      [ "$(field '.failures[0].repro')" = "$expected" ]
+      called "^xcodebuild build-for-testing .* -testPlan $plan -configuration Debug "
+    done
+  done
+}
+
+@test "build-app CloudAgent rejects preview modes in either option order before build work" {
+  trace_app_build
+  local platform preview config order
+  for platform in mac ios-sim; do
+    for preview in --standalone --personal-preview; do
+      for config in Debug Release; do
+        for order in plan-first plan-last; do
+          if [ "$order" = plan-first ]; then
+            mg build-app --test-plan CloudAgent "$preview" --config "$config" --platform "$platform"
+          else
+            mg build-app --platform "$platform" --config "$config" "$preview" --test-plan CloudAgent
+          fi
+          [ "$status" -eq 2 ]
+          [ "$(field '.failures[0].id')" = usage ]
+          [ ! -s "$STUB_LOG" ]
+        done
+      done
+      mg build-app --platform "$platform" "$preview" --test-plan CloudAgent
+      [ "$status" -eq 2 ]
+      [ ! -s "$STUB_LOG" ]
+    done
+  done
+  [ ! -d "$SB/build/app" ]
+}
+
+@test "build-app CloudAgent rejects non-Debug configurations and other platforms before build work" {
+  trace_app_build
+  local platform config
+  for platform in mac ios-sim; do
+    for config in Profile Release AppStore; do
+      mg build-app --platform "$platform" --test-plan CloudAgent --config "$config"
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = usage ]
+      [ ! -s "$STUB_LOG" ]
+    done
+  done
+  for platform in ios-device iphone ipad watchos 'mac ios-sim' ''; do
+    mg build-app --test-plan CloudAgent --config Debug --platform "$platform"
+    [ "$status" -eq 2 ]
+    [ ! -s "$STUB_LOG" ]
+  done
+  mg build-app --test-plan CloudAgent
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -d "$SB/build/app" ]
+}
+
+@test "build-app rejects missing empty compound and unsupported test plans before build work" {
+  trace_app_build
+  local plan
+  for plan in '' Snapshot Performance 'UI CloudAgent' cloudagent; do
+    mg build-app --platform mac --test-plan "$plan"
+    [ "$status" -eq 2 ]
+    [ ! -s "$STUB_LOG" ]
+  done
+  mg build-app --platform mac --test-plan
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -d "$SB/build/app" ]
+}
+
 @test "app builds keep adhoc defaults without provisioning arguments" {
   local platform mode
   for platform in mac ios-sim; do
@@ -430,6 +570,7 @@ PY
     called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
     [ "$(field .details.build.personal_preview)" = true ]
+    [ "$(field .details.build.test_plan)" = UI ]
     [ "$(field .details.build.standalone)" = false ]
     [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
     [ "$(field .details.personal_preview_product.test_hooks)" = false ]
@@ -607,6 +748,7 @@ PY
     [ "$(field '.artifacts[] | select(.kind == "app") | .path')" = "$candidate" ]
     [ "$(field .details.build.app)" = "$candidate" ]
     [ "$(field .details.build.action)" = build ]
+    [ "$(field .details.build.test_plan)" = UI ]
     [ "$(field .details.build.standalone)" = true ]
     [ "$(field '.details.standalone_product.architecture | .app + "/" + .widget')" = arm64/arm64 ]
     [ "$(field .details.standalone_product.signature_verified)" = true ]

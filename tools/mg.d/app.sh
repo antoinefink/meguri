@@ -13,7 +13,7 @@
 # daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
-  "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--standalone|--personal-preview] (lint-ui first, core XCFramework; default build-for-testing with UI plan; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; previews never launch)"
+  "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI|CloudAgent] [--standalone|--personal-preview] (lint-ui first, core XCFramework; default build-for-testing with UI plan; CloudAgent: Debug only, no previews; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; previews never launch)"
 mg_job run host mg_run \
   "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app (Debug only) runs hidden for N s (5), out of the Dock and never active (checked with lsappinfo every second), and quits"
 
@@ -68,7 +68,7 @@ mg_app_build() {
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
 # Only explicit preview actions select build; no ambient switch changes callers.
 mg_app_build_action() {
-  local action="$1" standalone_arg="" personal=false test_args=()
+  local action="$1" standalone_arg="" plan_arg="" personal=false test_args=()
   shift
   local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=()
   case "$action" in
@@ -162,11 +162,12 @@ mg_app_build_action() {
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
-    --arg action "$action" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson counts "${counts:-null}" \
-    '{platform: $p, config: $c, app: $app, action: $action, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
+    --arg action "$action" --arg plan "$plan" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson counts "${counts:-null}" \
+    '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
+    [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
     mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
-      "tools/mg build-app --platform $platform --config $config$standalone_arg"
+      "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
     mg_message "$MG_JOB: the $platform $config build failed; see $log"
     mg_status fail
     return 1
@@ -909,7 +910,7 @@ mg_app_quit_mac() {
 # Jobs
 
 mg_build_app() {
-  local platform="" config=Debug config_given=false standalone=false personal=false input="" app
+  local platform="" config=Debug config_given=false plan=UI standalone=false personal=false input="" app
   # Bash dynamic scope constrains this override to this CLI build and its
   # product lookup; later/nested test jobs retain the default DerivedData.
   local MG_APP_DD="$MG_APP_DD"
@@ -923,12 +924,20 @@ mg_build_app() {
         [ "$#" -ge 2 ] && mg_word_in "$2" "Debug Profile Release AppStore" || { mg_drive__usage "--config takes Debug, Profile, Release or AppStore"; return 0; }
         config="$2" && config_given=true && shift 2
         ;;
+      --test-plan)
+        [ "$#" -ge 2 ] && mg_word_in "$2" "UI CloudAgent" || { mg_drive__usage "--test-plan takes UI or CloudAgent"; return 0; }
+        plan="$2" && shift 2
+        ;;
       --standalone) standalone=true; shift ;;
       --personal-preview) personal=true; shift ;;
-      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--standalone|--personal-preview]"; return 0 ;;
+      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview]"; return 0 ;;
     esac
   done
-  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--standalone|--personal-preview]"; return 0; }
+  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview]"; return 0; }
+  if [ "$plan" = CloudAgent ] && { [ "$config" != Debug ] || [ "$standalone" = true ] || [ "$personal" = true ]; }; then
+    mg_drive__usage "--test-plan CloudAgent requires Debug on mac or ios-sim, without --standalone or --personal-preview"
+    return 0
+  fi
   if [ "$personal" = true ]; then
     if [ "$platform" != mac ] || [ "$standalone" = true ] || { [ "$config_given" = true ] && [ "$config" != Release ]; }; then
       mg_drive__usage "--personal-preview requires --platform mac, Release (explicit or derived), and no --standalone"
@@ -960,7 +969,7 @@ mg_build_app() {
     fi
     mg_detail input "$(jq -nc --arg input "$input" '$input')"
   else
-    mg_app_build "$platform" "$config" || return 0
+    mg_app_build "$platform" "$config" "$plan" || return 0
     app="$(mg_app_products "$platform" "$config")/Meguri.app"
   fi
   mg_artifact app "$app"
