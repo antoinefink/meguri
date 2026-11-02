@@ -462,19 +462,70 @@ class AdmissionTests(unittest.TestCase):
                     agent.build_product(str(self.root), self.build, self.expected)
                 path.write_bytes(raw)
 
+    def test_exact_cloudagent_suite_selections_are_order_independent(self):
+        original = self.xctestrun.read_bytes()
+        for selection in (["CloudKitSoakTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitSoakTests"]):
+            with self.subTest(selection=selection):
+                data = plistlib.loads(original)
+                data["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"] = selection
+                self.xctestrun.write_bytes(plistlib.dumps(data))
+                manifest = self.refresh_manifest()
+                self.assertEqual(manifest["agent"]["bundle_id"], "example.generated.agent")
+
     def test_extra_or_reselected_tests_cannot_be_frozen_as_cloudagent(self):
         original = self.xctestrun.read_bytes()
-        for selection in (["AnotherSuite"], ["CloudKitSoakTests", "AnotherSuite"], []):
-            data = plistlib.loads(original)
-            data["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"] = selection
-            self.xctestrun.write_bytes(plistlib.dumps(data))
-            with self.assertRaisesRegex(agent.Refused, "agent-selection"):
-                self.refresh_manifest()
+        for selection in (
+            None, [], "", "CloudKitSoakTests", b"CloudKitSoakTests", True, 1, 1.0, {},
+            {"CloudKitSoakTests": True}, [""], [True], [1], [[]], [{}],
+            ["CloudKitSoakTests", ""], ["CloudKitSoakTests", True],
+            ["CloudKitSoakTests", 1], ["CloudKitSoakTests", b"CloudKitPathPreflightTests"],
+            ["CloudKitSoakTests", []], ["CloudKitSoakTests", {}],
+            ["CloudKitPathPreflightTests"], ["AnotherSuite"],
+            ["CloudKitSoakTests", "AnotherSuite"],
+            ["CloudKitSoakTests", "CloudKitPathPreflightTests", "AnotherSuite"],
+            ["CloudKitSoakTests", "CloudKitSoakTests"],
+            ["CloudKitPathPreflightTests", "CloudKitPathPreflightTests"],
+            ["CloudKitSoakTests", "CloudKitPathPreflightTests", "CloudKitSoakTests"],
+            ["CloudKitPathPreflightTests", "CloudKitSoakTests", "CloudKitPathPreflightTests"],
+            ["*"], ["CloudKitSoakTests*"], ["*CloudKitSoakTests"],
+            ["MeguriSnapshotTests/CloudKitSoakTests"], ["CloudKitSoakTests/testSmoke"],
+            [" CloudKitSoakTests"], ["CloudKitSoakTests "],
+            ["CloudKitSoakTests", "CloudKitPathPreflightTests/testPreflight"],
+            ["CloudKitSoakTests", "MeguriSnapshotTests/CloudKitPathPreflightTests"],
+        ):
+            with self.subTest(selection=selection):
+                data = plistlib.loads(original)
+                target = data["TestConfigurations"][0]["TestTargets"][0]
+                if selection is None:
+                    target.pop("OnlyTestIdentifiers", None)
+                else:
+                    target["OnlyTestIdentifiers"] = selection
+                self.xctestrun.write_bytes(plistlib.dumps(data))
+                with self.assertRaisesRegex(agent.Refused, "agent-selection"):
+                    self.refresh_manifest()
         data = plistlib.loads(original)
         data["TestConfigurations"][0]["TestTargets"].append(copy.deepcopy(data["TestConfigurations"][0]["TestTargets"][0]))
         self.xctestrun.write_bytes(plistlib.dumps(data))
         with self.assertRaisesRegex(agent.Refused, "agent-xctestrun"):
             self.refresh_manifest()
+
+    def test_cloudagent_suite_selection_does_not_allow_skips(self):
+        original = self.xctestrun.read_bytes()
+        for selection in (["CloudKitSoakTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitSoakTests"]):
+            for skipped in (["CloudKitSoakTests"], ["CloudKitPathPreflightTests"],
+                            ["CloudKitSoakTests/testSmoke"], ["AnotherSuite"]):
+                with self.subTest(selection=selection, skipped=skipped):
+                    data = plistlib.loads(original)
+                    target = data["TestConfigurations"][0]["TestTargets"][0]
+                    target["OnlyTestIdentifiers"] = selection
+                    target["SkipTestIdentifiers"] = skipped
+                    self.xctestrun.write_bytes(plistlib.dumps(data))
+                    with self.assertRaisesRegex(agent.Refused, "agent-selection"):
+                        self.refresh_manifest()
 
     def test_captured_host_bundles_executables_and_dependencies_are_bound(self):
         for lane in ("mac", "sim"):

@@ -467,12 +467,16 @@ def test_inputs(products, path, app, platform):
     need(isinstance(targets, list) and len(targets) == 1 and isinstance(targets[0], dict),
          "agent-xctestrun")
     target = targets[0]
+    selection = target.get("OnlyTestIdentifiers")
     need(target.get("BlueprintName") == "MeguriSnapshotTests" and
          target.get("IsUITestBundle", False) is False and
          target.get("IsAppHostedTestBundle") is True and
          target.get("TestHostBundleIdentifier") == app["bundle_id"] and
-         target.get("OnlyTestIdentifiers") in (["CloudKitSoakTests"],
-                                               ["CloudKitSoakTests", "CloudKitPathPreflightTests"]) and
+         isinstance(selection, list) and len(selection) in (1, 2) and
+         all(isinstance(item, str) and item for item in selection) and
+         len(set(selection)) == len(selection) and
+         set(selection) in ({"CloudKitSoakTests"},
+                            {"CloudKitSoakTests", "CloudKitPathPreflightTests"}) and
          not target.get("SkipTestIdentifiers"), "agent-selection")
     host_bundle = os.path.join(products, app["path"])
 
