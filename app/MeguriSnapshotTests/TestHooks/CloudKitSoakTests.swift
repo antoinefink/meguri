@@ -14,14 +14,16 @@ import Testing
         }
         let directory = URL(fileURLWithPath: path, isDirectory: true)
         let storage = try AgentFileStorage(directory: directory)
-        let runtime = CloudKitSmokeRuntime(directory: directory)
+        let originalHeaderBytes = try storage.read(.run)
+        let runtime = CloudKitSmokeRuntime(directory: directory, originalHeaderBytes: originalHeaderBytes)
         let engine = try AgentEngine(storage: storage, runtime: runtime, instance: "launch-" + UUID().uuidString)
         do {
             let deliveries = try CloudKitAgentDeliveries(directory: directory)
             defer { deliveries.cancel() }
             var completed = false
             for await _ in deliveries.stream {
-                let journal = try await engine.deliver(header: storage.read(.run), commands: storage.read(.delivery), retainedJournal: storage.read(.retained))
+                guard try storage.read(.run) == originalHeaderBytes else { throw AgentFailure.binding }
+                let journal = try await engine.deliver(header: originalHeaderBytes, commands: storage.read(.delivery), retainedJournal: storage.read(.retained))
                 let records = try AgentJSON.lines(journal).complete.map { try AgentRecord.read($0) }
                 guard !records.contains(where: { $0.kind == .failed }) else { throw AgentFailure.execution }
                 // A launch receipt alone or a requested outcome cannot finish
