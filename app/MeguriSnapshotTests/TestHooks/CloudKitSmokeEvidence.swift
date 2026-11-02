@@ -13,6 +13,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         let attempt: UInt64
         let kind: String
         var phase = 0
+        var result: CloudPublicationResult?
     }
     private struct Callback {
         let alias: String
@@ -93,13 +94,18 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                     expected = 1; suffix = "enqueued"
                 case .replied(let result):
                     switch (kind, result) {
-                    case ("createZones", .zonesCreated), ("saveMediaRoot", .saved),
+                    case ("createZones", .zonesCreated), ("saveMediaRoot", .saved), ("saveMediaRoot", .conflict),
                          ("savePublishingEpoch", .saved), ("saveCompleteEpoch", .saved),
                          ("saveActive", .saved), ("readOwnEpoch", .read), ("readResetMediaRoot", .read): break
                     default: throw AgentFailure.execution
                     }
+                    // Keep the actual typed reply, including the server's opaque
+                    // media root. Only the original Core call validates it.
+                    own.result = result
                     expected = 2; suffix = "replied"
-                case .committed: expected = 3; suffix = "committed"
+                case .committed:
+                    guard own.result != nil else { throw AgentFailure.execution }
+                    expected = 3; suffix = "committed"
                 }
                 guard own.phase == expected else { throw AgentFailure.execution }
                 own.phase += 1; s.own[observation.identity] = own
@@ -107,9 +113,11 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             } catch { s.failed = true }
         }
     }
-    func requirePublication(_ id: Data) throws {
+    func requirePublication(_ id: Data, completed: SmokeCloudObservation) throws {
         try state.withLock { s in
             guard !s.failed, !s.own.isEmpty,
+                  completed.generation == s.generation, completed.publicationID == nil,
+                  completed.publicationComplete, completed.bindingUsable, completed.engine != nil,
                   s.own.values.allSatisfy({ $0.operation == id && $0.phase == 4 }),
                   Set(s.own.values.map(\.kind)).isSuperset(of: ["createZones", "saveMediaRoot", "savePublishingEpoch", "saveCompleteEpoch", "saveActive"]) else { throw AgentFailure.execution }
         }

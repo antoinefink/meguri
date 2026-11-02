@@ -64,3 +64,14 @@ Independent review and all new focused checks remain pending. The host keeps
 its explicit Missing boundary until it validates the exact added facts.
 Integration renames one generated-test local binding after the privacy finding;
 the assertion and executable checks are unchanged. Privacy68716 passes.
+
+Evidence review found one P2: valid existing media-root conflicts were rejected
+although production publication accepts them. Filtered repair
+cleanroom/20261102T150241Z-72116 retains the typed conflict for saveMediaRoot
+only, and requires the original Core commit plus completed publication.
+Independent re-review found no required client issue. Encoding is unchanged.
+New native/generated checks remain pending.
+
+Core-test/20261102T150603Z-73358 passed 17/17 selected real builder, publication,
+review, storage and FFI regressions, no skips, after the shared Rust refactor.
+This uses generated local data and supplies no actual CloudKit result.

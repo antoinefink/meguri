@@ -242,7 +242,7 @@ import Foundation
                   backend.publicationOperations.allSatisfy({ $0.publicationID == issued.publicationID && $0.publicationInitial }),
                   backend.publicationOperations.contains(where: { $0.publicationCompleting && $0.publicationBindingID == completed.bindingID }) else { throw AgentFailure.execution }
             guard let publicationID = issued.publicationID else { throw AgentFailure.execution }
-            try evidence.requirePublication(publicationID)
+            try evidence.requirePublication(publicationID, completed: completed)
             backend.watchPublication = false
             let fact = AgentFact(name: .stateSaved, count: completed.seq, engine: "engine1", operation: "p1")
             try observe(fact)

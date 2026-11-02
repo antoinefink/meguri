@@ -4,7 +4,7 @@ import Foundation
 import CryptoKit
 import Testing
 
-// Generated observations exercise refusal logic only. They are never actual
+// Generated observations exercise ledger admission and refusal only. They are never actual
 // CloudKit success records, and this suite belongs outside the smoke selection.
 @MainActor @Suite(.serialized) struct CloudKitSmokeObservationTests {
     private func entity(_ label: String, revision: UInt64 = 7, acked: UInt64 = 7,
@@ -55,10 +55,12 @@ import Testing
         #expect(Set(stride(from: 0, to: bytes.count, by: 32).map { bytes.subdata(in: $0..<($0 + 32)) }).count == 320)
     }
 
-    private func current(engine: String = "generated-engine", generation: UInt64 = 11) -> SmokeCloudObservation {
-        .init(generation: generation, activeSession: nil, seq: 20, publicationID: nil, publicationReason: nil,
+    private func current(engine: String? = "generated-engine", generation: UInt64 = 11,
+                         publicationID: Data? = nil, publicationComplete: Bool = true,
+                         bindingUsable: Bool = true) -> SmokeCloudObservation {
+        .init(generation: generation, activeSession: nil, seq: 20, publicationID: publicationID, publicationReason: nil,
               publicationCompleting: false, publicationBindingID: nil, bindingID: nil,
-              publicationInitial: false, publicationComplete: true, bindingUsable: true,
+              publicationInitial: false, publicationComplete: publicationComplete, bindingUsable: bindingUsable,
               engine: engine, entities: [], cardNoteID: nil, lastReviewID: nil)
     }
     private func ledger() throws -> CloudKitSmokeEvidence {
@@ -101,6 +103,96 @@ import Testing
         wrongAttempt.own(.init(metadata: metadata, identity: identity, phase: .prepared))
         wrongAttempt.own(.init(metadata: .init(operationID: Data([1]), attempt: 5, kind: .createZones), identity: identity, phase: .enqueued(true)))
         #expect(throws: AgentFailure.execution) { try wrongAttempt.check() }
+    }
+    // Opaque generated transport payloads; Core's real call, never this ledger,
+    // decodes and accepts an MGMediaRoot before emitting the original commit.
+    private var controlRecord: CloudControlRecord {
+        .init(encrypted: Data([31, 32]), systemFields: Data([41, 42]))
+    }
+    private func publication(_ evidence: CloudKitSmokeEvidence, mediaResult: CloudPublicationResult,
+                             mediaCommit: Bool = true) {
+        let operations: [(CloudOwnKind, CloudPublicationResult)] = [
+            (.createZones, .zonesCreated), (.saveMediaRoot, mediaResult),
+            (.savePublishingEpoch, .saved(controlRecord)), (.saveCompleteEpoch, .saved(controlRecord)),
+            (.saveActive, .saved(controlRecord))
+        ]
+        for (index, operation) in operations.enumerated() {
+            let identity = UUID()
+            let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: operation.0)
+            let phases: [CloudOwnObservationPhase] = [.prepared, .enqueued(true), .replied(operation.1)]
+            for phase in phases { evidence.own(.init(metadata: metadata, identity: identity, phase: phase)) }
+            if index != 1 || mediaCommit {
+                evidence.own(.init(metadata: metadata, identity: identity, phase: .committed))
+            }
+        }
+    }
+    @Test func mediaRootTypedConflictUsesOriginalCommitAndSameFixedFactsAsSaved() throws {
+        for result in [CloudPublicationResult.saved(controlRecord), .conflict(controlRecord)] {
+            let evidence = try ledger()
+            publication(evidence, mediaResult: result)
+            try evidence.check()
+            try evidence.requirePublication(Data([1]), completed: current())
+            let facts = evidence.drain()
+            #expect(facts.count == 20)
+            #expect(facts.map(\.count) == (1...20).map { UInt64($0) })
+            let media = Array(facts[4..<8])
+            #expect(media.map(\.operation) == ["own2-saveMediaRoot-prepared", "own2-saveMediaRoot-enqueued", "own2-saveMediaRoot-replied", "own2-saveMediaRoot-committed"])
+            #expect(media.map(\.name) == [.applied, .applied, .applied, .stateSaved])
+            #expect(facts.allSatisfy { $0.digest == nil && $0.engine == nil })
+        }
+    }
+    @Test func mediaRootConflictDoesNotAdmitOtherOperationKindsOrOtherFailureResults() throws {
+        let kinds: [CloudOwnKind] = [.createZones, .savePublishingEpoch, .saveCompleteEpoch,
+                                    .saveActive, .readOwnEpoch, .readResetMediaRoot]
+        for kind in kinds {
+            let evidence = try ledger()
+            let identity = UUID()
+            let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: kind)
+            for phase in [CloudOwnObservationPhase.prepared, .enqueued(true), .replied(.conflict(controlRecord))] {
+                evidence.own(.init(metadata: metadata, identity: identity, phase: phase))
+            }
+            #expect(throws: AgentFailure.execution) { try evidence.check() }
+        }
+        let invalid: [CloudPublicationResult] = [.zonesCreated, .read(.found(controlRecord)), .notStarted,
+                                               .failed(retryAfterMilliseconds: nil), .retryAfter(durationMilliseconds: 100)]
+        for result in invalid {
+            let evidence = try ledger()
+            publication(evidence, mediaResult: result)
+            #expect(throws: AgentFailure.execution) { try evidence.check() }
+            #expect(throws: AgentFailure.execution) { try evidence.requirePublication(Data([1]), completed: current()) }
+        }
+    }
+    @Test func mediaRootConflictCannotReplaceMissingOriginalCoreCommitOrPublicationCompletion() throws {
+        let missingCommit = try ledger()
+        publication(missingCommit, mediaResult: .conflict(controlRecord), mediaCommit: false)
+        try missingCommit.check() // A valid reply can still await its Core commit.
+        #expect(throws: AgentFailure.execution) { try missingCommit.requirePublication(Data([1]), completed: current()) }
+        #expect(!missingCommit.drain().contains { $0.operation == "own2-saveMediaRoot-committed" })
+
+        let completed = try ledger()
+        publication(completed, mediaResult: .conflict(controlRecord))
+        for incomplete in [current(publicationComplete: false), current(bindingUsable: false),
+                           current(engine: nil), current(publicationID: Data([1])), current(generation: 12)] {
+            #expect(throws: AgentFailure.execution) { try completed.requirePublication(Data([1]), completed: incomplete) }
+        }
+        #expect(throws: AgentFailure.execution) { try completed.requirePublication(Data([2]), completed: current()) }
+        try completed.requirePublication(Data([1]), completed: current())
+    }
+    @Test func mediaRootConflictRetainsOriginalOwnerAttemptAndPhaseOrder() throws {
+        let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .saveMediaRoot)
+        for mismatch in 0..<4 {
+            let evidence = try ledger()
+            let identity = UUID()
+            for phase in [CloudOwnObservationPhase.prepared, .enqueued(true), .replied(.conflict(controlRecord))] {
+                evidence.own(.init(metadata: metadata, identity: identity, phase: phase))
+            }
+            let commitMetadata = CloudOwnMetadata(operationID: Data([mismatch == 2 ? 2 : 1]),
+                                                   attempt: mismatch == 1 ? 5 : 4, kind: .saveMediaRoot)
+            evidence.own(.init(metadata: commitMetadata, identity: mismatch == 0 ? UUID() : identity,
+                               phase: mismatch == 3 ? .replied(.conflict(controlRecord)) : .committed))
+            #expect(throws: AgentFailure.execution) { try evidence.check() }
+            #expect(!evidence.drain().contains { $0.operation == "own1-saveMediaRoot-committed" })
+        }
     }
     @Test func sdkStateSaveRequiresOriginalDeliveryCommitAndReturnWithoutOpaqueFacts() throws {
         let valid = try ledger()
