@@ -75,3 +75,11 @@ New native/generated checks remain pending.
 Core-test/20261102T150603Z-73358 passed 17/17 selected real builder, publication,
 review, storage and FFI regressions, no skips, after the shared Rust refactor.
 This uses generated local data and supplies no actual CloudKit result.
+
+Host evidence export cleanroom/20261102T150002Z-70976 integrates the fixed
+SDK/own-operation/held-image/ACK/join encoding. Independent review found one
+remaining P2: it requires a positive held-period batch instead of accepting
+recorded zero batches plus the separate deterministic eligibility proof.
+The correction remains pending. All other required wire/order checks cleared
+source review. Integration renames one generated test method for privacy;
+its body and assertions are unchanged. No actual smoke pass is claimed.

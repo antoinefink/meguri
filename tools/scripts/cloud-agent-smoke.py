@@ -281,8 +281,13 @@ def fact(value):
     need(isinstance(value, dict) and {"name"} <= set(value) <=
          {"name", "count", "digest", "engine", "operation", "error_domain", "error_code"} and
          isinstance(value["name"], str) and value["name"] in FACTS, "journal-fact")
-    if value["name"] in ("accountVerified", "ownedWorkJoined"):
+    if value["name"] == "accountVerified":
         need(set(value) == {"name"}, "journal-private-fact")
+    if value["name"] == "ownedWorkJoined":
+        need(set(value) == {"name"} or
+             (set(value) == {"name", "count", "operation"} and value["operation"] == "own-joined") or
+             (set(value) == {"name", "count", "operation", "engine"} and
+              value["operation"] == "sdk-joined" and value["engine"] == "engine1"), "journal-private-fact")
     if value["name"] == "coreOpened":
         need(set(value) == {"name", "count"}, "journal-core-opened")
     if "count" in value:
@@ -299,12 +304,14 @@ def fact(value):
 
 
 def _completion_facts(number, checks):
-    """Current client encoding only; this cannot establish missing J3.1 proof."""
+    """Exact Runtime checks; chronological evidence is validated separately."""
     need(type(number) is int and 1 <= number <= len(PROGRAM), "smoke-command")
     names = {1: ["integrity"], 2: ["coordinatorResult"], 3: ["coordinatorResult"],
              4: ["localDurability"], 5: ["localDurability"], 6: ["localDurability"],
              7: ["localDurability"], 8: ["localDurability"], 9: ["coordinatorResult"],
              10: ["integrity", "localDurability"]}[number]
+    if number == 10 and isinstance(checks, list) and len(checks) == 3:
+        names = ["integrity", "coordinatorResult", "localDurability"]
     need(isinstance(checks, list) and len(checks) == len(names), "smoke-checks")
     facts = []
     for check, name in zip(checks, names):
@@ -324,12 +331,13 @@ def _completion_facts(number, checks):
         need(item["count"] > 0, "smoke-revision")
 
     sizes = {1: 1, 2: 1, 3: 1, 4: 2, 5: 1, 6: 3, 7: 1, 8: 3, 9: 5, 10: 2}
-    need(len(facts) == sizes[number], "smoke-facts")
+    need(len(facts) == sizes[number] or number == 9 and len(facts) == 9 or
+         number == 10 and len(checks) == 3 and len(facts) >= 9, "smoke-facts")
     if number in (1, 10):
         exact(facts[0], "integrity", ("count",))
         if number == 10:
-            need([len(c["facts"]) for c in checks] == [1, 1], "smoke-close-checks")
-            exact(facts[1], "ownedWorkJoined")
+            need(len(checks[0]["facts"]) == len(checks[-1]["facts"]) == 1, "smoke-close-checks")
+            exact(facts[-1], "ownedWorkJoined")
     elif number == 2:
         exact(facts[0], "applied", count=20, operation="p1")
     elif number == 3:
@@ -352,9 +360,161 @@ def _completion_facts(number, checks):
         for item in facts[:4]:
             exact(item, "stateSaved", ("count", "digest"), operation=item["operation"])
             need(item["count"] > 0, "smoke-revision")
-        exact(facts[4], "syncResult", ("count",), operation="exchange1")
-        need(facts[4]["count"] > 0, "smoke-exchange")
+        if len(facts) == 9:
+            need({f.get("operation", "").split("-")[0] for f in facts[4:8]} ==
+                 {"n1", "c1", "r1", "m1"}, "smoke-ack-labels")
+            for item in facts[4:8]:
+                exact(item, "applied", ("count", "operation"), engine="engine1")
+                need(re.fullmatch(r"[ncrm]1-sdk[1-9][0-9]*-batch[1-9][0-9]*-ack", item["operation"]),
+                     "smoke-ack-labels")
+        exact(facts[-1], "syncResult", ("count",), operation="exchange1")
+        need(facts[-1]["count"] > 0, "smoke-exchange")
     return facts
+
+
+# These are aliases and fields emitted by CloudKitSmokeEvidence, never native
+# identities, envelopes or state. Check copies are deliberately not ingested.
+OWN_KINDS = {"createZones", "saveMediaRoot", "savePublishingEpoch", "saveCompleteEpoch",
+             "saveActive", "readOwnEpoch", "readResetMediaRoot"}
+TRACE = re.compile(r"(?:own([1-9][0-9]*)-([A-Za-z]+)-(prepared|enqueued|replied|committed)|"
+                   r"sdk([1-9][0-9]*)-(state|sent)(?:-batch([1-9][0-9]*))?-(delivered|committed|returned)|"
+                   r"batch([1-9][0-9]*)-(collection-handoff|media-handoff|save-count))")
+
+
+def evidence_shape(item, name, *, engine=False, digest=False):
+    need(set(item) == {"name", "count", "operation"} |
+         ({"engine"} if engine else set()) | ({"digest"} if digest else set()) and
+         item["name"] == name and (not engine or item["engine"] == "engine1"), "smoke-evidence-shape")
+
+
+class SmokeEvidence:
+    """One shared chronological ledger across all command drains."""
+    def __init__(self):
+        self.tick, self.own, self.sdk, self.batches = 0, {}, {}, {}
+        self.last_batch = None
+
+    def ingest(self, item):
+        match = TRACE.fullmatch(item.get("operation", ""))
+        if match is None:
+            return False
+        own, kind, phase, sdk, event, batch, stage, handed, handoff = match.groups()
+        if handoff == "save-count":
+            evidence_shape(item, "applied", engine=True)
+            need(handed == self.last_batch and self.batches[handed]["saves"] is None,
+                 "smoke-batch-save-count")
+            self.batches[handed]["saves"] = item["count"]
+            self.last_batch = None
+            return True
+        need(self.last_batch is None, "smoke-batch-save-count")
+        self.tick += 1
+        need(item.get("count") == self.tick <= 4096, "smoke-evidence-tick")
+        if own:
+            need(kind in OWN_KINDS and int(own) <= 256, "smoke-own-kind")
+            evidence_shape(item, "stateSaved" if phase == "committed" else "applied")
+            if phase == "prepared":
+                need(int(own) == len(self.own) + 1, "smoke-own-origin")
+                self.own[own] = [kind, []]
+            need(own in self.own and self.own[own][0] == kind, "smoke-own-origin")
+            phases = self.own[own][1]
+            need(len(phases) < 4 and phase == ("prepared", "enqueued", "replied", "committed")[len(phases)],
+                 "smoke-own-order")
+            phases.append(self.tick)
+        elif sdk:
+            evidence_shape(item, "stateSaved" if event == "state" and stage == "committed" else "engineCallback",
+                           engine=True)
+            need((event == "sent") == (batch is not None) and int(sdk) <= 1024, "smoke-sdk-origin")
+            if stage == "delivered":
+                need(int(sdk) == len(self.sdk) + 1 and all(len(c[2]) == 3 for c in self.sdk.values()),
+                     "smoke-sdk-origin")
+                need(batch is None or batch in self.batches, "smoke-sdk-handoff")
+                self.sdk[sdk] = [event, batch, []]
+            need(sdk in self.sdk and self.sdk[sdk][:2] == [event, batch], "smoke-sdk-origin")
+            phases = self.sdk[sdk][2]
+            need(len(phases) < 3 and stage == ("delivered", "committed", "returned")[len(phases)],
+                 "smoke-sdk-order")
+            phases.append(self.tick)
+        else:
+            evidence_shape(item, "applied", engine=True)
+            need(int(handed) == len(self.batches) + 1 and int(handed) <= 256, "smoke-batch-origin")
+            self.batches[handed] = {"kind": handoff, "tick": self.tick, "saves": None}
+            self.last_batch = handed
+        return True
+
+    def publication(self):
+        required = OWN_KINDS - {"readOwnEpoch", "readResetMediaRoot"}
+        if not all(len(ticks) == 4 for _, ticks in self.own.values()) or not required <= {
+                k for k, ticks in self.own.values() if len(ticks) == 4} or not any(
+                kind == "state" and len(ticks) == 3 for kind, _, ticks in self.sdk.values()):
+            raise Missing("smoke-publication-sdk-order")
+
+    def acknowledgements(self, facts):
+        if len(facts) != 9:
+            raise Missing("smoke-acknowledgement-sdk-order")
+        acknowledged = {}
+        for item in facts[4:8]:
+            entity, sdk, batch, _ = item["operation"].split("-")
+            acknowledged.setdefault(batch[5:], set()).add(entity)
+            callback = self.sdk.get(sdk[3:])
+            need(callback is not None and callback[:2] == ["sent", batch[5:]] and len(callback[2]) == 3 and
+                 item["count"] == callback[2][-1], "smoke-ack-callback")
+            need(self.batches[batch[5:]]["saves"] > 0, "smoke-ack-handoff")
+            if not any(kind == "state" and len(ticks) == 3 and ticks[1] > item["count"]
+                       for kind, _, ticks in self.sdk.values()):
+                raise Missing("smoke-acknowledgement-sdk-order")
+        need(all(len(entities) <= self.batches[batch]["saves"] for batch, entities in acknowledged.items()),
+             "smoke-ack-handoff-count")
+
+    def joined(self, proof, baseline, answer):
+        if not proof:
+            raise Missing("smoke-owned-work-join")
+        labels = {}
+        for item in proof:
+            label = item.get("operation")
+            need(label not in labels, "smoke-held-duplicate")
+            labels[label] = item
+            if item["name"] == "ownedWorkJoined":
+                fact(item)
+            else:
+                evidence_shape(item, "applied", engine=True, digest=bool(re.fullmatch(
+                    r"batch[1-9][0-9]*-c1-held", label or "")))
+        def take(label):
+            if label not in labels:
+                raise Missing("smoke-review-held-image")
+            return labels.pop(label)
+        for label, count in (("own-joined", len(self.own)), ("sdk-joined", len(self.sdk))):
+            item = take(label)
+            evidence_shape(item, "ownedWorkJoined", engine=label == "sdk-joined")
+            need(item["count"] == count and count > 0, "smoke-join-count")
+        need(self.last_batch is None and all(len(t) == 4 for _, t in self.own.values()) and
+             all(len(t) == 3 for _, _, t in self.sdk.values()), "smoke-join-order")
+        counts = {label: take(label)["count"] for label in
+                  ("held-batches", "held-collection-batches", "held-media-batches",
+                   "c1-held-handed", "r1-held-handed")}
+        collection, media, cards = set(), set(), 0
+        for batch, info in self.batches.items():
+            prefix = "batch" + batch
+            snapshot = labels.pop(prefix + "-s1-snapshot", None)
+            media_snapshot = labels.pop(prefix + "-s1-media-snapshot", None)
+            need(not (snapshot and media_snapshot), "smoke-held-batch-kind")
+            if snapshot is not None or media_snapshot is not None:
+                held = snapshot if snapshot is not None else media_snapshot
+                need(held["count"] >= answer["count"] and info["saves"] is not None and
+                     info["kind"] == ("collection-handoff" if snapshot is not None else "media-handoff"),
+                     "smoke-held-snapshot")
+                (collection if snapshot is not None else media).add(batch)
+            if snapshot is not None:
+                absent = take(prefix + "-r1-absent")
+                need(absent["count"] == 0, "smoke-held-review")
+                card = labels.pop(prefix + "-c1-held", None)
+                if card is not None:
+                    cards += 1
+                    need(info["saves"] > 0 and card["digest"] == baseline["digest"] and
+                         card["count"] < answer["count"], "smoke-held-card")
+        need(not labels and counts == {"held-batches": len(collection) + len(media),
+             "held-collection-batches": len(collection), "held-media-batches": len(media),
+             "c1-held-handed": cards, "r1-held-handed": 0}, "smoke-held-accounting")
+        if not collection or not cards:
+            raise Missing("smoke-review-held-upload-exercise")
 
 
 def completion(command_number, checks, journal=None):
@@ -362,30 +522,33 @@ def completion(command_number, checks, journal=None):
     if journal is None:
         raise Missing("smoke-journal-context")
     need(journal.done_checks.get(command_number) == checks, "smoke-terminal-context")
-    previous = {}
+    previous, evidence = {}, SmokeEvidence()
+    baseline, held_projection, missing = None, None, []
     for number in range(1, command_number + 1):
         need(number in journal.done_checks and number in journal.done_observations, "smoke-context")
         facts = _completion_facts(number, journal.done_checks[number])
-        observations = journal.done_observations[number]
+        observations = []
+        need(journal.done_observations[number] and
+             journal.done_observations[number][0] == {"name": "accountVerified"}, "smoke-operation-observations")
+        for item in journal.done_observations[number]:
+            fact(item)
+            if not evidence.ingest(item):
+                observations.append(item)
         expected = [{"name": "accountVerified"}]
         if number == 1:
             need(len(observations) == 2, "smoke-open-observation")
             opened = observations[1]
-            fact(opened)
             need(opened["name"] == "coreOpened", "smoke-open-observation")
             expected.append(opened)
         elif number == 10:
-            expected.append(facts[1])
+            proof = journal.done_checks[10][1]["facts"] if len(journal.done_checks[10]) == 3 else []
+            expected.extend(proof + [facts[-1]])
         elif number == 9:
-            # These are observation-only accounting, not invented done facts.
-            need(len(observations) == 9, "smoke-media-accounting")
-            for item, label in zip(observations[1:4],
-                                   ("media-pending", "media-missing", "media-unknown")):
-                fact(item)
+            need(len(observations) == len(facts) + 4, "smoke-media-accounting")
+            for item, label in zip(observations[1:4], ("media-pending", "media-missing", "media-unknown")):
                 need(set(item) == {"name", "count", "operation"} and item["name"] == "syncResult"
                      and item["operation"] == label, "smoke-media-accounting")
-            expected.extend(observations[1:4])
-            expected.extend(facts)
+            expected.extend(observations[1:4] + facts)
             retained = {"n1": previous[4][1], "c1": previous[6][1],
                         "r1": previous[6][2], "m1": previous[8][1]}
             for item in facts[:4]:
@@ -393,6 +556,29 @@ def completion(command_number, checks, journal=None):
                 need((item["count"], item["digest"]) == (original["count"], original["digest"]),
                      "smoke-ack-revision")
         else:
+            if number == 5:
+                if len(observations) == 2:
+                    missing.append("smoke-review-held-image")
+                else:
+                    need(len(observations) >= 3, "smoke-held-baseline")
+                    baseline = observations[1]
+                    evidence_shape(baseline, "localDurable", digest=True)
+                    need(baseline["operation"] == "c1-before-answer" and baseline["count"] > 0, "smoke-held-baseline")
+                    expected.append(baseline)
+            elif number == 6:
+                if len(observations) == 4:
+                    missing.append("smoke-review-held-image")
+                else:
+                    need(baseline is not None and len(observations) >= 6, "smoke-held-baseline")
+                    held_projection, absent = observations[1:3]
+                    evidence_shape(held_projection, "applied", engine=True, digest=True)
+                    evidence_shape(absent, "applied", engine=True)
+                    need(held_projection["operation"] == "c1-held-projection" and
+                         held_projection["digest"] == baseline["digest"] and
+                         held_projection["count"] < facts[0]["count"] and absent["operation"] == "r1-held-absent" and
+                         absent["count"] == 0 and facts[1]["count"] > baseline["count"] and
+                         facts[1]["digest"] != baseline["digest"], "smoke-held-projection")
+                    expected.extend([held_projection, absent])
             expected.extend(facts)
         need(observations == expected, "smoke-operation-observations")
         if number in (3, 4, 6, 10):
@@ -401,22 +587,25 @@ def completion(command_number, checks, journal=None):
                  facts[0]["count"] >= prior_seq, "smoke-sequence")
         if number == 8:
             header = journal.header_value
-            need(isinstance(header.get("run_id"), str) and isinstance(header.get("device"), str),
-                 "smoke-media-context")
+            need(isinstance(header.get("run_id"), str) and isinstance(header.get("device"), str), "smoke-media-context")
             media = b"".join(bytes.fromhex(v.digest(
                 ("MeguriCloudSmoke/%s/%s/m1/%d" % (header["run_id"], header["device"], n)).encode()))
                 for n in range(320))
             need(facts[2]["digest"] == v.digest(media), "smoke-media-digest")
         previous[number] = facts
-    # p1's stateSaved summary has no SDK/own-operation order. Review's applied
-    # head and durable answer facts also omit the held image/baseline and its
-    # release order. Later revision ACKs have no per-record SDK/state-save order.
-    # Earliest required absent proof fences every successor in the real parent.
-    missing = {3: "smoke-publication-sdk-order", 5: "smoke-review-held-image",
-               7: "smoke-review-release-order", 9: "smoke-acknowledgement-sdk-order"}
-    for number in range(1, command_number + 1):
-        if number in missing:
-            raise Missing(missing[number])
+    # Buffered traces belong to their original aliases, regardless of which
+    # command drains them. Summary stateSaved/entity facts never stand in for SDK.
+    need(evidence.last_batch is None, "smoke-batch-save-count")
+    if command_number >= 3:
+        evidence.publication()
+    if missing:
+        raise Missing(missing[0])
+    if command_number >= 7 and held_projection is None:
+        raise Missing("smoke-review-release-order")
+    if command_number >= 9:
+        evidence.acknowledgements(previous[9])
+    if command_number == 10:
+        evidence.joined(proof, baseline, previous[6][0])
 
 
 class Journal:
@@ -424,13 +613,13 @@ class Journal:
     def __init__(self, header_raw, commands):
         self.header, self.commands, self.retained = v.digest(header_raw), commands, b""
         self.header_value = strict(header_raw)
-        self.done_checks, self.done_observations = {}, {}
+        self.done_checks, self.done_observations, self.late_observations = {}, {}, []
 
     def inspect(self, raw, delivered):
         need(type(raw) is bytes and len(raw) <= CAP and raw.startswith(self.retained), "journal-prefix")
         complete = raw[:raw.rfind(b"\n") + 1]
         started, terminal, instance, done_checks = set(), {}, None, {}
-        observations, done_observations = {}, {}
+        observations, done_observations, late_observations = {}, {}, []
         for seq, line in enumerate(complete.splitlines(), 1):
             r = strict(line.decode("utf-8"))
             required = {"header_sha256", "record_seq", "command_seq", "command_sha256", "agent_instance",
@@ -460,6 +649,8 @@ class Journal:
                 observations[n] = []
             elif kind == "observation":
                 need(set(r) == required and n in started and r["facts"] and not r["checks"], "journal-observation")
+                if n in terminal:
+                    late_observations.extend(r["facts"])
                 observations[n].extend(r["facts"])
             elif kind in ("done", "failed"):
                 need(n in started and n not in terminal and n == len(started), "journal-terminal")
@@ -489,6 +680,7 @@ class Journal:
                 raise v.Refused("journal-kind")
         self.done_checks = done_checks
         self.done_observations = done_observations
+        self.late_observations = late_observations
         return complete, terminal
 
     def retain(self, complete):
@@ -1004,6 +1196,9 @@ def execute(root, parent, vm, expected, header, files, support, copied, recheck,
             need(final == raw and command_outcomes == dict.fromkeys(range(1, 11), "done"), "closed-journal")
             append_exact(local, "steps.jsonl", journal.retained, final[len(journal.retained):])
             journal.retain(final)
+            completion(10, journal.done_checks[10], journal)
+            need(all(not TRACE.fullmatch(item.get("operation", "")) for item in journal.late_observations),
+                 "smoke-work-after-terminal")
             check()
         return {"scope": "SMOKE", "outcome": "smoke_completed", "signed_execution": True,
                 "commands": 10, "closed_journal": True, "original_app_hosted_joined": True}

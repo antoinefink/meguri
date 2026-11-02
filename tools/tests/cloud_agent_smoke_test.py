@@ -109,6 +109,205 @@ def generated_journal(commands, count=10, checks=None, observations=None):
     return b"".join(raw(line) for line in lines)
 
 
+def current_evidence():
+    """Generated facts in the canonical Evidence/Runtime encoding, never SDK proof."""
+    checks = generated_checks()
+    observations = generated_observations(checks)
+    def f(name, count, operation, engine=False, digest=None):
+        item = {"name": name, "count": count, "operation": operation}
+        if engine: item["engine"] = "engine1"
+        if digest is not None: item["digest"] = digest
+        return item
+    tick = 0
+    def event(name, operation, engine=False):
+        nonlocal tick
+        tick += 1
+        return f(name, tick, operation, engine)
+    publication = []
+    for n, kind in enumerate(("createZones", "saveMediaRoot", "savePublishingEpoch",
+                              "saveCompleteEpoch", "saveActive"), 1):
+        for phase in ("prepared", "enqueued", "replied", "committed"):
+            publication.append(event("stateSaved" if phase == "committed" else "applied",
+                                     "own%d-%s-%s" % (n, kind, phase)))
+    def callback(n, kind):
+        return [event("stateSaved" if kind == "state" and phase == "committed" else "engineCallback",
+                      "sdk%d-%s-%s" % (n, kind, phase), True)
+                for phase in ("delivered", "committed", "returned")]
+    publication += callback(1, "state")
+    observations[3] += publication
+    observations[5].insert(1, f("localDurable", 1, "c1-before-answer", digest="0"*64))
+    observations[6][1:1] = [f("applied", 9, "c1-held-projection", True, "0"*64),
+                              f("applied", 0, "r1-held-absent", True)]
+    def batch(n, kind, saves):
+        return [event("applied", "batch%d-%s-handoff" % (n, kind), True),
+                f("applied", saves, "batch%d-save-count" % n, True)]
+    # This held collection batch contains the baseline card. The media batch
+    # contributes a snapshot but cannot stand in for a held collection exercise.
+    observations[6] += batch(1, "collection", 1) + batch(2, "media", 1)
+    upload = batch(3, "collection", 3) + batch(4, "media", 1)
+    upload += callback(2, "sent-batch3")
+    collection_returned = tick
+    upload += callback(3, "sent-batch4")
+    media_returned = tick
+    upload += callback(4, "state")
+    acks = [f("applied", media_returned if label == "m1" else collection_returned,
+              "%s-sdk%d-batch%d-ack" % (label, 3 if label == "m1" else 2, 4 if label == "m1" else 3), True)
+            for label in ("n1", "c1", "r1", "m1")]
+    checks[9][0]["facts"][4:4] = copy.deepcopy(acks)
+    observations[9][-1:-1] = acks
+    observations[9] += upload
+    proof = [f("applied", 10, "batch2-s1-media-snapshot", True),
+             f("applied", 10, "batch1-s1-snapshot", True),
+             f("applied", 9, "batch1-c1-held", True, "0"*64),
+             f("applied", 0, "batch1-r1-absent", True),
+             f("applied", 2, "held-batches", True),
+             f("applied", 1, "held-media-batches", True),
+             f("applied", 1, "held-collection-batches", True),
+             f("applied", 1, "c1-held-handed", True),
+             f("applied", 0, "r1-held-handed", True),
+             f("ownedWorkJoined", 5, "own-joined"),
+             f("ownedWorkJoined", 4, "sdk-joined", True)]
+    checks[10].insert(1, {"name": "coordinatorResult", "outcome": "pass", "facts": copy.deepcopy(proof)})
+    observations[10][1:1] = proof
+    return checks, observations
+
+
+class CurrentEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.commands = s.command_bytes(raw(header()))
+        self.checks, self.obs = current_evidence()
+
+    def complete(self, n=10):
+        journal = s.Journal(raw(header()), self.commands)
+        journal.inspect(generated_journal(self.commands, n, self.checks, self.obs), n)
+        return s.completion(n, journal.done_checks[n], journal)
+
+    def item(self, label):
+        return next(f for facts in self.obs.values() for f in facts if f.get("operation") == label)
+
+    def proof(self, label, **changes):
+        self.item(label).update(changes)
+        next(f for f in self.checks[10][1]["facts"] if f.get("operation") == label).update(changes)
+
+    def reject(self, label, **changes):
+        self.item(label).update(changes)
+        with self.assertRaises(s.v.Refused): self.complete()
+
+    def test_exact_current_encoding_validates_every_command_and_check_copies_are_not_ticks(self):
+        for n in range(1, 11):
+            with self.subTest(command=n): self.assertIsNone(self.complete(n))
+
+    def test_buffered_events_keep_original_aliases_across_command_flushes(self):
+        # Own and SDK events are flushed after their initiating command; no
+        # assignment of a batch's origin from its flushing command is permitted.
+        moved = [f for f in self.obs[6] if s.TRACE.fullmatch(f.get("operation", ""))]
+        self.obs[6] = [f for f in self.obs[6] if f not in moved]
+        self.obs[7] += moved
+        self.assertIsNone(self.complete())
+
+    def test_own_order_kind_origin_and_tick_refuse(self):
+        for label, changes in (("own1-createZones-enqueued", {"count": 1}),
+                               ("own1-createZones-replied", {"operation": "own2-createZones-replied"}),
+                               ("own1-createZones-committed", {"name": "applied"}),
+                               ("own2-saveMediaRoot-prepared", {"operation": "own2-unrecognized-prepared"}),
+                               ("own1-createZones-prepared", {"engine": "engine1"})):
+            with self.subTest(label=label):
+                self.checks, self.obs = current_evidence()
+                self.reject(label, **changes)
+
+    def test_missing_native_publication_is_missing_even_with_summary_success(self):
+        self.obs[3] = [f for f in self.obs[3] if not s.TRACE.fullmatch(f.get("operation", ""))]
+        with self.assertRaisesRegex(s.Missing, "smoke-publication-sdk-order"): self.complete(3)
+        self.checks, self.obs = current_evidence()
+        self.obs[3] = [f for f in self.obs[3] if not f.get("operation", "").startswith("sdk")]
+        with self.assertRaisesRegex(s.Missing, "smoke-publication-sdk-order"): self.complete(3)
+
+    def test_shared_tick_duplicate_gap_overflow_and_sdk_engine_refuse(self):
+        for changes in ({"count": 20}, {"count": 22}, {"count": 4097}, {"engine": "engine2"},
+                        {"name": "stateSaved"}, {"count": True}):
+            with self.subTest(changes=changes):
+                self.checks, self.obs = current_evidence()
+                self.reject("sdk1-state-delivered", **changes)
+        self.checks, self.obs = current_evidence()
+        self.obs[3].append(copy.deepcopy(self.item("sdk1-state-returned")))
+        with self.assertRaises(s.v.Refused): self.complete(3)
+
+    def test_sdk_original_batch_stage_and_returned_ack_link_refuse(self):
+        for label, changes in (("sdk2-sent-batch3-committed", {"operation": "sdk2-sent-batch4-committed"}),
+                               ("sdk2-sent-batch3-delivered", {"operation": "sdk2-sent-batch3-returned"}),
+                               ("sdk2-sent-batch3-returned", {"engine": "other"}),
+                               ("batch3-collection-handoff", {"operation": "batch5-collection-handoff"})):
+            with self.subTest(label=label):
+                self.checks, self.obs = current_evidence()
+                self.reject(label, **changes)
+        for label in ("n1", "c1", "r1", "m1"):
+            for field, value in (("count", 1), ("engine", "other"),
+                                 ("operation", label + "-sdk1-batch3-ack")):
+                self.checks, self.obs = current_evidence()
+                ack = next(f for f in self.checks[9][0]["facts"] if f.get("operation", "").startswith(label+"-sdk"))
+                operation = ack["operation"]
+                ack[field] = value
+                self.item(operation)[field] = value
+                with self.subTest(label=label, field=field), self.assertRaises(s.v.Refused): self.complete()
+
+    def test_each_ack_requires_later_native_state_not_entity_summaries(self):
+        self.obs[9] = [f for f in self.obs[9] if not f.get("operation", "").startswith("sdk4-")]
+        with self.assertRaisesRegex(s.Missing, "smoke-acknowledgement-sdk-order"): self.complete(9)
+
+    def test_invalid_review_image_evidence_is_rejected(self):
+        for label, changes in (("c1-before-answer", {"digest": "2"*64}),
+                               ("c1-before-answer", {"count": 2}),
+                               ("c1-held-projection", {"count": 10}),
+                               ("c1-held-projection", {"digest": "2"*64}),
+                               ("r1-held-absent", {"count": 1})):
+            self.checks, self.obs = current_evidence()
+            with self.subTest(label=label): self.reject(label, **changes)
+        self.checks, self.obs = current_evidence()
+        self.obs[6].remove(self.item("c1-held-projection"))
+        self.obs[6].remove(self.item("r1-held-absent"))
+        with self.assertRaisesRegex(s.Missing, "smoke-review-held-image"): self.complete(6)
+
+    def test_held_batch_image_kind_counts_and_joins_refuse(self):
+        for label, changes in (("batch1-c1-held", {"digest": "2"*64}),
+                               ("batch1-c1-held", {"count": 10}),
+                               ("batch1-r1-absent", {"count": 1}),
+                               ("batch1-s1-snapshot", {"count": 9}),
+                               ("batch2-s1-media-snapshot", {"operation": "batch2-s1-snapshot"}),
+                               ("held-batches", {"count": 1}),
+                               ("held-media-batches", {"count": 0}),
+                               ("c1-held-handed", {"count": 0}),
+                               ("r1-held-handed", {"count": 1}),
+                               ("own-joined", {"count": 6}), ("sdk-joined", {"count": 5})):
+            self.checks, self.obs = current_evidence()
+            self.proof(label, **changes)
+            with self.subTest(label=label), self.assertRaises(s.v.Refused): self.complete()
+
+    def test_zero_observed_batches_does_not_prove_upload_exercise(self):
+        # Handoffs still exist, but none was observed during the held period.
+        proof = [f for f in self.checks[10][1]["facts"] if not f["operation"].startswith("batch")]
+        for f in proof:
+            if f["name"] == "applied": f["count"] = 0
+        self.checks[10][1]["facts"] = proof
+        self.obs[10] = [{"name": "accountVerified"}] + copy.deepcopy(proof) + [{"name": "ownedWorkJoined"}]
+        with self.assertRaisesRegex(s.Missing, "smoke-review-held-upload-exercise"): self.complete()
+
+    def test_close_proof_needs_observed_copy_and_all_original_work_terminal(self):
+        self.obs[10].pop(1)
+        with self.assertRaises(s.v.Refused): self.complete()
+        self.checks, self.obs = current_evidence()
+        self.obs[10].append({"name": "engineCallback", "count": 37, "engine": "engine1",
+                             "operation": "sdk5-state-delivered"})
+        self.proof("sdk-joined", count=5)
+        with self.assertRaisesRegex(s.v.Refused, "smoke-join-order"): self.complete()
+
+    def test_generic_pass_cannot_clear_native_fence(self):
+        self.checks[3][0]["facts"] = [{"name": "commandCompleted"}]
+        with self.assertRaises(s.v.Refused): self.complete(3)
+        self.checks, self.obs = current_evidence()
+        self.item("sdk1-state-committed")["requested_success"] = True
+        with self.assertRaises(s.v.Refused): self.complete(3)
+
+
 class CompletionMappingTests(unittest.TestCase):
     def setUp(self):
         self.commands = s.command_bytes(raw(header()))
@@ -346,7 +545,8 @@ class ParentTransport:
         if action == "poll":
             n = len(self.commands)
             if self.test.actual_wire:
-                self.journal = generated_journal(self.test.commands, n, self.test.wire_checks)
+                self.journal = generated_journal(self.test.commands, n, self.test.wire_checks,
+                                                 self.test.wire_observations)
             else:
                 self.journal += pair(self.test.commands, n, 2*n-1)
             if n == self.test.fail_at:
@@ -368,7 +568,8 @@ class ParentTransport:
             self.test.assertEqual(len(self.commands), 10)
             # Actual returned prefix AFTER original-process join, including a
             # late callback that the parent has not retained yet.
-            final = record(self.test.commands, 10, 21, "observation", facts=[{"name": "ownedWorkJoined"}])
+            final = record(self.test.commands, 10, len(self.journal.splitlines())+1,
+                           "observation", facts=[{"name": "ownedWorkJoined"}])
             self.journal += raw(final)
             return {"joined": True, "exit_code": 0, "passed": 1, "failed": 0, "skipped": 0}, self.journal
         raise AssertionError(action)
@@ -393,6 +594,7 @@ class ParentTests(unittest.TestCase):
         self.expected = header()
         self.fail_at = self.change_at = None
         self.actual_wire, self.wire_checks = False, generated_checks()
+        self.wire_observations = None
         self.check_count = 0
         test = self
         class Projection:
@@ -445,6 +647,28 @@ class ParentTests(unittest.TestCase):
         self.assertEqual(private_file.read_bytes(), self.projection.private_bytes())
         self.assertEqual(private_file.stat().st_mode & 0o777, 0o600)
         self.assertEqual(private_file.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_current_wire_accepts_after_original_join_and_keeps_both_prefixes(self):
+        self.patchers[1].stop()
+        self.actual_wire = True
+        self.wire_checks, self.wire_observations = current_evidence()
+        result = self.run_parent()
+        self.assertEqual(result["outcome"], "smoke_completed")
+        self.assertEqual(len(self.transport.commands), 10)
+        self.assertEqual(self.transport.events[-2:], ["finish", "original-transport-joined"])
+        self.assertEqual((self.local_path / "steps.jsonl").read_bytes(), self.transport.journal)
+
+    def test_missing_held_projection_keeps_prefix_and_never_delivers_release(self):
+        self.patchers[1].stop()
+        self.actual_wire = True
+        self.wire_checks, self.wire_observations = current_evidence()
+        self.wire_observations[6] = [f for f in self.wire_observations[6]
+                                   if f.get("operation") not in ("c1-held-projection", "r1-held-absent")]
+        with self.assertRaisesRegex(s.Missing, "smoke-review-held-image"): self.run_parent()
+        self.assertEqual(len(self.transport.commands), 6)
+        self.assertEqual(self.transport.events[-1], "original-transport-joined")
+        self.assertNotIn("finish", self.transport.events)
+        self.assertEqual((self.local_path / "steps.jsonl").read_bytes(), self.transport.retained)
 
     def test_actual_wire_retains_publication_then_missing_joins_without_successor(self):
         self.patchers[1].stop()
