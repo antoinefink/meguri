@@ -359,10 +359,14 @@ mod tests {
         let engine = Engine::new(crate::EngineConfig::default()).unwrap();
         let lane = engine.inner.control_lane.lock().unwrap();
         let caller = engine.clone();
-        let started = monotonic::now();
-        let result = std::thread::spawn(move || caller.suspend(Duration::from_millis(20)))
-            .join()
-            .unwrap();
+        let (result, elapsed) = std::thread::spawn(move || {
+            let started = monotonic::now();
+            let result = caller.suspend(Duration::from_millis(20));
+            let elapsed = monotonic::now() - started;
+            (result, elapsed)
+        })
+        .join()
+        .unwrap();
         drop(lane);
         assert_eq!(
             result,
@@ -370,6 +374,6 @@ mod tests {
                 phase: "control lane".into()
             })
         );
-        assert!(monotonic::now() - started < Duration::from_millis(200));
+        assert!(elapsed < Duration::from_millis(200));
     }
 }
