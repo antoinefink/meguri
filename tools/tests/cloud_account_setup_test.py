@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import tempfile
 import unittest
@@ -432,6 +433,28 @@ class TerminalChecks(unittest.TestCase):
 
 
 class SourceBoundaries(unittest.TestCase):
+    def assert_owner_setup_has_no_runtime_construction(self, entry):
+        # CoreBridge defines the configuration enum; importing it creates no host.
+        # Exempt only that import, keeping qualified uses and constructor aliases guarded.
+        runtime = re.sub(r"(?m)^import CoreBridge\r?$", "", entry)
+        self.assertNotRegex(runtime, r"\b(?:CoreBridge|Core|ReviewCollection|SyncCoordinator|CKSyncEngine|CKDatabase|CKRecord|CKAsset)\b")
+        for forbidden in ("ReviewCollection(", "SyncCoordinator(", "CKSyncEngine(",
+                          "privateCloudDatabase", "publicCloudDatabase", "sharedCloudDatabase",
+                          "CKRecord(", "CKAsset(", "XCTAttachment", "Attachment.record", "localizedDescription"):
+            self.assertNotIn(forbidden, entry)
+
+    def test_setup_boundary_rejects_generated_runtime_calls(self):
+        self.assert_owner_setup_has_no_runtime_construction("import CoreBridge\n")
+        for name in ("Core", "ReviewCollection", "SyncCoordinator", "CKSyncEngine", "CKDatabase", "CKRecord", "CKAsset"):
+            for expression in (f"{name}(generated: true)", f"{name} \n (generated: true)",
+                               f"{name}.init(generated: true)", f"let GeneratedAlias = {name}.self"):
+                with self.subTest(expression=expression), self.assertRaises(AssertionError):
+                    self.assert_owner_setup_has_no_runtime_construction("import CoreBridge\n" + expression)
+        for expression in ("CoreBridge.Core(generated: true)", "Core.open(generated: true)",
+                           "container.privateCloudDatabase", "container.publicCloudDatabase", "container.sharedCloudDatabase"):
+            with self.subTest(expression=expression), self.assertRaises(AssertionError):
+                self.assert_owner_setup_has_no_runtime_construction("import CoreBridge\n" + expression)
+
     def test_private_wire_compiles_and_preserves_original_group_join(self):
         source = p.guest_source().decode()
         ast.parse(source)
@@ -445,9 +468,7 @@ class SourceBoundaries(unittest.TestCase):
     def test_startup_entry_excluded_normal_plans_and_no_core_database_calls(self):
         entry = (ROOT / "app/MeguriSnapshotTests/TestHooks/CloudKitAccountSetupTests.swift").read_text()
         self.assertTrue(entry.startswith("#if DEBUG && MEGURI_TEST_HOOKS && os(macOS)"))
-        for forbidden in ("import CoreBridge", "ReviewCollection(", "SyncCoordinator(", "CKSyncEngine(",
-                          "privateCloudDatabase", "CKRecord(", "CKAsset(", "XCTAttachment", "Attachment.record", "localizedDescription"):
-            self.assertNotIn(forbidden, entry)
+        self.assert_owner_setup_has_no_runtime_construction(entry)
         snapshot = json.loads((ROOT / "app/TestPlans/Snapshot.xctestplan").read_text())
         self.assertIn("CloudKitAccountSetupTests", snapshot["testTargets"][0]["skippedTests"])
         plan = json.loads((ROOT / "app/TestPlans/CloudAgent.xctestplan").read_text())
