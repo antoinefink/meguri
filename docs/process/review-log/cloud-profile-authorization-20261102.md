@@ -21,3 +21,8 @@ Selftest/20261102T183416Z-27004 passes10/10 wrappers, zero skips, including
 negative grant and signed-claim cases. Privacy26606 passes. No full gate,
 CloudKit execution or U113 acceptance is claimed. Development readiness stays
 NO until actual grant verification completes; production stays NO.
+
+Actual build-app/20261102T183655Z-27985, source7d2ab7a3, now passes.
+The unchanged product check validates signatures, profile grants and packaged
+CloudKit configuration. The earlier failed receipt is retained. Static31032
+and similarity31377 pass for the profile correction. No SDK exchange ran.

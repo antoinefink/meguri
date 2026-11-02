@@ -1,6 +1,6 @@
 # Isolated CloudKit development setup
 
-Status: imported and exported schema verified. Product-grant verification remains open; readiness remains NO.
+Status: development schema and product grants verified; development readiness enabled. Runtime sync remains unverified.
 Source: a12118d3. U113 start and original integration base are unchanged.
 
 Antoine authorized native screen control for setup, approved creation of the
@@ -36,3 +36,11 @@ settings still require their integration checks before enabling development
 readiness. Both source readiness flags remain NO. No account identity,
 credential, record contents or private UI capture is stored in this log.
 Test-account approval and signed sync evidence remain open.
+
+The subsequent real Mac product check27985 passes after the reviewed profile
+checker correction. Implementer264d exported filtered30272 from7d2ab7a3:
+only development schema readiness changes NO to YES. Production and ad-hoc
+policy remain unchanged. Independent review is clear. Selftest32491 passes
+3/3 configuration wrappers, including typed Info and isolation checks.
+The rebuilt signed agent and approved account input are still required; this
+setting alone proves no live SDK operation or synchronization result.

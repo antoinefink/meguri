@@ -3,7 +3,7 @@
 // Verify/replace them through docs/process/one-time-setup.md before team use.
 MEGURI_CLOUD_CONTAINER_development = iCloud.com.antoinefink.meguri.dev
 MEGURI_CLOUD_CONTAINER_production = iCloud.com.antoinefink.meguri
-MEGURI_CLOUD_SCHEMA_CONFIGURED_development = NO
+MEGURI_CLOUD_SCHEMA_CONFIGURED_development = YES
 MEGURI_CLOUD_SCHEMA_CONFIGURED_production = NO
 
 // Debug/Profile select development explicitly; Release/AppStore production.
