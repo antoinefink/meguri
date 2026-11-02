@@ -149,6 +149,31 @@ A device is a data directory (the collection, its sidecar, `meguri-cloud.db`, th
 
 `setup(devices, base)` makes device A's collection from a generated base, publishes it (V15, reason 1), and makes every other listed device adopt it (V14), then drains (Q4.3). Base `small` (default): one note type `QA` of the harness's own (fields `Q` and `A`, one template, its own CSS; R1959), decks `D1` and `D1::D2`, the default preset, 20 notes with one card each, 5 media files of 10 KB referenced by 5 notes, and 3 days of reviews. Base `media`: `small` plus 200 media files of 20 KB to 5 MB (40 MB in all). Every field text, tag, deck name and media file name contains a unique marker string, so `content-free` (Q5) can search for it. Bases `10k` and `150k` are U11's generated fixtures.
 
+For `small`, `D1` and `D2` are logical roles. With the request's generated marker
+`M`, the actual names are `M-D1` and `M-D1::M-D2`. Rename deck id 1 to the first
+name (`decks/decks#D6`) and create its child. Retain exactly these two decks and
+the unchanged default preset. Do not delete id 1: `decks/decks#D8` would reset
+its name to `Default`.
+Each of the five distinct media files has one reference in a different note.
+The marker rules above still apply to every field value, tag and file name.
+
+Use the request seed and a pinned `now` of `2025-01-01T00:00:00Z` (Q3.6), UTC
+offset 0 and rollover hour 4. The pinned day starts at
+`T = 2024-12-31T04:00:00Z`, under `fixtures/synthetic-collections#F4.3`.
+For each card ordinal `i` from 0 to 19 in generation order, record Again on
+each of the days starting at `T - 3 days`, `T - 2 days` and `T - 1 day`.
+Its answer instant is that day's start plus 8 hours plus `i` seconds.
+These are the December 28, 29 and 30 scheduler-day buckets. Require exactly
+60 distinct history rows, three per card, and none on the pinned day.
+
+Use `fixtures/synthetic-collections#F5` generator/Core calculations for the card
+state, history, counters and FSRS data. Use the pinned request time throughout,
+without a wall-clock input. Read back learning step 1, three learning-kind rows,
+`reps = 3`, `lapses = 0` and a due instant at the last answer plus 60 seconds
+for each card. Keep the computed FSRS fields. The target is learning; it must
+not be replaced with a review state. All other `small` shape and marker
+requirements above still apply.
+
 ### Q4.3 Steps
 
 A program or a Q6 row is a list of steps. Device names are `A` to `D`; accounts `acct1` and `acct2`.

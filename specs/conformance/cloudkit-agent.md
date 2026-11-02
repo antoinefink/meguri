@@ -280,6 +280,13 @@ that does not add a requirement to inspect each packet.
 
 `base` names the Q4.2 base the selected work requires. The initial producer may implement only `small`; it must not claim that other bases or a complete leg ran. `small` is not a currently defined literal MG fixture-job argument. The producer needs a real generated request and, if necessary, an actual MG preparation run that establishes Q4.2's base. Missing that producer or its checks is implementation work, never proof supplied by a `generated` marker.
 
+For `small`, verify the actual output against Q4.2's marked deck roles, pinned
+clock, 20 single-card notes, five distinct media references and 60 history rows
+over its three specified days. Retain the real request and preparation proof;
+the base label or requested counts alone do not establish those file and row
+facts. The original generator manifest and any later preparation remain
+separate under the frozen-input rules below.
+
 The frozen JSON input contains exactly `protocol_version`, `run_id`, `device`, `source_commit`, `base`, `parent_files`, `prepared_source` and `files`. The version is `1`; run, device, source and base match the header. `parent_files` maps every source-relative parent file path to `{sha256, bytes}`. `prepared_source` is either that same source or the prepared fixture artifact declared by `preparation_receipt`. `files` is the corresponding exact source-relative file map for the data to install. Both maps include the database, manifest, any required WAL and every media file. Check exact file sets and actual bytes, not only declared digests. The real generator request, manifest and any preparation evidence must establish the generated base and its recorded changes. Preserve the parent's manifest; do not claim its digest describes prepared database changes.
 
 Freeze those inputs before launch. The header binds the frozen input's bytes; its run/device/source fields bind it back without a circular header hash. The full maps and their generated media names are fixture input, never text to copy into logs or signed evidence. Public observations use fixed file labels, sizes and digests only. A returned collection or later app state cannot become the expected source.
