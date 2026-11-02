@@ -29,11 +29,13 @@ The device's run directory holds `run.json`, one UTF-8 JSON object. Before any c
 | `job`, `run_id`, `lane` | Exact MG job `cloudkit-signed`, enclosing MG run id, and `cloud-signed` |
 | `source_commit`, `tree_clean` | Exact source commit; `tree_clean` must be `true` |
 | `device`, `device_kind`, `os_build` | Run-local device label, Mac/iPhone/iPad kind, and actual OS build |
-| `app_build`, `app_sha256`, `build_receipt_sha256` | App build identity, digest of the executing app product as verified by its signed-build receipt, and digest of that receipt |
+| `app_build`, `executable_sha256` | App build identity and lower-case SHA-256 of the running bundle's `CFBundleExecutable` bytes |
+| `build_receipt`, `build_receipt_sha256`, `deployment_receipt` | Exact MG build and device-deployment receipt references (J2.1), plus SHA-256 of the build receipt's bytes |
 | `container`, `environment` | Verified development container identifier and development environment |
 | `account_scope` | Run-local opaque label for the approved test-account scope |
 | `account_labels` | Test-account labels needed by the selected commands: `acct1`, and `acct2` only where Q7 requires it |
 | `selection` | `smoke`, or one exact Q7.5 leg id |
+| `fixture_delivery` | The generated source and frozen input admitted for this device's initial launch (J2.3) |
 
 The runner checks source and build fields against the actual signed product and its build receipt. The agent checks its actual product, OS, cloud configuration and runtime account binding against that expectation. These fields are expectations to verify, not declarations to trust. Ad-hoc signing or missing CloudKit grants cannot prove signed execution.
 
@@ -44,6 +46,36 @@ Check the running product, container and environment first, with no CloudKit cal
 Account-changing legs retain the original header and scope. They observe only their planned transitions between the approved accounts or to no account. They never relabel an unknown identity as `acct1` or `acct2`. Signing in, signing out and account setup remain the user's actions.
 
 `header_sha256` means SHA-256 of the exact `run.json` bytes. Every command and journal record carries it. A new MG run, product, device or account scope needs a new header and directory. A resumed app uses the original ones. Copying another run's journal never changes these bindings.
+
+### J2.1 Executable and receipt binding
+
+`executable_sha256` hashes only the executable file, never an undefined whole-bundle encoding. It has the meaning of the existing MG `standalone_product.executable_sha256` field. The producer must provide this check for Mac, iPhone and iPad products; a Mac preview result cannot stand in for another device's product.
+
+`build_receipt` and `deployment_receipt` each contain `{job, run_id}`. Resolve the exact MG receipts and only their declared artifacts using Q13.1's path and envelope rules. Require the run's clean source commit and the actual device/product binding. The coordinator independently checks the product signature, required CloudKit and push grants, provisioning under the existing platform rules, Debug/test-hook configuration, development container and environment, and the product actually delivered to this device. The running executable's bytes must match `executable_sha256` and that checked delivery. An executable hash alone proves none of the signing or account conditions. A caller-written receipt or a standalone preview's product details cannot substitute for these checks.
+
+### J2.2 Protected expected accounts
+
+The host reads `Meguri/CloudKitSignedPrivate/<run_id>/<device>/expected-accounts.json` under the current user's Application Support directory. The device reads the same relative path under its app container's Application Support directory. Keep both copies outside the checkout, `build/`, fixture directories and public MG artifacts. The coordinator copies only the account choice supplied by approved Q7.2 setup, with this run and device binding. Reading the current account cannot create or change the expected account.
+
+The private directories have mode `0700`. The input is a regular file with mode `0600`, one link, and the process user's ownership. Check that owner on the private directories too. Read through stable no-follow file and directory bindings; reject links, paths writable by another user, changed file bytes and changed path authority. These checks start at the admitted Application Support root, following the existing protected-input pattern. The host and device copies must preserve these restrictions.
+
+The JSON object contains exactly `protocol_version`, `header_sha256`, `job`, `run_id`, `source_commit`, `device`, `executable_sha256`, `container`, `environment`, `account_scope` and `accounts`. The version is `1`; every binding field equals J2's header. `accounts` maps exactly the header's account labels to the actual expected CloudKit user-record identities supplied by completed Q7.2 setup. Each value is a nonempty array of integers from 0 through 255: the exact opaque identity bytes the core uses under `sync/cloudkit-recovery#V9.1`, with no case conversion or hashing. Parse strictly, including duplicate-key rejection. Compare the actual core-verified current identity with this private input before database work, using J2's startup order.
+
+Examples, commands, journals and public artifacts contain no account IDs. Keep the private input and its digest out of exports. Do not export an account hash or another value that identifies the same account between runs. Report failures with fixed labels and check results only. If the user has not supplied the approved expected accounts, await Q7.2 setup. A current identity that differs fails `wrong-container`. Missing code to read, deliver or compare the input fails under J6; it is not a user setup step.
+
+### J2.3 Initial generated data
+
+`fixture_delivery` contains `base`, `fixtures_receipt`, `source`, `manifest`, `frozen_input` and, only when preparation is needed, `preparation_receipt`. Receipt references are `{job, run_id}` under J2.1's MG resolution rules. `fixtures_receipt` identifies the real passing MG `fixtures` run. `source` is its declared generated fixture artifact. `manifest` and `frozen_input` each contain `path`, `sha256` and `bytes`. The manifest path is relative to `source`. The frozen-input path is exactly `fixture-input.json` in this device's run directory, outside the fixture source. Resolve neither through links or a parent-path escape. They identify exact input files, not a later export from the app.
+
+`base` names the Q4.2 base the selected work requires. The initial producer may implement only `small`; it must not claim that other bases or a complete leg ran. `small` is not a currently defined literal MG fixture-job argument. The producer needs a real generated request and, if necessary, an actual MG preparation run that establishes Q4.2's base. Missing that producer or its checks is implementation work, never proof supplied by a `generated` marker.
+
+The frozen JSON input contains exactly `protocol_version`, `run_id`, `device`, `source_commit`, `base`, `parent_files`, `prepared_source` and `files`. The version is `1`; run, device, source and base match the header. `parent_files` maps every source-relative parent file path to `{sha256, bytes}`. `prepared_source` is either that same source or the prepared fixture artifact declared by `preparation_receipt`. `files` is the corresponding exact source-relative file map for the data to install. Both maps include the database, manifest, any required WAL and every media file. Check exact file sets and actual bytes, not only declared digests. The real generator request, manifest and any preparation evidence must establish the generated base and its recorded changes. Preserve the parent's manifest; do not claim its digest describes prepared database changes.
+
+Freeze those inputs before launch. The header binds the frozen input's bytes; its run/device/source fields bind it back without a circular header hash. The full maps and their generated media names are fixture input, never text to copy into logs or signed evidence. Public observations use fixed file labels, sizes and digests only. A returned collection or later app state cannot become the expected source.
+
+Deliver a copy to a directory owned by this run and device, using the existing frozen-input and `FixtureInstaller` patterns. Check owner, non-writable-by-other paths, stable no-follow regular files and the complete frozen file set before installation. The destination is a new collection directory owned by this run inside the development app container; it is never the app's default collection or the daily-driver collection. Require its absence before the initial install, and check copied bytes before opening `CoreHost`.
+
+Run the installer once, during the device's first `launch`, after durable `started` and before opening the local core. On relaunch, open the same collection and tracking owned by this run; do not install again. After a kill during that first install, check the actual state against the planned recovery. Do not delete the destination or copy the source again to obtain a passing result. The fixture's identity does not prove a study operation. Retain J4's actual operation evidence and all Q5 checks.
 
 ## J3. Ordered command delivery
 
@@ -126,6 +158,8 @@ A selected leg needs all of that leg's required devices, steps, checks, actual n
 
 Keep the existing MG envelope. If setup or an assisted user step is missing, record `user_steps`, `status: warn` and `details.outcome: awaiting_user`. For machine blocks, use MG's queued result. Both remain incomplete. Missing required non-assisted work, false assumptions and failed evidence checks fail under Q7.4. The protocol grants no user-step approval.
 
+If required code is missing, fail with `implementation_missing`. This includes the generator, preparation code, receipt checks, account input checks, agent and required proof of the real operation. Missing code is never a user step. Use `awaiting_user` only for missing user-owned setup or the approved expected-account choice under Q7.2.
+
 Q7.3 allows pause or an app stopped by the coordinator for one device's offline period. Legs that require network loss still need the VM's network cut. Existing rules for the host screen, VM and account setup continue to apply. Preserve Q9.2's three devices, eight hours of work, kills, network cuts and quiescence limit.
 
 ## J7. Executable acceptance cases
@@ -148,6 +182,12 @@ Protocol tests exercise the following cases without credentials. They check oper
 | Fail product/container checks, or fail the later account match | No lookup before product/container checks; only read-only identity lookup before account match; no database operation or cleanup |
 | Receive startup callbacks or fail with work still active | Durable `launch` start precedes core and engine startup; failure cancels and joins owned work; late observations cannot change the result or start a successor |
 | Return a journal shorter than, or different from, a prefix the coordinator retained | Refusal before further core or sync work, including after relaunch |
+| Change executable bytes, build/deployment references or checked product grants | Refusal; an executable digest alone establishes no signed product |
+| Give account input a wrong owner/mode, link, changed bytes or wrong header/run/device/scope | Refusal before database work; no private identity or input digest appears in exported diagnostics |
+| Omit the user's approved expected accounts, or use a current account read to choose them | Await user setup when its expected accounts are missing; refuse to create expected accounts from a current read |
+| Change a fixture receipt, manifest, frozen map, file, prepared-source binding or destination owner | Refusal before installation or core startup; generated markers supply no proof |
+| Relaunch with an existing run-owned collection, or direct initial install to the default collection | Preserve run data on relaunch; refuse default-collection delivery; no repeated install |
+| Omit a required generator, input inspector, receipt verifier or agent implementation | Failure `implementation_missing`, never a pass or a user setup step |
 
 App-hosted tests verify the producer separately: real core mutations and operation receipts; real coordinator results; actual adapter event order; durable flush ordering; interruption recovery; and rejection before cloud work under a wrong runtime binding. Fake engine cases stay fake evidence.
 

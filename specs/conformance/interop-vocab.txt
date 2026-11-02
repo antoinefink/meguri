@@ -368,8 +368,10 @@ device
 device_kind
 os_build
 app_build
-app_sha256
+executable_sha256
 build_receipt_sha256
+build_receipt
+deployment_receipt
 container
 environment
 account_scope
@@ -390,3 +392,23 @@ observed_at
 kind
 checks
 recovered_from
+# Signed device protected setup and frozen source inputs (cloudkit-agent.md J2).
+CFBundleExecutable
+expected-accounts.json
+CloudKitSignedPrivate
+accounts
+fixture_delivery
+base
+fixtures_receipt
+source
+manifest
+frozen_input
+fixture-input.json
+preparation_receipt
+path
+sha256
+bytes
+parent_files
+prepared_source
+files
+implementation_missing
