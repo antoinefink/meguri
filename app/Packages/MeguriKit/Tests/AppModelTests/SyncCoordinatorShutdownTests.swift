@@ -453,7 +453,7 @@ extension ReviewCollectionStartupTests {
                 else if wrapper {
                     let preserved = try #require(result.error as? CloudKitSDKOperationFailure)
                     #expect(preserved.code == 20 && preserved.retryAfterMilliseconds == nil)
-                    #expect((preserved.underlying as? NSError) === original)
+                    #expect((preserved.underlying as NSError) === original)
                 } else { #expect((result.error as? NSError) === original) }
                 try #require(result.outputs.count == 2)
                 if case .syncNowUnavailable(.paused) = result.outputs[0] {} else { Issue.record("Media unavailable output lost") }

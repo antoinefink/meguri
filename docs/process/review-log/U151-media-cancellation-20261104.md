@@ -23,3 +23,10 @@ Swift11504 stops at another test compilation error: a conditional NSError cast
 of a nonoptional Error. No app-level test executes. A bridge syntax correction
 is required; assertions and error identity remain required. Runtime producer
 logic and app-facing RED evidence remain pending.
+
+Export13867 corrects only the bridge syntax; identity assertion stays.
+Native14358: SDK control passes; Pause and Stop fail only qualification.
+The corrected AppModel run executes both selected tests: mapping and all
+negative controls pass. Only qualified cancellation fails presentation and
+revision assertions. Outputs, original ACKs and cleanup checks pass. This is
+the app-facing RED witness. Producer and presentation repair remain pending.

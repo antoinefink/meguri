@@ -19,3 +19,4 @@
 
 - Swift `CKSyncEngine`: async fetch/send APIs only. Objective-C completion overloads are unavailable in Swift.
 - Raw CloudKit terminal partial-failure tests capture installed handlers: SDK callback getter round-trips normalize them. Preserve maximum-delay assertions.
+- Cloud media read failures cross as numeric facts. They do not retain the SDK object. Check the wrapper code and retry delay; its underlying error can be local.
