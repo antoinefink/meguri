@@ -97,7 +97,7 @@ extension EventTests {
             do {
                 _ = try await Jobs.trackDraining(started.handle, setup: { _ in throw BridgeError.invalidArgument("early terminal setup") })
                 Issue.record("setup failure lost")
-            } catch { #expect(error == .invalidArgument("early terminal setup")) }
+            } catch { #expect(error as? BridgeError == BridgeError.invalidArgument("early terminal setup")) }
             #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
             let value = try await MaintenanceLane.shared.call(.cloudPolicyStatusResult) { try started.result.result() }
             #expect(value != nil)

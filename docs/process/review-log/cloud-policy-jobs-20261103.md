@@ -95,6 +95,18 @@ it leaves the exported patch identical. Private48188, Similarity48592 and
 CoreLint48547 pass. Core49187 passes all18 selected tests;314 tests are outside
 the selection. Swift and native lifecycle checks remain pending.
 
+Swift49615 builds the changed bindings and production bridge, then fails test
+compilation: one catch compares an untyped Error directly with an enum case.
+Export51993 adds the conditional BridgeError cast while retaining the exact case
+and message. Independent narrow review is clear. Private54144 and Similarity54115
+pass the changed test. The focused Swift run must be repeated after this correction.
+
+The remaining final-enqueue audit identifies two blocking paths. Native execution
+validation waits for Driver and Runtime locks. Invocation reporting additionally
+runs full policy projections. The new owner-only check cannot replace their
+command, guard, preference or SDK authority. A projection-held proof and separately
+reviewed design remain necessary; no native ownership repair is inferred here.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.
