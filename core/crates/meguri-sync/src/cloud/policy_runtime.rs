@@ -374,16 +374,17 @@ impl Runtime {
             }
             if s.policy.rollovers.contains(&key) {
                 false
-            } else if {
-                work.effect()?;
-                s.policy.rollovers_running.insert(key.clone())
-            } {
-                true
             } else {
-                return Err(meguri_engine::EngineError::Busy {
-                    running_op: "cloud policy rollover".into(),
+                work.effect()?;
+                let inserted = s.policy.rollovers_running.insert(key.clone());
+                if inserted {
+                    true
+                } else {
+                    return Err(meguri_engine::EngineError::Busy {
+                        running_op: "cloud policy rollover".into(),
+                    }
+                    .into());
                 }
-                .into());
             }
         };
         if rollover {

@@ -70,6 +70,18 @@ passes all15 selected tests. Private38618 and Similarity38863 pass the changed
 test file. Core39078 reports one lint error: move a block out of an if condition
 in policy_runtime.rs while keeping its effect check at the same point.
 
+Export39789 makes that one-region style correction. Independent review finds
+the same effect, insertion, branches and error order. Core41920 could not reach
+Docker from the sandbox; it ran no lint. A permitted host run is in progress.
+
+A later lifecycle review finds a separate suspended-close regression. The new
+status job is correctly cancelled while the registry is paused, but native close
+requests that status only to validate its original owner and ignores the value.
+S4 permits closing after suspension. The proposed repair is a short original-Host
+lifetime and generation check with no Driver lock, projection or job admission.
+Ordinary cloud jobs must remain cancelled during suspension. Repair and focused
+regressions remain pending; native Resume ownership is outside this correction.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.
