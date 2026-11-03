@@ -547,18 +547,13 @@ impl CloudWorkflow {
     }
     pub fn prepare_runtime(&self) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.prepare_runtime");
-        self.core.refresh_identity().map_err(cloud_error)?;
-        let status = self.core.status().map_err(cloud_error)?;
-        if !status.scan_completed_this_open {
-            self.core
-                .reconcile_binding(
-                    &self.host.collection()?,
-                    &self.host.media()?,
-                    std::time::Duration::from_secs(1),
-                )
-                .map_err(cloud_error)?;
-        }
-        Ok(())
+        self.core
+            .prepare_binding(
+                &self.host.collection()?,
+                &self.host.media()?,
+                std::time::Duration::from_secs(1),
+            )
+            .map_err(cloud_error)
     }
     pub fn register_sdk(&self, automatic: bool) -> Result<CloudEngineRegistration, CoreError> {
         callback::enter("CloudWorkflow.register_sdk");

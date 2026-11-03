@@ -63,6 +63,9 @@ impl Fixture {
         Self::with_collection(keys, None, false)
     }
     fn with_collection(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool) -> Self {
+        Self::with_recipe(keys, identity, local, None)
+    }
+    fn with_recipe(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool, recipe: Option<&str>) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
         let backups = directory.path().join("backups");
@@ -70,7 +73,10 @@ impl Fixture {
         std::fs::create_dir_all(&backups).unwrap();
         let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
         let random = Arc::new(SeededRandom::new(114));
-        if local {
+        if let Some(recipe) = recipe {
+            let recipe = meguri_testkit::generate::recipe::Recipe::parse(recipe).unwrap();
+            meguri_testkit::generate::recipe::generate_recipe(&recipe, 114, &data).unwrap();
+        } else if local {
             meguri_engine::bootstrap::create(&data.join("collection.anki2"), clock.as_ref(), random.as_ref()).unwrap();
         }
         let mut config = HostConfig::new(

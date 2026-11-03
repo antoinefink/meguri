@@ -132,7 +132,7 @@ impl Runtime {
         ));
         Ok(PreviewWork::ReadActive { id })
     }
-    fn require_supported_publication(op: &PublishOp) -> Result<(), RuntimeError> {
+    pub(super) fn require_supported_publication(op: &PublishOp) -> Result<(), RuntimeError> {
         if op
             .binding_before
             .as_ref()

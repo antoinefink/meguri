@@ -889,56 +889,7 @@ fn active_request_with_epoch(
                 if sdk.is_none() {
                     sdk = Some(fixture.workflow.register_sdk(false).unwrap());
                 }
-                let sdk = sdk.as_ref().unwrap();
-                let pending = fixture.workflow.tracking_sendables().unwrap();
-                let batch = fixture
-                    .workflow
-                    .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), pending)
-                    .unwrap()
-                    .expect("actual entity batch");
-                let count = batch.saves.len() as u32;
-                let changes = batch
-                    .saves
-                    .into_iter()
-                    .map(|r| Mutation::Save {
-                        record: RecordInput::encrypted(&r.name, "MGEntity", r.envelope),
-                        if_unchanged: r.system_fields.map(SystemFields::from_bytes),
-                    })
-                    .collect();
-                let response = service
-                    .request(
-                        &scope,
-                        Caller::default(),
-                        Operation::Modify {
-                            zone: sdk.collection_zone.clone(),
-                            atomic: false,
-                            changes,
-                        },
-                    )
-                    .unwrap();
-                let Reply::Modified(items) = response.result.unwrap() else {
-                    panic!("actual service save")
-                };
-                let saved = items
-                    .into_iter()
-                    .map(|item| {
-                        let MutationSuccess::Saved(record) = item.result.unwrap() else {
-                            panic!("actual saved entity")
-                        };
-                        let r = publication_control_record(&record).unwrap();
-                        CloudRecord {
-                            name: record.name,
-                            envelope: r.encrypted.unwrap(),
-                            system_fields: Some(r.system_fields.0),
-                            ..Default::default()
-                        }
-                    })
-                    .collect();
-                fixture
-                    .workflow
-                    .sent(sdk.instance_id.clone(), batch.id, saved, vec![], vec![], vec![], count)
-                    .unwrap();
-                fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+                send_publication_batch(fixture, sdk.as_ref().unwrap(), &mut service, &scope);
             }
             _ => panic!("publication failed before active"),
         }
@@ -956,6 +907,342 @@ fn active_request_with_epoch(
             system_fields: epoch.system_fields.0,
         },
     )
+}
+
+fn send_publication_batch(
+    fixture: &Fixture,
+    sdk: &CloudEngineRegistration,
+    service: &mut Service<SeededRandom>,
+    scope: &Scope,
+) {
+    let pending = fixture.workflow.tracking_sendables().unwrap();
+    let batch = fixture
+        .workflow
+        .build_batch(sdk.instance_id.clone(), sdk.collection_zone.clone(), pending)
+        .unwrap()
+        .expect("actual entity batch");
+    let count = batch.saves.len() as u32;
+    assert!(count > 0);
+    let changes = batch
+        .saves
+        .into_iter()
+        .map(|r| Mutation::Save {
+            record: RecordInput::encrypted(&r.name, "MGEntity", r.envelope),
+            if_unchanged: r.system_fields.map(SystemFields::from_bytes),
+        })
+        .collect();
+    let response = service
+        .request(
+            scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: sdk.collection_zone.clone(),
+                atomic: false,
+                changes,
+            },
+        )
+        .unwrap();
+    let Reply::Modified(items) = response.result.unwrap() else {
+        panic!("actual service save")
+    };
+    let saved = items
+        .into_iter()
+        .map(|item| {
+            let MutationSuccess::Saved(record) = item.result.unwrap() else {
+                panic!("actual saved entity")
+            };
+            let r = publication_control_record(&record).unwrap();
+            CloudRecord {
+                name: record.name,
+                envelope: r.encrypted.unwrap(),
+                system_fields: Some(r.system_fields.0),
+                ..Default::default()
+            }
+        })
+        .collect();
+    fixture
+        .workflow
+        .sent(sdk.instance_id.clone(), batch.id, saved, vec![], vec![], vec![], count)
+        .unwrap();
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+}
+
+const BOUND_PREPARATION_RECIPE: &str = "recipe: publication-bound-preparation\ndescription: Public synthetic publication rows\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Publication\n    notetype: basic\n    new: 1\n    due: 1\n    tags: [generic]\n    fields: [\"generic {n}\", \"back {n}\"]\n";
+
+fn bound_preparation_fixture() -> Fixture {
+    let cache = Arc::new(CachedIdentity(Mutex::new(Some(r::IdentityStatus::Available(
+        c::OpaqueBytes(b"synthetic-account-A".to_vec()),
+    )))));
+    Fixture::with_recipe(keys(), Some(cache), true, Some(BOUND_PREPARATION_RECIPE))
+}
+
+fn reopen_bound_preparation(fixture: &mut Fixture) {
+    fixture.workflow.host.close().unwrap();
+    let mut config = HostConfig::new(
+        fixture._directory.path().join("collection"),
+        fixture._directory.path().join("backups"),
+        fixture._directory.path().join("widget"),
+        fixture.clock.clone(),
+        fixture.random.clone(),
+        Arc::new(meguri_storage::space::StatvfsSpace),
+    );
+    config.cloud = Some(r::CloudInputs {
+        scope: c::BuildScope {
+            container: c::ContainerId::new("synthetic-u114").unwrap(),
+            environment: c::Environment::Development,
+        },
+        identity: fixture.workflow.identity.as_ref().unwrap().clone(),
+        files: Arc::new(NativeFiles),
+    });
+    let host = Arc::new(CoreHost::open(config).unwrap());
+    let core = host.cloud_runtime().unwrap().clone();
+    core.retain_adapter_inspection();
+    fixture.workflow = CloudWorkflow {
+        host,
+        core,
+        identity: fixture.workflow.identity.clone(),
+    };
+}
+
+fn fresh_bound_identity(workflow: &CloudWorkflow) {
+    let read = workflow.begin_identity_read(false, None).unwrap();
+    assert!(
+        workflow
+            .complete_identity_read(
+                read,
+                CloudAccountStatus::Available,
+                Some(b"synthetic-account-A".to_vec()),
+            )
+            .unwrap()
+    );
+}
+
+fn assert_bound_preparation_closed(fixture: &Fixture) {
+    let workflow = &fixture.workflow;
+    let status = workflow.core.status().unwrap();
+    assert!(status.identity_verified && status.stored_usable);
+    assert!(status.scan_required && !status.scan_running && !status.scan_completed_this_open);
+    assert!(!status.note_scan_completed_this_open);
+    assert!(workflow.core.note_scan_proof().is_none());
+    let stored = workflow.core.stored_state_for_testing().unwrap();
+    assert!(!stored.whole_scan && stored.coverage.is_none() && stored.note_scan.is_none());
+    for kind in c::row_payload::KINDS {
+        assert!(workflow.core.entity_facts_page(kind, None).unwrap().is_empty());
+    }
+    assert!(workflow.durable_snapshot().unwrap().entities.is_empty());
+    assert!(workflow.register_sdk(false).is_err());
+    let instance = workflow.core.instance().unwrap();
+    assert!(workflow.core.start_sdk_instance(&instance).is_err());
+    let batch = workflow
+        .core
+        .build_collection_batch(
+            &instance,
+            &workflow.host.collection().unwrap(),
+            &std::collections::BTreeSet::new(),
+        )
+        .unwrap();
+    assert_eq!(batch.id, 0);
+    assert!(batch.saves.is_empty());
+    assert!(workflow.core.start_manual_send_call(&instance).unwrap().is_none());
+    assert!(
+        workflow
+            .build_batch(instance.clone(), "meguri-root".into(), HashMap::new())
+            .is_err()
+    );
+    assert!(workflow.begin_send(instance).unwrap().is_none());
+}
+
+fn bound_preparation_progress(reopen_after: Option<usize>) {
+    let mut fixture = bound_preparation_fixture();
+    fixture
+        .workflow
+        .host
+        .media()
+        .unwrap()
+        .store()
+        .register_full(|_, _| true)
+        .unwrap();
+    let mut connection = fixture.workflow.connection().unwrap();
+    connection.confirm_publication(ready(&connection)).unwrap();
+    let run = tempfile::tempdir().unwrap();
+    let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(801)).unwrap();
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    let (mut request, _) = own(&connection);
+    let mut acks = 0;
+    let mut reopened = false;
+    loop {
+        assert_eq!(
+            fixture.workflow.core.publication_op().unwrap().unwrap().step,
+            p::PublishStep::Bound
+        );
+        let mut repeated_zones = false;
+        if reopen_after == Some(acks) && !reopened {
+            let old = CloudWorkflow {
+                host: fixture.workflow.host.clone(),
+                core: fixture.workflow.core.clone(),
+                identity: fixture.workflow.identity.clone(),
+            };
+            let old_connection = connection;
+            let old_request = request;
+            reopen_bound_preparation(&mut fixture);
+            assert!(old.prepare_runtime().is_err());
+            connection = fixture.workflow.connection().unwrap();
+            failure_is(
+                connection.publication_result(old_request, CloudPublicationResult::NotStarted),
+                CloudConnectionFailure::WrongOwner,
+            );
+            assert!(old_connection.next_publication_work().is_err());
+            // The identity cache is not process-local verification at reopen.
+            fixture
+                .workflow
+                .identity
+                .as_ref()
+                .unwrap()
+                .set(r::IdentityStatus::ReadFailed);
+            assert!(fixture.workflow.prepare_runtime().is_err());
+            assert!(!fixture.workflow.core.status().unwrap().identity_verified);
+            fresh_bound_identity(&fixture.workflow);
+            let (next, command) = own(&connection);
+            assert_eq!(next.retained_for_test().kind, p::OwnKind::CreateZones);
+            assert!(matches!(command, CloudOwnOperation::CreateZones { .. }));
+            request = next;
+            reopened = true;
+            repeated_zones = true;
+        }
+        fresh_bound_identity(&fixture.workflow);
+        let op = fixture.workflow.core.publication_op().unwrap().unwrap();
+        let stored = fixture.workflow.core.stored_state_for_testing().unwrap();
+        let requests = service.request_log().unwrap();
+        // Exercises the original production entry with real structural rows;
+        // the required outcome is deferred reconciliation, never Bound seeding.
+        fixture.workflow.prepare_runtime().unwrap();
+        assert!(fixture.workflow.core.publication_op().unwrap().unwrap() == op);
+        assert_eq!(fixture.workflow.core.stored_state_for_testing().unwrap(), stored);
+        assert!(service.request_log().unwrap() == requests);
+        assert_bound_preparation_closed(&fixture);
+        let expected = if repeated_zones || acks == 0 {
+            p::OwnKind::CreateZones
+        } else if acks == 1 {
+            p::OwnKind::SaveMediaRoot
+        } else {
+            p::OwnKind::SavePublishingEpoch
+        };
+        assert_eq!(request.retained_for_test().kind, expected);
+        let (reply, _) = execute_publication_request(
+            &mut service,
+            &scope,
+            request.retained_for_test(),
+            &fixture.workflow.core,
+            &fixture.workflow.host.collection().unwrap(),
+        )
+        .unwrap();
+        connection.publication_result(request, result(reply)).unwrap();
+        // Zone creation is repeated at reopen; its success is process-local.
+        acks = if expected == p::OwnKind::CreateZones {
+            acks.max(1)
+        } else {
+            acks + 1
+        };
+        if fixture.workflow.core.publication_op().unwrap().unwrap().step == p::PublishStep::Zones {
+            break;
+        }
+        request = own(&connection).0;
+    }
+    assert_eq!(reopened, reopen_after.is_some());
+    assert!(!fixture.workflow.core.status().unwrap().scan_completed_this_open);
+    assert!(fixture.workflow.register_sdk(false).is_err());
+    fixture.workflow.prepare_runtime().unwrap();
+    let status = fixture.workflow.core.status().unwrap();
+    assert!(status.scan_completed_this_open && !status.scan_required);
+    let proof = fixture.workflow.core.note_scan_proof().unwrap();
+    assert_eq!(proof.receipt.identity().generation(), proof.snapshot_generation);
+    assert_eq!(
+        proof.receipt.identity().native_file(),
+        (proof.snapshot_native_file.device, proof.snapshot_native_file.inode)
+    );
+    assert!(proof.receipt.through() >= proof.snapshot_seq);
+    let stored = fixture.workflow.core.stored_state_for_testing().unwrap();
+    assert!(stored.whole_scan);
+    let coverage = stored.coverage.unwrap();
+    assert_eq!(coverage.cursor.seq, proof.snapshot_seq.0);
+    assert_eq!(coverage.cursor.covered_through, proof.receipt.through().0);
+    assert_eq!(
+        coverage.counts.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+        c::row_payload::KINDS
+    );
+    for (kind, count) in coverage.counts {
+        let entities = fixture.workflow.core.entity_facts_page(kind, None).unwrap();
+        assert_eq!(entities.len() as u64, count);
+        if kind != c::entity_codec::Kind::MediaName {
+            assert!(count > 0, "generated {kind:?} rows must be reconciled");
+        }
+    }
+    assert!(matches!(
+        connection.next_publication_work().unwrap(),
+        CloudPublicationWork::SendEntities
+    ));
+    let sdk = fixture.workflow.register_sdk(false).unwrap();
+    for _ in 0..16 {
+        match connection.next_publication_work().unwrap() {
+            CloudPublicationWork::SendEntities => send_publication_batch(&fixture, &sdk, &mut service, &scope),
+            CloudPublicationWork::Own { request, .. } => {
+                assert_eq!(request.retained_for_test().kind, p::OwnKind::SaveCompleteEpoch);
+                return;
+            }
+            _ => panic!("real publication must advance after the entity ACKs"),
+        }
+    }
+    panic!("bounded publication progress after preparation");
+}
+
+#[test]
+fn publication_bound_preparation_defers_initial_scan_until_control_acks() {
+    bound_preparation_progress(None);
+}
+
+#[test]
+fn publication_bound_preparation_reopen_preserves_partial_control_acks() {
+    for control_acks in 0..3 {
+        bound_preparation_progress(Some(control_acks));
+    }
+}
+
+#[test]
+fn publication_bound_preparation_does_not_bypass_account_mismatch() {
+    for identity in [
+        r::IdentityStatus::Available(c::OpaqueBytes(b"synthetic-account-B".to_vec())),
+        r::IdentityStatus::SignedOut,
+        r::IdentityStatus::TemporarilyUnavailable,
+    ] {
+        let fixture = bound_preparation_fixture();
+        let connection = fixture.workflow.connection().unwrap();
+        connection.confirm_publication(ready(&connection)).unwrap();
+        let (request, _) = own(&connection);
+        fixture.workflow.identity.as_ref().unwrap().set(identity);
+        assert!(fixture.workflow.prepare_runtime().is_err());
+        assert!(!fixture.workflow.core.status().unwrap().identity_verified);
+        assert!(fixture.workflow.core.note_scan_proof().is_none());
+        assert!(
+            fixture
+                .workflow
+                .core
+                .stored_state_for_testing()
+                .unwrap()
+                .coverage
+                .is_none()
+        );
+        assert!(fixture.workflow.register_sdk(false).is_err());
+        assert!(matches!(
+            connection.next_publication_work().unwrap(),
+            CloudPublicationWork::Idle
+        ));
+        assert!(fixture.workflow.core.publication_op().unwrap().unwrap().step == p::PublishStep::Bound);
+        drop(request);
+    }
 }
 
 struct RefusingQueue;

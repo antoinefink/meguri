@@ -449,6 +449,61 @@ impl Runtime {
         }
         Ok(request)
     }
+    /// V2.4 settles intents before a scan. A publisher's new binding cannot
+    /// seed structural rows until its own controls have reached Zones (V15.2).
+    pub fn prepare_binding(
+        &self,
+        collection: &Collection,
+        media: &meguri_engine::media::MediaService,
+        timeout: Duration,
+    ) -> Result<(), RuntimeError> {
+        self.refresh_identity()?;
+        let status = self.status()?;
+        if status.scan_completed_this_open {
+            return Ok(());
+        }
+        let publishing_bound = self.publication_op()?.is_some_and(|op| {
+            op.step == crate::cloud::publication::PublishStep::Bound
+                && status.binding.as_ref().is_some_and(|b| op.binding_after == Some(b.id))
+        });
+        if !publishing_bound {
+            return self.reconcile_binding(collection, media, timeout).map(|_| ());
+        }
+        self.settle_before_transition(collection, timeout)?;
+        let guard = {
+            let s = self.state();
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if !b.usable || !b.verified {
+                return Err(RuntimeError::IdentityUnverified);
+            }
+            if s.scan_running || s.invalidation_exhausted {
+                return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+            }
+            ScanGuard {
+                invalidation: s.invalidation,
+                binding: b.binding.id,
+                open: b.open_counter,
+                generation: b.evidence.generation,
+                file: b.file,
+                incarnation: s.incarnation,
+            }
+        };
+        let defer = self.with_scan(&guard, collection, |s| {
+            let op = s.store.as_ref().ok_or(Error::Database)?.publication_op()?;
+            let Some(op) = op.filter(|op| {
+                op.binding_after == Some(guard.binding) && op.step == crate::cloud::publication::PublishStep::Bound
+            }) else {
+                return Ok(false);
+            };
+            Self::require_supported_publication(&op)?;
+            Ok(true)
+        })?;
+        if !defer {
+            self.reconcile_binding(collection, media, timeout)?;
+        }
+        Ok(())
+    }
+
     pub fn reconcile_binding(
         &self,
         collection: &Collection,
