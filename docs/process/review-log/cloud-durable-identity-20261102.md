@@ -69,3 +69,10 @@ Actual native53809 passes177/177, zero failures and zero ignored tests.
 This includes the real Darwin retained-FD/Collection/Runtime path and the
 simulated prior-device reopen with pending/ACK preservation. It is not an
 actual remount or SDK network trial. The original failed run48627 stays.
+
+Committed577e8d23 has final lint55496 passing4/4, similarity55303 passing and
+static55359 passing3/3. Static verification uses the original integration
+base. Final privacy54876 passes. The focused identity component is verified;
+U113, U114, actual remount, signed SDK workflow and full batch acceptance
+remain open. The next UI component must implement the specified publication
+decision flow rather than clear or bypass its pending decision.
