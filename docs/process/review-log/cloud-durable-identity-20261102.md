@@ -60,3 +60,12 @@ Direct signed Mac inspection also succeeds in source6759694a: the collection
 opens, one review is accepted, and normal quit/reopen retains its state. This
 is UI evidence only. Publication remains blocked by disabled placeholder
 actions in the existing decision sheet. No live CloudKit round trip is claimed.
+
+Test-only correction52236 asserts the exact pre-reconcile SDK refusal and
+successful registration/validation after real reconciliation. Every other
+assertion and all limits remain. Independent round4 clears the delta and
+the V7 maintenance instruction. Privacy53558 passes for the changed test.
+Actual native53809 passes177/177, zero failures and zero ignored tests.
+This includes the real Darwin retained-FD/Collection/Runtime path and the
+simulated prior-device reopen with pending/ACK preservation. It is not an
+actual remount or SDK network trial. The original failed run48627 stays.

@@ -1198,7 +1198,6 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
     let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
     assert!(pending.mark.is_some());
     let complete = runtime.stored_state_for_testing().unwrap();
-    let names = entity_names(runtime);
     let decision = meguri_engine::device_state::DeviceState::for_collection(collection.path())
         .publication_decision()
         .unwrap();
@@ -1239,14 +1238,12 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
     assert!(refreshed.note_scan.is_none() && refreshed.coverage.is_none());
     assert!(!refreshed.whole_scan && !refreshed.drained);
     assert!(runtime.status().unwrap().scan_required);
-    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
-    assert!(
-        runtime
-            .build_collection_batch(&sdk, &collection, &names)
-            .unwrap()
-            .saves
-            .is_empty()
-    );
+    assert!(matches!(
+        runtime.register_sdk(false),
+        Err(cloud::runtime::RuntimeError::Incomplete(
+            cloud::runtime::Incomplete::WholeBindingReconciliation
+        ))
+    ));
     let retained = runtime.entity_facts(&before.name).unwrap().unwrap();
     assert_eq!(retained.local_rev, pending.local_rev);
     assert_eq!(retained.acked_rev, pending.acked_rev);
@@ -1257,6 +1254,8 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
         .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
         .unwrap();
     assert!(!runtime.status().unwrap().scan_required);
+    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    runtime.validate_sdk(&sdk).unwrap();
     let reconciled = runtime.entity_facts(&before.name).unwrap().unwrap();
     assert_eq!(reconciled.local_rev, pending.local_rev);
     assert_eq!(reconciled.acked_payload, pending.acked_payload);
