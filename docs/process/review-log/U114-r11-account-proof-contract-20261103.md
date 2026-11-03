@@ -37,3 +37,9 @@ corrected source; the documentation scan is recorded with this commit.
 This closes the retained Resume test failure under the approved contract.
 It supplies neither a full gate nor a live CloudKit round trip. U114 remains
 unaccepted pending the other required verification and integration evidence.
+
+## Account test evidence
+
+Export64090: source56828 plus compiler repair. Swift62096: build failure.
+Swift65594: three tests; two pass, one fails four expected assertions.
+Outputs, ACKs and cleanup pass. No gate or unit acceptance.

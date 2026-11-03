@@ -84,6 +84,96 @@ struct SyncCoordinatorTests {
         #expect(backend.closed)
     }
 
+    #if os(macOS)
+    @Test func supersededAccountCancellationPreservesOutputsAndAcknowledgesBothReads() async throws {
+        try await checkAccountReadFailure(superseded: true, error: CancellationError(), expectsFailure: false)
+    }
+
+    @Test func latestAccountCancellationStillReportsGenericFailure() async throws {
+        try await checkAccountReadFailure(superseded: false, error: CancellationError(), expectsFailure: true)
+    }
+
+    @Test func supersededAccountGenuineFailureStillProcessesOutputsAndReportsFailure() async throws {
+        try await checkAccountReadFailure(superseded: true,
+            error: BridgeError.internal("synthetic-account-failure"), expectsFailure: true)
+    }
+
+    private func checkAccountReadFailure(superseded: Bool, error: any Error, expectsFailure: Bool) async throws {
+        let backend = SyncOwnerFake()
+        let firstGate = SyncOwnerGate(), secondGate = SyncOwnerGate()
+        let firstHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let secondHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { firstHeld.continuation.finish(); secondHeld.continuation.finish() }
+        var reads: [UInt64] = []
+        let releaseState = SyncOwnerReleaseState()
+        backend.resolveAccount = { read in
+            reads.append(read)
+            if read == 1 {
+                firstHeld.continuation.yield(true)
+                if !releaseState.releasing { await firstGate.hold() }
+                return .init(outputs: [.syncNowUnavailable(.notConnected)], error: error, deferred: true)
+            }
+            secondHeld.continuation.yield(true)
+            if !releaseState.releasing { await secondGate.hold() }
+            return .init(outputs: [.syncNowUnavailable(.paused)], error: nil, deferred: false)
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        await sync.preparePlatform()
+        await sync.completeOpenedHost(generation: 8)
+        do {
+            guard try await serviceAppSignal(firstHeld.stream, stage: "first account read held") else {
+                throw CloudOwnTransportFailure.missingReply
+            }
+            let initiallyFailed = sync.operationFailed, initialRevision = sync.failureRevision
+            if superseded { await sync.accountChanged() }
+            // accountChanged joins the ordered beginAccountRead input, while A
+            // is still held. B cannot resolve until A's completion is ACKed.
+            let readsWhileFirstHeld = backend.accountReads
+            sync.receive(.network(reachable: false))
+            await sync.waitForInputs()
+            let processedWhileFirstHeld = backend.events.contains("offline")
+            firstGate.release()
+            if superseded {
+                guard try await serviceAppSignal(secondHeld.stream, stage: "second account read after first ACK") else {
+                    throw CloudOwnTransportFailure.missingReply
+                }
+            } else { await sync.prepareConnectionAuthority() }
+            let afterFirst = (failed: sync.operationFailed, revision: sync.failureRevision,
+                unavailable: sync.syncNowUnavailable, deferred: sync.hasDeferredNativeWork)
+            let refreshCount = backend.localRefreshCount
+            sync.receive(.refresh(.local))
+            await sync.waitForInputs()
+            let processedAfterFirst = backend.localRefreshCount == refreshCount + 1
+            releaseState.releasing = true
+            secondGate.release()
+            // Joins the original account task, including B's result ACK.
+            await sync.prepareConnectionAuthority()
+            let afterBoth = (failed: sync.operationFailed, revision: sync.failureRevision,
+                unavailable: sync.syncNowUnavailable, deferred: sync.hasDeferredNativeWork)
+            let drained = await sync.cancelAndDrain()
+            // Every held continuation is released and original work joined
+            // before assertions, including on the unfixed source's RED path.
+            #expect(!initiallyFailed && initialRevision == 0)
+            #expect(readsWhileFirstHeld == 1 && processedWhileFirstHeld)
+            #expect(afterFirst.failed == expectsFailure)
+            #expect(afterFirst.revision == (expectsFailure ? 1 : 0))
+            #expect(afterFirst.unavailable == .notConnected && afterFirst.deferred)
+            #expect(processedAfterFirst)
+            #expect(reads == (superseded ? [1, 2] : [1]))
+            #expect(afterBoth.failed == expectsFailure)
+            #expect(afterBoth.revision == (expectsFailure ? 1 : 0))
+            #expect(afterBoth.unavailable == (superseded ? .paused : .notConnected))
+            #expect(afterBoth.deferred)
+            #expect(drained && backend.quiesced && backend.closed && backend.closeCount == 1)
+        } catch {
+            releaseState.releasing = true
+            firstGate.release(); secondGate.release()
+            _ = await sync.cancelAndDrain()
+            throw error
+        }
+    }
+    #endif
+
     @Test func localFlushBoundaryAndExpiryAreOrderedAndDrainIsIdempotent() async {
         let backend = SyncOwnerFake()
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
@@ -432,6 +522,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var accountReads = 0
     var holdAccount = false
     var accountResult: SyncCommandResult?
+    var resolveAccount: (@MainActor (UInt64) async -> SyncCommandResult)?
     var quiesced = false
     var closed = false
     var closeCount = 0
@@ -482,6 +573,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
                 account = continuation
             }
         }
+        if let resolveAccount { return await resolveAccount(read) }
         return accountResult ?? .init(outputs: [.commands([])], error: nil, deferred: false, accountVerified: true)
     }
     func waitForLocalRefresh(after count: Int) async {
@@ -503,6 +595,11 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
         try await onClose?(); closed = true; closeCount += 1; releaseAccount()
         closes.continuation.yield(())
     }
+}
+
+@MainActor
+private final class SyncOwnerReleaseState {
+    var releasing = false
 }
 
 @MainActor final class SyncOwnerGate {
