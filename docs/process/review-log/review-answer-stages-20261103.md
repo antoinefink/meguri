@@ -20,3 +20,17 @@ helper nor reveal.complete alone proves a visible answer.
 
 Signed build and live trace await verification. C6 hook ordering and the native
 cloud/Resume repair cap remain intact. No new tests mirror diagnostic literals.
+
+Build62232 passes from clean147381e4. Executable SHA256:
+c8dce791007ebf778b3c536752c35f58ceb32cd12b059cedf07aa3f2a9f2acd3.
+The first live Reveal completes all stages in23ms during Syncing Media.
+After returning to decks and entering another review, the question has a
+disabled Show Answer control and no second surfaceReveal.begin. This points
+before renderer admission; it is not evidence of a shown-hook stall.
+The fixed-category log stream stopped and joined normally.
+
+An independent source audit identifies a startup activity race: beginPause
+can run before start supplies sessionID, while recovered activity tasks call
+resume too early. Startup completion does not resume that paused model.
+Its exact live occurrence is unproved. A held-start inactive/active regression
+and same-model activity reconciliation are the next bounded work.
