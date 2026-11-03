@@ -298,6 +298,149 @@ private struct ObservedMediaRead: CloudPreparedMediaRead {
 }
 
 extension EventTests {
+    #if DEBUG
+    @Test func nativeMediaUploadsResumeAfterUnrelatedPersistedSentHandlerReturns() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            let guardBefore = try await fixture.core.currentGuard()
+            let held = CloudCallbackGate()
+            await fixture.probe.pauseSent(held)
+            let (admissions, observedAdmission) = AsyncStream<Bool>.makeStream()
+            let admissionEvidence = Mutex<(handlerReleased: Bool,
+                entries: [(admitted: Bool, beforeHandlerRelease: Bool)])>((false, []))
+            let queue = HeldNativeMediaQueue()
+            let transport = NativeCloudMediaTransport(queue: queue,
+                staging: try .init(directory: fixture.directory.appendingPathComponent("busy-send-media"), available: { UInt64.max }))
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+                mediaService: try await fixture.core.media(), mediaTransport: transport)
+            let responses = Task {
+                for await operation in queue.issued {
+                    for id in operation.recordIDs ?? [] {
+                        if id.recordName == "root" {
+                            let root = CKRecord(recordType: "MGMediaRoot", recordID: id)
+                            // Canonical V1 synthetic media root: format 1,
+                            // 32-byte shared media key, creation time zero.
+                            root.encryptedValues["e"] = (Data([0x08, 0x01, 0x12, 0x20])
+                                + Data(repeating: 47, count: 32)) as CKRecordValue
+                            operation.perRecordResultBlock?(id, .success(root))
+                        } else {
+                            // Only original metadata callbacks report absence;
+                            // the SDK's own send later supplies actual Saved.
+                            operation.perRecordResultBlock?(id, .failure(CKError(.unknownItem)))
+                        }
+                    }
+                    operation.fetchRecordsResultBlock?(.success(()))
+                }
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    admissionEvidence.withLock { $0.handlerReleased = true }
+                    await held.abort(CancellationError())
+                    observedAdmission.finish()
+                    try? await fixture.adapter.stop()
+                }
+            }
+            // This call owns its sent event and cannot return before that
+            // original event does. It is unrelated to the later media round.
+            let original = Task { try await fixture.adapter.requestSend(zones: [fixture.zone]) }
+            var media: Task<CloudPolicyNativeResult, Never>?
+            var names: [String] = []
+            var failure: (any Error)?
+            do {
+                try await held.waitForArrival()
+                let trace = await engine.recordedTrace()
+                let handed = try #require(trace.compactMap { entry -> UInt64? in
+                    if case .handed(let id, let names) = entry, names.contains(fixture.names[0]) { id } else { nil }
+                }.last)
+                let committed = try #require(try await fixture.core.entityFacts(name: fixture.names[0]))
+                try #require(committed.ackedRev == committed.localRev && committed.ackedRev > 0 && committed.mark == nil)
+                try #require(!(try await fixture.core.observations()).contains(.handlerReturned(requestID: handed)))
+                try #require(!trace.contains(.eventReturned("sent")))
+                let calls = engine.acceptedNetworkCalls.value
+                let bytes: [[UInt8]] = [[7, 1, 5, 3, 9], [2, 4, 6, 8, 10, 12]]
+                let files = CoreMediaService()
+                for (index, content) in bytes.enumerated() {
+                    names.append(try await files.addMedia(name: "busy-send-\(index).asset", bytes: content))
+                }
+                try #require(Set(names).count == 2)
+                let tracked = try await files.trackedNames()
+                for (name, content) in zip(names, bytes) {
+                    try #require(tracked.names.contains { $0.name == name })
+                    try #require(try Data(contentsOf: tracked.root.appendingPathComponent(name)) == Data(content))
+                }
+                guard case .commands(let commands) = try await policy.input(.settings(.init(
+                    enabled: true, paused: false, automatic: true, media: true))) else {
+                    throw CloudMediaFailure.missingReply
+                }
+                let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+                await fixture.adapter.setSendAdmissionObserver { admitted in
+                    admissionEvidence.withLock {
+                        if $0.entries.count < 8 {
+                            $0.entries.append((admitted, !$0.handlerReleased))
+                        }
+                    }
+                    _ = observedAdmission.yield(admitted)
+                }
+                let running = Task { await executor.execute(resume) }
+                media = running
+                var entries = admissions.makeAsyncIterator()
+                // A valid implementation may wait after its first rejection.
+                // Observe that admission without requiring the round to finish.
+                guard let admitted = await entries.next() else { throw CancellationError() }
+                try #require(!admitted)
+                try #require(engine.acceptedNetworkCalls.value == calls)
+                try #require(try await fixture.core.currentGuard() == guardBefore)
+                try #require(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+                try #require(await fixture.factory.engines().count == 1)
+                let status = try await policy.status()
+                try #require(status.accountStatus == .available && status.accountMatchesBinding && !status.mediaPaused)
+                for name in names {
+                    let pending = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
+                    let size = try #require(pending.mediaBytes)
+                    try #require(size > 0 && !pending.blobPresent && !pending.acknowledged)
+                }
+                admissionEvidence.withLock { $0.handlerReleased = true }
+                await held.open()
+                try await original.value
+                _ = await running.value
+            } catch { failure = error }
+
+            // All paths release callbacks before joining every owned task.
+            // Deadline assertions come only after these joins, including the
+            // watchdog's failure-only stop/drain and the native responder.
+            admissionEvidence.withLock { $0.handlerReleased = true }
+            await held.open()
+            media?.cancel()
+            let originalResult = await original.result
+            let mediaResult = await media?.value
+            await fixture.adapter.setSendAdmissionObserver(nil)
+            observedAdmission.finish()
+            queue.finish()
+            await responses.value
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            let evidence = admissionEvidence.withLock { $0.entries }
+            #expect(inTime, "Media admission or original callback drain exceeded the existing ten-second bound; first eight admissions (admitted, before-handler-release): \(evidence)")
+            if let failure { throw failure }
+            try originalResult.get()
+            #expect(mediaResult?.error == nil && mediaResult?.deferred == false,
+                "Media round failed; first eight admissions (admitted, before-handler-release): \(evidence)")
+            for name in names {
+                let saved = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
+                #expect(saved.acknowledged && saved.ackedRevision == saved.revision && saved.blobPresent,
+                    "Both generated files must reach real Saved commits without another policy wake; first eight admissions (admitted, before-handler-release): \(evidence)")
+            }
+            #expect(try await fixture.core.currentGuard() == guardBefore)
+            #expect(await fixture.factory.engines().count == 1)
+            #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
+        }
+    }
+    #endif
+
     @Test func nativeMediaFailureReachesPolicyAsReadWithoutSDKCalls() async throws {
         try await withNativePolicyFixture { fixture in
             let queue = HeldNativeMediaQueue()

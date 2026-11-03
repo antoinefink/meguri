@@ -15,3 +15,5 @@
 - Manual transfer previews own backend confirmations; never reconstruct ids/revisions into authority. History entries own backend ids. `CollectionLocation.manual_transfer_directory` is a separate installation-wide private root, including initial Files/open paths; profile parents cannot select it.
 
 - A preparation task keeps the policy admission identity assigned to that host job after its typed result is consumed. Read it from the task’s stored value without I/O; never derive ownership from history entries.
+
+- In smoke observations, open the media service before retaining a Query reader: opening that service borrows Query again.

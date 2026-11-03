@@ -150,6 +150,14 @@ public actor CloudKitSyncAdapter {
     private var originalMediaDrain: (@Sendable (String) async -> Void)?
     func setOriginalMediaDrain(_ drain: @escaping @Sendable (String) async -> Void) { originalMediaDrain = drain }
 
+    #if DEBUG
+    // Scheduling observation only, after the lane-backed call releases Core.
+    private var sendAdmissionObserver: (@Sendable (Bool) async -> Void)?
+    func setSendAdmissionObserver(_ observer: (@Sendable (Bool) async -> Void)?) {
+        sendAdmissionObserver = observer
+    }
+    #endif
+
     public private(set) var lastFailure: (any Error)?
 
     public init(core: CoreCloudWorkflowService, engineFactory: any CloudKitEngineFactory,
@@ -951,6 +959,9 @@ public actor CloudKitSyncAdapter {
         let call: UInt64?
         if let execution { call = try await execution.beginSend() }
         else { call = try await core.beginSend(sdk: origin) }
+        #if DEBUG
+        await sendAdmissionObserver?(call != nil)
+        #endif
         guard let call else { return }
         if zones.contains("meguri-media") { try await consumePendingUpdates(origin: origin) }
         guard await valid(origin) else { return }

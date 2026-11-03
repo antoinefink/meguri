@@ -131,6 +131,23 @@ pub fn observe(
         .cloud_runtime()
         .ok_or_else(|| cloud_error("smoke cloud runtime absent"))?;
     let collection = host.collection()?;
+    let media = if let Some(name) = &media_name {
+        // A stored media basename only; never a caller-selected file or query.
+        if name.is_empty()
+            || name.len() > 255
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+            || name == "."
+            || name == ".."
+        {
+            return Err(cloud_error("invalid smoke media basename"));
+        }
+        // Opening the service needs the Query slot; do it before retaining its lease.
+        Some(host.media()?)
+    } else {
+        None
+    };
     let lease = collection.reader(ReaderRole::Query)?;
     let snapshot = lease.snapshot()?;
     let status = core.status().map_err(cloud_error)?;
@@ -193,17 +210,6 @@ pub fn observe(
         }
     }
     if let Some(name) = &media_name {
-        // A stored media basename only; never a caller-selected file or query.
-        if name.is_empty()
-            || name.len() > 255
-            || name.contains('/')
-            || name.contains('\\')
-            || name.contains('\0')
-            || name == "."
-            || name == ".."
-        {
-            return Err(cloud_error("invalid smoke media basename"));
-        }
         keys.push(("m1", c::Kind::MediaName, name.to_lowercase().into_bytes(), None));
     }
     for (label, kind, key, id) in keys {
@@ -253,20 +259,21 @@ pub fn observe(
             }
             _ => (None, None, false),
         };
-        let media_change_counter = if let Some(name) = media_name.as_ref().filter(|_| label == "m1") {
-            let feed = host.media()?.store().media_feed_snapshot().map_err(cloud_error)?;
-            let item = feed
-                .items
-                .iter()
-                .find(|i| &i.name == name)
-                .ok_or_else(|| cloud_error("smoke media journal fact absent"))?;
-            if !feed.status.complete || !matches!(item.state, meguri_storage::media::MediaFileState::Present(_)) {
-                return Err(cloud_error("smoke media journal is incomplete"));
-            }
-            Some(item.change_counter)
-        } else {
-            None
-        };
+        let media_change_counter =
+            if let Some((name, media)) = media_name.as_ref().filter(|_| label == "m1").zip(media.as_ref()) {
+                let feed = media.store().media_feed_snapshot().map_err(cloud_error)?;
+                let item = feed
+                    .items
+                    .iter()
+                    .find(|i| &i.name == name)
+                    .ok_or_else(|| cloud_error("smoke media journal fact absent"))?;
+                if !feed.status.complete || !matches!(item.state, meguri_storage::media::MediaFileState::Present(_)) {
+                    return Err(cloud_error("smoke media journal is incomplete"));
+                }
+                Some(item.change_counter)
+            } else {
+                None
+            };
         result.entities.push(CloudSmokeEntity {
             label: label.into(),
             record_name: name,
