@@ -63,3 +63,9 @@ failed. The inherited cleanup follow-up and full batch gate remain open.
 
 Export82283, review clear. Swift85502: one test fails two assertions.
 No runtime changes.
+
+Export88798: common finalizer; Swift89635 passes eight tests. Review finds one
+P2: cleanup failure with no original error must propagate. Export91368 applies
+that correction; independent review clears it. Swift92121 then passes seven
+of eight tests. The original wake test fails three assertions; its cause is
+not established. No unchanged rerun. Safe failure evidence is needed next.

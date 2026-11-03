@@ -994,110 +994,117 @@ public actor CloudKitSyncAdapter {
         try await consumePendingUpdates(origin: origin)
         guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
         var call: UInt64?
-        repeat {
-            if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
-            let returned = instance.sentHandlerReturns
-            if let execution { call = try await execution.beginSend() }
-            else { call = try await core.beginSend(sdk: origin) }
-            #if DEBUG
-            if let call { sendCallObserver?(origin, call, false) }
-            #endif
-            do {
+        var finalizationAttempted = false
+        var networkStarted = false
+        // Keep the original network lifetime through exact-call cleanup.
+        defer { if networkStarted { instance.networks -= 1; changed() } }
+        var operationError: (any Error)?
+        sendWork: do {
+            repeat {
+                if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
+                let returned = instance.sentHandlerReturns
+                if let execution { call = try await execution.beginSend() }
+                else { call = try await core.beginSend(sdk: origin) }
+                #if DEBUG
+                if let call { sendCallObserver?(origin, call, false) }
+                #endif
                 if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
                 #if DEBUG
                 await sendAdmissionObserver?(call != nil)
                 #endif
                 if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
-            } catch {
-                // A successful admission owns a Runtime call even when the
-                // owner ends before any SDK invocation. Retire only that call,
-                // preserving the original owner/cancellation error.
-                if let call {
-                    let pending = await instance.engine.pendingRecordZoneChanges()
-                    do { try await finishSend(origin: origin, call: call, pending: pending) }
-                    catch { lastFailure = error }
-                }
-                throw error
-            }
-            guard requireMediaAdmission else { break }
-            if call != nil { break }
-            guard let execution else { throw BridgeError.cloudPolicy(.staleCommand) }
-            try await execution.validate()
-            try checkMediaSendOwner(origin, instance: instance)
-            // Manual requests obey the sync gate, exchange state and eight-call
-            // exchange budget, which also counts calls that have returned.
-            // Refused admission starts no SDK operation. A sent handler's return
-            // permits an admission retry; without an active or newly returned
-            // sent handler, retain the upload and report busy.
-            guard instance.sentHandlers > 0 || instance.sentHandlerReturns != returned else {
-                throw CloudMediaFailure.busy
-            }
-            while instance.sentHandlers > 0 {
-                #if DEBUG
-                mediaSendWaits += 1; changed()
-                defer { mediaSendWaits -= 1; changed() }
-                #endif
-                let old = version
-                try await waitForChange(after: old)
-                try checkMediaSendOwner(origin, instance: instance)
+                guard requireMediaAdmission else { break }
+                if call != nil { break }
+                guard let execution else { throw BridgeError.cloudPolicy(.staleCommand) }
                 try await execution.validate()
                 try checkMediaSendOwner(origin, instance: instance)
+                // Manual requests obey the sync gate, exchange state and eight-call
+                // exchange budget, which also counts calls that have returned.
+                // Refused admission starts no SDK operation. A sent handler's return
+                // permits an admission retry; without an active or newly returned
+                // sent handler, retain the upload and report busy.
+                guard instance.sentHandlers > 0 || instance.sentHandlerReturns != returned else {
+                    throw CloudMediaFailure.busy
+                }
+                while instance.sentHandlers > 0 {
+                    #if DEBUG
+                    mediaSendWaits += 1; changed()
+                    defer { mediaSendWaits -= 1; changed() }
+                    #endif
+                    let old = version
+                    try await waitForChange(after: old)
+                    try checkMediaSendOwner(origin, instance: instance)
+                    try await execution.validate()
+                    try checkMediaSendOwner(origin, instance: instance)
+                }
+                // Return can race beginSend, its observer or waiter registration.
+                // The retained return counter and versioned waiter cover all three.
+                // Only recheck admission after an actual handler return; unrelated
+                // changed() notifications above never cause another beginSend.
+                // prepareSend still joins SDK event bookkeeping before enqueue.
+            } while true
+            guard let call else { break sendWork }
+            if zones.contains("meguri-media") { try await consumePendingUpdates(origin: origin) }
+            guard await valid(origin) else { break sendWork }
+            instance.networks += 1; networkStarted = true; changed()
+            let mediaScope = zones.contains("meguri-media")
+            let reportedZones: [CloudPolicyZone] = mediaScope ? [.media] : [.collection]
+            var sendError: (any Error)?
+            let invocationOutputs = CloudPolicyInvocationOutputs()
+            do {
+                if let execution { try await execution.validate() }
+                guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+                instance.operationSaved = 0
+                instance.mediaSendFailure = nil
+                let validateSDK = try await core.finalSDKAuthorization(origin)
+                let prepared = try await instance.engine.prepareSend(zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
+                guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
+                guard !quiescing else { throw CancellationError() }
+                let operation = try prepared.enqueue {
+                    try validateSDK()
+                    try execution?.validateForEnqueue()
+                    if let execution { invocationOutputs.append(try execution.reportInvocation(zones: reportedZones, kind: .send)) }
+                }
+                try await operation.drain()
+                if let execution { try await execution.validate() }
             }
-            // Return can race beginSend, its observer or waiter registration.
-            // The retained return counter and versioned waiter cover all three.
-            // Only recheck admission after an actual handler return; unrelated
-            // changed() notifications above never cause another beginSend.
-            // prepareSend still joins SDK event bookkeeping before enqueue.
-        } while true
-        guard let call else { return }
-        if zones.contains("meguri-media") { try await consumePendingUpdates(origin: origin) }
-        guard await valid(origin) else { return }
-        instance.networks += 1; changed()
-        defer { instance.networks -= 1; changed() }
-        let mediaScope = zones.contains("meguri-media")
-        let reportedZones: [CloudPolicyZone] = mediaScope ? [.media] : [.collection]
-        var sendError: (any Error)?
-        let invocationOutputs = CloudPolicyInvocationOutputs()
-        do {
+            catch { sendError = error }
+            policyOperationOutputs.append(contentsOf: invocationOutputs.take())
+
+            if sendError == nil { sendError = instance.mediaSendFailure }
+            // SDK delivery has returned. Join its original first-read/apply work
+            // before finishSend observes pending changes and decides another round.
+            await joinOriginalFirstAssetReads(instance)
+            if sendError == nil, Task.isCancelled { sendError = CancellationError() }
+            if await valid(origin) {
+                try await reportOperation(execution, zones: reportedZones, kind: .send, started: false, error: sendError, saved: instance.operationSaved)
+            }
+            guard await valid(origin) else { if let sendError { throw sendError }; break sendWork }
+            try await waitForDeferredUpdates(origin: origin)
             if let execution { try await execution.validate() }
             guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
-            instance.operationSaved = 0
-            instance.mediaSendFailure = nil
-            let validateSDK = try await core.finalSDKAuthorization(origin)
-            let prepared = try await instance.engine.prepareSend(zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
-            guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
-            guard !quiescing else { throw CancellationError() }
-            let operation = try prepared.enqueue {
-                try validateSDK()
-                try execution?.validateForEnqueue()
-                if let execution { invocationOutputs.append(try execution.reportInvocation(zones: reportedZones, kind: .send)) }
-            }
-            try await operation.drain()
+            try await waitForDeferredUpdates(origin: origin)
             if let execution { try await execution.validate() }
+            guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+            let pending = await instance.engine.pendingRecordZoneChanges()
+            guard await valid(origin) else { break sendWork }
+            finalizationAttempted = true
+            try await finishSend(origin: origin, call: call, pending: pending)
+            try await consumePendingUpdates(origin: origin)
+            if let sendError { throw sendError }
+        } catch { operationError = error }
+        // Admission owns only this original call, even when later work returns
+        // early or throws. Normal finalization consumes its single attempt too.
+        if requireMediaAdmission, let call, !finalizationAttempted {
+            finalizationAttempted = true
+            let pending = await instance.engine.pendingRecordZoneChanges()
+            do { try await finishSend(origin: origin, call: call, pending: pending) }
+            catch {
+                lastFailure = error
+                if operationError == nil { operationError = error }
+            }
         }
-        catch { sendError = error }
-        policyOperationOutputs.append(contentsOf: invocationOutputs.take())
-
-        if sendError == nil { sendError = instance.mediaSendFailure }
-        // SDK delivery has returned. Join its original first-read/apply work
-        // before finishSend observes pending changes and decides another round.
-        await joinOriginalFirstAssetReads(instance)
-        if sendError == nil, Task.isCancelled { sendError = CancellationError() }
-        if await valid(origin) {
-            try await reportOperation(execution, zones: reportedZones, kind: .send, started: false, error: sendError, saved: instance.operationSaved)
-        }
-        guard await valid(origin) else { if let sendError { throw sendError }; return }
-        try await waitForDeferredUpdates(origin: origin)
-        if let execution { try await execution.validate() }
-        guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
-        try await waitForDeferredUpdates(origin: origin)
-        if let execution { try await execution.validate() }
-        guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
-        let pending = await instance.engine.pendingRecordZoneChanges()
-        guard await valid(origin) else { return }
-        try await finishSend(origin: origin, call: call, pending: pending)
-        try await consumePendingUpdates(origin: origin)
-        if let sendError { throw sendError }
+        if let operationError { throw operationError }
     }
     private func fetch(zones: [String], origin pinnedOrigin: String? = nil, execution: CoreCloudPolicyExecution? = nil) async throws -> Bool {
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
