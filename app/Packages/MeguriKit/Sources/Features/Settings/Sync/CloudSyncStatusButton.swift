@@ -69,6 +69,7 @@ public struct CloudSyncStatusButton: View {
             }
             .padding()
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sync.status.popover")
     }
     private var mediaLine: String? {

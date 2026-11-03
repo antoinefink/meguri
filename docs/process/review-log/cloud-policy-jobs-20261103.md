@@ -114,6 +114,13 @@ runs full policy projections. The new owner-only check cannot replace their
 command, guard, preference or SDK authority. A projection-held proof and separately
 reviewed design remain necessary; no native ownership repair is inferred here.
 
+Optimized personal preview63150 passes signing, development isolation and build
+validation with zero errors or warnings. Source:d281f8f5. Executable SHA256:
+085169b3e488ae57ae0eb6fbf70c1277fa850aa410ec761ef267e10a6255c5bc.
+The exact product is open as the sole Mac Meguri process; its decks remain present
+and its live UI reaches Syncing Media. Keep it open for the retained operation.
+This is ongoing activity, not completion or cross-device consistency evidence.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.

@@ -31,6 +31,17 @@ test and both inspection steps successfully. Captures and manifest are present;
 hierarchy checks report no issues. The actual screenshot shows the empty
 collection screen. This proves signed app launch and direct inspection only.
 
+Drive61191 opens the iCloud panel: all three steps and the selected XCTest pass,
+but the drive receipt fails its hierarchy check. Four elements inherit the outer
+popover identifier; the native sheet grabber also lacks an identifier. The first
+is an app bug; the native-control classification is a separate unresolved issue.
+
+UI correction start:d281f8f502cec016b726806dab80b89f9c0a7f54.
+Export65556 adds one explicit accessibility container to the status panel, keeping
+its children separate. Independent technical review has no P0-P2 findings.
+Private66647 and Similarity66646 pass. Actual phone recapture remains pending.
+Keep the native grabber and its failed evidence; no audit exception was added.
+
 Phone verification uses the three new transport tests. An older parser test
 requires files from the checkout and stays in its existing test lane.
 D3 requires an initial capture before a later replacement action.
