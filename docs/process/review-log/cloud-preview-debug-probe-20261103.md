@@ -43,6 +43,15 @@ of the corrected label is still pending.
 The later inspection1629 is queued because the selected phone is unavailable.
 It runs no test and provides no new adoption outcome. Keep that distinction.
 
+Host-access inspection10397 then passes two steps with no hierarchy issues. The
+phone is reachable and still has no collection after normal relaunch. Do not
+treat the sandboxed1629 preflight as proof that user setup is missing.
+Phone12461 on57c4808a renders the corrected progress label. Six steps pass, then
+the required disappearance of the adoption row times out after30 seconds. It has
+zero hierarchy issues and no skips, but its receipt fails. The preview tag is
+again `finished`. The collection download and round trip remain unproven; the
+spinner alone cannot distinguish active work from a retained interruption.
+
 Native Resume/registration ownership and the U114 repair cap are unchanged.
 Remove the temporary observation after diagnosis, or review any permanent
 diagnostic separately. No underlying sync repair is inferred from this probe.
