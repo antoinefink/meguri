@@ -43,3 +43,7 @@ unaccepted pending the other required verification and integration evidence.
 Export64090: source56828 plus compiler repair. Swift62096: build failure.
 Swift65594: three tests; two pass, one fails four expected assertions.
 Outputs, ACKs and cleanup pass. No gate or unit acceptance.
+
+Export64090 source applied after RED65594. Independent review: no P0-P2.
+Swift68864: three pass. Swift71176: 16 coordinator tests pass.
+Private scan and similarity pass. No unit acceptance; batch gate pending.

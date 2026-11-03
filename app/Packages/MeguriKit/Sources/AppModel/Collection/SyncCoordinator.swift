@@ -149,7 +149,8 @@ public final class SyncCoordinator {
         case persisted(revision: UInt64)
         case account(Bool)
         case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
-        case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool, acknowledged: CheckedContinuation<Void, Never>?)
+        case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool,
+                    supersededAccountCancellation: Bool = false, acknowledged: CheckedContinuation<Void, Never>?)
         case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                              complete: @MainActor (Bool) async -> SyncCommandResult,
                              acknowledged: CheckedContinuation<Bool, Never>)
@@ -854,7 +855,14 @@ public final class SyncCoordinator {
             // this lane may rotate authority, after all original command ACKs.
             observeAccountPolicyDrain?(.finished)
             let result = await complete(true)
-            await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+            // A different read already begun on this same owner is the exact
+            // supersession witness. Keep its predecessor's error and outputs;
+            // only the generic failure presentation changes for cancellation.
+            let supersededAccountCancellation = result.error is CancellationError
+                && pendingAccountRead.map { $0 != read } == true
+                && expected == generation && revision == hostRevision && backend === original
+            await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false,
+                supersededAccountCancellation: supersededAccountCancellation, acknowledged: nil))
             #if DEBUG
             observeCausalBoundary?(.proofResultReduced, nil)
             #endif
@@ -887,7 +895,7 @@ public final class SyncCoordinator {
                 try await service.resumeBinding(handle)
                 acknowledged.resume(returning: .resumed)
             } catch { acknowledged.resume(throwing: error) }
-        case .result(let result, let expected, let revision, let shutdownCancelled, let acknowledged):
+        case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let acknowledged):
             if expected == generation, revision == hostRevision, !replacing, !suspended {
                 for output in result.outputs {
                     consume(output, generation: expected)
@@ -897,7 +905,7 @@ public final class SyncCoordinator {
                     #if DEBUG
                     DebugCloudDiagnostics.record(.commandResult, error: error)
                     #endif
-                    operationFailed = true; failureRevision &+= 1
+                    if !supersededAccountCancellation { operationFailed = true; failureRevision &+= 1 }
                 }
                 if !closing, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
                 if !closing, initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
