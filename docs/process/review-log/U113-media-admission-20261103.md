@@ -39,3 +39,18 @@ returns without an error, but neither generated file reaches Saved.
 This supplies the intended scheduling regression. A production repair and
 passing focused checks remain required. No failed run is reclassified. The
 full batch gate and live cross-device round trip remain open.
+
+## Repair evidence
+
+Export61288 waits on the original sent handler and rechecks admission.
+Independent review finds a P2 cancellation cleanup gap after successful
+admission. Export68365 finalizes that exact call before propagating the error.
+Independent recheck finds no new P0-P2; the original witness stays unchanged.
+
+Swift74246: four tests pass, but a compiler warning fails the MG run.
+Export76113 fixes that warning and rewrites one comment. No assertions change.
+Private scan passes. A separate inherited cleanup gap remains recorded in
+build/notes/media-post-admission-cleanup-followup-20261103.md.
+
+Swift77452: all four tests pass; MG still fails the Bool-optional macro warning.
+Export76113 does not resolve that diagnostic. Both failed runs remain retained.

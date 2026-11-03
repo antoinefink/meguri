@@ -439,6 +439,237 @@ extension EventTests {
             #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
         }
     }
+
+    @Test(arguments: [false, true]) func nativeMediaBusyAdmissionCancellationAndLostWake(cancel: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            let guardBefore = try await fixture.core.currentGuard()
+            let held = CloudCallbackGate(), declined = CloudCallbackGate()
+            await fixture.probe.pauseSent(held)
+            let (admissions, observedAdmission) = AsyncStream<Bool>.makeStream()
+            let queue = HeldNativeMediaQueue()
+            let transport = NativeCloudMediaTransport(queue: queue,
+                staging: try .init(directory: fixture.directory.appendingPathComponent("busy-admission-races"), available: { UInt64.max }))
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+                mediaService: try await fixture.core.media(), mediaTransport: transport)
+            let responses = Task {
+                for await operation in queue.issued {
+                    for id in operation.recordIDs ?? [] {
+                        if id.recordName == "root" {
+                            let root = CKRecord(recordType: "MGMediaRoot", recordID: id)
+                            root.encryptedValues["e"] = (Data([0x08, 0x01, 0x12, 0x20])
+                                + Data(repeating: 47, count: 32)) as CKRecordValue
+                            operation.perRecordResultBlock?(id, .success(root))
+                        } else {
+                            operation.perRecordResultBlock?(id, .failure(CKError(.unknownItem)))
+                        }
+                    }
+                    operation.fetchRecordsResultBlock?(.success(()))
+                }
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    await held.abort(CancellationError())
+                    await declined.abort(CancellationError())
+                    observedAdmission.finish()
+                    try? await fixture.adapter.stop()
+                }
+            }
+            let original = Task { try await fixture.adapter.requestSend(zones: [fixture.zone]) }
+            var media: Task<CloudPolicyNativeResult, Never>?
+            var failure: (any Error)?
+            do {
+                try await held.waitForArrival()
+                let trace = await engine.recordedTrace()
+                let handed = try #require(trace.compactMap { entry -> UInt64? in
+                    if case .handed(let id, let names) = entry, names.contains(fixture.names[0]) { id } else { nil }
+                }.last)
+                try #require(!(try await fixture.core.observations()).contains(.handlerReturned(requestID: handed)))
+                let calls = engine.acceptedNetworkCalls.value
+                let name = try await CoreMediaService().addMedia(name: "busy-admission.asset", bytes: [3, 1, 4, 1, 5, 9])
+                guard case .commands(let commands) = try await policy.input(.settings(.init(
+                    enabled: true, paused: false, automatic: true, media: true))) else {
+                    throw CloudMediaFailure.missingReply
+                }
+                let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+                await fixture.adapter.setSendAdmissionObserver { admitted in
+                    _ = observedAdmission.yield(admitted)
+                    // Force handler return BEFORE wait registration in this
+                    // variant, using the existing post-Core scheduling seam.
+                    if !admitted && !cancel { await declined.enter() }
+                }
+                let running = Task { await executor.execute(resume) }
+                media = running
+                var entries = admissions.makeAsyncIterator()
+                let nextAdmission: Bool? = await entries.next()
+                let admitted = try #require(nextAdmission)
+                try #require(!admitted)
+                try #require(engine.acceptedNetworkCalls.value == calls)
+                if cancel {
+                    // This rendezvous observes an installed versioned waiter,
+                    // not merely the earlier nil-admission callback.
+                    try await fixture.adapter.waitForMediaSendAdmissionWaiter()
+                    running.cancel()
+                    let result = await running.value
+                    try #require(result.error is CancellationError && !result.deferred)
+                    try #require(engine.acceptedNetworkCalls.value == calls)
+                    try #require(!(try await fixture.core.observations()).contains(.handlerReturned(requestID: handed)))
+                    try #require(!(await engine.recordedTrace()).contains(.eventReturned("sent")))
+                    let pending = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
+                    try #require(!pending.acknowledged && !pending.blobPresent)
+                }
+                await held.open()
+                try await original.value
+                await declined.open()
+                let result = await running.value
+                if !cancel {
+                    try #require(result.error == nil && !result.deferred)
+                    let saved = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
+                    try #require(saved.acknowledged && saved.ackedRevision == saved.revision && saved.blobPresent)
+                    // Exactly collection then media after the declined first
+                    // scope. This seam does not force a later-scope wait.
+                    try #require(engine.acceptedNetworkCalls.value == calls + 2)
+                }
+            } catch { failure = error }
+            await held.open()
+            await declined.open()
+            media?.cancel()
+            let originalResult = await original.result
+            _ = await media?.value
+            await fixture.adapter.setSendAdmissionObserver(nil)
+            observedAdmission.finish()
+            queue.finish()
+            await responses.value
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            #expect(inTime, "Busy media admission cancellation/registration exceeded ten seconds")
+            if let failure { throw failure }
+            try originalResult.get()
+            #expect(try await fixture.core.currentGuard() == guardBefore)
+            #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(await fixture.factory.engines().count == 1)
+            #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
+        }
+    }
+
+    @Test func nativeMediaCancellationAfterSuccessfulAdmissionFinalizesExactCall() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            let guardBefore = try await fixture.core.currentGuard()
+            guard case .commands(let commands) = try await policy.input(.settings(.init(
+                enabled: true, paused: false, automatic: true, media: true))) else {
+                throw CloudMediaFailure.missingReply
+            }
+            let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+            let permit = try #require(try await policy.prepareExecution(resume))
+            let held = CloudCallbackGate()
+            let calls = engine.acceptedNetworkCalls.value
+            let observations = Mutex<[(sdk: String, id: UInt64, returned: Bool)]>([])
+            await fixture.adapter.setSendCallObserver { sdk, id, returned in
+                observations.withLock { $0.append((sdk, id, returned)) }
+            }
+            await fixture.adapter.setSendAdmissionObserver { admitted in
+                if admitted { await held.enter() }
+            }
+            // This is the original media-send task and retained permit, held
+            // after Core reserves its first scope but before any SDK call.
+            let original = Task<(any Error)?, Never> {
+                do { try await fixture.adapter.sendPolicyMedia(execution: permit); return nil }
+                catch { return error }
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    original.cancel()
+                    await held.abort(CancellationError())
+                    try? await fixture.adapter.stop()
+                }
+            }
+            var failure: (any Error)?
+            do {
+                try await held.waitForArrival()
+                let before = observations.withLock { $0 }
+                try #require(before.count == 1)
+                let admission = try #require(before.first)
+                try #require(admission.sdk == engine.instanceID && !admission.returned)
+                try #require(engine.acceptedNetworkCalls.value == calls)
+                original.cancel()
+                await held.open()
+                let result = await original.value
+                try #require(result is CancellationError)
+                let after = observations.withLock { $0 }
+                try #require(after.count == 2)
+                let finished = try #require(after.last)
+                // Emitted only after lane-backed Core finishSend returns:
+                // Runtime has marked this exact reservation returned.
+                try #require(finished.returned && finished.sdk == admission.sdk && finished.id == admission.id)
+                try #require(engine.acceptedNetworkCalls.value == calls)
+            } catch { failure = error }
+            await held.open()
+            original.cancel()
+            let result = await original.value
+            await fixture.adapter.setSendAdmissionObserver(nil)
+            await fixture.adapter.setSendCallObserver(nil)
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            #expect(inTime, "Successful media admission cancellation/finalization exceeded ten seconds")
+            if let failure { throw failure }
+            #expect(result is CancellationError)
+            #expect(engine.acceptedNetworkCalls.value == calls)
+            #expect(try await fixture.core.currentGuard() == guardBefore)
+            #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(await fixture.factory.engines().count == 1)
+            #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
+        }
+    }
+
+    @Test func nativeMediaNonbusySendDeclineFailsWithoutSDKInvocation() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            guard case .commands(let commands) = try await policy.input(.settings(.init(
+                enabled: true, paused: false, automatic: true, media: true))) else {
+                throw CloudMediaFailure.missingReply
+            }
+            let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+            let permit = try #require(try await policy.prepareExecution(resume))
+            // A real Runtime exchange's before-send fetch phase declines even
+            // though there is NO retained handler. This tests a nonbusy nil;
+            // closed gates and budget exhaustion have no isolated Swift seam.
+            let exchange = try await fixture.core.beginExchange(sdk: engine.instanceID)
+            let calls = engine.acceptedNetworkCalls.value
+            let running = Task<(any Error)?, Never> {
+                do { try await fixture.adapter.sendPolicyMedia(execution: permit); return nil }
+                catch { return error }
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    running.cancel()
+                    try? await fixture.adapter.stop()
+                }
+            }
+            let failure = await running.value
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            _ = try await fixture.core.completeExchange(sdk: engine.instanceID, id: exchange, fetched: false, cancelled: true)
+            #expect(inTime, "Nonbusy nil admission must not wait for a handler")
+            if case .busy? = failure as? CloudMediaFailure {} else {
+                Issue.record("Nonbusy nil did not report explicit busy failure: \(String(describing: failure))")
+            }
+            #expect(engine.acceptedNetworkCalls.value == calls)
+            #expect(await fixture.factory.engines().count == 1)
+        }
+    }
     #endif
 
     @Test func nativeMediaFailureReachesPolicyAsReadWithoutSDKCalls() async throws {
