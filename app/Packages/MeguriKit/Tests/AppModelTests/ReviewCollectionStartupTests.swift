@@ -6,6 +6,137 @@ import Testing
 // Owns the process's real collection; run this suite with a focused selector.
 @MainActor
 @Suite(.serialized) struct ReviewCollectionStartupTests {
+    @Test func reviewStartupActivityCoalescedRecoveryEnablesReveal() async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            let study = Task { await fixture.owner.startStudy(deckID: deckID) }
+            await fixture.gate.requested()
+            let model = try #require(fixture.owner.review)
+            #expect(model.sessionID == nil)
+            // No suspension between these setters: both queued tasks see active.
+            fixture.owner.setSceneActive(false)
+            fixture.owner.setSceneActive(true)
+            await fixture.owner.waitForLifecycle()
+            #expect(model.sessionID == nil && model.paused)
+            #expect(fixture.surface.reveals == 0)
+            fixture.gate.release()
+            await study.value
+            #expect(fixture.owner.review === model)
+            #expect(fixture.owner.reviewIsActive)
+            #expect(model.phase == .question)
+            #expect(!model.paused && model.canReveal)
+            model.reveal(); await model.settled()
+            #expect(fixture.surface.reveals == 1)
+            #expect(model.phase == .answer)
+        }
+    }
+
+    @Test func reviewStartupActivityInactiveCompletionWaitsForLaterActivation() async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            let study = Task { await fixture.owner.startStudy(deckID: deckID) }
+            await fixture.gate.requested()
+            let model = try #require(fixture.owner.review)
+            fixture.owner.setSceneActive(false)
+            // Unlike recovery, this lifecycle task may wait for startup in pause.
+            fixture.gate.release()
+            await study.value
+            await fixture.owner.waitForLifecycle()
+            #expect(!fixture.owner.reviewIsActive)
+            #expect(model.phase == .question && model.paused && !model.canReveal)
+            model.reveal(); await model.settled()
+            #expect(fixture.surface.reveals == 0)
+            fixture.owner.setSceneActive(true)
+            await fixture.owner.waitForLifecycle()
+            #expect(fixture.owner.reviewIsActive && !model.paused && model.canReveal)
+            model.reveal(); await model.settled()
+            #expect(fixture.surface.reveals == 1)
+            #expect(model.phase == .answer)
+        }
+    }
+
+    @Test func reviewStartupActivityReplacedOwnerDoesNotResumeOldModel() async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            let study = Task { await fixture.owner.startStudy(deckID: deckID) }
+            await fixture.gate.requested()
+            let old = try #require(fixture.owner.review)
+            fixture.owner.setSceneActive(false)
+            fixture.owner.setSceneActive(true)
+            await fixture.owner.waitForLifecycle()
+            let replacement = ReviewCoordinatorTests.Fixture()
+            await replacement.model.start()
+            fixture.owner.presentReview(replacement.model)
+            fixture.gate.release()
+            await study.value
+            #expect(fixture.owner.review === replacement.model)
+            #expect(old.paused && !old.canReveal)
+            #expect(!fixture.surface.calls.contains("resume"))
+            #expect(replacement.model.canReveal)
+            old.reveal(); await old.settled()
+            #expect(fixture.surface.reveals == 0)
+            #expect(await old.end())
+            await fixture.owner.finishReview()
+        }
+    }
+
+    private func withStartupActivityOwner(
+        _ body: (StartupActivityFixture, Int64) async throws -> Void
+    ) async throws {
+        let fixture = try StartupActivityFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        do {
+            await fixture.owner.start()
+            try #require(fixture.owner.state == .ready)
+            if fixture.owner.policy != .ok { await fixture.owner.enableFsrs() }
+            try #require(fixture.owner.policy == .ok)
+            let deck = try #require(fixture.owner.decks.first)
+            try await body(fixture, deck.id)
+            #expect(await fixture.owner.close())
+        } catch {
+            fixture.gate.release()
+            _ = await fixture.owner.close()
+            throw error
+        }
+    }
+
+    private final class StartupActivityFixture {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let surface = ReviewCoordinatorTests.Surface()
+        let client = ReviewCoordinatorTests.Client()
+        let gate = StartupResultGate()
+        let owner: ReviewCollection
+
+        init() throws {
+            let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: source, to: directory.appending(path: "collection.anki2"))
+            var configuration = LaunchConfiguration()
+            configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
+            configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
+            configuration.timeZone = TimeZone(secondsFromGMT: 0)
+            let sync = SyncCoordinator(directory: directory, configuration: nil, defaults: nil)
+            owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+            owner.makeReviewSurface = { [surface] _ in surface }
+            owner.reviewSessionClient = client
+            client.onStartResult = { [gate] in await gate.hold() }
+        }
+    }
+
+    private final class StartupResultGate {
+        private var held: CheckedContinuation<Void, Never>?
+        private var admission: CheckedContinuation<Void, Never>?
+        private var admitted = false
+        func hold() async {
+            await withCheckedContinuation {
+                held = $0; admitted = true
+                admission?.resume(); admission = nil
+            }
+        }
+        func requested() async {
+            if admitted { return }
+            await withCheckedContinuation { admission = $0 }
+        }
+        func release() { held?.resume(); held = nil }
+    }
+
     @Test func realChangesSurviveOwnerCloseAndReopenInOneEngine() async throws {
         let files = FileManager.default
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)

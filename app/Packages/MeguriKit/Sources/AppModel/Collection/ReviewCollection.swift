@@ -2,6 +2,9 @@ import CardRendering
 import CoreBridge
 import Foundation
 import Observation
+#if DEBUG
+import OSLog
+#endif
 
 /// One production collection, held above shell layouts.
 @Observable
@@ -955,7 +958,30 @@ public final class ReviewCollection: ChangeFanoutSink {
                 presentReview(model)
                 return true
             }
-            if !reviewIsActive { model.beginPause(); try await model.pause() }
+            #if DEBUG
+            logStartupActivity("startup.complete", model: model, generation: expected)
+            #endif
+            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return false }
+            // Startup has released its operation. Serialize with lifecycle work
+            // now: a pause may have awaited it, or coalesced resumes may have
+            // returned before the session ID arrived. Never await this in start().
+            let previous = lifecycleTask
+            var activityFailure: (any Error)?
+            let reconciliation = Task {
+                await previous?.value
+                guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return }
+                do {
+                    if !reviewIsActive { try await model.pause() }
+                    else if foreground, !resuming, resolver != nil { try await model.resume() }
+                } catch { activityFailure = error }
+            }
+            lifecycleTask = reconciliation
+            await reconciliation.value
+            #if DEBUG
+            logStartupActivity("startup.reconciled", model: model, generation: expected)
+            #endif
+            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return false }
+            if let activityFailure { throw activityFailure }
             if model.sessionID == nil {
                 navigation.endReview(); review = nil
                 if pendingDeck != nil { await readPolicy() }
@@ -968,6 +994,13 @@ public final class ReviewCollection: ChangeFanoutSink {
             return false
         }
     }
+    #if DEBUG
+    private func logStartupActivity(_ stage: String, model: ReviewCoordinator, generation expected: UInt64) {
+        let currentOwner = !closed && !closing && expected == generation && review === model && model.phase != .ended
+        let logger = Logger(subsystem: "Meguri", category: "ReviewActivityStage")
+        logger.debug("\(stage, privacy: .public) currentOwner=\(currentOwner, privacy: .public) reviewIsActive=\(self.reviewIsActive, privacy: .public) paused=\(model.paused, privacy: .public) foreground=\(self.foreground, privacy: .public) sceneActive=\(self.sceneActive, privacy: .public) applicationActive=\(self.applicationActive, privacy: .public) windowVisible=\(self.windowVisible, privacy: .public) reviewWindowActive=\(self.reviewWindowActive, privacy: .public) reviewVisible=\(self.reviewVisible, privacy: .public) hostCountZero=\(self.visibleReviewHosts == 0, privacy: .public) presentationAllowsInput=\(self.reviewPresentationAllowsInput, privacy: .public)")
+    }
+    #endif
     func presentReview(_ model: ReviewCoordinator) {
         reviewVisible = true
         review = model

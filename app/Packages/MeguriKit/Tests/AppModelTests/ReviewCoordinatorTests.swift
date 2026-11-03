@@ -481,11 +481,14 @@ import Testing
         var refusal: ReviewRefusal?
         var summary: ReviewDeckStudyState?
         var summaryGate: SummaryGate?
+        var onStartResult: (() async -> Void)?
         var currentHead = ReviewCoordinatorTests.head(1)
         var answerHead = ReviewAnswerOutcome.accepted(headDiff: ReviewHeadDiff(head: ReviewCoordinatorTests.head(2), marks: [], removed: [1]), leech: false, suspended: false, rolledOver: false)
         func start(deckID: Int64) async throws -> ReviewStartResult {
             if let refusal { return .refused(reason: refusal) }
-            return .started(sessionId: 5, generation: 1, head: currentHead, timeLim: 0)
+            let result = ReviewStartResult.started(sessionId: 5, generation: 1, head: currentHead, timeLim: 0)
+            await onStartResult?()
+            return result
         }
         func head(sessionID: UInt64) async throws -> ReviewHead { headReads += 1; return currentHead }
         func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
