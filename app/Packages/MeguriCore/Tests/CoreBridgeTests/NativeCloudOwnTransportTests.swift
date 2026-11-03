@@ -40,6 +40,36 @@ struct NativeCloudOwnTransportTests {
         }
     }
 
+    /// Synthetic SDK identity only; this does not prove equivalence of
+    /// separately fetched real server objects.
+    @Test func epochReadAndIndependentPageProjectionsPreserveExactSystemFields() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let staging = try CloudMediaStaging(directory: directory, available: { UInt64.max })
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let target = CloudControlTarget(zone: "c-synthetic", name: "epoch", recordType: "MGEpoch")
+        let encrypted = Data([1, 3, 5])
+        let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
+        record.encryptedValues["e"] = encrypted as CKRecordValue
+        guard case .found(let read) = try NativeCloudOwnRecords.readResult(.success(record), target: target) else {
+            throw CloudOwnTransportFailure.unexpectedReply
+        }
+        let page = try NativeCloudStagingRecords.project(record, target: target, staging: staging, cancelled: { false })
+        #expect(read.encrypted == encrypted)
+        #expect(page.record.encrypted == encrypted)
+        #expect(page.payloadFile == nil)
+        // Each production projection independently archives system fields.
+        #expect(page.record.systemFields == read.systemFields)
+
+        let restored = try NativeCloudKitSystemFields.restore(read.systemFields, target: target)
+        #expect(restored !== record)
+        restored.encryptedValues["e"] = encrypted as CKRecordValue
+        let restoredPage = try NativeCloudStagingRecords.project(restored, target: target, staging: staging, cancelled: { false })
+        #expect(restoredPage.record.encrypted == encrypted)
+        #expect(restoredPage.payloadFile == nil)
+        #expect(restoredPage.record.systemFields == read.systemFields)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
     @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
     func publicationReadsSavesAndZonesForwardActualServerDuration(code: CKError.Code) async throws {
         let retry = CKError(code, userInfo: [CKErrorRetryAfterKey: 120.0])

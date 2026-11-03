@@ -90,7 +90,7 @@ extension ReviewCollectionStartupTests {
             #expect(harness.sync.settings.enabled && harness.persistedEnabled == true)
             #expect(!harness.sync.settings.automatic && harness.sync.settings.media)
             #expect(!harness.collectionExists && !harness.backupsExist)
-            harness.page.finish(fixture.page)
+            harness.page.finish(try fixture.pageIncludingEpoch())
             await harness.joinOriginal()
             let replacement = try await probe.next(stage: "collection-replaced") { if case .collectionReplaced = $0.kind { true } else { false } }
             await harness.sync.waitForReplacement()
@@ -362,6 +362,36 @@ extension ReviewCollectionStartupTests {
             #expect(harness.sync.settings.enabled == earlier && harness.persistedEnabled == earlier)
             #expect(!harness.sync.initialAdoptionActive && harness.sync.recovery == nil)
             #expect(harness.owner.generation == generation && !harness.collectionExists)
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+
+    @Test(arguments: [false, true])
+    func initialAdoptionChangedEpochPageEndsWithoutBindingAndRestoresEnabled(earlier: Bool) async throws {
+        let fixture = try InitialCloudFixture.load()
+        let harness = try InitialCloudHarness(fixture: fixture, enabled: earlier)
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.beginAndWaitForPage()
+            let generation = harness.owner.generation
+            let backend = try #require(harness.backends.first)
+            let policy = try await backend.workflow.policy()
+            let epoch = try #require(fixture.records.first { $0.recordType == "MGEpoch" && $0.name == "epoch" })
+            var bytes = Data(epoch.encrypted)
+            try #require(!bytes.isEmpty)
+            bytes[bytes.startIndex] ^= 1
+            #expect(bytes != epoch.control.encrypted)
+            // Keep the original record-ID control reads; change only page e.
+            harness.page.finish(try fixture.pageIncludingEpoch(replacingEncrypted: bytes))
+            await harness.joinOriginal()
+            await harness.sync.waitForInputs()
+            #expect(harness.sync.operationFailed)
+            #expect(harness.sync.settings.enabled == earlier && harness.persistedEnabled == earlier)
+            #expect(!harness.sync.initialAdoptionActive && harness.sync.recovery == nil)
+            #expect(harness.owner.generation == generation && !harness.collectionExists && !harness.backupsExist)
+            #expect(harness.owner.review == nil && harness.factory.created.isEmpty)
+            let status = try await policy.status()
+            #expect(status.controls.bindingActive == false && status.controls.bindingStopped == false)
             #expect(await harness.owner.close())
         } catch { await harness.cleanup(); throw error }
     }
@@ -1025,6 +1055,13 @@ nonisolated struct InitialCloudFixture: Sendable {
         records.filter { $0.recordType == "MGEntity" }.map { .init(name: $0.name, recordType: $0.recordType, record: $0.control) }
     }
     var page: CloudOwnTransportReply { .page(records: entities, deleted: [], next: nil) }
+    func pageIncludingEpoch(replacingEncrypted encrypted: Data? = nil) throws -> CloudOwnTransportReply {
+        let epoch = try #require(records.first { $0.recordType == "MGEpoch" && $0.name == "epoch" })
+        let control = epoch.control
+        let staged = CloudStagingRecord(name: epoch.name, recordType: epoch.recordType,
+            record: .init(encrypted: encrypted ?? control.encrypted, systemFields: control.systemFields))
+        return .page(records: [staged] + entities, deleted: [], next: nil)
+    }
     static func load() throws -> Self {
         let path = try #require(ProcessInfo.processInfo.environment["MEGURI_INITIAL_ADOPTION_FIXTURE"],
             "Export cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication through tools/mg first")

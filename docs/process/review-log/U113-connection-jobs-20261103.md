@@ -93,6 +93,24 @@ The warning is diagnostic-context dependent. No signing change is justified;
 tools/AGENTS.md records the trap.
 
 
-A normal team-signed Mac Debug build is being prepared for a scoped debugger
-observation of the original error class/code. The hardened Release app is not
-modified to permit attachment. The live failure and batch gate remain open.
+Normal team-signed Mac Debug build13681 passes. A bounded debugger read gives
+no usable error type. The debugger is detached and its process joined; the
+Release signature is unchanged. The live failure and batch gate remain open.
+
+
+## Native epoch witness
+
+Component start:1da8c363. Filtered export21835 adds two test paths.
+Independent source review finds no P0-P2 issue; no runtime guard is changed.
+Swift23516 passes the native archive witness: independent read/page encodes and
+a restored object retain identical bytes for the synthetic record. This does
+not establish equality across separate live server reads. Swift25046 passes
+three adoption tests, including unchanged epoch-page success, changed epoch
+refusal and the existing corrupt-page case. Exact saved-row and review checks
+remain enabled. Private23189 and Similarity24586 pass both test paths.
+
+The phone recheck20449 passes transport and original-process continuity; its
+screen still shows Unknown and Try Again. No collection was adopted. Restricted
+probe18556 could not reach the device service; the host-context check supplies
+the observation. No failed receipt is reclassified. The native witness does
+not establish the cause of this live failure or supply a completed round trip.
