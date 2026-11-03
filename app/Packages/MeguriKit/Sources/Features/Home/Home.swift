@@ -173,7 +173,12 @@ public struct HomeView: View {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
         case .noFile:
             HomeCollectionEmptyContent(canPresent: collection.entry.canPresent,
-                importAction: { collection.entry.present() })
+                importAction: { collection.entry.present() },
+                connectTitleKey: collection.sync.status?.controls.resumeBindingOffered == true
+                    ? "sync.action.resume" : "sync.connect.action",
+                connectUnavailableReason: collection.cloudPreviewEntryUnavailableReason(.connect),
+                canPresentConnect: collection.navigation.sheet == nil || collection.navigation.sheet == .accountSync,
+                connectAction: { collection.presentCloudSync(.connect) })
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .failed(let message):
@@ -315,10 +320,21 @@ public struct HomeView: View {
 struct HomeCollectionEmptyContent: View {
     var canPresent: Bool = true
     var importAction: (() -> Void)? = nil
+    var connectTitleKey: String = "sync.connect.action"
+    var connectUnavailableReason: String? = nil
+    var canPresentConnect: Bool = true
+    var connectAction: () -> Void = {}
 
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
             description: Text("Import a collection to start studying.", bundle: .module)) {
+            Button(SyncText.value(connectTitleKey), action: connectAction)
+                .disabled(connectUnavailableReason != nil || !canPresentConnect)
+                .help(SyncText.value(connectUnavailableReason ?? connectTitleKey))
+                .accessibilityIdentifier("home.collection.connect")
+            if let connectUnavailableReason {
+                Text(SyncText.value(connectUnavailableReason)).foregroundStyle(.secondary)
+            }
             if let importAction {
                 HomeCollectionImportButton(canPresent: canPresent, action: importAction)
             }
