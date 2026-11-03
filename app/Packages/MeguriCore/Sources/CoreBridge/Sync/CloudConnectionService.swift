@@ -14,6 +14,11 @@ private final class ForeignPublicationQueue: MeguriCoreBindings.CloudPublication
 public actor CoreCloudConnectionService {
     private let raw: MeguriCoreBindings.CloudConnection
     init(_ raw: MeguriCoreBindings.CloudConnection) { self.raw = raw }
+    public func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation {
+        try await MaintenanceLane.shared.call(.cloudConnectionLocalPublicationInformation) { [raw] in
+            LocalPublicationInformation(try raw.localPublicationInformation(generation: generation))
+        }
+    }
     public func beginConnectionPreview() async throws -> CloudConnectionPreviewWork {
         let raw = self.raw
         return try await MaintenanceLane.shared.call(.cloudConnectionBeginConnectionPreview) { [raw] in CloudConnectionPreviewWork(try raw.beginConnectionPreview()) }

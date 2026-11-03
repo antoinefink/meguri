@@ -86,6 +86,489 @@ fn generated(dir: &Path) {
     let recipe = Recipe::parse("recipe: publication-phase\ndescription: Public synthetic rows\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Publication\n    notetype: basic\n    new: 1\n    due: 1\n    tags: [generic]\n    fields: [\"generic {n}\", \"back {n}\"]\n").unwrap();
     generate_recipe(&recipe, 91, dir).unwrap();
 }
+
+struct CountedUnavailable(std::sync::atomic::AtomicUsize);
+impl IdentityProvider for CountedUnavailable {
+    fn read_identity(&self, _: &cloud::BuildScope) -> IdentityStatus {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        IdentityStatus::TemporarilyUnavailable
+    }
+}
+fn information_bytes(dir: &Path) -> Vec<Option<Vec<u8>>> {
+    [
+        "collection.anki2",
+        "collection.anki2-wal",
+        "meguri-sidecar.json",
+        "meguri-cloud.db",
+        "meguri-cloud.db-wal",
+    ]
+    .map(|name| match std::fs::read(dir.join(name)) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => panic!("synthetic file read failed: {e}"),
+    })
+    .into_iter()
+    .collect()
+}
+#[test]
+fn local_information_uses_snapshot_dates_without_account_keys_or_durable_writes() {
+    use meguri_storage::{ReadRows, ReaderRole};
+    use std::sync::atomic::Ordering;
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let account = Arc::new(CountedUnavailable(std::sync::atomic::AtomicUsize::new(0)));
+    let keys = keys();
+    let host = open_host_with(&dir, keys.clone(), account.clone(), scope());
+    let collection = host.collection().unwrap();
+    // Fixed stored history and collection modification times, independent of
+    // the clock at which the information is requested.
+    collection
+        .run(
+            meguri_engine::OpSpec::named(
+                "synthetic information history",
+                meguri_model::changes::OpSource::UserNonUndoable,
+            ),
+            |ctx| {
+                let card = ctx.scope().row_page(meguri_storage::Table::Cards, None)?;
+                let id = cloud::row_payload::int(&card[0], 0).map_err(|_| meguri_storage::StorageError::Io {
+                    detail: "synthetic card id".into(),
+                })?;
+                ctx.scope().put(&meguri_model::revlog::RevlogEntry {
+                    id: meguri_model::ids::RevlogId(NOW + 1234),
+                    card_id: meguri_model::ids::CardId(id),
+                    usn: meguri_model::usn::Usn(-1),
+                    button: 3,
+                    interval: 2,
+                    last_interval: 1,
+                    ease_factor: 2500,
+                    answer_millis: 700,
+                    kind: meguri_model::revlog::RevlogKind::Review,
+                })?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let expected = {
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        let facts = reader.snapshot().unwrap().transfer_facts().unwrap();
+        facts
+    };
+    let before = information_bytes(&dir);
+    let calls = account.0.load(Ordering::SeqCst);
+    let info = host.local_publication_information(collection.generation()).unwrap();
+    assert!(info.collection_present);
+    assert_eq!(
+        info.condition,
+        Some(cloud::local_publication::LocalPublicationCondition::LocalOnly)
+    );
+    assert_eq!(info.local.as_ref().unwrap().counts[&cloud::entity_codec::Kind::Note], 2);
+    assert_eq!(info.local.as_ref().unwrap().counts[&cloud::entity_codec::Kind::Card], 2);
+    assert_eq!(
+        info.local.as_ref().unwrap().counts[&cloud::entity_codec::Kind::Revlog],
+        expected.totals.reviews
+    );
+    assert_eq!(info.last_review_ms, expected.last_review.map(|v| v.0));
+    assert_eq!(info.last_review_ms, Some(NOW + 1234));
+    assert_eq!(info.last_change_ms, Some(expected.stamps.modified.0));
+    assert_eq!(info.local.as_ref().unwrap().counts.len(), 9);
+    assert_eq!(account.0.load(Ordering::SeqCst), calls);
+    assert_eq!(*keys.calls.lock().unwrap(), 0);
+    assert_eq!(information_bytes(&dir), before);
+    assert!(host.cloud_runtime().unwrap().publication_op().unwrap().is_none());
+    host.cloud_runtime().unwrap().adapter_pause(true).unwrap();
+    let paused_bytes = information_bytes(&dir);
+    let paused_calls = account.0.load(Ordering::SeqCst);
+    assert_eq!(
+        host.local_publication_information(collection.generation()).unwrap(),
+        info
+    );
+    assert_eq!(account.0.load(Ordering::SeqCst), paused_calls);
+    assert_eq!(information_bytes(&dir), paused_bytes);
+    host.close().unwrap();
+    assert!(host.local_publication_information(collection.generation()).is_err());
+}
+#[test]
+fn local_information_preserves_pending_reasons_and_refuses_replaced_generation() {
+    use cloud::local_publication::{LocalPendingDecisionReason, LocalPublicationCondition};
+    use meguri_engine::{LongOp, replace::ReplaceReason};
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = CoreHost::open(options(&dir, NOW, 91)).unwrap();
+    assert!(host.cloud_runtime().is_none());
+    for (reason, expected) in [
+        (ReplaceReason::Restore, LocalPendingDecisionReason::Restore),
+        (ReplaceReason::ColpkgImport, LocalPendingDecisionReason::ColpkgImport),
+        (ReplaceReason::FullDownload, LocalPendingDecisionReason::ManualImport),
+    ] {
+        let old = host.collection().unwrap().generation();
+        let candidate = tempfile::tempdir().unwrap();
+        generated(candidate.path());
+        let stage = meguri_engine::replace::ReplacementStage::new(&dir).unwrap();
+        std::fs::copy(candidate.path().join("collection.anki2"), stage.path()).unwrap();
+        let slot = host
+            .engine()
+            .acquire_slot(match reason {
+                ReplaceReason::Restore => LongOp::Restore,
+                ReplaceReason::ColpkgImport => LongOp::ColpkgImport,
+                _ => LongOp::OneWaySync,
+            })
+            .unwrap();
+        slot.replace_verified(stage, reason, |_| Ok(())).unwrap();
+        drop(slot);
+        assert!(host.local_publication_information(old).is_err());
+        let generation = host.collection().unwrap().generation();
+        let before = information_bytes(&dir);
+        let info = host.local_publication_information(generation).unwrap();
+        assert_eq!(info.condition, Some(LocalPublicationCondition::Pending));
+        assert_eq!(info.pending_reason, Some(expected));
+        assert!(info.tracking.is_none());
+        assert_eq!(information_bytes(&dir), before);
+    }
+    // A synthetic legacy R6.7 document has no reason member. The information
+    // path must neither infer one nor rewrite the durable publication.
+    let sidecar = &dir.join("meguri-sidecar.json");
+    let mut doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    doc["deviceState"]
+        .as_object_mut()
+        .unwrap()
+        .remove("pendingDecisionReason");
+    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    let before = information_bytes(&dir);
+    let info = host
+        .local_publication_information(host.collection().unwrap().generation())
+        .unwrap();
+    assert_eq!(info.condition, Some(LocalPublicationCondition::Pending));
+    assert_eq!(info.pending_reason, None);
+    assert_eq!(information_bytes(&dir), before);
+    // Invalid metadata is an error, never a local-only/zero-count fallback.
+    doc["deviceState"]["pendingDecisionReason"] = serde_json::Value::Null;
+    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    let invalid = information_bytes(&dir);
+    assert!(
+        host.local_publication_information(host.collection().unwrap().generation())
+            .is_err()
+    );
+    assert_eq!(information_bytes(&dir), invalid);
+    // Restore the synthetic document before the ordinary close protocol.
+    doc["deviceState"]
+        .as_object_mut()
+        .unwrap()
+        .remove("pendingDecisionReason");
+    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    host.close().unwrap();
+}
+#[test]
+fn local_information_never_follows_a_replacement_or_closed_host() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = Arc::new(CoreHost::open(options(&dir, NOW, 91)).unwrap());
+    let generation = host.collection().unwrap().generation();
+    let candidate = tempfile::tempdir().unwrap();
+    generated(candidate.path());
+    let stage = meguri_engine::replace::ReplacementStage::new(&dir).unwrap();
+    std::fs::copy(candidate.path().join("collection.anki2"), stage.path()).unwrap();
+    let (reached, wait) = std::sync::mpsc::channel();
+    let (release, resume) = std::sync::mpsc::channel();
+    let replacing = host.clone();
+    let worker = std::thread::spawn(move || {
+        let slot = replacing.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+        let mut exclusive = slot.enter_exclusive(true).unwrap();
+        exclusive
+            .replace_verified_before_commit(
+                stage,
+                meguri_engine::replace::ReplaceReason::Restore,
+                |_| Ok(()),
+                || {
+                    reached.send(()).unwrap();
+                    resume.recv_timeout(Duration::from_secs(30)).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+    wait.recv_timeout(Duration::from_secs(30)).unwrap();
+    // An exclusive phase can refuse the read or still provide the original
+    // admitted view. It can never return facts for a successor generation.
+    if let Ok(info) = host.local_publication_information(generation) {
+        assert_eq!(
+            info.condition,
+            Some(cloud::local_publication::LocalPublicationCondition::LocalOnly)
+        );
+    }
+    release.send(()).unwrap();
+    worker.join().unwrap();
+    assert!(host.local_publication_information(generation).is_err());
+    let current = host.collection().unwrap().generation();
+    let closing = host.clone();
+    let closer = std::thread::spawn(move || closing.close());
+    // Exercise the same read against concurrent reader drain. Either a fully
+    // validated current snapshot or an explicit lifecycle refusal is correct.
+    if let Ok(info) = host.local_publication_information(current) {
+        assert_eq!(
+            info.condition,
+            Some(cloud::local_publication::LocalPublicationCondition::Pending)
+        );
+    }
+    closer.join().unwrap().unwrap();
+    assert!(host.local_publication_information(current).is_err());
+}
+#[test]
+fn local_information_qualifies_isolated_work_without_claiming_a_retained_backup() {
+    use cloud::{
+        entity_codec::{Kind, Payload},
+        local_publication::*,
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(616)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let collection = host.collection().unwrap();
+    assert_eq!(
+        host.local_publication_information(collection.generation())
+            .unwrap()
+            .condition,
+        Some(LocalPublicationCondition::Clear)
+    );
+    let entity = host
+        .cloud_runtime()
+        .unwrap()
+        .entity_facts_page(Kind::Note, None)
+        .unwrap()
+        .remove(0);
+    let Payload::Note(note) = entity.payload else {
+        panic!("synthetic note required");
+    };
+    edit_workflow_note(&collection, &note, "unpublished synthetic change");
+    restore_collection(&host, &dir);
+    let generation = host.collection().unwrap().generation();
+    let before = information_bytes(&dir);
+    let calls = service.request_log().unwrap().len();
+    let info = host.local_publication_information(generation).unwrap();
+    let tracking = info.tracking.unwrap();
+    assert_eq!(tracking.isolated.len(), 1);
+    assert_eq!(tracking.isolated[0].pending_by_kind[&Kind::Note], 1);
+    assert_eq!(tracking.isolated[0].content, IsolatedLocalContent::ReplacedLocally);
+    assert_eq!(tracking.isolated[0].backup, LocalBackupKnowledge::Unknown);
+    assert_eq!(tracking.unresolved_conflict_copies, 0);
+    assert_eq!(service.request_log().unwrap().len(), calls);
+    assert_eq!(information_bytes(&dir), before);
+    host.close().unwrap();
+}
+#[test]
+fn local_information_counts_isolated_revision_after_dirty_mark_loss_without_mutation() {
+    use cloud::{
+        entity_codec::{Kind, Payload},
+        local_publication::*,
+    };
+    use meguri_storage::raw::{PlainDatabase, RawValue};
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let keys = keys();
+    let host = open_host(&dir, keys.clone());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(617)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let entity = runtime.entity_facts_page(Kind::Note, None).unwrap().remove(0);
+    let Payload::Note(note) = &entity.payload else {
+        panic!("synthetic note required");
+    };
+    edit_workflow_note(&host.collection().unwrap(), note, "synthetic revision without mark");
+    restore_collection(&host, &dir);
+    let runtime = host.cloud_runtime().unwrap();
+    // Lose only the mark on the already isolated ordinary owner. Keep the
+    // captured revision, payload, ACK, flights and pending state intact.
+    cloud::runtime::with_tracking_access(|| {
+        let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
+        assert_eq!(
+            db.execute(
+                "UPDATE cloud_runtime_notes SET content=json_set(content,'$.mark',NULL) WHERE binding=?1 AND id=?2",
+                &[RawValue::Blob(binding.id.0.to_vec()), RawValue::Integer(note.id)],
+            )
+            .unwrap(),
+            1
+        );
+    });
+    let before_entity = runtime.binding_entity(binding.id, &entity.name).unwrap().unwrap();
+    assert!(before_entity.mark.is_none());
+    assert!(before_entity.local_rev > before_entity.acked_rev);
+    let generation = host.collection().unwrap().generation();
+    let before = information_bytes(&dir);
+    let status = format!("{:?}", runtime.status().unwrap());
+    let pending = runtime.tracking_sendables();
+    let observations = runtime.observations();
+    let emitted = runtime.emitted_update_ids();
+    let guard = runtime.adapter_guard();
+    let calls = service.request_log().unwrap().len();
+    let key_calls = *keys.calls.lock().unwrap();
+    let info = host.local_publication_information(generation).unwrap();
+    let tracking = info.tracking.as_ref().unwrap();
+    assert_eq!(tracking.isolated.len(), 1);
+    assert_eq!(tracking.isolated[0].pending_by_kind[&Kind::Note], 1);
+    assert_eq!(tracking.isolated[0].content, IsolatedLocalContent::ReplacedLocally);
+    assert_eq!(tracking.isolated[0].backup, LocalBackupKnowledge::Unknown);
+    assert_eq!(host.local_publication_information(generation).unwrap(), info);
+    assert_eq!(information_bytes(&dir), before);
+    assert!(runtime.binding_entity(binding.id, &entity.name).unwrap().unwrap() == before_entity);
+    assert_eq!(format!("{:?}", runtime.status().unwrap()), status);
+    assert_eq!(runtime.tracking_sendables(), pending);
+    assert!(runtime.observations() == observations);
+    assert_eq!(runtime.emitted_update_ids(), emitted);
+    assert_eq!(runtime.adapter_guard(), guard);
+    assert_eq!(service.request_log().unwrap().len(), calls);
+    assert_eq!(*keys.calls.lock().unwrap(), key_calls);
+    host.close().unwrap();
+}
+
+fn information_copy(db: &meguri_storage::raw::PlainDatabase, owner: cloud::BindingId, id: u8, resolved: Option<i64>) {
+    use meguri_storage::raw::RawValue;
+    let copy = cloud::ConflictCopy {
+        id: cloud::CopyId([id; 16]),
+        kind: cloud::ConflictKind::Note,
+        key: cloud::OpaqueBytes(vec![id]),
+        reason: cloud::ConflictReason::FieldConflict,
+        losing_envelope: cloud::OpaqueBytes(b"synthetic private copy payload".to_vec()),
+        losing_payload_digest: cloud::PayloadDigest([id; 32]),
+        winning_payload_digest: cloud::PayloadDigest([0; 32]),
+        field_names: None,
+        template_names: None,
+        note_deck: None,
+        staged_path: None,
+        created_at_ms: NOW,
+        resolved_at_ms: resolved,
+    };
+    db.execute(
+        "INSERT INTO conflicts(id,binding,content) VALUES(?1,?2,?3)",
+        &[
+            RawValue::Blob(copy.id.0.to_vec()),
+            RawValue::Blob(owner.0.to_vec()),
+            RawValue::text(&serde_json::to_string(&copy).unwrap()),
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn local_information_filters_other_container_and_environment_copies_before_decoding() {
+    local_information_foreign_copies(false);
+}
+
+#[test]
+fn local_information_filters_salvage_copies_before_decoding() {
+    local_information_foreign_copies(true);
+}
+
+fn local_information_foreign_copies(salvage: bool) {
+    use meguri_storage::raw::{PlainDatabase, RawValue};
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(618)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let generation = host.collection().unwrap().generation();
+    cloud::runtime::with_tracking_access(|| {
+        let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
+        information_copy(&db, binding.id, 201, None);
+        information_copy(&db, binding.id, 202, None);
+        information_copy(&db, binding.id, 203, Some(NOW));
+    });
+    let expected = host.local_publication_information(generation).unwrap();
+    assert_eq!(expected.tracking.as_ref().unwrap().unresolved_conflict_copies, 2);
+    cloud::runtime::with_tracking_access(|| {
+        let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
+        for (id, container, environment) in [
+            (211, "test.meguri.foreign-information", 0),
+            (212, binding.scope.container.as_str(), 1),
+        ] {
+            let owner = cloud::BindingId([id; 16]);
+            let mut facts = binding.facts.clone();
+            facts.state = cloud::BindingState::Isolated(if salvage {
+                cloud::IsolationReason::TrackingDamaged
+            } else {
+                cloud::IsolationReason::Stopped
+            });
+            if salvage && id == 212 {
+                let metadata = cloud::SalvageBinding {
+                    id: owner,
+                    source: "meguri-cloud.db.damaged-2025-01-01-00-00-00.salvaging".into(),
+                    original_binding: None,
+                    created_at_ms: NOW,
+                    original_created_at_ms: None,
+                    container: Some(binding.scope.container.clone()),
+                    environment: Some(binding.scope.environment),
+                    account: None,
+                    epoch: None,
+                    record_key: None,
+                    publication: None,
+                };
+                db.execute(
+                    "INSERT INTO salvage_bindings(id,metadata) VALUES(?1,?2)",
+                    &[
+                        RawValue::Blob(owner.0.to_vec()),
+                        RawValue::text(&serde_json::to_string(&metadata).unwrap()),
+                    ],
+                )
+                .unwrap();
+            } else {
+                db.execute(
+                    "INSERT INTO bindings(id,container,environment,created_at_ms,facts) VALUES(?1,?2,?3,?4,?5)",
+                    &[
+                        RawValue::Blob(owner.0.to_vec()),
+                        RawValue::text(if salvage {
+                            binding.scope.container.as_str()
+                        } else {
+                            container
+                        }),
+                        RawValue::Integer(if salvage { 0 } else { environment }),
+                        RawValue::Integer(NOW),
+                        RawValue::text(&serde_json::to_string(&facts).unwrap()),
+                    ],
+                )
+                .unwrap();
+            }
+            information_copy(&db, owner, id, None);
+            // Valid SQLite JSON, deliberately not a decodable ConflictCopy.
+            assert_eq!(
+                db.execute(
+                    "UPDATE conflicts SET content='{}' WHERE id=?1",
+                    &[RawValue::Blob(vec![id; 16]),]
+                )
+                .unwrap(),
+                1
+            );
+        }
+    });
+    let before = information_bytes(&dir);
+    let pending = runtime.tracking_sendables();
+    let status = format!("{:?}", runtime.status().unwrap());
+    let calls = service.request_log().unwrap().len();
+    assert_eq!(host.local_publication_information(generation).unwrap(), expected);
+    assert_eq!(host.local_publication_information(generation).unwrap(), expected);
+    assert_eq!(information_bytes(&dir), before);
+    assert_eq!(runtime.tracking_sendables(), pending);
+    assert_eq!(format!("{:?}", runtime.status().unwrap()), status);
+    assert_eq!(service.request_log().unwrap().len(), calls);
+    // Remove only deliberately corrupt fixture rows before ordinary shutdown.
+    cloud::runtime::with_tracking_access(|| {
+        let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
+        db.execute(
+            "DELETE FROM conflicts WHERE id IN (?1,?2)",
+            &[RawValue::Blob(vec![211; 16]), RawValue::Blob(vec![212; 16])],
+        )
+        .unwrap();
+    });
+    host.close().unwrap();
+}
+
 fn preview(host: &CoreHost, service: &mut Service<SeededRandom>) -> Preview {
     let runtime = host.cloud_runtime().unwrap();
     let PreviewWork::ReadActive { id } = runtime

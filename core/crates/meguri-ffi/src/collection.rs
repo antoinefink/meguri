@@ -21,6 +21,15 @@ pub struct CollectionLocation {
     pub manual_transfer_directory: String,
 }
 
+/// Local facts without requiring a CloudWorkflow or native account factory.
+#[uniffi::export]
+pub fn local_publication_information(
+    generation: u64,
+) -> Result<crate::cloud_connection::CloudLocalPublicationInformation, CoreError> {
+    callback::enter("local_publication_information");
+    crate::cloud_connection::local_information_for_host(runtime::host()?.as_ref(), generation)
+}
+
 /// Trusted bounded synchronous platform values only; no core reentry, UI or async
 /// work. These reads alone may run under core locks (E-20261021T142014Z-9c3d).
 #[uniffi::export(foreign)]

@@ -218,6 +218,19 @@ impl TrackingStore {
             })
             .collect()
     }
+    /// Read only resolution metadata of ordinary owners in this build scope.
+    /// Other builds and salvage payloads never enter the projection.
+    pub(super) fn publication_unresolved_conflict_count(&self) -> Result<u64, Error> {
+        // Keep scoped bindings outermost; look up only their indexed copies.
+        let count: i64 = self.connection.query_row(
+            "SELECT count(*) FROM bindings AS b CROSS JOIN conflicts AS c ON c.binding=b.id
+             WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0
+             AND json_extract(c.content,'$.resolved_at_ms') IS NULL",
+            params![self.scope.container.as_str(), self.scope.environment.code()],
+            |row| row.get(0),
+        )?;
+        u64::try_from(count).map_err(|_| Error::InvalidData)
+    }
     pub fn publication_op(&self) -> Result<Option<PublishOp>, Error> {
         let text: Option<String> = self
             .connection

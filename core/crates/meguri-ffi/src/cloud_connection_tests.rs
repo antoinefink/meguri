@@ -12,6 +12,107 @@ fn keys() -> Arc<Keys> {
     Keys::new([Some(vec![31; 32]), Some(vec![47; 32])])
 }
 #[test]
+fn local_facts_require_no_account_and_preserve_host_guards() {
+    let identity_cache = Arc::new(CachedIdentity(Mutex::new(None)));
+    let key_provider = keys();
+    let setup = Fixture::with_identity(key_provider.clone(), Some(identity_cache));
+    let api = setup.workflow.connection().unwrap();
+    let host_generation = setup.workflow.host.cloud_connection_generation().unwrap().0;
+    setup.workflow.set_paused(true).unwrap();
+    let facts = api.local_publication_information(host_generation).unwrap();
+    assert!(facts.collection_present);
+    assert!(matches!(
+        facts.condition,
+        Some(CloudLocalPublicationCondition::LocalOnly)
+    ));
+    assert!(facts.pending_reason.is_none());
+    assert_eq!(facts.local_counts.len(), 9);
+    assert!(facts.last_review_ms.is_none());
+    assert!(facts.last_change_ms.is_some());
+    assert!(api.recovery_status().unwrap().is_none());
+    assert_eq!(key_provider.calls.load(Ordering::SeqCst), 0);
+    failure_is(
+        api.begin_connection_preview(),
+        CloudConnectionFailure::AccountUnavailable,
+    );
+    failure_is(
+        api.local_publication_information(host_generation + 1),
+        CloudConnectionFailure::AuthorityChanged,
+    );
+    setup.workflow.host.close().unwrap();
+    failure_is(
+        api.local_publication_information(host_generation),
+        CloudConnectionFailure::Closed,
+    );
+}
+#[test]
+fn absent_local_information_does_not_bootstrap_collection_or_sidecar() {
+    let fixture = Fixture::without_collection(keys());
+    let host = &fixture.workflow.host;
+    let connection = fixture.workflow.connection().unwrap();
+    let directory = host.cloud_connection_directory();
+    let sidecar = std::fs::read(directory.join("meguri-sidecar.json")).ok();
+    let info = connection
+        .local_publication_information(host.cloud_connection_generation().unwrap().0)
+        .unwrap();
+    assert!(!info.collection_present && info.local_counts.is_empty());
+    assert!(info.condition.is_none() && info.last_change_ms.is_none());
+    assert!(!directory.join("collection.anki2").exists());
+    assert_eq!(std::fs::read(directory.join("meguri-sidecar.json")).ok(), sidecar);
+    // A file appearing in the retained no-collection host is stale, never
+    // silently read/opened or treated as an absent collection.
+    std::fs::write(directory.join("collection.anki2"), b"synthetic-invalid-file").unwrap();
+    failure_is(
+        connection.local_publication_information(host.cloud_connection_generation().unwrap().0),
+        CloudConnectionFailure::AuthorityChanged,
+    );
+}
+#[test]
+fn local_facts_keep_recorded_reasons_and_retained_preview_usable() {
+    let setup = Fixture::new(keys());
+    let retained_host = &setup.workflow.host;
+    let host_generation = retained_host.cloud_connection_generation().unwrap().0;
+    let api = setup.workflow.connection().unwrap();
+    let sidecar_path = retained_host.cloud_connection_directory().join("meguri-sidecar.json");
+    let saved_sidecar = std::fs::read(&sidecar_path).unwrap();
+    let mut sidecar_document: serde_json::Value = serde_json::from_slice(&saved_sidecar).unwrap();
+    sidecar_document["deviceState"]["active"]["decision"] = serde_json::json!("Pending");
+    for (recorded_reason, expected_reason) in [
+        (Some("restore"), Some(CloudLocalPendingDecisionReason::Restore)),
+        (
+            Some("colpkgImport"),
+            Some(CloudLocalPendingDecisionReason::ColpkgImport),
+        ),
+        (
+            Some("manualImport"),
+            Some(CloudLocalPendingDecisionReason::ManualImport),
+        ),
+        (None, None),
+    ] {
+        if let Some(recorded_reason) = recorded_reason {
+            sidecar_document["deviceState"]["pendingDecisionReason"] = serde_json::json!(recorded_reason);
+        } else {
+            sidecar_document["deviceState"]
+                .as_object_mut()
+                .unwrap()
+                .remove("pendingDecisionReason");
+        }
+        let encoded_sidecar = serde_json::to_vec(&sidecar_document).unwrap();
+        std::fs::write(&sidecar_path, &encoded_sidecar).unwrap();
+        let facts = api.local_publication_information(host_generation).unwrap();
+        assert!(matches!(facts.condition, Some(CloudLocalPublicationCondition::Pending)));
+        assert_eq!(facts.pending_reason, expected_reason);
+        assert_eq!(std::fs::read(&sidecar_path).unwrap(), encoded_sidecar);
+    }
+    std::fs::write(&sidecar_path, saved_sidecar).unwrap();
+    let retained_preview = ready(&api);
+    let _queried_facts = api.local_publication_information(host_generation).unwrap();
+    // Confirmation consumes the opaque handle acquired before reading these facts.
+    // Reading facts leaves that existing confirmation available to its caller.
+    let publication_operation = api.confirm_publication(retained_preview).unwrap();
+    api.cancel_operation(publication_operation).unwrap();
+}
+#[test]
 fn actual_no_collection_host_discovers_without_creating_an_empty_collection_or_publication() {
     let keys = keys();
     let fixture = Fixture::without_collection(keys.clone());

@@ -9,6 +9,68 @@ use meguri_engine::device_state::{DeviceState, PendingDecisionReason};
 use std::collections::BTreeMap;
 
 impl Runtime {
+    pub fn local_publication_tracking_information(
+        &self,
+    ) -> Result<Option<super::super::local_publication::LocalTrackingInformation>, RuntimeError> {
+        Ok(self.local_publication_tracking()?.1)
+    }
+    /// Local metadata only. No account verification, provider or callback.
+    /// Incarnation is a private consistency guard, never returned across FFI.
+    pub(crate) fn local_publication_tracking(
+        &self,
+    ) -> Result<(u64, Option<super::super::local_publication::LocalTrackingInformation>), RuntimeError> {
+        use super::super::local_publication::*;
+        let s = self.state();
+        let facts = with_tracking_access(|| -> Result<_, Error> {
+            let Some(store) = s.store.as_ref() else {
+                return Ok(None);
+            };
+            let bindings = store.publication_bindings()?;
+            let mut isolated = Vec::new();
+            for binding in &bindings {
+                let BindingState::Isolated(reason) = binding.facts.state else {
+                    continue;
+                };
+                let mut pending_by_kind = BTreeMap::new();
+                for kind in row_payload::KINDS {
+                    let mut count = 0u64;
+                    let mut after = None;
+                    loop {
+                        let page = store.entity_page(binding.id, kind, after.as_deref())?;
+                        if page.is_empty() {
+                            break;
+                        }
+                        for entity in page {
+                            after = Some(entity.key.clone());
+                            if entity.mark.is_some() || entity.local_rev > entity.acked_rev {
+                                count = count.checked_add(1).ok_or(Error::InvalidData)?;
+                            }
+                        }
+                    }
+                    pending_by_kind.insert(kind, count);
+                }
+                isolated.push(IsolatedLocalInformation {
+                    pending_by_kind,
+                    content: match reason {
+                        IsolationReason::ReplacedLocally => IsolatedLocalContent::ReplacedLocally,
+                        IsolationReason::FileMismatch => IsolatedLocalContent::FileMismatch,
+                        _ => IsolatedLocalContent::Unverified,
+                    },
+                    backup: if reason == IsolationReason::FileMismatch {
+                        LocalBackupKnowledge::NotTakenForExternalReplacement
+                    } else {
+                        LocalBackupKnowledge::Unknown
+                    },
+                });
+            }
+            let unresolved_conflict_copies = store.publication_unresolved_conflict_count()?;
+            Ok(Some(LocalTrackingInformation {
+                isolated,
+                unresolved_conflict_copies,
+            }))
+        })?;
+        Ok((s.incarnation, facts))
+    }
     fn check_absent_preview_file(&self, id: u64) -> Result<(), RuntimeError> {
         let absent = self
             .state()
@@ -119,30 +181,7 @@ impl Runtime {
         let incarnation = self.state().incarnation;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
-        let mut counts = BTreeMap::new();
-        let mut nondefault_deck = false;
-        for kind in row_payload::KINDS {
-            let mut count = 0;
-            if let Some(table) = row_payload::table(kind) {
-                let mut after = None;
-                loop {
-                    let page = snapshot.row_page(table, after.as_ref())?;
-                    if page.is_empty() {
-                        break;
-                    }
-                    for row in page {
-                        after = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
-                        if kind == codec::Kind::Deck && row_payload::int(&row, 0)? != 1 {
-                            nondefault_deck = true;
-                        }
-                        count += 1;
-                    }
-                }
-            } else {
-                count = u64::try_from(media.tracked_names()?.names.len()).map_err(|_| Error::InvalidData)?;
-            }
-            counts.insert(kind, count);
-        }
+        let local = super::super::local_publication::count_local_rows(&*snapshot, media.tracked_names()?.names.len())?;
         let unsent_by_kind = self.resume_unsent_counts(&*snapshot, media)?;
         if self.inputs.files.identity(collection.path())? != file
             || self.publication_decision()? != decision
@@ -151,15 +190,6 @@ impl Runtime {
         {
             return Err(PublicationError::AuthorityChanged.into());
         }
-        let empty = [
-            codec::Kind::Note,
-            codec::Kind::Card,
-            codec::Kind::Revlog,
-            codec::Kind::MediaName,
-        ]
-        .iter()
-        .all(|k| counts[k] == 0)
-            && !nondefault_deck;
         let mut s = self.state();
         if s.incarnation != incarnation {
             return Err(RuntimeError::StaleIncarnation);
@@ -200,7 +230,7 @@ impl Runtime {
         s.publication.preview = Some((
             Preview {
                 id,
-                local: Counts { counts, empty },
+                local,
                 cloud: None,
                 published_at_ms: None,
                 decision: ConnectDecision::ConfirmUpload,

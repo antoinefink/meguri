@@ -152,6 +152,122 @@ fn counts(v: &std::collections::BTreeMap<c::entity_codec::Kind, u64>) -> Vec<Clo
         })
         .collect()
 }
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CloudLocalPublicationCondition {
+    Pending,
+    Clear,
+    LocalOnly,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudLocalPendingDecisionReason {
+    Restore,
+    ColpkgImport,
+    ManualImport,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CloudIsolatedLocalContent {
+    ReplacedLocally,
+    FileMismatch,
+    Unverified,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CloudLocalBackupKnowledge {
+    Unknown,
+    NotTakenForExternalReplacement,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudIsolatedLocalInformation {
+    pub pending_counts: Vec<CloudKindCount>,
+    pub content: CloudIsolatedLocalContent,
+    pub backup: CloudLocalBackupKnowledge,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudLocalTrackingInformation {
+    /// Scoped ordinary bindings only; excludes salvage owners and other devices.
+    pub isolated: Vec<CloudIsolatedLocalInformation>,
+    pub unresolved_conflict_copies: u64,
+}
+/// Values only: no opaque authority, action offer, account or file identifiers.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudLocalPublicationInformation {
+    pub generation: u64,
+    pub collection_present: bool,
+    pub condition: Option<CloudLocalPublicationCondition>,
+    pub pending_reason: Option<CloudLocalPendingDecisionReason>,
+    pub local_counts: Vec<CloudKindCount>,
+    /// Unknown with no local collection, rather than claiming an empty one.
+    pub local_empty: Option<bool>,
+    pub last_review_ms: Option<i64>,
+    pub last_change_ms: Option<i64>,
+    pub tracking: Option<CloudLocalTrackingInformation>,
+}
+impl From<c::local_publication::LocalPublicationInformation> for CloudLocalPublicationInformation {
+    fn from(v: c::local_publication::LocalPublicationInformation) -> Self {
+        use c::local_publication::*;
+        Self {
+            generation: v.generation,
+            collection_present: v.collection_present,
+            condition: v.condition.map(|v| match v {
+                LocalPublicationCondition::Pending => CloudLocalPublicationCondition::Pending,
+                LocalPublicationCondition::Clear => CloudLocalPublicationCondition::Clear,
+                LocalPublicationCondition::LocalOnly => CloudLocalPublicationCondition::LocalOnly,
+            }),
+            pending_reason: v.pending_reason.map(|v| match v {
+                LocalPendingDecisionReason::Restore => CloudLocalPendingDecisionReason::Restore,
+                LocalPendingDecisionReason::ColpkgImport => CloudLocalPendingDecisionReason::ColpkgImport,
+                LocalPendingDecisionReason::ManualImport => CloudLocalPendingDecisionReason::ManualImport,
+            }),
+            local_counts: v.local.as_ref().map(|v| counts(&v.counts)).unwrap_or_default(),
+            local_empty: v.local.map(|v| v.empty),
+            last_review_ms: v.last_review_ms,
+            last_change_ms: v.last_change_ms,
+            tracking: v.tracking.map(|v| CloudLocalTrackingInformation {
+                isolated: v
+                    .isolated
+                    .into_iter()
+                    .map(|v| CloudIsolatedLocalInformation {
+                        pending_counts: counts(&v.pending_by_kind),
+                        content: match v.content {
+                            IsolatedLocalContent::ReplacedLocally => CloudIsolatedLocalContent::ReplacedLocally,
+                            IsolatedLocalContent::FileMismatch => CloudIsolatedLocalContent::FileMismatch,
+                            IsolatedLocalContent::Unverified => CloudIsolatedLocalContent::Unverified,
+                        },
+                        backup: match v.backup {
+                            LocalBackupKnowledge::Unknown => CloudLocalBackupKnowledge::Unknown,
+                            LocalBackupKnowledge::NotTakenForExternalReplacement => {
+                                CloudLocalBackupKnowledge::NotTakenForExternalReplacement
+                            }
+                        },
+                    })
+                    .collect(),
+                unresolved_conflict_copies: v.unresolved_conflict_copies,
+            }),
+        }
+    }
+}
+pub(crate) fn local_information_for_host(
+    host: &meguri_host::CoreHost,
+    generation: u64,
+) -> Result<CloudLocalPublicationInformation, CoreError> {
+    let current = host
+        .cloud_connection_generation()
+        .map_err(|_| failure(CloudConnectionFailure::Closed))?;
+    if current.0 != generation {
+        return Err(failure(CloudConnectionFailure::AuthorityChanged));
+    }
+    let info = host
+        .local_publication_information(meguri_engine::Generation(generation))
+        .map_err(error)?;
+    if host
+        .cloud_connection_generation()
+        .map_err(|_| failure(CloudConnectionFailure::Closed))?
+        .0
+        != generation
+    {
+        return Err(failure(CloudConnectionFailure::AuthorityChanged));
+    }
+    Ok(info.into())
+}
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudConnectionSummary {
     pub local_collection_present: bool,
@@ -500,6 +616,13 @@ pub struct CloudRecoveryStatus {
 
 #[uniffi::export]
 impl CloudConnection {
+    pub fn local_publication_information(
+        &self,
+        generation: u64,
+    ) -> Result<CloudLocalPublicationInformation, CoreError> {
+        callback::enter("CloudConnection.local_publication_information");
+        local_information_for_host(&self.owner.host, generation)
+    }
     pub fn resume_binding(&self, preview: Arc<CloudConnectionPreview>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.resume_binding");
         self.owns(&preview.owner)?;

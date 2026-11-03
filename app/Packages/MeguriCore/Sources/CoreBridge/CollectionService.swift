@@ -43,6 +43,7 @@ public struct CollectionLocation: Sendable, Hashable {
 }
 
 public protocol CollectionService: Sendable {
+    func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation
     func open(_ location: CollectionLocation, randomSeed: UInt64) async throws(BridgeError)
     func close() async throws(BridgeError)
     func lifecycle() async throws(BridgeError) -> CollectionLifecycle
@@ -55,6 +56,11 @@ public actor CoreCollectionService: CollectionService {
     public init(clock: any CollectionClock = SystemCollectionClock(), diskSpace: any DiskSpaceProviding = DiskSpaceProvider()) {
         self.clock = CollectionClockRelay(clock)
         self.diskSpace = DiskSpaceRelay(diskSpace)
+    }
+    public func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation {
+        try await MaintenanceLane.shared.call(.localPublicationInformation) {
+            LocalPublicationInformation(try MeguriCoreBindings.localPublicationInformation(generation: generation))
+        }
     }
     /// Use startOpen when the caller displays progress and explicit Cancel.
     public func startOpen(_ location: CollectionLocation, randomSeed: UInt64) async throws(BridgeError) -> CoreJob {
@@ -120,16 +126,24 @@ public actor CoreCollectionService: CollectionService {
 /// Scripted terminal results for previews; exhaustion is an explicit error.
 public actor FakeCollectionService: CollectionService {
     public enum Call: Sendable, Hashable {
-        case open(CollectionLocation, seed: UInt64), close, lifecycle, waitAvailable(UInt32)
+        case open(CollectionLocation, seed: UInt64), close, lifecycle, waitAvailable(UInt32), localPublicationInformation(UInt64)
     }
     public private(set) var calls: [Call] = []
     private var opens: [Result<Void, BridgeError>]
     private var closes: [Result<Void, BridgeError>]
     private var states: [Result<CollectionLifecycle, BridgeError>]
     private var waits: [Result<UInt64, BridgeError>]
+    private var information: [Result<LocalPublicationInformation, BridgeError>]
     public init(opens: [Result<Void, BridgeError>] = [], closes: [Result<Void, BridgeError>] = [],
-                states: [Result<CollectionLifecycle, BridgeError>] = [], waits: [Result<UInt64, BridgeError>] = []) {
+                states: [Result<CollectionLifecycle, BridgeError>] = [], waits: [Result<UInt64, BridgeError>] = [],
+                information: [Result<LocalPublicationInformation, BridgeError>] = []) {
         self.opens = opens; self.closes = closes; self.states = states; self.waits = waits
+        self.information = information
+    }
+    public func localPublicationInformation(generation: UInt64) throws(BridgeError) -> LocalPublicationInformation {
+        calls.append(.localPublicationInformation(generation))
+        guard !information.isEmpty else { throw .unavailable(reason: "No scripted local publication information") }
+        return try information.removeFirst().get()
     }
     public func open(_ location: CollectionLocation, randomSeed: UInt64) throws(BridgeError) {
         calls.append(.open(location, seed: randomSeed))

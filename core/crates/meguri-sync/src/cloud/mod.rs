@@ -33,6 +33,7 @@ pub mod zone_deletion;
 pub mod incoming;
 mod incoming_merge;
 mod incoming_store;
+pub mod local_publication;
 pub mod media;
 mod open;
 mod payload_asset;

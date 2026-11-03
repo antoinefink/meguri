@@ -6,6 +6,52 @@ use meguri_sync::cloud::{
     runtime::RuntimeError,
 };
 impl CoreHost {
+    /// V12.2 local facts are available even without cloud configuration. This
+    /// does not open a missing collection or construct account/network ports.
+    pub fn local_publication_information(
+        &self,
+        generation: meguri_engine::Generation,
+    ) -> Result<meguri_sync::cloud::local_publication::LocalPublicationInformation, RuntimeError> {
+        use meguri_sync::cloud::{local_publication as local, publication::PublicationError::AuthorityChanged};
+        if self.cloud_connection_generation()? != generation {
+            return Err(AuthorityChanged.into());
+        }
+        let information = if matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection) {
+            let path = self.cloud_connection_directory().join("collection.anki2");
+            let absent = || -> Result<(), RuntimeError> {
+                match path.symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(meguri_storage::StorageError::from(e).into()),
+                    Ok(_) => Err(AuthorityChanged.into()),
+                }
+            };
+            absent()?;
+            let decision = meguri_engine::device_state::DeviceState::for_collection(&path).publication_decision()?;
+            let mut info = local::LocalPublicationInformation::absent(generation.0);
+            if let Some(runtime) = self.cloud_runtime() {
+                info.tracking = runtime.local_publication_tracking_information()?;
+            }
+            absent()?;
+            if meguri_engine::device_state::DeviceState::for_collection(&path).publication_decision()? != decision {
+                return Err(AuthorityChanged.into());
+            }
+            info
+        } else {
+            let collection = self.cloud_connection_collection()?;
+            if collection.generation() != generation {
+                return Err(AuthorityChanged.into());
+            }
+            local::read_local_publication_information(
+                &collection,
+                &self.media()?,
+                self.cloud_runtime().map(|runtime| runtime.as_ref()),
+            )?
+        };
+        if self.cloud_connection_generation()? != generation {
+            return Err(AuthorityChanged.into());
+        }
+        Ok(information)
+    }
     pub fn cloud_connection_directory(&self) -> &std::path::Path {
         &self.backup_inputs.collection_directory
     }

@@ -63,22 +63,13 @@ public struct CloudConnectionSummary: Sendable {
         }
     }
     init(_ v: MeguriCoreBindings.CloudConnectionSummary) {
-        func counts(_ rows: [MeguriCoreBindings.CloudKindCount]) -> [CloudCountKind: UInt64] {
-            Dictionary(uniqueKeysWithValues: rows.map { row in
-                let kind: CloudCountKind = switch row.kind {
-                case .note: .note; case .card: .card; case .revlog: .revlog; case .deck: .deck; case .preset: .preset
-                case .notetype: .notetype; case .tag: .tag; case .config: .config; case .mediaName: .mediaName
-                }
-                return (kind, row.count)
-            })
-        }
         localCollectionPresent = v.localCollectionPresent
         initialAdoptionRequired = v.initialAdoptionRequired
-        localCounts = counts(v.localCounts); localEmpty = v.localEmpty
-        manifestCounts = v.manifestCounts.map(counts); publishedAtMilliseconds = v.publishedAtMs
-        unpublishedCounts = counts(v.unpublishedCounts)
+        localCounts = cloudKindCounts(v.localCounts); localEmpty = v.localEmpty
+        manifestCounts = v.manifestCounts.map(cloudKindCounts); publishedAtMilliseconds = v.publishedAtMs
+        unpublishedCounts = cloudKindCounts(v.unpublishedCounts)
         resumeBindingId = v.resumeBindingId
-        unsentCounts = counts(v.unsentCounts)
+        unsentCounts = cloudKindCounts(v.unsentCounts)
         decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .confirmResume: .confirmResume; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
     }
 }

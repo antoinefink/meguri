@@ -4,6 +4,54 @@ import Testing
 @testable import CoreBridge
 
 extension EventTests {
+    @Test func localPublicationInformationConvertsActualExportWhileAccountUnavailableAndPaused() async throws {
+        try await withCloudConnection(status: .temporarilyUnavailable, identity: nil) { f in
+            guard case .ready(let generation) = try await f.collection.lifecycle() else {
+                Issue.record("synthetic collection must be ready"); return
+            }
+            try await f.workflow.setPaused(true)
+            let information = try await f.connection.localPublicationInformation(generation: generation)
+            let local = try await f.collection.localPublicationInformation(generation: generation)
+            #expect(information == local)
+            #expect(information.generation == generation)
+            #expect(information.collectionPresent && information.condition == .localOnly)
+            #expect(information.pendingReason == nil && information.lastReviewMilliseconds == nil)
+            #expect(information.lastChangeMilliseconds != nil)
+            #expect(information.localCounts.count == 9 && information.localCounts[.note] == 0)
+            #expect(try await f.connection.recoveryStatus() == nil)
+            await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { _ = try await f.connection.beginConnectionPreview() }
+            await #expect(throws: BridgeError.cloudConnection(.authorityChanged)) {
+                _ = try await f.collection.localPublicationInformation(generation: generation + 1)
+            }
+            try await f.collection.close()
+            await #expect(throws: BridgeError.cloudConnection(.closed)) {
+                _ = try await f.connection.localPublicationInformation(generation: generation)
+            }
+        }
+    }
+    @Test func pendingLocalInformationReadsRecordedReasonThroughActualCollectionExport() async throws {
+        try await withCloudConnection(status: .noAccount, identity: nil) { f in
+            guard case .ready(let generation) = try await f.collection.lifecycle() else {
+                Issue.record("synthetic collection must be ready"); return
+            }
+            let sidecar = f.directory.appending(path: "collection/meguri-sidecar.json")
+            let original = try Data(contentsOf: sidecar)
+            defer { try? original.write(to: sidecar) }
+            var document = try #require(JSONSerialization.jsonObject(with: original) as? [String: Any])
+            var device = try #require(document["deviceState"] as? [String: Any])
+            var active = try #require(device["active"] as? [String: Any])
+            active["decision"] = "Pending"
+            device["active"] = active
+            device["pendingDecisionReason"] = "colpkgImport"
+            document["deviceState"] = device
+            let pending = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
+            try pending.write(to: sidecar)
+            let information = try await f.collection.localPublicationInformation(generation: generation)
+            #expect(information.condition == .pending && information.pendingReason == .colpkgImport)
+            #expect(try Data(contentsOf: sidecar) == pending)
+            #expect(try await f.connection.recoveryStatus() == nil)
+        }
+    }
     @Test func cloudFixturesSupplyTheirOwnPlatformAcrossHostLifetimes() async throws {
         try await withCloudConnection(status: .temporarilyUnavailable, identity: nil) { f in
             await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { try await f.connection.beginConnectionPreview() }
