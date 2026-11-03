@@ -15,5 +15,12 @@ narrow review confirms identical executable code. Private84233 and Similarity848
 pass the final file. Compilation and actual phone action/layout checks remain
 pending. No new connection flow, native ownership or Core behavior is introduced.
 
+Phone86370 compiles the combined source and shows both empty-state buttons. The
+direct Connect action and readiness wait succeed. The final capture has no active
+reading indicator and shows the generic operation-error branch with no preview.
+No adoption, download or replacement is confirmed. Hierarchy findings keep the
+drive failed, including the existing Try Again button without an identifier.
+Native appearance was inspected; final design agreement and full gates are open.
+
 Session74365 could not create its Git lock in the sandbox and recorded no session.
 The permitted host session76059 succeeds; no lock was removed or guard bypassed.

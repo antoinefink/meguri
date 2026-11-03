@@ -55,6 +55,14 @@ Independent review is clear; state, copy, guards and timing are unchanged.
 Private84233 and Similarity84891 pass. The next actual-phone script will use the
 existing wait-until-gone action to observe readiness before judging the result.
 
+Phone86370 completes all six requested steps, including direct Home entry and
+progress disappearance, with no skips. Its final hierarchy contains the generic
+operation-error element and neither the local entry-error nor typed-failure
+element. The preview is absent and Try Again is visible. This establishes the
+settled UI outcome but does not identify the discarded underlying error.
+The receipt remains failed for six identifier issues. Preserve those findings;
+do not repeat unchanged requests as proof of repair.
+
 Phone verification uses the three new transport tests. An older parser test
 requires files from the checkout and stays in its existing test lane.
 D3 requires an initial capture before a later replacement action.

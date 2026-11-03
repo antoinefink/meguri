@@ -23,3 +23,7 @@ review confirms unchanged predicates, native facts, assertions and geometry.
 Private84233 and Similarity84891 pass. ImageTools84788 passes all74 hierarchy
 regressions. Original failed drive receipts remain retained; no result is edited.
 No additional locale, detent or platform is inferred from this evidence.
+
+Hierarchy85715 verifies the final source against both retained phone67343 panel
+captures: no issues. The later direct-entry phone86370 also has no grabber finding;
+its other missing-identifier findings remain visible and unaccepted.
