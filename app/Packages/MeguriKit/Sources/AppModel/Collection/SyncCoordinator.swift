@@ -894,6 +894,9 @@ public final class SyncCoordinator {
                 }
                 if result.deferred { hasDeferredNativeWork = true }
                 if let error = result.error, !(closing && shutdownCancelled && error is CancellationError) {
+                    #if DEBUG
+                    DebugCloudDiagnostics.record(.commandResult, error: error)
+                    #endif
                     operationFailed = true; failureRevision &+= 1
                 }
                 if !closing, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
@@ -999,6 +1002,15 @@ public final class SyncCoordinator {
         }
     }
     private func consume(_ output: CloudPolicyOutput, generation expected: UInt64) {
+        #if DEBUG
+        if expected == generation {
+            switch output {
+            case .coreActionFailed(let error, _): DebugCloudDiagnostics.record(.coreActionFailed, error: error)
+            case .applyDeferred(let error): DebugCloudDiagnostics.record(.applyDeferred, error: error)
+            default: break
+            }
+        }
+        #endif
         let issued: [CloudPolicyCommand]
         switch output {
         case .commands(let values): issued = values
@@ -1062,7 +1074,12 @@ public final class SyncCoordinator {
                                 timerSequence = value.sequence; flushTimer?.invalidate(); flushTimer = nil
                             }
                         case .statusChanged(let snapshot):
-                            if !closing, value.sequence > statusSequence { statusSequence = value.sequence; status = snapshot }
+                            if !closing, value.sequence > statusSequence {
+                                statusSequence = value.sequence; status = snapshot
+                                #if DEBUG
+                                DebugCloudDiagnostics.recordStatus(snapshot.error)
+                                #endif
+                            }
                         case .quitNow: quitCompletion?(); quitCompletion = nil
                         case .quitFlush: quitCompletion?(); quitCompletion = nil
                         default: break

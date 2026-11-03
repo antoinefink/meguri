@@ -155,6 +155,116 @@ struct DebugCloudDiagnosticsTests {
         expectFailure(underlying, "other")
     }
 
+    @Test func returnedFailuresHaveFiniteBoundariesAndNoCommandAction() {
+        for boundary: DebugCloudDiagnostics.Boundary in [.commandResult, .coreActionFailed, .applyDeferred] {
+            let value = Value(boundary, action: .prioritizeMedia(names: [UUID().uuidString]),
+                              error: BridgeError.cancelled)
+            #expect(value.formatted == "boundary=\(boundary.rawValue) action=none failure=bridge.cancelled")
+            #expect(value.zone == nil && value.kind == nil && value.code == nil)
+        }
+    }
+
+    @Test func statusProjectsEveryClassAndLogicalZoneAndKind() {
+        let failures: [(CloudPolicyOperationError, String)] = [
+            (.noAccount, "noAccount"), (.configuration, "configuration"), (.offline, "offline"),
+            (.throttled, "throttled"), (.quotaFull, "quotaFull"), (.localStorageFull, "localStorageFull"),
+            (.trackingError, "trackingError"), (.conflictRecovery, "conflictRecovery"),
+            (.unsupportedSchema, "unsupportedSchema"), (.other, "other")
+        ]
+        let zones: [(CloudPolicyZone, String)] = [(.root, "root"), (.collection, "collection"), (.media, "media")]
+        let kinds: [(CloudPolicyOperationKind, String)] = [(.send, "send"), (.fetch, "fetch"), (.read, "read")]
+        for (failure, tag) in failures {
+            for (zone, zoneTag) in zones {
+                for (kind, kindTag) in kinds {
+                    let value = Value.status(failure, zone: zone, kind: kind, code: 20)
+                    #expect(value.boundary == .policyStatus && value.action == "none")
+                    #expect(value.failure == tag && value.zone == zoneTag && value.kind == kindTag)
+                    #expect(value.formatted ==
+                        "boundary=policyStatus action=none failure=\(tag) zone=\(zoneTag) kind=\(kindTag) code=20")
+                }
+            }
+        }
+    }
+
+    @Test func statusUsesOnlyExactlyBoundedCode() {
+        for code in [Int64(Int32.min), -1, 0, Int64(Int32.max)] {
+            let value = Value.status(.other, zone: .root, kind: .read, code: code)
+            #expect(value.code == Int32(exactly: code))
+            #expect(value.formatted == "boundary=policyStatus action=none failure=other zone=root kind=read code=\(code)")
+        }
+        for code in [Int64.min, Int64(Int32.min) - 1, Int64(Int32.max) + 1, Int64.max] {
+            let value = Value.status(.other, zone: .root, kind: .read, code: code)
+            #expect(value.code == nil)
+            #expect(value.formatted == "boundary=policyStatus action=none failure=other zone=root kind=read")
+        }
+    }
+
+    @Test func statusNilDedupResetAndInterleavedCommandsUseOneSafeLatestValue() {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        let status = Value.status(.offline, zone: .media, kind: .fetch, code: 4)
+        let command = Value(.commandResult, error: HostileError())
+        var received: [Value] = []
+        recorder.emitStatus(nil) { received.append($0) }
+        #expect(recorder.latestValue == nil && received.isEmpty)
+        recorder.emitStatus(status) { value in
+            #expect(recorder.latestValue == value.formatted)
+            received.append(value)
+            // Status callbacks also permit synchronous reads and reentry.
+            recorder.emitStatus(status) { received.append($0) }
+        }
+        recorder.emitStatus(status) { received.append($0) }
+        recorder.emit(command) { received.append($0) }
+        #expect(recorder.latestValue == command.formatted)
+        recorder.emitStatus(status) { received.append($0) }
+        #expect(received == [status, command])
+        #expect(recorder.latestValue == status.formatted)
+        recorder.emitStatus(nil) { received.append($0) }
+        #expect(recorder.latestValue == status.formatted)
+        recorder.emitStatus(status) { received.append($0) }
+        #expect(received == [status, command, status])
+    }
+
+    @Test func statusDedupUsesTheWholeSafeTuple() {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        let values: [Value] = [
+            .status(.offline, zone: .root, kind: .read, code: 1),
+            .status(.noAccount, zone: .root, kind: .read, code: 1),
+            .status(.noAccount, zone: .collection, kind: .read, code: 1),
+            .status(.noAccount, zone: .collection, kind: .fetch, code: 1),
+            .status(.noAccount, zone: .collection, kind: .fetch, code: 2),
+            .status(.noAccount, zone: .collection, kind: .fetch, code: .max)
+        ]
+        var received: [Value] = []
+        for value in values {
+            recorder.emitStatus(value) { received.append($0) }
+            recorder.emitStatus(value) { received.append($0) }
+        }
+        // Distinct out-of-range codes project to the same safe tuple.
+        recorder.emitStatus(.status(.noAccount, zone: .collection, kind: .fetch, code: .min)) { received.append($0) }
+        recorder.emitStatus(values[0]) { received.append($0) }
+        #expect(received == values + [values[0]])
+    }
+
+    @Test func statusAndCommandsShareThe64SinkCapAndKeepUpdatingLatest() {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        let command = Value(.applyDeferred, error: BridgeError.cancelled)
+        var calls = 0
+        for code in 0..<32 {
+            let status = Value.status(.offline, zone: .media, kind: .send, code: Int64(code))
+            recorder.emitStatus(status) { _ in calls += 1 }
+            recorder.emitStatus(status) { _ in calls += 1 }
+            recorder.emit(command) { _ in calls += 1 }
+        }
+        #expect(calls == 64)
+        let latest = Value.status(.quotaFull, zone: .collection, kind: .send, code: 25)
+        recorder.emitStatus(latest) { _ in calls += 1 }
+        #expect(recorder.latestValue == latest.formatted)
+        recorder.emitStatus(nil) { _ in calls += 1 }
+        recorder.emitStatus(latest) { _ in calls += 1 }
+        recorder.emit(command) { _ in calls += 1 }
+        #expect(calls == 64 && recorder.latestValue == command.formatted)
+    }
+
     @Test func unknownErrorsDoNotInvokeNSErrorOrDescriptionAccessors() {
         struct Unknown: Error { let text: String }
         expectFailure(Unknown(text: UUID().uuidString), "other")

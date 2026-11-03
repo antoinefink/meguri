@@ -133,3 +133,29 @@ to the approved Resume contract.
 Focused checks: Swift28882 passes 12 tests; Swift30717 passes 18 tests.
 Private28419 and Similarity30026 pass all five source paths.
 The signed live check and batch gate remain pending. No unit is accepted.
+
+
+## Returned failures and status
+
+Component start:4a96f2f0. Export38471 adds result and status evidence.
+Swift40700: 18 pass, two fail. Export43525 changes six type expressions,
+with assertions unchanged. Swift45005: 33 pass, two fail. Both runs stay failed.
+
+Independent review approves withdrawing that optional classification feature.
+Export46289 restores the original behavior for those errors and withdraws only
+the two new feature tests. All original tests, assertions and limits remain.
+The failed exports and receipts stay retained and failed. Account resolver
+errors can still report other; codes come from typed Core status or the
+established SDK wrapper. No sync decision changes.
+
+Independent source review clears the reduced candidate. Swift48708 passes all
+33 selected tests; Swift50172 passes 18 adoption/recovery tests. Private48434
+and Similarity49644 pass the three source paths.
+
+Signed Mac Debug build33447 passes at 4a96f2f0. A real Sync Now reaches media
+work, followed by temporary unavailable and awaiting-evidence states. No catch
+event is captured. Phone preparation34943, Connect36999 and recheck38132 pass
+transport and original-process checks; page work remains active. Recheck46795
+fails before running its script with XCTest future timeout 1000. It supplies
+no app outcome or continuity proof. The live round trip and batch gate remain
+open; no unit is accepted.
