@@ -2789,6 +2789,7 @@ mod recovery_authority_tests {
                     opened_mod: 0,
                     opened_scm: 0,
                     native_file: authority.file.pair(),
+                    cloud_file: None,
                 },
                 file: authority.file,
                 open_counter: authority.open,

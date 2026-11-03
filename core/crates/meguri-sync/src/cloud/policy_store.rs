@@ -190,6 +190,19 @@ mod tests {
                     created_seconds: 1,
                     created_nanos: 0,
                 },
+                crate::cloud::runtime::DurableFileIdentity {
+                    version: 1,
+                    identity: if cfg!(target_vendor = "apple") {
+                        meguri_storage::persistent_identity::PersistentIdentity::Darwin {
+                            volume_uuid: [3; 16],
+                            inode: 2,
+                        }
+                    } else {
+                        meguri_storage::persistent_identity::PersistentIdentity::NonDarwin { device: 1, inode: 2 }
+                    },
+                    created_seconds: 1,
+                    created_nanos: 0,
+                },
             )
             .unwrap();
         // This is the exact valid pre-policy extension layout, with existing rows.

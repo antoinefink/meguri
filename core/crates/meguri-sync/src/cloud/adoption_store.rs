@@ -150,6 +150,7 @@ impl TrackingStore {
         op: &AdoptOp,
         activation: Option<&CloudAdoptActivation>,
         file: Option<runtime::NativeFileIdentity>,
+        durable_file: Option<runtime::DurableFileIdentity>,
     ) -> Result<bool, Error> {
         if self.adoption_op()?.as_ref() != Some(op) {
             return Err(Error::InvalidData);
@@ -220,7 +221,10 @@ impl TrackingStore {
             None
         };
         if let Some(state) = &mut state {
-            state.file = Some(file.ok_or(Error::RecoveryRefused)?);
+            state.record_identity(
+                file.ok_or(Error::RecoveryRefused)?,
+                durable_file.ok_or(Error::RecoveryRefused)?,
+            )?;
             state.drained = false;
         }
         let tx = self.connection.transaction()?;
@@ -269,6 +273,7 @@ impl TrackingStore {
         publication: Option<&Publication>,
         activation: Option<&CloudAdoptActivation>,
         file: Option<runtime::NativeFileIdentity>,
+        durable_file: Option<runtime::DurableFileIdentity>,
     ) -> Result<(), Error> {
         let Some(op) = self.adoption_op()? else {
             return Ok(());
@@ -295,9 +300,9 @@ impl TrackingStore {
             if !matches {
                 return Err(Error::RecoveryRefused);
             }
-            self.end_adoption(&op, Some(proof), file)?;
+            self.end_adoption(&op, Some(proof), file, durable_file)?;
         } else {
-            self.end_adoption(&op, None, file)?;
+            self.end_adoption(&op, None, file, None)?;
         }
         Ok(())
     }

@@ -273,6 +273,8 @@ impl Runtime {
         }
         // Immediate precommit provider reads run outside both guards.
         self.validate_resume_providers(&context, &preview)?;
+        let durable_file =
+            DurableFileIdentity::from_evidence(collection.open_evidence()?.cloud_file, context.scan.file)?;
         {
             let mut s = self.state();
             self.validate_resume_context_locked(&s, &context)?;
@@ -285,6 +287,7 @@ impl Runtime {
                 s.store.as_mut().ok_or(Error::Database)?.resume_isolated_binding(
                     &context.binding,
                     context.scan.file,
+                    durable_file,
                     &context.publish,
                     &context.adopt,
                 )

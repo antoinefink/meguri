@@ -12,6 +12,9 @@ mod adoption_store;
 mod cleanup_store;
 mod conflict_expiry;
 pub mod control_codec;
+mod durable_identity;
+#[cfg(test)]
+mod durable_identity_tests;
 pub mod entity_codec;
 pub mod generation;
 pub mod generation_codec;

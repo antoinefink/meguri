@@ -16,6 +16,7 @@ use meguri_engine::{
 use meguri_storage::{Cell, ReadRows, ReaderRole, RowKey, Table};
 use serde::{Deserialize, Serialize};
 
+pub use super::durable_identity::DurableFileIdentity;
 use super::{entity_codec as codec, *};
 #[path = "adapter_runtime.rs"]
 mod adapter_impl;
@@ -326,6 +327,12 @@ pub struct StoredRuntimeState {
     pub open_counter: u64,
     pub drained: bool,
     pub file: Option<NativeFileIdentity>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::durable_identity::present"
+    )]
+    pub durable_file: Option<DurableFileIdentity>,
     pub note_scan: Option<NoteScanCursor>,
     #[serde(default)]
     pub whole_scan: bool,
@@ -351,6 +358,9 @@ impl StoredRuntimeState {
         }
         if self.file.is_some_and(|file| file.created_nanos >= 1_000_000_000) {
             return Err(Error::InvalidData);
+        }
+        if let Some(durable) = self.durable_file {
+            durable.paired(self.file.ok_or(Error::InvalidData)?)?;
         }
         if let Some(coverage) = &self.coverage {
             coverage.validate()?;
@@ -597,7 +607,7 @@ impl Runtime {
                 .store
                 .as_mut()
                 .ok_or(Error::Database)
-                .and_then(|store| store.set_workflow_drained(id, false, (0, 0)));
+                .and_then(|store| store.set_workflow_drained(id, false, (0, 0), None));
         }
     }
     fn bind(&self, collection: &Collection) -> Result<(), RuntimeError> {
@@ -607,10 +617,14 @@ impl Runtime {
         if file.pair() != evidence.native_file || file.created_nanos >= 1_000_000_000 {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
+        let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
         let device = meguri_engine::device_state::DeviceState::for_collection(collection.path());
         let publication = device.settled_publication()?;
         let activation = collection.cloud_adopt_activation()?;
         let live_adoption = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+        if !collection.is_current() || evidence.generation != collection.generation() {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         let mut state = self.state();
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
@@ -665,7 +679,12 @@ impl Runtime {
             store.adapter_install()?;
             if !live_adoption {
                 let retained_adoption = store.adoption_op()?;
-                store.recover_adoption(publication.as_ref(), activation.as_ref(), Some(file))?;
+                store.recover_adoption(
+                    publication.as_ref(),
+                    activation.as_ref(),
+                    Some(file),
+                    Some(durable_file),
+                )?;
                 if store.adoption_op()?.is_none()
                     && let Some(op) = retained_adoption
                 {
@@ -699,12 +718,6 @@ impl Runtime {
                 return Ok(());
             };
             let previous = store.runtime_binding(binding.id)?;
-            // Every active open clears drain before account verification.
-            let durable = if binding.facts.state == BindingState::Active {
-                store.open_runtime_binding(binding.id, file)?
-            } else {
-                previous.clone()
-            };
             let publication_matches = publication
                 .as_ref()
                 .is_some_and(|p| p.identity == binding.facts.publication);
@@ -714,7 +727,10 @@ impl Runtime {
             if binding.facts.state == BindingState::Active {
                 let reason = if !publication_matches {
                     Some(IsolationReason::ReplacedLocally)
-                } else if previous.file.is_some_and(|stored| stored != file) {
+                } else if !previous.reopen_matches(file, durable_file)?
+                    || ((publication_op.is_some() || store.adoption_op()?.is_some())
+                        && previous.file.is_some_and(|stored| stored != file))
+                {
                     Some(IsolationReason::FileMismatch)
                 } else {
                     None
@@ -724,6 +740,12 @@ impl Runtime {
                     binding = store.binding(binding.id)?.ok_or(Error::BindingNotFound)?;
                 }
             }
+            // Record the complete pair only after selection; mismatches retain evidence.
+            let durable = if binding.facts.state == BindingState::Active {
+                store.open_runtime_binding(binding.id, file, durable_file)?
+            } else {
+                previous.clone()
+            };
             let decision_matches = publication.as_ref().is_some_and(|p| match &p.binding {
                 meguri_engine::device_state::AccountBinding::LocalOnly => true,
                 meguri_engine::device_state::AccountBinding::Connected {
@@ -1432,13 +1454,21 @@ impl SuspendParticipant for Runtime {
                         })
                     })
             });
+        let identity = state.bound.as_ref().and_then(|b| {
+            file.as_ref().ok().filter(|file| **file == b.file).and_then(|file| {
+                DurableFileIdentity::from_evidence(b.evidence.cloud_file, *file)
+                    .ok()
+                    .map(|durable| (*file, durable))
+            })
+        });
         if let Some((id, mod_time, scm)) = state.bound.as_ref().map(|b| (b.binding.id, b.latest_mod, b.latest_scm)) {
             with_tracking_access(|| {
-                state
-                    .store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .set_workflow_drained(id, complete, (mod_time, scm))
+                state.store.as_mut().ok_or(Error::Database)?.set_workflow_drained(
+                    id,
+                    complete,
+                    (mod_time, scm),
+                    identity,
+                )
             })
             .map_err(engine_error)?;
         }

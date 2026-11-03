@@ -23,3 +23,10 @@ remain available. Privacy17976 passes both amended specification files.
 Live Mac verification awaits an unlocked session. The saved collection stays
 intact. Signed SDK evidence and the batch gate are outstanding. This component
 changes neither Swift nor the U114 repair limit.
+
+Filtered export18553 finishes from source64296f8f with boundary checks passing.
+The patch changes Rust only. Format35922 and source privacy36539 pass.
+The first code review finds two P2 issues: publication must recheck its open
+authority after the final provider reads; the old-reader witness must run the
+unchanged V6 probe, rather than a test predicate. Both remain open. Focused
+compilation is running; this WIP has no acceptance claim.

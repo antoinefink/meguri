@@ -53,6 +53,8 @@ pub struct OpenEvidence {
     pub opened_mod: i64,
     pub opened_scm: i64,
     pub native_file: (u64, u64),
+    /// Bounded cloud-only failure: unavailable identity never prevents local use.
+    pub cloud_file: Option<meguri_storage::persistent_identity::CloudFileEvidence>,
 }
 
 impl fmt::Debug for OpenEvidence {
@@ -72,6 +74,7 @@ impl OpenEvidence {
             opened_mod: col.modified.0,
             opened_scm: col.schema_modified.0,
             native_file: opened.writer().native_identity()?,
+            cloud_file: opened.writer().cloud_file_evidence().ok(),
         })
     }
 }

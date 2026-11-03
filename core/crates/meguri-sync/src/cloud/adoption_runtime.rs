@@ -336,7 +336,7 @@ impl Runtime {
                         return Err(Error::RecoveryRefused.into());
                     }
                     remove_adoption_stage(&self.directory, &op)?;
-                    store.end_adoption(&op, None, None)?;
+                    store.end_adoption(&op, None, None, None)?;
                 }
                 s.store = Some(store);
                 Ok(())
@@ -868,7 +868,12 @@ impl Runtime {
         let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;
         {
             let mut s = self.state();
-            with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.end_adoption(op, None, file))?;
+            with_tracking_access(|| {
+                s.store
+                    .as_mut()
+                    .ok_or(Error::Database)?
+                    .end_adoption(op, None, file, None)
+            })?;
         }
         self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(collection) = collection {
@@ -1197,14 +1202,17 @@ impl Runtime {
         if activation.native_file() != (file.device, file.inode) {
             return Err(refused());
         }
+        let durable_file = DurableFileIdentity::from_evidence(adopted.open_evidence()?.cloud_file, file)?;
         meguri_model::faultpoint!("cloud.adopt.after_activation").map_err(Error::from)?;
         {
             let mut s = self.state();
             if !with_tracking_access(|| {
-                s.store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .end_adoption(op, Some(&activation), Some(file))
+                s.store.as_mut().ok_or(Error::Database)?.end_adoption(
+                    op,
+                    Some(&activation),
+                    Some(file),
+                    Some(durable_file),
+                )
             })? {
                 return Err(refused());
             }
@@ -1271,6 +1279,7 @@ impl Runtime {
             .ok_or_else(refused)?;
         let file = self.inputs.files.identity(adopted.path())?;
         let activation = adopted.cloud_adopt_activation()?.ok_or_else(refused)?;
+        let durable_file = DurableFileIdentity::from_evidence(adopted.open_evidence()?.cloud_file, file)?;
         // As at startup, R6 may have completed this exact swap with Pending
         // after the platform account changed. Its typed proof admits only the
         // original certain bound candidate, with no pending reason. Finish
@@ -1301,10 +1310,12 @@ impl Runtime {
         {
             let mut s = self.state();
             if !with_tracking_access(|| {
-                s.store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .end_adoption(op, Some(&activation), Some(file))
+                s.store.as_mut().ok_or(Error::Database)?.end_adoption(
+                    op,
+                    Some(&activation),
+                    Some(file),
+                    Some(durable_file),
+                )
             })? {
                 return Err(refused());
             }

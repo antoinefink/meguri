@@ -18,6 +18,61 @@ impl PersistentIdentity {
         }
     }
 }
+
+/// Cloud reopen evidence captured from the Writer's retained descriptor.
+/// The tuple includes exact birthtime; this does not change C12's identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloudFileEvidence {
+    pub native: (u64, u64, i64, u32),
+    pub identity: PersistentIdentity,
+}
+
+pub(crate) fn cloud_native(file: &File) -> Result<(u64, u64, i64, u32), StorageError> {
+    let metadata = file.metadata().map_err(|_| unavailable())?;
+    let (seconds, nanos) = {
+        let created = metadata.created().map_err(|_| unavailable())?;
+        match created.duration_since(std::time::UNIX_EPOCH) {
+            Ok(value) => (
+                i64::try_from(value.as_secs()).map_err(|_| unavailable())?,
+                value.subsec_nanos(),
+            ),
+            Err(error) => {
+                let value = error.duration();
+                let seconds = i64::try_from(value.as_secs()).map_err(|_| unavailable())?;
+                if value.subsec_nanos() == 0 {
+                    (-seconds, 0)
+                } else {
+                    (
+                        seconds
+                            .checked_neg()
+                            .and_then(|s| s.checked_sub(1))
+                            .ok_or_else(unavailable)?,
+                        1_000_000_000 - value.subsec_nanos(),
+                    )
+                }
+            }
+        }
+    };
+    if metadata.ino() == 0 || nanos >= 1_000_000_000 {
+        return Err(unavailable());
+    }
+    Ok((metadata.dev(), metadata.ino(), seconds, nanos))
+}
+
+pub(crate) fn checked_cloud(
+    bound: (u64, u64),
+    before: (u64, u64, i64, u32),
+    identity: PersistentIdentity,
+    after: (u64, u64, i64, u32),
+) -> Result<CloudFileEvidence, StorageError> {
+    if before != after || (before.0, before.1) != bound {
+        return Err(mismatch());
+    }
+    Ok(CloudFileEvidence {
+        native: before,
+        identity,
+    })
+}
 fn unavailable() -> StorageError {
     StorageError::Io {
         detail: "pending_answer_stable_identity_unavailable".into(),
@@ -163,6 +218,17 @@ fn volume_uuid(file: &File) -> Result<[u8; 16], StorageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloud_identity_capture_checks_both_birthtime_fields_and_live_pair() {
+        let before = (17, 29, 41, 53);
+        let identity = PersistentIdentity::NonDarwin { device: 17, inode: 29 };
+        assert!(checked_cloud((17, 29), before, identity, before).is_ok());
+        for after in [(18, 29, 41, 53), (17, 30, 41, 53), (17, 29, 42, 53), (17, 29, 41, 54)] {
+            assert!(checked_cloud((17, 29), before, identity, after).is_err());
+        }
+        assert!(checked_cloud((99, 29), before, identity, before).is_err());
+    }
 
     fn reply() -> Vec<u8> {
         let mut bytes = Vec::new();

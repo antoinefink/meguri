@@ -974,7 +974,105 @@ fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom
     assert!(matches!(&result, OwnResult::Saved(_)));
     runtime.publication_result(&request, result, &collection).unwrap();
     assert!(runtime.publication_op().unwrap().is_none());
+    assert!(runtime.stored_state_for_testing().unwrap().durable_file.is_some());
     runtime.status().unwrap().binding.unwrap()
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles_before_send() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("durable-reopen");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let before = runtime
+        .entity_facts_page(cloud::entity_codec::Kind::Note, None)
+        .unwrap()
+        .remove(0);
+    let cloud::entity_codec::Payload::Note(note) = &before.payload else {
+        panic!("note")
+    };
+    let collection = host.collection().unwrap();
+    edit_workflow_note(&collection, note, "pending across simulated device drift");
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert!(pending.mark.is_some());
+    let complete = runtime.stored_state_for_testing().unwrap();
+    let names = entity_names(runtime);
+    let decision = meguri_engine::device_state::DeviceState::for_collection(collection.path())
+        .publication_decision()
+        .unwrap();
+    host.close().unwrap();
+    // Model a prior mount in the saved native authorities only. The durable
+    // UUID/inode/birthtime remains the real retained-FD capture, never injected.
+    let scope = cloud::BuildScope {
+        container: cloud::ContainerId::new(scope().container).unwrap(),
+        environment: cloud::Environment::Development,
+    };
+    cloud::runtime::with_tracking_access(|| {
+        let cloud::OpenOutcome::Opened(mut store) = cloud::TrackingStore::open(&dir, scope).unwrap() else {
+            panic!("tracking store")
+        };
+        let coverage = complete.coverage.as_ref().unwrap();
+        let mut file = complete.file.unwrap();
+        file.device ^= 1;
+        let mut cursor = coverage.cursor.clone();
+        cursor.native_file = file;
+        store
+            .prepare_drained_baseline_for_testing(
+                binding.id,
+                file,
+                cursor,
+                coverage.media_feed_id,
+                coverage.media_cursor,
+            )
+            .unwrap();
+    });
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    runtime.refresh_identity().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&binding));
+    let refreshed = runtime.stored_state_for_testing().unwrap();
+    assert_eq!(refreshed.durable_file, complete.durable_file);
+    assert_eq!(refreshed.file, complete.file);
+    assert!(refreshed.note_scan.is_none() && refreshed.coverage.is_none());
+    assert!(!refreshed.whole_scan && !refreshed.drained);
+    assert!(runtime.status().unwrap().scan_required);
+    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    assert!(
+        runtime
+            .build_collection_batch(&sdk, &collection, &names)
+            .unwrap()
+            .saves
+            .is_empty()
+    );
+    let retained = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert_eq!(retained.local_rev, pending.local_rev);
+    assert_eq!(retained.acked_rev, pending.acked_rev);
+    assert_eq!(retained.acked_payload, pending.acked_payload);
+    assert_eq!(retained.acked_system_fields, pending.acked_system_fields);
+    assert_eq!(retained.in_flight, pending.in_flight);
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    assert!(!runtime.status().unwrap().scan_required);
+    let reconciled = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert_eq!(reconciled.local_rev, pending.local_rev);
+    assert_eq!(reconciled.acked_payload, pending.acked_payload);
+    assert_eq!(reconciled.mark, pending.mark);
+    assert_eq!(
+        meguri_engine::device_state::DeviceState::for_collection(collection.path())
+            .publication_decision()
+            .unwrap(),
+        decision
+    );
+    host.close().unwrap();
 }
 
 fn save_other_writer_publication_note(
@@ -2495,6 +2593,7 @@ fn explicit_resume_after_real_isolated_edit_and_review_is_cursorless_and_require
     );
     assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
     assert_eq!(runtime.stored_state_for_testing().unwrap().open_counter, open);
+    assert!(runtime.stored_state_for_testing().unwrap().durable_file.is_some());
     assert!(!runtime.stored_state_for_testing().unwrap().drained);
     assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_none());
     assert!(!runtime.status().unwrap().scan_required);

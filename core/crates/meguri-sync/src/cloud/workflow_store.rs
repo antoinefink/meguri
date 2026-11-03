@@ -385,8 +385,16 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         b: BindingId,
         complete: bool,
         metadata: (i64, i64),
+        identity: Option<(runtime::NativeFileIdentity, runtime::DurableFileIdentity)>,
     ) -> Result<(), Error> {
         let mut state = self.runtime_binding(b)?;
+        if complete {
+            let (file, durable) = identity.ok_or(Error::InvalidData)?;
+            if state.file != Some(file) {
+                return Err(Error::InvalidData);
+            }
+            state.record_identity(file, durable)?;
+        }
         if complete
             && !state
                 .coverage

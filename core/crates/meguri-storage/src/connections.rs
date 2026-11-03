@@ -80,6 +80,14 @@ impl Writer {
         crate::persistent_identity::read_from(&self.identity_file, self.identity_bound)
     }
 
+    /// No second database FD: closing one would release SQLite's POSIX locks.
+    pub fn cloud_file_evidence(&self) -> Result<crate::persistent_identity::CloudFileEvidence, StorageError> {
+        let before = crate::persistent_identity::cloud_native(&self.identity_file)?;
+        let identity = self.persistent_identity()?;
+        let after = crate::persistent_identity::cloud_native(&self.identity_file)?;
+        crate::persistent_identity::checked_cloud(self.identity_bound, before, identity, after)
+    }
+
     /// Opens the writer: read-write, never create, then C5 and C4's settings
     /// (the switch to WAL mode among them).
     pub(crate) fn open(path: &Path, initializers: &Initializers) -> Result<Writer, OpenError> {

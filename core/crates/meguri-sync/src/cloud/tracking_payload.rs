@@ -163,8 +163,8 @@ fn owner_v5(cn: &Connection, b: BindingId) -> Result<bool, Error> {
         )?);
     }
     match cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))? {
-        5 => Ok(true),                // Historical markerless V5 representation.
-        6 => Err(Error::InvalidData), // Never reconstruct V6 handoff history.
+        5 => Ok(true),                    // Historical markerless V5 representation.
+        6 | 7 => Err(Error::InvalidData), // Never reconstruct fenced handoff history.
         _ => Ok(false),
     }
 }
@@ -758,6 +758,7 @@ impl Header {
 pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Error> {
     // Refuse future or markerless V6 before DDL, including direct migration calls.
     super::runtime_store::check_version(tx)?;
+    super::runtime_store::validate_bindings(tx, scope)?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payloads(binding BLOB NOT NULL REFERENCES bindings(id),digest BLOB NOT NULL CHECK(length(digest)=32),bytes BLOB NOT NULL,PRIMARY KEY(binding,digest));")?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payload_retired(binding BLOB NOT NULL REFERENCES bindings(id),name TEXT NOT NULL,digest BLOB NOT NULL CHECK(length(digest)=32),PRIMARY KEY(binding,name,digest));")?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS cloud_runtime_payload_owners(binding BLOB PRIMARY KEY REFERENCES bindings(id),version INTEGER NOT NULL CHECK(version=5));")?;
@@ -797,7 +798,10 @@ pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Er
     }
     tx.execute("INSERT INTO cloud_runtime_payload_owners SELECT id,5 FROM bindings WHERE container=?1 AND environment=?2 AND salvage=0 ON CONFLICT(binding) DO NOTHING", params![scope.container.as_str(), scope.environment.code()])?;
     meguri_model::faultpoint!("cloud.payload_migration.before_commit")?;
-    tx.execute("UPDATE cloud_runtime_schema SET version=6", [])?;
+    tx.execute(
+        "UPDATE cloud_runtime_schema SET version=?1",
+        [super::runtime_store::VERSION],
+    )?;
     Ok(())
 }
 
@@ -1082,11 +1086,11 @@ mod tests {
         let tx = cn.transaction().unwrap();
         migrate(&tx, &scope()).unwrap();
         tx.commit().unwrap();
-        // Runtime V6 fences the sent bit; payload image ownership remains V5.
+        // Runtime V7 retains the sent fence and V5 payload image ownership.
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            7
         );
         let text: String = cn
             .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
@@ -1105,14 +1109,14 @@ mod tests {
             3
         );
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
-        cn.execute("UPDATE cloud_runtime_schema SET version=7", []).unwrap();
+        cn.execute("UPDATE cloud_runtime_schema SET version=8", []).unwrap();
         assert!(matches!(
             super::super::runtime_store::check_version(&cn),
             Err(Error::RuntimeSchemaUnsupported)
         ));
     }
     #[test]
-    fn v5_to_v6_retains_legacy_handoff_defaults_and_reopens_without_downgrade() {
+    fn v5_to_v7_retains_legacy_handoff_defaults_and_reopens_without_downgrade() {
         let (mut cn, b, note, entity, old_note, old_entity) = legacy();
         assert!(decode::<NoteTracking>(&old_note).unwrap().sent);
         assert!(decode::<EntityFacts>(&old_entity).unwrap().sent);
@@ -1140,7 +1144,7 @@ mod tests {
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            7
         );
         assert!(owner_v5(&cn, b).unwrap());
         assert!(
@@ -1170,6 +1174,9 @@ mod tests {
         let old_v5_accepts = |v: &[i64]| v == [1] || v == [2] || v == [3] || v == [4] || v == [5];
         assert!(old_v5_accepts(&[5]));
         assert!(!old_v5_accepts(&[6]));
+        let old_v6_accepts = |v: &[i64]| old_v5_accepts(v) || v == [6];
+        assert!(old_v6_accepts(&[6]));
+        assert!(!old_v6_accepts(&[7]));
         let run = tempfile::tempdir().unwrap();
         let path = run.path().join("runtime.sqlite");
         cn.execute("VACUUM INTO ?1", [path.to_str().unwrap()]).unwrap();
@@ -1183,7 +1190,7 @@ mod tests {
             reopened
                 .query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            7
         );
         assert!(
             stored_header(&reopened, b, c::Kind::Note, &c::id_key(note.id))
@@ -1191,6 +1198,53 @@ mod tests {
                 .sent
         );
         assert!(stored_header(&reopened, b, entity.kind, &entity.key).facts.sent);
+    }
+
+    #[test]
+    fn runtime_v7_payload_migration_preserves_fence_and_scoped_owner() {
+        let (mut cn, b, note, entity, _, _) = legacy();
+        let tx = cn.transaction().unwrap();
+        migrate(&tx, &scope()).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            7
+        );
+        cn.execute("UPDATE cloud_runtime_schema SET version=6", []).unwrap();
+        for _ in 0..2 {
+            let tx = cn.transaction().unwrap();
+            migrate(&tx, &scope()).unwrap();
+            tx.commit().unwrap();
+            assert_eq!(
+                cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                7
+            );
+            assert!(owner_v5(&cn, b).unwrap());
+            assert!(
+                dump_note(
+                    &cn,
+                    b,
+                    &cn.query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get::<_, String>(0))
+                        .unwrap()
+                )
+                .unwrap()
+                    == note
+            );
+            assert!(
+                dump_entity(
+                    &cn,
+                    b,
+                    entity.kind,
+                    &cn.query_row("SELECT content FROM cloud_runtime_entities", [], |r| r
+                        .get::<_, String>(0))
+                        .unwrap()
+                )
+                .unwrap()
+                    == entity
+            );
+        }
     }
 
     #[test]
@@ -1210,19 +1264,19 @@ mod tests {
     }
 
     #[test]
-    fn exact_runtime_fence_and_markerless_v6_refuse_before_migration_mutates() {
+    fn exact_runtime_fence_and_markerless_v6_v7_refuse_before_migration_mutates() {
         let (mut cn, b, _, _, old_note, old_entity) = legacy();
         for version in 1..=5 {
             cn.execute("UPDATE cloud_runtime_schema SET version=?1", [version])
                 .unwrap();
             assert!(super::super::runtime_store::check_version(&cn).unwrap());
         }
-        for version in [6, 7] {
+        for version in [6, 7, 8] {
             cn.execute("UPDATE cloud_runtime_schema SET version=?1", [version])
                 .unwrap();
             let tx = cn.transaction().unwrap();
             let error = migrate(&tx, &scope()).unwrap_err();
-            if version == 7 {
+            if version == 8 {
                 assert!(matches!(error, Error::RuntimeSchemaUnsupported));
             } else {
                 assert!(matches!(error, Error::InvalidData));
@@ -1252,7 +1306,7 @@ mod tests {
                 )
                 .unwrap()
             );
-            if version == 6 {
+            if version == 6 || version == 7 {
                 assert!(matches!(owner_v5(&cn, b), Err(Error::InvalidData)));
             }
         }
@@ -1261,8 +1315,8 @@ mod tests {
         migrate(&tx, &scope()).unwrap();
         tx.commit().unwrap();
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
-        // A populated V6 store with a future marker also remains byte-identical.
-        cn.execute("UPDATE cloud_runtime_schema SET version=7", []).unwrap();
+        // A populated fenced store with a future marker also remains byte-identical.
+        cn.execute("UPDATE cloud_runtime_schema SET version=8", []).unwrap();
         let note_before: String = cn
             .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
             .unwrap();

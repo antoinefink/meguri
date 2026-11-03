@@ -113,6 +113,7 @@ impl TrackingStore {
         &mut self,
         expected: &Binding,
         file: runtime::NativeFileIdentity,
+        durable_file: runtime::DurableFileIdentity,
         publish: &Option<PublishOp>,
         adopt: &Option<adoption::AdoptOp>,
     ) -> Result<Binding, Error> {
@@ -177,7 +178,7 @@ impl TrackingStore {
         if state.file.is_some_and(|stored| stored != file) {
             return Err(Error::RecoveryRefused);
         }
-        state.file = Some(file);
+        state.record_identity(file, durable_file)?;
         state.drained = false;
         let mut resumed = expected.clone();
         resumed.facts.state = BindingState::Active;
@@ -277,7 +278,14 @@ impl TrackingStore {
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn bind_publication(&mut self, op: &mut PublishOp, id: BindingId, now: i64) -> Result<Binding, Error> {
+    pub(super) fn bind_publication(
+        &mut self,
+        op: &mut PublishOp,
+        id: BindingId,
+        now: i64,
+        durable_file: runtime::DurableFileIdentity,
+    ) -> Result<Binding, Error> {
+        durable_file.paired(op.confirmed_file)?;
         if op.step != PublishStep::Confirmed
             || op.binding_after.is_some()
             || self.publication_op()?.as_ref() != Some(&*op)
@@ -333,6 +341,7 @@ impl TrackingStore {
             id,
             &StoredRuntimeState {
                 file: Some(op.confirmed_file),
+                durable_file: Some(durable_file),
                 ..StoredRuntimeState::default()
             },
         )?;

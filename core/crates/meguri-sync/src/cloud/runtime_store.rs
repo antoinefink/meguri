@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-const VERSION: i64 = 6;
+pub(super) const VERSION: i64 = 7;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -43,11 +43,12 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
             && versions != [3]
             && versions != [4]
             && versions != [5]
+            && versions != [6]
             && versions != [VERSION]
         {
             return Err(Error::RuntimeSchemaUnsupported);
         }
-        if versions == [6] {
+        if versions == [6] || versions == [7] {
             let owners: bool = connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_payload_owners')",
                 [],
@@ -68,6 +69,35 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         }
     }
     Ok(exists)
+}
+
+fn decode_binding(connection: &rusqlite::Connection, content: &str) -> Result<StoredRuntimeState, Error> {
+    let version: i64 = connection.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+    let value: StoredRuntimeState = decode(content)?;
+    if version != VERSION && value.durable_file.is_some() {
+        return Err(Error::InvalidData);
+    }
+    value.validate()?;
+    Ok(value)
+}
+
+pub(super) fn validate_bindings(connection: &rusqlite::Connection, scope: &BuildScope) -> Result<(), Error> {
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_bindings')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Ok(());
+    }
+    let mut statement = connection.prepare(
+        "SELECT r.content FROM cloud_runtime_bindings r JOIN bindings b ON b.id=r.binding WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0",
+    )?;
+    let mut rows = statement.query(params![scope.container.as_str(), scope.environment.code()])?;
+    while let Some(row) = rows.next()? {
+        decode_binding(connection, &row.get::<_, String>(0)?)?;
+    }
+    Ok(())
 }
 
 impl TrackingStore {
@@ -98,8 +128,7 @@ impl TrackingStore {
         let mut rows = statement.query(params![self.scope.container.as_str(), self.scope.environment.code()])?;
         while let Some(row) = rows.next()? {
             let _: BindingId = super::store::binding_id(row.get(0)?)?;
-            let value: StoredRuntimeState = decode(&row.get::<_, String>(1)?)?;
-            value.validate()?;
+            decode_binding(&self.connection, &row.get::<_, String>(1)?)?;
         }
         let mut statement = self.connection.prepare(
             "SELECT r.id,r.content,r.binding FROM cloud_runtime_notes r JOIN bindings b ON b.id=r.binding
@@ -135,7 +164,7 @@ impl TrackingStore {
             )
             .optional()?;
         content
-            .map(|value| decode(&value))
+            .map(|value| decode_binding(&self.connection, &value))
             .transpose()
             .map(|value| value.unwrap_or_default())
     }
@@ -155,22 +184,24 @@ impl TrackingStore {
                 |row| row.get(0),
             )
             .optional()?;
-        content.map(|value| decode(&value)).transpose()
+        content
+            .map(|value| decode_binding(&self.connection, &value))
+            .transpose()
     }
 
     pub(super) fn open_runtime_binding(
         &mut self,
         binding: BindingId,
         file: NativeFileIdentity,
+        durable_file: super::durable_identity::DurableFileIdentity,
     ) -> Result<StoredRuntimeState, Error> {
         let mut value = self.runtime_binding(binding)?;
+        if !value.reopen_matches(file, durable_file)? {
+            return Err(Error::RecoveryRefused);
+        }
         value.open_counter = next(value.open_counter)?;
         value.drained = false;
-        // V8.2: first recording is allowed; an existing mismatch is isolated
-        // by the runtime before this call. Never replace an existing identity.
-        if value.file.is_none() {
-            value.file = Some(file);
-        }
+        value.record_identity(file, durable_file)?;
         let transaction = self.connection.transaction()?;
         put_binding(&transaction, binding, &value)?;
         // A lost post-handler first read follows ordinary retries on the next open.
@@ -549,6 +580,12 @@ pub(super) fn put_binding(
     value: &StoredRuntimeState,
 ) -> Result<(), Error> {
     value.validate()?;
+    if value.durable_file.is_some() {
+        let version: i64 = transaction.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+        if version != VERSION {
+            return Err(Error::RuntimeSchemaUnsupported);
+        }
+    }
     transaction.execute(
         "INSERT INTO cloud_runtime_bindings(binding,content) VALUES (?1,?2)
         ON CONFLICT(binding) DO UPDATE SET content=excluded.content",

@@ -295,6 +295,92 @@ fn incomplete(runtime: &Runtime) {
     assert!(wiring::require(meguri_engine::ports::ServicePort::Sync).is_err());
 }
 
+#[cfg(target_vendor = "apple")]
+#[test]
+fn durable_identity_darwin_retained_fd_collection_runtime_bind_and_reopen_preserve_pending_ack() {
+    // Generated collection only. CoreHost wires the production OpenStep; no tuple injection.
+    let fixture = Fixture::new(BindingState::Active);
+    let host = fixture.open();
+    let collection = host.collection().unwrap();
+    let evidence = collection.open_evidence().unwrap().cloud_file.unwrap();
+    let meguri_storage::persistent_identity::PersistentIdentity::Darwin { volume_uuid, inode } = evidence.identity
+    else {
+        panic!("Darwin FD capture required")
+    };
+    assert_ne!(volume_uuid, [0; 16]);
+    let runtime = host.cloud_runtime().unwrap();
+    let opened = runtime.stored_state_for_testing().unwrap();
+    let live = fixture.files.identity(collection.path()).unwrap();
+    assert_eq!(
+        evidence.native,
+        (live.device, live.inode, live.created_seconds, live.created_nanos)
+    );
+    let recorded = opened.durable_file.unwrap();
+    assert_eq!(recorded.identity, evidence.identity);
+    assert_eq!(inode, live.inode);
+    let result = edit(&collection, fixture.ids[0], "pending across native FD reopen");
+    assert!(runtime.capture_proof(result.seq, result.generation).unwrap().persisted);
+    let pending = with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        store.tracked_note(fixture.binding, fixture.ids[0].0).unwrap().unwrap()
+    });
+    assert!(pending.mark.is_some());
+    host.close().unwrap();
+    let reopened = fixture.open();
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert!(runtime.status().unwrap().stored_usable);
+    assert!(runtime.status().unwrap().scan_required);
+    assert_eq!(runtime.stored_state_for_testing().unwrap().durable_file, Some(recorded));
+    runtime.refresh_identity().unwrap();
+    runtime
+        .reconcile_notes(&reopened.collection().unwrap(), BUDGET)
+        .unwrap();
+    let after = with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        store.tracked_note(fixture.binding, fixture.ids[0].0).unwrap().unwrap()
+    });
+    assert_eq!(after.local_rev, pending.local_rev);
+    assert_eq!(after.acknowledged, pending.acknowledged);
+    assert_eq!(after.mark, pending.mark);
+    reopened.close().unwrap();
+}
+
+#[test]
+fn durable_identity_bind_birthtime_race_keeps_local_editing_available() {
+    let fixture = Fixture::new(BindingState::Active);
+    *fixture.files.0.lock().unwrap() = true;
+    let host = fixture.open();
+    let runtime = host.cloud_runtime().unwrap();
+    assert!(runtime.status().unwrap().tracking_stopped);
+    assert!(runtime.status().unwrap().binding.is_none());
+    let collection = host.collection().unwrap();
+    edit(&collection, fixture.ids[0], "local review/edit remains viable");
+    assert!(runtime.reconcile_notes(&collection, BUDGET).is_err());
+    host.close().unwrap();
+}
+
+#[test]
+fn durable_identity_matching_reopen_never_reactivates_existing_isolation() {
+    let fixture = Fixture::new(BindingState::Active);
+    fixture.open().close().unwrap();
+    let recorded = fixture.durable().durable_file;
+    assert!(recorded.is_some());
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        store
+            .isolate_runtime_binding_for_testing(fixture.binding, IsolationReason::SignedOut)
+            .unwrap();
+    });
+    let host = fixture.open();
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        BindingState::Isolated(IsolationReason::SignedOut)
+    );
+    assert!(!runtime.status().unwrap().stored_usable);
+    assert!(runtime.reconcile_notes(&host.collection().unwrap(), BUDGET).is_err());
+    assert_eq!(runtime.stored_state_for_testing().unwrap().durable_file, recorded);
+    host.close().unwrap();
+}
+
 #[test]
 fn optional_cloud_composition_captures_without_live_identity_and_keeps_sync_pending() {
     let fixture = Fixture::new(BindingState::Active);

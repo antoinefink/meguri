@@ -758,6 +758,15 @@ impl Runtime {
         match work {
             LocalWork::Bind if op.step == PublishStep::Confirmed && decision == op.fence_before => {
                 self.settle_before_transition(collection, Duration::from_secs(30))?;
+                let file = self.inputs.files.identity(collection.path())?;
+                if file != op.confirmed_file {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
+                let evidence = collection.open_evidence()?;
+                let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
+                if !collection.is_current() || evidence.generation != collection.generation() {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
                 let id = BindingId(self.publication_random_id()?);
                 let now = self.adapter_now()?;
                 {
@@ -766,7 +775,7 @@ impl Runtime {
                         s.store
                             .as_mut()
                             .ok_or(Error::Database)?
-                            .bind_publication(&mut op, id, now)
+                            .bind_publication(&mut op, id, now, durable_file)
                     })?;
                 }
                 self.bind(collection)?;

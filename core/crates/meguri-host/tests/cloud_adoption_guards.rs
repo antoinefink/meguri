@@ -560,6 +560,14 @@ fn live_adoption_account_capture(account: Option<String>, isolation: Option<clou
             tracking.stored_runtime_state(op.binding_after).unwrap().unwrap().file,
             Some(facts.native_file)
         );
+        assert!(
+            tracking
+                .stored_runtime_state(op.binding_after)
+                .unwrap()
+                .unwrap()
+                .durable_file
+                .is_some()
+        );
     }
     // Reopen with A: neither the retained Pending decision nor V9 isolation
     // may be cleared just because this process sees the original identity.
