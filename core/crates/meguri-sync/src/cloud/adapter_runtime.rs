@@ -1,4 +1,5 @@
 use super::{super::adapter_store::AdapterCommitOptions, *};
+use crate::cloud::policy::PolicyWork;
 use crate::cloud::{adapter::*, workflow::*};
 use std::collections::{BTreeMap, BTreeSet};
 impl Runtime {
@@ -285,12 +286,21 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_account(&self, sdk: Option<&str>, identity: IdentityStatus) -> Result<(), RuntimeError> {
+        self.adapter_account_with_work(sdk, identity, &mut PolicyWork::default())
+    }
+    pub fn adapter_account_with_work(
+        &self,
+        sdk: Option<&str>,
+        identity: IdentityStatus,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let _ = self.adapter_now();
         self.wait_incoming_idle();
         let mut s = self.state();
         if let Some(sdk) = sdk {
             Self::sdk_locked(&s, sdk)?;
         }
+        work.effect()?;
         Self::adapter_account_locked(self, &mut s, identity, sdk.is_some(), false)
     }
     fn adapter_account_locked(
@@ -1391,12 +1401,21 @@ impl Runtime {
         _transition: bool,
         origin_sdk: Option<&str>,
     ) -> Result<u64, RuntimeError> {
+        self.adapter_begin_identity_read_with_work(_transition, origin_sdk, &mut PolicyWork::default())
+    }
+    pub fn adapter_begin_identity_read_with_work(
+        &self,
+        _transition: bool,
+        origin_sdk: Option<&str>,
+        work: &mut PolicyWork,
+    ) -> Result<u64, RuntimeError> {
         let _ = self.adapter_now();
         let no_collection = self.state().store.is_none();
         self.with_identity_read_state(no_collection, |s| {
             if let Some(sdk) = origin_sdk {
                 Self::sdk_locked(s, sdk)?;
             }
+            work.effect()?;
             if origin_sdk.is_some() {
                 s.adapter.no_state = true;
                 s.adapter.no_state_creation = false;
@@ -1424,6 +1443,14 @@ impl Runtime {
         })
     }
     pub fn adapter_complete_identity_read(&self, id: u64, identity: IdentityStatus) -> Result<bool, RuntimeError> {
+        self.adapter_complete_identity_read_with_work(id, identity, &mut PolicyWork::default())
+    }
+    pub fn adapter_complete_identity_read_with_work(
+        &self,
+        id: u64,
+        identity: IdentityStatus,
+        work: &mut PolicyWork,
+    ) -> Result<bool, RuntimeError> {
         let Some(no_collection) = self
             .state()
             .adapter
@@ -1438,6 +1465,7 @@ impl Runtime {
             if !Self::identity_read_current_locked(s, id) {
                 return Ok(false);
             }
+            work.effect()?;
             s.adapter.identity_read = None;
             // A failed later read preserves an already verified process owner (V9.1).
             if !matches!(identity, IdentityStatus::ReadFailed) {

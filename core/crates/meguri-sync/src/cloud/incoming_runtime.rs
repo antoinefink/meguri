@@ -402,9 +402,32 @@ impl Runtime {
         timeout: Duration,
         sdk: Option<&str>,
     ) -> Result<IncomingDisposition, RuntimeError> {
-        self.refresh_identity()?;
+        self.drain_incoming_bounded_with_work(
+            collection,
+            timeout,
+            sdk,
+            &mut crate::cloud::policy::PolicyWork::default(),
+        )
+    }
+    pub(crate) fn drain_native_incoming_with_work(
+        &self,
+        collection: &Collection,
+        sdk: &str,
+        timeout: Duration,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<IncomingDisposition, RuntimeError> {
+        self.drain_incoming_bounded_with_work(collection, timeout, Some(sdk), work)
+    }
+    fn drain_incoming_bounded_with_work(
+        &self,
+        collection: &Collection,
+        timeout: Duration,
+        sdk: Option<&str>,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<IncomingDisposition, RuntimeError> {
+        self.refresh_identity_with_work(work)?;
         if let Ok(instance) = self.instance() {
-            self.poll_review(&instance)?;
+            self.poll_review_with_work(&instance, work)?;
         }
         let guard = {
             let mut s = self.state();
@@ -442,6 +465,7 @@ impl Runtime {
                 file: b.file,
                 incarnation: s.incarnation,
             };
+            work.effect()?;
             s.incoming.running = true;
             g
         };

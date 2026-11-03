@@ -1,5 +1,6 @@
 //! One-engine media send bridge. Scheduling and file decisions stay in Runtime.
 use super::*;
+use crate::cloud::policy::PolicyWork;
 
 fn check_requested_action(work: &Work, requested: workflow::PendingChange) -> Result<(), RuntimeError> {
     match (&work.request, requested) {
@@ -518,8 +519,13 @@ impl Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn policy_media_setting(&self, enabled: bool) -> Result<(), RuntimeError> {
+    pub(crate) fn policy_media_setting_with_work(
+        &self,
+        enabled: bool,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        work.effect()?;
         s.media.enabled = Some(enabled);
         if !enabled {
             s.media.paused = true;

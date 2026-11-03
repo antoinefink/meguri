@@ -46,6 +46,13 @@ impl MediaService {
     }
 
     pub fn open(collection: &Collection, clock: Arc<dyn Clock>) -> Result<Self, EngineError> {
+        Self::open_with_boundary(collection, clock, &mut || Ok(()))
+    }
+    pub fn open_with_boundary(
+        collection: &Collection,
+        clock: Arc<dyn Clock>,
+        before_effect: &mut dyn FnMut() -> Result<(), meguri_storage::media::MediaError>,
+    ) -> Result<Self, EngineError> {
         let _reader = collection.operation_reader(ReaderRole::Query)?;
         let mut bound = collection
             .core
@@ -56,7 +63,13 @@ impl MediaService {
             Some(state) => state.clone(),
             None => {
                 let state = Arc::new(MediaState {
-                    store: MediaStore::open(collection.path(), clock, collection.core.random.clone()).map_err(error)?,
+                    store: MediaStore::open_with_boundary(
+                        collection.path(),
+                        clock,
+                        collection.core.random.clone(),
+                        before_effect,
+                    )
+                    .map_err(error)?,
                     jobs: MediaJobLock::default(),
                     consumer: std::sync::Mutex::new(None),
                 });

@@ -511,7 +511,11 @@ impl MediaStore {
     /// Called under the shared journal guard before another operation may
     /// change a protocol stamp. Receipts remain until committed SQL or physical
     /// restoration makes them obsolete, so outer SQL rollback is harmless.
-    pub(super) fn recover_removal_intents(&self, db: &Connection) -> Result<()> {
+    pub(super) fn recover_removal_intents_with_boundary(
+        &self,
+        db: &Connection,
+        before_effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let mut pending = self
             .inner
@@ -588,12 +592,14 @@ impl MediaStore {
                 && moved
                 && source_absent;
             if valid && (stamp == intent.entry_counter || already_observed) {
+                before_effect()?;
                 super::feed::observe_removal(db, &intent.name)?;
             } else if db.is_autocommit() {
                 if !source_absent
                     && current.feed_id.0 == intent.feed_id
                     && self.inner.journal_native == intent.journal_native
                 {
+                    before_effect()?;
                     db.execute_batch("SAVEPOINT media_restored_cause")?;
                     let clear: Result<()> = (|| {
                         db.execute("UPDATE media SET explicit_removal=0 WHERE name=?1", [&intent.name])?;
@@ -612,6 +618,7 @@ impl MediaStore {
                 // Never delete a receipt based on uncommitted SQL, which an
                 // outer savepoint might still discard. Physical restoration
                 // and a committed later stamp both invalidate this ownership.
+                before_effect()?;
                 match fs::remove_file(&path) {
                     Ok(()) => {
                         fs::remove_dir(&directory)?;
@@ -624,6 +631,7 @@ impl MediaStore {
             }
         }
         for parent in settled {
+            before_effect()?;
             pending.remove(&parent);
         }
         Ok(())

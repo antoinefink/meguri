@@ -83,7 +83,7 @@ impl CloudPolicyExecution {
             .ok_or_else(|| failure(CloudPolicyFailure::StaleCommand))
     }
 }
-fn execution_error(error: p::DriverError) -> CoreError {
+pub(super) fn execution_error(error: p::DriverError) -> CoreError {
     match error {
         p::DriverError::Runtime(error) => crate::cloud_connection::error(error),
         p::DriverError::NotCoreAction => failure(CloudPolicyFailure::NotNativeAction),
@@ -101,27 +101,7 @@ impl CloudPolicy {
         native_ready: bool,
     ) -> Result<CloudPolicyReadiness, CoreError> {
         callback::enter("CloudPolicy.exchange_readiness");
-        self.owns(&command)?;
-        let (ready, outcome) = self
-            .driver()?
-            .native_exchange_readiness(&command.command, expired, native_ready)
-            .map_err(execution_error)?;
-        Ok(match outcome {
-            Some(p::ExchangeOutcome::Waiting { class, retry_after_ms }) => CloudPolicyReadiness::End {
-                outcome: CloudPolicyEarlyEnd::Waiting {
-                    class: class.into(),
-                    retry_after_ms,
-                },
-            },
-            Some(p::ExchangeOutcome::Failed { class }) => CloudPolicyReadiness::End {
-                outcome: CloudPolicyEarlyEnd::Failed { class: class.into() },
-            },
-            Some(_) => CloudPolicyReadiness::End {
-                outcome: CloudPolicyEarlyEnd::Cancelled,
-            },
-            None if ready => CloudPolicyReadiness::Ready,
-            None => CloudPolicyReadiness::Wait,
-        })
+        self.exchange_readiness_with_work(command, expired, native_ready, &mut p::PolicyWork::default())
     }
 
     pub fn prepare_execution(
@@ -129,49 +109,7 @@ impl CloudPolicy {
         command: Arc<CloudPolicyCommand>,
     ) -> Result<Option<Arc<CloudPolicyExecution>>, CoreError> {
         callback::enter("CloudPolicy.prepare_execution");
-        self.owns(&command)?;
-        match &command.command.action.kind {
-            p::ActionKind::StartEngine { .. }
-            | p::ActionKind::StopEngine { .. }
-            | p::ActionKind::ConfigureAutomatic { .. }
-            | p::ActionKind::RequestFetch { .. }
-            | p::ActionKind::RequestSend { .. }
-            | p::ActionKind::RunExchange { .. }
-            | p::ActionKind::CancelExchange { .. }
-            | p::ActionKind::ResumeMedia
-            | p::ActionKind::PauseMedia
-            | p::ActionKind::ReadBlobs { .. }
-            | p::ActionKind::RunCleanup
-            | p::ActionKind::DeleteZones
-            | p::ActionKind::RetryAssetEntries
-            | p::ActionKind::PrioritizeMedia { .. }
-            | p::ActionKind::BackgroundFlush { .. }
-            | p::ActionKind::QuitFlush { .. }
-            | p::ActionKind::CancelBackgroundFlush
-            | p::ActionKind::ArmFlushTimer { .. }
-            | p::ActionKind::CancelFlushTimer
-            | p::ActionKind::QuitNow => {}
-            _ => return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable)),
-        }
-        if self
-            .driver()?
-            .native_disposition(&command.command)
-            .map_err(execution_error)?
-            == p::NativeDisposition::NoOperation
-        {
-            return Ok(None);
-        }
-        let original_sdk = self
-            .driver()?
-            .native_origin(&command.command)
-            .map_err(execution_error)?;
-        Ok(Some(Arc::new(CloudPolicyExecution {
-            command,
-            original_sdk,
-            registration: Mutex::new(Registration::default()),
-            cleanup_begun: std::sync::atomic::AtomicBool::new(false),
-            zone_deletion_begun: std::sync::atomic::AtomicBool::new(false),
-        })))
+        self.prepare_execution_with_work(command, &mut p::PolicyWork::default())
     }
 }
 
@@ -370,5 +308,88 @@ pub(crate) fn operation_error_class(code: i64) -> p::OperationError {
         26 | 28 => p::OperationError::ConflictRecovery,
         18 => p::OperationError::UnsupportedSchema,
         _ => p::OperationError::Other,
+    }
+}
+
+impl CloudPolicy {
+    pub(super) fn exchange_readiness_with_work(
+        &self,
+        command: Arc<CloudPolicyCommand>,
+        expired: bool,
+        native_ready: bool,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyReadiness, CoreError> {
+        self.owns(&command)?;
+        let (ready, outcome) = self
+            .driver()?
+            .native_exchange_readiness_with_work(&command.command, expired, native_ready, work)
+            .map_err(execution_error)?;
+        work.check().map_err(crate::cloud_connection::error)?;
+        Ok(match outcome {
+            Some(p::ExchangeOutcome::Waiting { class, retry_after_ms }) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Waiting {
+                    class: class.into(),
+                    retry_after_ms,
+                },
+            },
+            Some(p::ExchangeOutcome::Failed { class }) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Failed { class: class.into() },
+            },
+            Some(_) => CloudPolicyReadiness::End {
+                outcome: CloudPolicyEarlyEnd::Cancelled,
+            },
+            None if ready => CloudPolicyReadiness::Ready,
+            None => CloudPolicyReadiness::Wait,
+        })
+    }
+    pub(super) fn prepare_execution_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        work: &mut p::PolicyWork,
+    ) -> Result<Option<Arc<CloudPolicyExecution>>, CoreError> {
+        self.owns(&command)?;
+        match &command.command.action.kind {
+            p::ActionKind::StartEngine { .. }
+            | p::ActionKind::StopEngine { .. }
+            | p::ActionKind::ConfigureAutomatic { .. }
+            | p::ActionKind::RequestFetch { .. }
+            | p::ActionKind::RequestSend { .. }
+            | p::ActionKind::RunExchange { .. }
+            | p::ActionKind::CancelExchange { .. }
+            | p::ActionKind::ResumeMedia
+            | p::ActionKind::PauseMedia
+            | p::ActionKind::ReadBlobs { .. }
+            | p::ActionKind::RunCleanup
+            | p::ActionKind::DeleteZones
+            | p::ActionKind::RetryAssetEntries
+            | p::ActionKind::PrioritizeMedia { .. }
+            | p::ActionKind::BackgroundFlush { .. }
+            | p::ActionKind::QuitFlush { .. }
+            | p::ActionKind::CancelBackgroundFlush
+            | p::ActionKind::ArmFlushTimer { .. }
+            | p::ActionKind::CancelFlushTimer
+            | p::ActionKind::QuitNow => {}
+            _ => return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable)),
+        }
+        if self
+            .driver()?
+            .native_disposition_with_work(&command.command, work)
+            .map_err(execution_error)?
+            == p::NativeDisposition::NoOperation
+        {
+            return Ok(None);
+        }
+        let original_sdk = self
+            .driver()?
+            .native_origin_with_work(&command.command, work)
+            .map_err(execution_error)?;
+        work.check().map_err(crate::cloud_connection::error)?;
+        Ok(Some(Arc::new(CloudPolicyExecution {
+            command,
+            original_sdk,
+            registration: Mutex::new(Registration::default()),
+            cleanup_begun: std::sync::atomic::AtomicBool::new(false),
+            zone_deletion_begun: std::sync::atomic::AtomicBool::new(false),
+        })))
     }
 }

@@ -276,40 +276,55 @@ impl MediaStore {
         &self,
         progress: impl FnMut(usize, usize) -> bool,
     ) -> Result<super::MediaCheckReport> {
+        self.check_changes_report_with_boundary(progress, &mut || Ok(()))
+    }
+    pub fn check_changes_with_boundary(&self, before_effect: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+        self.check_changes_report_with_boundary(|_, _| true, before_effect)
+            .map(|_| ())
+    }
+    fn check_changes_report_with_boundary(
+        &self,
+        progress: impl FnMut(usize, usize) -> bool,
+        before_effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<super::MediaCheckReport> {
         // Refuse suspended stores before touching the folder or callbacks.
-        drop(self.db()?);
+        drop(self.db_with_boundary(before_effect)?);
         let current = match fs::metadata(self.media_dir()) {
             Ok(metadata) => stamp(&metadata),
             Err(error) => {
                 // No scan ran: replace any previous report with this failure's
                 // zero counts before callers recover progress from the journal.
                 let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
-                self.finish_check_report(&mut report)?;
+                self.finish_check_report_with_boundary(&mut report, before_effect)?;
                 return Err(error.into());
             }
         };
-        if journal_db::marker(&*self.db()?)?.as_deref() == Some(&current) {
+        if journal_db::marker(&*self.db_with_boundary(before_effect)?)?.as_deref() == Some(&current) {
             let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
             report.completed = true;
-            self.finish_check_report(&mut report)?;
+            self.finish_check_report_with_boundary(&mut report, before_effect)?;
             return Ok(report);
         }
-        self.register_full_report(progress)
+        self.register_full_report_with_boundary(progress, before_effect)
     }
     /// The callback cancels by returning false; completed records remain valid.
     pub fn register_full(&self, progress: impl FnMut(usize, usize) -> bool) -> Result<()> {
         self.register_full_report(progress).map(|_| ())
     }
-    pub fn register_full_report(
+    pub fn register_full_report(&self, progress: impl FnMut(usize, usize) -> bool) -> Result<super::MediaCheckReport> {
+        self.register_full_report_with_boundary(progress, &mut || Ok(()))
+    }
+    fn register_full_report_with_boundary(
         &self,
         mut progress: impl FnMut(usize, usize) -> bool,
+        before_effect: &mut dyn FnMut() -> Result<()>,
     ) -> Result<super::MediaCheckReport> {
         // Refuse suspended stores before touching the folder or callbacks.
-        drop(self.db()?);
+        drop(self.db_with_boundary(before_effect)?);
         let mut report = super::MediaCheckReport::started(self.inner.clock.now_ms());
-        let result = self.scan(&mut progress, &mut report);
+        let result = self.scan(&mut progress, &mut report, before_effect);
         report.completed = result.is_ok();
-        self.finish_check_report(&mut report)?;
+        self.finish_check_report_with_boundary(&mut report, before_effect)?;
         result?;
         Ok(report)
     }
@@ -317,10 +332,11 @@ impl MediaStore {
         &self,
         progress: &mut impl FnMut(usize, usize) -> bool,
         report: &mut super::MediaCheckReport,
+        before_effect: &mut dyn FnMut() -> Result<()>,
     ) -> Result<()> {
         let before = stamp(&fs::metadata(self.media_dir())?);
         let (cutoff, epoch) = {
-            let db = self.db()?;
+            let db = self.db_with_boundary(before_effect)?;
             let cutoff = journal_db::counter(&db)?;
             meguri_model::faultpoint!("media.scan.after_cutoff")?;
             (cutoff, super::sync_state::epoch(&db)?)
@@ -351,12 +367,13 @@ impl MediaStore {
                 continue;
             };
             let (old, independent) = {
-                let db = self.db()?;
+                let db = self.db_with_boundary(before_effect)?;
                 (journal_db::entry(&db, &name)?, super::feed::independent(&db, &name)?)
             };
             let mut path = file.path();
             if name != disk && !old.as_ref().is_some_and(|e| same_stat(e, &m)) {
                 let canonical = self.media_dir().join(&name);
+                before_effect()?;
                 match crate::atomic_file::move_new(&path, &canonical) {
                     Ok(()) => {
                         path = canonical;
@@ -416,11 +433,12 @@ impl MediaStore {
                 stable = false;
                 continue;
             }
-            let db = self.db()?;
+            let db = self.db_with_boundary(before_effect)?;
             if journal_db::entry(&db, &name)? != old || super::feed::independent(&db, &name)? != independent {
                 stable = false;
                 continue;
             }
+            before_effect()?;
             live(&db, &name, hash.clone(), &after, false)?;
             let new = journal_db::entry(&db, &name)?;
             if let Some(new) = new.filter(|e| old.as_ref().is_none_or(|o| o.change_counter != e.change_counter)) {
@@ -438,7 +456,8 @@ impl MediaStore {
         if !progress(total, total) {
             return Err(MediaError::Cancelled);
         }
-        let mut db = self.db()?;
+        let mut db = self.db_with_boundary(before_effect)?;
+        before_effect()?;
         let tx = db.savepoint()?;
         super::feed::observe_registered(&tx, self.media_dir(), &found, cutoff)?;
         super::feed::independent_missing(&tx, &found, cutoff)?;

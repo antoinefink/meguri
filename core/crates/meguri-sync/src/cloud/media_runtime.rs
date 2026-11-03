@@ -1,4 +1,5 @@
 use super::*;
+use crate::cloud::policy::PolicyWork;
 use crate::cloud::{
     incoming::{ApplyIntent, ApplyKey, ApplyKeyRole},
     media::{self as m, *},
@@ -115,13 +116,24 @@ impl Runtime {
         })
     }
     pub(super) fn media_service(&self, collection: &Collection) -> Result<MediaService, RuntimeError> {
+        self.media_service_with_work(collection, &mut PolicyWork::default())
+    }
+    pub(super) fn media_service_with_work(
+        &self,
+        collection: &Collection,
+        work: &mut PolicyWork,
+    ) -> Result<MediaService, RuntimeError> {
         let clock = self
             .adapter_clock
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .ok_or(Error::InvalidData)?;
-        Ok(MediaService::open(collection, clock)?)
+        let result = MediaService::open_with_boundary(collection, clock, &mut || work.media_effect());
+        match result {
+            Err(_) if work.was_rejected() => Err(meguri_engine::EngineError::Cancelled.into()),
+            result => Ok(result?),
+        }
     }
     fn media_authority(&self, collection: &Collection, verified: bool) -> Result<Authority, RuntimeError> {
         let evidence = collection.open_evidence()?;
@@ -291,12 +303,39 @@ impl Runtime {
         apply_commit: Option<MediaFeedApplyCommit>,
         notification: Option<&Authority>,
     ) -> Result<usize, RuntimeError> {
+        self.consume_media_feed_inner_with_work(
+            collection,
+            media,
+            apply_commit,
+            notification,
+            &mut PolicyWork::default(),
+        )
+    }
+    pub(crate) fn consume_media_feed_with_work(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        work: &mut PolicyWork,
+    ) -> Result<usize, RuntimeError> {
+        self.consume_media_feed_inner_with_work(collection, media, None, None, work)
+    }
+    fn consume_media_feed_inner_with_work(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        apply_commit: Option<MediaFeedApplyCommit>,
+        notification: Option<&Authority>,
+        work: &mut PolicyWork,
+    ) -> Result<usize, RuntimeError> {
         let a = self.media_authority(collection, false)?;
         if notification.is_some_and(|issued| issued != &a) {
             return Err(RuntimeError::StaleIncarnation);
         }
         media.check_generation(a.generation)?;
-        media.store().check_changes().map_err(media_error)?;
+        media
+            .store()
+            .check_changes_with_boundary(&mut || work.media_effect())
+            .map_err(|error| work.media_error(error))?;
         let (mut feed_state, intents) = {
             let state = self.state();
             with_tracking_access(|| -> Result<_, Error> {

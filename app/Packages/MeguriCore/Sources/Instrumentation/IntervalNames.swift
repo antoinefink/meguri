@@ -348,6 +348,23 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let manualTransferHistoryEntryRecord = BridgeCall("ManualTransferHistoryEntry.record")
 
     public static let cloudWorkflowPolicy = BridgeCall("CloudWorkflow.policy")
+    public static let cloudPolicyStartInput = BridgeCall("CloudPolicy.start_input")
+    public static let cloudPolicyStartRefreshAccount = BridgeCall("CloudPolicy.start_refresh_account")
+    public static let cloudPolicyStartProjectIdentityRead = BridgeCall("CloudPolicy.start_project_identity_read")
+    public static let cloudPolicyStartStatus = BridgeCall("CloudPolicy.start_status")
+    public static let cloudPolicyStartExecuteCore = BridgeCall("CloudPolicy.start_execute_core")
+    public static let cloudPolicyStartSubmitNative = BridgeCall("CloudPolicy.start_submit_native")
+    public static let cloudPolicyStartCaptureExchange = BridgeCall("CloudPolicy.start_capture_exchange")
+    public static let cloudPolicyStartCompleteExchange = BridgeCall("CloudPolicy.start_complete_exchange")
+    public static let cloudPolicyStartEndBeforeCapture = BridgeCall("CloudPolicy.start_end_before_capture")
+    public static let cloudPolicyStartExchangeReadiness = BridgeCall("CloudPolicy.start_exchange_readiness")
+    public static let cloudPolicyStartPrepareExecution = BridgeCall("CloudPolicy.start_prepare_execution")
+    public static let cloudPolicyOutputResult = BridgeCall("CloudPolicyOutputResult.result")
+    public static let cloudPolicyStatusResult = BridgeCall("CloudPolicyStatusResult.result")
+    public static let cloudPolicyAdmissionResult = BridgeCall("CloudPolicyAdmissionResult.result")
+    public static let cloudPolicyCaptureResult = BridgeCall("CloudPolicyCaptureResult.result")
+    public static let cloudPolicyReadinessResult = BridgeCall("CloudPolicyReadinessResult.result")
+    public static let cloudPolicyExecutionResult = BridgeCall("CloudPolicyExecutionResult.result")
     public static let cloudPolicyInput = BridgeCall("CloudPolicy.input")
     public static let cloudPolicyRefreshAccount = BridgeCall("CloudPolicy.refresh_account")
     public static let cloudPolicyProjectIdentityRead = BridgeCall("CloudPolicy.project_identity_read")
@@ -476,6 +493,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
+        cloudPolicyStartInput, cloudPolicyStartRefreshAccount, cloudPolicyStartProjectIdentityRead, cloudPolicyStartStatus, cloudPolicyStartExecuteCore, cloudPolicyStartSubmitNative, cloudPolicyStartCaptureExchange, cloudPolicyStartCompleteExchange, cloudPolicyStartEndBeforeCapture, cloudPolicyStartExchangeReadiness, cloudPolicyStartPrepareExecution, cloudPolicyOutputResult, cloudPolicyStatusResult, cloudPolicyAdmissionResult, cloudPolicyCaptureResult, cloudPolicyReadinessResult, cloudPolicyExecutionResult,
         cloudWorkflowPolicy, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,
         cloudWorkflowConnection, cloudConnectionBeginConnectionPreview, cloudConnectionLocalPublicationInformation, localPublicationInformation, cloudConnectionConnectionActiveRead, cloudConnectionConnectionEpochRead, cloudConnectionCancelPreview, cloudConnectionConfirmPublication, cloudConnectionConfirmAdoption, cloudConnectionResumeBinding, cloudConnectionNextPublicationWork, cloudConnectionPerformLocal, cloudConnectionSubmitPublicationRequest, cloudConnectionPublicationResult, cloudConnectionAdoptionResult, cloudConnectionPerformAdoptionLocal, cloudConnectionCancelOperation, cloudConnectionTrigger, cloudConnectionRecoveryStatus,

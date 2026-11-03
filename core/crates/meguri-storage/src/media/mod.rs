@@ -132,19 +132,45 @@ impl MediaStore {
         admission: Option<&str>,
         empty_native: Option<(u64, u64)>,
     ) -> Result<Self> {
+        Self::open_checked_with_boundary(collection, clock, random, cancel, admission, empty_native, &mut || {
+            Ok(())
+        })
+    }
+    /// Only the original media owner may call this; the gate runs immediately
+    /// before creating its persistent store, after the owner's acquisition.
+    pub fn open_with_boundary(
+        collection: &Path,
+        clock: Arc<dyn Clock>,
+        random: Arc<dyn RandomSource>,
+        before_effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        Self::open_checked_with_boundary(collection, clock, random, &|| false, None, None, before_effect)
+    }
+    fn open_checked_with_boundary(
+        collection: &Path,
+        clock: Arc<dyn Clock>,
+        random: Arc<dyn RandomSource>,
+        cancel: &dyn Fn() -> bool,
+        admission: Option<&str>,
+        empty_native: Option<(u64, u64)>,
+        before_effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Self> {
         let root = collection.parent().unwrap_or(Path::new("."));
         InitialMediaState::check_pending(root, admission)?;
         let media = root.join("collection.media");
         let trash = root.join("media.trash");
         let staging = root.join("media.staging");
         for dir in [&media, &trash, &staging] {
+            if std::fs::symlink_metadata(dir).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+                before_effect()?;
+            }
             folder::ensure_directory(dir)?;
         }
         let journal = root.join("meguri-media.db");
         if std::fs::symlink_metadata(&journal).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(MediaError::InvalidName);
         }
-        let db = journal_db::open_initial_owned(&journal, empty_native, random.as_ref())?;
+        let db = journal_db::open_initial_owned_with_boundary(&journal, empty_native, random.as_ref(), before_effect)?;
         use std::os::unix::fs::MetadataExt;
         let journal_metadata = std::fs::symlink_metadata(&journal)?;
         if !journal_metadata.is_file() || journal_metadata.nlink() != 1 {
@@ -182,6 +208,9 @@ impl MediaStore {
         Ok(store)
     }
     fn db(&self) -> Result<JournalGuard<'_>> {
+        self.db_with_boundary(&mut || Ok(()))
+    }
+    fn db_with_boundary(&self, before_effect: &mut dyn FnMut() -> Result<()>) -> Result<JournalGuard<'_>> {
         if self.inner.importing.load(Ordering::Acquire) {
             return Err(MediaError::InvalidManifest(
                 "collection media replacement owns the store".into(),
@@ -193,7 +222,7 @@ impl MediaStore {
                 "collection media replacement owns the store".into(),
             ));
         }
-        self.recover_removal_intents(&guard)?;
+        self.recover_removal_intents_with_boundary(&guard, before_effect)?;
         Ok(guard)
     }
     fn import_db(&self) -> Result<JournalGuard<'_>> {

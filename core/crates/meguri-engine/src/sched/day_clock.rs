@@ -201,9 +201,17 @@ impl DayClock {
     /// The writer's side of a check, inside a `Rollover` op (D8 steps 1 to
     /// 5; D9, D10).
     pub(crate) fn run(self: &Arc<DayClock>, ctx: &mut OpContext<'_, '_>) -> Result<DayReport, EngineError> {
+        self.run_with_boundary(ctx, || Ok(()))
+    }
+    fn run_with_boundary(
+        self: &Arc<DayClock>,
+        ctx: &mut OpContext<'_, '_>,
+        before_effect: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<DayReport, EngineError> {
         let now = self.now();
         let (mut cache, seen, before) = {
             let mut state = self.lock();
+            before_effect()?;
             state.parked = false;
             (state.cache.clone(), state.changes, state.reported.clone())
         };
@@ -332,6 +340,14 @@ impl Collection {
     /// it fails with `CollectionUnavailable`, and the check runs by itself
     /// once the collection is `Ready` again (D9).
     pub fn check_rollover(&self) -> Result<DayReport, EngineError> {
+        self.check_rollover_with_boundary(|| Ok(()))
+    }
+    /// A synchronous Rust gate on the existing writer, after blocking ownership
+    /// and before the day query's first mutation. Cached reads do not admit it.
+    pub fn check_rollover_with_boundary(
+        &self,
+        before_effect: impl FnOnce() -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<DayReport, EngineError> {
         if writer::on_writer_thread() {
             return Err(EngineError::InvalidArgument {
                 message: "the day query never runs on the writer thread: run check_rollover before the op and pass \
@@ -346,7 +362,10 @@ impl Collection {
             return Ok(report);
         }
         let this = Arc::clone(day_clock);
-        match self.submit(op_spec(), move |ctx| this.run(ctx)).wait() {
+        match self
+            .submit(op_spec(), move |ctx| this.run_with_boundary(ctx, before_effect))
+            .wait()
+        {
             Ok(result) => Ok(result.value),
             Err(error @ EngineError::CollectionUnavailable { .. }) => {
                 day_clock.park(exec);

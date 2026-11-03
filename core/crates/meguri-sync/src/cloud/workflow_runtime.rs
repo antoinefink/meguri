@@ -1,4 +1,5 @@
 use super::*;
+use crate::cloud::policy::PolicyWork;
 use crate::cloud::{
     row_payload::{self, View},
     workflow::*,
@@ -101,6 +102,9 @@ impl Runtime {
     }
     /// Called off the writer after real ReviewService inputs complete.
     pub fn poll_review(&self, instance: &str) -> Result<Option<u64>, RuntimeError> {
+        self.poll_review_with_work(instance, &mut PolicyWork::default())
+    }
+    pub fn poll_review_with_work(&self, instance: &str, work: &mut PolicyWork) -> Result<Option<u64>, RuntimeError> {
         let _ = self.adapter_now();
         let active = self.active_review();
         let mut s = self.state();
@@ -109,6 +113,7 @@ impl Runtime {
         }
         if let Some(old) = s.last_session {
             if active != Some(old) {
+                work.effect()?;
                 s.actions.observations.push(Observation::SessionEnded { session: old });
                 s.last_session = active;
                 s.cloud.detached.clear();
@@ -117,9 +122,11 @@ impl Runtime {
                 self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
                 return Ok(Some(old));
             }
-        } else {
+        } else if active.is_some() {
+            work.effect()?;
             s.last_session = active;
         }
+        work.check()?;
         Ok(None)
     }
     pub(super) fn workflow_gate(&self) -> Result<(), RuntimeError> {
@@ -2077,9 +2084,18 @@ impl Runtime {
         Ok(saved_count)
     }
     pub fn sync_now(&self, instance: &str, collection: &Collection) -> Result<u64, RuntimeError> {
+        self.sync_now_with_work(instance, collection, &mut PolicyWork::default())
+    }
+    pub fn sync_now_with_work(
+        &self,
+        instance: &str,
+        collection: &Collection,
+        work: &mut PolicyWork,
+    ) -> Result<u64, RuntimeError> {
         let _ = self.adapter_now();
-        self.poll_review(instance)?;
-        self.consume_media_feed(collection, &self.media_service(collection)?)?;
+        self.poll_review_with_work(instance, work)?;
+        let media = self.media_service_with_work(collection, work)?;
+        self.consume_media_feed_with_work(collection, &media, work)?;
         if self.active_review().is_some() {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }

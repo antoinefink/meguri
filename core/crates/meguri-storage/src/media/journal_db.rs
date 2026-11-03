@@ -45,6 +45,14 @@ pub(super) fn open_initial_owned(
     empty_native: Option<(u64, u64)>,
     random: &dyn meguri_model::rng::RandomSource,
 ) -> Result<Connection> {
+    open_initial_owned_with_boundary(path, empty_native, random, &mut || Ok(()))
+}
+pub(super) fn open_initial_owned_with_boundary(
+    path: &Path,
+    empty_native: Option<(u64, u64)>,
+    random: &dyn meguri_model::rng::RandomSource,
+    before_effect: &mut dyn FnMut() -> Result<()>,
+) -> Result<Connection> {
     use std::os::unix::fs::MetadataExt;
     let owned_empty = if let Some(expected) = empty_native {
         let m = std::fs::symlink_metadata(path)?;
@@ -58,7 +66,8 @@ pub(super) fn open_initial_owned(
     const APPLICATION_ID: i64 = 0x4d47524d;
     const VERSION: i64 = 3;
     let mut old_version = 0;
-    if !owned_empty && path.try_exists()? {
+    let exists = path.try_exists()?;
+    if !owned_empty && exists {
         // Probe a copy when SQLite might need sidecar recovery. Even a refused
         // foreign WAL database must not acquire new sidecars in its directory.
         let temporary = tempfile::tempdir()?;
@@ -78,11 +87,20 @@ pub(super) fn open_initial_owned(
                 "unsupported media journal format or version".into(),
             ));
         }
+        meguri_model::faultpoint!("media.journal.after_probe")?;
+    }
+    // Creation is the first effect for a missing journal. For an existing one,
+    // connection setup grants no authority to mutate it after the private probe.
+    if !exists {
+        before_effect()?;
     }
     let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;
     db.busy_timeout(std::time::Duration::from_secs(5))?;
     #[cfg(target_vendor = "apple")]
     db.execute_batch("PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
+    // WAL setup may recover/write the original journal; admission belongs here,
+    // after the private probe and read-only connection configuration.
+    before_effect()?;
     db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if old_version == 0 {

@@ -1460,6 +1460,127 @@ fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom
     runtime.status().unwrap().binding.unwrap()
 }
 
+struct HeldResumeAccount {
+    identity: Mutex<IdentityStatus>,
+    after_sample: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+impl IdentityProvider for HeldResumeAccount {
+    fn read_identity(&self, _: &cloud::BuildScope) -> IdentityStatus {
+        let identity = self.identity.lock().unwrap().clone();
+        let hook = self.after_sample.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        identity
+    }
+}
+
+#[test]
+fn policy_work_retained_resume_provider_cancellation_preserves_offer_until_invalidation() {
+    use cloud::policy::{DeviceEvent, DriverError, PolicyWork};
+    use meguri_sync::cloud::runtime::RuntimeError;
+    use std::sync::mpsc;
+
+    for after_effect in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("resume-policy-work");
+        generated(&dir);
+        let available = IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()));
+        let account = Arc::new(HeldResumeAccount {
+            identity: Mutex::new(available.clone()),
+            after_sample: Mutex::new(None),
+        });
+        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
+        let binding = publish_actual_collection(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        *account.identity.lock().unwrap() = IdentityStatus::SignedOut;
+        runtime.refresh_identity().unwrap();
+        *account.identity.lock().unwrap() = available.clone();
+        runtime.refresh_identity().unwrap();
+        let preview = actual_preview(&host, &mut service, &scope());
+        assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+        assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+        let driver = host.cloud_policy_driver().unwrap();
+        let before = driver.state();
+        let guard = runtime.adapter_guard();
+        let cancel = meguri_engine::CancelToken::new();
+        // Fail the actual validation read without an account-refresh mutation.
+        *account.identity.lock().unwrap() = IdentityStatus::SignedOut;
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        *account.after_sample.lock().unwrap() = Some(Box::new(move || {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(10)).expect("provider release");
+        }));
+        let (projected, projection_reached) = mpsc::channel();
+        let (projection_release, projection_resume) = mpsc::channel();
+        if after_effect {
+            driver.set_projection_hook_for_testing(move || {
+                projected.send(()).unwrap();
+                projection_resume
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("projection release");
+            });
+        }
+        let result = std::thread::scope(|threads| {
+            let worker = threads.spawn(|| {
+                driver.handle_with_work(
+                    host.engine().state(),
+                    collection.generation(),
+                    DeviceEvent::Network { reachable: true },
+                    &mut PolicyWork::new(&cancel),
+                )
+            });
+            let held = reached.recv_timeout(Duration::from_secs(5));
+            if !after_effect {
+                cancel.cancel();
+            }
+            let _ = release.send(());
+            let projected = if after_effect {
+                let held = projection_reached.recv_timeout(Duration::from_secs(5));
+                cancel.cancel();
+                let _ = projection_release.send(());
+                Some(held)
+            } else {
+                None
+            };
+            let result = worker.join().unwrap();
+            held.expect("real retained-offer provider validation held");
+            if let Some(held) = projected {
+                held.expect("invalidation completed before cancellation");
+            }
+            result
+        });
+        *account.identity.lock().unwrap() = available;
+        if after_effect {
+            assert!(result.is_ok(), "a real invalidation must preserve its actual outcome");
+            assert_eq!(runtime.resume_binding_offer(), None);
+        } else {
+            assert!(matches!(
+                result,
+                Err(DriverError::Runtime(RuntimeError::Engine(
+                    meguri_engine::EngineError::Cancelled
+                )))
+            ));
+            assert_eq!(driver.state(), before);
+            assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+        }
+        assert_eq!(runtime.adapter_guard(), guard);
+        assert!(matches!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut)
+        ));
+        // Verify that a provider error also clears the retained offer through the older helper.
+        *account.identity.lock().unwrap() = IdentityStatus::SignedOut;
+        assert_eq!(runtime.resume_binding_offer(), None);
+        *account.identity.lock().unwrap() = IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()));
+        assert_eq!(runtime.resume_binding_offer(), None);
+        host.close().unwrap();
+    }
+}
+
 #[derive(Debug)]
 struct HeldBindProvider {
     random: SeededRandom,

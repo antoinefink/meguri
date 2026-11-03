@@ -597,6 +597,12 @@ fn rig_with_provider_and_deck(
     (fixture, sdk, incoming, deck)
 }
 fn unbound_fixture(identity: Arc<dyn r::IdentityProvider>) -> (Fixture, meguri_model::ids::DeckId) {
+    unbound_fixture_with_clock(identity, None)
+}
+fn unbound_fixture_with_clock(
+    identity: Arc<dyn r::IdentityProvider>,
+    policy_clock: Option<Arc<dyn meguri_model::clock::Clock>>,
+) -> (Fixture, meguri_model::ids::DeckId) {
     let directory = tempfile::tempdir().unwrap();
     let data = directory.path().join("collection");
     let backups = directory.path().join("backups");
@@ -609,7 +615,7 @@ fn unbound_fixture(identity: Arc<dyn r::IdentityProvider>) -> (Fixture, meguri_m
         data,
         backups,
         directory.path().join("widget"),
-        clock.clone(),
+        policy_clock.unwrap_or_else(|| clock.clone()),
         random.clone(),
         Arc::new(meguri_storage::space::StatvfsSpace),
     );
@@ -1811,115 +1817,127 @@ fn real_generation_swap_invalidates_retained_policy_before_any_queue_callback() 
 
 #[test]
 fn failed_durable_evidence_returns_original_stop_followups_as_typed_output() {
-    let (fixture, sdk, _) = rig();
-    let policy = fixture.workflow.policy().unwrap();
-    drain(
-        &policy,
-        policy
-            .clone()
-            .input(CloudPolicyEvent::Operation {
-                instance: sdk.instance_id.clone(),
-                operation: CloudPolicyOperation {
-                    zone: CloudPolicyZone::Collection,
-                    kind: CloudPolicyOperationKind::Fetch,
-                },
-                phase: CloudPolicyActivity::Started,
-            })
-            .unwrap(),
-    );
-    fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
-    assert!(
-        !fixture
+    for asynchronous in [false, true] {
+        let (fixture, sdk, _) = rig();
+        let policy = fixture.workflow.policy().unwrap();
+        drain(
+            &policy,
+            policy
+                .clone()
+                .input(CloudPolicyEvent::Operation {
+                    instance: sdk.instance_id.clone(),
+                    operation: CloudPolicyOperation {
+                        zone: CloudPolicyZone::Collection,
+                        kind: CloudPolicyOperationKind::Fetch,
+                    },
+                    phase: CloudPolicyActivity::Started,
+                })
+                .unwrap(),
+        );
+        fixture.workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+        assert!(
+            !fixture
+                .workflow
+                .host
+                .cloud_policy_driver()
+                .unwrap()
+                .state()
+                .engine
+                .unwrap()
+                .stopping
+        );
+        let run = run(&policy);
+        let CloudPolicyAction::RunExchange { exchange, .. } = run.action else {
+            unreachable!()
+        };
+        let record = select(
+            &policy,
+            policy
+                .clone()
+                .end_before_capture(exchange, CloudPolicyEarlyEnd::Cancelled)
+                .unwrap(),
+            |a| matches!(a, CloudPolicyAction::RecordExchange { .. }),
+        );
+        fixture
             .workflow
-            .host
-            .cloud_policy_driver()
-            .unwrap()
-            .state()
-            .engine
-            .unwrap()
-            .stopping
-    );
-    let run = run(&policy);
-    let CloudPolicyAction::RunExchange { exchange, .. } = run.action else {
-        unreachable!()
-    };
-    let record = select(
-        &policy,
-        policy
-            .clone()
-            .end_before_capture(exchange, CloudPolicyEarlyEnd::Cancelled)
-            .unwrap(),
-        |a| matches!(a, CloudPolicyAction::RecordExchange { .. }),
-    );
-    fixture
-        .workflow
-        .core
-        .policy_evidence_constraint_for_testing(true)
-        .unwrap();
-    let output = policy.clone().execute_core(record.handle).unwrap();
-    fixture
-        .workflow
-        .core
-        .policy_evidence_constraint_for_testing(false)
-        .unwrap();
-    let CloudPolicyOutput::CoreActionFailed { error, commands } = output else {
-        panic!("failure followups lost")
-    };
-    assert!(matches!(
-        error,
-        CoreError::CloudConnection {
-            failure: crate::cloud_connection::CloudConnectionFailure::Tracking
-        }
-    ));
-    let evidence = fixture
-        .workflow
-        .core
-        .policy_projection(
-            meguri_sync::cloud::policy::Lifecycle::Ready,
-            fixture.workflow.host.engine().generation().0,
-        )
-        .unwrap()
-        .evidence;
-    assert!(evidence.quiet_ms.is_none() && evidence.last_attempt.is_none() && evidence.last_completed.is_none());
-    let stops: Vec<_> = commands
-        .iter()
-        .filter(|c| matches!(c.action, CloudPolicyAction::StopEngine { .. }))
-        .map(|c| c.handle.clone())
-        .collect();
-    assert_eq!(stops.len(), 1, "required StopEngine");
-    let queue = Arc::new(Queue(AtomicUsize::new(0)));
-    for command in commands {
-        if matches!(command.action, CloudPolicyAction::StopEngine { .. }) {
-            assert!(matches!(
-                policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
-                CloudPolicyAdmission::Admitted { accepted: true }
-            ));
-        } else {
-            drain(
-                &policy,
-                CloudPolicyOutput::Commands {
-                    commands: vec![command],
-                },
+            .core
+            .policy_evidence_constraint_for_testing(true)
+            .unwrap();
+        let output = if asynchronous {
+            let events = fixture.workflow.host.engine().stream().subscribe();
+            let started = policy.clone().start_execute_core(record.handle).unwrap();
+            assert_eq!(
+                policy_job_tests::finished(&events, started.handle.id),
+                meguri_engine::JobOutcome::Succeeded
             );
-        }
-    }
-    assert_eq!(queue.0.load(Ordering::SeqCst), 1);
-    fixture.workflow.retire_sdk(sdk.instance_id.clone(), true).unwrap();
-    fixture.workflow.release_sdk(sdk.instance_id).unwrap();
-    failure_is(
-        policy.clone().submit_native(stops[0].clone(), queue.clone()),
-        CloudPolicyFailure::StaleCommand,
-    );
-    assert_eq!(queue.0.load(Ordering::SeqCst), 1);
-    let status = policy.status().unwrap();
-    assert!(status.as_of_ms.is_none() && status.last_attempt.is_none() && status.last_completed.is_none());
-    assert!(
-        status
-            .attention
+            started.result.result().unwrap().unwrap()
+        } else {
+            policy.clone().execute_core(record.handle).unwrap()
+        };
+        fixture
+            .workflow
+            .core
+            .policy_evidence_constraint_for_testing(false)
+            .unwrap();
+        let CloudPolicyOutput::CoreActionFailed { error, commands } = output else {
+            panic!("failure followups lost")
+        };
+        assert!(matches!(
+            error,
+            CoreError::CloudConnection {
+                failure: crate::cloud_connection::CloudConnectionFailure::Tracking
+            }
+        ));
+        let evidence = fixture
+            .workflow
+            .core
+            .policy_projection(
+                meguri_sync::cloud::policy::Lifecycle::Ready,
+                fixture.workflow.host.engine().generation().0,
+            )
+            .unwrap()
+            .evidence;
+        assert!(evidence.quiet_ms.is_none() && evidence.last_attempt.is_none() && evidence.last_completed.is_none());
+        let stops: Vec<_> = commands
             .iter()
-            .any(|a| a.kind == CloudPolicyAttention::TrackingError)
-    );
-    fixture.workflow.host.close().unwrap();
+            .filter(|c| matches!(c.action, CloudPolicyAction::StopEngine { .. }))
+            .map(|c| c.handle.clone())
+            .collect();
+        assert_eq!(stops.len(), 1, "required StopEngine");
+        let queue = Arc::new(Queue(AtomicUsize::new(0)));
+        for command in commands {
+            if matches!(command.action, CloudPolicyAction::StopEngine { .. }) {
+                assert!(matches!(
+                    policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
+                    CloudPolicyAdmission::Admitted { accepted: true }
+                ));
+            } else {
+                drain(
+                    &policy,
+                    CloudPolicyOutput::Commands {
+                        commands: vec![command],
+                    },
+                );
+            }
+        }
+        assert_eq!(queue.0.load(Ordering::SeqCst), 1);
+        fixture.workflow.retire_sdk(sdk.instance_id.clone(), true).unwrap();
+        fixture.workflow.release_sdk(sdk.instance_id).unwrap();
+        failure_is(
+            policy.clone().submit_native(stops[0].clone(), queue.clone()),
+            CloudPolicyFailure::StaleCommand,
+        );
+        assert_eq!(queue.0.load(Ordering::SeqCst), 1);
+        let status = policy.status().unwrap();
+        assert!(status.as_of_ms.is_none() && status.last_attempt.is_none() && status.last_completed.is_none());
+        assert!(
+            status
+                .attention
+                .iter()
+                .any(|a| a.kind == CloudPolicyAttention::TrackingError)
+        );
+        fixture.workflow.host.close().unwrap();
+    }
 }
 
 #[test]
@@ -2281,3 +2299,6 @@ fn policy_without_binding_has_unknown_media_counts() {
     );
     fixture.workflow.host.close().unwrap();
 }
+
+#[path = "cloud_policy_job_tests.rs"]
+mod policy_job_tests;

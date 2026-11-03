@@ -7,7 +7,13 @@ impl Runtime {
     /// Sample this Runtime's original platform provider, never a UI identity or
     /// the process-global configuration for a later Host. No core lock is held.
     pub fn policy_account_identity(&self) -> Result<(u64, IdentityStatus), RuntimeError> {
-        let request = self.adapter_begin_identity_read(false, None)?;
+        self.policy_account_identity_with_work(&mut PolicyWork::default())
+    }
+    pub fn policy_account_identity_with_work(
+        &self,
+        work: &mut PolicyWork,
+    ) -> Result<(u64, IdentityStatus), RuntimeError> {
+        let request = self.adapter_begin_identity_read_with_work(false, None, work)?;
         let identity = self.inputs.identity.read_identity(&self.inputs.scope);
         self.adapter_validate_identity_read(request)?;
         Ok((request, identity))
@@ -26,8 +32,16 @@ impl Runtime {
     }
 
     pub fn policy_projection(&self, lifecycle: Lifecycle, generation: u64) -> Result<Projection, RuntimeError> {
+        self.policy_projection_with_work(lifecycle, generation, &mut PolicyWork::default())
+    }
+    pub fn policy_projection_with_work(
+        &self,
+        lifecycle: Lifecycle,
+        generation: u64,
+        work: &mut PolicyWork,
+    ) -> Result<Projection, RuntimeError> {
         let session = self.active_review();
-        let resume_binding = self.resume_binding_offer();
+        let resume_binding = self.resume_binding_offer_with_work(work)?;
         // Read the existing sidecar fact, outside Runtime/tracking locks. This grants no authority.
         let publication =
             meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
@@ -225,11 +239,20 @@ impl Runtime {
         guard: &crate::cloud::adapter::Guard,
         update: Update,
     ) -> Result<(), RuntimeError> {
+        self.policy_update_pending_with_work(guard, update, &mut PolicyWork::default())
+    }
+    pub(crate) fn policy_update_pending_with_work(
+        &self,
+        guard: &crate::cloud::adapter::Guard,
+        update: Update,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let _ = self.adapter_now();
         let mut s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
+        work.effect()?;
         if update == Update::Full {
             s.policy.parked.clear();
         }
@@ -243,25 +266,33 @@ impl Runtime {
         )?;
         Ok(())
     }
-    pub(crate) fn policy_tracking_failed(&self) {
-        self.state().tracking_stopped = true;
+    pub(crate) fn policy_tracking_failed_with_work(&self, work: &mut PolicyWork) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        work.effect()?;
+        s.tracking_stopped = true;
+        Ok(())
     }
     pub(crate) fn policy_tracking_stopped(&self) -> bool {
         self.state().tracking_stopped
     }
-    pub(crate) fn policy_probe(&self, guard: &crate::cloud::adapter::Guard) -> Result<(), RuntimeError> {
+    pub(crate) fn policy_probe_with_work(
+        &self,
+        guard: &crate::cloud::adapter::Guard,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
         let mut s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        let result = with_tracking_access(|| {
-            s.store
+        let result = with_tracking_access(|| -> Result<_, RuntimeError> {
+            work.effect()?;
+            Ok(s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .record_cloud_probe(binding, at_ms)
-        });
+                .record_cloud_probe(binding, at_ms))
+        })?;
         match result {
             Ok(()) if !s.invalidation_exhausted => {
                 s.tracking_stopped = false;
@@ -274,22 +305,24 @@ impl Runtime {
             }
         }
     }
-    pub(crate) fn policy_record_quiet(
+    pub(crate) fn policy_record_quiet_with_work(
         &self,
         guard: &crate::cloud::adapter::Guard,
         at_ms: i64,
+        work: &mut PolicyWork,
     ) -> Result<Evidence, RuntimeError> {
         let mut s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        let result = with_tracking_access(|| {
-            s.store
+        let result = with_tracking_access(|| -> Result<_, RuntimeError> {
+            work.effect()?;
+            Ok(s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .record_cloud_quiet(binding, at_ms)
-        });
+                .record_cloud_quiet(binding, at_ms))
+        })?;
         if result.is_err() {
             s.tracking_stopped = true;
         }
@@ -305,12 +338,13 @@ impl Runtime {
     }
     /// Only a successful day check leaves a receipt. A concurrent check is refused;
     /// a failed check releases its reservation so an explicit later call can try it.
-    pub(crate) fn policy_record_exchange(
+    pub(crate) fn policy_record_exchange_with_work(
         &self,
         collection: &Collection,
         guard: &crate::cloud::adapter::Guard,
         owner: &str,
         record: &ExchangeRecord,
+        work: &mut PolicyWork,
     ) -> Result<Evidence, RuntimeError> {
         let key = (owner.to_owned(), record.exchange);
         let rollover = {
@@ -329,16 +363,21 @@ impl Runtime {
                     .policy_exchange_recorded(binding, owner, record.exchange)
             })?;
             if recorded {
-                return with_tracking_access(|| {
+                let evidence = with_tracking_access(|| -> Result<_, RuntimeError> {
                     Ok(s.store
                         .as_ref()
                         .ok_or(Error::Database)?
                         .cloud_policy_evidence(binding)?)
-                });
+                })?;
+                work.check()?;
+                return Ok(evidence);
             }
             if s.policy.rollovers.contains(&key) {
                 false
-            } else if s.policy.rollovers_running.insert(key.clone()) {
+            } else if {
+                work.effect()?;
+                s.policy.rollovers_running.insert(key.clone())
+            } {
                 true
             } else {
                 return Err(meguri_engine::EngineError::Busy {
@@ -359,12 +398,13 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        let result = with_tracking_access(|| {
-            s.store
+        let result = with_tracking_access(|| -> Result<_, RuntimeError> {
+            work.effect()?;
+            Ok(s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .record_cloud_policy_exchange(binding, owner, record)
-        });
+                .record_cloud_policy_exchange(binding, owner, record))
+        })?;
         if result.is_err() {
             s.tracking_stopped = true;
         }
@@ -377,6 +417,16 @@ impl Runtime {
         retry_failed: bool,
         timeout: Duration,
     ) -> Result<crate::cloud::incoming::IncomingDisposition, RuntimeError> {
+        self.policy_apply_ready_with_work(collection, guard, retry_failed, timeout, &mut PolicyWork::default())
+    }
+    pub(crate) fn policy_apply_ready_with_work(
+        &self,
+        collection: &Collection,
+        guard: &crate::cloud::adapter::Guard,
+        retry_failed: bool,
+        timeout: Duration,
+        work: &mut PolicyWork,
+    ) -> Result<crate::cloud::incoming::IncomingDisposition, RuntimeError> {
         let sdk = {
             let mut s = self.state();
             if &Self::adapter_guard_locked(&s) != guard {
@@ -385,12 +435,15 @@ impl Runtime {
             let sdk = s.adapter.sdk.as_ref().ok_or(RuntimeError::StaleIncarnation)?.id.clone();
             Self::sdk_locked(&s, &sdk)?;
             if retry_failed {
+                work.effect()?;
                 s.incoming.retry_granted = true;
             }
             sdk
         };
-        collection.check_rollover()?;
-        self.drain_native_incoming(collection, &sdk, timeout)
+        let authority = work.clone();
+        collection.check_rollover_with_boundary(move || authority.engine_effect())?;
+        work.check()?;
+        self.drain_native_incoming_with_work(collection, &sdk, timeout, work)
     }
 }
 

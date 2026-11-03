@@ -27,10 +27,16 @@ impl MediaCheckReport {
     }
 }
 impl MediaStore {
-    pub(super) fn finish_check_report(&self, report: &mut MediaCheckReport) -> Result<()> {
+    pub(super) fn finish_check_report_with_boundary(
+        &self,
+        report: &mut MediaCheckReport,
+        before_effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
         report.finished_at = self.inner.clock.now_ms();
         let value = serde_json::to_string(report).map_err(|e| MediaError::Database(e.to_string()))?;
-        self.db()?.execute(
+        let db = self.db_with_boundary(before_effect)?;
+        before_effect()?;
+        db.execute(
             "INSERT INTO meta VALUES('last_check_report',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             params![value],
         )?;

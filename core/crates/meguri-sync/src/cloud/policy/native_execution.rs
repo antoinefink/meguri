@@ -98,7 +98,16 @@ impl Driver {
         expired: bool,
         native_ready: bool,
     ) -> Result<(bool, Option<ExchangeOutcome>), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.native_exchange_readiness_with_work(command, expired, native_ready, &mut PolicyWork::default())
+    }
+    pub fn native_exchange_readiness_with_work(
+        &self,
+        command: &Command,
+        expired: bool,
+        native_ready: bool,
+        work: &mut PolicyWork,
+    ) -> Result<(bool, Option<ExchangeOutcome>), DriverError> {
+        let owned = self.lock_for_work(work)?;
         let ActionKind::RunExchange { exchange, .. } = command.action.kind else {
             return Err(DriverError::NotCoreAction);
         };
@@ -198,9 +207,18 @@ impl Driver {
     }
 
     pub fn native_origin(&self, command: &Command) -> Result<Option<String>, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.native_origin_with_work(command, &mut PolicyWork::default())
+    }
+    pub fn native_origin_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<Option<String>, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
-        Ok(self.runtime.policy_sdk_origin(&command.backend_guard)?)
+        let sdk = self.runtime.policy_sdk_origin(&command.backend_guard)?;
+        work.check()?;
+        Ok(sdk)
     }
 
     pub fn register_native_sdk(&self, command: &Command) -> Result<(String, Option<Vec<u8>>, String), DriverError> {

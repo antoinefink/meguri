@@ -1081,62 +1081,29 @@ impl CloudWorkflow {
 impl CloudPolicy {
     pub fn input(self: Arc<Self>, event: CloudPolicyEvent) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.input");
-        self.validate_owner()?;
-        let result = self.host.cloud_policy_input(event.into());
-        self.output(result)
+        self.input_with_work(event, &mut p::PolicyWork::default())
     }
     /// Samples the original Runtime's platform provider through its guarded
     /// identity-read workflow. No UI account string is accepted.
     pub fn refresh_account(self: Arc<Self>) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.refresh_account");
-        self.validate_owner()?;
-        let sampled = self
-            .host
-            .cloud_runtime()
-            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
-            .policy_account_identity();
-        self.validate_owner()?;
-        let (request, identity) = sampled.map_err(|error| match error {
-            meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation => failure(CloudPolicyFailure::StaleCommand),
-            error => crate::cloud_connection::error(error),
-        })?;
-        let result = self
-            .host
-            .cloud_policy_input(p::DeviceEvent::IdentityRead { request, identity });
-        self.output(result)
+        self.refresh_account_with_work(&mut p::PolicyWork::default())
     }
     /// Project an already accepted read from this original Host/Runtime. The
     /// request is a lookup key, never frontend-supplied identity authority.
     pub fn project_identity_read(self: Arc<Self>, request: u64) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.project_identity_read");
-        self.validate_owner()?;
-        let result = self
-            .host
-            .cloud_policy_input(p::DeviceEvent::AcceptedIdentityRead { request });
-        // Preserve Closed/GenerationChanged precedence over stale proof.
-        self.validate_owner()?;
-        let result = result.map_err(|error| match error {
-            p::DriverError::Runtime(meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation) => {
-                p::DriverError::StaleCommand
-            }
-            error => error,
-        });
-        self.output(result)
+        self.project_identity_read_with_work(request, &mut p::PolicyWork::default())
     }
     /// Read-only: lifecycle/session/tracking changes enter through Refresh,
     /// never by supplying CoreFacts or generation in a DTO.
     pub fn status(&self) -> Result<CloudPolicyStatus, CoreError> {
         callback::enter("CloudPolicy.status");
-        self.validate_owner()?;
-        Ok(self.driver()?.status().into())
+        self.status_with_work(&mut p::PolicyWork::default())
     }
     pub fn execute_core(self: Arc<Self>, command: Arc<CloudPolicyCommand>) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.execute_core");
-        self.owns(&command)?;
-        let result = self
-            .host
-            .execute_cloud_policy_core(&command.command, Duration::from_secs(1));
-        self.output(result)
+        self.execute_core_with_work(command, &mut p::PolicyWork::default())
     }
     /// Revalidation is the last step before the synchronous native enqueue,
     /// with no await/provider call/lock held across the foreign callback.
@@ -1147,66 +1114,18 @@ impl CloudPolicy {
         queue: Arc<dyn CloudPolicyQueue>,
     ) -> Result<CloudPolicyAdmission, CoreError> {
         callback::enter("CloudPolicy.submit_native");
-        self.owns(&command)?;
-        match &command.command.action.kind {
-            // These actions use dedicated retained execution/result ports.
-            // General queue admission cannot substitute for those capabilities.
-            p::ActionKind::RunCleanup
-            | p::ActionKind::ReadBlobs { .. }
-            | p::ActionKind::RetryAssetEntries
-            | p::ActionKind::ResumeMedia
-            | p::ActionKind::DeleteZones => {
-                return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable));
-            }
-            p::ActionKind::UpdatePending(_)
-            | p::ActionKind::ApplyReady { .. }
-            | p::ActionKind::RecordExchange(_)
-            | p::ActionKind::RecordQuietPoint { .. }
-            | p::ActionKind::ProbeTracking
-            | p::ActionKind::StatusChanged(_) => {
-                return Err(failure(CloudPolicyFailure::NotNativeAction));
-            }
-            _ => {}
-        }
-        match self.driver()?.native_disposition(&command.command) {
-            Ok(p::NativeDisposition::NoOperation) => return Ok(CloudPolicyAdmission::NoOperation),
-            Ok(p::NativeDisposition::Enqueue) => {}
-            Err(error) => {
-                return Ok(CloudPolicyAdmission::PolicyOutput {
-                    output: self.output(Err(error))?,
-                });
-            }
-        }
-        Ok(CloudPolicyAdmission::Admitted {
-            accepted: callback::invoke("CloudPolicyQueue.enqueue", || queue.enqueue()),
-        })
+        self.submit_native_with_work(command, queue, &mut p::PolicyWork::default())
     }
     pub fn capture_exchange(
         self: Arc<Self>,
         command: Arc<CloudPolicyCommand>,
     ) -> Result<CloudPolicyCapture, CoreError> {
         callback::enter("CloudPolicy.capture_exchange");
-        self.owns(&command)?;
-        let collection = self.collection()?;
-        match self.driver()?.capture_exchange(&command.command, &collection) {
-            Ok(id) => Ok(CloudPolicyCapture {
-                runtime_exchange: Some(id),
-                output: CloudPolicyOutput::Commands { commands: Vec::new() },
-            }),
-            Err(error) => Ok(CloudPolicyCapture {
-                runtime_exchange: None,
-                output: self.output(Err(error))?,
-            }),
-        }
+        self.capture_exchange_with_work(command, &mut p::PolicyWork::default())
     }
     pub fn complete_exchange(self: Arc<Self>, exchange: u64) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.complete_exchange");
-        self.collection()?;
-        let engine = self.host.engine();
-        self.output(
-            self.driver()?
-                .complete_exchange(exchange, engine.state(), engine.generation()),
-        )
+        self.complete_exchange_with_work(exchange, &mut p::PolicyWork::default())
     }
     pub fn end_before_capture(
         self: Arc<Self>,
@@ -1214,12 +1133,7 @@ impl CloudPolicy {
         outcome: CloudPolicyEarlyEnd,
     ) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.end_before_capture");
-        self.collection()?;
-        let engine = self.host.engine();
-        self.output(
-            self.driver()?
-                .end_before_capture(exchange, outcome.into(), engine.state(), engine.generation()),
-        )
+        self.end_before_capture_with_work(exchange, outcome, &mut p::PolicyWork::default())
     }
 }
 
@@ -1276,3 +1190,166 @@ mod execution;
 pub use execution::{CloudPolicyExecution, CloudPolicyOperationFacts, CloudPolicyReadiness};
 
 pub(crate) use execution::operation_error_class;
+
+#[path = "cloud_policy_jobs.rs"]
+mod policy_jobs;
+pub use policy_jobs::*;
+
+impl CloudPolicy {
+    fn input_with_work(
+        self: Arc<Self>,
+        event: CloudPolicyEvent,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.validate_owner()?;
+        let result = self.host.cloud_policy_input_with_work(event.into(), work);
+        self.output(result)
+    }
+    fn refresh_account_with_work(self: Arc<Self>, work: &mut p::PolicyWork) -> Result<CloudPolicyOutput, CoreError> {
+        self.validate_owner()?;
+        let sampled = self
+            .host
+            .cloud_runtime()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
+            .policy_account_identity_with_work(work);
+        self.validate_owner()?;
+        let (request, identity) = sampled.map_err(|error| match error {
+            meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation => failure(CloudPolicyFailure::StaleCommand),
+            error => crate::cloud_connection::error(error),
+        })?;
+        let result = self
+            .host
+            .cloud_policy_input_with_work(p::DeviceEvent::IdentityRead { request, identity }, work);
+        self.output(result)
+    }
+    fn project_identity_read_with_work(
+        self: Arc<Self>,
+        request: u64,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.validate_owner()?;
+        let result = self
+            .host
+            .cloud_policy_input_with_work(p::DeviceEvent::AcceptedIdentityRead { request }, work);
+        // Preserve Closed/GenerationChanged precedence over stale proof.
+        self.validate_owner()?;
+        let result = result.map_err(|error| match error {
+            p::DriverError::Runtime(meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation) => {
+                p::DriverError::StaleCommand
+            }
+            error => error,
+        });
+        self.output(result)
+    }
+    fn status_with_work(&self, work: &mut p::PolicyWork) -> Result<CloudPolicyStatus, CoreError> {
+        self.validate_owner()?;
+        let status = self
+            .driver()?
+            .status_with_work(work)
+            .map_err(execution::execution_error)?;
+        work.check().map_err(crate::cloud_connection::error)?;
+        self.validate_owner()?;
+        Ok(status.into())
+    }
+    fn execute_core_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.owns(&command)?;
+        let result = self
+            .host
+            .execute_cloud_policy_core_with_work(&command.command, Duration::from_secs(1), work);
+        self.output(result)
+    }
+    fn submit_native_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        queue: Arc<dyn CloudPolicyQueue>,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyAdmission, CoreError> {
+        self.owns(&command)?;
+        match &command.command.action.kind {
+            // These actions use dedicated retained execution/result ports.
+            // General queue admission cannot substitute for those capabilities.
+            p::ActionKind::RunCleanup
+            | p::ActionKind::ReadBlobs { .. }
+            | p::ActionKind::RetryAssetEntries
+            | p::ActionKind::ResumeMedia
+            | p::ActionKind::DeleteZones => {
+                return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable));
+            }
+            p::ActionKind::UpdatePending(_)
+            | p::ActionKind::ApplyReady { .. }
+            | p::ActionKind::RecordExchange(_)
+            | p::ActionKind::RecordQuietPoint { .. }
+            | p::ActionKind::ProbeTracking
+            | p::ActionKind::StatusChanged(_) => {
+                return Err(failure(CloudPolicyFailure::NotNativeAction));
+            }
+            _ => {}
+        }
+        match self.driver()?.native_disposition_with_work(&command.command, work) {
+            Ok(p::NativeDisposition::NoOperation) => return Ok(CloudPolicyAdmission::NoOperation),
+            Ok(p::NativeDisposition::Enqueue) => {}
+            Err(error) => {
+                return Ok(CloudPolicyAdmission::PolicyOutput {
+                    output: self.output(Err(error))?,
+                });
+            }
+        }
+        work.effect().map_err(crate::cloud_connection::error)?;
+        Ok(CloudPolicyAdmission::Admitted {
+            accepted: callback::invoke("CloudPolicyQueue.enqueue", || queue.enqueue()),
+        })
+    }
+    fn capture_exchange_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyCapture, CoreError> {
+        self.owns(&command)?;
+        let collection = self.collection()?;
+        match self
+            .driver()?
+            .capture_exchange_with_work(&command.command, &collection, work)
+        {
+            Ok(id) => Ok(CloudPolicyCapture {
+                runtime_exchange: Some(id),
+                output: CloudPolicyOutput::Commands { commands: Vec::new() },
+            }),
+            Err(error) => Ok(CloudPolicyCapture {
+                runtime_exchange: None,
+                output: self.output(Err(error))?,
+            }),
+        }
+    }
+    fn complete_exchange_with_work(
+        self: Arc<Self>,
+        exchange: u64,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.collection()?;
+        let engine = self.host.engine();
+        self.output(
+            self.driver()?
+                .complete_exchange_with_work(exchange, engine.state(), engine.generation(), work),
+        )
+    }
+    fn end_before_capture_with_work(
+        self: Arc<Self>,
+        exchange: u64,
+        outcome: CloudPolicyEarlyEnd,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.collection()?;
+        let engine = self.host.engine();
+        self.output(self.driver()?.end_before_capture_with_work(
+            exchange,
+            outcome.into(),
+            engine.state(),
+            engine.generation(),
+            work,
+        ))
+    }
+}

@@ -120,11 +120,84 @@ struct Owned {
     issued_quiet: Option<(Guard, i64)>,
     issued_cleanup: Option<Command>,
 }
+/// Explicit authority for one facade job, passed through its first effect.
+/// Synchronous callers have no cancellation authority. After an effect, the
+/// original operation and its failure follow-ups must run to their real result.
+#[derive(Clone, Default)]
+pub struct PolicyWork {
+    cancel: Option<meguri_engine::CancelToken>,
+    effected: Arc<std::sync::atomic::AtomicBool>,
+    rejected: Arc<std::sync::atomic::AtomicBool>,
+    owner_check: Option<Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>>,
+}
+impl PolicyWork {
+    pub fn new(cancel: &meguri_engine::CancelToken) -> Self {
+        Self {
+            cancel: Some(cancel.clone()),
+            ..Self::default()
+        }
+    }
+    /// Original Host validation runs only at Driver acquisition, never from
+    /// the collection writer or beneath Runtime/tracking ownership.
+    pub fn with_owner_check(
+        mut self,
+        check: Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>,
+    ) -> Self {
+        self.owner_check = Some(check);
+        self
+    }
+    fn after_driver_acquisition(&self) -> Result<(), RuntimeError> {
+        self.check()?;
+        if !self.effected.load(std::sync::atomic::Ordering::SeqCst)
+            && let Some(check) = &self.owner_check
+        {
+            check()?;
+        }
+        Ok(())
+    }
+    pub fn check(&self) -> Result<(), RuntimeError> {
+        if !self.effected.load(std::sync::atomic::Ordering::SeqCst)
+            && let Some(cancel) = &self.cancel
+        {
+            cancel.check()?;
+        }
+        Ok(())
+    }
+    pub fn effect(&self) -> Result<(), RuntimeError> {
+        if let Err(error) = self.check() {
+            self.rejected.store(true, std::sync::atomic::Ordering::SeqCst);
+            return Err(error);
+        }
+        self.effected.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    pub(crate) fn was_rejected(&self) -> bool {
+        self.rejected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    pub(crate) fn engine_effect(&self) -> Result<(), meguri_engine::EngineError> {
+        self.effect().map_err(|_| meguri_engine::EngineError::Cancelled)
+    }
+    pub(crate) fn media_effect(&self) -> Result<(), meguri_storage::media::MediaError> {
+        self.effect().map_err(|_| meguri_storage::media::MediaError::Cancelled)
+    }
+    pub(crate) fn media_error(&self, error: meguri_storage::media::MediaError) -> RuntimeError {
+        if self.rejected.load(std::sync::atomic::Ordering::SeqCst) {
+            meguri_engine::EngineError::Cancelled.into()
+        } else {
+            let _ = error;
+            crate::cloud::Error::Io(std::io::ErrorKind::Other).into()
+        }
+    }
+}
 /// No Host/Collection strong reference. Every collection operation borrows its current handle.
 pub struct Driver {
     runtime: Arc<Runtime>,
     clock: Arc<dyn Clock>,
     inner: Mutex<Owned>,
+    #[cfg(feature = "test-hooks")]
+    contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    #[cfg(feature = "test-hooks")]
+    projection_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub(super) zone_deletion: Mutex<std::sync::Weak<crate::cloud::zone_deletion::Pass>>,
 }
 #[cfg(feature = "test-hooks")]
@@ -161,8 +234,44 @@ impl Driver {
             runtime,
             clock,
             inner: Mutex::new(Owned::default()),
+            #[cfg(feature = "test-hooks")]
+            contention: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            projection_hook: Mutex::new(None),
             zone_deletion: Mutex::new(std::sync::Weak::new()),
         }
+    }
+    /// One-shot Rust-only observation: a worker failed to acquire the real
+    /// Driver mutex. No timing inference or foreign callback is involved.
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_contention_for_testing(&self, entered: std::sync::mpsc::Sender<()>) {
+        *self.contention.lock().unwrap_or_else(PoisonError::into_inner) = Some(entered);
+    }
+    /// Rust-only barrier after real review polling and projection reads, before
+    /// Driver projection effects. The callback never grants work authority.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_projection_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.projection_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+    fn lock_for_work(&self, work: &PolicyWork) -> Result<std::sync::MutexGuard<'_, Owned>, DriverError> {
+        #[cfg(feature = "test-hooks")]
+        let owned = match self.inner.try_lock() {
+            Ok(owned) => owned,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if let Some(entered) = self.contention.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                    let _ = entered.send(());
+                }
+                self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+            }
+        };
+        #[cfg(not(feature = "test-hooks"))]
+        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        work.after_driver_acquisition()?;
+        Ok(owned)
+    }
+    pub fn status_with_work(&self, work: &PolicyWork) -> Result<Status, DriverError> {
+        Ok(self.lock_for_work(work)?.state.status())
     }
     pub fn status(&self) -> Status {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner).state.status()
@@ -176,44 +285,62 @@ impl Driver {
         generation: Generation,
         event: DeviceEvent,
     ) -> Result<Vec<Command>, DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.handle_with_work(lifecycle, generation, event, &mut PolicyWork::default())
+    }
+    pub fn handle_with_work(
+        &self,
+        lifecycle: LifecycleState,
+        generation: Generation,
+        event: DeviceEvent,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         let event = match event {
             DeviceEvent::AcceptedIdentityRead { request } => {
                 let identity = self.runtime.with_accepted_identity_read(request, Clone::clone)?;
                 let mut prepared = owned.clone();
-                let commands = self.project_and_step(
+                let commands = self.project_and_step_with_work(
                     &mut prepared,
                     lifecycle,
                     generation,
-                    Event::Account(account(identity)),
-                    None,
+                    (Event::Account(account(identity)), None),
+                    work,
+                    false,
                 )?;
                 // Providers/projection ran outside Runtime's lock. Recheck
                 // freshness at the policy mutation boundary, then commit only
                 // prepared values while begin/completion cannot supersede us.
-                return Ok(self.runtime.with_accepted_identity_read(request, |_| {
-                    *owned = prepared;
-                    commands
-                })?);
+                return self
+                    .runtime
+                    .with_accepted_identity_read(request, |_| {
+                        work.effect()?;
+                        *owned = prepared;
+                        Ok(commands)
+                    })?
+                    .map_err(DriverError::from);
             }
             DeviceEvent::Refresh(cause) => Event::TrackingChanged(cause),
             DeviceEvent::TrackingWriteFailed { no_space } => {
-                self.runtime.policy_tracking_failed();
+                self.runtime.policy_tracking_failed_with_work(work)?;
                 Event::TrackingWriteFailed { no_space }
             }
             DeviceEvent::Settings(settings) => {
-                self.runtime.policy_media_setting(settings.media)?;
+                self.runtime.policy_media_setting_with_work(settings.media, work)?;
                 self.runtime.adapter_pause(!settings.enabled || settings.paused)?;
                 Event::DeviceSettings(settings)
             }
             DeviceEvent::Account { identity, origin_sdk } => {
                 if self.runtime.status()?.binding.is_some() {
-                    self.runtime.adapter_account(origin_sdk.as_deref(), identity.clone())?;
+                    self.runtime
+                        .adapter_account_with_work(origin_sdk.as_deref(), identity.clone(), work)?;
                 }
                 Event::Account(account(identity))
             }
             DeviceEvent::IdentityRead { request, identity } => {
-                if !self.runtime.adapter_complete_identity_read(request, identity.clone())? {
+                if !self
+                    .runtime
+                    .adapter_complete_identity_read_with_work(request, identity.clone(), work)?
+                {
                     return Err(DriverError::StaleCommand);
                 }
                 Event::Account(account(identity))
@@ -257,25 +384,38 @@ impl Driver {
                 }
             }
         };
-        self.project_and_step(&mut owned, lifecycle, generation, event, None)
+        self.project_and_step_with_work(&mut owned, lifecycle, generation, (event, None), work, true)
     }
-    fn project_and_step(
+    fn project_and_step_with_work(
         &self,
         owned: &mut Owned,
         lifecycle: LifecycleState,
         generation: Generation,
-        event: Event,
-        ended_ms: Option<i64>,
+        observation: (Event, Option<i64>),
+        work: &mut PolicyWork,
+        publish: bool,
     ) -> Result<Vec<Command>, DriverError> {
+        let (event, ended_ms) = observation;
         let now_ms = ended_ms.unwrap_or_else(|| self.clock.now_ms());
         let cleanup_before = owned.state.last_cleanup_ms;
         let ended_session = match self.runtime.instance() {
-            Ok(instance) => self.runtime.poll_review(&instance)?,
+            Ok(instance) => self.runtime.poll_review_with_work(&instance, work)?,
             Err(_) => None,
         };
         let projection = self
             .runtime
-            .policy_projection(lifecycle_kind(&lifecycle), generation.0)?;
+            .policy_projection_with_work(lifecycle_kind(&lifecycle), generation.0, work)?;
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self
+                .projection_hook
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
         // ReadFailed preserves Runtime's verified process owner. Project that
         // accepted effective identity without submitting another account event.
         let event = match event {
@@ -289,6 +429,10 @@ impl Driver {
             event => event,
         };
         let owner = self.runtime.instance().unwrap_or_default();
+        work.check()?;
+        if publish {
+            work.effect()?;
+        }
         let mut actions = Vec::new();
         let sdk = projection.engine.as_ref().map(|e| e.instance.clone());
         if owner != owned.last_owner {
@@ -497,11 +641,23 @@ impl Driver {
         Ok(())
     }
     pub fn validate(&self, command: &Command) -> Result<(), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        self.validate_locked(&owned, command)
+        self.validate_with_work(command, &mut PolicyWork::default())
+    }
+    pub fn validate_with_work(&self, command: &Command, work: &mut PolicyWork) -> Result<(), DriverError> {
+        let owned = self.lock_for_work(work)?;
+        self.validate_locked(&owned, command)?;
+        work.check()?;
+        Ok(())
     }
     pub fn native_disposition(&self, command: &Command) -> Result<NativeDisposition, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.native_disposition_with_work(command, &mut PolicyWork::default())
+    }
+    pub fn native_disposition_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<NativeDisposition, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         if let ActionKind::ConfigureAutomatic { on } = command.action.kind {
             let engine = self.runtime.policy_engine(&command.backend_guard)?;
@@ -526,9 +682,11 @@ impl Driver {
                         && (owned.state.facts.summary.scan != Scan::None
                             || owned.state.facts.summary.unsettled_intents > 0)));
             if !allowed {
+                work.check()?;
                 return Ok(NativeDisposition::NoOperation);
             }
         }
+        work.check()?;
         Ok(NativeDisposition::Enqueue)
     }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
@@ -601,22 +759,32 @@ impl Driver {
         lifecycle: LifecycleState,
         timeout: Duration,
     ) -> Result<Vec<Command>, DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.execute_core_with_work(command, collection, lifecycle, timeout, &mut PolicyWork::default())
+    }
+    pub fn execute_core_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        lifecycle: LifecycleState,
+        timeout: Duration,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         let guard = &command.backend_guard;
         let result = match &command.action.kind {
             ActionKind::UpdatePending(update) => self
                 .runtime
-                .policy_update_pending(guard, *update)
+                .policy_update_pending_with_work(guard, *update, work)
                 .map(|_| Event::EvidenceCommitted(Box::new(owned.state.evidence.clone()))),
             ActionKind::ProbeTracking => self
                 .runtime
-                .policy_probe(guard)
+                .policy_probe_with_work(guard, work)
                 .map(|_| Event::TrackingChanged(ChangeCause::Probe)),
             ActionKind::ApplyReady { retry_failed } => {
                 match self
                     .runtime
-                    .policy_apply_ready(collection, guard, *retry_failed, timeout)
+                    .policy_apply_ready_with_work(collection, guard, *retry_failed, timeout, work)
                 {
                     Ok(crate::cloud::incoming::IncomingDisposition::Progress(0)) => {
                         // Ready media can await bytes that only an external event supplies.
@@ -636,9 +804,11 @@ impl Driver {
                 if owned.issued_quiet.as_ref() != Some(&(command.action.guard.clone(), *at_ms)) {
                     return Err(DriverError::UnqualifiedCompletion);
                 }
-                let current = self
-                    .runtime
-                    .policy_projection(lifecycle_kind(&lifecycle), collection.generation().0)?;
+                let current = self.runtime.policy_projection_with_work(
+                    lifecycle_kind(&lifecycle),
+                    collection.generation().0,
+                    work,
+                )?;
                 let summary = &current.facts.summary;
                 if !summary.collection_known
                     || summary.scan != Scan::None
@@ -653,11 +823,12 @@ impl Driver {
                     eprintln!("cloud-policy-observation stage=execute.quiet-superseded");
                     // Valid work can arrive after this drain qualified. Consume
                     // its candidate without stamping or retrying the same drain.
+                    work.effect()?;
                     owned.issued_quiet = None;
                     Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
                 } else {
                     self.runtime
-                        .policy_record_quiet(guard, *at_ms)
+                        .policy_record_quiet_with_work(guard, *at_ms, work)
                         .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
                 }
             }
@@ -666,10 +837,11 @@ impl Driver {
                     return Err(DriverError::UnqualifiedCompletion);
                 }
                 self.runtime
-                    .policy_record_exchange(collection, guard, &command.owner, record)
+                    .policy_record_exchange_with_work(collection, guard, &command.owner, record, work)
                     .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
             }
             ActionKind::RunCleanup => {
+                work.effect()?;
                 owned.issued_cleanup = None;
                 return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup"));
             }
@@ -677,8 +849,20 @@ impl Driver {
             _ => return Err(DriverError::NotCoreAction),
         };
         match result {
-            Ok(event) => self.project_and_step(&mut owned, lifecycle, collection.generation(), event, None),
+            Ok(event) => self.project_and_step_with_work(
+                &mut owned,
+                lifecycle,
+                collection.generation(),
+                (event, None),
+                work,
+                true,
+            ),
             Err(error) => {
+                // A rejected boundary has made no policy/durable effect. It
+                // must not be turned into a new tracking-failure transition.
+                if work.rejected.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err(DriverError::Runtime(error));
+                }
                 if !self.runtime.policy_tracking_stopped() {
                     return Err(DriverError::Runtime(error));
                 }
@@ -714,12 +898,21 @@ impl Driver {
     /// Starts the existing Runtime capture, not a policy-owned selection.
     /// Call only after P12.3's gate wait/fetch prerequisites, never from an SDK handler.
     pub fn capture_exchange(&self, command: &Command, collection: &Collection) -> Result<u64, DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.capture_exchange_with_work(command, collection, &mut PolicyWork::default())
+    }
+    pub fn capture_exchange_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        work: &mut PolicyWork,
+    ) -> Result<u64, DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         let ActionKind::RunExchange { exchange, .. } = command.action.kind else {
             return Err(DriverError::NotCoreAction);
         };
         if let Some((_, id)) = owned.captures.get(&exchange) {
+            work.check()?;
             return Ok(*id);
         }
         let sdk = owned
@@ -730,7 +923,7 @@ impl Driver {
             .ok_or(DriverError::StaleCommand)?
             .instance
             .clone();
-        let id = self.runtime.sync_now(&sdk, collection)?;
+        let id = self.runtime.sync_now_with_work(&sdk, collection, work)?;
         owned.captures.insert(exchange, (sdk, id));
         Ok(id)
     }
@@ -741,7 +934,16 @@ impl Driver {
         lifecycle: LifecycleState,
         generation: Generation,
     ) -> Result<Vec<Command>, DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.complete_exchange_with_work(request, lifecycle, generation, &mut PolicyWork::default())
+    }
+    pub fn complete_exchange_with_work(
+        &self,
+        request: u64,
+        lifecycle: LifecycleState,
+        generation: Generation,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         let (_, id) = owned.captures.get(&request).ok_or(DriverError::UnqualifiedCompletion)?;
         let (completed, ended_ms) = self
             .runtime
@@ -749,7 +951,7 @@ impl Driver {
             .ok_or(DriverError::UnqualifiedCompletion)?;
         let projection = self
             .runtime
-            .policy_projection(lifecycle_kind(&lifecycle), generation.0)?;
+            .policy_projection_with_work(lifecycle_kind(&lifecycle), generation.0, work)?;
         let summary = &projection.facts.summary;
         let outcome = match completed.collection {
             CollectionOutcome::Succeeded => ExchangeOutcome::Succeeded {
@@ -776,15 +978,19 @@ impl Driver {
             },
             CollectionOutcome::Cancelled => ExchangeOutcome::Cancelled,
         };
-        self.project_and_step(
+        self.project_and_step_with_work(
             &mut owned,
             lifecycle,
             generation,
-            Event::ExchangeEnded {
-                exchange: request,
-                outcome,
-            },
-            Some(ended_ms),
+            (
+                Event::ExchangeEnded {
+                    exchange: request,
+                    outcome,
+                },
+                Some(ended_ms),
+            ),
+            work,
+            true,
         )
     }
     /// Reports an operation that stopped before Runtime could capture it. Cannot report success.
@@ -795,7 +1001,17 @@ impl Driver {
         lifecycle: LifecycleState,
         generation: Generation,
     ) -> Result<Vec<Command>, DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        self.end_before_capture_with_work(request, outcome, lifecycle, generation, &mut PolicyWork::default())
+    }
+    pub fn end_before_capture_with_work(
+        &self,
+        request: u64,
+        outcome: ExchangeOutcome,
+        lifecycle: LifecycleState,
+        generation: Generation,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         if owned.captures.contains_key(&request)
             || matches!(
                 outcome,
@@ -804,15 +1020,19 @@ impl Driver {
         {
             return Err(DriverError::UnqualifiedCompletion);
         }
-        self.project_and_step(
+        self.project_and_step_with_work(
             &mut owned,
             lifecycle,
             generation,
-            Event::ExchangeEnded {
-                exchange: request,
-                outcome,
-            },
-            None,
+            (
+                Event::ExchangeEnded {
+                    exchange: request,
+                    outcome,
+                },
+                None,
+            ),
+            work,
+            true,
         )
     }
 }

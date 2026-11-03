@@ -7,7 +7,7 @@ mod transition;
 mod types;
 #[cfg(feature = "test-hooks")]
 pub use driver::ExchangeObservation;
-pub use driver::{Command, DeviceEvent, Driver, DriverError};
+pub use driver::{Command, DeviceEvent, Driver, DriverError, PolicyWork};
 pub use transition::step;
 pub use types::*;
 

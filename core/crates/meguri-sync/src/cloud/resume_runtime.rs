@@ -1,5 +1,6 @@
 //! V9.2 authority is retained from V13's real reads, separate from scan authority.
 use super::*;
+use crate::cloud::policy::PolicyWork;
 use crate::cloud::{
     control_codec::{Active, DecodeOutcome, Epoch, EpochState},
     publication::*,
@@ -197,29 +198,50 @@ impl Runtime {
 
     /// Observational offer, revalidated each time. No expiry heuristic grants authority.
     pub fn resume_binding_offer(&self) -> Option<BindingId> {
+        self.resume_binding_offer_with_work(&mut PolicyWork::default())
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) fn resume_binding_offer_with_work(
+        &self,
+        work: &mut PolicyWork,
+    ) -> Result<Option<BindingId>, RuntimeError> {
         let (context, preview) = {
             let s = self.state();
-            let (p, ready) = s.publication.preview.as_ref()?;
+            work.check()?;
+            let Some((p, ready)) = s.publication.preview.as_ref() else {
+                return Ok(None);
+            };
             if !ready || p.decision != ConnectDecision::ConfirmResume {
-                return None;
+                return Ok(None);
             }
-            (s.publication.resume.clone()?, p.clone())
+            let Some(context) = s.publication.resume.clone() else {
+                return Ok(None);
+            };
+            (context, p.clone())
         };
         if self.validate_resume_providers(&context, &preview).is_err() {
             let mut s = self.state();
-            if s.publication.preview.as_ref().is_some_and(|(p, _)| p.id == preview.id) {
+            work.check()?;
+            if s.publication.preview.as_ref().is_some_and(|(p, _)| p.id == preview.id) && s.publication.resume.is_some()
+            {
+                work.effect()?;
                 s.publication.resume = None;
             }
-            return None;
+            return Ok(None);
         }
         let s = self.state();
+        work.check()?;
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true))
             || !Self::resume_reads_match(&context, &preview)
         {
-            return None;
+            return Ok(None);
         }
-        self.validate_resume_context_locked(&s, &context).ok()?;
-        Some(context.binding.id)
+        if self.validate_resume_context_locked(&s, &context).is_err() {
+            return Ok(None);
+        }
+        Ok(Some(context.binding.id))
     }
 
     /// Explicit V26.2 admission consumes the retained V13 proof, never UI booleans.

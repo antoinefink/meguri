@@ -822,6 +822,12 @@ impl Runtime {
     /// An actor/host calls this off the writer at an actual account read point.
     /// An old result cannot verify a replacement or resumed incarnation.
     pub fn refresh_identity(&self) -> Result<(), RuntimeError> {
+        self.refresh_identity_with_work(&mut crate::cloud::policy::PolicyWork::default())
+    }
+    pub(crate) fn refresh_identity_with_work(
+        &self,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
         let guard = {
             let state = self.state();
@@ -857,11 +863,13 @@ impl Runtime {
         if !matches!(&result, IdentityStatus::Available(account)
             if state.bound.as_ref().is_some_and(|b| &b.binding.facts.account == account))
         {
+            work.effect()?;
             state.publication.resume = None;
             state.publication.preview = None;
             state.adapter.token = state.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         }
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
+            work.effect()?;
             let State { bound, store, .. } = &mut *state;
             let bound = bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
             match result {
@@ -886,6 +894,9 @@ impl Runtime {
             }
             Ok(())
         });
+        if work.was_rejected() {
+            return result;
+        }
         if result.is_ok()
             && let (Some(account), Some(instance)) = (verified_account, instance)
             && let Ok(account) = String::from_utf8(account.0)

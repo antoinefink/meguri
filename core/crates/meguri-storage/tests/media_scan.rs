@@ -6,6 +6,87 @@ use std::{fs, os::unix::fs::MetadataExt, sync::Arc};
 type ScanHook = Box<dyn FnOnce() + Send>;
 static SCAN_HOOK: std::sync::Mutex<Option<ScanHook>> = std::sync::Mutex::new(None);
 
+// Pause journal inspection to test cancellation before and after the first effect.
+// Recreating a removed directory supplies that effect. With the directory present,
+// cancellation must preserve every byte of the journal and its existing sidecars.
+#[test]
+fn media_open_held_journal_probe_cancels_only_before_first_effect() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    for create_folder in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collection.anki2");
+        let store = MediaStore::open(&path, Arc::new(common::clock()), common::media_random()).unwrap();
+        store.add("retained.png", b"retained bytes").unwrap();
+        drop(store);
+        if create_folder {
+            fs::remove_dir(dir.path().join("media.trash")).unwrap();
+        }
+        let journal_bytes = || {
+            ["", "-wal", "-shm", "-journal"].map(|suffix| {
+                match fs::read(dir.path().join(format!("meguri-media.db{suffix}"))) {
+                    Ok(bytes) => Some(bytes),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => panic!("journal snapshot: {e}"),
+                }
+            })
+        };
+        let before = journal_bytes();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let effected = Arc::new(AtomicBool::new(false));
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        *SCAN_HOOK.lock().unwrap() = Some(Box::new(move || {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(10)).expect("probe release");
+        }));
+        meguri_model::faultpoint::arm(
+            "media.journal.after_probe",
+            meguri_model::faultpoint::Fault::Callback(run_scan_hook),
+        );
+        let result = std::thread::scope(|threads| {
+            let worker = threads.spawn(|| {
+                MediaStore::open_with_boundary(&path, Arc::new(common::clock()), common::media_random(), &mut || {
+                    if !effected.load(Ordering::SeqCst) && cancel.load(Ordering::SeqCst) {
+                        return Err(MediaError::Cancelled);
+                    }
+                    effected.store(true, Ordering::SeqCst);
+                    Ok(())
+                })
+            });
+            let held = reached.recv_timeout(Duration::from_secs(5));
+            let prior_effect = effected.load(Ordering::SeqCst);
+            cancel.store(true, Ordering::SeqCst);
+            // Always release before asserting, including a failed handshake.
+            let _ = release.send(());
+            let result = worker.join().unwrap();
+            held.expect("real journal probe completed before admission");
+            assert_eq!(prior_effect, create_folder);
+            result
+        });
+        meguri_model::faultpoint::disarm("media.journal.after_probe");
+        if create_folder {
+            let store = result.expect("folder creation preserves actual successful open after cancellation");
+            assert_eq!(store.entries().unwrap().len(), 1);
+            assert!(dir.path().join("media.trash").is_dir());
+            drop(store);
+        } else {
+            assert!(matches!(result, Err(MediaError::Cancelled)));
+            assert!(!effected.load(Ordering::SeqCst));
+            assert_eq!(journal_bytes(), before);
+            let store = MediaStore::open(&path, Arc::new(common::clock()), common::media_random()).unwrap();
+            assert_eq!(store.entries().unwrap().len(), 1);
+        }
+        assert_eq!(
+            fs::read(dir.path().join("collection.media/retained.png")).unwrap(),
+            b"retained bytes"
+        );
+    }
+}
+
 #[test]
 fn media_reopening_preserves_the_unchanged_folder_fast_path() {
     let dir = tempfile::tempdir().unwrap();
