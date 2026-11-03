@@ -39,3 +39,15 @@ Similarity84500 passes the complete component changes from e20b5464.
 The actual phone preparation and continuity checks, and the required integration
 gate remain pending. A live iCloud round trip is still incomplete. No unit
 acceptance is recorded here.
+
+Physical run93588 builds and verifies the signed development products. Its
+private install witness records successful app/runner installation and matching
+metadata. A later public device query fails before preparation completes; no
+continuity evidence is produced. The generic query refusal is retained.
+
+Export96382 retains bounded private failure diagnostics before query scratch
+cleanup. Independent review confirms unchanged query scope, count, timeout
+and original refusal, with no public raw values. Selftest98631 passes the
+affected metadata/diagnostic seam. Private99042 and Similarity99310 pass.
+The next physical observation must identify the underlying error; no device
+setup or successful launch is inferred from the generic refusal.

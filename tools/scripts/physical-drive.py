@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import stat
 import sys
 import tempfile
 from urllib.parse import unquote, urlparse
@@ -28,6 +29,7 @@ Refused, need, command = products.Refused, products.need, products.command
 APP = "com.antoinefink.meguri.dev"
 TEST = APP + ".uitests"
 RUNNER = TEST + ".xctrunner"
+DIAGNOSTIC_BYTES = 16 * 1024 * 1024  # Per artifact, matching the guarded reader.
 
 
 def read_bytes(path, boundary):
@@ -176,16 +178,70 @@ def local_artifacts(root, xctestrun):
             "xctestrun_sha256": products.digest(source)}, generated
 
 
+def retain_failed_query(output, scratch, arguments, stage, error):
+    """Best effort only: two bounded private files and fixed metadata, no echo.
+
+    Never serialize argv, stdout/stderr, exception text or runner environment.
+    Raw public-tool evidence may contain sensitive values; it stays under MG's
+    private output, behind nofollow parents and exclusive mode-0600 files.
+    """
+    operation = {
+        ("device", "install", "app"): "install-app",
+        ("device", "info", "apps"): "targeted-installation",
+        ("device", "process", "launch"): "normal-app-launch",
+        ("device", "info", "processes"): "selected-process-query",
+    }.get(tuple(arguments[:3]), "public-device-query")
+    category = str(error) if isinstance(error, Refused) else "physical-evidence-unavailable"
+    try:
+        destination = output / "failed-device-query"
+        products.contained(str(output), str(destination))
+        with products.authority(str(output)) as parent:
+            os.mkdir(destination.name, mode=0o700, dir_fd=parent)
+            with products.authority(str(destination)) as retained:
+                def write(name, raw, bound):
+                    need(len(raw) <= bound, "diagnostic-size")
+                    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=retained)
+                    with os.fdopen(fd, "wb") as stream:
+                        info = os.fstat(stream.fileno())
+                        need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
+                             stat.S_IMODE(info.st_mode) == 0o600, "diagnostic-path")
+                        stream.write(raw)
+
+                artifacts = {}
+                for name in ("response.json", "diagnostic.log"):
+                    try:
+                        raw = read_bytes(scratch / name, scratch)
+                        write(name, raw, DIAGNOSTIC_BYTES)
+                        artifacts[name] = "retained"
+                    except Exception:
+                        artifacts[name] = "unavailable"
+                metadata = {"operation": operation, "stage": stage, "category": category,
+                            "artifacts": artifacts}
+                write("metadata.json", json.dumps(metadata, sort_keys=True).encode(), 1024)
+    except Exception:
+        # Diagnostic failures must never replace the original query failure.
+        pass
+
+
 def device_query(device, output, arguments):
-    """Raw responses and stdout stay private; callers retain selected fields only."""
+    """Successful raw responses are transient; failed evidence stays private."""
     with tempfile.TemporaryDirectory(prefix="device-query-", dir=output) as scratch:
-        path = Path(scratch) / "response.json"
-        command(["/usr/bin/xcrun", "devicectl", *arguments, "--device", device,
-                 "--json-output", str(path)], "public-device-query")
-        value = read_json(path)
-        need(value.get("info", {}).get("outcome") == "success" and isinstance(value.get("result"), dict),
-             "public-device-response")
-        return value["result"]
+        scratch = Path(scratch)
+        stage = "command"
+        try:
+            command(["/usr/bin/xcrun", "devicectl", *arguments, "--device", device,
+                     "--json-output", str(scratch / "response.json"),
+                     "--log-output", str(scratch / "diagnostic.log")], "public-device-query")
+            stage = "response-read"
+            value = read_json(scratch / "response.json")
+            stage = "response-validation"
+            need(value.get("info", {}).get("outcome") == "success" and isinstance(value.get("result"), dict),
+                 "public-device-response")
+            return value["result"]
+        except Exception as error:
+            retain_failed_query(output, scratch, arguments, stage, error)
+            raise
 
 
 def installation(device, output, identifier, required=True):

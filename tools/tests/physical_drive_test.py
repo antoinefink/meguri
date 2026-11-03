@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Synthetic public-device evidence tests. Never run Apple tools or hardware."""
 import copy
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import plistlib
+import stat
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -143,10 +147,133 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
                 self.assertEqual(argv[:3], ["/usr/bin/xcrun", "devicectl", "device"])
                 destination = Path(argv[argv.index("--json-output") + 1])
                 destination.write_text(json.dumps({"info": {"outcome": "success"}, "result": {"apps": []}}))
+                Path(argv[argv.index("--log-output") + 1]).write_text("PRIVATE_DIAGNOSTIC")
                 return subprocess.CompletedProcess(argv, 0, b"PRIVATE_STDOUT", b"PRIVATE_DIAGNOSTIC")
-            with patch.object(drive, "command", side_effect=fake):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with patch.object(drive, "command", side_effect=fake), redirect_stdout(stdout), redirect_stderr(stderr):
                 self.assertEqual(drive.device_query("selected", output, ["device", "info", "apps", "--filter", "selected"]), {"apps": []})
             self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
+
+    def test_failed_public_queries_retain_private_artifacts_and_fixed_stage_metadata(self):
+        operations = [(["device", "process", "launch", "--terminate-existing", drive.APP], "normal-app-launch"),
+                      (["device", "info", "apps", "--filter", "synthetic-selection"], "targeted-installation"),
+                      (["device", "info", "processes", "--filter", "synthetic-selection"], "selected-process-query"),
+                      (["device", "install", "app", "/synthetic/product"], "install-app")]
+        for case in ("command", "malformed", "failed", "invalid-result"):
+            for arguments, operation in operations:
+                with self.subTest(case=case, operation=operation), tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory)
+                    raw = (b'{"info":{"outcome":"failed"},"result":{},"detail":"SYNTHETIC_PRIVATE"}'
+                           if case in ("command", "failed") else
+                           b'{"info":{"outcome":"success"},"result":[],"detail":"SYNTHETIC_PRIVATE"}'
+                           if case == "invalid-result" else b'{SYNTHETIC_PRIVATE')
+                    def fake(argv, **kwargs):
+                        self.assertTrue(kwargs["capture_output"])
+                        self.assertEqual(kwargs["timeout"], 60)
+                        self.assertEqual(argv[2:2 + len(arguments)], arguments)
+                        Path(argv[argv.index("--json-output") + 1]).write_bytes(raw)
+                        Path(argv[argv.index("--log-output") + 1]).write_bytes(b"SYNTHETIC_PRIVATE_LOG")
+                        return subprocess.CompletedProcess(argv, 1 if case == "command" else 0,
+                                                           b"SYNTHETIC_PRIVATE_STDOUT", b"SYNTHETIC_PRIVATE_STDERR")
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with patch.object(drive.products.subprocess, "run", side_effect=fake) as query, \
+                         redirect_stdout(stdout), redirect_stderr(stderr):
+                        with self.assertRaises((drive.Refused, ValueError)) as failure:
+                            drive.device_query("synthetic-device", output, arguments)
+                    query.assert_called_once()
+                    self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
+                    retained = output / "failed-device-query"
+                    self.assertEqual(list(output.iterdir()), [retained])  # scratch already cleaned
+                    self.assertEqual((retained / "response.json").read_bytes(), raw)
+                    self.assertEqual((retained / "diagnostic.log").read_bytes(), b"SYNTHETIC_PRIVATE_LOG")
+                    metadata = json.loads((retained / "metadata.json").read_bytes())
+                    category = "public-device-query" if case == "command" else (
+                        "physical-evidence-unavailable" if case == "malformed" else "public-device-response")
+                    self.assertEqual(metadata, {"operation": operation,
+                        "stage": "command" if case == "command" else (
+                            "response-read" if case == "malformed" else "response-validation"),
+                        "category": category,
+                        "artifacts": {"response.json": "retained", "diagnostic.log": "retained"}})
+                    if case != "malformed":
+                        self.assertEqual(str(failure.exception), category)
+                    self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(metadata))
+                    self.assertEqual(stat.S_IMODE(retained.stat().st_mode), 0o700)
+                    for path in retained.iterdir():
+                        self.assertTrue(stat.S_ISREG(path.lstat().st_mode))
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                        self.assertEqual(path.stat().st_nlink, 1)
+
+    def test_failed_query_retention_rejects_oversize_and_unsafe_files_independently(self):
+        for case in ("response-oversize", "log-oversize", "symlink", "hardlink", "fifo"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                outside = output / "synthetic-source"
+                outside.write_bytes(b"SYNTHETIC_PRIVATE")
+                failure = drive.Refused("public-device-query")
+                def fake(argv, category):
+                    response = Path(argv[argv.index("--json-output") + 1])
+                    log = Path(argv[argv.index("--log-output") + 1])
+                    if case == "symlink":
+                        response.symlink_to(outside)
+                    elif case == "hardlink":
+                        os.link(outside, response)
+                    elif case == "fifo":
+                        os.mkfifo(response)
+                    else:
+                        response.write_bytes(b"x" * (drive.DIAGNOSTIC_BYTES + 1)
+                                             if case == "response-oversize" else b"{}")
+                    log.write_bytes(b"x" * (drive.DIAGNOSTIC_BYTES + 1)
+                                    if case == "log-oversize" else b"SYNTHETIC_PRIVATE_LOG")
+                    raise failure
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.object(drive, "command", side_effect=fake), redirect_stdout(stdout), redirect_stderr(stderr):
+                    with self.assertRaises(drive.Refused) as caught:
+                        drive.device_query("synthetic-device", output, ["device", "info", "apps"])
+                self.assertIs(caught.exception, failure)
+                self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
+                retained = output / "failed-device-query"
+                rejected = "diagnostic.log" if case == "log-oversize" else "response.json"
+                other = "response.json" if rejected == "diagnostic.log" else "diagnostic.log"
+                metadata = json.loads((retained / "metadata.json").read_bytes())
+                self.assertEqual(metadata["artifacts"], {rejected: "unavailable", other: "retained"})
+                self.assertFalse((retained / rejected).exists())
+                self.assertTrue((retained / other).is_file())
+                self.assertEqual(len(list(retained.iterdir())), 2)
+                self.assertTrue(all(path.stat().st_size <= drive.DIAGNOSTIC_BYTES for path in retained.iterdir()))
+                self.assertEqual(outside.read_bytes(), b"SYNTHETIC_PRIVATE")
+
+    def test_diagnostic_write_failure_preserves_original_query_category_and_exception(self):
+        for failed_write in ("directory", "response.json", "diagnostic.log", "metadata.json"):
+            for command_failed in (False, True):
+                with self.subTest(write=failed_write, command_failed=command_failed), tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory)
+                    failure = drive.Refused("public-device-query")
+                    def fake(argv, category):
+                        Path(argv[argv.index("--json-output") + 1]).write_bytes(
+                            b'{"info":{"outcome":"failed"},"result":{}}')
+                        Path(argv[argv.index("--log-output") + 1]).write_bytes(b"SYNTHETIC_PRIVATE")
+                        if command_failed:
+                            raise failure
+                        return subprocess.CompletedProcess(argv, 0, b"", b"")
+                    original_open = os.open
+                    def guarded_open(path, flags, *args, **kwargs):
+                        if path == failed_write and flags & os.O_CREAT:
+                            raise OSError("SYNTHETIC_PRIVATE_WRITE_ERROR")
+                        return original_open(path, flags, *args, **kwargs)
+                    if failed_write == "directory":
+                        (output / "failed-device-query").symlink_to(output, target_is_directory=True)
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with patch.object(drive, "command", side_effect=fake), \
+                         patch.object(drive.os, "open", side_effect=guarded_open), \
+                         redirect_stdout(stdout), redirect_stderr(stderr):
+                        with self.assertRaises(drive.Refused) as caught:
+                            drive.device_query("synthetic-device", output, ["device", "process", "launch"])
+                    self.assertEqual(str(caught.exception), "public-device-query" if command_failed else "public-device-response")
+                    if command_failed:
+                        self.assertIs(caught.exception, failure)
+                    self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
+                    self.assertFalse(any(path.name.startswith("device-query-") for path in output.iterdir()))
 
     def setup_preparation(self, root, output):
         run = root / "build/mg/run/prepared"
