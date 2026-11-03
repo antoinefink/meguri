@@ -190,9 +190,10 @@ struct SyncCoordinatorTests {
     }
 
     @Test func attachmentBeforeReplacementClosesStaleCandidateBeforeNextFactory() async {
-        let stale = SyncOwnerFake(), latest = SyncOwnerFake()
+        let stale = SyncOwnerFake(), successor = SyncOwnerFake(), latest = SyncOwnerFake()
         let factory = SyncOwnerGate(), staleDrain = SyncOwnerGate(), finalDrain = SyncOwnerGate()
         var callbacks: [@Sendable () async -> Void] = []
+        var observations: [SyncCoordinator.PlatformSignalStage] = []
         var constructing = 0, maximumConstructing = 0
         stale.onClose = { await staleDrain.hold() }
         latest.onClose = { await finalDrain.hold() }
@@ -206,8 +207,11 @@ struct SyncCoordinatorTests {
                 return stale
             }
             #expect(stale.closed && stale.closeCount == 1)
+            if callbacks.count == 2 { return successor }
+            #expect(successor.closed && successor.closeCount == 1)
             return latest
-        }, defaults: nil)
+        }, defaults: nil, observeSignals: true)
+        sync.observePlatformSignalLifetime = { observations.append($0) }
         await sync.preparePlatform()
         let attachment = Task { await sync.completeOpenedHost(generation: 30) }
         await factory.waitUntilHeld()
@@ -227,6 +231,7 @@ struct SyncCoordinatorTests {
         await staleDrain.waitUntilHeld()
         #expect(sync.generation == 32 && callbacks.count == 1)
         #expect(stale.events.isEmpty && stale.accountReads == 0)
+        #expect(observations.isEmpty)
         await callbacks[0]()
         await sync.waitForInputs()
         #expect(stale.persistedReads == 0)
@@ -236,6 +241,12 @@ struct SyncCoordinatorTests {
         await sync.waitForReplacement()
         #expect(callbacks.count == 2 && maximumConstructing == 1 && constructing == 0)
         #expect(sync.generation == 32 && sync.setupState == .attached && !sync.operationFailed)
+        #expect(observations == [.started])
+        sync.collectionReplaced(33)
+        await sync.waitForReplacement()
+        #expect(callbacks.count == 3 && maximumConstructing == 1 && constructing == 0)
+        #expect(sync.generation == 33 && sync.setupState == .attached && !sync.operationFailed)
+        #expect(observations == [.started])
         var shutdownReturned = false
         let shutdown = Task {
             let result = await sync.cancelAndDrain()
@@ -244,9 +255,11 @@ struct SyncCoordinatorTests {
         }
         await finalDrain.waitUntilHeld()
         #expect(!shutdownReturned && !latest.closed)
+        #expect(observations == [.started, .drained])
         finalDrain.release()
         #expect(await shutdown.value)
-        #expect(stale.closed && latest.closed && latest.closeCount == 1)
+        #expect(stale.closed && successor.closed && latest.closed && latest.closeCount == 1)
+        #expect(observations == [.started, .drained])
     }
 
     @Test func replacementBeforeCompleteOpenedHostJoinsOriginalFactory() async {

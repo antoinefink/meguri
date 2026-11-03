@@ -162,6 +162,8 @@ public final class SyncCoordinator {
     // Scheduling observation only; never supplies a result or a capability.
     @ObservationIgnored var observeAccountPolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
     @ObservationIgnored var observeResumePolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
+    enum PlatformSignalStage: Equatable { case started, drained }
+    @ObservationIgnored var observePlatformSignalLifetime: (@MainActor (PlatformSignalStage) -> Void)?
     // Scheduling observation only; never substitutes Core confirmation authority.
     @ObservationIgnored var observePublicationConfirmation: (@MainActor () async -> Void)?
     private struct Issued { let command: CloudPolicyCommand; let generation: UInt64; let sequence: UInt64 }
@@ -205,6 +207,9 @@ public final class SyncCoordinator {
     private var initialOwnResumeRead: UInt64?
     private var initialOwnResume: Task<Void, Never>?
     private var awaitingInitialOwnProof = false
+    // Discovery is presentation only. This attachment's one startup request
+    // waits for successful proof on the ordered account-completion lane.
+    private var retainedRecoveryStart: (backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64)?
     private var ownWorkRequested = false
     private var ownTask: Task<Void, Never>?
     private var flushTimer: Timer?
@@ -308,6 +313,11 @@ public final class SyncCoordinator {
                 }
                 drained = false
                 setupState = .attached
+                let retained = await readRetainedRecovery(value)
+                guard !closing, !suspended, !replacing, !Task.isCancelled,
+                      backend === value, !backendRetired, !drained,
+                      revision == hostRevision, generation == self.generation else { return }
+                attachRetainedRecovery(retained, backend: value, generation: generation, revision: revision)
                 enqueue(.policy(.settings(settings)))
                 enqueue(.policy(.refresh(.cloud)))
                 enqueue(.account(false))
@@ -318,11 +328,42 @@ public final class SyncCoordinator {
         await task.value
     }
 
+    private func readRetainedRecovery(_ original: any SyncCoordinatorBackend) async -> Result<CloudRecoveryStatus?, any Error> {
+        do { return .success(try await original.connection?.recoveryStatus()) }
+        catch { return .failure(error) }
+    }
+    // Called only after the original attachment has been revalidated following
+    // discovery. Keep Core's actual status/handle; infer no operation or permission.
+    private func attachRetainedRecovery(_ result: Result<CloudRecoveryStatus?, any Error>,
+                                       backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64) {
+        retainedRecoveryStart = nil
+        switch result {
+        case .success(let status):
+            recovery = status
+            if status != nil { retainedRecoveryStart = (backend, generation, revision) }
+        case .failure:
+            recovery = nil
+            operationFailed = true
+        }
+    }
+    private func startRetainedRecoveryAfterProof(_ original: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64) {
+        guard let pending = retainedRecoveryStart, pending.backend === original,
+              pending.generation == expected, pending.revision == revision,
+              backend === original, expected == generation, revision == hostRevision,
+              !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+              settings.enabled, !settings.paused, accountTask?.isCancelled == false,
+              !awaitingResumeProof, !awaitingInitialOwnProof, initialOwnDrain == nil,
+              !initialActivationReturned, initialAdoptionEnabledBefore == nil, ownTask == nil,
+              original.connection != nil else { return }
+        resumeConnection()
+        if ownTask != nil { retainedRecoveryStart = nil }
+    }
+
     private func nativeEventPersisted(revision: UInt64) {
         guard revision == hostRevision, !closing, !replacing, !drained else { return }
         // SDK callbacks only enqueue. send/fetch never runs in callback delivery.
         enqueue(.persisted(revision: revision))
-        if recovery != nil {
+        if recovery != nil, retainedRecoveryStart == nil {
             if ownTask == nil { resumeConnection() }
             else { ownWorkRequested = true }
         }
@@ -345,6 +386,14 @@ public final class SyncCoordinator {
         let wasPaused = settings.paused
         if paused { initialOwnAdmission.setOpen(false) }
         saveSettings(.init(enabled: settings.enabled, paused: paused, automatic: automatic, media: media))
+        if wasPaused, !paused, settings.enabled, let pending = retainedRecoveryStart,
+           pending.backend === backend, pending.generation == generation, pending.revision == hostRevision,
+           !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+           initialAdoptionEnabledBefore == nil {
+            // Revisit this attachment through a new ordered read. The proof
+            // that returned while paused grants no authority to this attempt.
+            enqueue(.account(false))
+        }
         guard initialAdoptionEnabledBefore != nil, wasPaused != paused else { return }
         if paused { drainInitialOwnWork() }
         else {
@@ -794,6 +843,9 @@ public final class SyncCoordinator {
             let result = await complete(true)
             await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
             if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
+            if result.error == nil, result.accountVerified {
+                startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
+            }
             acknowledged.resume(returning: true)
         case .resumeBinding(let handle, let service, let expected, let revision, let acknowledged):
             guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
@@ -834,6 +886,7 @@ public final class SyncCoordinator {
         case .replaced(let next):
             guard next > generation || (next == generation && setupState == .failed) else { return }
             generation = next; status = nil; preview = nil; recovery = nil
+            retainedRecoveryStart = nil
             hasDeferredNativeWork = false
             hostRevision &+= 1
             // Local collection generations still advance without an iCloud
@@ -1048,12 +1101,23 @@ public final class SyncCoordinator {
                     backend = nil
                     continue
                 }
+                let discoverySuspended = suspended
+                let retained = await readRetainedRecovery(successor)
+                guard !closing, suspended == discoverySuspended, replacing,
+                      backend === successor, !backendRetired,
+                      expected == generation, revision == hostRevision else {
+                    try await successor.close()
+                    backend = nil
+                    continue
+                }
                 setupState = .attached
                 replacing = false
+                attachRetainedRecovery(retained, backend: successor, generation: expected, revision: revision)
                 enqueue(.policy(.settings(settings)))
                 enqueue(.policy(.refresh(.cloud)))
                 if let reachable { enqueue(.policy(.network(reachable: reachable))) }
                 enqueue(.account(false))
+                if observeSignals { observePlatformSignals() }
                 await reconcileInitialAdoption(successor)
                 return
             }
@@ -1126,6 +1190,7 @@ public final class SyncCoordinator {
         if let closeTask { return await closeTask.value }
         if drained { return true }
         closing = true
+        retainedRecoveryStart = nil
         initialOwnAdmission.setOpen(false)
         let task = Task { () -> Bool in
             await attachmentTask?.value
@@ -1157,6 +1222,7 @@ public final class SyncCoordinator {
                 await accountTask?.value
                 await networkTask?.value
                 await accountEventsTask?.value
+                if networkMonitor != nil { observePlatformSignalLifetime?(.drained) }
                 await waitForInputs()
                 await drainOperations()
                 if let backend { await reconcileInitialAdoption(backend) }
@@ -1203,5 +1269,6 @@ public final class SyncCoordinator {
                 await accountChanged()
             }
         }
+        observePlatformSignalLifetime?(.started)
     }
 }
