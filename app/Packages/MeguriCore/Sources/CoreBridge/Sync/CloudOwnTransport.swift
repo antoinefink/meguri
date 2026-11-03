@@ -38,6 +38,13 @@ public enum CloudOwnTransportFailure: Error, Sendable {
 #if DEBUG
 /// Temporary, memory-only diagnosis. Each instance stores one attempt and a bounded safe tag.
 public final class DebugCloudPreviewProbe: Observable, Sendable {
+    enum WorkStage: CaseIterable, Equatable, Sendable {
+        case nextPublicationWork, performLocal
+        case adoptionControlRead, adoptionControlResult
+        case adoptionPageReply, adoptionPageResult, adoptionPageFailureResult
+        case adoptionValidation, beforeActivation, adoptionActivation, afterActivation
+    }
+
     public static let shared = DebugCloudPreviewProbe()
     public static let ownWork = DebugCloudPreviewProbe()
     private let changes = ObservationRegistrar()
@@ -59,6 +66,25 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     }
 
     func finish(_ attempt: UUID) { update(attempt, tag: "finished") }
+
+    /// The tag marks the last entered await boundary, not its completion.
+    func enter(_ stage: WorkStage, attempt: UUID) {
+        let tag: String
+        switch stage {
+        case .nextPublicationWork: tag = "nextPublicationWork"
+        case .performLocal: tag = "performLocal"
+        case .adoptionControlRead: tag = "adoptionControlRead"
+        case .adoptionControlResult: tag = "adoptionControlResult"
+        case .adoptionPageReply: tag = "adoptionPageReply"
+        case .adoptionPageResult: tag = "adoptionPageResult"
+        case .adoptionPageFailureResult: tag = "adoptionPageFailureResult"
+        case .adoptionValidation: tag = "adoptionValidation"
+        case .beforeActivation: tag = "beforeActivation"
+        case .adoptionActivation: tag = "adoptionActivation"
+        case .afterActivation: tag = "afterActivation"
+        }
+        update(attempt, tag: tag)
+    }
 
     func finish(_ attempt: UUID, progress: CloudConnectionProgress) {
         let tag: String
@@ -187,6 +213,9 @@ public actor CloudOwnExecutor {
     private var previewTask: Task<CloudConnectionPreviewWork, any Error>?
     private var stopping = false
     private var closed = false
+    #if DEBUG
+    private var debugWorkAttempt: UUID?
+    #endif
     public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport,
                 observe: (@Sendable (CloudOwnObservation) -> Void)? = nil) {
         self.core = core; self.transport = transport; self.observe = observe
@@ -200,6 +229,10 @@ public actor CloudOwnExecutor {
         #endif
         do {
             try requireIdle()
+            #if DEBUG
+            debugWorkAttempt = probeAttempt
+            defer { if debugWorkAttempt == probeAttempt { debugWorkAttempt = nil } }
+            #endif
             let progress = try await run { try await self.executeNext(admission: admission, beforeActivation: beforeActivation, afterActivation: afterActivation) }
             #if DEBUG
             DebugCloudPreviewProbe.ownWork.finish(probeAttempt, progress: progress)
@@ -315,16 +348,28 @@ public actor CloudOwnExecutor {
             throw error
         }
     }
+    #if DEBUG
+    private func recordWorkStage(_ stage: DebugCloudPreviewProbe.WorkStage) {
+        guard let attempt = debugWorkAttempt else { return }
+        DebugCloudPreviewProbe.ownWork.enter(stage, attempt: attempt)
+    }
+    #endif
     private func executeNext(admission: CloudOwnWorkAdmission?,
                              beforeActivation: (@Sendable () async throws -> Void)?,
                              afterActivation: (@Sendable () async -> Void)?) async throws -> CloudConnectionProgress {
         try admission?.check()
+        #if DEBUG
+        recordWorkStage(.nextPublicationWork)
+        #endif
         let work = try await core.nextPublicationWork()
         try checkStopping()
         try admission?.check()
         switch work {
         case .local(let handle, _, _), .scan(let handle):
             try checkStopping()
+            #if DEBUG
+            recordWorkStage(.performLocal)
+            #endif
             try await core.performLocal(handle)
         case .own(let request, let command, _, let metadata):
             let identity = UUID()
@@ -386,33 +431,65 @@ public actor CloudOwnExecutor {
             try checkStopping()
             switch action {
             case .read(let target):
+                #if DEBUG
+                recordWorkStage(.adoptionControlRead)
+                let reply = try await read(target, admission: admission)
+                recordWorkStage(.adoptionControlResult)
+                try await core.adoptionResult(handle, result: .read(reply))
+                #else
                 try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission)))
+                #endif
             case .fetch(let zone, let cursor):
                 let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor)); prepared = op
                 try checkStopping()
                 guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                 do {
+                    #if DEBUG
+                    recordWorkStage(.adoptionPageReply)
+                    #endif
                     let reply = try await op.reply(); prepared = nil
                     guard case .page(let records, let deleted, let next) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    #if DEBUG
+                    recordWorkStage(.adoptionPageResult)
+                    #endif
                     try await core.adoptionResult(handle, result: .page(records: records, deleted: deleted, next: next))
                 } catch {
                     prepared = nil
                     // A failed page is an actual failed read, never an empty
                     // final page. Host retains or aborts staging by its policy.
+                    #if DEBUG
+                    recordWorkStage(.adoptionPageFailureResult)
+                    #endif
                     try? await core.adoptionResult(handle, result: .read(.failed))
                     throw error
                 }
-            case .validate: try await core.performAdoptionLocal(handle)
+            case .validate:
+                #if DEBUG
+                recordWorkStage(.adoptionValidation)
+                #endif
+                try await core.performAdoptionLocal(handle)
             case .activate:
+                #if DEBUG
+                if beforeActivation != nil { recordWorkStage(.beforeActivation) }
+                #endif
                 try await beforeActivation?()
                 do {
                     try checkStopping()
                     try admission?.check()
+                    #if DEBUG
+                    recordWorkStage(.adoptionActivation)
+                    #endif
                     try await core.performAdoptionLocal(handle)
                 } catch {
+                    #if DEBUG
+                    if afterActivation != nil { recordWorkStage(.afterActivation) }
+                    #endif
                     await afterActivation?()
                     throw error
                 }
+                #if DEBUG
+                if afterActivation != nil { recordWorkStage(.afterActivation) }
+                #endif
                 await afterActivation?()
             }
         case .sendEntities: return .sendEntities

@@ -203,6 +203,57 @@ struct DebugCloudPreviewProbeTests {
         #expect(work.latestTag == "transportBusy")
     }
 
+    @Test func typedWorkStagesHaveExactTags() {
+        let stages: [(DebugCloudPreviewProbe.WorkStage, String)] = [
+            (.nextPublicationWork, "nextPublicationWork"), (.performLocal, "performLocal"),
+            (.adoptionControlRead, "adoptionControlRead"), (.adoptionControlResult, "adoptionControlResult"),
+            (.adoptionPageReply, "adoptionPageReply"), (.adoptionPageResult, "adoptionPageResult"),
+            (.adoptionPageFailureResult, "adoptionPageFailureResult"),
+            (.adoptionValidation, "adoptionValidation"), (.beforeActivation, "beforeActivation"),
+            (.adoptionActivation, "adoptionActivation"), (.afterActivation, "afterActivation")
+        ]
+        #expect(stages.map(\.0) == DebugCloudPreviewProbe.WorkStage.allCases)
+        let work = DebugCloudPreviewProbe()
+        let older = work.begin()
+        let current = work.begin()
+        #expect(work.latestTag == "running")
+        for (stage, expected) in stages {
+            work.enter(stage, attempt: current)
+            #expect(work.latestTag == expected)
+            work.enter(stage, attempt: older)
+            #expect(work.latestTag == expected)
+        }
+        work.finish(current, progress: .progressed)
+        #expect(work.latestTag == "progressed")
+    }
+
+    @Test func olderWorkStagesCannotReplaceNewRunningOrTerminalAttempt() {
+        let work = DebugCloudPreviewProbe()
+        let older = work.begin()
+        _ = work.begin()
+        for stage in DebugCloudPreviewProbe.WorkStage.allCases {
+            work.enter(stage, attempt: older)
+            #expect(work.latestTag == "running")
+        }
+        let completions: [(CloudConnectionProgress, String)] = [
+            (.progressed, "progressed"), (.sendEntities, "sendEntities"), (.idle, "idle")
+        ]
+        for (progress, expected) in completions {
+            let current = work.begin()
+            work.finish(current, progress: progress)
+            for stage in DebugCloudPreviewProbe.WorkStage.allCases {
+                work.enter(stage, attempt: older)
+                #expect(work.latestTag == expected)
+            }
+        }
+        let current = work.begin()
+        work.fail(current, error: CloudOwnTransportFailure.busy)
+        for stage in DebugCloudPreviewProbe.WorkStage.allCases {
+            work.enter(stage, attempt: older)
+            #expect(work.latestTag == "transportBusy")
+        }
+    }
+
     @Test func typedWorkCompletionNotifiesObserverThatSynchronouslyReadsTag() {
         final class CallbackState: Sendable {
             let value = Mutex<(calls: Int, tag: String?)>((0, nil))

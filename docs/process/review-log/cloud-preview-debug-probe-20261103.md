@@ -68,6 +68,23 @@ Similarity18904 pass the final three files. Swift19238 passes all14 cases on the
 final source, with no skips. Signed phone observation remains pending; no work
 outcome is inferred from source review.
 
+Phone20467 on22e813db passes six steps with zero hierarchy issues. Its final
+value is `preview:finished;work:running`. Phone22826 retains the same value in
+the actual after-wait capture at the thirty-second deadline. Its receipt fails
+the disappearance condition; zero hierarchy issues do not make it a sync pass.
+Both workers are still inside runNext at their captured points. Each drive's
+normal teardown terminates the app afterward. These captures establish neither
+a terminal error nor completed adoption. The driver already captures failed
+waits; no additional capture mechanism is needed.
+
+Export24810 adds fixed, Debug-only last-entered await tags to that same probe.
+It retains the original attempt UUID after idle admission and clears it by a
+matching defer. No guard, task, await, cancellation, error, activation ordering
+or Release behavior changes. Independent review is clear. Private26865 and
+Similarity27114 pass both files. Swift27385 passes all16 focused cases without
+skips. These tags identify an entered boundary; by themselves they do not prove
+that its work is still blocked there. No further probe extension is planned.
+
 Native Resume/registration ownership and the U114 repair cap are unchanged.
 Remove the temporary observation after diagnosis, or review any permanent
 diagnostic separately. No underlying sync repair is inferred from this probe.
