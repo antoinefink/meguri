@@ -147,15 +147,19 @@ extension ReviewCollectionStartupTests {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     let transport = PublicationPresentationTransport()
     private var backend: PublicationPresentationBackend?
-    lazy var sync = SyncCoordinator(bootstrap: {
-        try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-publication-presentation", environment: .development,
-            status: .available, identity: Data("synthetic-publication-account".utf8))
-    }, makeBackend: { [self] _ in
-        let connection = try await CoreCloudWorkflowService().connection()
-        let backend = PublicationPresentationBackend(connection: connection, own: CloudOwnExecutor(core: connection, transport: transport))
-        self.backend = backend
-        return backend
-    }, defaults: nil, clock: .system, directory: nil, observeSignals: false)
+    lazy var sync = makeSync()
+
+    private func makeSync() -> SyncCoordinator {
+        SyncCoordinator(bootstrap: {
+            try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-publication-presentation", environment: .development,
+                status: .available, identity: Data("synthetic-publication-account".utf8))
+        }, makeBackend: { [self] _ in
+            let connection = try await CoreCloudWorkflowService().connection()
+            let backend = PublicationPresentationBackend(connection: connection, own: CloudOwnExecutor(core: connection, transport: transport))
+            self.backend = backend
+            return backend
+        }, defaults: nil, clock: .system, directory: nil, observeSignals: false)
+    }
     lazy var owner: ReviewCollection = {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
@@ -234,6 +238,7 @@ private nonisolated func publicationSignal(_ stream: AsyncStream<Bool>) async th
         group.addTask { for await value in stream { return value }; throw CloudOwnTransportFailure.missingReply }
         group.addTask { try await Task.sleep(for: .seconds(10)); throw PublicationTestFailure() }
         defer { group.cancelAll() }
-        return try #require(try await group.next())
+        let value: Bool? = try await group.next()
+        return try #require(value)
     }
 }
