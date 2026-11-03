@@ -52,6 +52,26 @@ pub fn entity_body_reads() -> usize {
     super::workflow_store::body_reads()
 }
 
+thread_local! {
+    static MEDIA_POLICY_BLOB_CANDIDATE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Calling-thread BlobState row visits by policy media metadata matching only:
+/// each inspected linear-search candidate, or each index-build row and selected
+/// indexed candidate. Excludes BTreeMap key comparisons, entity decoding and
+/// all other Runtime work; this is not a total-runtime cost measurement.
+pub fn media_policy_blob_candidate_visits() -> usize {
+    MEDIA_POLICY_BLOB_CANDIDATE_VISITS.with(std::cell::Cell::get)
+}
+
+pub fn reset_media_policy_blob_candidate_visits() {
+    MEDIA_POLICY_BLOB_CANDIDATE_VISITS.with(|v| v.set(0));
+}
+
+pub(super) fn media_policy_blob_candidate_visit() {
+    MEDIA_POLICY_BLOB_CANDIDATE_VISITS.with(|v| v.set(v.get().saturating_add(1)));
+}
+
 /// Body materializations in the last receipt's fully validated Saved ACK loop.
 /// Reset at receipt entry; None unless its entire Saved loop succeeds on this thread.
 /// Excludes receipt prevalidation, conflict handling and pending emission.

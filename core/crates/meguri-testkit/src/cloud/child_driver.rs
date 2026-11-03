@@ -380,6 +380,9 @@ pub(crate) enum Input {
     AssetConflictBodyReads,
     EntityBodyReads,
     SavedAckBodyReads,
+    MediaPolicyBlobCandidateVisits,
+    ResetMediaPolicyBlobCandidateVisits,
+    PolicyMediaFacts,
     AssetBodyReadControl(core::BindingId, String),
     AssetConflict(String, u64, Saved),
     DrainIncoming(usize),
@@ -940,6 +943,16 @@ impl ChildDriver {
     }
     pub fn saved_ack_body_reads(&mut self) -> Result<Option<usize>> {
         self.call(Input::SavedAckBodyReads)
+    }
+    pub fn media_policy_blob_candidate_visits(&mut self) -> Result<usize> {
+        self.call(Input::MediaPolicyBlobCandidateVisits)
+    }
+    pub fn reset_media_policy_blob_candidate_visits(&mut self) -> Result<()> {
+        self.call(Input::ResetMediaPolicyBlobCandidateVisits)
+    }
+    /// Actual Runtime projection for the ready collection, with its real generation.
+    pub fn policy_media_facts(&mut self) -> Result<core::policy::MediaFacts> {
+        self.call(Input::PolicyMediaFacts)
     }
     pub fn asset_body_read_control(&mut self, binding: core::BindingId, name: &str) -> Result<usize> {
         self.call(Input::AssetBodyReadControl(binding, name.to_owned()))
@@ -2614,6 +2627,26 @@ impl Device {
             Input::AssetConflictBodyReads => value(self.asset_conflict_body_reads),
             Input::EntityBodyReads => value(core::testing::entity_body_reads()),
             Input::SavedAckBodyReads => value(core::testing::saved_ack_body_reads()),
+            Input::MediaPolicyBlobCandidateVisits => value(core::testing::media_policy_blob_candidate_visits()),
+            Input::ResetMediaPolicyBlobCandidateVisits => {
+                core::testing::reset_media_policy_blob_candidate_visits();
+                value(())
+            }
+            Input::PolicyMediaFacts => {
+                let collection = self.host.collection()?;
+                let generation = {
+                    let lease = collection.reader(ReaderRole::Cloud)?;
+                    let snapshot = lease.snapshot()?;
+                    snapshot.generation().0
+                };
+                value(
+                    self.runtime()?
+                        .policy_projection(core::policy::Lifecycle::Ready, generation)?
+                        .facts
+                        .summary
+                        .media,
+                )
+            }
             Input::AssetBodyReadControl(b, name) => {
                 let before = core::testing::entity_body_reads();
                 let _ = self.runtime()?.binding_entity(b, &name)?.ok_or_else(failure)?;

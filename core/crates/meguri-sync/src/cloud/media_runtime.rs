@@ -2642,13 +2642,32 @@ impl Runtime {
                 live.insert(text(&p.name)?.to_lowercase(), p);
             }
         }
+        let mut blobs_by_metadata = BTreeMap::new();
+        for state in ledger.blobs.values() {
+            #[cfg(feature = "test-hooks")]
+            super::testing::media_policy_blob_candidate_visit();
+            let metadata = &state.metadata;
+            // Keep the first row in ledger record-name order, just as find did.
+            blobs_by_metadata
+                .entry((metadata.sha256, metadata.sha1, metadata.size))
+                .or_insert(state);
+        }
+        let lookup_blob = |metadata: &blob::Blob| {
+            blobs_by_metadata
+                .get(&(metadata.sha256, metadata.sha1, metadata.size))
+                .copied()
+                .inspect(|_| {
+                    #[cfg(feature = "test-hooks")]
+                    super::testing::media_policy_blob_candidate_visit();
+                })
+        };
         let mut uploads = BTreeMap::new();
         let mut downloads = BTreeMap::new();
         let mut unknown = BTreeSet::new();
         let mut missing = 0u64;
         for (name, payload) in &live {
             let metadata = blob::Blob::from(payload);
-            let tracked = ledger.blobs.values().find(|b| b.metadata == metadata);
+            let tracked = lookup_blob(&metadata);
             let flags = ledger.names.get(name);
             if flags.is_some_and(|f| f.removal_held || f.withheld.is_some() || f.tombstone_at.is_some()) {
                 continue;
@@ -2669,7 +2688,7 @@ impl Runtime {
         for flags in ledger.names.values().filter(|f| f.sendable()) {
             if let Some(local) = &flags.local {
                 let metadata = blob::Blob::from(local);
-                let tracked = ledger.blobs.values().find(|b| b.metadata == metadata);
+                let tracked = lookup_blob(&metadata);
                 if tracked.is_none_or(|b| b.server != ServerState::Present && b.upload != Transfer::Complete) {
                     uploads.insert(metadata.sha256, metadata.size);
                 }
@@ -2748,6 +2767,224 @@ impl Runtime {
 #[cfg(test)]
 mod recovery_authority_tests {
     use super::*;
+
+    // Storage-only semantic seam for metadata duplicates/mismatches and held
+    // flags that cannot safely be fabricated through public SDK callbacks.
+    // The real Runtime.policy_projection cost proof lives in cloud_media_cleanup.
+    fn policy_facts_fixture(ledger: Ledger, payloads: Vec<codec::MediaName>) -> crate::cloud::policy::MediaFacts {
+        use meguri_model::{
+            clock::{FixedClock, UtcOffset},
+            rng::SeededRandom,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let (mut state, mut authority) = paused_owner();
+        let binding = state.bound.as_ref().unwrap().binding.clone();
+        let mut store = match TrackingStore::open(directory.path(), binding.scope).unwrap() {
+            OpenOutcome::Missing(store) => store,
+            _ => panic!("new synthetic store"),
+        };
+        store.install_runtime().unwrap();
+        let binding = store
+            .create_binding(
+                binding.facts,
+                &FixedClock::new(1000, UtcOffset::UTC),
+                &SeededRandom::new(1915),
+            )
+            .unwrap();
+        authority.0.binding = binding.id;
+        let tx = store.connection.transaction().unwrap();
+        m::store::put_ledger(&tx, binding.id, &ledger).unwrap();
+        for payload in payloads {
+            let key = text(&payload.name).unwrap().to_lowercase().into_bytes();
+            let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::MediaName, &key).unwrap();
+            let entity = fresh_media_entity(
+                &name,
+                key,
+                [1; 16],
+                codec::Payload::MediaName(payload),
+                false,
+                &authority,
+            );
+            workflow_store::put(&tx, binding.id, &entity).unwrap();
+        }
+        tx.commit().unwrap();
+        state.media.no_space = true;
+        Runtime::policy_media_facts_locked(&state, &store, binding.id).unwrap()
+    }
+
+    fn policy_metadata(id: u8, size: u64) -> blob::Blob {
+        blob::Blob {
+            sha256: [id; 32],
+            sha1: [id; 20],
+            size,
+        }
+    }
+
+    fn expected_policy_facts(
+        uploads: (u64, u64),
+        downloads: (u64, u64),
+        unknown: u64,
+        missing: u64,
+    ) -> crate::cloud::policy::MediaFacts {
+        crate::cloud::policy::MediaFacts {
+            upload_files: Some(uploads.0),
+            upload_bytes: Some(uploads.1),
+            download_files: Some(downloads.0),
+            download_bytes: Some(downloads.1),
+            unknown_blobs: Some(unknown),
+            missing_names: Some(missing),
+            root_acked: Some(false),
+            zone_missing: Some(true),
+            no_space: Some(true),
+            uploads_running: None,
+            downloads_running: None,
+            remaining_download_ms: None,
+        }
+    }
+
+    #[test]
+    fn media_policy_lookup_cost_exact_metadata_and_duplicate_first_winner_in_both_loops() {
+        let shared = policy_metadata(1, 7);
+        let sha1_mismatch = policy_metadata(3, 11);
+        let size_mismatch = policy_metadata(4, 13);
+        let mut ledger = Ledger {
+            zone_missing: true,
+            ..Default::default()
+        };
+        for (key, metadata, server) in [
+            ("a-first", shared.clone(), ServerState::Deleted),
+            ("z-duplicate", shared.clone(), ServerState::Present),
+            (
+                "0-wrong-sha1",
+                blob::Blob {
+                    sha1: [9; 20],
+                    ..sha1_mismatch.clone()
+                },
+                ServerState::Present,
+            ),
+            (
+                "0-wrong-size",
+                blob::Blob {
+                    size: 14,
+                    ..size_mismatch.clone()
+                },
+                ServerState::Present,
+            ),
+        ] {
+            ledger.blobs.insert(
+                key.into(),
+                BlobState {
+                    metadata,
+                    server,
+                    ..Default::default()
+                },
+            );
+        }
+        for (name, metadata) in [
+            ("upload.bin", &shared),
+            ("sha1-upload.bin", &sha1_mismatch),
+            ("size-upload.bin", &size_mismatch),
+        ] {
+            ledger.names.insert(
+                name.into(),
+                NameState {
+                    local: Some(metadata.media(name)),
+                    ..Default::default()
+                },
+            );
+        }
+        let facts = policy_facts_fixture(
+            ledger,
+            vec![
+                shared.media("remote.bin"),
+                shared.media("shared.bin"),
+                policy_metadata(2, 9).media("unknown.bin"),
+                sha1_mismatch.media("sha1.bin"),
+                size_mismatch.media("size.bin"),
+            ],
+        );
+        // Two missing names share one download; SHA256 alone must not match
+        // either mismatched Present row. Duplicate metadata selects a-first.
+        assert_eq!(facts, expected_policy_facts((3, 31), (4, 40), 3, 2));
+    }
+
+    #[test]
+    fn media_policy_lookup_cost_case_folded_flags_are_preserved() {
+        let mut ledger = Ledger {
+            zone_missing: true,
+            ..Default::default()
+        };
+        let mut payloads = Vec::new();
+        for (id, name, mut flags) in [
+            (
+                1,
+                "WithHeld.bin",
+                NameState {
+                    withheld: Some([1; 32]),
+                    ..Default::default()
+                },
+            ),
+            (
+                2,
+                "Removal.bin",
+                NameState {
+                    removal_held: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                3,
+                "Tombstone.bin",
+                NameState {
+                    tombstone_at: Some(1),
+                    ..Default::default()
+                },
+            ),
+            (
+                4,
+                "Missing.bin",
+                NameState {
+                    file_missing: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                5,
+                "Superseded.bin",
+                NameState {
+                    superseded: Some([5; 32]),
+                    ..Default::default()
+                },
+            ),
+            (
+                6,
+                "Changed.bin",
+                NameState {
+                    media_changed: Some([6; 32]),
+                    ..Default::default()
+                },
+            ),
+            (
+                7,
+                "Unsyncable.bin",
+                NameState {
+                    unsyncable: true,
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let payload = policy_metadata(id, 2 * u64::from(id) + 3).media(name);
+            if flags.tombstone_at.is_none() {
+                flags.local = Some(payload.clone());
+            }
+            ledger.names.insert(name.to_lowercase(), flags);
+            payloads.push(payload);
+        }
+        assert_eq!(
+            policy_facts_fixture(ledger, payloads),
+            expected_policy_facts((0, 0), (2, 24), 4, 0)
+        );
+    }
 
     fn paused_owner() -> (State, MediaRecoveryAuthority) {
         let authority = Authority {

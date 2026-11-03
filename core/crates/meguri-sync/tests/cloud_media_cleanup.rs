@@ -17,6 +17,223 @@ use support::*;
 const DAY: i64 = 86_400_000;
 const MEDIA: &str = "meguri-media";
 
+fn policy_media_expected(
+    uploads: (u64, u64),
+    downloads: (u64, u64),
+    unknown: u64,
+    missing: u64,
+) -> meguri_sync::cloud::policy::MediaFacts {
+    meguri_sync::cloud::policy::MediaFacts {
+        upload_files: Some(uploads.0),
+        upload_bytes: Some(uploads.1),
+        download_files: Some(downloads.0),
+        download_bytes: Some(downloads.1),
+        unknown_blobs: Some(unknown),
+        missing_names: Some(missing),
+        root_acked: Some(true),
+        zone_missing: Some(false),
+        no_space: Some(false),
+        uploads_running: None,
+        downloads_running: None,
+        remaining_download_ms: None,
+    }
+}
+
+#[test]
+fn media_policy_lookup_cost_projection_visits_are_additive_and_keep_full_entity_reads() {
+    for count in [100, 200] {
+        let mut pair = Pair::published();
+        for index in 0..count {
+            pair.sender
+                .driver()
+                .put_media(
+                    &format!("policy-cost-{index:04}.bin"),
+                    format!("synthetic unique policy content {index:04}").as_bytes(),
+                )
+                .unwrap();
+        }
+        sync(&mut pair);
+        let blobs = pair.sender.driver().media_blobs().unwrap();
+        assert_eq!(blobs.len(), count);
+        assert!(
+            blobs
+                .values()
+                .all(|b| b.server == ServerState::Present && b.upload == Transfer::Complete)
+        );
+        // Fixture generation, transport, ACKs and driver observations are outside
+        // this measurement. Both live-name and sendable-name lookups visit all N
+        // distinct metadata values. Old linear searches cost N*(N+1) visits.
+        let before = pair.sender.driver().entity_body_reads().unwrap();
+        pair.sender.driver().reset_media_policy_blob_candidate_visits().unwrap();
+        let facts = pair.sender.driver().policy_media_facts().unwrap();
+        let visits = pair.sender.driver().media_policy_blob_candidate_visits().unwrap();
+        let reads = pair.sender.driver().entity_body_reads().unwrap() - before;
+        assert_eq!(facts, policy_media_expected((0, 0), (0, 0), 0, 0));
+        assert_eq!(reads, count, "all M complete MediaName images must still be read");
+        assert!(visits <= blobs.len() + 2 * count, "N={count}, visits={visits}");
+        // A zero/unwired counter must not make the additive bound vacuous.
+        assert!(visits >= 2 * count, "both lookup loops must select real candidates");
+        pair.close();
+    }
+}
+
+#[test]
+fn media_policy_lookup_cost_real_shared_upload_present_and_tombstone_facts() {
+    let mut pair = Pair::published();
+    pair.sender.driver().put_media("Photo.JPG", LOCAL).unwrap();
+    pair.sender.driver().put_media("shared.jpg", LOCAL).unwrap();
+    pair.sender.driver().reconcile_binding().unwrap();
+    assert_eq!(
+        pair.sender.driver().policy_media_facts().unwrap(),
+        policy_media_expected((1, LOCAL.len() as u64), (0, 0), 1, 0),
+    );
+    sync(&mut pair);
+    assert_eq!(pair.sender.driver().media_blobs().unwrap().len(), 1);
+    assert_eq!(
+        pair.sender.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (0, 0), 0, 0)
+    );
+    pair.sender.driver().trash_media("Photo.JPG").unwrap();
+    sync(&mut pair);
+    assert_eq!(
+        pair.sender.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (0, 0), 0, 0)
+    );
+    pair.sender.driver().trash_media("shared.jpg").unwrap();
+    sync(&mut pair);
+    assert_eq!(
+        pair.sender.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (0, 0), 0, 0)
+    );
+    pair.close();
+}
+
+#[test]
+fn media_policy_lookup_cost_real_inbox_overrides_local_image_before_download() {
+    let mut pair = Pair::adopted();
+    pair.sender.driver().put_media("photo.jpg", LOCAL).unwrap();
+    sync(&mut pair);
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], LOCAL);
+    pair.sender.driver().put_media("photo.jpg", REMOTE).unwrap();
+    sync(&mut pair);
+    let entity = name(&pair.sender);
+    let state = pair.service.inspect(&scope()).unwrap().unwrap();
+    let record = state.zones[&pair.sender.collection_zone().unwrap()].records[&entity.name].clone();
+    // Actual fetched record, held in the normal inbox without applying it.
+    pair.receiver.driver().deliver_collection_records(&[record]).unwrap();
+    let binding = pair.receiver.facts().unwrap().current.unwrap().id;
+    assert_eq!(pair.receiver.driver().inbox_entries(binding).unwrap().len(), 1);
+    assert_eq!(
+        pair.receiver.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (1, REMOTE.len() as u64), 1, 0),
+    );
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], REMOTE);
+    assert_eq!(
+        pair.receiver.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (0, 0), 0, 0)
+    );
+    let blob = pair
+        .receiver
+        .driver()
+        .media_blobs()
+        .unwrap()
+        .into_iter()
+        .find(|(_, blob)| blob.metadata.sha256 == codec::sha256(REMOTE))
+        .unwrap()
+        .0;
+    let deleted = pair
+        .service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Modify {
+                zone: MEDIA.into(),
+                atomic: false,
+                changes: vec![Mutation::Delete { name: blob.clone() }],
+            },
+        )
+        .unwrap();
+    assert!(matches!(&deleted.result, Ok(Reply::Modified(items))
+        if matches!(&items[0].result, Ok(MutationSuccess::Deleted))));
+    // An outside file loss is a missing file, never a Meguri removal/tombstone.
+    std::fs::remove_file(pair.receiver_dir.join("collection.media").join("photo.jpg")).unwrap();
+    pair.receiver.driver().reconcile_binding().unwrap();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(
+        pair.receiver.driver().media_blobs().unwrap()[&blob].server,
+        ServerState::Deleted
+    );
+    assert_eq!(
+        pair.receiver.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (1, REMOTE.len() as u64), 0, 1)
+    );
+    pair.close();
+}
+
+#[test]
+fn media_policy_lookup_cost_projection_rejects_damaged_local_base_ack_and_flight_bodies() {
+    let mut pair = Pair::published();
+    publish_old(&mut pair);
+    pair.sender.driver().put_media("photo.jpg", REMOTE).unwrap();
+    pair.sender.hold(Point::BeforeCollectionSave).unwrap();
+    sync(&mut pair);
+    assert!(pair.sender.is_held(Point::BeforeCollectionSave));
+    let entity = name(&pair.sender);
+    assert!(entity.base_payload.is_some() && entity.acked_payload.is_some() && !entity.in_flight.is_empty());
+    let connection =
+        rusqlite::Connection::open(pair.root.path().join("sender").join(meguri_sync::cloud::TRACKING_FILE)).unwrap();
+    let content: String = connection
+        .query_row(
+            "SELECT content FROM cloud_runtime_entities WHERE kind=9 AND key=?1",
+            [entity.key.as_slice()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let header: serde_json::Value = serde_json::from_str(&content).unwrap();
+    for field in ["local", "base", "acked", "flights"] {
+        let image = &header["payload_images"][field];
+        let image = if field == "flights" { &image[0] } else { image };
+        let digest: Vec<u8> = serde_json::from_value(image.clone()).unwrap();
+        assert_eq!(digest.len(), 32, "real {field} image reference");
+        let bytes: Vec<u8> = connection
+            .query_row(
+                "SELECT bytes FROM cloud_runtime_payloads WHERE digest=?1",
+                [&digest],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE cloud_runtime_payloads SET bytes=X'ff' WHERE digest=?1",
+                    [&digest]
+                )
+                .unwrap(),
+            1
+        );
+        assert!(
+            pair.sender.driver().policy_media_facts().is_err(),
+            "accepted damaged {field} body"
+        );
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE cloud_runtime_payloads SET bytes=?1 WHERE digest=?2",
+                    rusqlite::params![bytes, digest],
+                )
+                .unwrap(),
+            1
+        );
+        assert!(pair.sender.driver().policy_media_facts().is_ok());
+    }
+    drop(connection);
+    pair.sender.release(Point::BeforeCollectionSave).unwrap();
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    pair.close();
+}
+
 fn sync(pair: &mut Pair) {
     let result = pair.sender.sync_now_and_drain(&mut pair.service, STEPS);
     result.unwrap_or_else(|error| panic!("{}: {error:?}", pair.sender.last_sync_phase()));
