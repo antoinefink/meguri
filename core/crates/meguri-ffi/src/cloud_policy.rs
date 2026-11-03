@@ -1198,7 +1198,7 @@ pub use execution::{CloudPolicyExecution, CloudPolicyOperationFacts, CloudPolicy
 pub(crate) use execution::operation_error_class;
 
 #[path = "cloud_policy_jobs.rs"]
-mod policy_jobs;
+pub(crate) mod policy_jobs;
 pub use policy_jobs::*;
 
 impl CloudPolicy {

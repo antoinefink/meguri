@@ -421,6 +421,7 @@ struct State {
     invalidation_exhausted: bool,
     store: Option<TrackingStore>,
     bound: Option<Bound>,
+    suspended_adoption_cleanup: Option<adoption_impl::SuspendedAdoptionCleanup>,
     scan_required: bool,
     scan_running: bool,
     tracking_stopped: bool,
@@ -468,6 +469,10 @@ pub struct Runtime {
     pending_clock: std::sync::atomic::AtomicI64,
     no_collection_identity_owner: Mutex<Option<NoCollectionIdentityOwner>>,
     state: Arc<Mutex<State>>,
+    #[cfg(feature = "test-hooks")]
+    state_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    #[cfg(feature = "test-hooks")]
+    adoption_reply_claim_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     incoming_idle: Arc<std::sync::Condvar>,
     #[cfg(feature = "test-hooks")]
     incoming_hooks: Arc<super::testing::Hooks>,
@@ -545,6 +550,10 @@ impl Runtime {
             key_bytes: Mutex::new(None),
             adoption: Mutex::new(None),
             review: Mutex::new(std::sync::Weak::new()),
+            #[cfg(feature = "test-hooks")]
+            state_contention: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            adoption_reply_claim_hook: Mutex::new(None),
             incoming_idle: Arc::new(std::sync::Condvar::new()),
             #[cfg(feature = "test-hooks")]
             incoming_hooks: Arc::new(super::testing::Hooks::default()),
@@ -587,7 +596,38 @@ impl Runtime {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_state_contention_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+        *self.state_contention.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn with_state_held_for_testing(&self, hold: impl FnOnce()) {
+        let _state = self.state();
+        hold();
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn set_adoption_reply_claim_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self
+            .adoption_reply_claim_hook
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
     fn state(&self) -> MutexGuard<'_, State> {
+        #[cfg(feature = "test-hooks")]
+        match self.state.try_lock() {
+            Ok(state) => return state,
+            Err(std::sync::TryLockError::Poisoned(error)) => return error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if let Some(sender) = self
+                    .state_contention
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take()
+                {
+                    let _ = sender.send(());
+                }
+            }
+        }
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
     fn invalidate_locked(state: &mut State) {
@@ -614,18 +654,34 @@ impl Runtime {
         // Providers and sidecar RMW locks never run under tracking/state locks.
         let evidence = collection.open_evidence()?;
         let file = self.inputs.files.identity(collection.path())?;
+        let device = meguri_engine::device_state::DeviceState::for_collection(collection.path());
+        let publication = device.settled_publication()?;
+        let activation = collection.cloud_adopt_activation()?;
+        if !collection.is_current() || evidence.generation != collection.generation() {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.bind_evidence(evidence, file, publication, activation)
+    }
+    // Reuses the immutable facts retained by the original adoption owner for
+    // close retry only. It grants no Collection or executor privilege.
+    fn bind_evidence(
+        &self,
+        evidence: OpenEvidence,
+        file: NativeFileIdentity,
+        publication: Option<meguri_engine::device_state::Publication>,
+        activation: Option<meguri_engine::device_state::CloudAdoptActivation>,
+    ) -> Result<(), RuntimeError> {
         if file.pair() != evidence.native_file || file.created_nanos >= 1_000_000_000 {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
         let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
-        let device = meguri_engine::device_state::DeviceState::for_collection(collection.path());
-        let publication = device.settled_publication()?;
-        let activation = collection.cloud_adopt_activation()?;
         let live_adoption = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_some();
-        if !collection.is_current() || evidence.generation != collection.generation() {
-            return Err(RuntimeError::StaleIncarnation);
+        if let Some(owner) = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+            *owner.cleanup_evidence.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some((evidence, activation.clone()));
         }
         let mut state = self.state();
+        state.suspended_adoption_cleanup = None;
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
         if state.cloud.generation != Some(evidence.generation) || state.cloud.native_file != Some(file) {
@@ -1449,7 +1505,28 @@ impl SuspendParticipant for Runtime {
         let publication =
             meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
                 .publication();
+        let adoption = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let mut state = self.state();
+        let cleanup_op = if adoption.is_some() {
+            with_tracking_access(|| -> Result<_, Error> {
+                match &state.store {
+                    Some(store) => store
+                        .adoption_op()?
+                        .map(|op| {
+                            let retained = Arc::new(store.retain_adoption_store(&op)?);
+                            Ok((op, retained))
+                        })
+                        .transpose(),
+                    None => Ok(state
+                        .suspended_adoption_cleanup
+                        .as_ref()
+                        .map(|cleanup| (cleanup.op.clone(), cleanup.store.clone()))),
+                }
+            })
+            .map_err(engine_error)?
+        } else {
+            None
+        };
         let complete = state.whole_complete
             && !state.scan_required
             && !state.scan_running
@@ -1491,6 +1568,11 @@ impl SuspendParticipant for Runtime {
         if state.adapter.retain_inspection && state.bound.is_some() {
             state.adapter.closed_snapshot = Some(Self::adapter_snapshot_locked(&state).map_err(engine_error)?);
         }
+        state.suspended_adoption_cleanup = cleanup_op.map(|(op, store)| adoption_impl::SuspendedAdoptionCleanup {
+            op,
+            store,
+            incarnation: state.incarnation,
+        });
         state.bound = None;
         state.scan_required = true;
         state.scan_running = false;

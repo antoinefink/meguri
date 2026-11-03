@@ -169,7 +169,35 @@ impl JobRegistry {
     }
 
     pub(crate) fn wait_empty_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
-        while !self.running().is_empty() {
+        self.wait_until(deadline, |_| true)
+    }
+
+    pub(crate) fn wait_connection_replies_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        self.wait_until(deadline, |job| {
+            matches!(
+                job.name.as_str(),
+                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result"
+            )
+        })
+    }
+
+    /// Only these existing workers can retain adoption/reply resources that
+    /// Host cleanup is about to release. Other jobs may need participant flush.
+    pub(crate) fn wait_host_recovery_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        self.wait_until(deadline, |job| {
+            matches!(
+                job.name.as_str(),
+                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result" | "iCloud adoption"
+            )
+        })
+    }
+
+    fn wait_until(
+        &self,
+        deadline: std::time::Duration,
+        include: impl Fn(&RunningJob) -> bool,
+    ) -> Result<(), EngineError> {
+        while self.running().iter().any(&include) {
             if crate::monotonic::now() >= deadline {
                 return Err(EngineError::SuspendDeadline { phase: "jobs".into() });
             }

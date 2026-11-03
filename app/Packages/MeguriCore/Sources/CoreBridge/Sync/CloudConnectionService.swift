@@ -11,9 +11,52 @@ private final class ForeignPublicationQueue: MeguriCoreBindings.CloudPublication
     func enqueue() -> Bool { queue.enqueue() }
 }
 
+private struct CloudConnectionJobValue<Value: Sendable>: Sendable {
+    let handle: MeguriCoreBindings.JobHandle
+    let read: @Sendable () throws -> Value?
+}
+
 public actor CoreCloudConnectionService {
+    // Two moved calls on this retained connection shared Maintenance ordering.
+    // Keep that order through terminal drain without sequencing policy jobs or
+    // nesting a permit around the synchronous calls they may themselves use.
+    private let order = CloudPolicyOrder()
+    private let onJobQueued: @Sendable () -> Void
     private let raw: MeguriCoreBindings.CloudConnection
-    init(_ raw: MeguriCoreBindings.CloudConnection) { self.raw = raw }
+    private let track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob
+    init(_ raw: MeguriCoreBindings.CloudConnection,
+         onJobQueued: @escaping @Sendable () -> Void = {},
+         track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }) {
+        self.raw = raw; self.track = track; self.onJobQueued = onJobQueued
+    }
+
+    private func run<Value: Sendable>(
+        _ startName: BridgeCall, result resultName: BridgeCall,
+        _ start: @escaping @Sendable () throws -> CloudConnectionJobValue<Value>
+    ) async throws -> Value {
+        await order.acquire(queued: onJobQueued)
+        do {
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(startName, start)
+            let job = try await Jobs.trackDraining(started.handle, setup: track)
+            let outcome = await job.outcome()
+            // The permit and payload leases survive setup failure and terminal
+            // drain. Cancellation of a waiting Task cannot drop a predecessor.
+            if let value = try await MaintenanceLane.shared.call(resultName, started.read) {
+                await order.release()
+                return value
+            }
+            switch outcome {
+            case .cancelled: throw BridgeError.cancelled
+            case .failed(let error): throw error
+            case .succeeded: throw BridgeError.internal("Connection job completed without its typed result")
+            }
+        } catch {
+            await order.release()
+            throw error
+        }
+    }
+
     public func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation {
         try await MaintenanceLane.shared.call(.cloudConnectionLocalPublicationInformation) { [raw] in
             LocalPublicationInformation(try raw.localPublicationInformation(generation: generation))
@@ -51,7 +94,11 @@ public actor CoreCloudConnectionService {
     }
     public func nextPublicationWork() async throws -> CloudPublicationWork {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudConnectionNextPublicationWork) { [raw] in CloudPublicationWork(try raw.nextPublicationWork()) }
+        let value: MeguriCoreBindings.CloudPublicationWork = try await run(.cloudConnectionStartNextPublicationWork, result: .cloudPublicationWorkResult) { [raw] in
+            let started = try raw.startNextPublicationWork()
+            return CloudConnectionJobValue(handle: started.handle, read: { try started.result.result() })
+        }
+        return CloudPublicationWork(value)
     }
     public func performLocal(_ handle: CloudPublicationLocal) async throws {
         let raw = self.raw
@@ -71,7 +118,12 @@ public actor CoreCloudConnectionService {
     public func adoptionResult(_ handle: CloudAdoptionWork, result: CloudAdoptionResult) async throws {
         let raw = self.raw
         try await result.withRaw { value in
-            try await MaintenanceLane.shared.call(.cloudConnectionAdoptionResult) { [raw] in try raw.adoptionResult(handle: handle.raw, result: value) }
+            // Keep every native payload/staging lease through admission,
+            // listener setup (including failure drain), terminal and typed read.
+            let _: MeguriCoreBindings.CloudAdoptionApplied = try await run(.cloudConnectionStartAdoptionResult, result: .cloudAdoptionAppliedResult) { [raw] in
+                let started = try raw.startAdoptionResult(handle: handle.raw, result: value)
+                return CloudConnectionJobValue(handle: started.handle, read: { try started.result.result() })
+            }
         }
     }
     public func performAdoptionLocal(_ handle: CloudAdoptionWork) async throws {

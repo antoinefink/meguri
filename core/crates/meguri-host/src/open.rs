@@ -490,7 +490,7 @@ impl CoreHost {
     pub fn close(&self) -> Result<(), EngineError> {
         // Identity provider calls hold no lease. Only begin/result/apply hold
         // this original Host lease, so close never waits for a platform read.
-        let mut identity_owner = self
+        let identity_owner = self
             .no_collection_identity_owner
             .as_ref()
             .map(|live| live.lock().unwrap_or_else(PoisonError::into_inner));
@@ -527,24 +527,42 @@ impl CoreHost {
             }
         }
         let _restore = Restore(&self.closed, prepared);
+        // Publish Closing under the original identity lease, then release it:
+        // an already running initial-adoption reply needs it to finish. The
+        // engine closes registry admission and drains before we reacquire.
+        drop(identity_owner);
+        let identity_owner = std::cell::RefCell::new(None);
         self.review.try_close_host(
             || {
                 if !prepared {
-                    // A retained startup row has no live adoption slot. Keep
-                    // that recovery evidence while closing the host normally.
-                    if self.engine.slot_holder() == Some(meguri_engine::LongOp::CloudAdopt)
-                        && let Some(runtime) = &self.cloud
-                        && let Some(op) = runtime.adoption_op().map_err(|_| EngineError::CollectionUnavailable {
-                            reason: "cloud recovery close failed".into(),
-                        })?
-                    {
-                        runtime
-                            .cancel_cloud_adoption(op.id, self.engine.collection().ok().as_ref())
-                            .map_err(|_| EngineError::Busy {
-                                running_op: "cloud adoption".into(),
-                            })?;
-                    }
-                    self.engine.close()?;
+                    self.engine.close_with_host_cleanup(|collection| {
+                        *identity_owner.borrow_mut() = self
+                            .no_collection_identity_owner
+                            .as_ref()
+                            .map(|live| live.lock().unwrap_or_else(PoisonError::into_inner));
+                        // A retained startup row has no live adoption slot. Keep
+                        // that recovery evidence while closing the host normally.
+                        if self.engine.slot_holder() == Some(meguri_engine::LongOp::CloudAdopt)
+                            && let Some(runtime) = &self.cloud
+                            && let Some(op) = runtime.adoption_op_for_host_close(&self.engine).map_err(|_| {
+                                EngineError::CollectionUnavailable {
+                                    reason: "cloud recovery close failed".into(),
+                                }
+                            })?
+                        {
+                            runtime
+                                .cancel_cloud_adoption_for_host_close(op.id, &self.engine, collection.as_ref())
+                                .map_err(|_| EngineError::Busy {
+                                    running_op: "cloud adoption".into(),
+                                })?;
+                        }
+                        Ok(())
+                    })?;
+                } else {
+                    *identity_owner.borrow_mut() = self
+                        .no_collection_identity_owner
+                        .as_ref()
+                        .map(|live| live.lock().unwrap_or_else(PoisonError::into_inner));
                 }
                 self.media
                     .close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
@@ -552,7 +570,7 @@ impl CoreHost {
                 Ok(())
             },
             || {
-                if let Some(live) = identity_owner.as_mut() {
+                if let Some(live) = identity_owner.borrow_mut().as_mut() {
                     **live = false;
                 }
                 *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;

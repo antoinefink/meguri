@@ -127,14 +127,21 @@ impl Engine {
         let collection = self.collection()?;
         let result = self.quiesce_inner(&collection, deadline);
         if result.is_err() {
-            let mut state = self.lock_state();
-            state.suspended = true;
-            collection.core.exec.set_admission(Admission::Closed {
-                reason: "suspension is incomplete".into(),
-            });
-            self.update_availability(&mut state);
+            self.record_incomplete_suspend();
         }
         result
+    }
+
+    // A failed close drain or cleanup keeps admission shut for retry.
+    pub(crate) fn record_incomplete_suspend(&self) {
+        let mut state = self.lock_state();
+        state.suspended = true;
+        if let Some(current) = &state.current {
+            current.core.exec.set_admission(Admission::Closed {
+                reason: "suspension is incomplete".into(),
+            });
+        }
+        self.update_availability(&mut state);
     }
 
     fn quiesce_inner(&self, collection: &crate::Collection, deadline: Duration) -> Result<(), EngineError> {
@@ -167,6 +174,9 @@ impl Engine {
             self.update_availability(&mut state);
         }
         exec.wait_idle_until(deadline)?;
+        // Only the two transfer-reply jobs need Runtime authority until their
+        // terminal result. Flush stays first; unrelated jobs keep S1 ordering.
+        self.jobs().wait_connection_replies_until(deadline)?;
         for participant in self.ports().suspend_participants {
             participant.suspend_until(deadline)?;
         }

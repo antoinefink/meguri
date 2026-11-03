@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    path::{Path, PathBuf},
+};
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -89,13 +93,174 @@ pub(super) fn open_current(directory: &Path, scope: BuildScope) -> Result<OpenOu
     })
 }
 
+/// Keep the suspended adoption's file open to prevent inode reuse.
+pub(super) struct RetainedAdoptionStore {
+    file: File,
+    directory: super::recovery::NativeIdentity,
+    identity: super::recovery::NativeIdentity,
+    op: super::adoption::AdoptOp,
+    before: Option<super::Binding>,
+    after: Option<super::Binding>,
+    authority: Option<(String, Option<String>)>,
+}
+
+impl TrackingStore {
+    pub(super) fn retain_adoption_store(&self, op: &super::adoption::AdoptOp) -> Result<RetainedAdoptionStore, Error> {
+        let directory = super::recovery::RecoveryDirectory::open(&self.directory)?;
+        let identity = directory.entry_identity(TRACKING_FILE)?.ok_or(Error::RecoveryRefused)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.directory.join(TRACKING_FILE))?;
+        let pinned = file.metadata()?;
+        let named = std::fs::symlink_metadata(self.directory.join(TRACKING_FILE))?;
+        if !pinned.is_file()
+            || (pinned.dev(), pinned.ino()) != (named.dev(), named.ino())
+            || directory.entry_identity(TRACKING_FILE)? != Some(identity)
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        let retained = RetainedAdoptionStore {
+            file,
+            directory: directory.native_identity(),
+            identity,
+            op: op.clone(),
+            before: op
+                .binding_before
+                .as_ref()
+                .map(|b| self.binding(b.id))
+                .transpose()?
+                .flatten(),
+            after: self.binding(op.binding_after)?,
+            authority: self.adoption_cleanup_authority(op)?,
+        };
+        if op.binding_before.is_some() != retained.before.is_some()
+            || (op.step == super::adoption::AdoptStep::Ready
+                && (retained.after.is_none() || retained.authority.is_none()))
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        retained.validate(self)?;
+        Ok(retained)
+    }
+
+    fn adoption_cleanup_authority(
+        &self,
+        op: &super::adoption::AdoptOp,
+    ) -> Result<Option<(String, Option<String>)>, Error> {
+        use rusqlite::OptionalExtension;
+        self.connection
+            .query_row(
+                "SELECT controls,activated_file FROM cloud_adoption_authority WHERE binding=?1",
+                [op.binding_after.0.as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(Error::from)
+    }
+
+    /// No CREATE, schema installation, migration, recovery or collection access.
+    /// All refusal checks run on a private WAL-aware copy before SQLite ever
+    /// opens the retained source (even read-only could change its sidecars).
+    pub(super) fn open_retained_adoption(
+        directory: &Path,
+        scope: BuildScope,
+        retained: &RetainedAdoptionStore,
+    ) -> Result<Self, Error> {
+        super::recovery::require_settled(directory)?;
+        retained.check_file(directory)?;
+        let (_private, copy) = private_copy(&directory.join(TRACKING_FILE))?;
+        let connection = Connection::open_with_flags(copy, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let probe_store = Self {
+            connection,
+            scope: scope.clone(),
+            directory: directory.to_owned(),
+        };
+        retained.validate(&probe_store)?;
+        drop(probe_store);
+        retained.check_file(directory)?;
+        let connection = Connection::open_with_flags(directory.join(TRACKING_FILE), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let store = Self {
+            connection,
+            scope,
+            directory: directory.to_owned(),
+        };
+        // Caller holds with_tracking_access across probe, open and cleanup.
+        retained.validate(&store)?;
+        #[cfg(target_vendor = "apple")]
+        store
+            .connection
+            .execute_batch("PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
+        store
+            .connection
+            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
+        Ok(store)
+    }
+}
+
+impl RetainedAdoptionStore {
+    fn check_file(&self, directory: &Path) -> Result<(), Error> {
+        let directory_guard = super::recovery::RecoveryDirectory::open(directory)?;
+        let named = std::fs::symlink_metadata(directory.join(TRACKING_FILE))?;
+        let pinned = self.file.metadata()?;
+        if !named.is_file()
+            || (named.dev(), named.ino()) != (pinned.dev(), pinned.ino())
+            || directory_guard.native_identity() != self.directory
+            || directory_guard.entry_identity(TRACKING_FILE)? != Some(self.identity)
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        Ok(())
+    }
+
+    fn validate(&self, store: &TrackingStore) -> Result<(), Error> {
+        let outer: i64 = store
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if outer != SCHEMA_VERSION {
+            return Err(Error::RecoveryRefused);
+        }
+        for (table, expected) in [
+            ("cloud_runtime_schema", super::runtime_store::VERSION),
+            ("cloud_workflow_schema", 2),
+            ("cloud_publication_schema", 2),
+        ] {
+            let versions = store
+                .connection
+                .prepare(&format!("SELECT version FROM {table}"))?
+                .query_map([], |r| r.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            if versions != [expected] {
+                return Err(Error::RecoveryRefused);
+            }
+        }
+        super::runtime_store::check_version(&store.connection)?;
+        store::validate(&store.connection, outer)?;
+        if store.adoption_op()?.as_ref() != Some(&self.op)
+            || self
+                .op
+                .binding_before
+                .as_ref()
+                .map(|b| store.binding(b.id))
+                .transpose()?
+                .flatten()
+                != self.before
+            || store.binding(self.op.binding_after)? != self.after
+            || store.adoption_cleanup_authority(&self.op)? != self.authority
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(suffix);
     PathBuf::from(name)
 }
 
-pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
+fn private_copy(path: &Path) -> Result<(tempfile::TempDir, PathBuf), Error> {
     let private = tempfile::tempdir()?;
     let copy = private.path().join(TRACKING_FILE);
     std::fs::copy(path, &copy)?;
@@ -106,6 +271,11 @@ pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
     }
     // Do not copy SHM: SQLite reconstructs the private WAL index. It never
     // shares the original's locks, nor recovers/checkpoints the original WAL.
+    Ok((private, copy))
+}
+
+pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
+    let (_private, copy) = private_copy(path)?;
     let checked = (|| -> Result<Probe, Error> {
         let connection = Connection::open_with_flags(&copy, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;

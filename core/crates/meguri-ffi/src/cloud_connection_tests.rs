@@ -1599,3 +1599,6 @@ fn server_retry_duration_uses_reply_clock_and_survives_actual_host_restart() {
     );
     host.close().unwrap();
 }
+
+#[path = "cloud_connection_job_tests.rs"]
+mod jobs;

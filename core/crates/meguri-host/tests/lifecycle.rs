@@ -1463,3 +1463,64 @@ fn late_cancellation_retains_publication_and_records_the_captured_reference() {
     );
     host.close().unwrap();
 }
+
+#[test]
+fn cloud_connection_start_racing_close_is_registered_before_drain_or_rejected_by_original_host() {
+    use meguri_engine::{EngineError, EventKind};
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(CoreHost::open(config(dir.path())).unwrap());
+    let generation = host.cloud_connection_generation().unwrap();
+    let events = host.engine().stream().subscribe();
+    let race = Arc::new(Barrier::new(2));
+    let completed = Arc::new(AtomicUsize::new(0));
+    std::thread::scope(|scope| {
+        let starter = host.clone();
+        let start_race = race.clone();
+        let done = completed.clone();
+        let starts = scope.spawn(move || {
+            start_race.wait();
+            (0..32)
+                .map(|_| {
+                    let done = done.clone();
+                    starter.start_cloud_connection_job(generation, "racing reply", move |_| {
+                        done.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        race.wait();
+        host.close().unwrap();
+        let starts = starts.join().unwrap();
+        let admitted: std::collections::BTreeSet<_> = starts
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(job) => Some(job.id),
+                Err(EngineError::CollectionUnavailable { .. }) => None,
+                other => panic!("unexpected start result: {other:?}"),
+            })
+            .collect();
+        assert!(
+            host.engine().jobs().running().is_empty(),
+            "start escaped original Host close drain"
+        );
+        let mut finished_jobs = std::collections::BTreeSet::new();
+        while finished_jobs.len() < admitted.len() {
+            let event = events.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            if let EventKind::JobFinished { id, .. } = &event.kind
+                && admitted.contains(id)
+            {
+                assert!(finished_jobs.insert(*id), "duplicate terminal");
+            }
+        }
+        assert!(completed.load(Ordering::SeqCst) <= admitted.len());
+    });
+    assert!(matches!(
+        host.start_cloud_connection_job(generation, "after close", |_| panic!("closed Host admitted work")),
+        Err(EngineError::CollectionUnavailable { .. })
+    ));
+}

@@ -29,20 +29,55 @@ use std::{
 
 pub(super) struct AdoptionOwner {
     slot: SlotGuard,
+    generation: meguri_engine::Generation,
+    pub(super) cleanup_evidence: Mutex<
+        Option<(
+            meguri_engine::OpenEvidence,
+            Option<meguri_engine::device_state::CloudAdoptActivation>,
+        )>,
+    >,
     directory: PathBuf,
     stage: Mutex<Option<ReplacementStage>>,
     next: Mutex<Option<AdoptionTask>>,
+    #[cfg(feature = "test-hooks")]
+    next_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     uncertain_activation: std::sync::atomic::AtomicBool,
+}
+// Retain one adoption for close cleanup; this grants no collection access.
+pub(super) struct SuspendedAdoptionCleanup {
+    pub(super) op: AdoptOp,
+    pub(super) incarnation: u64,
+    pub(super) store: Arc<super::open::RetainedAdoptionStore>,
 }
 impl AdoptionOwner {
     fn set_next(&self, task: AdoptionTask) {
         *self.next.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
     }
     fn claim(&self, task: &AdoptionTask) -> Result<(), RuntimeError> {
+        self.claim_with_work(task, &crate::cloud::policy::PolicyWork::default())
+    }
+    fn claim_with_work(
+        &self,
+        task: &AdoptionTask,
+        work: &crate::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
+        #[cfg(feature = "test-hooks")]
+        if matches!(self.next.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
+            if let Some(sender) = self
+                .next_contention
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+            {
+                let _ = sender.send(());
+            }
+        }
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         if next.as_ref() != Some(task) {
             return Err(RuntimeError::StaleIncarnation);
         }
+        // After claim, restore the task or abort even if cancellation arrives.
+        work.effect()?;
         *next = None;
         Ok(())
     }
@@ -567,11 +602,20 @@ impl Runtime {
             started_at_ms: self.adapter_now()?,
         };
         self.check_adoption_preview(preview, collection)?;
+        let cleanup_evidence = collection
+            .map(|collection| -> Result<_, RuntimeError> {
+                Ok((collection.open_evidence()?, collection.cloud_adopt_activation()?))
+            })
+            .transpose()?;
         let owner = Arc::new(AdoptionOwner {
             slot,
+            generation: engine.generation(),
+            cleanup_evidence: Mutex::new(cleanup_evidence),
             directory: stage.directory().to_owned(),
             stage: Mutex::new(Some(stage)),
             next: Mutex::new(Some(AdoptionTask::ReadActive)),
+            #[cfg(feature = "test-hooks")]
+            next_contention: Mutex::new(None),
             uncertain_activation: std::sync::atomic::AtomicBool::new(false),
         });
         let mut held = self.adoption.lock().unwrap_or_else(PoisonError::into_inner);
@@ -604,7 +648,34 @@ impl Runtime {
         Ok(id)
     }
     /// A distinct durable adoption row drives the existing publication lane.
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_adoption_next_contention_for_testing(
+        &self,
+        sender: std::sync::mpsc::Sender<()>,
+    ) -> Result<(), RuntimeError> {
+        *self
+            .adoption_owner()?
+            .next_contention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(sender);
+        Ok(())
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn with_adoption_next_held_for_testing(&self, hold: impl FnOnce()) -> Result<(), RuntimeError> {
+        let owner = self.adoption_owner()?;
+        let _next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+        hold();
+        Ok(())
+    }
     pub fn next_adoption_work(&self, collection: Option<&Collection>) -> Result<Option<AdoptionWork>, RuntimeError> {
+        self.next_adoption_work_with_work(collection, &mut crate::cloud::policy::PolicyWork::default())
+    }
+    pub fn next_adoption_work_with_work(
+        &self,
+        collection: Option<&Collection>,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<Option<AdoptionWork>, RuntimeError> {
+        work.check()?;
         let Some(op) = self.adoption_op()? else {
             return Ok(None);
         };
@@ -620,8 +691,12 @@ impl Runtime {
         ) {
             return Ok(None);
         }
-        if self.check_adoption_before(&op, collection).is_err() {
-            self.cancel_cloud_adoption(op.id, collection)?;
+        // Cancellation is not invalid recovery authority and must never enter
+        // its destructive cleanup path. Recheck after every contended read.
+        let authority = self.check_adoption_before(&op, collection);
+        work.check()?;
+        if authority.is_err() {
+            self.cancel_cloud_adoption_with_work(op.id, collection, work)?;
             return Ok(None);
         }
         let owner = self.adoption_owner()?;
@@ -637,6 +712,7 @@ impl Runtime {
         {
             return Ok(None);
         }
+        work.check()?;
         Ok(next.map(|task| AdoptionWork { op: op.id, task }))
     }
     /// Delivery owns no reader lease, Runtime/store guard or lifecycle lock.
@@ -647,6 +723,23 @@ impl Runtime {
         collection: Option<&Collection>,
         space: &dyn SpaceProvider,
     ) -> Result<(), RuntimeError> {
+        self.cloud_adoption_reply_with_work(
+            work,
+            reply,
+            collection,
+            space,
+            &mut crate::cloud::policy::PolicyWork::default(),
+        )
+    }
+    pub fn cloud_adoption_reply_with_work(
+        &self,
+        work: &AdoptionWork,
+        reply: AdoptionReply,
+        collection: Option<&Collection>,
+        space: &dyn SpaceProvider,
+        authority: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
+        authority.check()?;
         #[cfg(feature = "test-hooks")]
         let task = match &work.task {
             AdoptionTask::ReadActive => "ReadActive",
@@ -677,7 +770,18 @@ impl Runtime {
             adoption_stage!("owner");
             let owner = self.adoption_owner()?;
             adoption_stage!("claim");
-            owner.claim(&work.task)?;
+            owner.claim_with_work(&work.task, authority)?;
+            #[cfg(feature = "test-hooks")]
+            {
+                let hook = self
+                    .adoption_reply_claim_hook
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                if let Some(hook) = hook {
+                    hook();
+                }
+            }
             if matches!(
                 self.inputs.identity.read_identity(&self.inputs.scope),
                 IdentityStatus::ReadFailed
@@ -891,14 +995,24 @@ impl Runtime {
         result
     }
     fn abort_adoption(&self, op: &AdoptOp, collection: Option<&Collection>) -> Result<(), RuntimeError> {
+        self.abort_adoption_with_work(op, collection, &crate::cloud::policy::PolicyWork::default())
+    }
+    fn abort_adoption_with_work(
+        &self,
+        op: &AdoptOp,
+        collection: Option<&Collection>,
+        work: &crate::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;
         {
             let mut s = self.state();
-            with_tracking_access(|| {
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                work.effect()?;
                 s.store
                     .as_mut()
                     .ok_or(Error::Database)?
-                    .end_adoption(op, None, file, None)
+                    .end_adoption(op, None, file, None)?;
+                Ok(())
             })?;
         }
         self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
@@ -908,7 +1022,107 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Host-only close cleanup after recovery-resource jobs drain. A suspended
+    /// Runtime can read only its exact retained row through this capability.
+    pub fn adoption_op_for_host_close(&self, engine: &Engine) -> Result<Option<AdoptOp>, RuntimeError> {
+        let owner = self.adoption_owner()?;
+        if !owner.slot.belongs_to(engine) || owner.generation != engine.generation() {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let s = self.state();
+        if let Some(cleanup) = &s.suspended_adoption_cleanup {
+            if cleanup.incarnation != s.incarnation || s.bound.is_some() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            return with_tracking_access(|| {
+                let store =
+                    TrackingStore::open_retained_adoption(&self.directory, self.inputs.scope.clone(), &cleanup.store)?;
+                let op = store.adoption_op()?;
+                if op.as_ref() != Some(&cleanup.op) {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                Ok(op)
+            });
+        }
+        drop(s);
+        self.adoption_op()
+    }
+    pub fn cancel_cloud_adoption_for_host_close(
+        &self,
+        id: [u8; 16],
+        engine: &Engine,
+        collection: Option<&Collection>,
+    ) -> Result<(), RuntimeError> {
+        let op = self
+            .adoption_op_for_host_close(engine)?
+            .filter(|op| op.id == id)
+            .ok_or(PublicationError::NotOffered)?;
+        let owner = self.adoption_owner()?;
+        if owner.next.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+            return Err(PublicationError::Busy.into());
+        }
+        // Provider failure precedes the cleanup commit and preserves the lease
+        // for retry, including after a drain deadline left admission closed.
+        let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;
+        let suspended = {
+            let mut s = self.state();
+            let suspended = s.suspended_adoption_cleanup.is_some();
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                if let Some(cleanup) = &s.suspended_adoption_cleanup {
+                    if cleanup.incarnation != s.incarnation || cleanup.op != op || s.bound.is_some() {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
+                    // Open only the original scoped tracking row. No schema
+                    // installation, recovery, bind or collection handle access.
+                    let mut store = TrackingStore::open_retained_adoption(
+                        &self.directory,
+                        self.inputs.scope.clone(),
+                        &cleanup.store,
+                    )?;
+                    store.end_adoption(&op, None, file, None)?;
+                } else {
+                    s.store
+                        .as_mut()
+                        .ok_or(Error::Database)?
+                        .end_adoption(&op, None, file, None)?;
+                }
+                Ok(())
+            })?;
+            s.suspended_adoption_cleanup = None;
+            suspended
+        };
+        self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if !suspended && let Some(collection) = collection {
+            if !collection.is_current() || collection.generation() != owner.generation {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let (evidence, activation) = owner
+                .cleanup_evidence
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+                .ok_or(RuntimeError::StaleIncarnation)?;
+            let publication =
+                meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
+            self.bind_evidence(
+                evidence,
+                file.ok_or(RuntimeError::FileIdentityUnavailable)?,
+                publication,
+                activation,
+            )?;
+            self.refresh_identity()?;
+        }
+        Ok(())
+    }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: Option<&Collection>) -> Result<(), RuntimeError> {
+        self.cancel_cloud_adoption_with_work(id, collection, &crate::cloud::policy::PolicyWork::default())
+    }
+    fn cancel_cloud_adoption_with_work(
+        &self,
+        id: [u8; 16],
+        collection: Option<&Collection>,
+        work: &crate::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let op = self
             .adoption_op()?
             .filter(|p| p.id == id)
@@ -917,7 +1131,7 @@ impl Runtime {
         if owner.next.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
             return Err(PublicationError::Busy.into());
         }
-        self.abort_adoption(&op, collection)
+        self.abort_adoption_with_work(&op, collection, work)
     }
     pub fn perform_cloud_adoption_local(
         &self,

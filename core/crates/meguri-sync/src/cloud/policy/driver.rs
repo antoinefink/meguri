@@ -126,6 +126,7 @@ struct Owned {
 #[derive(Clone, Default)]
 pub struct PolicyWork {
     cancel: Option<meguri_engine::CancelToken>,
+    generation: Option<(meguri_engine::WeakEngine, meguri_engine::Generation)>,
     effected: Arc<std::sync::atomic::AtomicBool>,
     rejected: Arc<std::sync::atomic::AtomicBool>,
     owner_check: Option<Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>>,
@@ -136,6 +137,12 @@ impl PolicyWork {
             cancel: Some(cancel.clone()),
             ..Self::default()
         }
+    }
+    /// A pure atomic generation check for retained connection jobs. This
+    /// never resolves a later active Host or invokes a validation callback.
+    pub fn with_generation(mut self, engine: meguri_engine::WeakEngine, generation: meguri_engine::Generation) -> Self {
+        self.generation = Some((engine, generation));
+        self
     }
     /// Original Host validation runs only at Driver acquisition, never from
     /// the collection writer or beneath Runtime/tracking ownership.
@@ -156,10 +163,15 @@ impl PolicyWork {
         Ok(())
     }
     pub fn check(&self) -> Result<(), RuntimeError> {
-        if !self.effected.load(std::sync::atomic::Ordering::SeqCst)
-            && let Some(cancel) = &self.cancel
-        {
-            cancel.check()?;
+        if !self.effected.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Some(cancel) = &self.cancel {
+                cancel.check()?;
+            }
+            if let Some((engine, generation)) = &self.generation
+                && engine.upgrade().is_none_or(|engine| engine.generation() != *generation)
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
         }
         Ok(())
     }

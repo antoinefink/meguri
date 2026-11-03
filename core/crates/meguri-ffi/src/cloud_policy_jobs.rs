@@ -5,10 +5,10 @@ use meguri_engine::{EngineError, Generation};
 
 // The cell preserves the FFI error, which conversion to EngineError can erase.
 // It owns no Host; completed reads must survive close and replacement.
-struct Cell<T>(Mutex<Option<Result<T, CoreError>>>);
-struct Completion<T>(Arc<Cell<T>>);
+pub(crate) struct Cell<T>(pub(crate) Mutex<Option<Result<T, CoreError>>>);
+pub(crate) struct Completion<T>(pub(crate) Arc<Cell<T>>);
 impl<T> Completion<T> {
-    fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
+    pub(crate) fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
         let terminal = value
             .as_ref()
             .map(|_| ())

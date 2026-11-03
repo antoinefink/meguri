@@ -667,3 +667,174 @@ fn reentrant_job_starts_during_control_calls_are_refused_promptly() {
     worker.join().unwrap();
     drop(dir);
 }
+
+#[test]
+fn suspend_waits_for_connection_reply() {
+    use meguri_engine::{EngineError, EventKind, Generation, Ports, SuspendParticipant};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    struct Participant(Arc<AtomicBool>);
+    impl SuspendParticipant for Participant {
+        fn name(&self) -> &str {
+            "reply-drain-witness"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn suspend(&self) -> Result<(), EngineError> {
+            assert!(
+                self.0.load(Ordering::SeqCst),
+                "participant retired before actual reply completion"
+            );
+            Ok(())
+        }
+    }
+    let completed = Arc::new(AtomicBool::new(false));
+    let h = common::Harness::open_with(Ports::new().suspend_participant(Arc::new(Participant(completed.clone()))));
+    let events = h.engine.stream().subscribe();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let effected = completed.clone();
+    let claimed = h.engine.jobs().start(
+        "CloudConnection.adoption_result",
+        h.engine.generation(),
+        None,
+        move |_| {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(10)).unwrap();
+            effected.store(true, Ordering::SeqCst);
+            Ok(())
+        },
+    );
+    reached.recv_timeout(Duration::from_secs(5)).unwrap();
+    std::thread::scope(|scope| {
+        let suspend = scope.spawn(|| h.engine.suspend(Duration::from_secs(5)));
+        while !claimed.cancel.is_cancelled() {
+            std::thread::yield_now();
+        }
+        // The paused registry rejects new work until this reply finishes.
+        let ran = Arc::new(AtomicBool::new(false));
+        let late_ran = ran.clone();
+        let late = h.engine.jobs().start("late reply", Generation(0), None, move |_| {
+            late_ran.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(late.cancel.is_cancelled());
+        assert!(!ran.load(Ordering::SeqCst));
+        assert!(!completed.load(Ordering::SeqCst));
+        release.send(()).unwrap();
+        assert_eq!(suspend.join().unwrap().unwrap(), SuspendOutcome::Suspended);
+    });
+    assert!(completed.load(Ordering::SeqCst));
+    assert!(h.engine.jobs().running().is_empty());
+    assert!(
+        std::iter::from_fn(|| events.try_recv())
+            .any(|event| matches!(&event.kind, EventKind::JobFinished { id, .. } if *id == claimed.id))
+    );
+    h.engine.close().unwrap();
+}
+
+#[test]
+fn host_cleanup_failure_keeps_collection_and_registry_paused_until_close_retry() {
+    use meguri_engine::{EngineError, EventKind, JobOutcome};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let h = common::Harness::open();
+    let reader = h.collection.reader(meguri_storage::ReaderRole::Query).unwrap();
+    let expected = EngineError::Busy {
+        running_op: "host cleanup".into(),
+    };
+    assert_eq!(
+        h.engine.close_with_host_cleanup(|_| {
+            assert!(reader.col().is_ok());
+            Err(expected.clone())
+        }),
+        Err(expected)
+    );
+    assert!(h.collection.is_current());
+    assert!(
+        h.collection
+            .run(OpSpec::named("must stay closed", OpSource::UserUndoable), |_| Ok(()))
+            .is_err()
+    );
+    let events = h.engine.stream().subscribe();
+    let ran = Arc::new(AtomicBool::new(false));
+    let witness = ran.clone();
+    let refused = h
+        .engine
+        .jobs()
+        .start("after cleanup failure", h.engine.generation(), None, move |_| {
+            witness.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+    assert!(!ran.load(Ordering::SeqCst));
+    assert!(refused.cancel.is_cancelled());
+    let event = events.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(&event.kind, EventKind::JobFinished { id, outcome: JobOutcome::Cancelled } if *id == refused.id));
+    h.engine
+        .close_with_host_cleanup(|collection| {
+            let internal = collection.unwrap();
+            assert!(internal.is_current());
+            assert!(
+                internal.open_evidence().is_err(),
+                "cleanup must not grant collection privilege"
+            );
+            assert!(
+                h.collection.open_evidence().is_err(),
+                "public admission reopened during cleanup"
+            );
+            assert!(reader.col().is_ok());
+            drop(reader);
+            Ok(())
+        })
+        .unwrap();
+    assert!(h.collection.reader(meguri_storage::ReaderRole::Query).is_err());
+}
+
+#[test]
+fn ordinary_suspend_flushes_participants_before_waiting_for_registered_jobs() {
+    use meguri_engine::{EngineError, Ports, SuspendParticipant};
+    use std::sync::{Arc, Mutex, mpsc};
+    struct Flush(Mutex<Option<mpsc::Sender<()>>>);
+    impl SuspendParticipant for Flush {
+        fn name(&self) -> &str {
+            "job-needs-flush"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            if let Some(release) = self.0.lock().unwrap().take() {
+                release.send(()).unwrap();
+            }
+            Ok(())
+        }
+        fn suspend(&self) -> Result<(), EngineError> {
+            Ok(())
+        }
+    }
+    let (release, flushed) = mpsc::channel();
+    let h = common::Harness::open_with(Ports::new().suspend_participant(Arc::new(Flush(Mutex::new(Some(release))))));
+    let (entered, reached) = mpsc::channel();
+    h.engine.jobs().start(
+        "ordinary job depending on participant flush",
+        h.engine.generation(),
+        None,
+        move |_| {
+            entered.send(()).unwrap();
+            flushed
+                .recv_timeout(Duration::from_secs(10))
+                .expect("global pre-flush drain deadlocked the job");
+            Ok(())
+        },
+    );
+    reached.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        h.engine.suspend(Duration::from_secs(2)).unwrap(),
+        SuspendOutcome::Suspended
+    );
+    assert!(h.engine.jobs().running().is_empty());
+    h.engine.close().unwrap();
+}

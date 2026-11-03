@@ -67,6 +67,29 @@ impl CoreHost {
         }
         Ok(self.engine().generation())
     }
+    /// Linearize these internal starts with the original Host's Closing
+    /// transition. No provider, Runtime lock or slot admission runs here.
+    pub fn start_cloud_connection_job(
+        &self,
+        generation: meguri_engine::Generation,
+        name: &str,
+        work: impl FnOnce(&meguri_engine::JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<meguri_engine::JobHandle, EngineError> {
+        let closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        if !matches!(*closed, CloseState::Active) {
+            return Err(EngineError::CollectionUnavailable {
+                reason: "cloud connection host closed".into(),
+            });
+        }
+        let current = self.engine().generation();
+        if current != generation {
+            return Err(EngineError::StaleGeneration {
+                planned: generation,
+                current,
+            });
+        }
+        Ok(self.engine().jobs().start(name, generation, None, work))
+    }
     /// A retained native connection must never follow this process engine into
     /// a successor host after close. Drop the state guard before any core work.
     pub fn cloud_connection_collection(&self) -> Result<meguri_engine::Collection, EngineError> {
@@ -110,11 +133,17 @@ impl CoreHost {
     pub fn next_cloud_publication_work(
         &self,
     ) -> Result<meguri_sync::cloud::publication::PublicationWork, RuntimeError> {
+        self.next_cloud_publication_work_with_work(&mut meguri_sync::cloud::policy::PolicyWork::default())
+    }
+    pub fn next_cloud_publication_work_with_work(
+        &self,
+        work: &mut meguri_sync::cloud::policy::PolicyWork,
+    ) -> Result<meguri_sync::cloud::publication::PublicationWork, RuntimeError> {
         let runtime = self.cloud_runtime().ok_or_else(unavailable)?;
         match self.cloud_adoption_collection()? {
-            Some(collection) => runtime.next_publication_work(&collection),
+            Some(collection) => runtime.next_publication_work_with_work(&collection, work),
             None => Ok(runtime
-                .next_adoption_work(None)?
+                .next_adoption_work_with_work(None, work)?
                 .map(meguri_sync::cloud::publication::PublicationWork::Adoption)
                 .unwrap_or(meguri_sync::cloud::publication::PublicationWork::Idle)),
         }
@@ -132,12 +161,23 @@ impl CoreHost {
             .cancel_cloud_adoption(id, self.cloud_adoption_collection()?.as_ref())
     }
     pub fn cloud_adoption_reply(&self, work: &AdoptionWork, reply: AdoptionReply) -> Result<(), RuntimeError> {
-        self.cloud_runtime().ok_or_else(unavailable)?.cloud_adoption_reply(
-            work,
-            reply,
-            self.cloud_adoption_collection()?.as_ref(),
-            self.backup_inputs.space.as_ref(),
-        )
+        self.cloud_adoption_reply_with_work(work, reply, &mut meguri_sync::cloud::policy::PolicyWork::default())
+    }
+    pub fn cloud_adoption_reply_with_work(
+        &self,
+        work: &AdoptionWork,
+        reply: AdoptionReply,
+        authority: &mut meguri_sync::cloud::policy::PolicyWork,
+    ) -> Result<(), RuntimeError> {
+        self.cloud_runtime()
+            .ok_or_else(unavailable)?
+            .cloud_adoption_reply_with_work(
+                work,
+                reply,
+                self.cloud_adoption_collection()?.as_ref(),
+                self.backup_inputs.space.as_ref(),
+                authority,
+            )
     }
     pub fn perform_cloud_adoption_local(&self, work: &AdoptionWork) -> Result<(), RuntimeError> {
         let runtime = self.cloud_runtime().ok_or_else(unavailable)?;

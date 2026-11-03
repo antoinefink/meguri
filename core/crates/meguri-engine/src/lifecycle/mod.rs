@@ -639,6 +639,23 @@ impl Engine {
     }
 
     pub fn close(&self) -> Result<(), EngineError> {
+        self.close_inner(None::<fn(Option<Collection>) -> Result<(), EngineError>>)
+    }
+
+    /// Host recovery cleanup runs after recovery-resource jobs drain, before any
+    /// participant, reader or collection resource is retired. It shares close's
+    /// existing quiescence deadline; synchronous cleanup has no wall-time bound.
+    pub fn close_with_host_cleanup(
+        &self,
+        cleanup: impl FnOnce(Option<Collection>) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.close_inner(Some(cleanup))
+    }
+
+    fn close_inner(
+        &self,
+        cleanup: Option<impl FnOnce(Option<Collection>) -> Result<(), EngineError>>,
+    ) -> Result<(), EngineError> {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         if self.slot_holder() == Some(LongOp::CollectionExportHandoff) {
             return Err(EngineError::Busy {
@@ -653,6 +670,16 @@ impl Engine {
             job.cancel.interrupt();
         }
         let deadline = crate::monotonic::now() + Duration::from_secs(5);
+        if let Some(cleanup) = cleanup {
+            let result = self
+                .jobs()
+                .wait_host_recovery_until(deadline)
+                .and_then(|()| cleanup(self.collection().ok()));
+            if let Err(error) = result {
+                self.record_incomplete_suspend();
+                return Err(error);
+            }
+        }
         if self.lock_state().current.is_some() {
             self.quiesce_for_suspend(deadline)?;
         } else {

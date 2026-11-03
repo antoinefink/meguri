@@ -63,6 +63,63 @@ pub fn test_cloud_asset_read_fail_next_accounting() -> Result<(), CoreError> {
     .map_err(crate::sync::cloud_error)
 }
 
+// One-shot positive post-claim rendezvous for the bridge ordering test. It
+// blocks the original job, with no foreign callback or new execution thread.
+#[derive(uniffi::Object)]
+pub struct CloudConnectionReplyGate {
+    state: std::sync::Mutex<(bool, bool)>,
+    changed: std::sync::Condvar,
+}
+#[uniffi::export]
+impl CloudConnectionReplyGate {
+    pub fn wait_for_claim(&self) -> Result<(), CoreError> {
+        callback::enter("CloudConnectionReplyGate.wait_for_claim");
+        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(10), |state| !state.0)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.0 {
+            Ok(())
+        } else {
+            Err(CoreError::Internal {
+                message: "adoption claim not reached".into(),
+            })
+        }
+    }
+    pub fn release(&self) -> Result<(), CoreError> {
+        callback::enter("CloudConnectionReplyGate.release");
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1 = true;
+        self.changed.notify_all();
+        Ok(())
+    }
+}
+#[uniffi::export]
+pub fn test_cloud_hold_adoption_reply() -> Result<Arc<CloudConnectionReplyGate>, CoreError> {
+    callback::enter("test_cloud_hold_adoption_reply");
+    let host = runtime::host()?;
+    let cloud = host.cloud_runtime().ok_or_else(|| CoreError::Internal {
+        message: "missing cloud runtime".into(),
+    })?;
+    let gate = Arc::new(CloudConnectionReplyGate {
+        state: std::sync::Mutex::new((false, false)),
+        changed: std::sync::Condvar::new(),
+    });
+    let held = gate.clone();
+    cloud.set_adoption_reply_claim_hook_for_testing(move || {
+        let mut state = held.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.0 = true;
+        held.changed.notify_all();
+        // A watchdog only; release is the behavior witness, never elapsed time.
+        let (state, _) = held
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(20), |state| !state.1)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(state.1, "bridge did not release its claimed reply");
+    });
+    Ok(gate)
+}
+
 /// Returns `error`, so Swift can check how each error crosses the bridge.
 #[uniffi::export]
 pub fn test_return_error(error: CoreError) -> Result<(), CoreError> {

@@ -538,7 +538,15 @@ impl Runtime {
     /// One actual local transition or one transport request at a time. Returning
     /// Scan/SendEntities grants existing Runtime/SDK work; it does not model it.
     pub fn next_publication_work(&self, collection: &Collection) -> Result<PublicationWork, RuntimeError> {
-        if let Some(work) = self.next_adoption_work(Some(collection))? {
+        self.next_publication_work_with_work(collection, &mut crate::cloud::policy::PolicyWork::default())
+    }
+    pub fn next_publication_work_with_work(
+        &self,
+        collection: &Collection,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<PublicationWork, RuntimeError> {
+        work.check()?;
+        if let Some(work) = self.next_adoption_work_with_work(Some(collection), work)? {
             return Ok(PublicationWork::Adoption(work));
         }
         let Some(op) = self.publication_op()? else {
@@ -555,7 +563,7 @@ impl Runtime {
             Ok(a) => a,
             Err(_) => return Ok(PublicationWork::Idle),
         };
-        self.refresh_identity()?;
+        self.refresh_identity_with_work(work)?;
         let decision = self.publication_decision()?;
         let file = self.inputs.files.identity(collection.path())?;
         if op.step == PublishStep::Confirmed {
@@ -576,11 +584,12 @@ impl Runtime {
                 || !before_matches
             {
                 let mut s = self.state();
-                with_tracking_access(|| {
-                    s.store
+                with_tracking_access(|| -> Result<(), RuntimeError> {
+                    work.effect()?;
+                    Ok(s.store
                         .as_mut()
                         .ok_or(Error::Database)?
-                        .discard_confirmed_publication(&op)
+                        .discard_confirmed_publication(&op)?)
                 })?;
                 return Ok(PublicationWork::Idle);
             }
@@ -732,6 +741,7 @@ impl Runtime {
                 .encode()
                 .map_err(|_| Error::InvalidData)?;
                 // Holding this request has not submitted a cloud mutation.
+                work.effect()?;
                 s.publication.own_epoch_read = false;
                 (
                     OwnKind::SaveActive,
@@ -746,6 +756,7 @@ impl Runtime {
             }
             _ => return Ok(PublicationWork::Idle),
         };
+        work.effect()?;
         s.publication.next_attempt = s.publication.next_attempt.checked_add(1).ok_or(Error::InvalidData)?;
         let request = OwnRequest {
             op: op.id,
