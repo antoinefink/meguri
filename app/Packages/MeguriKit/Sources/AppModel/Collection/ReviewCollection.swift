@@ -972,7 +972,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return }
                 do {
                     if !reviewIsActive { try await model.pause() }
-                    else if foreground, !resuming, resolver != nil { try await model.resume() }
+                    else if foreground, !resuming, self.resolver != nil { try await model.resume() }
                 } catch { activityFailure = error }
             }
             lifecycleTask = reconciliation
