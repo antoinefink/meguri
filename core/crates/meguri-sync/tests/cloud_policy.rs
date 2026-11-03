@@ -56,6 +56,143 @@ fn kinds(actions: &[Action]) -> Vec<ActionKind> {
 }
 
 #[test]
+fn policy_initial_automatic_closed_gate_retains_preference_without_engine_work() {
+    for reason in 0..9 {
+        let mut state = ready();
+        state.engine = None;
+        state.settings.automatic = false;
+        match reason {
+            0 => state.facts.binding = None,
+            1 => state.facts.binding.as_mut().unwrap().verified = false,
+            2 => state.facts.lifecycle = Lifecycle::Opening,
+            3 => state.facts.summary.scan = Scan::Required,
+            4 => state.facts.summary.scan = Scan::Running,
+            5 => state.facts.summary.unsettled_intents = 1,
+            6 => state.settings.paused = true,
+            7 => state.account.status = AccountStatus::Undetermined,
+            8 => state.facts.summary.crt_mismatch = true,
+            _ => unreachable!(),
+        }
+        assert!(!state.gate_open());
+        let mut settings = state.settings;
+        settings.automatic = true;
+        let (state, actions) = run(state, Event::DeviceSettings(settings));
+        assert!(state.settings.automatic && state.engine.is_none());
+        assert!(actions.iter().all(|a| matches!(a.kind, ActionKind::StatusChanged(_))));
+    }
+}
+
+#[test]
+fn policy_initial_automatic_off_preserves_closed_gate_configuration_and_timer_cancellation() {
+    let mut state = ready();
+    state.facts.binding.as_mut().unwrap().verified = false;
+    state.engine = None;
+    state.flush_at_ms = Some(120_000);
+    let token = state.token;
+    let mut settings = state.settings;
+    settings.automatic = false;
+    let (state, actions) = run(state, Event::DeviceSettings(settings));
+    assert!(!state.gate_open() && !state.settings.automatic);
+    assert_eq!(state.token, token);
+    assert_eq!(state.flush_at_ms, None);
+    assert_eq!(
+        kinds(&actions)
+            .into_iter()
+            .filter(|a| !matches!(a, ActionKind::StatusChanged(_)))
+            .collect::<Vec<_>>(),
+        vec![
+            ActionKind::ConfigureAutomatic { on: false },
+            ActionKind::CancelFlushTimer
+        ]
+    );
+}
+
+#[test]
+fn policy_initial_automatic_publication_zones_force_scheduling_until_sent() {
+    let mut state = ready();
+    state.engine = None;
+    state.settings.automatic = false;
+    state.facts.binding.as_mut().unwrap().publish_step = Some(PublishStep::Bound);
+    let mut binding = state.facts.binding.clone().unwrap();
+    binding.publish_step = Some(PublishStep::Zones);
+    let token = state.token;
+    let (state, actions) = run(state, Event::Binding(Some(binding.clone())));
+    assert!(state.gate_open() && state.automatic() && !state.settings.automatic);
+    assert_eq!(state.token, token);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a.kind, ActionKind::StartEngine { automatic: true, .. }))
+            .count(),
+        1
+    );
+    let (mut state, _) = run(
+        state,
+        Event::EngineStarted {
+            instance: "publication-sdk".into(),
+            binding: binding.id,
+        },
+    );
+    for automatic in [true, false] {
+        let mut settings = state.settings;
+        settings.automatic = automatic;
+        let (next, actions) = run(state, Event::DeviceSettings(settings));
+        assert!(next.automatic());
+        assert!(!actions.iter().any(|a| matches!(
+            a.kind,
+            ActionKind::ConfigureAutomatic { .. } | ActionKind::CancelFlushTimer
+        )));
+        state = next;
+    }
+    binding.publish_step = Some(PublishStep::Sent);
+    let (state, actions) = run(state, Event::Binding(Some(binding)));
+    assert!(!state.automatic() && state.gate_open() && state.engine_runs());
+    assert_eq!(state.token, token);
+    let actions = kinds(&actions);
+    assert!(actions.starts_with(&[
+        ActionKind::ConfigureAutomatic { on: false },
+        ActionKind::UpdatePending(Update::Full)
+    ]));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, ActionKind::StartEngine { .. } | ActionKind::RequestSend { .. }))
+    );
+}
+
+#[test]
+fn policy_initial_automatic_reopening_retains_stopping_instance_until_engine_stopped() {
+    let mut state = ready();
+    let mut settings = state.settings;
+    settings.paused = true;
+    let (next, _) = run(state, Event::DeviceSettings(settings));
+    state = next;
+    assert!(state.engine.as_ref().unwrap().stopping && !state.engine_runs());
+    settings.automatic = false;
+    let (state, actions) = run(state, Event::DeviceSettings(settings));
+    assert!(kinds(&actions).contains(&ActionKind::ConfigureAutomatic { on: false }));
+    settings.paused = false;
+    let (state, actions) = run(state, Event::DeviceSettings(settings));
+    assert!(state.gate_open() && !state.engine_runs());
+    assert!(state.engine.as_ref().unwrap().stopping);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a.kind, ActionKind::StartEngine { automatic: false, .. }))
+            .count(),
+        1
+    );
+    let (state, actions) = run(
+        state,
+        Event::EngineStopped {
+            instance: "sdk1".into(),
+        },
+    );
+    assert!(state.engine.is_none());
+    assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::StartEngine { .. })));
+}
+
+#[test]
 fn local_cloud_and_root_drain_have_different_update_authority() {
     let mut state = ready();
     state.facts.summary.sendable = 2;

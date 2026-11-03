@@ -374,7 +374,7 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
                 }
             }
             Event::DeviceSettings(_) => {
-                if s.automatic() != old.automatic() {
+                if s.automatic() != old.automatic() && (!s.automatic() || open) {
                     a.push(ActionKind::ConfigureAutomatic { on: s.automatic() });
                     if !s.automatic() {
                         cancel_timer(&mut s, &mut a);

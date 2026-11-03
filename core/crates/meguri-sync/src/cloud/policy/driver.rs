@@ -503,21 +503,33 @@ impl Driver {
     pub fn native_disposition(&self, command: &Command) -> Result<NativeDisposition, DriverError> {
         let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         self.validate_locked(&owned, command)?;
-        // Only an unbound Host has no native configuration intent. A bound
-        // start may still be awaiting construction even though no SDK exists.
-        Ok(
-            if matches!(command.action.kind, ActionKind::ConfigureAutomatic { .. })
-                && command.action.guard.binding.is_none()
-                && command.owner.is_empty()
-                && command.backend_guard.generation == 0
-                && command.backend_guard.binding.is_empty()
-                && !self.runtime.policy_has_engine(&command.backend_guard)?
-            {
-                NativeDisposition::NoOperation
-            } else {
-                NativeDisposition::Enqueue
-            },
-        )
+        if let ActionKind::ConfigureAutomatic { on } = command.action.kind {
+            let engine = self.runtime.policy_engine(&command.backend_guard)?;
+            let running = engine.as_ref().is_some_and(|engine| {
+                !engine.stopping
+                    && Some(engine.binding) == command.action.guard.binding
+                    && !owned
+                        .state
+                        .engine
+                        .as_ref()
+                        .is_some_and(|old| old.instance == engine.instance && old.stopping)
+            });
+            // An open gate retains scheduling intent even while the old SDK stops.
+            // A closed gate can only turn off an existing running instance
+            // while a scan or ordinary intent holds back collection work.
+            let allowed = owned.state.engine_allowed()
+                && (owned.state.gate_open()
+                    || (!on
+                        && running
+                        && owned.state.facts.lifecycle == Lifecycle::Ready
+                        && !owned.state.facts.summary.crt_mismatch
+                        && (owned.state.facts.summary.scan != Scan::None
+                            || owned.state.facts.summary.unsettled_intents > 0)));
+            if !allowed {
+                return Ok(NativeDisposition::NoOperation);
+            }
+        }
+        Ok(NativeDisposition::Enqueue)
     }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
         let runtime = self.runtime.adapter_guard();

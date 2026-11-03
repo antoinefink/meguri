@@ -13,12 +13,16 @@ impl Runtime {
         Ok((request, identity))
     }
 
-    pub(crate) fn policy_has_engine(&self, guard: &crate::cloud::adapter::Guard) -> Result<bool, RuntimeError> {
+    pub(crate) fn policy_engine(&self, guard: &crate::cloud::adapter::Guard) -> Result<Option<Engine>, RuntimeError> {
         let s = self.state();
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
-        Ok(s.adapter.sdk.is_some())
+        Ok(s.adapter.sdk.as_ref().map(|sdk| Engine {
+            instance: sdk.id.clone(),
+            binding: s.bound.as_ref().map_or(BindingId([0; 16]), |b| b.binding.id),
+            stopping: sdk.stopping || &sdk.guard != guard,
+        }))
     }
 
     pub fn policy_projection(&self, lifecycle: Lifecycle, generation: u64) -> Result<Projection, RuntimeError> {
