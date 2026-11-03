@@ -52,3 +52,8 @@ needed to select the next repair. This component has no acceptance.
 
 Lint21650 passes145 files. Similarity21791 passes3 files with no flags or
 exemptions.
+
+Test-only export23574 observes the real account-completion result without
+changing its inputs or return. Swift25331 confirms the blocked path:
+accountVerified=false, errorPresent=true, runtimeTrackingFailed=true,
+connectionOperationActive=false, recoveryStep=bound, ownObservationCount=0.

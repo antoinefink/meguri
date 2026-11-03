@@ -183,6 +183,7 @@ extension ReviewCollectionStartupTests {
             releaseCommand?.resume(); releaseCommand = nil
             stage = "startup-account-proof-completion"
             await harness.sync.prepareConnectionAuthority()
+            harness.expectSuccessfulAccountCompletion(stage: "startup-account-proof-completion")
             stage = "startup-create-zones-admission"
             try await harness.transport.zones.waitForAdmission(stage: "startup-create-zones-admission")
             #expect(commandReturned && harness.sync.connectionOperationActive)
@@ -265,6 +266,7 @@ extension ReviewCollectionStartupTests {
                 #expect(try await harness.connection().recoveryStatus()?.step == .bound)
                 freshProof.finish()
                 await harness.sync.prepareConnectionAuthority()
+                harness.expectSuccessfulAccountCompletion(stage: "unpause-account-proof-completion")
                 try await harness.transport.zones.waitForAdmission(stage: "unpause-create-zones-admission")
                 #expect(harness.transport.zones.enqueues == 1 && harness.transport.save.enqueues == 0)
                 #expect(harness.observations.operationIDs == Set([operationID]))
@@ -392,6 +394,13 @@ extension ReviewCollectionStartupTests {
             forKey: "meguri.cloud.deviceSettings")
     }
     func connection() throws -> CoreCloudConnectionService { try #require(backend?.connection) }
+    var accountCompletion: PublicationAccountCompletion? { (backend as? PublicationStartupBackend)?.accountCompletion }
+    func expectSuccessfulAccountCompletion(stage: String) {
+        let completion = accountCompletion
+        let recoveryStep = sync.recovery.map { String(describing: $0.step) } ?? "none"
+        #expect(completion?.accountVerified == true && completion?.errorPresent == false,
+            "\(stage) completionObserved=\(completion != nil) accountVerified=\(completion?.accountVerified ?? false) errorPresent=\(completion?.errorPresent ?? false) runtimeTrackingFailed=\(completion?.runtimeTrackingFailed ?? false) connectionOperationActive=\(sync.connectionOperationActive) operationFailed=\(sync.operationFailed) recoveryStep=\(recoveryStep) ownObservationCount=\(observations.kinds.count)")
+    }
     func release() {
         transport.zones.finish(.publication(.failed(retryAfterMilliseconds: nil)))
         transport.save.finish(.publication(.failed(retryAfterMilliseconds: nil)))
@@ -467,12 +476,19 @@ private nonisolated func publicationSignal(_ stream: AsyncStream<Bool>, stage: S
 
 nonisolated enum RetainedPublicationProofBlock: CaseIterable, Sendable { case failed, stale, replaced, paused, disabled }
 
+private nonisolated struct PublicationAccountCompletion {
+    let accountVerified: Bool
+    let errorPresent: Bool
+    let runtimeTrackingFailed: Bool
+}
+
 // Native account proof and policy execution stay intact. Only delivery of an
 // original command may be held, as in the initial-adoption ordered-proof tests.
 @MainActor private final class PublicationStartupBackend: SyncCoordinatorBackend {
     let native: NativeCollectionCloudBackend
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
+    private(set) var accountCompletion: PublicationAccountCompletion?
     var connection: CoreCloudConnectionService? { native.connection }
     var own: CloudOwnExecutor? { native.own }
     init(native: NativeCollectionCloudBackend) { self.native = native }
@@ -485,7 +501,15 @@ nonisolated enum RetainedPublicationProofBlock: CaseIterable, Sendable { case fa
     }
     func beginAccountRead(transition: Bool) async throws -> UInt64 { try await native.beginAccountRead(transition: transition) }
     func readAccount(_ read: UInt64) async -> SyncCommandResult { await native.readAccount(read) }
-    func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult { await native.prepareAccountRead(read) }
+    func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        let complete = await native.prepareAccountRead(read)
+        return { admitted in
+            let result = await complete(admitted)
+            self.accountCompletion = .init(accountVerified: result.accountVerified, errorPresent: result.error != nil,
+                runtimeTrackingFailed: (result.error as? BridgeError) == .unavailable(reason: "cloud runtime tracking failed"))
+            return result
+        }
+    }
     func takeAccountReadRequest() async -> Bool { await native.takeAccountReadRequest() }
     func freezeForSuspend() async throws { try await native.freezeForSuspend() }
     func resumeAfterCoreResume() async { await native.resumeAfterCoreResume() }
