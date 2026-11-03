@@ -750,6 +750,8 @@ extension ReviewCollectionStartupTests {
         var heldCommand: CloudPolicyCommand?
         var returned = false, waited = false, admitted = false
         var starts = 0, reads = 0, verified = 0
+        var priorMatchingProcessProof = false
+        var matchingResumePreviewBackend: InitialCloudBackend?
         func observe(_ sync: SyncCoordinator) {
             #if DEBUG
             sync.observeCausalBoundary = { boundary, command in
@@ -785,6 +787,17 @@ extension ReviewCollectionStartupTests {
             trace.record("fixture.configure")
             starts = harness.factory.created.count; reads = harness.factory.accountReads
             verified = backend.verifiedAccountReads.count
+            // The ready Resume preview witnesses a matching stopped binding.
+            // Pair it with accepted reads on that same backend and availability.
+            priorMatchingProcessProof = matchingResumePreviewBackend === backend
+                && verified > 0
+                && harness.sync.status?.accountStatus == .available
+            switch window {
+            case .reopen:
+                #expect(verified == 0 && !priorMatchingProcessProof, "\(trace.diagnostic)")
+            case .resume:
+                #expect(priorMatchingProcessProof, "\(trace.diagnostic)")
+            }
             backend.beforeExecution = { command in
                 guard case .statusChanged = command.action, heldCommand == nil else { return }
                 heldCommand = command
@@ -814,7 +827,13 @@ extension ReviewCollectionStartupTests {
                 }
             case .resume:
                 try await harness.prepareStoppedResume()
+                guard case .ready(_, let summary) = harness.sync.preview else {
+                    throw CloudOwnTransportFailure.unexpectedReply
+                }
+                try #require(summary.decision == .confirmResume && summary.resumeBindingId != nil,
+                    "\(trace.diagnostic)")
                 let backend = try #require(harness.backends.last)
+                matchingResumePreviewBackend = backend
                 harness.sync.observeResumePolicyDrain = { stage in
                     guard case .finished = stage else { return }
                     configure(backend)
@@ -834,10 +853,17 @@ extension ReviewCollectionStartupTests {
             _ = try await (entrySignal, drainSignal)
             let backend = try #require(target, "\(trace.diagnostic)")
             #expect(heldCommand != nil && !returned, "\(trace.diagnostic)")
-            // The SDK resolver really returned, but Core has not accepted proof.
+            // The SDK resolver really returned, but Core has not accepted this
+            // read's proof. Resume already accepted matching proof in this process.
             #expect(harness.factory.accountReads == reads + 1, "\(trace.diagnostic)")
             #expect(backend.verifiedAccountReads.count == verified, "\(trace.diagnostic)")
-            #expect(!returned && !admitted && harness.factory.created.count == starts, "\(trace.diagnostic)")
+            #expect(!returned && !admitted, "\(trace.diagnostic)")
+            if priorMatchingProcessProof {
+                #expect(harness.factory.created.count >= starts && harness.factory.created.count <= starts + 1
+                    && harness.factory.maximumLive == 1, "\(trace.diagnostic)")
+            } else {
+                #expect(harness.factory.created.count == starts, "\(trace.diagnostic)")
+            }
             #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0, "\(trace.diagnostic)")
             trace.record("target.status.hold.release", command: heldCommand.flatMap { trace.commandOrdinal($0) })
             released = true
