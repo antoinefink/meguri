@@ -92,6 +92,19 @@ public struct SyncStatusPresentation {
     public static func permitsPublication(_ decision: CloudConnectionDecision) -> Bool {
         decision == .confirmUpload || decision == .chooseCollection
     }
+    public static func permitsPublication(_ decision: CloudConnectionDecision, on page: CloudSyncEntry) -> Bool {
+        switch page {
+        case .connect: decision == .confirmUpload
+        case .replaceCloud: permitsPublication(decision)
+        case .publicationChoice, .replaceLocal: false
+        }
+    }
+    /// UI readiness only; confirmation still consumes the coordinator's retained authority.
+    public static func publicationReady(_ decision: CloudConnectionDecision?, accountAvailable: Bool,
+                                        paused: Bool, busy: Bool) -> Bool {
+        guard let decision else { return false }
+        return permitsPublication(decision) && accountAvailable && !paused && !busy
+    }
     public static func permitsResume(_ decision: CloudConnectionDecision) -> Bool {
         decision == .confirmResume
     }

@@ -43,6 +43,35 @@ import Testing
         #expect(!SyncStatusPresentation.permitsPublication(.cloudUnreadable))
         #expect(!SyncStatusPresentation.permitsAdoption(.cloudUnreadable))
     }
+    @Test func publicationRequiresTheExplicitPreviewOrNormalConnectUploadPage() {
+        let cases: [(CloudConnectionDecision, Bool, Bool)] = [
+            (.confirmUpload, true, true), (.chooseCollection, true, false),
+            (.confirmAdoption, false, false), (.cloudUnreadable, false, false),
+            (.noCollection, false, false), (.confirmResume, false, false)
+        ]
+        for (decision, replacement, connect) in cases {
+            #expect(SyncStatusPresentation.permitsPublication(decision, on: .replaceCloud) == replacement)
+            #expect(SyncStatusPresentation.permitsPublication(decision, on: .connect) == connect)
+            // The choice entry only navigates; it cannot itself confirm publication.
+            #expect(!SyncStatusPresentation.permitsPublication(decision, on: .publicationChoice))
+            #expect(!SyncStatusPresentation.permitsPublication(decision, on: .replaceLocal))
+        }
+        #expect(SyncText.value("sync.decision.replace").hasSuffix("…"))
+    }
+    @Test func publicationReadinessRequiresAvailableAccountAndIdleUnpausedPreview() {
+        let allowed: [CloudConnectionDecision] = [.confirmUpload, .chooseCollection]
+        for decision in allowed {
+            #expect(SyncStatusPresentation.publicationReady(decision, accountAvailable: true, paused: false, busy: false))
+            #expect(!SyncStatusPresentation.publicationReady(decision, accountAvailable: false, paused: false, busy: false))
+            #expect(!SyncStatusPresentation.publicationReady(decision, accountAvailable: true, paused: true, busy: false))
+            #expect(!SyncStatusPresentation.publicationReady(decision, accountAvailable: true, paused: false, busy: true))
+        }
+        // No retained ready preview, an adoption, or unreadable cloud cannot publish.
+        let refused: [CloudConnectionDecision?] = [nil, .confirmAdoption, .cloudUnreadable, .noCollection, .confirmResume]
+        for decision in refused {
+            #expect(!SyncStatusPresentation.publicationReady(decision, accountAvailable: true, paused: false, busy: false))
+        }
+    }
     @Test func resumeIsAnExplicitDirectionAndOtherChoicesRemainSeparate() {
         let decisions: [CloudConnectionDecision] = [.noCollection, .confirmUpload, .confirmAdoption,
             .confirmResume, .chooseCollection, .cloudUnreadable]
