@@ -22,6 +22,12 @@ public struct CloudConnectionView: View {
         return summary
     }
     private var page: CloudSyncEntry { collection.syncPresentation.connectionPath.last ?? entry }
+    private var publicationReady: Bool {
+        SyncStatusPresentation.publicationReady(summary?.decision,
+            accountAvailable: sync.status?.accountStatus == .available, paused: sync.settings.paused,
+            busy: preparing || confirming || cancelling || submitted
+                || sync.connectionPreviewActive || sync.connectionOperationActive)
+    }
     public var body: some View {
         NavigationStack(path: Binding(get: { collection.syncPresentation.connectionPath },
             set: { collection.syncPresentation.connectionPath = $0 })) {
@@ -99,10 +105,10 @@ public struct CloudConnectionView: View {
                         .accessibilityIdentifier("sync.replaceLocal.replace")
                     }
                 }
-                if page == .replaceCloud, summary.decision == .chooseCollection {
+                if page == .replaceCloud, SyncStatusPresentation.permitsPublication(summary.decision, on: page) {
                     ToolbarItem(placement: .destructiveAction) {
                         Button(SyncText.value("sync.publish.confirm"), role: .destructive) { Task { await confirm(.publication) } }
-                            .disabled(sync.settings.paused)
+                            .disabled(!publicationReady)
                             .accessibilityIdentifier("sync.replaceCloud.replace")
                     }
                 }
@@ -153,7 +159,7 @@ public struct CloudConnectionView: View {
             case .noCollection: Text(SyncText.value("sync.recovery.error.notOffered"))
             case .confirmUpload:
                 Button(SyncText.value("sync.connect.upload.confirm")) { Task { await confirm(.publication) } }
-                    .disabled(sync.settings.paused)
+                    .disabled(!publicationReady)
                     .accessibilityIdentifier("sync.connect.upload")
             case .confirmAdoption: EmptyView() // destructive toolbar confirmation, never Return
             case .confirmResume: EmptyView() // native confirmation toolbar action
@@ -172,8 +178,9 @@ public struct CloudConnectionView: View {
                 Text(SyncText.value("sync.adopt.backup"))
             } else { Text(SyncText.value("sync.recovery.error.notOffered")) }
         } else if page == .replaceCloud {
-            if summary.decision == .chooseCollection { Text(SyncText.value("sync.publish.otherDevices")) }
-            else { Text(SyncText.value("sync.recovery.error.notOffered")) }
+            if SyncStatusPresentation.permitsPublication(summary.decision, on: page) {
+                Text(SyncText.value("sync.publish.otherDevices"))
+            } else { Text(SyncText.value("sync.recovery.error.notOffered")) }
         }
     }
     private var publicationChoice: some View {
@@ -187,14 +194,16 @@ public struct CloudConnectionView: View {
                 }
             }
             Section {
-                // Publication-fence reasons and keep_local_only are not in the
-                // public coordinator surface. Do not publish with reason 2.
                 if sync.settings.paused || sync.status?.accountStatus == .available {
-                    Button(SyncText.value("sync.decision.replace")) {}.disabled(true)
-                        .accessibilityIdentifier("sync.publicationChoice.replaceICloud")
+                    NavigationLink(value: CloudSyncEntry.replaceCloud) {
+                        Text(SyncText.value("sync.decision.replace"))
+                    }
+                    .disabled(!publicationReady)
+                    .accessibilityIdentifier("sync.publicationChoice.replaceICloud")
                     Text(SyncText.value("sync.decision.replace.caption"))
                     if sync.settings.paused { Text(SyncText.value("sync.status.paused.user")) }
                 }
+                // keep_local_only still needs the Core/coordinator operation surface.
                 Button(SyncText.value("sync.decision.keepLocal")) {}.disabled(true)
                     .accessibilityIdentifier("sync.publicationChoice.keepLocal")
                 Text(SyncText.value("sync.decision.keepLocal.caption"))
@@ -252,8 +261,7 @@ public struct CloudConnectionView: View {
         switch intent {
         case .adoption: guard canAdopt(summary, page: page) else { return }
         case .publication:
-            guard (page == .connect && summary.decision == .confirmUpload)
-                || (page == .replaceCloud && summary.decision == .chooseCollection) else { return }
+            guard publicationReady, SyncStatusPresentation.permitsPublication(summary.decision, on: page) else { return }
         case .resume:
             guard page == .connect, SyncStatusPresentation.permitsResume(summary.decision) else { return }
         }
