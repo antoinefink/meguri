@@ -151,8 +151,7 @@ fn local_information_uses_snapshot_dates_without_account_keys_or_durable_writes(
         .unwrap();
     let expected = {
         let reader = collection.reader(ReaderRole::Query).unwrap();
-        let facts = reader.snapshot().unwrap().transfer_facts().unwrap();
-        facts
+        reader.snapshot().unwrap().transfer_facts().unwrap()
     };
     let before = information_bytes(&dir);
     let calls = account.0.load(Ordering::SeqCst);
@@ -229,12 +228,12 @@ fn local_information_preserves_pending_reasons_and_refuses_replaced_generation()
     // A synthetic legacy R6.7 document has no reason member. The information
     // path must neither infer one nor rewrite the durable publication.
     let sidecar = &dir.join("meguri-sidecar.json");
-    let mut doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    let mut doc: serde_json::Value = serde_json::from_slice(&std::fs::read(sidecar).unwrap()).unwrap();
     doc["deviceState"]
         .as_object_mut()
         .unwrap()
         .remove("pendingDecisionReason");
-    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    std::fs::write(sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
     let before = information_bytes(&dir);
     let info = host
         .local_publication_information(host.collection().unwrap().generation())
@@ -244,7 +243,7 @@ fn local_information_preserves_pending_reasons_and_refuses_replaced_generation()
     assert_eq!(information_bytes(&dir), before);
     // Invalid metadata is an error, never a local-only/zero-count fallback.
     doc["deviceState"]["pendingDecisionReason"] = serde_json::Value::Null;
-    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    std::fs::write(sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
     let invalid = information_bytes(&dir);
     assert!(
         host.local_publication_information(host.collection().unwrap().generation())
@@ -256,7 +255,7 @@ fn local_information_preserves_pending_reasons_and_refuses_replaced_generation()
         .as_object_mut()
         .unwrap()
         .remove("pendingDecisionReason");
-    std::fs::write(&sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
+    std::fs::write(sidecar, serde_json::to_vec(&doc).unwrap()).unwrap();
     host.close().unwrap();
 }
 #[test]
