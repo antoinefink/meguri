@@ -1,6 +1,9 @@
 import CoreBridge
 import Foundation
 import Instrumentation
+#if DEBUG
+import OSLog
+#endif
 import QuartzCore
 import WebKit
 
@@ -275,8 +278,19 @@ public final class CardPagePair {
     public func showAnswer(inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) async throws -> SwapToken {
         let page = current
         guard !closed, !suspended, !lifecycleSuspended, !page.needsReconstruction, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
+        #if DEBUG
+        let logger = Logger(subsystem: "Meguri", category: "ReviewAnswerStage")
+        logger.debug("questionShown.begin")
+        #endif
         try await page.waitForShown(previous)
+        #if DEBUG
+        logger.debug("questionShown.end")
+        logger.debug("typedRead.begin")
+        #endif
         let typed = await page.typedText()
+        #if DEBUG
+        logger.debug("typedRead.end")
+        #endif
         try Task.checkCancellation()
         guard page.update == previous, current === page, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }
         page.captureTypedText(typed)
@@ -285,7 +299,13 @@ public final class CardPagePair {
         #endif
         var answer = payload.answer
         if let descriptor = payload.typeIn {
+            #if DEBUG
+            logger.debug("typedCompare.begin")
+            #endif
             let comparison = try await compare(descriptor, typed)
+            #if DEBUG
+            logger.debug("typedCompare.end")
+            #endif
             answer = answer.replacingOccurrences(of: TypeAnswerDescriptor.placeholderHTML, with: comparison)
         }
         try Task.checkCancellation()
@@ -299,18 +319,45 @@ public final class CardPagePair {
         page.begin(payload, update: update)
         page.visibleToken = token.sequence
         audio.present(payload: payload, update: update)
+        #if DEBUG
+        logger.debug("answerIdentity.begin")
+        #endif
         try await page.run("meguriCard.present(token, card, generation);",
                            arguments: ["token": token.sequence, "card": update.card, "generation": update.generation], world: CardPage.world)
+        #if DEBUG
+        logger.debug("answerIdentity.end")
+        logger.debug("answerStart.begin")
+        #endif
         try await page.start(html: answer, update: update)
+        #if DEBUG
+        logger.debug("answerStart.end")
+        logger.debug("answerShown.begin")
+        #endif
         try await page.waitForShown(update)
+        #if DEBUG
+        logger.debug("answerShown.end")
+        #endif
         guard current === page, page.update == update, !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.superseded }
         #if !os(macOS)
         page.webView.scrollView.setZoomScale(pinch, animated: false)
         #endif
+        #if DEBUG
+        logger.debug("accessibility.begin")
+        #endif
         await page.announceAnswer()
+        #if DEBUG
+        logger.debug("accessibility.end")
+        logger.debug("hostContext.begin")
+        #endif
         await page.hostReports.publish()
+        #if DEBUG
+        logger.debug("hostContext.end")
+        #endif
         try Task.checkCancellation()
         guard !closed, !suspended, !lifecycleSuspended, current === page, page.update == update, page.presented else { throw CardPage.Failure.superseded }
+        #if DEBUG
+        logger.debug("complete")
+        #endif
         return token
     }
 

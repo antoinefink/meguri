@@ -2,6 +2,9 @@ import CardRendering
 import CoreBridge
 import Foundation
 import Observation
+#if DEBUG
+import OSLog
+#endif
 
 @Observable
 public final class ReviewCoordinator {
@@ -130,11 +133,26 @@ public final class ReviewCoordinator {
         busy = true; phase = .transition
         let inputTime = uptime()
         operation = Task {
+            #if DEBUG
+            let logger = Logger(subsystem: "Meguri", category: "ReviewAnswerStage")
+            #endif
             do {
+                #if DEBUG
+                logger.debug("surfaceReveal.begin")
+                #endif
                 try await surface.reveal(inputTime: inputTime)
+                #if DEBUG
+                logger.debug("surfaceReveal.end")
+                #endif
                 if let nativeInput, let pair = surface.pair, let sessionID {
+                    #if DEBUG
+                    logger.debug("nativeImage.begin")
+                    #endif
                     try await nativeInput.captureImage(pair: pair, coordinator: nativeCoordinator,
                         session: sessionID, generation: nativeGeneration)
+                    #if DEBUG
+                    logger.debug("nativeImage.end")
+                    #endif
                 }
                 sideIsAnswer = true
                 if item?.homePreset.stopTimerOnAnswer == true {
@@ -143,6 +161,9 @@ public final class ReviewCoordinator {
                 phase = .answer
             } catch { nativeInput?.failed(error); fail(error) }
             completeOperation()
+            #if DEBUG
+            logger.debug("reveal.complete")
+            #endif
         }
     }
 
