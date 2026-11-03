@@ -54,7 +54,10 @@ public struct CloudConnectionView: View {
     }
     private func content(_ page: CloudSyncEntry) -> some View {
         Form {
-            if let errorKey { Text(SyncText.value(errorKey)) }
+            if let errorKey {
+                Text(SyncText.value(errorKey))
+                    .accessibilityIdentifier("sync.connect.entryError")
+            }
             if publicationPage, publication.refused {
                 Text(SyncText.value(publication.failure.map(SyncStatusPresentation.connectionErrorKey) ?? "sync.recovery.error.other"))
             } else if publicationPage {
@@ -63,11 +66,16 @@ public struct CloudConnectionView: View {
                         .accessibilityIdentifier("sync.publish.error")
                 } else if !submitted, !confirming, let failure = sync.connectionFailure {
                     Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+                        .accessibilityIdentifier("sync.connect.failure")
                 }
             } else if !submitted || confirmation != .resume {
                 if let failure = sync.connectionFailure {
                     Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
-                } else if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
+                        .accessibilityIdentifier("sync.connect.failure")
+                } else if sync.operationFailed {
+                    Text(SyncText.value("sync.recovery.error.other"))
+                        .accessibilityIdentifier("sync.connect.operationError")
+                }
             }
             if sync.initialAdoptionActive {
                 ProgressView(SyncText.value("sync.connect.downloading"))
@@ -84,6 +92,7 @@ public struct CloudConnectionView: View {
                 else { Text(SyncText.value("sync.counts.unknown")) }
             } else if preparing || sync.connectionPreviewActive || cancelling {
                 ProgressView(SyncText.value("sync.connect.reading"))
+                    .accessibilityIdentifier("sync.connect.reading")
             } else if page == .publicationChoice {
                 publicationChoice
             } else if let summary {

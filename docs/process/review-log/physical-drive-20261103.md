@@ -42,6 +42,19 @@ its children separate. Independent technical review has no P0-P2 findings.
 Private66647 and Similarity66646 pass. Actual phone recapture remains pending.
 Keep the native grabber and its failed evidence; no audit exception was added.
 
+Phone67343 confirms each app identifier appears once and preserves the native
+layout; all three actions pass. Its drive receipt still fails for the grabber.
+The separate native-sheet-chrome log records that classification repair.
+Phone69967 reaches Account & Sync and72513 opens Connect; all requested steps
+pass, while hierarchy findings keep those receipts failed. The initial preview
+capture is immediate: a generic message can reflect a prior operation while a
+fresh request remains active. It is not proof of that request's final outcome.
+
+Export82207 adds leaf identifiers to existing preview progress and error origins.
+Independent review is clear; state, copy, guards and timing are unchanged.
+Private84233 and Similarity84891 pass. The next actual-phone script will use the
+existing wait-until-gone action to observe readiness before judging the result.
+
 Phone verification uses the three new transport tests. An older parser test
 requires files from the checkout and stays in its existing test lane.
 D3 requires an initial capture before a later replacement action.
