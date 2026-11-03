@@ -42,3 +42,13 @@ Rust34990:52 passed;2 failed at stored.whole_scan after successful preparation
 and current-scan proof. R2 confirms that field marks clean drain, not current
 scan completion. The repair must assert both stored drain flags remain false
 and retain the scan, WAL, coverage, admission and ACK checks. Lint36485 passes.
+
+| Receipt | Outcome |
+| --- | --- |
+| Export39326 | One test assertion |
+| Rust44629 | Pass:54 cases |
+| Swift39682 | Fail: initial adoption |
+| Swift45964 | Fail: prior coordinator |
+
+Saved SHA256 values verify exact coordinator restoration. Missing-file discovery
+and earlier native findings remain open. No signed publication or gate pass.

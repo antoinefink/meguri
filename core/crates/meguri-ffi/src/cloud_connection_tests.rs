@@ -1166,7 +1166,7 @@ fn bound_preparation_progress(reopen_after: Option<usize>) {
     );
     assert!(proof.receipt.through() >= proof.snapshot_seq);
     let stored = fixture.workflow.core.stored_state_for_testing().unwrap();
-    assert!(stored.whole_scan);
+    assert!(!stored.drained && !stored.whole_scan);
     let coverage = stored.coverage.unwrap();
     assert_eq!(coverage.cursor.seq, proof.snapshot_seq.0);
     assert_eq!(coverage.cursor.covered_through, proof.receipt.through().0);
