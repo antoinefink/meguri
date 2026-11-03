@@ -77,6 +77,46 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
     init(generation: UInt64, revision: UInt64) { self.generation = generation; self.revision = revision }
 }
 
+/// Presentation lifetime only. The coordinator retains the original publication
+/// task after durable acceptance, including when this presentation closes.
+@Observable @MainActor
+public final class CloudPublicationConfirmation {
+    public enum Result: Equatable { case accepted, refused(CloudConnectionFailure?) }
+    public private(set) var confirming = false
+    public private(set) var result: Result?
+    /// Safe copy for this attempt's post-acceptance failure; never inherited history.
+    public private(set) var backgroundErrorKey: String?
+    private var attempt: UUID?
+    private var dismissed = false
+    public init() {}
+    public var accepted: Bool { result == .accepted }
+    public var refused: Bool { if case .refused = result { true } else { false } }
+    public var failure: CloudConnectionFailure? { if case .refused(let failure) = result { failure } else { nil } }
+    public var submitted: Bool { confirming || accepted }
+    public func clearRefusal() { if refused { result = nil } }
+    public func confirm(using sync: SyncCoordinator) async {
+        guard !dismissed, !confirming, !accepted else { return }
+        let token = UUID(), generation = sync.generation
+        attempt = token; confirming = true; result = nil; backgroundErrorKey = nil
+        await sync.confirmPublication(onConfirmation: { outcome in
+            guard self.attempt == token, sync.generation == generation else { return }
+            self.result = outcome; self.confirming = false
+        }, onBackgroundFailure: { failure in
+            guard self.attempt == token, sync.generation == generation, self.accepted else { return }
+            self.backgroundErrorKey = failure.map(SyncStatusPresentation.connectionErrorKey) ?? "sync.recovery.error.other"
+        })
+        // No completion mutation here: retained work can finish much later.
+    }
+    public func close() -> Bool {
+        guard !confirming else { return false }
+        invalidate()
+        return true
+    }
+    public func invalidate() {
+        dismissed = true; attempt = nil; confirming = false; backgroundErrorKey = nil
+    }
+}
+
 @Observable @MainActor
 public final class SyncCoordinator {
     public enum SetupState: Equatable { case configurationUnavailable, prepared, attached, failed }
@@ -122,6 +162,8 @@ public final class SyncCoordinator {
     // Scheduling observation only; never supplies a result or a capability.
     @ObservationIgnored var observeAccountPolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
     @ObservationIgnored var observeResumePolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
+    // Scheduling observation only; never substitutes Core confirmation authority.
+    @ObservationIgnored var observePublicationConfirmation: (@MainActor () async -> Void)?
     private struct Issued { let command: CloudPolicyCommand; let generation: UInt64; let sequence: UInt64 }
     @ObservationIgnored private let bootstrap: @MainActor () async throws -> Void
     @ObservationIgnored private let makeBackend: @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend
@@ -417,22 +459,39 @@ public final class SyncCoordinator {
         }
     }
     public func confirmPublication() async { await confirmConnection(.publication) }
+    public func confirmPublication(onConfirmation: @escaping @MainActor (CloudPublicationConfirmation.Result) -> Void,
+                                   onBackgroundFailure: (@MainActor (CloudConnectionFailure?) -> Void)? = nil) async {
+        await confirmConnection(.publication, publicationConfirmation: onConfirmation, publicationBackgroundFailure: onBackgroundFailure)
+    }
     public func confirmAdoption() async { await confirmConnection(.adoption) }
     public func confirmResume() async { await confirmConnection(.resume) }
     private func recordConnectionFailure(_ error: any Error) {
         operationFailed = true
         if case BridgeError.cloudConnection(let failure) = error { connectionFailure = failure }
     }
-    private func confirmConnection(_ intent: CloudConnectionConfirmation) async {
+    private func confirmConnection(_ intent: CloudConnectionConfirmation,
+                                   publicationConfirmation: (@MainActor (CloudPublicationConfirmation.Result) -> Void)? = nil,
+                                   publicationBackgroundFailure: (@MainActor (CloudConnectionFailure?) -> Void)? = nil) async {
         guard !closing, !suspended, !replacing, !settings.paused, !readingPreview,
               initialAdoptionEnabledBefore == nil, ownTask == nil, case .ready(let handle, let summary) = preview,
               SyncStatusPresentation.permits(intent, decision: summary.decision),
               let owner = readyPreviewOwner, owner.generation == generation, owner.revision == hostRevision,
-              let backend, let connection = backend.connection, connection === owner.service else { return }
+              let backend, let connection = backend.connection, connection === owner.service else {
+            publicationConfirmation?(.refused(.notOffered))
+            return
+        }
         let expected = generation, revision = hostRevision
         preview = nil; readyPreviewOwner = nil
         ownTask = Task {
-            defer { finishOwnWork() }
+            var publicationAccepted = false
+            var publicationResultDelivered = false
+            defer {
+                if !publicationResultDelivered, expected == generation, revision == hostRevision,
+                   self.backend === backend, backend.connection === connection, !closing {
+                    publicationConfirmation?(.refused(.authorityChanged))
+                }
+                finishOwnWork()
+            }
             do {
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
                       expected == generation, revision == hostRevision,
@@ -442,7 +501,22 @@ public final class SyncCoordinator {
                 }
                 switch intent {
                 case .adoption: _ = try await connection.confirmAdoption(handle)
-                case .publication: _ = try await connection.confirmPublication(handle)
+                case .publication:
+                    await observePublicationConfirmation?()
+                    guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                          expected == generation, revision == hostRevision,
+                          self.backend === backend, backend.connection === connection else {
+                        try await connection.cancelPreview(handle)
+                        return
+                    }
+                    _ = try await connection.confirmPublication(handle)
+                    if expected == generation, revision == hostRevision,
+                       self.backend === backend, backend.connection === connection, !closing {
+                        publicationAccepted = true
+                        publicationResultDelivered = true
+                        // Durable acceptance ends confirmation, not this task.
+                        publicationConfirmation?(.accepted)
+                    }
                 case .resume:
                     guard try await resumeBindingAfterPolicyDrain(handle, service: connection,
                         generation: expected, revision: revision) else {
@@ -475,9 +549,28 @@ public final class SyncCoordinator {
                     guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
                           expected == generation, revision == hostRevision,
                           self.backend === backend, backend.connection === connection else { return }
-                } else { await runOwnWork(backend, generation: expected, revision: revision) }
+                } else {
+                    await runOwnWork(backend, generation: expected, revision: revision, onFailure: { failure in
+                        guard publicationAccepted, expected == self.generation, revision == self.hostRevision,
+                              self.backend === backend, backend.connection === connection, !self.closing, !self.replacing else { return }
+                        publicationBackgroundFailure?(failure)
+                    })
+                }
             } catch {
-                if expected == generation, revision == hostRevision, !closing { recordConnectionFailure(error) }
+                if expected == generation, revision == hostRevision, !closing {
+                    recordConnectionFailure(error)
+                    let failure: CloudConnectionFailure?
+                    if case BridgeError.cloudConnection(let value) = error { failure = value }
+                    else { failure = nil }
+                    if publicationAccepted {
+                        if self.backend === backend, backend.connection === connection, !replacing {
+                            publicationBackgroundFailure?(failure)
+                        }
+                    } else {
+                        publicationResultDelivered = true
+                        publicationConfirmation?(.refused(failure))
+                    }
+                }
             }
         }
         await ownTask?.value
@@ -568,7 +661,8 @@ public final class SyncCoordinator {
             initialActivationReturned = true
         }
     }
-    private func runOwnWork(_ backend: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64) async {
+    private func runOwnWork(_ backend: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64,
+                            onFailure: (@MainActor (CloudConnectionFailure?) -> Void)? = nil) async {
         guard let own = backend.own else { return }
         do {
             while !closing, !Task.isCancelled, revision == hostRevision {
@@ -592,7 +686,13 @@ public final class SyncCoordinator {
                 switch progress { case .progressed: continue; case .idle, .sendEntities: return }
             }
         } catch {
-            if expected == generation, !closing, !initialAdoptionCancelled, !(error is CancellationError) { operationFailed = true }
+            if expected == generation, !closing, !initialAdoptionCancelled, !(error is CancellationError) {
+                operationFailed = true
+                let failure: CloudConnectionFailure?
+                if case BridgeError.cloudConnection(let value) = error { failure = value }
+                else { failure = nil }
+                onFailure?(failure)
+            }
             if revision == hostRevision, !replacing { await reconcileInitialAdoption(backend) }
         }
     }

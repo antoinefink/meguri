@@ -8,15 +8,22 @@ public struct CloudConnectionView: View {
     let collection: ReviewCollection
     let entry: CloudSyncEntry
     @State private var preparing = false
-    @State private var confirming = false
+    @State private var otherConfirming = false
     @State private var cancelling = false
-    @State private var submitted = false
+    @State private var otherSubmitted = false
+    @State private var publication = CloudPublicationConfirmation()
     @State private var confirmation: CloudConnectionConfirmation?
     @State private var errorKey: String?
     public init(collection: ReviewCollection, entry: CloudSyncEntry) {
         self.collection = collection; self.entry = entry
     }
     private var sync: SyncCoordinator { collection.sync }
+    private var confirming: Bool { otherConfirming || publication.confirming }
+    private var submitted: Bool { otherSubmitted || publication.submitted }
+    private var publicationPage: Bool {
+        page == .replaceCloud || page == .publicationChoice || confirmation == .publication
+            || (page == .connect && summary?.decision == .confirmUpload)
+    }
     private var summary: CloudConnectionSummary? {
         guard case .ready(_, let summary) = sync.preview else { return nil }
         return summary
@@ -39,12 +46,25 @@ public struct CloudConnectionView: View {
         .onChange(of: sync.settings.paused) { _, paused in
             if paused, !submitted { Task { await sync.cancelConnectionPreview() } }
         }
-        .onDisappear { if !submitted { Task { await sync.cancelConnectionPreview() } } }
+        .onChange(of: sync.generation) { _, _ in publication.invalidate() }
+        .onDisappear {
+            publication.invalidate()
+            if !submitted { Task { await sync.cancelConnectionPreview() } }
+        }
     }
     private func content(_ page: CloudSyncEntry) -> some View {
         Form {
             if let errorKey { Text(SyncText.value(errorKey)) }
-            if !submitted || confirmation != .resume {
+            if publicationPage, publication.refused {
+                Text(SyncText.value(publication.failure.map(SyncStatusPresentation.connectionErrorKey) ?? "sync.recovery.error.other"))
+            } else if publicationPage {
+                if let key = publication.backgroundErrorKey {
+                    Text(SyncText.value(key))
+                        .accessibilityIdentifier("sync.publish.error")
+                } else if !submitted, !confirming, let failure = sync.connectionFailure {
+                    Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+                }
+            } else if !submitted || confirmation != .resume {
                 if let failure = sync.connectionFailure {
                     Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
                 } else if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
@@ -56,6 +76,10 @@ public struct CloudConnectionView: View {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {
                 if confirmation == .resume { SyncStatusRows(collection: collection) }
+                else if publication.accepted, sync.connectionOperationActive,
+                        sync.recovery == nil || sync.recovery?.step == .confirmed || sync.recovery?.step == .bound {
+                    ProgressView(SyncText.value("sync.publish.uploading"))
+                }
                 else if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
                 else { Text(SyncText.value("sync.counts.unknown")) }
             } else if preparing || sync.connectionPreviewActive || cancelling {
@@ -246,6 +270,7 @@ public struct CloudConnectionView: View {
         guard !preparing, !cancelling, !sync.connectionPreviewActive, !sync.connectionOperationActive,
               !sync.settings.paused, sync.preview == nil, !submitted else { return }
         preparing = true; errorKey = nil
+        publication.clearRefusal()
         defer { preparing = false }
         do { try await collection.prepareCloudConnectionPreview(allowDuringReview: entry == .replaceCloud || entry == .publicationChoice) }
         catch BridgeError.sessionActive { errorKey = "sync.recovery.error.sessionActive" }
@@ -265,16 +290,22 @@ public struct CloudConnectionView: View {
         case .resume:
             guard page == .connect, SyncStatusPresentation.permitsResume(summary.decision) else { return }
         }
-        confirming = true; submitted = true; confirmation = intent
+        confirmation = intent; errorKey = nil
+        if intent == .publication {
+            await publication.confirm(using: sync)
+            return
+        }
+        otherConfirming = true; otherSubmitted = true
         switch intent {
         case .adoption: await sync.confirmAdoption()
-        case .publication: await sync.confirmPublication()
+        case .publication: break // handled by the durable publication result above
         case .resume: await sync.confirmResume()
         }
-        confirming = false
+        otherConfirming = false
     }
     private func close() async {
         guard !confirming, !preparing, !cancelling else { return }
+        guard publication.close() else { return }
         cancelling = true
         defer { cancelling = false }
         if sync.initialAdoptionActive { await sync.cancelConnectionOperation() }
