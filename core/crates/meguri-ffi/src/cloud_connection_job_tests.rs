@@ -603,42 +603,117 @@ fn connection_host_close_flushes_unrelated_registered_work_before_join_for_ordin
 
 #[test]
 fn connection_suspend_timeout_keeps_claimed_reply_then_retry_drains_without_losing_actual_result() {
-    let fixture = Fixture::new(Keys::new([]));
-    let (connection, handle, active, stage) = adoption(&fixture);
-    let events = fixture.workflow.host.engine().stream().subscribe();
-    let (claimed, reached) = mpsc::channel();
-    let (release, resume) = mpsc::channel();
-    fixture
-        .workflow
-        .core
-        .set_adoption_reply_claim_hook_for_testing(move || {
-            claimed.send(()).unwrap();
-            resume.recv_timeout(Duration::from_secs(20)).unwrap();
-        });
-    let release = Release(release);
-    let job = connection
-        .start_adoption_result(
-            handle,
-            CloudAdoptionResult::Read {
-                read: CloudControlRead::Found { record: active },
-            },
-        )
-        .unwrap();
-    reached.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert!(
-        matches!(fixture.workflow.host.engine().suspend(Duration::from_millis(100)),
-        Err(meguri_engine::EngineError::SuspendDeadline { phase }) if phase == "jobs")
-    );
-    assert!(stage.exists());
-    drop(release);
-    assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
-    assert!(job.result.result().unwrap().unwrap().applied);
-    assert_eq!(
-        fixture.workflow.host.engine().suspend(Duration::from_secs(5)).unwrap(),
-        meguri_engine::SuspendOutcome::Suspended
-    );
-    fixture.workflow.host.close().unwrap();
-    assert!(!stage.exists());
+    use meguri_storage::{ReadRows, RowKey, Table};
+    for malformed in [false, true] {
+        let fixture = Fixture::new(Keys::new([]));
+        let (connection, handle, active, stage) = adoption(&fixture);
+        let host = &fixture.workflow.host;
+        let engine = host.engine();
+        let collection = host.collection().unwrap();
+        let generation = engine.generation();
+        let collection_generation = collection.generation();
+        let host_generation = host.cloud_connection_generation().unwrap();
+        // Copy every stored cell in all collection tables. Each call drops its
+        // snapshot and lease before any claim, suspend or terminal wait.
+        let rows = || {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            Table::ALL
+                .into_iter()
+                .map(|table| {
+                    let mut rows = Vec::new();
+                    let mut after = None;
+                    loop {
+                        let page = snapshot.row_page(table, after.as_ref()).unwrap();
+                        let Some(last) = page.last() else {
+                            break;
+                        };
+                        after = Some(RowKey::from_stored(table, last).unwrap());
+                        rows.extend(page);
+                    }
+                    (table, rows)
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = rows();
+        let events = engine.stream().subscribe();
+        let (claimed, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        fixture
+            .workflow
+            .core
+            .set_adoption_reply_claim_hook_for_testing(move || {
+                claimed.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(20)).unwrap();
+            });
+        let release = Release(release);
+        let read = if malformed {
+            CloudControlRead::Missing
+        } else {
+            CloudControlRead::Found { record: active }
+        };
+        let job = connection
+            .start_adoption_result(handle, CloudAdoptionResult::Read { read })
+            .unwrap();
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let timed_out = engine.suspend(Duration::from_millis(100));
+        let held_stage = stage.exists();
+        let held_generation = engine.generation();
+        let held_collection_generation = collection.generation();
+        let held_host_generation = host.cloud_connection_generation();
+        let held_admission_closed = collection.open_evidence().is_err();
+        drop(release);
+        let outcome = finished(&events, job.handle.id);
+        let result = job.result.result();
+        // Observe mandatory abort cleanup before retry/close could perform it.
+        let adoption_op = fixture.workflow.core.adoption_op();
+        let completed_stage = stage.exists();
+        let completed_slot = engine.slot_holder();
+        let completed_jobs_empty = engine.jobs().running().is_empty();
+        let completed_generation = engine.generation();
+        let completed_collection_generation = collection.generation();
+        let completed_host_generation = host.cloud_connection_generation();
+        let completed_admission_closed = collection.open_evidence().is_err();
+        let after = rows();
+        let suspended = engine.suspend(Duration::from_secs(5));
+        let suspended_stage = stage.exists();
+        let closed = host.close();
+        // Teardown precedes the expected RED exact-error assertion, so the
+        // admission error currently masking Tracking cannot leave a live Host.
+        assert!(
+            matches!(timed_out,
+            Err(meguri_engine::EngineError::SuspendDeadline { phase }) if phase == "jobs")
+        );
+        assert!(held_stage);
+        assert_eq!(collection_generation, generation);
+        assert_eq!(held_generation, generation);
+        assert_eq!(held_collection_generation, collection_generation);
+        assert_eq!(held_host_generation.unwrap(), host_generation);
+        assert!(held_admission_closed);
+        assert_eq!(completed_generation, generation);
+        assert_eq!(completed_collection_generation, collection_generation);
+        assert_eq!(completed_host_generation.unwrap(), host_generation);
+        assert!(completed_admission_closed, "reply completion reopened public admission");
+        assert!(completed_jobs_empty);
+        assert_eq!(suspended.unwrap(), meguri_engine::SuspendOutcome::Suspended);
+        closed.unwrap();
+        assert!(!stage.exists());
+        assert!(engine.jobs().running().is_empty());
+        assert_eq!(engine.slot_holder(), None);
+        if malformed {
+            assert!(adoption_op.unwrap().is_none());
+            assert!(!completed_stage);
+            assert_eq!(completed_slot, None);
+            assert_eq!(after, before, "malformed reply changed collection rows");
+            assert!(matches!(outcome, JobOutcome::Failed { .. }));
+            failure_is(result, CloudConnectionFailure::Tracking);
+        } else {
+            assert!(completed_stage);
+            assert!(suspended_stage);
+            assert_eq!(outcome, JobOutcome::Succeeded);
+            assert!(result.unwrap().unwrap().applied);
+        }
+    }
 }
 
 #[test]

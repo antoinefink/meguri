@@ -79,6 +79,10 @@ threads-required = "num-test-threads"
 filter = '(package(meguri-host) and test(=close_refuses_restore_admission_and_retains_the_host_for_retry)) or (package(meguri-ffi) and binary(collection_ffi))'
 threads-required = "num-test-threads"
 
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and test(=sync::tests::connection::jobs::connection_suspend_timeout_keeps_claimed_reply_then_retry_drains_without_losing_actual_result)'
+threads-required = "num-test-threads"
+
 # RF3's measured process footprint needs the runner to itself.
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and binary(collection_export_memory)'

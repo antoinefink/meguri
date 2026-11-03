@@ -159,3 +159,11 @@ transport and original-process checks; page work remains active. Recheck46795
 fails before running its script with XCTest future timeout 1000. It supplies
 no app outcome or continuity proof. The live round trip and batch gate remain
 open; no unit is accepted.
+
+## R3P2 regression
+
+Export73717 extends the existing held-reply suspend test. Independent review
+finds no P0-P2. Core76840 runs alone and fails only the exact-error assertion;
+cleanup, rows, generation, closed admission and retry/close checks pass.
+The valid-reply case remains. No production repair is applied yet.
+The nextest reservation now names this exact library test.
