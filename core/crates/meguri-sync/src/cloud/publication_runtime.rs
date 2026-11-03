@@ -364,8 +364,7 @@ impl Runtime {
         s.publication.resume = None;
     }
     pub fn publication_op(&self) -> Result<Option<PublishOp>, RuntimeError> {
-        let s = self.state();
-        with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.publication_op()?))
+        self.read_recovery_op(TrackingStore::publication_op)
     }
     pub(super) fn check_preview_authority(&self, p: &Preview, collection: &Collection) -> Result<(), RuntimeError> {
         if self.publication_account()? != p.account

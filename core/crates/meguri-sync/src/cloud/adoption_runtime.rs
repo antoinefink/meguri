@@ -258,8 +258,35 @@ impl Runtime {
             .ok_or(RuntimeError::StaleIncarnation)
     }
     pub fn adoption_op(&self) -> Result<Option<AdoptOp>, RuntimeError> {
-        let s = self.state();
-        with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.adoption_op()?))
+        self.read_recovery_op(TrackingStore::adoption_op)
+    }
+    /// A missing store is absent only for its live NoCollection owner and path.
+    pub(super) fn read_recovery_op<T>(
+        &self,
+        query: impl FnOnce(&TrackingStore) -> Result<Option<T>, Error>,
+    ) -> Result<Option<T>, RuntimeError> {
+        let read = |s: &State| {
+            with_tracking_access(|| match s.store.as_ref() {
+                Some(store) => Ok(query(store)?),
+                None if self.tracking_file_absent_locked()? => Ok(None),
+                None => Err(Error::Database.into()),
+            })
+        };
+        {
+            let s = self.state();
+            if s.store.is_some() {
+                return read(&s);
+            }
+        }
+        self.with_initial_adoption_state(|s| read(s))
+    }
+    /// Caller holds Runtime state and tracking access; never opens the file.
+    fn tracking_file_absent_locked(&self) -> Result<bool, RuntimeError> {
+        match self.directory.join(super::open::TRACKING_FILE).symlink_metadata() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(e) => Err(storage_io(e)),
+            Ok(_) => Ok(false),
+        }
     }
     fn write_adoption(&self, op: &AdoptOp) -> Result<(), RuntimeError> {
         let mut s = self.state();
@@ -275,10 +302,8 @@ impl Runtime {
         let operation = {
             let _state = self.state();
             with_tracking_access(|| -> Result<Option<AdoptOp>, RuntimeError> {
-                match self.directory.join(super::open::TRACKING_FILE).symlink_metadata() {
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(e) => return Err(storage_io(e)),
-                    Ok(_) => {}
+                if self.tracking_file_absent_locked()? {
+                    return Ok(None);
                 }
                 let mut store = match TrackingStore::open(&self.directory, self.inputs.scope.clone())? {
                     OpenOutcome::Opened(store) => store,
@@ -310,10 +335,11 @@ impl Runtime {
             // candidate and settles step 9 using its native R6 proof.
             return Ok(());
         }
-        match self.directory.join(super::open::TRACKING_FILE).symlink_metadata() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(storage_io(e)),
-            Ok(_) => {}
+        {
+            let _state = self.state();
+            if with_tracking_access(|| self.tracking_file_absent_locked())? {
+                return Ok(());
+            }
         }
         self.with_initial_adoption_state(|s| {
             with_tracking_access(|| {

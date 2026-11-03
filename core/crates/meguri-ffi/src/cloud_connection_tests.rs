@@ -47,18 +47,41 @@ fn local_facts_require_no_account_and_preserve_host_guards() {
 }
 #[test]
 fn absent_local_information_does_not_bootstrap_collection_or_sidecar() {
-    let fixture = Fixture::without_collection(keys());
+    let (fixture, _process, _config, identity, keys) = held_no_collection_host();
     let host = &fixture.workflow.host;
     let connection = fixture.workflow.connection().unwrap();
     let directory = host.cloud_connection_directory();
+    let generation = host.cloud_connection_generation().unwrap();
+    let guard = fixture.workflow.core.adapter_guard();
+    let identity_calls = identity.calls.load(Ordering::SeqCst);
+    let file_calls = identity.file_calls.load(Ordering::SeqCst);
     let sidecar = std::fs::read(directory.join("meguri-sidecar.json")).ok();
+    assert!(connection.recovery_status().unwrap().is_none());
     let info = connection
         .local_publication_information(host.cloud_connection_generation().unwrap().0)
         .unwrap();
     assert!(!info.collection_present && info.local_counts.is_empty());
     assert!(info.condition.is_none() && info.last_change_ms.is_none());
     assert!(!directory.join("collection.anki2").exists());
+    for suffix in ["", "-wal", "-shm"] {
+        assert!(
+            directory
+                .join(format!("{}{suffix}", c::TRACKING_FILE))
+                .symlink_metadata()
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
     assert_eq!(std::fs::read(directory.join("meguri-sidecar.json")).ok(), sidecar);
+    assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+    assert!(matches!(
+        host.engine().state(),
+        meguri_engine::LifecycleState::NoCollection
+    ));
+    assert_eq!(host.engine().slot_holder(), None);
+    assert_eq!(fixture.workflow.core.adapter_guard(), guard);
+    assert_eq!(identity.calls.load(Ordering::SeqCst), identity_calls);
+    assert_eq!(identity.file_calls.load(Ordering::SeqCst), file_calls);
+    assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
     // A file appearing in the retained no-collection host is stale, never
     // silently read/opened or treated as an absent collection.
     std::fs::write(directory.join("collection.anki2"), b"synthetic-invalid-file").unwrap();
@@ -66,6 +89,93 @@ fn absent_local_information_does_not_bootstrap_collection_or_sidecar() {
         connection.local_publication_information(host.cloud_connection_generation().unwrap().0),
         CloudConnectionFailure::AuthorityChanged,
     );
+    failure_is(connection.recovery_status(), CloudConnectionFailure::AuthorityChanged);
+    host.close().unwrap();
+    failure_is(connection.recovery_status(), CloudConnectionFailure::Closed);
+}
+#[test]
+fn recovery_discovery_absent_tracking_checks_both_runtime_reads_without_bootstrap() {
+    let fixture = Fixture::without_collection(keys());
+    let core = &fixture.workflow.core;
+    let directory = fixture.workflow.host.cloud_connection_directory();
+    let entries = recovery_discovery_entries(directory);
+    assert!(core.adoption_op().unwrap().is_none());
+    assert!(core.publication_op().unwrap().is_none());
+    assert_eq!(recovery_discovery_entries(directory), entries);
+    for name in ["collection.anki2", c::TRACKING_FILE, "meguri-sidecar.json"] {
+        assert!(
+            directory
+                .join(name)
+                .symlink_metadata()
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
+    fixture.workflow.host.close().unwrap();
+    assert!(matches!(core.adoption_op(), Err(r::RuntimeError::StaleIncarnation)));
+    assert!(matches!(core.publication_op(), Err(r::RuntimeError::StaleIncarnation)));
+}
+fn recovery_discovery_entries(directory: &std::path::Path) -> std::collections::BTreeSet<std::ffi::OsString> {
+    std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect()
+}
+#[test]
+fn recovery_discovery_absent_store_rejects_present_tracking_entries_without_changes() {
+    for entry in ["malformed", "newer", "directory", "symlink"] {
+        #[cfg(not(unix))]
+        if entry == "symlink" {
+            continue;
+        }
+        let (fixture, _process, _config, identity, keys) = held_no_collection_host();
+        let host = &fixture.workflow.host;
+        let core = &fixture.workflow.core;
+        let connection = fixture.workflow.connection().unwrap();
+        let directory = host.cloud_connection_directory();
+        let path = directory.join(c::TRACKING_FILE);
+        match entry {
+            "malformed" => std::fs::write(&path, b"synthetic damaged tracking").unwrap(),
+            "newer" => {
+                let db = meguri_storage::rusqlite::Connection::open(&path).unwrap();
+                db.pragma_update(None, "user_version", 9999).unwrap();
+            }
+            "directory" => std::fs::create_dir(&path).unwrap(),
+            #[cfg(unix)]
+            "symlink" => std::os::unix::fs::symlink("missing-tracking-target", &path).unwrap(),
+            _ => unreachable!(),
+        }
+        let bytes = path.is_file().then(|| std::fs::read(&path).unwrap());
+        let metadata = path.symlink_metadata().unwrap();
+        let link = std::fs::read_link(&path).ok();
+        let entries = recovery_discovery_entries(directory);
+        let generation = host.cloud_connection_generation().unwrap();
+        let guard = core.adapter_guard();
+        let identity_calls = identity.calls.load(Ordering::SeqCst);
+        let file_calls = identity.file_calls.load(Ordering::SeqCst);
+        failure_is(connection.recovery_status(), CloudConnectionFailure::Tracking);
+        assert!(matches!(core.adoption_op(), Err(r::RuntimeError::Tracking(_))));
+        assert!(matches!(core.publication_op(), Err(r::RuntimeError::Tracking(_))));
+        assert_eq!(path.symlink_metadata().unwrap().file_type(), metadata.file_type());
+        assert_eq!(path.is_file().then(|| std::fs::read(&path).unwrap()), bytes);
+        assert_eq!(std::fs::read_link(&path).ok(), link);
+        if entry == "directory" {
+            assert_eq!(std::fs::read_dir(&path).unwrap().count(), 0);
+        }
+        assert_eq!(recovery_discovery_entries(directory), entries);
+        assert!(!directory.join("collection.anki2").exists());
+        assert!(!directory.join("meguri-sidecar.json").exists());
+        assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+        assert!(matches!(
+            host.engine().state(),
+            meguri_engine::LifecycleState::NoCollection
+        ));
+        assert_eq!(host.engine().slot_holder(), None);
+        assert_eq!(core.adapter_guard(), guard);
+        assert_eq!(identity.calls.load(Ordering::SeqCst), identity_calls);
+        assert_eq!(identity.file_calls.load(Ordering::SeqCst), file_calls);
+        assert_eq!(keys.calls.load(Ordering::SeqCst), 0);
+        host.close().unwrap();
+    }
 }
 #[test]
 fn local_facts_keep_recorded_reasons_and_retained_preview_usable() {
@@ -171,6 +281,15 @@ fn actual_no_collection_host_discovers_without_creating_an_empty_collection_or_p
 // Holds the actual original provider, without account-cache or transport fallback.
 struct HeldNoCollectionAccount {
     held: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+    calls: AtomicUsize,
+    file_calls: Arc<AtomicUsize>,
+}
+struct CountedNoCollectionFiles(Arc<AtomicUsize>);
+impl r::FileIdentityProvider for CountedNoCollectionFiles {
+    fn identity(&self, path: &std::path::Path) -> Result<r::NativeFileIdentity, r::RuntimeError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        r::FileIdentityProvider::identity(&NativeFiles, path)
+    }
 }
 struct ReleaseNoCollectionRead(std::sync::mpsc::Sender<()>);
 impl Drop for ReleaseNoCollectionRead {
@@ -188,6 +307,7 @@ impl HeldNoCollectionAccount {
 }
 impl r::IdentityProvider for HeldNoCollectionAccount {
     fn read_identity(&self, _: &c::BuildScope) -> r::IdentityStatus {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         let held = self.held.lock().unwrap().take();
         if let Some((reached, resume)) = held {
             reached.send(()).unwrap();
@@ -208,7 +328,11 @@ fn held_no_collection_host() -> (
     std::fs::create_dir_all(directory.path().join("backups")).unwrap();
     let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
     let random = Arc::new(SeededRandom::new(114));
-    let identity = Arc::new(HeldNoCollectionAccount { held: Mutex::new(None) });
+    let identity = Arc::new(HeldNoCollectionAccount {
+        held: Mutex::new(None),
+        calls: AtomicUsize::new(0),
+        file_calls: Arc::new(AtomicUsize::new(0)),
+    });
     let keys = keys();
     let mut config = HostConfig::new(
         directory.path().join("collection"),
@@ -224,7 +348,7 @@ fn held_no_collection_host() -> (
             environment: c::Environment::Development,
         },
         identity: identity.clone(),
-        files: Arc::new(NativeFiles),
+        files: Arc::new(CountedNoCollectionFiles(identity.file_calls.clone())),
     });
     config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys.clone())));
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
@@ -251,6 +375,7 @@ fn held_no_collection_host() -> (
 #[test]
 fn actual_held_no_collection_account_read_cannot_reach_same_generation_successor_host() {
     let (fixture, process, config, identity, keys) = held_no_collection_host();
+    let connection = fixture.workflow.connection().unwrap();
     let policy = fixture.workflow.policy().unwrap();
     let original_generation = fixture.workflow.host.engine().generation();
     let (reached, release) = identity.arm();
@@ -266,6 +391,15 @@ fn actual_held_no_collection_account_read_cannot_reach_same_generation_successor
             host: successor.clone(),
             identity: None,
         };
+        assert!(matches!(
+            fixture.workflow.core.adoption_op(),
+            Err(r::RuntimeError::StaleIncarnation)
+        ));
+        assert!(matches!(
+            fixture.workflow.core.publication_op(),
+            Err(r::RuntimeError::StaleIncarnation)
+        ));
+        failure_is(connection.recovery_status(), CloudConnectionFailure::Closed);
         let successor_policy = workflow.policy().unwrap();
         successor_policy.clone().refresh_account().unwrap();
         let guard = workflow.core.adapter_guard();
@@ -639,10 +773,26 @@ fn adoption_preview(connection: &CloudConnection) -> (Arc<CloudConnectionPreview
 }
 #[test]
 fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases_it() {
-    let fixture = Fixture::new(Keys::new([]));
+    assert_adoption_recovery_operation(Fixture::new(Keys::new([])));
+}
+#[test]
+fn recovery_discovery_absent_collection_retains_actual_adoption_operation() {
+    assert_adoption_recovery_operation(Fixture::without_collection(Keys::new([])));
+}
+fn assert_adoption_recovery_operation(fixture: Fixture) {
     let connection = fixture.workflow.connection().unwrap();
     let (preview, active) = adoption_preview(&connection);
     let operation = connection.confirm_adoption(preview).unwrap();
+    let before = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(matches!(status.step, CloudRecoveryStep::Staging));
+    assert!(!status.switch_sent && !status.switch_conflict && status.retry_after_ms.is_none());
+    assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
+    let other = fixture.workflow.connection().unwrap();
+    failure_is(
+        other.cancel_operation(status.operation.clone()),
+        CloudConnectionFailure::WrongOwner,
+    );
     assert_eq!(
         fixture.workflow.host.engine().slot_holder(),
         Some(meguri_engine::LongOp::CloudAdopt)
@@ -669,9 +819,14 @@ fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases
             )
             .is_err()
     );
-    connection.cancel_operation(operation).unwrap();
+    connection.cancel_operation(status.operation).unwrap();
     assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
     assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    failure_is(
+        connection.cancel_operation(operation),
+        CloudConnectionFailure::NotOffered,
+    );
+    assert!(connection.recovery_status().unwrap().is_none());
 }
 #[test]
 fn bridge_adoption_close_rejects_held_reply_and_actual_host_releases_stage() {
