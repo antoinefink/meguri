@@ -103,6 +103,76 @@ final class DriveScriptTests: XCTestCase {
         }
     }
 
+    private func inline(_ data: Data) -> [String: String] {
+        ["MEGURI_DRIVE_SCRIPT_BASE64": data.base64EncodedString()]
+    }
+
+    private func refused(_ environment: [String: String], _ expected: DriveScriptInput.Failure,
+                         file: StaticString = #filePath, line: UInt = #line) {
+        do {
+            _ = try DriveScriptInput.load(environment, physical: true)
+            XCTFail("private input was accepted", file: file, line: line)
+        } catch {
+            XCTAssertEqual(error as? DriveScriptInput.Failure, expected, file: file, line: line)
+            XCTAssertEqual(String(describing: error), expected.rawValue, file: file, line: line)
+        }
+    }
+
+    func testPhysicalInlineUsesTheExistingParserAndPathTransportStaysAvailable() throws {
+        let data = Data(#"{"name":"inspect","steps":[{"launch":{}},{"snapshot":"initial"}]}"#.utf8)
+        guard case let .inline(script)? = try DriveScriptInput.load(inline(data), physical: true) else {
+            return XCTFail("inline script missing")
+        }
+        XCTAssertEqual(script, try DriveScript(json: data))
+        guard case let .path(url)? = try DriveScriptInput.load(["MEGURI_DRIVE_SCRIPT": "/synthetic/script.json"], physical: false) else {
+            return XCTFail("existing path missing")
+        }
+        XCTAssertEqual(url.path, "/synthetic/script.json")
+        XCTAssertNil(try DriveScriptInput.load([:], physical: false))
+    }
+
+    func testPhysicalInlineRejectsSourcesEncodingSizeAndJSONWithFixedCategories() {
+        let valid = #"{"name":"inspect","steps":[{"launch":{}}]}"#
+        refused([:], .missing)
+        refused(["MEGURI_DRIVE_REQUIRED": "1"], .missing)
+        refused(["MEGURI_DRIVE_SCRIPT_BASE64": ""], .missing)
+        refused(["MEGURI_DRIVE_SCRIPT": "/private/path"], .policy)
+        refused(["MEGURI_DRIVE_SCRIPT": "", "MEGURI_DRIVE_SCRIPT_BASE64": Data(valid.utf8).base64EncodedString()], .conflicting)
+        refused(["MEGURI_DRIVE_SCRIPT_BASE64": "PRIVATE_TEXT!"], .encoding)
+        refused(["MEGURI_DRIVE_SCRIPT_BASE64": String(repeating: "A", count: 21_849)], .oversized)
+        refused(inline(Data(repeating: 32, count: 16_385)), .oversized)
+        refused(inline(Data([0xff])), .encoding)
+        refused(inline(Data("PRIVATE_TEXT".utf8)), .json)
+        refused(inline(Data(#"{"name":"x","steps":[{"launch":{}},{"snapshot":"PRIVATE_TEXT"}]}"#.utf8)), .grammar)
+        refused(inline(Data(#"{"name":"x","PRIVATE_TEXT":null,"steps":[{"launch":{}}]}"#.utf8)), .grammar)
+        refused(inline(Data(#"{"name":"x","steps":[{"launch":{}},{"swipe":{"id":"a","direction":"PRIVATE_TEXT"}}]}"#.utf8)), .grammar)
+    }
+
+    func testPhysicalInlineInspectsEveryRawLaunchBeforeDefaultsAndRefusesMotion() throws {
+        let overrides = [#"null"#, #"[]"#, #"{"route":""}"#, #"{"arguments":[]}"#,
+                         #"{"animations":false}"#, #"{"fixture":null}"#, #"{"reset":false}"#,
+                         #"{"import":"PRIVATE_TEXT"}"#, #"{"PRIVATE_TEXT":null}"#]
+        for launch in overrides {
+            let json = "{\"name\":\"x\",\"steps\":[{\"launch\":{}},{\"launch\":\(launch)}]}"
+            refused(inline(Data(json.utf8)), .policy)
+        }
+        for step in [#"{"resize":"default"}"#, #"{"snapshot":"x","transition":null}"#,
+                     #"{"snapshot":"x","transition":"motion"}"#] {
+            let json = "{\"name\":\"x\",\"steps\":[{\"launch\":{}},\(step)]}"
+            refused(inline(Data(json.utf8)), .policy)
+        }
+        let valid = #"{"name":"x","steps":[{"launch":{}}]}"#
+        var environment = inline(Data(valid.utf8))
+        environment["MEGURI_DRIVE_FRAMES"] = "1"
+        refused(environment, .policy)
+        refused(inline(Data(#"{"name":"x","steps":[{"snapshot":"x"}]}"#.utf8)), .grammar)
+        // The inclusive decoded limit, including whitespace, remains valid.
+        let padded = valid + String(repeating: " ", count: 16_384 - valid.utf8.count)
+        guard case .inline? = try DriveScriptInput.load(inline(Data(padded.utf8)), physical: true) else {
+            return XCTFail("bounded inline script missing")
+        }
+    }
+
     func testPNGWidthComesFromTheHeader() {
         // The 24 bytes up to IHDR's width of a 1206 x 2622 PNG.
         var header: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]

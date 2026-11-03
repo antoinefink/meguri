@@ -10,7 +10,7 @@
 # R1965); unavailable steps (an iPhone resize) do not.
 
 mg_job drive host mg_drive \
-  "Run a drive script: <script.json> [--platform iphone|iphone-small|ipad|ipad-small|foldable|mac] [--device <leased udid>] [--config Debug|Profile] [--record] (per-step hierarchy JSON and PNGs, hierarchy-check, manifest; --record adds video and contact sheets of marked transitions)"
+  "Run a drive script: <script.json> [--platform iphone|iphone-small|ipad|ipad-small|foldable|mac] [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile] [--record] (per-step hierarchy JSON and PNGs, hierarchy-check, manifest; --record adds video and contact sheets of marked transitions)"
 mg_job ui-tree host mg_ui_tree \
   "Launch on a route and export the UI hierarchy (and a screenshot): --route <route> [--platform ...] [--device <udid>] [--config ...] [-- launch args]"
 mg_job screenshot host mg_screenshot \
@@ -59,6 +59,52 @@ mg_drive__check_script() {
   [ -f "$1" ] || { echo "no drive script at $1"; return 1; }
   jq -e 'type == "object" and (.name | type) == "string" and (.steps | type) == "array" and (.steps | length) > 0' "$1" >/dev/null 2>&1 ||
     { echo "$1 is not a drive script (a JSON object with name and steps; tools/drive-scripts/AGENTS.md)"; return 1; }
+}
+
+# Freeze once, privately, inside this run. A bounded read also catches growth
+# after fstat; parsing and transport consume exactly these same bytes.
+mg_drive__physical_payload() {
+  (umask 077
+    python3 - "$1" "$MG_RUN_DIR" <<'PYTHON'
+import base64
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+try:
+    with os.fdopen(os.open(sys.argv[1], os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+            raise ValueError()
+        data = source.read(16385)
+    if not data or len(data) > 16384:
+        raise ValueError()
+    root = json.loads(data.decode("utf-8"))
+    if not isinstance(root, dict) or set(root) - {"name", "description", "platforms", "steps"}:
+        raise ValueError()
+    if not isinstance(root.get("name"), str) or not root["name"]:
+        raise ValueError()
+    steps = root.get("steps")
+    if not isinstance(steps, list) or not steps or not isinstance(steps[0], dict) or "launch" not in steps[0]:
+        raise ValueError()
+    actions = {"launch", "tap", "type", "swipe", "scroll", "wait", "snapshot"}
+    for step in steps:
+        if not isinstance(step, dict) or len(step) != 1 or not set(step) <= actions:
+            raise ValueError()
+        if "launch" in step and (not isinstance(step["launch"], dict) or step["launch"]):
+            raise ValueError()
+    out = Path(sys.argv[2])
+    # Exclusive creation prevents adopting another run's payload or symlink.
+    with (out / "physical-script.json").open("xb") as frozen:
+        frozen.write(data)
+    with (out / "physical-script.base64").open("xb") as encoded:
+        encoded.write(base64.b64encode(data))
+except (OSError, ValueError, TypeError, RecursionError):
+    sys.exit(1)
+PYTHON
+  ) 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -202,6 +248,7 @@ mg_drive_run() {
   [ "$out" != "$MG_RUN_DIR" ] || name="$MG_JOB"
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
+    ios-device) dest="platform=iOS,id=$udid" ;;
     *) dest="id=$udid" ;;
   esac
   if [ "$record" = yes ]; then
@@ -248,7 +295,7 @@ mg_drive_run() {
   # copy of the script in the run directory that names it there; so it does
   # for a script outside the checkout.
   local run_script="$abs_script"
-  if { [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; } || { [ "$platform" != mac ] && [ "$MG_SIM_RUNNER" = vm ]; }; then
+  if { [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; } || { [ "$platform" != mac ] && [ "$platform" != ios-device ] && [ "$MG_SIM_RUNNER" = vm ]; }; then
     local form fixture moved='{}'
     while IFS="$(printf '\t')" read -r form fixture; do
       # launch.fixture is relative to the checkout; -MeguriFixture must be
@@ -275,10 +322,33 @@ mg_drive_run() {
 
   echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid${MG_SIM_RUNNER:+ ($MG_SIM_RUNNER)}") ($config)${capture:+, capturing motion: $capture}" >&2
   local since refused=0
-  since="$(mg_app_log_now)"
-  TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$run_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
-    mg_app_xcodebuild_test "$out/drive" "$platform" "$dest" "$config" -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
-  rc=$?
+  [ "$platform" = ios-device ] || since="$(mg_app_log_now)"
+  if [ "$platform" = ios-device ]; then
+    mg_ui_test__physical_check "$udid" "$MG_D_KIND" || return 5
+    # Unset the host path source, including an inherited source. Do not put
+    # private bytes on a command line or in any diagnostic.
+    (
+      unset TEST_RUNNER_MEGURI_DRIVE_SCRIPT MEGURI_DRIVE_SCRIPT MEGURI_DRIVE_SCRIPT_BASE64
+      export TEST_RUNNER_MEGURI_DRIVE_SCRIPT_BASE64="$(cat "$out/physical-script.base64")"
+      export TEST_RUNNER_MEGURI_DRIVE_REQUIRED=1 TEST_RUNNER_MEGURI_DRIVE_FRAMES=0
+      mg_app_xcodebuild_test "$out/drive" ios-device "$dest" Debug -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
+    )
+    rc=$?
+    # Reuse physical selected-test/count checks without letting their XCTest
+    # verdict replace the drive-log verdict below. Keep their failure text fixed.
+    (
+      mg_status() { printf '%s\n' "$1" >"$out/physical-test-status"; }
+      eval "$(declare -f mg_failure | sed '1s/mg_failure/mg_drive__report_failure/')"
+      mg_failure() { mg_drive__report_failure physical-device-results "physical drive selected-test verification failed"; }
+      mg_message() { :; }
+      mg_ui_test__report "$out/drive" "$rc" physical AgentDriverTests/testDriveScript
+    )
+    [ "$(cat "$out/physical-test-status" 2>/dev/null)" = pass ] || rc=1
+  else
+    TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$run_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
+      mg_app_xcodebuild_test "$out/drive" "$platform" "$dest" "$config" -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
+    rc=$?
+  fi
   # A Mac drive whose input macOS dropped ran, but proves nothing about the
   # app: its captures are kept, and it ends queued (mac-input), not fail.
   local part="$name"
@@ -340,6 +410,39 @@ mg_drive_run() {
   # A failed move leaves the export behind for a look.
   [ "$incomplete" -ne 0 ] || rm -rf "$raw"
 
+  if [ "$platform" = ios-device ]; then
+    if ! jq -e '
+      type == "object" and (.steps | type == "array")
+      and all(.steps[]; type == "object" and (.index | type == "number")
+        and (.kind | type == "string") and (.status | type == "string")
+        and (.captures | type == "array") and all(.captures[];
+          (.phase | type == "string") and (.hierarchy | type == "string" and test("^drive-[a-z0-9.-]+\\.json$"))
+          and (.screenshot | type == "string" and test("^drive-[a-z0-9.-]+\\.png$"))))
+    ' "$out/drive-log.json" >/dev/null 2>&1; then
+      mg_failure physical-drive-evidence "physical drive log is missing or malformed"
+      return 2
+    fi
+    # A valid XCTest receipt alone says nothing about the driver's steps.
+    # Require the whole frozen script and each capture phase, not merely the
+    # captures a truncated/malformed log happens to list.
+    if ! jq -e --slurpfile script "$out/physical-script.json" '
+      def safe: type == "string" and test("^drive-[a-z0-9.-]+\\.(json|png)$");
+      type == "object" and .error == null and (.steps | type == "array")
+      and (.steps | length) == ($script[0].steps | length)
+      and all(.steps | to_entries[];
+        .key as $i | .value as $s | ($script[0].steps[$i] | keys[0]) as $kind
+        | $s.index == ($i + 1) and $s.kind == $kind and $s.status == "ok" and $s.transition == null
+          and ($s.captures | type == "array")
+          and ($s.captures | map(.phase)) ==
+            (if $kind == "launch" then ["after"] elif $kind == "snapshot" then [$script[0].steps[$i].snapshot]
+             else ["before", "after"] end)
+          and all($s.captures[]; (.hierarchy | safe) and (.screenshot | safe)))
+    ' "$out/drive-log.json" >/dev/null 2>&1; then
+      mg_failure physical-drive-evidence "physical drive steps or required captures failed verification"
+      capture_error=1
+    fi
+  fi
+
   # Every capture the drive log lists (hierarchies, screenshots, sampled
   # frames) must have come out of the result bundle, and not empty: a drive
   # with a capture missing is an error, never a pass (R1965, R1968).
@@ -368,6 +471,19 @@ mg_drive_run() {
     else
       mg_failure hierarchy-check "hierarchy-check could not run (exit $check_rc); see log.txt"
     fi
+  fi
+
+  if [ "$platform" = ios-device ] && [ "$checked" = true ]; then
+    if ! jq -e --argjson expected "$(mg_json_array ${files[0]+"${files[@]}"})" '
+      type == "object" and (.files | type == "array")
+      and ([.files[].path] | sort) == ($expected | sort)
+      and all(.files[]; (.issues | type == "array") and all(.issues[];
+        type == "object" and (.kind | type == "string") and (.message | type == "string")))
+    ' "$out/hierarchy-check.json" >/dev/null 2>&1; then
+      mg_failure hierarchy-check "physical drive hierarchy report is incomplete or malformed"
+      checked=false
+    fi
+    [ "$check_rc" -eq 0 ] || capture_error=1
   fi
 
   # Motion: a contact sheet for every marked step. Each one asked for must
@@ -500,8 +616,18 @@ mg_drive_run() {
 # test VM (mac-vm.sh: the pool VM's lease and a pool simulator, or for the Mac
 # a VM's lease) and runs the script.
 mg_drive__job() {
-  local script="$1" kind="$2" udid="$3" config="$4" record="$5" platform
-  if [ "$kind" = mac ]; then
+  local script="$1" kind="$2" udid="$3" config="$4" record="$5" platform physical="${6:-}"
+  local MG_UI_PHYSICAL_DEVICE=""
+  if [ -n "$physical" ]; then
+    platform=ios-device
+    udid="$physical"
+    mg_detail destination_platform '"ios-device"'
+    mg_ui_test__physical_check "$physical" "$kind" || return 0
+    mg_host_lease --no-session || return 0
+    mg_ui_test__physical_check "$physical" "$kind" || return 0
+    export MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
+    mg_app_build ios-device Debug || return 0
+  elif [ "$kind" = mac ]; then
     platform=mac
     mg_mac_ui_begin || return 0
     mg_app_build mac "$config" || return 0
@@ -553,6 +679,7 @@ mg_drive__job() {
     # The test VM could not be reached: queued (mg__mac_vm_unreachable wrote
     # the message).
     4) mg_status pass ;;
+    5) return 0 ;;
     *)
       if [ -f "$manifest" ]; then
         mg_message "$MG_JOB: the drive ran, but a capture or check it asked for could not be made; see the failures and log.txt"
@@ -570,6 +697,7 @@ mg_drive__job() {
 # MG_D_REST (launch arguments after --) and MG_D_POSITIONAL. Returns 1 after
 # recording a usage error.
 mg_drive__args() {
+  MG_D_PHYSICAL=""
   MG_D_KIND=iphone MG_D_UDID="" MG_D_CONFIG=Debug MG_D_RECORD=no MG_D_ROUTE="" MG_D_REST=() MG_D_POSITIONAL=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -580,6 +708,12 @@ mg_drive__args() {
       --device)
         [ "$#" -ge 2 ] && [ -n "$2" ] || { mg_drive__usage "--device needs a UDID (tools/mg sim acquire <kind>)"; return 1; }
         MG_D_UDID="$2" && shift 2
+        ;;
+      --physical-device)
+        [ "$MG_JOB" = drive ] && [ "$#" -ge 2 ] && [ -z "$MG_D_PHYSICAL" ] &&
+          [[ "$2" =~ ^([A-Fa-f0-9]{8}-[A-Fa-f0-9]{16}|[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12})$ ]] ||
+          { mg_drive__usage "--physical-device requires drive and one explicit Xcode device identifier"; return 1; }
+        MG_D_PHYSICAL="$2" && shift 2
         ;;
       --config)
         [ "$#" -ge 2 ] && mg_word_in "$2" "Debug Profile" || { mg_drive__usage "--config takes Debug or Profile (the builds with test hooks)"; return 1; }
@@ -595,6 +729,13 @@ mg_drive__args() {
       *) MG_D_POSITIONAL[${#MG_D_POSITIONAL[@]}]="$1" && shift ;;
     esac
   done
+  if [ -n "$MG_D_PHYSICAL" ]; then
+    if [ -n "$MG_D_UDID" ] || ! mg_word_in "$MG_D_KIND" "iphone ipad" ||
+        [ "$MG_D_CONFIG" != Debug ] || [ "$MG_D_RECORD" != no ]; then
+      mg_drive__usage "physical drive requires iphone or ipad, Debug, no --device and no recording"
+      return 1
+    fi
+  fi
   if [ "$MG_D_KIND" = mac ] && [ -n "$MG_D_UDID" ]; then
     mg_drive__usage "--device is for simulators"
     return 1
@@ -606,6 +747,14 @@ mg_drive() {
   mg_drive__args "$@" || return 0
   [ "${#MG_D_POSITIONAL[@]}" -eq 1 ] || { mg_drive__usage "usage: tools/mg drive <script.json> [options]"; return 0; }
   [ -z "$MG_D_ROUTE" ] && [ "${#MG_D_REST[@]}" -eq 0 ] || { mg_drive__usage "the script sets the launch options; --route and -- are for ui-tree and screenshot"; return 0; }
+  if [ -n "$MG_D_PHYSICAL" ]; then
+    if ! mg_drive__physical_payload "${MG_D_POSITIONAL[0]}"; then
+      mg_drive__usage "physical drive input refused (missing, oversized, invalid JSON or physical policy)"
+      return 0
+    fi
+    mg_drive__job "$MG_RUN_DIR/physical-script.json" "$MG_D_KIND" "" Debug no "$MG_D_PHYSICAL"
+    return 0
+  fi
   local problem
   if ! problem="$(mg_drive__check_script "${MG_D_POSITIONAL[0]}")"; then
     mg_drive__usage "$problem"

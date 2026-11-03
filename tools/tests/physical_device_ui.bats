@@ -3026,3 +3026,213 @@ PY
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
 }
+
+# Drive fixtures replace only attachment export and the image-tools checker;
+# destination selection, team build, test invocation and result checks stay real.
+physical_drive_facts() {
+  mkdir -p "$SB/build/drive-input"
+  export FX_DRIVE_SCRIPT="$SB/build/drive-input/inspect.json"
+  printf '%s\n' '{"name":"physical-inspect","steps":[{"launch":{}},{"snapshot":"initial"}]}' >"$FX_DRIVE_SCRIPT"
+  echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' >"$FX_SUMMARY"
+  test_tree '[{nodeType:"Test Case", nodeIdentifier:"AgentDriverTests/testDriveScript()", result:"Passed"}]'
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKES'
+# Preserve the production physical test helper, inspecting only transport facts.
+eval "$(declare -f mg_app_xcodebuild_test | sed '1s/mg_app_xcodebuild_test/fx_original_test/')"
+mg_app_xcodebuild_test() {
+  [ -z "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT+x}" ] || return 2
+  [ "${TEST_RUNNER_MEGURI_DRIVE_REQUIRED:-}" = 1 ] || return 2
+  [ "${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-}" = 0 ] || return 2
+  python3 - <<'PY'
+import base64, os
+from pathlib import Path
+payload = base64.b64decode(os.environ['TEST_RUNNER_MEGURI_DRIVE_SCRIPT_BASE64'], validate=True)
+assert payload == (Path(os.environ['MG_RUN_DIR']) / 'physical-script.json').read_bytes()
+# The original file changing after validation cannot change the delivered bytes.
+if os.environ.get('FX_MUTATE_SCRIPT'):
+    Path(os.environ['FX_DRIVE_SCRIPT']).write_text('changed source')
+assert b'physical-inspect' in payload
+PY
+  [ "$?" -eq 0 ] || return 2
+  echo inline-transport-verified >>"$STUB_LOG"
+  fx_original_test "$@"
+}
+mg_drive__export_attachments() {
+  echo drive-export >>"$STUB_LOG"
+  mkdir -p "$2"
+  python3 - "$2" <<'PY'
+import json, os
+from pathlib import Path
+import sys
+out = Path(sys.argv[1])
+mode = os.environ.get('FX_DRIVE_CASE', '')
+log = {'script':'physical-inspect','path':'','platform':'ios','steps':[]}
+attachments = []
+for index, kind, phase in [(1, 'launch', 'after'), (2, 'snapshot', 'initial')]:
+    name = f'drive-{index:02}-{kind}-{phase}'
+    capture = {'phase':phase, 'hierarchy':name+'.json', 'screenshot':name+'.png'}
+    log['steps'].append({'index':index,'kind':kind,'status':'ok','captures':[capture], 'started':0,'ended':1})
+    for ext in ('.json', '.png'):
+        (out / (name+ext)).write_text('{}' if ext == '.json' else 'synthetic-png')
+        attachments.append({'suggestedHumanReadableName':name+ext, 'exportedFileName':name+ext})
+if mode == 'step-failed': log['steps'][1].update(status='failed', message='drive step failed')
+if mode == 'no-captures': log['steps'][0]['captures'] = []
+if mode == 'truncated-log': log['steps'] = log['steps'][:1]
+if mode == 'malformed-log': log = {}
+if mode == 'missing-capture': (out / 'drive-02-snapshot-initial.png').unlink()
+if mode != 'missing-log':
+    (out / 'drive-log.json').write_text(json.dumps(log))
+    attachments.append({'suggestedHumanReadableName':'drive-log.json', 'exportedFileName':'drive-log.json'})
+(out / 'manifest.json').write_text(json.dumps([{'attachments':attachments}]))
+PY
+}
+mg_image_tools() {
+  echo hierarchy-check >>"$STUB_LOG"
+  [ "${FX_DRIVE_CASE:-}" != missing-hierarchy ] || return 2
+  shift 2
+  [ "$1" = --report ] || return 2
+  local report="$2"; shift 2
+  report="$MG_ROOT/${report#/work/}"
+  python3 - "$report" "$@" <<'PY'
+import json, os, sys
+issues = []
+if os.environ.get('FX_DRIVE_CASE') == 'hierarchy-failure':
+    issues = [{'kind':'duplicate-id','identifier':'synthetic.id','message':'synthetic issue',
+               'frame':{'x':0,'y':0,'width':10,'height':10}}]
+with open(sys.argv[1], 'w') as f:
+    json.dump({'files':[{'path':p,'issues':issues} for p in sys.argv[2:]]}, f)
+PY
+  [ "${FX_DRIVE_CASE:-}" != hierarchy-failure ]
+}
+FAKES
+}
+
+physical_drive() { mg drive "$FX_DRIVE_SCRIPT" --physical-device "$PHONE" --platform iphone --config Debug "$@"; }
+
+@test "physical drive routes frozen inline bytes through team Debug and exact selected test without VM or simulator" {
+  physical_drive_facts
+  FX_MUTATE_SCRIPT=1 TEST_RUNNER_MEGURI_DRIVE_SCRIPT=/private/host-path physical_drive
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.drive.hierarchy_checked)" = true ]
+  called '^host-lease --no-session$'
+  called '^xcodebuild build-for-testing .* -configuration Debug .* -destination platform=iOS,id=.* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration'
+  called '^xcodebuild test-without-building .* -destination platform=iOS,id=.* -only-testing:MeguriUITests/AgentDriverTests/testDriveScript$'
+  called '^inline-transport-verified$'
+  called '^hierarchy-check$'
+  not_called '^(sim-|vm-|open)|xcrun (simctl|devicectl)|physical-script.base64|private/host-path'
+  [ "$(cat "$FX_DRIVE_SCRIPT")" = 'changed source' ]
+}
+
+@test "physical drive rejects unsupported modes conflicts and malformed identifiers before discovery" {
+  physical_drive_facts
+  local args
+  for args in '--device fake' '--platform mac' '--platform iphone-small' '--config Profile' '--config Release' '--record' '--physical-device bad'; do
+    : >"$STUB_LOG"
+    # Intentional splitting of fixed synthetic options.
+    physical_drive $args
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ ! -s "$STUB_LOG" ]
+  done
+  mg drive "$FX_DRIVE_SCRIPT" --physical-device invalid
+  [ "$status" -eq 2 ]
+  mg drive --physical-device "$PHONE"
+  [ "$status" -eq 2 ]
+  mg ui-tree --physical-device "$PHONE" --route sample/sheet
+  [ "$status" -eq 2 ]
+  mg screenshot --physical-device "$PHONE" --route sample/sheet
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "physical drive rejects model OS and nonphysical destinations and queues unavailable without fallback" {
+  physical_drive_facts
+  physical_drive --platform ipad
+  [ "$status" -eq 2 ]
+  mg drive "$FX_DRIVE_SCRIPT" --physical-device "$SIM"
+  [ "$status" -eq 2 ]
+  jq 'map(.operatingSystemVersion = "26.0")' "$FX_DEVICES" >"$FX_DEVICES.tmp"
+  mv "$FX_DEVICES.tmp" "$FX_DEVICES"
+  physical_drive
+  [ "$status" -eq 2 ]
+  echo '[]' >"$FX_DEVICES"
+  physical_drive
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild)|xcrun (simctl|devicectl)'
+}
+
+@test "physical drive refuses private invalid JSON oversize raw launches and motion before discovery without echoing input" {
+  physical_drive_facts
+  local json launch
+  for launch in 'null' '[]' '{"fixture":null}' '{"route":""}' '{"arguments":[]}' '{"animations":false}' '{"PRIVATE_SENTINEL":null}'; do
+    printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},{"launch":%s}]}' "$launch" >"$FX_DRIVE_SCRIPT"
+    physical_drive
+    [ "$status" -eq 2 ]
+    [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+    [ ! -s "$STUB_LOG" ]
+  done
+  for json in 'PRIVATE_SENTINEL' '{"name":"x","steps":[{"launch":{}},{"resize":"default"}]}' \
+      '{"name":"x","steps":[{"launch":{},"transition":null}]}' \
+      '{"name":"x","steps":[{"launch":{}},{"snapshot":"x","transition":"move"}]}' \
+      '{"name":"x","PRIVATE_SENTINEL":null,"steps":[{"launch":{}}]}'; do
+    printf '%s' "$json" >"$FX_DRIVE_SCRIPT"
+    physical_drive
+    [ "$status" -eq 2 ]
+    [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+    [ ! -s "$STUB_LOG" ]
+  done
+  python3 - "$FX_DRIVE_SCRIPT" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b' ' * 16385)
+PY
+  physical_drive
+  [ "$status" -eq 2 ]
+  rm "$FX_DRIVE_SCRIPT"
+  physical_drive
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "physical drive cannot pass absent skipped failed or malformed selected XCTest results" {
+  physical_drive_facts
+  local tree
+  for tree in '[]' '[{nodeType:"Test Case",nodeIdentifier:"OtherTests/testOther()",result:"Passed"}]' \
+      '[{nodeType:"Test Case",nodeIdentifier:"AgentDriverTests/testDriveScript()",result:"Skipped"}]' \
+      '[{nodeType:"Test Case",nodeIdentifier:"AgentDriverTests/testDriveScript()",result:"Failed"}]'; do
+    test_tree "$tree"
+    physical_drive
+    [ "$status" -ne 0 ]
+    [ "$(field .status)" != pass ]
+  done
+  test_tree '[{nodeType:"Test Case",nodeIdentifier:"AgentDriverTests/testDriveScript()",result:"Passed"}]'
+  printf 'not JSON' >"$FX_SUMMARY"
+  physical_drive
+  [ "$status" -ne 0 ]
+  [ "$(field .status)" != pass ]
+}
+
+@test "physical drive cannot pass failed steps missing captures logs or hierarchy even when XCTest passes" {
+  physical_drive_facts
+  local mode
+  for mode in step-failed missing-log missing-capture malformed-log no-captures truncated-log missing-hierarchy hierarchy-failure; do
+    FX_DRIVE_CASE="$mode" physical_drive
+    [ "$status" -ne 0 ]
+    [ "$(field .status)" != pass ]
+    called '^inline-transport-verified$'
+    not_called '^(sim-|vm-)|xcrun (simctl|devicectl)'
+  done
+}
+
+@test "physical drive accepts the matching synthetic iPad destination" {
+  physical_drive_facts
+  jq --arg p "$PHONE" 'map(if .identifier == $p then .modelCode = "iPad99,1" else . end)' "$FX_DEVICES" >"$FX_DEVICES.tmp"
+  mv "$FX_DEVICES.tmp" "$FX_DEVICES"
+  physical_drive --platform ipad
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  called '^inline-transport-verified$'
+  not_called '^(sim-|vm-)|xcrun (simctl|devicectl)'
+}

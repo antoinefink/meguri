@@ -4,9 +4,72 @@ import XCTest
 import AppKit
 #endif
 
+/// The inline transport is private and uses the existing parser and driver.
+/// Never surface DriveScriptError: its descriptions may contain caller input.
+enum DriveScriptInput {
+    enum Failure: String, Error, CustomStringConvertible {
+        case missing = "drive input missing"
+        case conflicting = "drive input sources conflict"
+        case encoding = "drive input encoding invalid"
+        case oversized = "drive input too large"
+        case json = "drive input JSON invalid"
+        case policy = "drive input physical policy refused"
+        case grammar = "drive input grammar invalid"
+        var description: String { rawValue }
+    }
+
+    case path(URL)
+    case inline(DriveScript)
+
+    static var physicalDevice: Bool {
+        #if os(iOS) && !targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
+
+    static func load(_ environment: [String: String], physical: Bool = physicalDevice) throws -> Self? {
+        let path = environment["MEGURI_DRIVE_SCRIPT"]
+        let encoded = environment["MEGURI_DRIVE_SCRIPT_BASE64"]
+        if path != nil, encoded != nil { throw Failure.conflicting }
+        if let encoded {
+            guard !encoded.isEmpty else { throw Failure.missing }
+            guard encoded.utf8.count <= 21_848 else { throw Failure.oversized }
+            guard let data = Data(base64Encoded: encoded), data.base64EncodedString() == encoded else {
+                throw Failure.encoding
+            }
+            guard data.count <= 16_384 else { throw Failure.oversized }
+            guard String(data: data, encoding: .utf8) != nil else { throw Failure.encoding }
+            let object: Any
+            do { object = try JSONSerialization.jsonObject(with: data) }
+            catch { throw Failure.json }
+            guard let root = object as? [String: Any], let steps = root["steps"] as? [[String: Any]] else {
+                throw Failure.grammar
+            }
+            // Inspect raw objects before DTO defaults can hide supplied keys.
+            for step in steps {
+                guard step["resize"] == nil, step["transition"] == nil else { throw Failure.policy }
+                if let launch = step["launch"] {
+                    guard let fields = launch as? [String: Any], fields.isEmpty else { throw Failure.policy }
+                }
+            }
+            guard environment["MEGURI_DRIVE_FRAMES"] != "1" else { throw Failure.policy }
+            do { return .inline(try DriveScript(json: data)) }
+            catch { throw Failure.grammar }
+        }
+        if let path, !path.isEmpty {
+            guard !physical else { throw Failure.policy }
+            return .path(URL(filePath: path))
+        }
+        if physical || environment["MEGURI_DRIVE_REQUIRED"] == "1" { throw Failure.missing }
+        return nil
+    }
+}
+
 /// Runs one agent drive script (U8, R1961, R1965). `tools/mg drive` passes the
-/// script's path as `MEGURI_DRIVE_SCRIPT` through the test-runner environment
-/// (`TEST_RUNNER_MEGURI_DRIVE_SCRIPT`); without it the test skips, so the UI
+/// path or private inline bytes through the test-runner environment
+/// (`TEST_RUNNER_` prefix); without a requested input the test skips, so the UI
 /// plan stays runnable on its own.
 ///
 /// Before and after every step the driver attaches the hierarchy
@@ -22,16 +85,28 @@ import AppKit
 @MainActor
 final class AgentDriverTests: XCTestCase {
     func testDriveScript() throws {
-        guard let path = ProcessInfo.processInfo.environment["MEGURI_DRIVE_SCRIPT"], !path.isEmpty else {
+        let input: DriveScriptInput?
+        do { input = try DriveScriptInput.load(ProcessInfo.processInfo.environment) }
+        catch {
+            let category = (error as? DriveScriptInput.Failure)?.rawValue ?? "drive input refused"
+            let log = AgentDriver.Log(script: "physical-drive", path: "", platform: AgentDriver.platform, error: category)
+            let attachment = XCTAttachment(data: try JSONEncoder().encode(log), uniformTypeIdentifier: "public.json")
+            attachment.name = "drive-log.json"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            return
+        }
+        guard let input else {
             throw XCTSkip("no drive script: tools/mg drive passes it as MEGURI_DRIVE_SCRIPT")
         }
-        // The driver stops at the first failed step and reports it in the
-        // drive log, which `tools/mg drive` reads; it records no test
-        // failure of its own. A failure XCTest records still fails the step,
-        // and must not stop the test before the log is attached.
+        // Step failures live in the drive log so captures survive a failure.
         continueAfterFailure = true
-        let driver = AgentDriver(build: try BuildUnderTest.current(), test: self)
-        driver.run(scriptAt: URL(filePath: path))
+        switch input {
+        case let .path(url):
+            AgentDriver(build: try BuildUnderTest.current(), test: self).run(scriptAt: url)
+        case let .inline(script):
+            AgentDriver(build: try BuildUnderTest.current(), test: self, privateInput: true).run(script)
+        }
     }
 
     /// Mac: a resize step resizes the window of the app that is running. The
@@ -154,6 +229,7 @@ final class AgentDriver {
     }
 
     private let build: BuildUnderTest
+    private let privateInput: Bool
     private unowned let test: XCTestCase
     /// Fixed-rate frames around marked steps (`FrameSampler`).
     private let sampleFrames = ProcessInfo.processInfo.environment["MEGURI_DRIVE_FRAMES"] == "1"
@@ -169,7 +245,8 @@ final class AgentDriver {
         #endif
     }
 
-    init(build: BuildUnderTest, test: XCTestCase) {
+    init(build: BuildUnderTest, test: XCTestCase, privateInput: Bool = false) {
+        self.privateInput = privateInput
         self.build = build
         self.test = test
         log = Log(script: "", path: "", platform: Self.platform)
@@ -191,7 +268,7 @@ final class AgentDriver {
     /// Runs the steps with a fresh log. The app the driver launched stays
     /// with it from one run to the next.
     func run(_ script: DriveScript, path: String = "") {
-        log = Log(script: script.name, path: path, platform: Self.platform)
+        log = Log(script: privateInput ? "physical-drive" : script.name, path: path, platform: Self.platform)
         defer { attachLog() }
         for (offset, step) in script.steps.enumerated() {
             guard perform(step, index: offset + 1) else { return }
@@ -255,6 +332,7 @@ final class AgentDriver {
             record.message = "XCTest recorded a failure during the step; see drive.log"
             failed = true
         }
+        if privateInput, record.status != "ok" { record.message = "drive step failed" }
         log.steps.append(record)
         if failed {
             // Not XCTFail: on a test failure XCTest attaches the app's whole
@@ -320,7 +398,7 @@ final class AgentDriver {
         #endif
         app?.terminate()
         let app = XCUIApplication()
-        app.launchArguments = arguments(options)
+        app.launchArguments = privateInput ? [] : arguments(options)
         app.launch()
         guard app.wait(for: .runningForeground, timeout: 30) else {
             throw StepFailure(message: "the app is not running in the foreground 30 s after launch")
@@ -510,13 +588,16 @@ final class AgentDriver {
     /// `.png`, and keeps the tree for the next step's hit points.
     private func capture(_ base: String, phase: String) throws -> Capture {
         let app = try running()
+        if privateInput, app.state != .runningForeground {
+            throw StepFailure(message: "drive capture unavailable")
+        }
         let tree = try HierarchyExport.tree(app)
         self.tree = tree
         #if os(macOS)
         let screenshot = app.windows.firstMatch.screenshot()
         let origin = tree.window.origin
         #else
-        let screenshot = XCUIScreen.main.screenshot()
+        let screenshot = privateInput ? app.screenshot() : XCUIScreen.main.screenshot()
         let origin = CGPoint.zero
         #endif
         let png = screenshot.pngRepresentation
