@@ -239,6 +239,6 @@ private nonisolated func publicationSignal(_ stream: AsyncStream<Bool>) async th
         group.addTask { try await Task.sleep(for: .seconds(10)); throw PublicationTestFailure() }
         defer { group.cancelAll() }
         let value: Bool? = try await group.next()
-        return try #require(value)
+        return try #require(value as Bool?)
     }
 }

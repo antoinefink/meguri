@@ -1,5 +1,7 @@
 # AppModelTests
 
+- Optional Bool in Swift Testing needs `#require(value as Bool?)` to select unwrapping; a typed local alone stays ambiguous. If lazy actor-isolated fixture initialization conflicts with inferred `@concurrent` defaults, construct it in an explicit actor-isolated helper.
+
 - Test-only FFI uses `@testable import Instrumentation` and `BridgeCall`; closures crossing `MaintenanceLane` need explicit `@Sendable`/nonisolated isolation as applicable.
 - Real collection fixtures keep backups beside the collection directory, never inside it.
 - Opaque commands must be actual issued handles; replace only their execution with a fake.
