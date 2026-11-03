@@ -20,6 +20,11 @@ extra argument between Debug and destination; the actual command is correct.
 Keep all signing, destination and exact selected-test assertions while repairing
 that one expression. Preserve this failed receipt.
 
+Export44671 changes that expression only. Independent review is clear.
+Selftest45704 passes all seven physical-drive cases. Selftest45029 passes all17
+existing physical-UI cases. Similarity45975 passes the four source files.
+Runner compilation and actual phone captures remain pending.
+
 Phone verification uses the three new transport tests. An older parser test
 requires files from the checkout and stays in its existing test lane.
 D3 requires an initial capture before a later replacement action.

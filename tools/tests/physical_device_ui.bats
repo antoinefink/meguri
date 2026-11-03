@@ -3115,7 +3115,7 @@ physical_drive() { mg drive "$FX_DRIVE_SCRIPT" --physical-device "$PHONE" --plat
   [ "$(field .status)" = pass ]
   [ "$(field .details.drive.hierarchy_checked)" = true ]
   called '^host-lease --no-session$'
-  called '^xcodebuild build-for-testing .* -configuration Debug .* -destination platform=iOS,id=.* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration'
+  called '^xcodebuild build-for-testing .* -configuration Debug -destination platform=iOS,id=.* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration'
   called '^xcodebuild test-without-building .* -destination platform=iOS,id=.* -only-testing:MeguriUITests/AgentDriverTests/testDriveScript$'
   called '^inline-transport-verified$'
   called '^hierarchy-check$'
