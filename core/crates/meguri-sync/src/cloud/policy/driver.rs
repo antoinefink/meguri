@@ -315,7 +315,7 @@ impl Driver {
                     .with_accepted_identity_read(request, |_| {
                         work.effect()?;
                         *owned = prepared;
-                        Ok(commands)
+                        Ok::<_, RuntimeError>(commands)
                     })?
                     .map_err(DriverError::from);
             }

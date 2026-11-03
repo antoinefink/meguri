@@ -57,6 +57,13 @@ needs an explicit error type; three diagnostics describe the same inference
 failure. Keep this failed receipt and correct the type before rerunning focused
 checks. Source review is not compilation evidence.
 
+Export31017 adds the matching RuntimeError type. Narrow review is clear. Core32893
+then compiles:13 of15 selected tests pass. Two tests fail at clock-based holds.
+The shared Host clock has other callers, so those holds do not prove Driver
+ownership or Settings changes. The reviewer recommends the existing Driver
+projection hook, retaining all checks and limits. No production defect is
+established by these two results; the exact other clock caller was not recorded.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.
