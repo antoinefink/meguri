@@ -31,6 +31,26 @@ The final run includes existing coordinator tests, owner close/reopen and real
 cloud adoption followed by a committed review. UI lint and zero-warning build
 pass within that job. No assertions or limits were removed.
 
-Live reproduction of the exact callback order remains unproved. Signed first
-and second entry checks remain pending. Preserve the older native Resume
-failure, its repair cap and the open batch; no native cloud code changed.
+Live reproduction of the exact callback order remains unproved. Preserve the
+older native Resume failure, its repair cap and the open batch; no native cloud
+code changed.
+
+Signed Build78316 passes from6359c47f. Executable SHA256:
+1ddb599fdfb9bab7bf9a469a57c455c9ceb6569c27a2b0143e77c4e9cfb2af40.
+First and second live entries reveal answers during media sync. Both fixed
+activity traces show the current, active, unpaused model. These observations
+do not reproduce the earlier inactive/active ordering.
+
+A later native rating reaches the accepted Core result, advances to the next
+question and enables Undo. A normal quit finishes. Reopening shows one recorded
+answer and the reduced due count. The bounded debugger reads only phase and
+input-state flags, with fixed entry and acceptance markers; it is terminated
+and joined, and the app is verified running afterward. An earlier rating with
+ambiguous admission is not counted as an accepted answer.
+
+A subsequent accessibility observation shows no decks while the app is no
+longer running. Selecting the exact signed product launches one process and
+shows the decks and recorded answer again. No collection loss is established.
+The fresh process continues media sync. No two-device round trip or complete
+media publication is claimed. This is live diagnostic evidence, not a passing
+automated gate or unit acceptance.
