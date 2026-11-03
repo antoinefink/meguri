@@ -60,3 +60,15 @@ Export2395 makes that narrow ordering correction for all four supported verbs.
 Independent review clears it without guard or diagnostic changes. Selftest3119,
 Private3390 and Similarity3680 pass. A new physical run must still establish
 whether launch succeeds and whether the process survives later inspection.
+
+Normal run4020 passes signed preparation, installation and launch with the
+corrected option order. Preserve drive5415 then refuses before starting its
+runner: Xcode's trusted generated plist contains three target metadata keys.
+It supplies no target arguments. No app restart occurs in that refusal path.
+
+Export5948 accepts only those known string-valued metadata keys and strips
+the whole target environment and empty argument field from the destination
+copy. Unknown keys, malformed values and nonempty arguments remain refused;
+host environments are preserved. Independent review clears the change.
+Selftest6642, Private6943 and Similarity7210 pass. The app/core products and
+their source digest are unchanged, so inspection reuses run4020 directly.

@@ -114,8 +114,16 @@ def destination_xctestrun(value, runner_id, test_relative):
     value = copy.deepcopy(value)
     target = ui_target(value)
     need(target.get("TestHostBundleIdentifier") == RUNNER, "test-host-identity")
+    if "UITargetAppEnvironmentVariables" in target:
+        environment = target["UITargetAppEnvironmentVariables"]
+        need(isinstance(environment, dict) and environment.keys() <= {
+            "APP_DISTRIBUTOR_ID_OVERRIDE", "XCODE_SCHEME_NAME", "XCODE_TEST_PLAN_NAME"
+        } and all(isinstance(item, str) for item in environment.values()), "target-launch-overrides")
+    if "UITargetAppCommandLineArguments" in target:
+        arguments = target["UITargetAppCommandLineArguments"]
+        need(isinstance(arguments, list) and not arguments, "target-launch-overrides")
+    # Accepted build metadata must never become target-app launch overrides.
     for key in ("UITargetAppCommandLineArguments", "UITargetAppEnvironmentVariables"):
-        need(not target.get(key), "target-launch-overrides")
         target.pop(key, None)
     for key in ("TestBundlePath", "TestHostPath", "UITargetAppPath", "DependentProductPaths"):
         target.pop(key, None)

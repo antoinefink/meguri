@@ -29,6 +29,7 @@ def generated(version=2):
         "UITargetAppPath": "__TESTROOT__/Debug-iphoneos/Meguri.app",
         "DependentProductPaths": ["__TESTROOT__/Debug-iphoneos/Meguri.app"],
         "ProductModuleName": "MeguriUITests", "IsXCTRunnerHostedTestBundle": True,
+        "TestHostEnvironmentVariables": {"HOST_METADATA": "retained"},
         "EnvironmentVariables": {"RUNNER_METADATA": "retained"},
         "TestingEnvironmentVariables": {"TEST_HOST_METADATA": "retained"},
         "OnlyTestIdentifiers": ["OtherTests"], "SkipTestIdentifiers": ["AgentDriverTests"],
@@ -85,10 +86,64 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
             self.assertEqual(target["UITargetAppBundleIdentifier"], drive.APP)
             self.assertEqual(target["ProductModuleName"], "MeguriUITests")
             self.assertIs(target["IsXCTRunnerHostedTestBundle"], True)
+            self.assertEqual(target["TestHostEnvironmentVariables"], {"HOST_METADATA": "retained"})
+            self.assertEqual(target["EnvironmentVariables"], {"RUNNER_METADATA": "retained"})
             self.assertEqual(target["TestingEnvironmentVariables"], {"TEST_HOST_METADATA": "retained"})
             self.assertEqual(target["OnlyTestIdentifiers"], ["AgentDriverTests/testDriveScript"])
             self.assertNotIn("SkipTestIdentifiers", target)
             self.assertEqual(plistlib.loads(plistlib.dumps(result)), result)
+
+    def test_destination_contract_strips_only_approved_target_build_metadata(self):
+        metadata = {
+            "APP_DISTRIBUTOR_ID_OVERRIDE": "synthetic-distributor-sentinel",
+            "XCODE_SCHEME_NAME": "synthetic-scheme-sentinel",
+            "XCODE_TEST_PLAN_NAME": "synthetic-test-plan-sentinel",
+        }
+        environments = [None] + [
+            {key: value for index, (key, value) in enumerate(metadata.items()) if mask & (1 << index)}
+            for mask in range(1 << len(metadata))
+        ]
+        for version in (1, 2):
+            for environment in environments:
+                for empty_arguments in (False, True):
+                    with self.subTest(version=version, environment=environment, empty_arguments=empty_arguments):
+                        source = generated(version)
+                        target = drive.ui_target(source)
+                        if environment is not None:
+                            target["UITargetAppEnvironmentVariables"] = environment
+                        if empty_arguments:
+                            target["UITargetAppCommandLineArguments"] = []
+                        saved = copy.deepcopy(source)
+                        result = drive.destination_xctestrun(source, drive.RUNNER, "__TESTHOST__/PlugIns/MeguriUITests.xctest")
+                        self.assertEqual(source, saved)
+                        target = drive.ui_target(result)
+                        self.assertNotIn("UITargetAppEnvironmentVariables", target)
+                        self.assertNotIn("UITargetAppCommandLineArguments", target)
+                        serialized = plistlib.dumps(result)
+                        for sentinel in metadata.values():
+                            self.assertNotIn(sentinel.encode(), serialized)
+                        for key in ("TestHostEnvironmentVariables", "EnvironmentVariables", "TestingEnvironmentVariables"):
+                            self.assertEqual(target[key], drive.ui_target(saved)[key])
+                        self.assertEqual(plistlib.loads(serialized), result)
+
+    def test_destination_contract_refuses_malformed_target_launch_overrides(self):
+        environments = [None, [], ["XCODE_SCHEME_NAME"], "", "metadata", 0, False,
+                        {"UNKNOWN_KEY": "synthetic"},
+                        {"XCODE_SCHEME_NAME": "synthetic", "UNKNOWN_KEY": "synthetic"}]
+        for key in ("APP_DISTRIBUTOR_ID_OVERRIDE", "XCODE_SCHEME_NAME", "XCODE_TEST_PLAN_NAME"):
+            environments.extend({key: value} for value in (None, 0, False, [], {}))
+        arguments = [None, {}, "", "argument", 0, False, (), ["synthetic-argument"], [None], [0], [[]], [{}]]
+        for version in (1, 2):
+            for key, values in (("UITargetAppEnvironmentVariables", environments),
+                                ("UITargetAppCommandLineArguments", arguments)):
+                for value in values:
+                    with self.subTest(version=version, key=key, value=value):
+                        source = generated(version)
+                        drive.ui_target(source)[key] = value
+                        saved = copy.deepcopy(source)
+                        with self.assertRaisesRegex(drive.Refused, "^target-launch-overrides$"):
+                            drive.destination_xctestrun(source, drive.RUNNER, "__TESTHOST__/PlugIns/MeguriUITests.xctest")
+                        self.assertEqual(source, saved)
 
     def test_destination_contract_refuses_overrides_unknown_host_and_multiple_configurations(self):
         for key, value in (("UITargetAppCommandLineArguments", ["PRIVATE_ARGUMENT"]),
