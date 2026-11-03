@@ -52,6 +52,22 @@ zero hierarchy issues and no skips, but its receipt fails. The preview tag is
 again `finished`. The collection download and round trip remain unproven; the
 spinner alone cannot distinguish active work from a retained interruption.
 
+From6e5ceec8, Export15382 adds one bounded own-work instance to the same temporary
+probe. It records only fixed progress cases or the existing safe error category.
+The existing runNext boundary preserves its admission, task, cancellation, result
+and original error. Native Observation updates the Debug-only value on the
+existing progress leaf even when the coordinator's old failure flag is unchanged.
+Observation callbacks run outside the probe mutex; a synchronous re-read test
+checks that boundary. No native ownership or coordinator code changes.
+
+Independent review is clear. Swift16706 passes all14 focused cases, including
+the existing cancellation/drain/reuse check. Private16097 flags four regions in
+one file. Export18040 changes only four private property references; tests and
+the view are byte-identical. Mechanical review is clear. Private18647 and
+Similarity18904 pass the final three files. Swift19238 passes all14 cases on the
+final source, with no skips. Signed phone observation remains pending; no work
+outcome is inferred from source review.
+
 Native Resume/registration ownership and the U114 repair cap are unchanged.
 Remove the temporary observation after diagnosis, or review any permanent
 diagnostic separately. No underlying sync repair is inferred from this probe.

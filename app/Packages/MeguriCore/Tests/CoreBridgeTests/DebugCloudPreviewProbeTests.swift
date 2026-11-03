@@ -1,5 +1,7 @@
 #if DEBUG
 import Foundation
+import Observation
+import Synchronization
 #if canImport(CloudKit)
 import CloudKit
 #endif
@@ -145,6 +147,82 @@ struct DebugCloudPreviewProbeTests {
         probe.fail(newer, error: CancellationError())
         #expect(probe.latestTag == "transportBusy")
         #expect(untouched.latestTag == "unobserved")
+    }
+
+    @Test func typedWorkCompletionsHaveExactTags() {
+        let completions: [(CloudConnectionProgress, String)] = [
+            (.progressed, "progressed"), (.sendEntities, "sendEntities"), (.idle, "idle")
+        ]
+        for (progress, expected) in completions {
+            let work = DebugCloudPreviewProbe()
+            let attempt = work.begin()
+            work.finish(attempt, progress: progress)
+            #expect(work.latestTag == expected)
+        }
+    }
+
+    @Test func previewAndWorkInstancesAreIndependent() {
+        let preview = DebugCloudPreviewProbe()
+        let work = DebugCloudPreviewProbe()
+        let previewAttempt = preview.begin()
+        #expect(work.latestTag == "unobserved")
+        let workAttempt = work.begin()
+        preview.finish(previewAttempt)
+        #expect(preview.latestTag == "finished")
+        #expect(work.latestTag == "running")
+        work.finish(workAttempt, progress: .sendEntities)
+        #expect(preview.latestTag == "finished")
+        #expect(work.latestTag == "sendEntities")
+        let nextPreview = preview.begin()
+        preview.fail(nextPreview, error: CloudOwnTransportFailure.closed)
+        #expect(preview.latestTag == "transportClosed")
+        #expect(work.latestTag == "sendEntities")
+    }
+
+    @Test func olderWorkCompletionsCannotReplaceNewRunningOrTerminalAttempt() {
+        let work = DebugCloudPreviewProbe()
+        let older = work.begin()
+        let newer = work.begin()
+        let progresses: [CloudConnectionProgress] = [.progressed, .sendEntities, .idle]
+        #expect(older != newer)
+        for progress in progresses {
+            work.finish(older, progress: progress)
+            work.fail(older, error: CloudOwnTransportFailure.closed)
+            #expect(work.latestTag == "running")
+        }
+        work.finish(newer, progress: .idle)
+        for progress in progresses {
+            work.finish(older, progress: progress)
+            work.fail(older, error: CancellationError())
+            #expect(work.latestTag == "idle")
+        }
+        let newest = work.begin()
+        work.fail(newest, error: CloudOwnTransportFailure.busy)
+        work.finish(newer, progress: .progressed)
+        work.fail(newer, error: CancellationError())
+        #expect(work.latestTag == "transportBusy")
+    }
+
+    @Test func typedWorkCompletionNotifiesObserverThatSynchronouslyReadsTag() {
+        final class CallbackState: Sendable {
+            let value = Mutex<(calls: Int, tag: String?)>((0, nil))
+        }
+        let work = DebugCloudPreviewProbe()
+        let attempt = work.begin()
+        let observed = CallbackState()
+        let trackedTag = withObservationTracking {
+            work.latestTag
+        } onChange: {
+            let tag = work.latestTag
+            observed.value.withLock { $0.calls += 1; $0.tag = tag }
+        }
+        #expect(trackedTag == "running")
+        work.finish(attempt, progress: .progressed)
+        let callback = observed.value.withLock { $0 }
+        #expect(callback.calls == 1)
+        // Native Observation calls onChange before the mutation.
+        #expect(callback.tag == "running")
+        #expect(work.latestTag == "progressed")
     }
 
     private func expectTag(_ error: any Error, expected: String, sentinel: String? = nil) {

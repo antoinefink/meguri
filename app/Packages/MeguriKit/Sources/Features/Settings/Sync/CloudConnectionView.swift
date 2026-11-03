@@ -83,6 +83,9 @@ public struct CloudConnectionView: View {
             if sync.initialAdoptionActive {
                 ProgressView(SyncText.value("sync.connect.downloading"))
                     .accessibilityIdentifier("sync.connect.download")
+                    #if DEBUG
+                    .accessibilityValue("preview:\(DebugCloudPreviewProbe.shared.latestTag);work:\(DebugCloudPreviewProbe.ownWork.latestTag)")
+                    #endif
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {

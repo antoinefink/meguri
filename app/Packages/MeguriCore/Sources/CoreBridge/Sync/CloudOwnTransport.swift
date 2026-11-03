@@ -1,5 +1,8 @@
 import Foundation
 import Synchronization
+#if DEBUG
+import Observation
+#endif
 #if DEBUG && canImport(CloudKit)
 import CloudKit
 #endif
@@ -33,22 +36,39 @@ public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
 #if DEBUG
-/// Temporary, memory-only preview diagnosis. Stores one attempt and a bounded safe tag.
-public final class DebugCloudPreviewProbe: Sendable {
+/// Temporary, memory-only diagnosis. Each instance stores one attempt and a bounded safe tag.
+public final class DebugCloudPreviewProbe: Observable, Sendable {
     public static let shared = DebugCloudPreviewProbe()
+    public static let ownWork = DebugCloudPreviewProbe()
+    private let changes = ObservationRegistrar()
     private let latest = Mutex<(attempt: UUID, tag: String)?>(nil)
 
     init() {}
 
-    public var latestTag: String { latest.withLock { $0?.tag ?? "unobserved" } }
+    public var latestTag: String {
+        changes.access(self, keyPath: \.latestTag)
+        return latest.withLock { $0?.tag ?? "unobserved" }
+    }
 
     func begin() -> UUID {
         let attempt = UUID()
-        latest.withLock { $0 = (attempt, "running") }
+        changes.withMutation(of: self, keyPath: \.latestTag) {
+            latest.withLock { $0 = (attempt, "running") }
+        }
         return attempt
     }
 
     func finish(_ attempt: UUID) { update(attempt, tag: "finished") }
+
+    func finish(_ attempt: UUID, progress: CloudConnectionProgress) {
+        let tag: String
+        switch progress {
+        case .progressed: tag = "progressed"
+        case .sendEntities: tag = "sendEntities"
+        case .idle: tag = "idle"
+        }
+        update(attempt, tag: tag)
+    }
 
     func fail(_ attempt: UUID, error: any Error) {
         let tag = Self.classify(error)
@@ -56,7 +76,11 @@ public final class DebugCloudPreviewProbe: Sendable {
     }
 
     private func update(_ attempt: UUID, tag: String) {
-        latest.withLock { if $0?.attempt == attempt { $0 = (attempt, tag) } }
+        // Native observation notifies outside the mutex, including synchronous
+        // observers that read latestTag. Recheck the attempt at the state update.
+        changes.withMutation(of: self, keyPath: \.latestTag) {
+            latest.withLock { if $0?.attempt == attempt { $0 = (attempt, tag) } }
+        }
     }
 
     static func classify(_ error: any Error) -> String {
@@ -171,8 +195,22 @@ public actor CloudOwnExecutor {
     public func runNext(admission: CloudOwnWorkAdmission? = nil,
                         beforeActivation: (@Sendable () async throws -> Void)? = nil,
                         afterActivation: (@Sendable () async -> Void)? = nil) async throws -> CloudConnectionProgress {
-        try requireIdle()
-        return try await run { try await self.executeNext(admission: admission, beforeActivation: beforeActivation, afterActivation: afterActivation) }
+        #if DEBUG
+        let probeAttempt = DebugCloudPreviewProbe.ownWork.begin()
+        #endif
+        do {
+            try requireIdle()
+            let progress = try await run { try await self.executeNext(admission: admission, beforeActivation: beforeActivation, afterActivation: afterActivation) }
+            #if DEBUG
+            DebugCloudPreviewProbe.ownWork.finish(probeAttempt, progress: progress)
+            #endif
+            return progress
+        } catch {
+            #if DEBUG
+            DebugCloudPreviewProbe.ownWork.fail(probeAttempt, error: error)
+            #endif
+            throw error
+        }
     }
     /// Reads the actual native records for the preview. Returning ready grants
     /// no publication; the caller must keep and confirm the returned handle.
