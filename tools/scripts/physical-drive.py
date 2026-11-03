@@ -230,9 +230,9 @@ def device_query(device, output, arguments):
         scratch = Path(scratch)
         stage = "command"
         try:
-            command(["/usr/bin/xcrun", "devicectl", *arguments, "--device", device,
+            command(["/usr/bin/xcrun", "devicectl", *arguments[:3], "--device", device,
                      "--json-output", str(scratch / "response.json"),
-                     "--log-output", str(scratch / "diagnostic.log")], "public-device-query")
+                     "--log-output", str(scratch / "diagnostic.log"), *arguments[3:]], "public-device-query")
             stage = "response-read"
             value = read_json(scratch / "response.json")
             stage = "response-validation"

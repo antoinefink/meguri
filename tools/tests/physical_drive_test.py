@@ -140,6 +140,35 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
                 with self.assertRaises(drive.Refused):
                     drive.installation("selected", Path("/unused"), drive.APP)
 
+    def test_device_query_places_common_options_before_unchanged_operation_tail(self):
+        operations = [
+            ["device", "install", "app", "/synthetic/products/Meguri Development.app"],
+            ["device", "info", "apps", "--filter", "bundleIdentifier == '" + drive.APP + "'"],
+            ["device", "process", "launch", "--terminate-existing", drive.APP],
+            ["device", "info", "processes", "--filter", "processIdentifier == 17"],
+        ]
+        for arguments in operations:
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                def fake(argv, **kwargs):
+                    self.assertTrue(kwargs["capture_output"])
+                    self.assertEqual(kwargs["timeout"], 60)
+                    response = Path(argv[8])
+                    log = Path(argv[10])
+                    self.assertEqual(argv, ["/usr/bin/xcrun", "devicectl", *arguments[:3],
+                        "--device", "synthetic-device", "--json-output", str(response),
+                        "--log-output", str(log), *arguments[3:]])
+                    self.assertEqual(response.name, "response.json")
+                    self.assertEqual(log, response.parent / "diagnostic.log")
+                    self.assertEqual(response.parent.parent, output)
+                    if arguments[:3] == ["device", "process", "launch"]:
+                        self.assertEqual(argv[argv.index(drive.APP) + 1:], [])
+                    response.write_text(json.dumps({"info": {"outcome": "success"}, "result": {}}))
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+                with patch.object(drive.products.subprocess, "run", side_effect=fake) as query:
+                    self.assertEqual(drive.device_query("synthetic-device", output, arguments), {})
+                query.assert_called_once()
+
     def test_device_responses_and_diagnostics_never_echo_and_raw_response_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -171,7 +200,8 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
                     def fake(argv, **kwargs):
                         self.assertTrue(kwargs["capture_output"])
                         self.assertEqual(kwargs["timeout"], 60)
-                        self.assertEqual(argv[2:2 + len(arguments)], arguments)
+                        self.assertEqual(argv[2:5], arguments[:3])
+                        self.assertEqual(argv[11:], arguments[3:])
                         Path(argv[argv.index("--json-output") + 1]).write_bytes(raw)
                         Path(argv[argv.index("--log-output") + 1]).write_bytes(b"SYNTHETIC_PRIVATE_LOG")
                         return subprocess.CompletedProcess(argv, 1 if case == "command" else 0,

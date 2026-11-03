@@ -51,3 +51,12 @@ and original refusal, with no public raw values. Selftest98631 passes the
 affected metadata/diagnostic seam. Private99042 and Similarity99310 pass.
 The next physical observation must identify the underlying error; no device
 setup or successful launch is inferred from the generic refusal.
+
+Run99663 retains fixed context: normal-app-launch, command failure. Neither
+requested output file exists. Public CLI help shows that launch has a variadic
+app-argument tail. Independent fact-checking supports placing device/output
+options before that tail; it does not prove why the earlier invocation failed.
+Export2395 makes that narrow ordering correction for all four supported verbs.
+Independent review clears it without guard or diagnostic changes. Selftest3119,
+Private3390 and Similarity3680 pass. A new physical run must still establish
+whether launch succeeds and whether the process survives later inspection.
