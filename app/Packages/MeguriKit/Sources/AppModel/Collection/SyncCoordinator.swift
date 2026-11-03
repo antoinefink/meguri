@@ -562,14 +562,8 @@ public final class SyncCoordinator {
                     let failure: CloudConnectionFailure?
                     if case BridgeError.cloudConnection(let value) = error { failure = value }
                     else { failure = nil }
-                    if publicationAccepted {
-                        if self.backend === backend, backend.connection === connection, !replacing {
-                            publicationBackgroundFailure?(failure)
-                        }
-                    } else {
-                        publicationResultDelivered = true
-                        publicationConfirmation?(.refused(failure))
-                    }
+                    publicationResultDelivered = true
+                    publicationConfirmation?(.refused(failure))
                 }
             }
         }
