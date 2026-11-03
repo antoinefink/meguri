@@ -56,3 +56,15 @@ errors as before. The regions identified by scan64302 have fresh wording;
 private test/local names were shortened without changing assertions or public
 names. One source consistency pass completed. No builds or tests ran here;
 the integrator owns verification. R3P2 remains open.
+
+Export79264 adds only the compiler-requested `ReadRows` import. Independent
+review confirms that exact one-line delta. Core-test80417 then passes all 32
+affected lifecycle, retained-store, payload and cursor tests. Swift80906 builds
+matching device, Mac and simulator libraries and bindings, then passes all 11
+selected bridge and interval-registry tests. Similarity84500 passes the complete
+component from e20b5464. These checks supplement the 11 passing connection-job
+tests; neither earlier failed receipt is reclassified.
+
+The remaining AppModel integration checks, lint and batch gate remain pending.
+The recorded P2 and live CloudKit round trip also remain open. No unit trailer
+or milestone acceptance is added.
