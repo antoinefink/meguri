@@ -35,3 +35,15 @@ Rust45549 passes64 selected cases, including all six regressions. Lint46889
 passes4/4. Private45819 passes4 files; similarity45834 passes4/4 with no
 exemptions. Log privacy46587 passes. Signed-app latency awaits verification.
 The original batch, older native Resume failure and U114 repair cap remain open.
+
+Build47349 passes from clean f57ad8f7. Executable SHA256:
+4ea27e278a3f8ab7d3742d559903a59e28ca6c2eb66888fb180982c56e7f8e80.
+Swift50017 passes20/21 functions; the same two Resume assertions remain red.
+Static48262 passes3/3; master was pushed through f57ad8f7.
+
+The live preview opens a review and first answer. A second review opens during
+Syncing Media, but its answer transition waits. The CPU sample still reaches
+full entity reads in policy_projection. It does not prove why Reveal waits.
+Independent source review traces Reveal through WebKit and shown-hook waits;
+those do not directly call MaintenanceLane. Preserve C6 hook requirements.
+No live latency or complete-sync pass is claimed.
