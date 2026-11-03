@@ -54,3 +54,16 @@ shows the decks and recorded answer again. No collection loss is established.
 The fresh process continues media sync. No two-device round trip or complete
 media publication is claimed. This is live diagnostic evidence, not a passing
 automated gate or unit acceptance.
+
+## Physical phone preparation
+
+UI97339 builds the signed development app with zero errors and warnings. The
+test waits for device unlock, then is explicitly interrupted and joined. Its
+failed receipt remains: no test passed in that run.
+
+After Antoine reports the phone unlocked, UI2519 reuses the unchanged Core
+products and passes TestHooksTests/testSampleScreenRoute. The test supplies no
+fixture, changes no collection and leaves the app installed after termination.
+Its build has zero errors and warnings. This proves signed installation and
+launch, not phone review persistence or iCloud exchange. Xcode MCP cannot select
+the physical phone for interactive inspection; no simulator fallback is used.
