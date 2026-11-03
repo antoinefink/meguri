@@ -64,6 +64,12 @@ ownership or Settings changes. The reviewer recommends the existing Driver
 projection hook, retaining all checks and limits. No production defect is
 established by these two results; the exact other clock caller was not recorded.
 
+Export35415 uses the Driver's one-shot projection hook for those two holds.
+Narrow review is clear, with every assertion and5s/10s limit retained. Core38143
+passes all15 selected tests. Private38618 and Similarity38863 pass the changed
+test file. Core39078 reports one lint error: move a block out of an if condition
+in policy_runtime.rs while keeping its effect check at the same point.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.

@@ -123,10 +123,7 @@ fn policy_job_starts_admit_without_driver_locks_during_real_projection() {
 // Do not carry PolicyWork, any cancellation check, or any facade repair into RED.
 #[test]
 fn policy_job_cancelled_after_worker_contends_on_driver_preserves_settings_and_state() {
-    let clock = Arc::new(ProjectionClock {
-        pause: Mutex::new(None),
-    });
-    let (fixture, _) = unbound_fixture_with_clock(Arc::new(Account), Some(clock.clone()));
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
     let policy = fixture.workflow.policy().unwrap();
     policy.clone().input(settings(false)).unwrap();
     policy.clone().input(CloudPolicyEvent::Foreground).unwrap();
@@ -138,7 +135,12 @@ fn policy_job_cancelled_after_worker_contends_on_driver_preserves_settings_and_s
     let (entered, reached) = mpsc::channel();
     let (release, resume) = mpsc::channel();
     let release = ReleaseDeckAccount(release);
-    *clock.pause.lock().unwrap() = Some((entered, resume));
+    driver.set_projection_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume
+            .recv_timeout(Duration::from_secs(10))
+            .expect("projection release");
+    });
     let held = policy.clone().start_input(CloudPolicyEvent::Foreground).unwrap();
     reached
         .recv_timeout(Duration::from_secs(5))
@@ -244,19 +246,22 @@ fn policy_job_bound_idle_poll_remains_cancellable_before_projection_effects() {
 
 #[test]
 fn policy_job_cancelled_after_settings_effect_keeps_actual_projection_result() {
-    let clock = Arc::new(ProjectionClock {
-        pause: Mutex::new(None),
-    });
-    let (fixture, _) = unbound_fixture_with_clock(Arc::new(Account), Some(clock.clone()));
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
     let policy = fixture.workflow.policy().unwrap();
     policy.clone().input(settings(false)).unwrap();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
     let events = fixture.workflow.host.engine().stream().subscribe();
     let (entered, reached) = mpsc::channel();
     let (release, resume) = mpsc::channel();
     let release = ReleaseDeckAccount(release);
-    *clock.pause.lock().unwrap() = Some((entered, resume));
+    driver.set_projection_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume
+            .recv_timeout(Duration::from_secs(10))
+            .expect("projection release");
+    });
     let started = policy.clone().start_input(settings(true)).unwrap();
-    // Settings' Runtime media/pause effects precede project_and_step's clock.
+    // This Driver's one-shot hook follows Settings' Runtime media/pause effects.
     reached.recv_timeout(Duration::from_secs(5)).unwrap();
     started.handle.cancel.cancel().unwrap();
     drop(release);
