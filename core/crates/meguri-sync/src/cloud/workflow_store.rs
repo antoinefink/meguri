@@ -11,10 +11,21 @@ use super::{
 use meguri_storage::{RowImage, RowKey, Table};
 use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(feature = "test-hooks")]
-thread_local! { static BODY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+thread_local! {
+    static BODY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SAVED_ACK_BODY_READS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
 #[cfg(feature = "test-hooks")]
 pub(super) fn body_reads() -> usize {
     BODY_READS.with(std::cell::Cell::get)
+}
+#[cfg(feature = "test-hooks")]
+pub(super) fn saved_ack_body_reads() -> Option<usize> {
+    SAVED_ACK_BODY_READS.with(std::cell::Cell::get)
+}
+#[cfg(feature = "test-hooks")]
+pub(super) fn set_saved_ack_body_reads(reads: Option<usize>) {
+    SAVED_ACK_BODY_READS.with(|v| v.set(reads));
 }
 #[cfg(feature = "test-hooks")]
 pub(super) fn body_read() {
@@ -501,6 +512,17 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         received: codec::Received,
         now_ms: i64,
     ) -> Result<bool, Error> {
+        self.acknowledge_with_references(b, saved, received, now_ms, None)
+    }
+
+    pub(super) fn acknowledge_with_references(
+        &mut self,
+        b: BindingId,
+        saved: &Saved,
+        received: codec::Received,
+        now_ms: i64,
+        mut references: Option<&mut media::cleanup::SavedReferences>,
+    ) -> Result<bool, Error> {
         if received.entity.fields.tombstone
             && matches!(
                 received.entity.fields.kind,
@@ -510,7 +532,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             return self.acknowledge_row_tombstone(b, saved, received);
         }
         if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
-            return self.acknowledge_media_tombstone(b, saved, received, now_ms);
+            return self.acknowledge_media_tombstone(b, saved, received, now_ms, references);
         }
         let mut h = self.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?;
         let e = &h.facts;
@@ -540,6 +562,20 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             .as_ref()
             .map(|prior| self.media_ack_ledger(b, prior, received.payload.as_ref().ok_or(Error::InvalidData)?, now_ms))
             .transpose()?;
+        let media_transition = if let (Some(prior), Some(ledger)) = (&prior_media, &media_ledger)
+            && references.is_some()
+        {
+            let before = media::cleanup::row_references(prior, ledger)?;
+            let Some(codec::Payload::MediaName(payload)) = &received.payload else {
+                return Err(Error::InvalidData);
+            };
+            // media_ack_ledger never changes names; Header::ack never changes
+            // images.local or tombstone_at. Only this row's live ACK changes.
+            let after = [before[0], Some(payload.sha256)];
+            Some((before, after))
+        } else {
+            None
+        };
         h.ack(index, saved)?;
         let media_removal_pending = media_ledger.as_ref().is_some_and(|ledger| {
             std::str::from_utf8(&h.facts.key)
@@ -574,12 +610,21 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         };
         let pending = h.facts.mark.is_some();
         let tx = self.connection.transaction()?;
+        let mut reference_delta = None;
         if let Some(ledger) = &mut media_ledger {
-            super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+            if let (Some(refs), Some(transition)) = (references.as_deref_mut(), media_transition) {
+                reference_delta = Some(refs.before(&tx, b, ledger, transition, now_ms)?);
+            } else {
+                super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+            }
         }
         super::tracking_payload::put_header(&tx, b, &h)?;
         if let Some(ledger) = &mut media_ledger {
-            super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+            if let (Some(refs), Some(delta)) = (references.as_deref(), &reference_delta) {
+                refs.after(ledger, now_ms, delta);
+            } else {
+                super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
+            }
             super::media::store::put_ledger(&tx, b, ledger)?;
         }
         if let Some(state) = state {
@@ -588,6 +633,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         super::adapter_store::mark_ack(&tx, b, &h.facts.name)?;
         super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
+        if let (Some(refs), Some(delta)) = (references, reference_delta) {
+            refs.committed(delta);
+        }
         Ok(pending)
     }
     pub(super) fn remove_unsent_scan_revlog(

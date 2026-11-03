@@ -1360,3 +1360,242 @@ fn service_media_tombstone_adoption_refuses_invalid_records_without_replacing_lo
         pair.close();
     }
 }
+
+// These fixtures publish real files and receive actual Service ACKs before
+// arranging the measured receipt. No tracking or flight authority is seeded.
+const ACK_BATCH: usize = 250;
+const RETIRING_SHARED: &[u8] = b"synthetic shared content retired by many ACKs";
+const RETIRING_REPLACED: &[u8] = b"synthetic last reference replaced";
+const RETIRING_REMOVED: &[u8] = b"synthetic last reference removed";
+
+fn reference_cost_name(index: usize) -> String {
+    format!("reference-cost-{index:04}.bin")
+}
+
+fn reference_cost_fixture(
+    media_count: usize,
+) -> (
+    Pair,
+    meguri_testkit::cloud::adapter::SDKRig,
+    meguri_testkit::cloud::adapter::ResponseBatch,
+) {
+    use meguri_sync::cloud::runtime::{KeyByteSource, KeySourceError};
+    struct NoNewKeys;
+    impl KeyByteSource for NoNewKeys {
+        fn draw_key(&self) -> std::result::Result<[u8; 32], KeySourceError> {
+            Err(KeySourceError::Unavailable)
+        }
+    }
+    let mut pair = Pair::published();
+    for index in 0..media_count {
+        let bytes = match index {
+            0..=123 | 250 => LOCAL,
+            124..=247 => RETIRING_SHARED,
+            248 => RETIRING_REPLACED,
+            249 => RETIRING_REMOVED,
+            _ => REMOTE,
+        };
+        pair.sender
+            .driver()
+            .put_media(&reference_cost_name(index), bytes)
+            .unwrap();
+    }
+    sync(&mut pair);
+    let facts = pair.sender.facts().unwrap();
+    let media: Vec<_> = facts
+        .entities
+        .values()
+        .filter(|e| e.kind == codec::Kind::MediaName)
+        .collect();
+    assert_eq!(media.len(), media_count);
+    assert!(
+        media
+            .iter()
+            .all(|e| e.server_erev > 0 && e.mark.is_none() && e.in_flight.is_empty())
+    );
+    assert!(
+        pair.sender
+            .driver()
+            .media_blobs()
+            .unwrap()
+            .values()
+            .all(|blob| { blob.unreferenced_since_ms.is_none() && blob.deletion_due_ms.is_none() })
+    );
+    for index in 0..ACK_BATCH {
+        if index % 2 == 1 {
+            pair.sender.driver().trash_media(&reference_cost_name(index)).unwrap();
+        } else {
+            pair.sender
+                .driver()
+                .put_media(&reference_cost_name(index), REMOTE)
+                .unwrap();
+        }
+    }
+    pair.sender.close_clean().unwrap();
+    let mut sdk = meguri_testkit::cloud::adapter::SDKRig::open_existing_collection(
+        &pair.root.path().join("sender"),
+        &scope(),
+        NOW + DAY,
+        808,
+        std::sync::Arc::new(NoNewKeys),
+    )
+    .unwrap();
+    sdk.reconcile_register_and_confirm_root(&mut pair.service, STEPS)
+        .unwrap();
+    let batch = sdk.request_collection_batch_response(&mut pair.service).unwrap();
+    assert_eq!(batch.mutations.len(), ACK_BATCH);
+    let Reply::Modified(items) = batch.response.result.as_ref().unwrap() else {
+        panic!("actual handed Service receipt")
+    };
+    assert_eq!(items.len(), ACK_BATCH);
+    for item in items {
+        let MutationSuccess::Saved(record) = item.result.as_ref().unwrap() else {
+            panic!("save fixture returned a different result variant")
+        };
+        let Field::EncryptedBytes(envelope) = &record.fields["e"] else {
+            panic!("actual entity envelope")
+        };
+        let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(envelope).unwrap() else {
+            panic!("supported entity")
+        };
+        assert_eq!(entity.fields.kind, codec::Kind::MediaName);
+    }
+    (pair, sdk, batch)
+}
+
+#[test]
+fn media_ack_reference_cost_saved_loop_tracks_media_growth() {
+    let mut costs = Vec::new();
+    let mut event_costs = Vec::new();
+    for media_count in [300, 600] {
+        let (mut pair, mut sdk, batch) = reference_cost_fixture(media_count);
+        // Fixture creation, reconciliation and real handoff are all excluded.
+        // The event total includes pending-emission eligibility scans after ACKs.
+        // The separate hook measures only the fully validated Saved ACK loop.
+        let before = sdk.driver().entity_body_reads().unwrap();
+        sdk.deliver_sent_event(&batch.response).unwrap();
+        let reads = sdk.driver().entity_body_reads().unwrap() - before;
+        let saved_reads = sdk
+            .driver()
+            .saved_ack_body_reads()
+            .unwrap()
+            .expect("Saved loop completed");
+        eprintln!("Media ACK body reads: M={media_count} B={ACK_BATCH} event={reads} saved_loop={saved_reads}");
+        event_costs.push((media_count, reads));
+        costs.push((media_count, saved_reads));
+        let blobs = sdk.driver().media_blobs().unwrap();
+        for bytes in [RETIRING_SHARED, RETIRING_REPLACED, RETIRING_REMOVED] {
+            let blob = blobs
+                .values()
+                .find(|blob| blob.metadata.sha256 == codec::sha256(bytes))
+                .unwrap();
+            assert_eq!(blob.unreferenced_since_ms, Some(NOW + DAY));
+            assert_eq!(blob.deletion_due_ms, None);
+        }
+        for bytes in [LOCAL, REMOTE] {
+            let blob = blobs
+                .values()
+                .find(|blob| blob.metadata.sha256 == codec::sha256(bytes))
+                .unwrap();
+            assert_eq!(
+                blob.unreferenced_since_ms, None,
+                "a shared live reference must protect content"
+            );
+            assert_eq!(blob.deletion_due_ms, None);
+        }
+        let Reply::Modified(items) = batch.response.result.as_ref().unwrap() else {
+            unreachable!()
+        };
+        for item in items {
+            let MutationSuccess::Saved(record) = item.result.as_ref().unwrap() else {
+                unreachable!()
+            };
+            let e = sdk.entity_facts(&record.name).unwrap();
+            assert!(e.mark.is_none() && e.in_flight.is_empty());
+            assert_eq!(e.local_rev, e.acked_rev);
+            assert_eq!(e.acked_system_fields, record.system_fields.bytes());
+        }
+        sdk.return_sent_handler().unwrap();
+        sdk.close_clean().unwrap();
+        pair.receiver.close_clean().unwrap();
+    }
+    for (media_count, reads) in &event_costs {
+        assert!(
+            *reads <= media_count + 6 * ACK_BATCH,
+            "M={media_count} B={ACK_BATCH} event reads={reads}"
+        );
+    }
+    for (media_count, reads) in &costs {
+        // Allow per-record validation/materialization, but never B whole scans.
+        assert!(
+            *reads <= media_count + 6 * ACK_BATCH,
+            "M={media_count} B={ACK_BATCH} reads={reads}"
+        );
+    }
+    assert!(
+        costs[1].1 <= costs[0].1 + 300,
+        "adding 300 rows must add at most one scan: {costs:?}"
+    );
+}
+
+#[test]
+fn media_ack_reference_cost_malformed_tail_prevalidates_without_partial_ack() {
+    let (mut pair, mut sdk, batch) = reference_cost_fixture(300);
+    let Reply::Modified(items) = batch.response.result.as_ref().unwrap() else {
+        unreachable!()
+    };
+    let before: Vec<_> = items.iter().map(|item| sdk.entity_facts(&item.name).unwrap()).collect();
+    let mut malformed = batch.response.clone();
+    let Reply::Modified(items) = malformed.result.as_mut().unwrap() else {
+        unreachable!()
+    };
+    let MutationSuccess::Saved(record) = items.last_mut().unwrap().result.as_mut().unwrap() else {
+        unreachable!()
+    };
+    record.fields.insert("e".into(), Field::EncryptedBytes(vec![0xff]));
+    let reads = sdk.driver().entity_body_reads().unwrap();
+    assert!(sdk.deliver_sent_event(&malformed).is_err());
+    assert_eq!(sdk.driver().saved_ack_body_reads().unwrap(), None);
+    assert_eq!(
+        sdk.driver().entity_body_reads().unwrap(),
+        reads,
+        "no snapshot before receipt validation"
+    );
+    for e in before {
+        assert_eq!(sdk.entity_facts(&e.name).unwrap(), e);
+    }
+    sdk.close_clean().unwrap();
+    pair.receiver.close_clean().unwrap();
+}
+
+#[test]
+fn media_ack_reference_cost_failed_second_commit_keeps_only_first_ack_durable() {
+    let (mut pair, mut sdk, batch) = reference_cost_fixture(300);
+    let Reply::Modified(items) = batch.response.result.as_ref().unwrap() else {
+        unreachable!()
+    };
+    let before: Vec<_> = items.iter().map(|item| sdk.entity_facts(&item.name).unwrap()).collect();
+    let key = before[1]
+        .key
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let connection =
+        rusqlite::Connection::open(pair.root.path().join("sender").join(meguri_sync::cloud::TRACKING_FILE)).unwrap();
+    connection
+        .execute_batch(&format!(
+            "CREATE TRIGGER reference_cost_abort BEFORE UPDATE ON cloud_runtime_entities WHEN NEW.key=X'{key}' BEGIN SELECT RAISE(ABORT,'synthetic ACK write failure'); END;"
+        ))
+        .unwrap();
+    assert!(sdk.deliver_sent_event(&batch.response).is_err());
+    assert_eq!(sdk.driver().saved_ack_body_reads().unwrap(), None);
+    let first = sdk.entity_facts(&before[0].name).unwrap();
+    assert!(first.server_erev > before[0].server_erev && first.in_flight.is_empty());
+    for e in before.iter().skip(1) {
+        assert_eq!(&sdk.entity_facts(&e.name).unwrap(), e);
+    }
+    connection.execute_batch("DROP TRIGGER reference_cost_abort").unwrap();
+    drop(connection);
+    sdk.close_clean().unwrap();
+    pair.receiver.close_clean().unwrap();
+}

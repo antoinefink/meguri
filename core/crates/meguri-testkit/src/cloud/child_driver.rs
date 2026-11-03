@@ -378,6 +378,8 @@ pub(crate) enum Input {
     AssetSDK,
     AssetSuspendResume,
     AssetConflictBodyReads,
+    EntityBodyReads,
+    SavedAckBodyReads,
     AssetBodyReadControl(core::BindingId, String),
     AssetConflict(String, u64, Saved),
     DrainIncoming(usize),
@@ -932,6 +934,12 @@ impl ChildDriver {
     }
     pub fn asset_conflict_body_reads(&mut self) -> Result<usize> {
         self.call(Input::AssetConflictBodyReads)
+    }
+    pub fn entity_body_reads(&mut self) -> Result<usize> {
+        self.call(Input::EntityBodyReads)
+    }
+    pub fn saved_ack_body_reads(&mut self) -> Result<Option<usize>> {
+        self.call(Input::SavedAckBodyReads)
     }
     pub fn asset_body_read_control(&mut self, binding: core::BindingId, name: &str) -> Result<usize> {
         self.call(Input::AssetBodyReadControl(binding, name.to_owned()))
@@ -2604,6 +2612,8 @@ impl Device {
                 value((before, after))
             }
             Input::AssetConflictBodyReads => value(self.asset_conflict_body_reads),
+            Input::EntityBodyReads => value(core::testing::entity_body_reads()),
+            Input::SavedAckBodyReads => value(core::testing::saved_ack_body_reads()),
             Input::AssetBodyReadControl(b, name) => {
                 let before = core::testing::entity_body_reads();
                 let _ = self.runtime()?.binding_entity(b, &name)?.ok_or_else(failure)?;

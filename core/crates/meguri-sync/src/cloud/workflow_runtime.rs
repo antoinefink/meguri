@@ -1791,6 +1791,7 @@ impl Runtime {
         received: codec::Received,
         now_ms: i64,
         force: &mut BTreeSet<String>,
+        references: Option<&mut media::cleanup::SavedReferences>,
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let image_key = (
@@ -1800,7 +1801,12 @@ impl Runtime {
         );
         let image = s.cloud.handed_images.get(&image_key).copied();
         let store = s.store.as_mut().ok_or(Error::Database)?;
-        if store.acknowledge(b, saved, received, now_ms)? {
+        let pending = if let Some(references) = references {
+            store.acknowledge_with_references(b, saved, received, now_ms, Some(references))?
+        } else {
+            store.acknowledge(b, saved, received, now_ms)?
+        };
+        if pending {
             force.insert(saved.name.clone());
         }
         if let Some(image) = image {
@@ -1843,6 +1849,8 @@ impl Runtime {
         failed: &[(String, SendError)],
         batch_count: usize,
     ) -> Result<u64, RuntimeError> {
+        #[cfg(feature = "test-hooks")]
+        super::workflow_store::set_saved_ack_body_reads(None);
         let _ = self.adapter_now();
         let at_ms = self.adapter_now()?;
         let evidence = collection.open_evidence()?;
@@ -1906,14 +1914,32 @@ impl Runtime {
                     return Err(Error::InvalidData.into());
                 }
             }
+            #[cfg(feature = "test-hooks")]
+            let saved_ack_body_reads_before = super::workflow_store::body_reads();
+            let mut references = media::cleanup::SavedReferences::default();
             for saved in saved {
                 let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
-                Self::acknowledge_sent_locked(&mut s, collection, saved, received, at_ms, &mut force)?;
+                Self::acknowledge_sent_locked(
+                    &mut s,
+                    collection,
+                    saved,
+                    received,
+                    at_ms,
+                    &mut force,
+                    Some(&mut references),
+                )?;
                 saved_count += 1;
             }
+            #[cfg(feature = "test-hooks")]
+            super::workflow_store::set_saved_ack_body_reads(Some(
+                super::workflow_store::body_reads().saturating_sub(saved_ack_body_reads_before),
+            ));
+            // Historical-flight ACKs and inbox intake retain their standalone
+            // behavior; no reference snapshot crosses into those mutating paths.
+            drop(references);
             for server in conflicts {
                 if let Some(received) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
-                    Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force)?;
+                    Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force, None)?;
                     saved_count += 1;
                 } else {
                     let key = s

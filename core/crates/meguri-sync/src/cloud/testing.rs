@@ -52,6 +52,13 @@ pub fn entity_body_reads() -> usize {
     super::workflow_store::body_reads()
 }
 
+/// Body materializations in the last receipt's fully validated Saved ACK loop.
+/// Reset at receipt entry; None unless its entire Saved loop succeeds on this thread.
+/// Excludes receipt prevalidation, conflict handling and pending emission.
+pub fn saved_ack_body_reads() -> Option<usize> {
+    super::workflow_store::saved_ack_body_reads()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IncomingStage {
     AssetReadPrepared,

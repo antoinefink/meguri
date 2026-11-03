@@ -344,6 +344,7 @@ impl TrackingStore {
         saved: &workflow::Saved,
         r: c::Received,
         now_ms: i64,
+        mut references: Option<&mut super::cleanup::SavedReferences>,
     ) -> Result<bool, Error> {
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         if e.origin != r.entity.fields.origin
@@ -366,6 +367,11 @@ impl TrackingStore {
         if Some(&image) != r.payload.as_ref() {
             return Err(Error::InvalidData);
         }
+        let mut ledger = self.media_ledger(b)?;
+        let before = references
+            .as_ref()
+            .map(|_| super::cleanup::row_references(&e, &ledger))
+            .transpose()?;
         e.acked_rev = flight.local_rev;
         e.server_erev = flight.erev;
         e.acked_payload = Some(image.clone());
@@ -374,7 +380,6 @@ impl TrackingStore {
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
         e.acked_system_fields = saved.system_fields.clone();
         e.in_flight.retain(|f| f.local_rev > flight.local_rev);
-        let mut ledger = self.media_ledger(b)?;
         if ledger
             .names
             .get(std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?)
@@ -386,13 +391,28 @@ impl TrackingStore {
             e.acked_rev = e.local_rev;
         }
         let pending = e.mark.is_some();
+        let transition = before
+            .map(|before| super::cleanup::row_references(&e, &ledger).map(|after| (before, after)))
+            .transpose()?;
         let tx = self.connection.transaction()?;
-        update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
+        let delta = if let (Some(refs), Some(transition)) = (references.as_deref_mut(), transition) {
+            Some(refs.before(&tx, b, &mut ledger, transition, now_ms)?)
+        } else {
+            update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
+            None
+        };
         workflow_store::put(&tx, b, &e)?;
-        update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
+        if let (Some(refs), Some(delta)) = (references.as_deref(), &delta) {
+            refs.after(&mut ledger, now_ms, delta);
+        } else {
+            update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
+        }
         put_ledger(&tx, b, &ledger)?;
         crate::cloud::adapter_store::mark_ack(&tx, b, &e.name)?;
         tx.commit()?;
+        if let (Some(refs), Some(delta)) = (references, delta) {
+            refs.committed(delta);
+        }
         Ok(pending)
     }
 }

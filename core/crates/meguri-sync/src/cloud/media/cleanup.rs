@@ -2,7 +2,7 @@
 use super::*;
 use crate::cloud::{store::decode, tracking_payload};
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const RETENTION_MS: i64 = 30 * 86_400_000;
 pub(crate) const FRESH_MS: i64 = 3_600_000;
@@ -19,10 +19,40 @@ fn rows<T: serde::de::DeserializeOwned>(
         .collect()
 }
 
-fn local_references(c: &Connection, b: BindingId, ledger: &Ledger) -> Result<BTreeSet<[u8; 32]>, Error> {
-    let mut refs = BTreeSet::new();
+pub(crate) type RowReferences = [Option<[u8; 32]>; 2];
+
+pub(crate) fn row_references(e: &workflow::EntityFacts, ledger: &Ledger) -> Result<RowReferences, Error> {
+    let case = std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?;
+    let local = if e.tombstone_at.is_none()
+        && ledger.names.get(case).is_none_or(|n| n.tombstone_at.is_none())
+        && let c::Payload::MediaName(name) = &e.payload
+    {
+        Some(name.sha256)
+    } else {
+        None
+    };
+    let ack = if e.server_erev > 0 && !e.acked_media_tombstone() {
+        let Some(c::Payload::MediaName(name)) = &e.acked_payload else {
+            return Err(Error::InvalidData);
+        };
+        Some(name.sha256)
+    } else {
+        None
+    };
+    Ok([local, ack])
+}
+
+fn reference_counts(c: &Connection, b: BindingId, ledger: &Ledger) -> Result<BTreeMap<[u8; 32], usize>, Error> {
+    let mut refs = BTreeMap::new();
+    let mut add = |hash| -> Result<(), Error> {
+        let count = refs.entry(hash).or_insert(0usize);
+        *count = count.checked_add(1).ok_or(Error::InvalidData)?;
+        Ok(())
+    };
     for name in ledger.names.values().filter(|n| n.tombstone_at.is_none()) {
-        refs.extend(name.local.as_ref().map(|v| v.sha256));
+        if let Some(local) = &name.local {
+            add(local.sha256)?;
+        }
     }
     let mut q = c.prepare("SELECT content FROM cloud_runtime_entities WHERE binding=?1 AND kind=?2")?;
     let texts = q.query_map(rusqlite::params![b.0.as_slice(), c::Kind::MediaName as i64], |r| {
@@ -30,21 +60,81 @@ fn local_references(c: &Connection, b: BindingId, ledger: &Ledger) -> Result<BTr
     })?;
     for text in texts {
         let e = tracking_payload::load_entity(c, b, c::Kind::MediaName, &text?)?;
-        let case = std::str::from_utf8(&e.key).map_err(|_| Error::InvalidData)?;
-        if e.tombstone_at.is_none()
-            && ledger.names.get(case).is_none_or(|n| n.tombstone_at.is_none())
-            && let c::Payload::MediaName(name) = &e.payload
-        {
-            refs.insert(name.sha256);
-        }
-        if e.server_erev > 0 && !e.acked_media_tombstone() {
-            let Some(c::Payload::MediaName(name)) = &e.acked_payload else {
-                return Err(Error::InvalidData);
-            };
-            refs.insert(name.sha256);
+        for hash in row_references(&e, ledger)?.into_iter().flatten() {
+            add(hash)?;
         }
     }
     Ok(refs)
+}
+
+fn local_references(c: &Connection, b: BindingId, ledger: &Ledger) -> Result<BTreeSet<[u8; 32]>, Error> {
+    Ok(reference_counts(c, b, ledger)?.into_keys().collect())
+}
+
+// Owned only by the fully admitted Saved loop while state/tracking stay held.
+// No decoded payloads survive a row. Conflicts and standalone ACKs never use it.
+#[derive(Default)]
+pub(crate) struct SavedReferences {
+    counts: Option<BTreeMap<[u8; 32], usize>>,
+}
+
+pub(crate) struct ReferenceDelta(BTreeMap<[u8; 32], usize>);
+
+impl SavedReferences {
+    pub(crate) fn before(
+        &mut self,
+        tx: &Transaction<'_>,
+        b: BindingId,
+        ledger: &mut Ledger,
+        transition: (RowReferences, RowReferences),
+        now: i64,
+    ) -> Result<ReferenceDelta, Error> {
+        if self.counts.is_none() {
+            self.counts = Some(reference_counts(tx, b, ledger)?);
+        }
+        let counts = self.counts.as_ref().ok_or(Error::InvalidData)?;
+        reference_age(ledger, now, |hash| counts.contains_key(hash));
+        let mut next = BTreeMap::new();
+        for hash in transition.0.into_iter().flatten() {
+            let count = next
+                .entry(hash)
+                .or_insert_with(|| counts.get(&hash).copied().unwrap_or(0));
+            *count = count.checked_sub(1).ok_or(Error::InvalidData)?;
+        }
+        for hash in transition.1.into_iter().flatten() {
+            let count = next
+                .entry(hash)
+                .or_insert_with(|| counts.get(&hash).copied().unwrap_or(0));
+            *count = count.checked_add(1).ok_or(Error::InvalidData)?;
+        }
+        Ok(ReferenceDelta(next))
+    }
+
+    pub(crate) fn after(&self, ledger: &mut Ledger, now: i64, delta: &ReferenceDelta) {
+        reference_age(ledger, now, |hash| {
+            delta
+                .0
+                .get(hash)
+                .copied()
+                .or_else(|| self.counts.as_ref()?.get(hash).copied())
+                .unwrap_or(0)
+                > 0
+        });
+    }
+
+    // Only after SQLite COMMIT succeeds. Every earlier error drops the receipt's
+    // cache; a failed row cannot advance counts past its rolled-back transition.
+    pub(crate) fn committed(&mut self, delta: ReferenceDelta) {
+        if let Some(counts) = &mut self.counts {
+            for (hash, count) in delta.0 {
+                if count == 0 {
+                    counts.remove(&hash);
+                } else {
+                    counts.insert(hash, count);
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn update_blob_reference_age(
@@ -54,8 +144,13 @@ pub(crate) fn update_blob_reference_age(
     now: i64,
 ) -> Result<(), Error> {
     let refs = local_references(tx, b, ledger)?;
+    reference_age(ledger, now, |hash| refs.contains(hash));
+    Ok(())
+}
+
+fn reference_age(ledger: &mut Ledger, now: i64, referenced: impl Fn(&[u8; 32]) -> bool) {
     for blob in ledger.blobs.values_mut() {
-        if refs.contains(&blob.metadata.sha256) {
+        if referenced(&blob.metadata.sha256) {
             blob.unreferenced_since_ms = None;
             blob.deletion_due_ms = None;
         } else if blob.unreferenced_since_ms.is_none_or(|at| now < at) {
@@ -64,7 +159,6 @@ pub(crate) fn update_blob_reference_age(
             blob.deletion_due_ms = None;
         }
     }
-    Ok(())
 }
 
 // Missing decoded content withholds deletion authority for every blob.
