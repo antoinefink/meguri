@@ -72,3 +72,14 @@ copy. Unknown keys, malformed values and nonempty arguments remain refused;
 host environments are preserved. Independent review clears the change.
 Selftest6642, Private6943 and Similarity7210 pass. The app/core products and
 their source digest are unchanged, so inspection reuses run4020 directly.
+
+Actual drive7555 passes both launch and snapshot steps with zero issues.
+Its completion evidence reports requested retention, activation of the existing
+app and verified continuity across the entire invocation. No build or install
+is performed. The exact render shows the normal No Collection screen, so this
+is app/process evidence, not a completed import or CloudKit round trip.
+
+The next retained session opens the connection preview through the existing
+home action. Repeated inspection, failed-step retention and default termination
+still need their remaining physical coverage; synthetic receipts alone do not
+satisfy those requirements.
