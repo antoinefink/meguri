@@ -52,7 +52,7 @@ wording retained that result. This is a component WIP, not unit acceptance.
 | core-lint37955 |3 checks passed; clippy failed on5 new test expressions |
 
 The first Rust attempt31431 failed on a Host Arc borrow before tests. Filtered
-correction33025 fixed that expression. Lint still requires a direct test return
-and removal of four unnecessary path borrows. No assertion or limit changes
-are required. The next filtered correction will retain the failed receipt and
-rerun affected checks. Full integration and U113 acceptance remain open.
+correction33025 fixed that expression. Lint37955 required a direct test return
+and removal of four unnecessary path borrows. Correction6febdc6f preserves all
+assertions and limits; core-lint73779 passes all4 checks. Failed receipts remain.
+Full integration and U113 acceptance remain open.

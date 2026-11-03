@@ -26,8 +26,15 @@ separate old and fresh errors, and reject stale presentation completion.
 All assertions and the10-second wait limit remain. Initial compile failures
 74177,81274 and87777 are retained; they are not test passes.
 
-Privacy77593 passed for the initial three-file UI component. Final source
-scanning and exact signed-app inspection follow. No full gate or unit closure
-is claimed. Keep Local, complete local preview facts in the interface and real
-signed publication/adoption remain unfinished. Startup account verification
-still needs diagnosis; a possible lifecycle interleaving is not proven.
+Privacy77593 passed for the initial three-file UI component;95681 passes the
+final5 source/evidence files. Similarity97890 and static97872 pass. Team-signed
+standalone build96219 passes on clean82aeb7a6. The exact fresh process path and
+executable digest were verified after normal quit/relaunch. Local Study, answer
+reveal and Back work; no additional grade was submitted. The actual sync badge
+still reports unavailable, so accepted-transfer visual states remain unproved.
+
+No full gate or unit closure is claimed. Keep Local, complete local preview
+facts in the interface and real signed publication/adoption remain unfinished.
+The startup caller trace later identifies ConfigureAutomatic reaching native
+preparation before verification; the proposed lifecycle race is not established.
+A separate U113 Rust-policy correction is in progress, without a native repair.

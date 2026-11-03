@@ -88,3 +88,20 @@ unrelated scopes before filtering. Fixer s-20261103T080958Z-70efb6d7 is repairin
 both using the reviewed seed. No local-information source is integrated yet.
 Rich preview facts and Keep Local remain incomplete; its proposed mutation
 contract remains parked, with no privacy-guard exception or normative change.
+
+## Startup caller correction
+
+The earlier inference that the failure followed a successful account-read
+preparation was not established. Full Swift caller and fixed-command-class
+inspection on signed82aeb7a6 instead identifies ConfigureAutomatic, through
+executePolicyLifecycle and startPrepared, reaching prepareRuntime before account
+verification. The probes returned symbols and a fixed action name only, then
+detached and exited. Local Study/reveal/Back work in this signed build.
+
+Independent source audit finds an existing P10.1 mismatch: saved automatic-on
+is applied to default-off policy state, whose transition emits configuration
+despite a closed gate. The documented on row requires an open gate; native
+disposition exempts only unbound owners, so a bound/unverified owner can reach
+preparation. A separate Rust-only fix begins at82aeb7a6 under session
+s-20261103T092052Z-6d1c3590. No SDK/Resume repair or new U114 round is authorized.
+Root will prove the regression against old production before accepting a fix.
