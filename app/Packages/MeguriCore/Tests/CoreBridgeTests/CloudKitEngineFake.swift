@@ -481,6 +481,7 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
     private var accountReads: [(Result<CloudResolvedAccount?, any Error>, CloudCallbackGate?)] = []
     private var accountReadCalls = 0
     private var creationPause: CloudCallbackGate?
+    private var nextEngineWrapper: (@Sendable (CloudKitEngineFake) -> any CloudKitEngine)?
 
     init(a23: Bool = true, keepAlive: Bool = false) {
         self.a23 = a23
@@ -493,7 +494,12 @@ actor CloudKitEngineFakeFactory: CloudKitEngineFactory {
                                         a23: a23, keepAlive: keepAlive)
         made.append(engine)
         if let gate = creationPause { creationPause = nil; await gate.enter() }
+        if let wrap = nextEngineWrapper { nextEngineWrapper = nil; return wrap(engine) }
         return engine
+    }
+
+    func wrapNextEngine(_ wrap: @escaping @Sendable (CloudKitEngineFake) -> any CloudKitEngine) {
+        nextEngineWrapper = wrap
     }
 
     func appendAccountRead(_ result: Result<CloudResolvedAccount?, any Error>, gate: CloudCallbackGate? = nil) {

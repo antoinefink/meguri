@@ -297,6 +297,39 @@ private struct ObservedMediaRead: CloudPreparedMediaRead {
     func cancel() { native.cancel(); cancelled.yield(()) }
 }
 
+#if DEBUG
+private final class NativeMediaPendingUpdateFailure: Error {}
+
+// Keep the fake's concrete nonthrowing API used by other witnesses. Only this
+// wrapper's protocol application can fail; every SDK operation still delegates.
+private actor NativeMediaPendingUpdateEngine: CloudKitEngine {
+    nonisolated let instanceID: String
+    private let sdk: CloudKitEngineFake
+    private var nextFailure: (any Error)?
+    private(set) var injectedFailures = 0
+    init(_ sdk: CloudKitEngineFake) { self.sdk = sdk; instanceID = sdk.instanceID }
+    func failNextPendingUpdate(_ error: any Error) { nextFailure = error }
+    func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { await sdk.pendingRecordZoneChanges() }
+    func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+        if let error = nextFailure {
+            nextFailure = nil
+            injectedFailures += 1
+            throw error
+        }
+        await sdk.applyPendingUpdate(update)
+    }
+    func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
+    func waitForEventBookkeeping() async throws { try await sdk.waitForEventBookkeeping() }
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue { try await sdk.prepareSend(zones: zones) }
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue { try await sdk.prepareFetch(options: options) }
+    func sendChanges(zones: [String]) async throws { try await sdk.sendChanges(zones: zones) }
+    func fetchChanges(options: CloudFetchOptions) async throws { try await sdk.fetchChanges(options: options) }
+    func cancelOperations() async { await sdk.cancelOperations() }
+    func release() async { await sdk.release() }
+}
+#endif
+
 extension EventTests {
     #if DEBUG
     @Test func nativeMediaUploadsResumeAfterUnrelatedPersistedSentHandlerReturns() async throws {
@@ -628,6 +661,86 @@ extension EventTests {
             #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
             #expect(await fixture.factory.engines().count == 1)
             #expect(!(await engine.recordedTrace()).contains(.reentrantNetworkCall))
+        }
+    }
+
+    @Test func nativeMediaPendingUpdateFailureAfterAdmissionFinalizesExactCall() async throws {
+        try await withNativePolicyFixture { fixture in
+            let wrapped = Mutex<NativeMediaPendingUpdateEngine?>(nil)
+            await fixture.factory.wrapNextEngine { sdk in
+                let engine = NativeMediaPendingUpdateEngine(sdk)
+                wrapped.withLock { $0 = engine }
+                return engine
+            }
+            let (policy, _) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            let pendingEngine = try #require(wrapped.withLock { $0 })
+            let guardBefore = try await fixture.core.currentGuard()
+            guard case .commands(let commands) = try await policy.input(.settings(.init(
+                enabled: true, paused: false, automatic: true, media: true))) else {
+                throw CloudMediaFailure.missingReply
+            }
+            let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+            let permit = try #require(try await policy.prepareExecution(resume))
+            let injected = NativeMediaPendingUpdateFailure()
+            let admissions = Mutex(0)
+            let observations = Mutex<[(sdk: String, id: UInt64, returned: Bool)]>([])
+            let calls = engine.acceptedNetworkCalls.value
+            let traceStart = await engine.recordedTrace().count
+            await fixture.adapter.setSendCallObserver { sdk, id, returned in
+                observations.withLock { $0.append((sdk, id, returned)) }
+            }
+            await fixture.adapter.setSendAdmissionObserver { admitted in
+                guard admitted else { return }
+                let count = admissions.withLock { $0 += 1; return $0 }
+                // Collection sends normally. Core's second successful beginSend
+                // emits the media pending update consumed before the SDK call.
+                if count == 2 { await pendingEngine.failNextPendingUpdate(injected) }
+            }
+            let original = Task<(any Error)?, Never> {
+                do { try await fixture.adapter.sendPolicyMedia(execution: permit); return nil }
+                catch { return error }
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    original.cancel()
+                    try? await fixture.adapter.stop()
+                }
+            }
+            // Join the original operation and remove both observers on every
+            // outcome before recording the same ten-second cleanup bound.
+            let result = await original.value
+            await fixture.adapter.setSendAdmissionObserver(nil)
+            await fixture.adapter.setSendCallObserver(nil)
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            #expect(inTime, "Post-admission pending-update failure/finalization exceeded ten seconds")
+            let keptOriginalError = (result as? NativeMediaPendingUpdateFailure) === injected
+            #expect(keptOriginalError)
+            #expect(await pendingEngine.injectedFailures == 1)
+            #expect(admissions.withLock { $0 } == 2)
+            #expect(engine.acceptedNetworkCalls.value == calls + 1)
+            let trace = Array((await engine.recordedTrace()).dropFirst(traceStart))
+            #expect(trace.filter { if case .sendEntered = $0 { true } else { false } }.count == 1)
+            #expect(trace.contains { if case .handed(_, let names) = $0 { names.contains(fixture.names[0]) } else { false } })
+            #expect(!trace.contains(.reentrantNetworkCall))
+            #expect(try await fixture.core.currentGuard() == guardBefore)
+            try await fixture.core.validateSDK(engine.instanceID)
+            #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+            #expect(await fixture.factory.engines().count == 1)
+            let observed = observations.withLock { $0 }
+            let admitted = observed.filter { !$0.returned }
+            #expect(admitted.count == 2)
+            #expect(observed.count == 4)
+            for call in admitted {
+                let originalOwner = call.sdk == engine.instanceID
+                #expect(originalOwner)
+                let retirements = observed.filter { $0.returned && $0.sdk == call.sdk && $0.id == call.id }.count
+                #expect(retirements == 1, "Each original admitted call must finalize exactly once")
+            }
         }
     }
 

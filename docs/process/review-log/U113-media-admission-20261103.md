@@ -58,3 +58,8 @@ Export76113 does not resolve that diagnostic. Both failed runs remain retained.
 Export79429 uses an explicit unwrap; independent review clears it.
 Swift80509 passes all four tests with no compiler warning. Prior failures stay
 failed. The inherited cleanup follow-up and full batch gate remain open.
+
+## Cleanup evidence
+
+Export82283, review clear. Swift85502: one test fails two assertions.
+No runtime changes.
