@@ -35,7 +35,24 @@ once with the latest preference after release. R2 found no P0–P2 findings.
 | Similarity | similarity57801:5 files; no flags or exemptions |
 | Static integration | static-checks58885:3 checks passed |
 
-The rebuilt signed Mac check remains pending. These tests
+These tests
 prove Rust policy and FFI authority, not native lifecycle or cloud publication.
 Other P24 requirements, real publication/adoption and full integration remain
 open. U114's repair cap is unchanged.
+
+## Signed Mac check
+
+Team build91867 passed on cleanb1a62f3e. The freshly launched process used the
+exact standalone Debug product. Executable SHA256:
+06c002699873c354b8a88791e90da0925d18a804c1d12ff8b32d391ff1d40c75.
+
+Settings shows a signed-in account, Offline and a generic failure. The retained
+operation's Resume control is absent. No publication completion or remote
+round trip is proved. Independent source audit identifies missing U151
+attachment discovery: startup never loads recoveryStatus. V15.3 requires restart
+to continue an active publication after matching account proof.
+
+A later startup probe stopped at an ambiguous inline catch location. Its
+expression failed and restored the process; all breakpoints were removed and
+the debugger detached. It supplies no new error classification. The ordinary
+app reopened its collection and remains running. No user values were exported.
