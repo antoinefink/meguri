@@ -680,10 +680,8 @@ fn connection_suspend_timeout_keeps_claimed_reply_then_retry_drains_without_losi
         let closed = host.close();
         // Teardown precedes the expected RED exact-error assertion, so the
         // admission error currently masking Tracking cannot leave a live Host.
-        assert!(
-            matches!(timed_out,
-            Err(meguri_engine::EngineError::SuspendDeadline { phase }) if phase == "jobs")
-        );
+        assert!(matches!(timed_out,
+            Err(meguri_engine::EngineError::SuspendDeadline { phase }) if phase == "jobs"));
         assert!(held_stage);
         assert_eq!(collection_generation, generation);
         assert_eq!(held_generation, generation);

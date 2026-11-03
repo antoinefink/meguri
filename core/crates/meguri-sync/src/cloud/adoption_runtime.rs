@@ -1002,6 +1002,7 @@ impl Runtime {
         collection: Option<&Collection>,
         work: &crate::cloud::policy::PolicyWork,
     ) -> Result<(), RuntimeError> {
+        let owner = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let file = collection.map(|c| self.inputs.files.identity(c.path())).transpose()?;
         {
             let mut s = self.state();
@@ -1016,7 +1017,24 @@ impl Runtime {
         }
         self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(collection) = collection {
-            self.bind(collection)?;
+            let owner = owner.ok_or(RuntimeError::StaleIncarnation)?;
+            if !collection.is_current() || collection.generation() != owner.generation {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let (evidence, activation) = owner
+                .cleanup_evidence
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+                .ok_or(RuntimeError::StaleIncarnation)?;
+            let publication =
+                meguri_engine::device_state::DeviceState::for_collection(collection.path()).settled_publication()?;
+            self.bind_evidence(
+                evidence,
+                file.ok_or(RuntimeError::FileIdentityUnavailable)?,
+                publication,
+                activation,
+            )?;
             self.refresh_identity()?;
         }
         Ok(())

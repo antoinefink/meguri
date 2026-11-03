@@ -167,3 +167,13 @@ finds no P0-P2. Core76840 runs alone and fails only the exact-error assertion;
 cleanup, rows, generation, closed admission and retry/close checks pass.
 The valid-reply case remains. No production repair is applied yet.
 The nextest reservation now names this exact library test.
+
+Export79970 retains the original adoption owner for abort rebind. Independent
+review finds no P0-P2. Public admission remains closed; retained evidence,
+current generation, fresh file and settled publication checks remain required.
+Cleanup errors still propagate. Format82718 adjusts the test layout only.
+Core83372 passes all 11 connection-job tests. Core84349 passes all 23 host
+adoption-guard tests. Private83661 and Similarity83740 pass. Lint and the batch
+gate remain pending; no unit acceptance is added.
+Core-lint84743 passes all four checks. R3P2 is closed; final enqueue and the
+batch gate remain open.
