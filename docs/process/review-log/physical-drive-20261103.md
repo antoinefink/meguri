@@ -25,6 +25,12 @@ Selftest45704 passes all seven physical-drive cases. Selftest45029 passes all17
 existing physical-UI cases. Similarity45975 passes the four source files.
 Runner compilation and actual phone captures remain pending.
 
+Physical UI52357 compiles the signed runner and passes all three transport tests
+on the available phone, with no skips. Drive56799 runs the exact selected driver
+test and both inspection steps successfully. Captures and manifest are present;
+hierarchy checks report no issues. The actual screenshot shows the empty
+collection screen. This proves signed app launch and direct inspection only.
+
 Phone verification uses the three new transport tests. An older parser test
 requires files from the checkout and stays in its existing test lane.
 D3 requires an initial capture before a later replacement action.

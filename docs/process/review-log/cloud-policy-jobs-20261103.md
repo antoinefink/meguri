@@ -101,6 +101,13 @@ Export51993 adds the conditional BridgeError cast while retaining the exact case
 and message. Independent narrow review is clear. Private54144 and Similarity54115
 pass the changed test. The focused Swift run must be repeated after this correction.
 
+Swift55618 passes all seven selected bridge/instrumentation checks with no skips.
+Swift58331 compiles AppModel and passes16 of17 selected test functions. The new
+native suspended-close test passes with a retained SDK and verified drain. The
+existing preissued-status Resume test still fails its same two expectations;
+its reopen case and the other functions pass. Preserve that receipt and the
+native repair cap; do not repeat the unchanged failure or claim a full gate.
+
 The remaining final-enqueue audit identifies two blocking paths. Native execution
 validation waits for Driver and Runtime locks. Invocation reporting additionally
 runs full policy projections. The new owner-only check cannot replace their
