@@ -62,15 +62,14 @@ impl AdoptionOwner {
         work: &crate::cloud::policy::PolicyWork,
     ) -> Result<(), RuntimeError> {
         #[cfg(feature = "test-hooks")]
-        if matches!(self.next.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
-            if let Some(sender) = self
+        if matches!(self.next.try_lock(), Err(std::sync::TryLockError::WouldBlock))
+            && let Some(sender) = self
                 .next_contention
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .take()
-            {
-                let _ = sender.send(());
-            }
+        {
+            let _ = sender.send(());
         }
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         if next.as_ref() != Some(task) {

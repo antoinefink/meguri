@@ -68,3 +68,11 @@ tests; neither earlier failed receipt is reclassified.
 The remaining AppModel integration checks, lint and batch gate remain pending.
 The recorded P2 and live CloudKit round trip also remain open. No unit trailer
 or milestone acceptance is added.
+
+Swift91047 passes the retained 17-test AppModel adoption/recovery selection
+against the new bridge. Core-lint93817 reports one test-hook collapsible-if
+diagnostic; export95638 changes only that conditional. Independent review
+confirms the same short-circuit order and lock lifetime. Core-lint97183 passes
+all four checks, including layering. Core-test97539 passes the exact contention
+regression that exercises the edited hook. The earlier failed lint stays
+recorded. No limit, assertion or runtime guard is weakened.
