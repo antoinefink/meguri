@@ -21,8 +21,8 @@ mg_native_durability() {
   fi
   mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
-  local package package_id suite target_name kind json log rc binary counts passed failed skipped
-  local suites="suspend wal_durability session_recovery collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity"
+  local package package_id suite target_name kind json log rc binary counts passed failed skipped expected_passed
+  local suites="suspend wal_durability session_recovery collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity cloud_runtime cloud_publication_phase"
   local total_passed=0 total_failed=0 total_skipped=0 broken=false
   local target="$MG_ROOT/build/native-durability/target"
   # Synthetic benchmark collections only, regardless of a caller's override.
@@ -43,7 +43,7 @@ mg_native_durability() {
     mg_status fail
     return 0
   fi
-  for package in meguri-engine meguri-ffi meguri-sync meguri-storage; do
+  for package in meguri-engine meguri-ffi meguri-sync meguri-storage meguri-host; do
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
@@ -57,6 +57,11 @@ mg_native_durability() {
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     elif [ "$package" = meguri-storage ]; then
       (cd core && cargo test --locked -p meguri-storage --lib \
+        --target aarch64-apple-darwin --target-dir "$target" --no-run \
+        --message-format json-render-diagnostics) >"$json" 2>"$log"
+    elif [ "$package" = meguri-host ]; then
+      (cd core && cargo test --locked -p meguri-host --features test-hooks \
+        --test cloud_runtime --test cloud_publication_phase \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
     else
@@ -84,6 +89,7 @@ mg_native_durability() {
       cloud_records|cloud_recovery) package=meguri-sync;;
       cloud_unit) package=meguri-sync; target_name=meguri_sync; kind=lib;;
       persistent_identity) package=meguri-storage; target_name=meguri_storage; kind=lib;;
+      cloud_runtime|cloud_publication_phase) package=meguri-host;;
     esac
     package_id="$(jq -er --arg package "$package" '
       .workspace_members as $members
@@ -120,6 +126,8 @@ mg_native_durability() {
     elif [ "$suite" = cloud_unit ]; then
       # Keep the private cloud settings proof; frozen server tests stay out.
       "$binary" cloud:: --test-threads=1 --nocapture >"$log" 2>&1
+    elif [ "$suite" = cloud_runtime ] || [ "$suite" = cloud_publication_phase ]; then
+      "$binary" durable_identity_ --test-threads=1 --nocapture >"$log" 2>&1
     else
       "$binary" --test-threads=1 --nocapture >"$log" 2>&1
     fi
@@ -138,10 +146,15 @@ mg_native_durability() {
         mg_failure "empty/$suite" "$suite executed no tests"
         broken=true
       fi
+      expected_passed=0
       case "$suite" in
-        persistent_identity|session_recovery)
-          if [ "$skipped" -ne 0 ] || { [ "$suite" = persistent_identity ] && [ "$passed" -ne 1 ]; }; then
-            mg_failure "test/$suite" "$suite must execute its full selection without ignored tests; the exact FD selection requires one pass"
+        persistent_identity|cloud_publication_phase) expected_passed=1;;
+        cloud_runtime) expected_passed=3;;
+      esac
+      case "$suite" in
+        persistent_identity|session_recovery|cloud_runtime|cloud_publication_phase)
+          if [ "$skipped" -ne 0 ] || { [ "$expected_passed" -ne 0 ] && [ "$passed" -ne "$expected_passed" ]; }; then
+            mg_failure "test/$suite" "$suite must execute its full selection without ignored tests (expected passes: $expected_passed; 0 means the full suite)"
             broken=true
           fi
           ;;

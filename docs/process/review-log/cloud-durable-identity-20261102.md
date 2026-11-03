@@ -30,3 +30,33 @@ The first code review finds two P2 issues: publication must recheck its open
 authority after the final provider reads; the old-reader witness must run the
 unchanged V6 probe, rather than a test predicate. Both remain open. Focused
 compilation is running; this WIP has no acceptance claim.
+
+Repair38128 pins publication authority after the final providers. Its new
+test covers eight lifecycle/provider/prior-binding combinations. Independent
+round2 clears that repair. Actual old-reader proof40319/40879 runs the unchanged
+V6 public open against a generated WAL-essential V7 fixture: two refusals,
+complete original byte preservation and a main-only positive control. Source
+hashes match the baseline. This closes the compatibility-test finding.
+
+Verification of the second repair:
+
+| Evidence | Result |
+|---|---|
+| Focused42701 | 79/80; one fixture needed V8.2 pre-bind rejection checks. |
+| Repair44829 | Keeps the scan failure assertions and checks that refusal leaves stored state identical. |
+| Historical mismatch case | Runtime durably isolates FileMismatch, retaining pending revisions, ACKs and identity evidence. |
+| Independent round3 | Clear; privacy48343 passes. |
+| Final focused48079 | 81/81 selected; 86 other cases excluded. |
+| Strict lint48904 | 4/4. |
+| Native wrapper42983 | 19/19; second repair leaves its source identical. |
+
+Actual native48627 fails the new Darwin publication test: it registers an SDK
+while reconciliation is still required. The public API correctly refuses
+WholeBindingReconciliation. The three other new native host identity tests
+pass. A test-only admission correction is required before accepting this
+native result. No production guard or timing limit may change.
+
+Direct signed Mac inspection also succeeds in source6759694a: the collection
+opens, one review is accepted, and normal quit/reopen retains its state. This
+is UI evidence only. Publication remains blocked by disabled placeholder
+actions in the existing decision sheet. No live CloudKit round trip is claimed.

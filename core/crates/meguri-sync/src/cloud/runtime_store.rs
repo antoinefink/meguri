@@ -445,6 +445,20 @@ impl TrackingStore {
         self.isolate_runtime_binding(binding, reason)
     }
 
+    /// Seed validated historical state for a generated, closed collection fixture.
+    #[cfg(feature = "test-hooks")]
+    pub fn prepare_runtime_state_for_testing(
+        &mut self,
+        binding: BindingId,
+        value: &StoredRuntimeState,
+    ) -> Result<(), Error> {
+        self.stored_runtime_state(binding)?.ok_or(Error::InvalidData)?;
+        let transaction = self.connection.transaction()?;
+        put_binding(&transaction, binding, value)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Corrupt an existing ordinary payload in a disposable tracking fixture.
     #[cfg(feature = "test-hooks")]
     pub fn damage_runtime_payload_for_testing(&mut self, binding: BindingId, note: Option<i64>) -> Result<(), Error> {

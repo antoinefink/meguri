@@ -33,7 +33,7 @@ EOF
 echo "cargo $*" >>"$STUB_LOG"
 if [ "${1:-}" = metadata ]; then
   [ "${FX_METADATA_FAIL:-}" != 1 ] || exit 42
-  jq -nc '{packages: ["meguri-engine", "meguri-ffi", "meguri-sync", "meguri-storage"] | map({name:., id:("path+file:///generated/" + . + "#0.1.0")})} | .workspace_members = [.packages[].id]'
+  jq -nc '{packages: ["meguri-engine", "meguri-ffi", "meguri-sync", "meguri-storage", "meguri-host"] | map({name:., id:("path+file:///generated/" + . + "#0.1.0")})} | .workspace_members = [.packages[].id]'
   exit 0
 fi
 if [ "${FX_CACHE_COLD:-}" = 1 ] && [[ " $* " == *" --offline "* ]]; then
@@ -54,6 +54,7 @@ case "$package" in
   meguri-ffi) suites="collection_ffi";;
   meguri-sync) suites="cloud_records cloud_recovery cloud_unit";;
   meguri-storage) suites="persistent_identity";;
+  meguri-host) suites="cloud_runtime cloud_publication_phase";;
   *) exit 97;;
 esac
 for suite in $suites; do
@@ -109,8 +110,9 @@ elif [ "${FX_TEST_FAIL:-}" = "$suite" ]; then
   exit 101
 else
   passed=2
-  case "$suite" in cloud_records|cloud_recovery) passed=5;; cloud_unit|persistent_identity) passed=1;; session_recovery) passed=21;; esac
+  case "$suite" in cloud_records|cloud_recovery) passed=5;; cloud_unit|persistent_identity|cloud_publication_phase) passed=1;; cloud_runtime) passed=3;; session_recovery) passed=21;; esac
   [ "${FX_EXTRA_PASS:-}" != "$suite" ] || passed=$((passed + 1))
+  [ "${FX_FEWER_PASS:-}" != "$suite" ] || passed=$((passed - 1))
   ignored=0
   [ "${FX_IGNORED:-}" != "$suite" ] || ignored=1
   echo "test result: ok. $passed passed; 0 failed; $ignored ignored; 0 measured; 0 filtered out; finished in 0.00s"
@@ -129,12 +131,12 @@ mg() {
 }
 field() { jq -r "$@" "$result"; }
 
-@test "native durability builds before leasing, runs eight suites once and retains timing" {
+@test "native durability builds before leasing, runs ten suites once and retains timing" {
   FX_CACHE_COLD=1 MEGURI_BENCH_FIXTURES=/must-not-use mg
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
-  [ "$(field .summary.passed)" -eq 39 ]
-  [ "$(field .summary.total)" -eq 39 ]
+  [ "$(field .summary.passed)" -eq 43 ]
+  [ "$(field .summary.total)" -eq 43 ]
   [ "$(field .details.environment.rustc)" = 'rustc fake' ]
   grep -Fx "rustc $SB/core -V" "$STUB_LOG"
   [ "$(field '.details.wal_durability.passed')" -eq 2 ]
@@ -147,14 +149,21 @@ field() { jq -r "$@" "$result"; }
   grep -Fx "cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
   grep -Fx "cargo test --locked -p meguri-sync --features test-hooks --lib --test cloud_records --test cloud_recovery --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
   grep -Fx "cargo test --locked -p meguri-storage --lib --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  grep -Fx "cargo test --locked -p meguri-host --features test-hooks --test cloud_runtime --test cloud_publication_phase --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  grep -Fx 'run cloud_runtime durable_identity_ --test-threads=1 --nocapture' "$STUB_LOG"
+  grep -Fx 'run cloud_publication_phase durable_identity_ --test-threads=1 --nocapture' "$STUB_LOG"
+  [ "$(field '.details.cloud_runtime.passed')" -eq 3 ]
+  [ "$(field '.details.cloud_publication_phase.passed')" -eq 1 ]
+  [ "$(field '.details.cloud_runtime.skipped')" -eq 0 ]
+  [ "$(field '.details.cloud_publication_phase.skipped')" -eq 0 ]
   grep -Fx 'run persistent_identity persistent_identity::tests::darwin_generated_regular_fd_reads_full_volume_uuid_and_retains_binding --exact --test-threads=1 --nocapture' "$STUB_LOG"
   [ "$(field '.details.persistent_identity.passed')" -eq 1 ]
-  [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 4 ]
-  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 8 ]
+  [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 5 ]
+  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 10 ]
   grep -Fx 'run session_recovery --test-threads=1 --nocapture' "$STUB_LOG"
   [ "$(field '.details.session_recovery.passed')" -eq 21 ]
   grep -Fx 'run cloud_unit cloud:: --test-threads=1 --nocapture' "$STUB_LOG"
-  [ "$(sed -n '7p' "$STUB_LOG")" = 'lease --no-session' ]
+  [ "$(sed -n '8p' "$STUB_LOG")" = 'lease --no-session' ]
   grep -q '^U32 full WAL sync: p50=123us, p95=456us' "$(dirname "$result")/wal_durability.log"
   grep -Fx "fixtures $SB/build/fixtures" "$(dirname "$result")/suspend.log"
   python3 "$SB/tools/tests/validate_result.py" "$result"
@@ -176,7 +185,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability artifacts require exact package target kind profile and one executable" {
   local suite fault
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
     for fault in FX_OMIT FX_DUPLICATE FX_NO_EXECUTABLE FX_NOT_EXECUTABLE FX_WRONG_KIND FX_WRONG_PROFILE FX_WRONG_PACKAGE FX_WRONG_TARGET; do
       export "$fault=$suite"
       mg
@@ -194,6 +203,16 @@ field() { jq -r "$@" "$result"; }
     FX_STREAM_PACKAGE=meguri-sync FX_STREAM="$stream" mg
     [ "$status" -eq 2 ]
     [ "$(field '.failures[0].id')" = executable/cloud_records ]
+    ! grep -Eq '^(run|lease) ' "$STUB_LOG"
+  done
+}
+
+@test "native durability host build stream must be complete and successful" {
+  local stream
+  for stream in incomplete failed malformed; do
+    FX_STREAM_PACKAGE=meguri-host FX_STREAM="$stream" mg
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = executable/cloud_runtime ]
     ! grep -Eq '^(run|lease) ' "$STUB_LOG"
   done
 }
@@ -222,13 +241,23 @@ field() { jq -r "$@" "$result"; }
   ! grep -Eq '^(run|lease) ' "$STUB_LOG"
 }
 
+@test "native durability host build failure is final before the lease" {
+  FX_BUILD_FAIL=meguri-host mg
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = build/meguri-host ]
+  [ "$(grep -c '^cargo test ' "$STUB_LOG")" -eq 5 ]
+  [ -f "$(dirname "$result")/meguri-host-build.jsonl" ]
+  grep -Fx 'fake native build failure for meguri-host' "$(dirname "$result")/meguri-host-build.log"
+  ! grep -Eq '^(run|lease) ' "$STUB_LOG"
+}
+
 @test "native durability failing libtest is counted and never retried" {
   FX_TEST_FAIL=wal_durability mg
   [ "$status" -eq 1 ]
   [ "$(field .summary.failed)" -eq 1 ]
   [ "$(field '.details.wal_durability.exit_code')" -eq 101 ]
   [ "$(grep -c '^run wal_durability ' "$STUB_LOG")" -eq 1 ]
-  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 8 ]
+  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
 }
 
 @test "native durability rejects empty suites and absent summaries" {
@@ -242,7 +271,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability cloud suites reject zero tests and missing or duplicate summaries" {
   local suite
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
     FX_EMPTY="$suite" mg
     [ "$status" -eq 1 ]
     [ "$(field '.failures[0].id')" = "empty/$suite" ]
@@ -258,7 +287,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability cloud failures and nonzero exits cannot pass or retry" {
   local suite fault
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
     for fault in FX_TEST_FAIL FX_EXIT_FAIL; do
       : >"$STUB_LOG"
       export "$fault=$suite"
@@ -271,7 +300,7 @@ field() { jq -r "$@" "$result"; }
         [ "$(field .summary.failed)" -eq 1 ]
       fi
       [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
-      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 8 ]
+      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
     done
   done
 }
@@ -298,6 +327,27 @@ field() { jq -r "$@" "$result"; }
   FX_IGNORED=persistent_identity mg
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = test/persistent_identity ]
+}
+
+@test "native durability host identity selections require exact counts and zero ignored" {
+  local suite fault
+  for suite in cloud_runtime cloud_publication_phase; do
+    for fault in FX_EXTRA_PASS FX_FEWER_PASS FX_IGNORED; do
+      : >"$STUB_LOG"
+      export "$fault=$suite"
+      mg
+      unset "$fault"
+      [ "$status" -eq 1 ]
+      # A zero selection can report empty before the exact-count refusal.
+      if [ "$suite" = cloud_publication_phase ] && [ "$fault" = FX_FEWER_PASS ]; then
+        [ "$(field '.failures[0].id')" = "empty/$suite" ]
+      else
+        [ "$(field '.failures[0].id')" = "test/$suite" ]
+      fi
+      [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
+      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
+    done
+  done
 }
 
 @test "native durability C12 integration suite cannot count ignored cases as passed" {

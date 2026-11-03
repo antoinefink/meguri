@@ -697,16 +697,98 @@ fn creation_fact_mismatch_during_pause_prevents_scan_completion() {
     });
     incomplete(runtime);
     host.close().unwrap();
-    assert!(fixture.durable().note_scan.is_none());
+    let before_reopen = fixture.durable();
+    assert!(before_reopen.note_scan.is_none());
     let reopened = fixture.open();
     let next = reopened.cloud_runtime().unwrap();
-    assert_eq!(
-        next.status().unwrap().binding.unwrap().facts.state,
-        BindingState::Isolated(IsolationReason::FileMismatch)
-    );
+    let status = next.status().unwrap();
+    assert!(status.binding.is_none());
+    assert!(status.tracking_stopped);
+    assert!(!status.stored_usable);
     incomplete(next);
+    assert!(next.reconcile_notes(&reopened.collection().unwrap(), BUDGET).is_err());
     reopened.close().unwrap();
-    assert!(!fixture.durable().drained);
+    let after_reopen = fixture.durable();
+    assert_eq!(after_reopen, before_reopen);
+    assert!(!after_reopen.drained);
+}
+
+#[test]
+fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_ack() {
+    let fixture = Fixture::new(BindingState::Active);
+    let host = fixture.open();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    runtime.refresh_identity().unwrap();
+    let live = fixture.files.identity(collection.path()).unwrap();
+    let evidence = collection.open_evidence().unwrap().cloud_file.unwrap();
+    assert_eq!(
+        evidence.native,
+        (live.device, live.inode, live.created_seconds, live.created_nanos)
+    );
+    let edited = edit(&collection, fixture.ids[0], "pending before historical mismatch");
+    assert!(runtime.capture_proof(edited.seq, edited.generation).unwrap().persisted);
+    runtime.reconcile_notes(&collection, BUDGET).unwrap();
+    incomplete(runtime);
+    host.close().unwrap();
+
+    let mut historical = fixture.durable();
+    assert_eq!(historical.file, Some(live));
+    assert_eq!(historical.durable_file.unwrap().identity, evidence.identity);
+    let mut historical_file = live;
+    historical_file.created_seconds = live.created_seconds.checked_sub(1).unwrap();
+    historical.file = Some(historical_file);
+    historical.durable_file.as_mut().unwrap().created_seconds = historical_file.created_seconds;
+    historical.note_scan.as_mut().unwrap().native_file = historical_file;
+    let (binding, notes) = with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        store
+            .prepare_runtime_state_for_testing(fixture.binding, &historical)
+            .unwrap();
+        assert_eq!(
+            store.stored_runtime_state(fixture.binding).unwrap().unwrap(),
+            historical
+        );
+        let notes: Vec<_> = fixture
+            .ids
+            .iter()
+            .map(|id| store.tracked_note(fixture.binding, id.0).unwrap().unwrap())
+            .collect();
+        assert!(notes[0].mark.is_some());
+        assert_ne!(notes[0].local_payload, notes[0].acknowledged.payload);
+        assert!(notes.iter().all(|note| note.acknowledged.erev == 1));
+        (store.binding(fixture.binding).unwrap().unwrap(), notes)
+    });
+
+    let reopened = fixture.open();
+    let collection = reopened.collection().unwrap();
+    assert_eq!(fixture.files.identity(collection.path()).unwrap(), live);
+    assert_eq!(collection.open_evidence().unwrap().cloud_file.unwrap(), evidence);
+    let next = reopened.cloud_runtime().unwrap();
+    next.refresh_identity().unwrap();
+    let mut isolated = binding;
+    isolated.facts.state = BindingState::Isolated(IsolationReason::FileMismatch);
+    let status = next.status().unwrap();
+    assert_eq!(status.binding.as_ref(), Some(&isolated));
+    assert!(!status.stored_usable);
+    assert!(next.note_scan_proof().is_none());
+    assert_eq!(next.stored_state_for_testing().unwrap(), historical);
+    incomplete(next);
+    assert!(next.reconcile_notes(&collection, BUDGET).is_err());
+    reopened.close().unwrap();
+
+    with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
+        assert_eq!(store.binding(fixture.binding).unwrap().as_ref(), Some(&isolated));
+        assert_eq!(
+            store.stored_runtime_state(fixture.binding).unwrap().unwrap(),
+            historical
+        );
+        for (id, expected) in fixture.ids.iter().zip(&notes) {
+            assert_eq!(
+                store.tracked_note(fixture.binding, id.0).unwrap().as_ref(),
+                Some(expected)
+            );
+        }
+    });
 }
 
 #[test]

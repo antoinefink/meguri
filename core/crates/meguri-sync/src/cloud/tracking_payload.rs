@@ -1169,14 +1169,8 @@ mod tests {
             .unwrap()
                 == entity
         );
-        // Explicitly model the old V5 reader's version predicate. This is a
-        // predicate proof, not a run of an old executable or its WAL probe.
-        let old_v5_accepts = |v: &[i64]| v == [1] || v == [2] || v == [3] || v == [4] || v == [5];
-        assert!(old_v5_accepts(&[5]));
-        assert!(!old_v5_accepts(&[6]));
-        let old_v6_accepts = |v: &[i64]| old_v5_accepts(v) || v == [6];
-        assert!(old_v6_accepts(&[6]));
-        assert!(!old_v6_accepts(&[7]));
+        // This exercises current migration/reopen only. Compatibility evidence
+        // must run the actual older reader, including its WAL-aware probe.
         let run = tempfile::tempdir().unwrap();
         let path = run.path().join("runtime.sqlite");
         cn.execute("VACUUM INTO ?1", [path.to_str().unwrap()]).unwrap();

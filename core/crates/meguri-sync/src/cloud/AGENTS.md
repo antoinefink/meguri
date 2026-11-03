@@ -13,6 +13,7 @@
 
 - V5 keeps image bodies in `cloud_runtime_payloads`. Headers retain only image structure for current, base and ACK state. `FlightPayload::Image` selects a historical body. Read bodies only for a selected flight or an explicit diagnostic request; validation and sending require complete images.
 - Runtime V6 fences durable monotonic `sent` metadata; missing legacy `sent` decodes true. Payload images and per-binding `cloud_runtime_payload_owners` remain V5. Markerless V5 is historical; markerless V6 is invalid. Install upgrades only non-salvage owners in this build scope, including later upgrades after another scope advanced V5.
+- Runtime V7 adds the separate durable file identity; retain strict `NativeFileIdentity` equality for live guards. V7 also needs the V6 owner tables. Payload migration must retain the V7 fence.
 - GC checks only blob IDs freed by this write in its binding. Header and own-flight intent refs can keep them live. Check that small list again when an intent ends. Digest-only own-save intents still need real writer and WAL proof.
 
 - Workflow V2 pairs `cloud_rekey_intents` with `cloud_apply_intents`. Persist and settle both together; the server inbox remains ready after the move.

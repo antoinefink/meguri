@@ -3,7 +3,7 @@
 use meguri_host::CoreHost;
 use meguri_model::{
     clock::{StepClock, UtcOffset},
-    rng::SeededRandom,
+    rng::{RandomSource, SeededRandom},
 };
 use meguri_sync::cloud::{
     self as cloud,
@@ -976,6 +976,201 @@ fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom
     assert!(runtime.publication_op().unwrap().is_none());
     assert!(runtime.stored_state_for_testing().unwrap().durable_file.is_some());
     runtime.status().unwrap().binding.unwrap()
+}
+
+#[derive(Debug)]
+struct HeldBindProvider {
+    random: SeededRandom,
+    remaining: Mutex<Option<usize>>,
+    hold_on_clock: bool,
+    clock_armed: std::sync::atomic::AtomicBool,
+    entered: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl HeldBindProvider {
+    fn hold(&self) {
+        self.entered.send(()).unwrap();
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap();
+    }
+}
+impl RandomSource for HeldBindProvider {
+    fn next_u64(&self) -> u64 {
+        let value = self.random.next_u64();
+        let last = {
+            let mut remaining = self.remaining.lock().unwrap();
+            if let Some(left) = remaining.as_mut() {
+                *left -= 1;
+                if *left == 0 {
+                    *remaining = None;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        if last {
+            if self.hold_on_clock {
+                self.clock_armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            } else {
+                self.hold();
+            }
+        }
+        value
+    }
+}
+impl meguri_model::clock::Clock for HeldBindProvider {
+    fn now_ms(&self) -> i64 {
+        if self.clock_armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.hold();
+        }
+        NOW
+    }
+    fn utc_offset_at(&self, _: i64) -> UtcOffset {
+        UtcOffset::UTC
+    }
+    fn zone_id(&self) -> String {
+        "UTC".into()
+    }
+}
+
+#[test]
+fn publication_bind_held_final_providers_refuse_reopen_and_replacement_without_storing_identity() {
+    for hold_on_clock in [false, true] {
+        for lifecycle in ["reopen", "replace"] {
+            for republish in [false, true] {
+                let temp = tempfile::tempdir().unwrap();
+                let dir = temp.path().join("held-bind");
+                generated(&dir);
+                let (entered_tx, entered) = std::sync::mpsc::channel();
+                let (release, release_rx) = std::sync::mpsc::channel();
+                let provider = Arc::new(HeldBindProvider {
+                    random: SeededRandom::new(91),
+                    remaining: Mutex::new(None),
+                    hold_on_clock,
+                    clock_armed: std::sync::atomic::AtomicBool::new(false),
+                    entered: entered_tx,
+                    release: Mutex::new(release_rx),
+                });
+                let mut config = options(&dir, NOW, 91);
+                config.random = provider.clone();
+                config.clock = provider.clone();
+                config.cloud = Some(CloudInputs {
+                    scope: cloud::BuildScope {
+                        container: cloud::ContainerId::new(scope().container).unwrap(),
+                        environment: cloud::Environment::Development,
+                    },
+                    identity: Arc::new(Account),
+                    files: Arc::new(NativeFiles),
+                });
+                config.cloud_key_bytes = Some(keys());
+                let host = CoreHost::open(config).unwrap();
+                let runtime = host.cloud_runtime().unwrap();
+                let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(711)).unwrap();
+                let prior = republish.then(|| publish_actual_collection(&host, &mut service));
+                if prior.is_some() {
+                    let entity = runtime
+                        .entity_facts_page(cloud::entity_codec::Kind::Note, None)
+                        .unwrap()
+                        .remove(0);
+                    let cloud::entity_codec::Payload::Note(note) = &entity.payload else {
+                        panic!("note")
+                    };
+                    edit_workflow_note(&host.collection().unwrap(), note, "pending while bind provider is held");
+                    runtime
+                        .reconcile_binding(
+                            &host.collection().unwrap(),
+                            &host.media().unwrap(),
+                            Duration::from_secs(30),
+                        )
+                        .unwrap();
+                }
+                let collection = host.collection().unwrap();
+                let preview = actual_preview(&host, &mut service, &scope());
+                let id = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+                let confirmed = runtime.publication_op().unwrap().unwrap();
+                assert_eq!(confirmed.step, PublishStep::Confirmed);
+                assert!(confirmed.binding_after.is_none());
+                let original = runtime.publication_facts(&collection).unwrap();
+                let original_state = prior.as_ref().map(|_| runtime.stored_state_for_testing().unwrap());
+                if republish {
+                    assert!(
+                        original
+                            .entities
+                            .values()
+                            .any(|e| e.mark.is_some() && e.acked_payload.is_some())
+                    );
+                }
+                *provider.remaining.lock().unwrap() = Some(2);
+                std::thread::scope(|threads| {
+                    let worker = threads.spawn(|| runtime.perform_publication_local(id, LocalWork::Bind, &collection));
+                    entered.recv_timeout(Duration::from_secs(30)).unwrap();
+                    if lifecycle == "reopen" {
+                        assert!(matches!(
+                            host.engine().suspend(Duration::from_secs(30)).unwrap(),
+                            meguri_engine::suspend::SuspendOutcome::Suspended
+                        ));
+                        host.engine().resume().unwrap();
+                    } else {
+                        restore_collection(&host, &dir);
+                    }
+                    let fresh = host.collection().unwrap();
+                    let before = runtime.publication_facts(&fresh).unwrap();
+                    let before_state = prior.as_ref().map(|_| runtime.stored_state_for_testing().unwrap());
+                    assert_eq!(before.bindings.len(), usize::from(republish));
+                    assert!(runtime.publication_op().unwrap().as_ref() == Some(&confirmed));
+                    assert!(before.entities == original.entities);
+                    if let (Some(original), Some(before)) = (&original_state, &before_state) {
+                        assert_eq!(before.file, original.file);
+                        assert_eq!(before.durable_file, original.durable_file);
+                    }
+                    if let Some(binding) = prior.as_ref() {
+                        let expected = if lifecycle == "replace" {
+                            cloud::BindingState::Isolated(cloud::IsolationReason::ReplacedLocally)
+                        } else {
+                            binding.facts.state
+                        };
+                        assert_eq!(before.bindings[0].facts.state, expected);
+                    }
+                    if lifecycle == "replace" {
+                        assert_ne!(
+                            before.decision.publication.identity,
+                            original.decision.publication.identity
+                        );
+                        assert_eq!(
+                            before.decision.publication.decision,
+                            meguri_engine::device_state::PublicationDecision::Pending
+                        );
+                    } else {
+                        assert_eq!(before.decision, original.decision);
+                    }
+                    release.send(()).unwrap();
+                    assert!(
+                        worker.join().unwrap().is_err(),
+                        "stale bind admitted: clock={hold_on_clock}, {lifecycle}, prior={republish}"
+                    );
+                    let after = runtime.publication_facts(&fresh).unwrap();
+                    // Binding creation and its native/durable pair share a
+                    // transaction. Neither may land before a late bind error.
+                    assert!(after.bindings == before.bindings);
+                    assert!(runtime.publication_op().unwrap().as_ref() == Some(&confirmed));
+                    assert!(after.entities == before.entities);
+                    assert_eq!(after.decision, before.decision);
+                    assert!(after.current == before.current);
+                    assert_eq!(
+                        prior.as_ref().map(|_| runtime.stored_state_for_testing().unwrap()),
+                        before_state
+                    );
+                });
+                host.close().unwrap();
+            }
+        }
+    }
 }
 
 #[cfg(target_vendor = "apple")]

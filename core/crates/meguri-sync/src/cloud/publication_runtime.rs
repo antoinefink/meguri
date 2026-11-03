@@ -739,6 +739,7 @@ impl Runtime {
         work: LocalWork,
         collection: &Collection,
     ) -> Result<(), RuntimeError> {
+        let incarnation = self.state().incarnation;
         let Some(mut op) = self.publication_op()?.filter(|o| o.id == id) else {
             return Err(PublicationError::NotOffered.into());
         };
@@ -758,19 +759,27 @@ impl Runtime {
         match work {
             LocalWork::Bind if op.step == PublishStep::Confirmed && decision == op.fence_before => {
                 self.settle_before_transition(collection, Duration::from_secs(30))?;
-                let file = self.inputs.files.identity(collection.path())?;
-                if file != op.confirmed_file {
-                    return Err(PublicationError::AuthorityChanged.into());
-                }
-                let evidence = collection.open_evidence()?;
-                let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
-                if !collection.is_current() || evidence.generation != collection.generation() {
-                    return Err(RuntimeError::StaleIncarnation);
-                }
                 let id = BindingId(self.publication_random_id()?);
                 let now = self.adapter_now()?;
+                // Providers can suspend, reopen or replace the collection. Read
+                // their final values before pinning the open and taking guards.
+                let account = self.publication_account()?;
+                let file = self.inputs.files.identity(collection.path())?;
+                let decision = self.publication_decision()?;
+                if account != op.account || file != op.confirmed_file || decision != op.fence_before {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
                 {
+                    let _lease = collection.reader(ReaderRole::Cloud)?;
+                    let evidence = collection.open_evidence()?;
+                    let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
                     let mut s = self.state();
+                    if s.incarnation != incarnation
+                        || !collection.is_current()
+                        || evidence.generation != collection.generation()
+                    {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
                     with_tracking_access(|| {
                         s.store
                             .as_mut()
