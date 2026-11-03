@@ -75,6 +75,9 @@ public struct CloudConnectionView: View {
                 } else if sync.operationFailed {
                     Text(SyncText.value("sync.recovery.error.other"))
                         .accessibilityIdentifier("sync.connect.operationError")
+                        #if DEBUG
+                        .accessibilityValue(DebugCloudPreviewProbe.shared.latestTag)
+                        #endif
                 }
             }
             if sync.initialAdoptionActive {
@@ -100,8 +103,10 @@ public struct CloudConnectionView: View {
             } else {
                 Group {
                     Text(SyncText.value("sync.counts.unknown"))
+                        .accessibilityIdentifier("sync.connect.unknown")
                     Button(SyncText.value("sync.recovery.tryAgain")) { Task { await prepare() } }
                         .disabled(sync.settings.paused || sync.connectionOperationActive)
+                        .accessibilityIdentifier("sync.connect.tryAgain")
                     if sync.connectionOperationActive { Text(SyncText.value("sync.recovery.error.busy")) }
                 }
             }

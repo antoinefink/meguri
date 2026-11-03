@@ -1,5 +1,8 @@
 import Foundation
 import Synchronization
+#if DEBUG && canImport(CloudKit)
+import CloudKit
+#endif
 
 /// Commands contain only native transport inputs projected by Rust. Recovery
 /// decisions and confirmations remain in the retained core handles.
@@ -29,6 +32,83 @@ public enum CloudOwnTransportReply: Sendable {
 public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
+#if DEBUG
+/// Temporary, memory-only preview diagnosis. Stores one attempt and a bounded safe tag.
+public final class DebugCloudPreviewProbe: Sendable {
+    public static let shared = DebugCloudPreviewProbe()
+    private let latest = Mutex<(attempt: UUID, tag: String)?>(nil)
+
+    init() {}
+
+    public var latestTag: String { latest.withLock { $0?.tag ?? "unobserved" } }
+
+    func begin() -> UUID {
+        let attempt = UUID()
+        latest.withLock { $0 = (attempt, "running") }
+        return attempt
+    }
+
+    func finish(_ attempt: UUID) { update(attempt, tag: "finished") }
+
+    func fail(_ attempt: UUID, error: any Error) {
+        let tag = Self.classify(error)
+        update(attempt, tag: tag)
+    }
+
+    private func update(_ attempt: UUID, tag: String) {
+        latest.withLock { if $0?.attempt == attempt { $0 = (attempt, tag) } }
+    }
+
+    static func classify(_ error: any Error) -> String {
+        if error is CancellationError { return "taskCancelled" }
+        if let failure = error as? CloudOwnTransportFailure {
+            switch failure {
+            case .closed: return "transportClosed"
+            case .busy: return "transportBusy"
+            case .queueRejected: return "transportQueueRejected"
+            case .missingReply: return "transportMissingReply"
+            case .unexpectedReply: return "transportUnexpectedReply"
+            case .invalidCursor: return "transportInvalidCursor"
+            case .privateDatabaseRequired: return "transportPrivateDatabaseRequired"
+            }
+        }
+        if let failure = error as? BridgeError {
+            switch failure {
+            case .cancelled: return "coreCancelled"
+            case .unavailable: return "coreUnavailable"
+            case .internal: return "coreInternal"
+            default: return "coreOther"
+            }
+        }
+        // Exact value types only: conditional casts alone can bridge fake domains.
+        #if canImport(CloudKit)
+        if type(of: error) == CKError.self, let native = error as? CKError {
+            guard let code = Int32(exactly: native.code.rawValue) else { return "other" }
+            return "CKErrorDomain:\(code)"
+        }
+        #endif
+        if type(of: error) == URLError.self, let native = error as? URLError {
+            guard let code = Int32(exactly: native.code.rawValue) else { return "other" }
+            return "NSURLErrorDomain:\(code)"
+        }
+        if type(of: error) == CocoaError.self, let native = error as? CocoaError {
+            guard let code = Int32(exactly: native.code.rawValue) else { return "other" }
+            return "NSCocoaErrorDomain:\(code)"
+        }
+        // Reject other Swift errors before bridging can consult their payloads.
+        guard type(of: error) is NSError.Type else { return "other" }
+        let native = error as NSError
+        guard let code = Int32(exactly: native.code) else { return "other" }
+        switch native.domain {
+        case "CKErrorDomain": return "CKErrorDomain:\(code)"
+        case NSURLErrorDomain: return "NSURLErrorDomain:\(code)"
+        case NSCocoaErrorDomain: return "NSCocoaErrorDomain:\(code)"
+        case NSOSStatusErrorDomain: return "NSOSStatusErrorDomain:\(code)"
+        default: return "other"
+        }
+    }
+}
+#endif
 public protocol CloudPreparedOwnOperation: CloudPublicationQueue, CloudAssetReadQueue, CloudZoneDeletionQueue {
     /// The original operation's terminal callback, buffered even if it arrives
     /// during Rust submission. Cancellation must drain this same callback.
@@ -97,17 +177,31 @@ public actor CloudOwnExecutor {
     /// Reads the actual native records for the preview. Returning ready grants
     /// no publication; the caller must keep and confirm the returned handle.
     public func preview() async throws -> CloudConnectionPreviewWork {
-        try requireIdle()
-        // Use the same active task slot as recovery operations. The separate
-        // result task retains its typed preview while cancel/close join it.
-        let result = Task { try await self.executePreview() }
-        previewTask = result
-        let id = UUID()
-        let join = Task<CloudConnectionProgress, any Error> { _ = try await result.value; return .progressed }
-        active = (id, join)
-        defer { if active?.id == id { active = nil; prepared = nil; previewTask = nil } }
-        return try await withTaskCancellationHandler { try await result.value }
-            onCancel: { Task { await self.cancelPreview(id: id) } }
+        #if DEBUG
+        let probeAttempt = DebugCloudPreviewProbe.shared.begin()
+        #endif
+        do {
+            try requireIdle()
+            // Use the same active task slot as recovery operations. The separate
+            // result task retains its typed preview while cancel/close join it.
+            let result = Task { try await self.executePreview() }
+            previewTask = result
+            let id = UUID()
+            let join = Task<CloudConnectionProgress, any Error> { _ = try await result.value; return .progressed }
+            active = (id, join)
+            defer { if active?.id == id { active = nil; prepared = nil; previewTask = nil } }
+            let work = try await withTaskCancellationHandler { try await result.value }
+                onCancel: { Task { await self.cancelPreview(id: id) } }
+            #if DEBUG
+            DebugCloudPreviewProbe.shared.finish(probeAttempt)
+            #endif
+            return work
+        } catch {
+            #if DEBUG
+            DebugCloudPreviewProbe.shared.fail(probeAttempt, error: error)
+            #endif
+            throw error
+        }
     }
     public func interruptAndDrain() async {
         guard !closed else { return }
