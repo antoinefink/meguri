@@ -732,43 +732,74 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [InitialCloudProofWindow.reopen, .resume])
     func firstAccountProofJoinsPreissuedRealStatus(window: InitialCloudProofWindow) async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        let trace = InitialCloudActionTrace()
         var releaseCommand: CheckedContinuation<Void, Never>?
         var released = false
         var original: Task<Void, any Error>?
         var target: InitialCloudBackend?
-        defer { releaseCommand?.resume(); harness.release(); harness.removeTemporaryStorage() }
+        defer {
+            releaseCommand?.resume()
+            target?.actionTrace = nil; harness.factory.actionTrace = nil
+            #if DEBUG
+            harness.sync.observeCausalBoundary = nil
+            #endif
+            harness.release(); harness.removeTemporaryStorage()
+        }
+        let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         var heldCommand: CloudPolicyCommand?
         var returned = false, waited = false, admitted = false
         var starts = 0, reads = 0, verified = 0
         func observe(_ sync: SyncCoordinator) {
+            #if DEBUG
+            sync.observeCausalBoundary = { boundary, command in
+                let ordinal = command.flatMap { trace.commandOrdinal($0) }
+                switch boundary {
+                case .commandResultEnqueue: trace.record("command.result.enqueue", command: ordinal)
+                case .commandAcknowledgementJoined: trace.record("command.ack.join.return", command: ordinal)
+                case .proofResultReduced: trace.record("proof.result.reduced")
+                case .proofAcknowledgementSending: trace.record("proof.ack.send")
+                }
+            }
+            #endif
             sync.observeAccountPolicyDrain = { stage in
                 switch stage {
                 case .waiting:
                     guard !waited else { return }
                     waited = true
-                    #expect(heldCommand != nil && !returned)
+                    // Generic drain contention is not positive target entry.
+                    trace.record("account.drain.waiting")
                     waiting.continuation.yield(())
                 case .finished:
                     guard !admitted else { return }
                     admitted = true
-                    // This runs only after the real command result was ACKed.
-                    #expect(returned && !sync.operationFailed && sync.failureRevision == 0)
+                    // Pre-completion drain admission, NOT proof acknowledgement.
+                    trace.record("account.drain.preCompletion")
+                    #expect(returned && !sync.operationFailed && sync.failureRevision == 0, "\(trace.diagnostic)")
                 }
             }
         }
         func configure(_ backend: InitialCloudBackend) {
             target = backend
+            backend.actionTrace = trace; harness.factory.actionTrace = trace
+            trace.record("fixture.configure")
             starts = harness.factory.created.count; reads = harness.factory.accountReads
             verified = backend.verifiedAccountReads.count
             backend.beforeExecution = { command in
                 guard case .statusChanged = command.action, heldCommand == nil else { return }
                 heldCommand = command
-                if !released { await withCheckedContinuation { releaseCommand = $0 } }
+                if !released {
+                    await withCheckedContinuation {
+                        releaseCommand = $0
+                        trace.record("target.status.hold.enter", command: trace.commandOrdinal(command))
+                        entered.continuation.yield(())
+                    }
+                }
             }
             backend.afterExecution = { command, result in
                 guard heldCommand?.raw === command.raw else { return }
-                #expect(result.error == nil && !result.deferred)
+                trace.record("target.status.execute.return", command: trace.commandOrdinal(command))
+                #expect(result.error == nil && !result.deferred, "\(trace.diagnostic)")
                 returned = true
             }
         }
@@ -787,39 +818,52 @@ extension ReviewCollectionStartupTests {
                 harness.sync.observeResumePolicyDrain = { stage in
                     guard case .finished = stage else { return }
                     configure(backend)
+                    trace.record("resume.drain.admission")
                 }
                 observe(harness.sync)
                 original = Task { await harness.sync.confirmResume() }
             }
-            try await initialCloudSignal(waiting.stream, stage: "first-proof-status-drain")
-            let backend = try #require(target)
+            // Both must be positive before inspecting the original contended window.
+            // Each uses the existing bounded signal wait; neither callback releases work.
+            async let entrySignal: Void = initialCloudSignal(entered.stream, stage: "first-proof-target-status-entry") {
+                await trace.diagnostic
+            }
+            async let drainSignal: Void = initialCloudSignal(waiting.stream, stage: "first-proof-status-drain") {
+                await trace.diagnostic
+            }
+            _ = try await (entrySignal, drainSignal)
+            let backend = try #require(target, "\(trace.diagnostic)")
+            #expect(heldCommand != nil && !returned, "\(trace.diagnostic)")
             // The SDK resolver really returned, but Core has not accepted proof.
-            #expect(harness.factory.accountReads == reads + 1)
-            #expect(backend.verifiedAccountReads.count == verified)
-            #expect(!returned && !admitted && harness.factory.created.count == starts)
-            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            #expect(harness.factory.accountReads == reads + 1, "\(trace.diagnostic)")
+            #expect(backend.verifiedAccountReads.count == verified, "\(trace.diagnostic)")
+            #expect(!returned && !admitted && harness.factory.created.count == starts, "\(trace.diagnostic)")
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0, "\(trace.diagnostic)")
+            trace.record("target.status.hold.release", command: heldCommand.flatMap { trace.commandOrdinal($0) })
             released = true
             releaseCommand?.resume(); releaseCommand = nil
             try await original?.value
+            trace.record("fixture.original.join.return")
             await harness.sync.prepareConnectionAuthority()
-            #expect(waited && returned && admitted)
-            #expect(backend.verifiedAccountReads.count > verified)
-            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
-            #expect(!harness.sync.settings.automatic)
+            #expect(waited && returned && admitted, "\(trace.diagnostic)")
+            #expect(backend.verifiedAccountReads.count > verified, "\(trace.diagnostic)")
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0, "\(trace.diagnostic)")
+            #expect(!harness.sync.settings.automatic, "\(trace.diagnostic)")
             if window == .resume {
                 try await backend.waitForStart()
-                #expect(backend.starts.count == 1 && backend.starts.first?.succeeded == true)
-                #expect(backend.starts.first?.automatic == false)
-                #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1)
+                #expect(backend.starts.count == 1 && backend.starts.first?.succeeded == true, "\(trace.diagnostic)")
+                #expect(backend.starts.first?.automatic == false, "\(trace.diagnostic)")
+                #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1, "\(trace.diagnostic)")
             } else {
-                #expect(backend.starts.isEmpty && harness.factory.created.count == starts)
-                #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+                #expect(backend.starts.isEmpty && harness.factory.created.count == starts, "\(trace.diagnostic)")
+                #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false, "\(trace.diagnostic)")
             }
             backend.beforeExecution = nil; backend.afterExecution = nil
             harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
             harness.sync.observeResumePolicyDrain = nil
-            #expect(await harness.owner.close())
+            #expect(await harness.owner.close(), "\(trace.diagnostic)")
         } catch {
+            Issue.record("First-proof causal observation failed: \(trace.diagnostic)")
             // Release and join the original command/read, including a failed
             // native result and its ACK; no test result or proof is substituted.
             released = true
@@ -1248,12 +1292,123 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     }
 }
 
+// Only the focused first-proof test installs this bounded, synthetic trace.
+private nonisolated enum InitialCloudCommandCorrelation {
+    @TaskLocal static var ordinal: Int?
+}
+
+@MainActor private final class InitialCloudActionTrace {
+    private let limit = 512
+    private var entries: [String] = []
+    // Retention makes raw identity comparisons safe; raw objects never enter diagnostics.
+    private var commands: [CloudPolicyCommand] = []
+    private var reads: [UInt64] = []
+    private var sequence = 0
+    private var overflow = 0
+    private var identityOverflow = 0
+    private var sdkSequence = 0
+
+    func commandOrdinal(_ command: CloudPolicyCommand) -> Int? {
+        if let index = commands.firstIndex(where: { $0.raw === command.raw }) { return index + 1 }
+        guard commands.count < limit else { identityOverflow += 1; return nil }
+        commands.append(command)
+        return commands.count
+    }
+    func readOrdinal(_ read: UInt64) -> Int? {
+        if let index = reads.firstIndex(of: read) { return index + 1 }
+        guard reads.count < limit else { identityOverflow += 1; return nil }
+        reads.append(read)
+        return reads.count
+    }
+    func record(_ tag: String, command: Int? = nil, read: Int? = nil, parent: Int? = nil) {
+        sequence += 1
+        guard entries.count < limit else { overflow += 1; return }
+        var entry = "\(sequence):\(tag)"
+        if let command { entry += ":c\(command)" }
+        if let read { entry += ":r\(read)" }
+        if let parent { entry += ":parent-c\(parent)" }
+        entries.append(entry)
+    }
+    func issued(_ outputs: [CloudPolicyOutput], source: String, parent: Int? = nil, read: Int? = nil) {
+        for output in outputs {
+            let issued: [CloudPolicyCommand]
+            switch output {
+            case .commands(let values), .coreActionFailed(_, let values): issued = values
+            case .applyDeferred, .syncNowUnavailable: issued = []
+            }
+            for command in issued {
+                record("issued.\(source).\(Self.actionTag(command.action))",
+                       command: commandOrdinal(command), read: read, parent: parent)
+            }
+        }
+    }
+    func sdkCreated() {
+        sdkSequence += 1
+        let command = InitialCloudCommandCorrelation.ordinal
+        record("sdk.create.s\(sdkSequence).\(command == nil ? "correlationGap" : "correlated")", command: command)
+    }
+    var diagnostic: String {
+        // Keep the causal prefix and explicitly report any lost suffix/identity mappings.
+        "trace=[\(entries.joined(separator: ";"))];overflow=\(overflow);identityOverflow=\(identityOverflow)"
+    }
+    static func inputTag(_ event: CloudPolicyEvent) -> String {
+        switch event {
+        case .settings: "settings"
+        case .refresh: "refresh"
+        case .trackingWriteFailed: "trackingWriteFailed"
+        case .network: "network"
+        case .foreground: "foreground"
+        case .background: "background"
+        case .backgroundExpiring: "backgroundExpiring"
+        case .quitRequested: "quitRequested"
+        case .flushTimerFired: "flushTimerFired"
+        case .syncNowRequested: "syncNowRequested"
+        case .syncNowCancelled: "syncNowCancelled"
+        case .volumeSpaceAvailable: "volumeSpaceAvailable"
+        case .visibleMedia: "visibleMedia"
+        case .operation: "operation"
+        case .operationError: "operationError"
+        }
+    }
+    static func actionTag(_ action: CloudPolicyAction) -> String {
+        switch action {
+        case .startEngine: "startEngine"
+        case .stopEngine: "stopEngine"
+        case .configureAutomatic: "configureAutomatic"
+        case .updatePending: "updatePending"
+        case .requestFetch: "requestFetch"
+        case .requestSend: "requestSend"
+        case .readBlobs: "readBlobs"
+        case .retryAssetEntries: "retryAssetEntries"
+        case .runCleanup: "runCleanup"
+        case .deleteZones: "deleteZones"
+        case .armFlushTimer: "armFlushTimer"
+        case .cancelFlushTimer: "cancelFlushTimer"
+        case .runExchange: "runExchange"
+        case .cancelExchange: "cancelExchange"
+        case .backgroundFlush: "backgroundFlush"
+        case .cancelBackgroundFlush: "cancelBackgroundFlush"
+        case .quitFlush: "quitFlush"
+        case .quitNow: "quitNow"
+        case .pauseMedia: "pauseMedia"
+        case .resumeMedia: "resumeMedia"
+        case .prioritizeMedia: "prioritizeMedia"
+        case .applyReady: "applyReady"
+        case .recordExchange: "recordExchange"
+        case .recordQuietPoint: "recordQuietPoint"
+        case .probeTracking: "probeTracking"
+        case .statusChanged: "statusChanged"
+        }
+    }
+}
+
 // Diagnostics wrap the same composition used by the app; only transports differ.
 @MainActor private final class InitialCloudBackend: SyncCoordinatorBackend {
     private let backend: NativeCollectionCloudBackend
     var shutdownTrace: NativeCollectionCloudBackend.ShutdownTrace { backend.shutdownTrace }
     var connection: CoreCloudConnectionService? { backend.connection }
     var own: CloudOwnExecutor? { backend.own }
+    var actionTrace: InitialCloudActionTrace?
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
     var observeQuiesce: (@MainActor () -> Void)?
@@ -1271,6 +1426,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     private var lastExecute = "not-called"
     private var lastExecuteError = "none"
     fileprivate var startDiagnostics: String {
+        if let actionTrace { return actionTrace.diagnostic }
         let state = lastPolicyStatus.map { String(describing: $0.state) } ?? "unobserved"
         let controls = lastPolicyStatus.map { String(describing: $0.controls) } ?? "unobserved"
         let matches = lastPolicyStatus.map { String($0.accountMatchesBinding) } ?? "unobserved"
@@ -1321,12 +1477,20 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         (startup, startupFinished) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
     }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+        let trace = actionTrace
+        let tag = InitialCloudActionTrace.inputTag(event)
+        trace?.record("input.\(tag).entry")
         let output = try await backend.input(event)
+        trace?.record("input.\(tag).return")
+        trace?.issued([output], source: tag)
         if case .refresh(.local) = event { localRefreshes += 1 }
         observe([output])
         return output
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        let trace = actionTrace
+        let ordinal = trace?.commandOrdinal(command)
+        trace?.record("backend.execute.entry.\(InitialCloudActionTrace.actionTag(command.action))", command: ordinal)
         let stage: String
         switch command.action {
         case .startEngine: stage = "startEngine"
@@ -1340,7 +1504,18 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
             catch { Issue.record("Original exchange observation failed: \(String(describing: error))") }
         }
         await beforeExecution?(command)
-        let result = await backend.execute(command)
+        trace?.record("native.execute.entry", command: ordinal)
+        let result: SyncCommandResult
+        if trace != nil {
+            // Dynamic task scope follows this exact original execute, including overlaps.
+            result = await InitialCloudCommandCorrelation.$ordinal.withValue(ordinal) {
+                await backend.execute(command)
+            }
+        } else {
+            result = await backend.execute(command)
+        }
+        trace?.record("native.execute.return", command: ordinal)
+        trace?.issued(result.outputs, source: "commandReturn", parent: ordinal)
         afterExecution?(command, result)
         if case .deleteZones = command.action { lastZoneDeletion = command; zoneDeletions.continuation.yield(()) }
         if case .statusChanged = command.action { lastStatusCommand = command }
@@ -1358,7 +1533,13 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         }
         return result
     }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { try await backend.beginAccountRead(transition: transition) }
+    func beginAccountRead(transition: Bool) async throws -> UInt64 {
+        let trace = actionTrace
+        trace?.record(transition ? "account.read.admission.transition.entry" : "account.read.admission.initial.entry")
+        let read = try await backend.beginAccountRead(transition: transition)
+        trace?.record("account.read.admission.return", read: trace?.readOrdinal(read))
+        return read
+    }
     func readAccount(_ id: UInt64) async -> SyncCommandResult {
         lastRead = "account-read: awaiting"
         let complete = await prepareAccountRead(id)
@@ -1366,10 +1547,18 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
     }
     func prepareAccountRead(_ id: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
         lastRead = "account-read: resolving"
+        let trace = actionTrace
+        let ordinal = trace?.readOrdinal(id)
+        trace?.record("account.resolver.entry", read: ordinal)
         let complete = await backend.prepareAccountRead(id)
+        trace?.record("account.resolver.return", read: ordinal)
         return { [self] admitted in
             lastRead = "account-read: committing"
-            return recordAccountRead(await complete(admitted), id: id)
+            trace?.record(admitted ? "proof.complete.admitted.entry" : "proof.complete.rejected.entry", read: ordinal)
+            let result = await complete(admitted)
+            trace?.record("proof.complete.return", read: ordinal)
+            trace?.issued(result.outputs, source: "accountCompletion", read: ordinal)
+            return recordAccountRead(result, id: id)
         }
     }
     private func recordAccountRead(_ result: SyncCommandResult, id: UInt64) -> SyncCommandResult {
@@ -1391,6 +1580,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
 }
 
 @MainActor private final class InitialCloudSDKFactory: CloudKitEngineFactory {
+    var actionTrace: InitialCloudActionTrace?
     var account = CloudResolvedAccount(status: .available, identity: Data("synthetic-initial-account".utf8))
     private(set) var accountReads = 0
     private(set) var accountReadsAtCreation: [Int] = []
@@ -1407,11 +1597,14 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
         (completions, completed) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
     }
     func resolveAccount() async throws -> CloudResolvedAccount? {
+        actionTrace?.record("sdk.account.resolve.entry")
         accountReads += 1
+        actionTrace?.record("sdk.account.resolve.return")
         return account
     }
     func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
-        #expect(live.isEmpty)
+        actionTrace?.sdkCreated()
+        #expect(live.isEmpty, "\(actionTrace?.diagnostic ?? "")")
         accountReadsAtCreation.append(accountReads)
         created.append(configuration); live.insert(configuration.instanceID)
         maximumLive = max(maximumLive, live.count)

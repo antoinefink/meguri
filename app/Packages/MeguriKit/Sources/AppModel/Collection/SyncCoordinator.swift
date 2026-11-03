@@ -158,6 +158,13 @@ public final class SyncCoordinator {
         case barrier(CheckedContinuation<Void, Never>)
     }
     private enum ResumeAdmission { case pending, cancelled, resumed }
+    #if DEBUG
+    enum CausalBoundary {
+        case commandResultEnqueue, commandAcknowledgementJoined
+        case proofResultReduced, proofAcknowledgementSending
+    }
+    @ObservationIgnored var observeCausalBoundary: (@MainActor (CausalBoundary, CloudPolicyCommand?) -> Void)?
+    #endif
     enum ResumePolicyDrainStage { case waiting, finished }
     // Scheduling observation only; never supplies a result or a capability.
     @ObservationIgnored var observeAccountPolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
@@ -842,10 +849,16 @@ public final class SyncCoordinator {
             observeAccountPolicyDrain?(.finished)
             let result = await complete(true)
             await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+            #if DEBUG
+            observeCausalBoundary?(.proofResultReduced, nil)
+            #endif
             if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
             if result.error == nil, result.accountVerified {
                 startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
             }
+            #if DEBUG
+            observeCausalBoundary?(.proofAcknowledgementSending, nil)
+            #endif
             acknowledged.resume(returning: true)
         case .resumeBinding(let handle, let service, let expected, let revision, let acknowledged):
             guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
@@ -1054,9 +1067,15 @@ public final class SyncCoordinator {
                         quitCompletion?(); quitCompletion = nil
                     }
                     await withCheckedContinuation { acknowledged in
+                        #if DEBUG
+                        observeCausalBoundary?(.commandResultEnqueue, command)
+                        #endif
                         enqueue(.result(result, generation: value.generation, revision: revision,
                             shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
                     }
+                    #if DEBUG
+                    observeCausalBoundary?(.commandAcknowledgementJoined, command)
+                    #endif
                 }
             }
         }
