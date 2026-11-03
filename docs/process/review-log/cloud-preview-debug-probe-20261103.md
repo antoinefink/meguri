@@ -23,7 +23,25 @@ requires the actual phone observation.
 Private96841 and Similarity97052 pass. Swift97467 passes all nine probe checks
 and the existing cancellation/drain/reuse regression, with no skips. The two
 fallback leaf identifiers also address the real phone's unidentified rows and
-retry action. Actual rendering, diagnostic value and hierarchy remain pending.
+retry action.
+
+Phone98749 on a481b4af passes all six steps with zero hierarchy issues and no
+skips. Its final preview tag is `finished`, and the initial-adoption row is
+present. Preview succeeded; adoption was admitted. The row is not evidence that
+the download completed or is still advancing: its marker can survive a retained
+failure. The historical generic error is not current-preview failure evidence.
+The rendered progress label exposes a missing localization entry; Export2191
+adds the exact approved T12 copy and a localized-value check. Independent review
+is clear. This copy change has no operation or layout changes.
+
+Private3181 and Similarity4199 pass the two copy/test files. Swift4531 passes
+all eight CloudSyncPresentationTests, with no skips. The first sandboxed
+Similarity3480 and Swift3479 requests could not reach Docker; they ran no checks.
+The host-access runs retain those failed setup receipts. The signed phone render
+of the corrected label is still pending.
+
+The later inspection1629 is queued because the selected phone is unavailable.
+It runs no test and provides no new adoption outcome. Keep that distinction.
 
 Native Resume/registration ownership and the U114 repair cap are unchanged.
 Remove the temporary observation after diagnosis, or review any permanent

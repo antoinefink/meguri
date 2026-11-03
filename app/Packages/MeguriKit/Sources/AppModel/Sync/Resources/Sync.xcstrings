@@ -653,6 +653,17 @@
         }
       }
     },
+    "sync.connect.downloading": {
+      "comment": "Approved specs/sync/status-strings.md#T12 copy; collection download progress while connecting to iCloud.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading your collection from iCloud…"
+          }
+        }
+      }
+    },
     "sync.connect.reading": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {

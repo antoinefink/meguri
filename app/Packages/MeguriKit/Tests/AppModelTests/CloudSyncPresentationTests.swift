@@ -91,6 +91,7 @@ import Testing
         }
         #expect(SyncText.value("sync.connect.continue.title") == "Continue Syncing This Collection?")
         #expect(SyncText.value("sync.connect.continue.confirm") == "Continue Syncing")
+        #expect(SyncText.value("sync.connect.downloading") == "Downloading your collection from iCloud…")
         #expect(SyncText.format("sync.connect.continue.message", Int64(1)) == "1 unsent change on this device will sync.")
         #expect(SyncText.format("sync.connect.continue.message", Int64(2)) == "2 unsent changes on this device will sync.")
     }
