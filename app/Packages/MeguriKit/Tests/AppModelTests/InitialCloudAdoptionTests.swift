@@ -7,6 +7,51 @@ import Testing
 @testable import AppModel
 
 extension ReviewCollectionStartupTests {
+    @Test func nativeBackendClosesAfterRealCoreSuspendWithoutResume() async throws {
+        let fixture = try InitialCloudFixture.load()
+        let harness = try InitialCloudHarness(fixture: fixture)
+        var nativeDrained: Bool?
+        defer {
+            harness.release()
+            if nativeDrained == true { harness.removeTemporaryStorage() }
+        }
+        do {
+            try await harness.beginAndWaitForPage()
+            harness.release()
+            await harness.joinOriginal()
+            await harness.sync.waitForReplacement()
+            await harness.owner.waitForCloudActivation()
+            await harness.sync.prepareConnectionAuthority()
+            let backend = try #require(harness.backends.last)
+            try await backend.waitForStart()
+            try #require(!harness.factory.live.isEmpty, "regression requires a retained SDK instance")
+            let collection = CoreCollectionService()
+            try await collection.flushForBackground()
+            try await backend.freezeForSuspend()
+            try #require(try await collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            let drained = await harness.sync.cancelAndDrain()
+            nativeDrained = drained
+            let trace = backend.shutdownTrace
+            #expect(trace.policyProbe == .finished)
+            #expect(trace.adapterDrain == .finished)
+            #expect(trace.retentionCheck == .vacant)
+            #expect(harness.factory.live.isEmpty)
+            try #require(drained && backend.closeCount == 1,
+                "suspended native close: owner=\(trace.policyProbe.rawValue) adapter=\(trace.adapterDrain.rawValue) retention=\(trace.retentionCheck.rawValue)")
+            #expect(await harness.owner.close())
+        } catch {
+            harness.release()
+            if nativeDrained == nil {
+                await harness.joinOriginal()
+                nativeDrained = await harness.sync.cancelAndDrain()
+            }
+            if nativeDrained == true {
+                try? await CoreCollectionService().close()
+            }
+            throw error
+        }
+    }
+
     @Test func absentCollectionAutomaticallyAdoptsRealCloudRowsAndThenCommitsAReview() async throws {
         let fixture = try InitialCloudFixture.load()
         let harness = try InitialCloudHarness(fixture: fixture)
@@ -1206,6 +1251,7 @@ private nonisolated struct InitialCloudExchangeObservation: Sendable {
 // Diagnostics wrap the same composition used by the app; only transports differ.
 @MainActor private final class InitialCloudBackend: SyncCoordinatorBackend {
     private let backend: NativeCollectionCloudBackend
+    var shutdownTrace: NativeCollectionCloudBackend.ShutdownTrace { backend.shutdownTrace }
     var connection: CoreCloudConnectionService? { backend.connection }
     var own: CloudOwnExecutor? { backend.own }
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?

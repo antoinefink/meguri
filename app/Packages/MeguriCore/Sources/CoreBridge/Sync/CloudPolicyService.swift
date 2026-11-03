@@ -84,6 +84,15 @@ public actor CoreCloudPolicyService {
         }
     }
 
+    /// Original Host metadata only; available after Core suspend without
+    /// admitting a policy job or waiting for the policy ordering permit.
+    public func validateOriginalOwner() async throws {
+        let raw = self.raw
+        try await Self.call(.cloudPolicyValidateOriginalOwner) { [raw] in
+            try raw.validateOriginalOwner()
+        }
+    }
+
     public func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
         defer { notifyReadinessChanged() }
         let raw = self.raw

@@ -4,13 +4,97 @@ use meguri_engine::{EventKind, JobKind, JobOutcome, Subscription};
 use meguri_model::clock::Clock;
 use std::sync::mpsc;
 
+#[test]
+fn policy_original_owner_metadata_survives_real_suspend_while_jobs_stay_cancelled() {
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
+    let policy = fixture.workflow.policy().unwrap();
+    let engine = fixture.workflow.host.engine();
+    let events = engine.stream().subscribe();
+    assert_eq!(
+        engine.suspend(Duration::from_secs(5)).unwrap(),
+        meguri_engine::SuspendOutcome::Suspended
+    );
+    policy.validate_original_owner().unwrap();
+    let status = policy.clone().start_status().unwrap();
+    assert_eq!(finished(&events, status.handle.id), JobOutcome::Cancelled);
+    assert!(matches!(status.result.result(), Err(CoreError::Cancelled)));
+    let input = policy.clone().start_input(settings(true)).unwrap();
+    assert_eq!(finished(&events, input.handle.id), JobOutcome::Cancelled);
+    assert!(matches!(input.result.result(), Err(CoreError::Cancelled)));
+    policy.validate_original_owner().unwrap();
+    fixture.workflow.host.close().unwrap();
+    failure_is(policy.validate_original_owner(), CloudPolicyFailure::Closed);
+    let (replacement, _) = unbound_fixture(Arc::new(Account));
+    failure_is(policy.validate_original_owner(), CloudPolicyFailure::Closed);
+    replacement.workflow.host.close().unwrap();
+}
+
+#[test]
+fn policy_original_owner_metadata_reports_real_generation_replacement() {
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
+    let policy = fixture.workflow.policy().unwrap();
+    let engine = fixture.workflow.host.engine();
+    let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    exclusive
+        .replace(|path| {
+            assert!(path.exists());
+            Ok(())
+        })
+        .unwrap();
+    drop(exclusive);
+    drop(slot);
+    failure_is(policy.validate_original_owner(), CloudPolicyFailure::GenerationChanged);
+    fixture.workflow.host.close().unwrap();
+    failure_is(policy.validate_original_owner(), CloudPolicyFailure::Closed);
+}
+
+#[test]
+fn policy_original_owner_metadata_completes_while_real_driver_projection_is_held() {
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
+    let policy = fixture.workflow.policy().unwrap();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (released, did_release) = mpsc::channel();
+    driver.set_projection_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume
+            .recv_timeout(Duration::from_secs(10))
+            .expect("projection release");
+        released.send(()).unwrap();
+    });
+    std::thread::scope(|scope| {
+        // Drop before scope joins on every failure, including missing entry.
+        let release = ReleaseDeckAccount(release);
+        let held_policy = policy.clone();
+        let held = scope.spawn(move || held_policy.input(CloudPolicyEvent::Foreground));
+        reached
+            .recv_timeout(Duration::from_secs(5))
+            .expect("real projection owns Driver");
+        let (validated, completed) = mpsc::channel();
+        let validating_policy = policy.clone();
+        let validation = scope.spawn(move || {
+            let _ = validated.send(validating_policy.validate_original_owner());
+        });
+        let before_release = completed.recv_timeout(Duration::from_secs(5));
+        drop(release);
+        let released = did_release.recv_timeout(Duration::from_secs(5));
+        held.join().unwrap().unwrap();
+        validation.join().unwrap();
+        released.expect("projection released");
+        before_release.expect("metadata validation waited for Driver").unwrap();
+    });
+    fixture.workflow.host.close().unwrap();
+}
+
 pub(super) fn finished(events: &Subscription, id: u64) -> JobOutcome {
     loop {
         let event = events.recv_timeout(Duration::from_secs(10)).expect("JobFinished");
-        if let EventKind::JobFinished { id: got, outcome } = &event.kind {
-            if got.0 == id {
-                return outcome.clone();
-            }
+        if let EventKind::JobFinished { id: got, outcome } = &event.kind
+            && got.0 == id
+        {
+            return outcome.clone();
         }
     }
 }
@@ -159,10 +243,10 @@ fn policy_job_cancelled_after_worker_contends_on_driver_preserves_settings_and_s
     let mut outcomes = std::collections::BTreeMap::new();
     while outcomes.len() != 2 {
         let event = events.recv_timeout(Duration::from_secs(10)).unwrap();
-        if let EventKind::JobFinished { id, outcome } = &event.kind {
-            if id.0 == held.handle.id || id.0 == cancelled.handle.id {
-                outcomes.insert(id.0, outcome.clone());
-            }
+        if let EventKind::JobFinished { id, outcome } = &event.kind
+            && (id.0 == held.handle.id || id.0 == cancelled.handle.id)
+        {
+            outcomes.insert(id.0, outcome.clone());
         }
     }
     assert_eq!(outcomes[&held.handle.id], JobOutcome::Succeeded);

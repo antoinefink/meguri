@@ -12,6 +12,21 @@ private func rawJobPolicy() async throws -> MeguriCoreBindings.CloudPolicy {
 }
 
 extension EventTests {
+    @Test func policyOriginalOwnerMetadataSurvivesSuspendAndKeepsOrdinaryJobsCancelled() async throws {
+        try await withCloudConnection { fixture in
+            let policy = try await fixture.workflow.policy()
+            try #require(try await fixture.collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            try await policy.validateOriginalOwner()
+            await #expect(throws: BridgeError.cancelled) { _ = try await policy.status() }
+            await #expect(throws: BridgeError.cancelled) { _ = try await policy.input(.foreground) }
+            try await policy.validateOriginalOwner()
+            try await fixture.collection.close()
+            await #expect(throws: BridgeError.cloudPolicy(.closed)) {
+                try await policy.validateOriginalOwner()
+            }
+        }
+    }
+
     @Test func policyFacadeOrdersDelayedInputsAndKeepsCancelledTaskEffectsAndReadiness() async throws {
         try await withCloudConnection { _ in
             let hold = CloudCallbackGate()

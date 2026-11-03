@@ -166,7 +166,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         var replaced = false
         shutdownTrace.policyProbe = .running
         do {
-            _ = try await policy.status()
+            try await policy.validateOriginalOwner()
             shutdownTrace.policyProbe = .finished
         } catch BridgeError.cloudPolicy(.generationChanged) {
             shutdownTrace.policyProbe = .superseded

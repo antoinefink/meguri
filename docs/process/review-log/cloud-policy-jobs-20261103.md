@@ -82,6 +82,19 @@ lifetime and generation check with no Driver lock, projection or job admission.
 Ordinary cloud jobs must remain cancelled during suspension. Repair and focused
 regressions remain pending; native Resume ownership is outside this correction.
 
+Core42677 completes production lint but finds two nested-if warnings in the new
+Rust tests. Export43159 adds the narrow owner-metadata check and three real Rust
+lifecycle regressions, a bridge regression and an active-SDK native-close test.
+Independent review clears production behavior but finds unsafe teardown in the
+new native test: it could close Core and delete storage after failed native drain.
+
+Export46789 preserves Host and storage on failed drain and mechanically collapses
+the two test conditions. Independent review has no P0-P2 findings. No adapter,
+Resume, registration or coordinator ownership code changes. Format47915 passes;
+it leaves the exported patch identical. Private48188, Similarity48592 and
+CoreLint48547 pass. Core49187 passes all18 selected tests;314 tests are outside
+the selection. Swift and native lifecycle checks remain pending.
+
 Full synchronous final-enqueue responsiveness and retained-execution contention
 remain open. The existing native U114 Resume failure and repair cap remain.
 No full gate, milestone, complete lane isolation or signed round trip is claimed.

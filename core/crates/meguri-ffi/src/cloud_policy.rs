@@ -1079,6 +1079,12 @@ impl CloudWorkflow {
 }
 #[uniffi::export]
 impl CloudPolicy {
+    /// Validate only the retained original Host's closed state and generation.
+    /// This metadata check remains available while ordinary jobs are suspended.
+    pub fn validate_original_owner(&self) -> Result<(), CoreError> {
+        callback::enter("CloudPolicy.validate_original_owner");
+        self.validate_owner()
+    }
     pub fn input(self: Arc<Self>, event: CloudPolicyEvent) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicy.input");
         self.input_with_work(event, &mut p::PolicyWork::default())
