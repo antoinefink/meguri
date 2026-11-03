@@ -342,6 +342,8 @@ extension EventTests {
             let (admissions, observedAdmission) = AsyncStream<Bool>.makeStream()
             let admissionEvidence = Mutex<(handlerReleased: Bool,
                 entries: [(admitted: Bool, beforeHandlerRelease: Bool)])>((false, []))
+            let callEvidence = Mutex<(admitted: [UInt64], finalized: [UInt64],
+                admissionOwnersMatch: Bool, finalizationOwnersMatch: Bool, capped: Bool)>(([], [], true, true, false))
             let queue = HeldNativeMediaQueue()
             let transport = NativeCloudMediaTransport(queue: queue,
                 staging: try .init(directory: fixture.directory.appendingPathComponent("busy-send-media"), available: { UInt64.max }))
@@ -364,6 +366,21 @@ extension EventTests {
                         }
                     }
                     operation.fetchRecordsResultBlock?(.success(()))
+                }
+            }
+            let sdkCallsBeforeOriginal = engine.acceptedNetworkCalls.value
+            let expectedOwner = engine.instanceID
+            await fixture.adapter.setSendCallObserver { origin, call, finalized in
+                callEvidence.withLock { evidence in
+                    if finalized {
+                        evidence.finalizationOwnersMatch = evidence.finalizationOwnersMatch && origin == expectedOwner
+                        if evidence.finalized.count < 8 { evidence.finalized.append(call) }
+                        else { evidence.capped = true }
+                    } else {
+                        evidence.admissionOwnersMatch = evidence.admissionOwnersMatch && origin == expectedOwner
+                        if evidence.admitted.count < 8 { evidence.admitted.append(call) }
+                        else { evidence.capped = true }
+                    }
                 }
             }
             let deadline = CloudPolicyReadinessDecision()
@@ -450,6 +467,7 @@ extension EventTests {
             let originalResult = await original.result
             let mediaResult = await media?.value
             await fixture.adapter.setSendAdmissionObserver(nil)
+            await fixture.adapter.setSendCallObserver(nil)
             observedAdmission.finish()
             queue.finish()
             await responses.value
@@ -457,15 +475,32 @@ extension EventTests {
             watchdog.cancel()
             await watchdog.value
             let evidence = admissionEvidence.withLock { $0.entries }
-            #expect(inTime, "Media admission or original callback drain exceeded the existing ten-second bound; first eight admissions (admitted, before-handler-release): \(evidence)")
+            let calls = callEvidence.withLock { $0 }
+            let exactCallsMatch = calls.admitted.count == calls.finalized.count
+                && Set(calls.admitted).count == calls.admitted.count
+                && Set(calls.admitted) == Set(calls.finalized)
+            let mediaFailure = (mediaResult?.error).map {
+                DebugCloudDiagnostics.Value(.policyExecute, error: $0).failure
+            } ?? "none"
+            let adapterError = await fixture.adapter.lastFailure
+            let adapterFailure = adapterError.map {
+                DebugCloudDiagnostics.Value(.policyExecute, error: $0).failure
+            } ?? "none"
+            // IDs remain internal to the bounded exact-call comparison.
+            let diagnostic = "mediaFailure=\(mediaFailure) adapterFailure=\(adapterFailure)"
+                + " sdkCallsSinceOriginal=\(engine.acceptedNetworkCalls.value - sdkCallsBeforeOriginal)"
+                + " admittedCalls=\(calls.admitted.count) finalizedCalls=\(calls.finalized.count)"
+                + " exactCallsMatch=\(exactCallsMatch) admissionOwnersMatch=\(calls.admissionOwnersMatch)"
+                + " finalizationOwnersMatch=\(calls.finalizationOwnersMatch) callEvidenceCapped=\(calls.capped)"
+            #expect(inTime, "Media admission or original callback drain exceeded the existing ten-second bound; first eight admissions (admitted, before-handler-release): \(evidence); \(diagnostic)")
             if let failure { throw failure }
             try originalResult.get()
             #expect(mediaResult?.error == nil && mediaResult?.deferred == false,
-                "Media round failed; first eight admissions (admitted, before-handler-release): \(evidence)")
+                "Media round failed; first eight admissions (admitted, before-handler-release): \(evidence); \(diagnostic)")
             for name in names {
                 let saved = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
                 #expect(saved.acknowledged && saved.ackedRevision == saved.revision && saved.blobPresent,
-                    "Both generated files must reach real Saved commits without another policy wake; first eight admissions (admitted, before-handler-release): \(evidence)")
+                    "Both generated files must reach real Saved commits without another policy wake; first eight admissions (admitted, before-handler-release): \(evidence); \(diagnostic)")
             }
             #expect(try await fixture.core.currentGuard() == guardBefore)
             #expect(await fixture.factory.engines().count == 1)

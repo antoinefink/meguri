@@ -69,3 +69,14 @@ P2: cleanup failure with no original error must propagate. Export91368 applies
 that correction; independent review clears it. Swift92121 then passes seven
 of eight tests. The original wake test fails three assertions; its cause is
 not established. No unchanged rerun. Safe failure evidence is needed next.
+
+Export94446 adds bounded failure tags and call counts to the original test.
+Independent review clears it; assertions and limits remain unchanged.
+Swift96587 passes the diagnostic pair. Swift97781 passes all eight selected
+tests. These passes do not establish the cause of Swift92121. Retain its
+failure and the diagnostics; do not repeat unchanged checks to seek a pass.
+
+Signed Mac Debug build95028 passes at4e6f1024, with zero build warnings.
+A real review starts, reveals, records one rating and advances. Normal quit
+and reopen retain the reduced review count and one recorded answer. Media
+remains pending; no two-device convergence or unit acceptance is claimed.
