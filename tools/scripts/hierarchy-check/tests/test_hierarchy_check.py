@@ -196,6 +196,307 @@ class MissingIdentifier(unittest.TestCase):
         self.assertEqual(hierarchy_check.check(doc(el("button", label="hidden", f=(0, 0, 0, 0)))), [])
 
 
+class NativeSheetGrabber(unittest.TestCase):
+    """Invented trees exercise the public checker, never captured fixtures."""
+
+    def grabber(self):
+        button = el("button", label="Sheet Grabber", f=(302, 410, 36, 20))
+        button["value"] = "Half screen"
+        return button
+
+    def tree(self):
+        grabber = self.grabber()
+        form = el("collectionView", label="Form", f=(80, 460, 480, 400), children=[
+            el("button", "work.sheet.apply", "Apply choice", f=(100, 480, 120, 44)),
+        ])
+        inner = el("other", f=(80, 450, 480, 420), children=[form])
+        content = el("other", f=(60, 440, 520, 440), children=[inner])
+        presentation = el("other", f=(60, 420, 520, 460), children=[content, grabber])
+        dismiss = el("other", "PopoverDismissRegion", f=(0, 0, 640, 960))
+        wrapper = el("other", f=(0, 0, 640, 960), children=[dismiss, presentation])
+        tree = doc(wrapper, window=(0, 0, 640, 960))
+        return tree, dict(grabber=grabber, form=form, inner=inner, content=content,
+                          presentation=presentation, dismiss=dismiss, wrapper=wrapper,
+                          window=tree["root"]["children"][0])
+
+    def assert_missing(self, tree, count=1, label="Sheet Grabber"):
+        issues = hierarchy_check.check(tree)
+        self.assertEqual(len([i for i in issues if i["kind"] == "missing-identifier" and i["label"] == label]), count)
+        return issues
+
+    def current_content_tree(self):
+        tree, p = self.tree()
+        p["form"]["label"] = ""
+        boundary = el("other", "sync.status.popover", f=(80, 455, 480, 410), children=[p["form"]])
+        p["inner"]["children"] = [boundary]
+        p["boundary"] = boundary
+        return tree, p
+
+    def test_exact_named_content_boundary_with_unlabeled_collection_is_supported(self):
+        tree, p = self.current_content_tree()
+        self.assertEqual(hierarchy_check.check(tree), [])
+        p["form"]["children"].append(el("button", label="Choose pattern", f=(100, 550, 120, 44)))
+        self.assertEqual([(i["kind"], i["label"]) for i in hierarchy_check.check(tree)],
+                         [("missing-identifier", "Choose pattern")])
+
+    def test_current_content_requires_the_exact_boundary(self):
+        for key, value in [("identifier", "work.sheet.content"), ("identifier", "sync.status.popoverExtra"),
+                           ("identifier", ""), ("type", "group"), ("label", "Invented content"),
+                           ("value", "Invented value")]:
+            with self.subTest(key=key, value=value):
+                tree, p = self.current_content_tree()
+                p["boundary"][key] = value
+                self.assert_missing(tree)
+
+    def test_current_boundary_requires_its_unlabeled_unidentified_collection(self):
+        for change in ["missing", "wrong-role", "named", "identified", "absent-label", "absent-identifier",
+                       "null-label", "null-identifier", "unrelated-descendant"]:
+            with self.subTest(change=change):
+                tree, p = self.current_content_tree()
+                if change == "missing":
+                    p["boundary"]["children"] = []
+                elif change == "wrong-role":
+                    p["form"]["type"] = "other"
+                elif change == "named":
+                    p["form"]["label"] = "Invented collection"
+                elif change == "identified":
+                    p["form"]["identifier"] = "work.sheet.collection"
+                elif change.startswith("absent-"):
+                    del p["form"][change.removeprefix("absent-")]
+                elif change.startswith("null-"):
+                    p["form"][change.removeprefix("null-")] = None
+                else:
+                    p["boundary"]["children"] = [el("other", "work.sheet.unrelated", f=(80, 455, 480, 410),
+                                                           children=[p["form"]])]
+                self.assert_missing(tree)
+
+    def test_current_boundary_requires_finite_positive_typed_geometry(self):
+        for key, value in [("x", float("nan")), ("y", float("inf")), ("width", 0), ("height", -1),
+                           ("x", "80"), ("x", True)]:
+            with self.subTest(key=key, value=value):
+                tree, p = self.current_content_tree()
+                p["boundary"]["frame"][key] = value
+                self.assert_missing(tree)
+
+    def test_matching_shape_avoids_only_the_grabbers_missing_identifier(self):
+        tree, p = self.tree()
+        self.assertEqual(hierarchy_check.check(tree), [])
+        p["form"]["children"].append(el("button", label="Choose tint", f=(100, 550, 120, 44)))
+        issues = hierarchy_check.check(tree)
+        self.assertEqual([(i["kind"], i["label"]) for i in issues], [("missing-identifier", "Choose tint")])
+        p["grabber"]["value"] = "Another detent"
+        self.assertEqual([(i["kind"], i["label"]) for i in hierarchy_check.check(tree)],
+                         [("missing-identifier", "Choose tint"), ("missing-identifier", "Sheet Grabber")])
+
+    def test_same_control_in_form_content_still_needs_an_identifier(self):
+        tree, p = self.tree()
+        p["presentation"]["children"].remove(p["grabber"])
+        p["form"]["children"].append(p["grabber"])
+        self.assert_missing(tree)
+
+    def test_scrolling_rows_and_bars_anywhere_in_ancestry_fail_closed(self):
+        for role in ["scrollView", "table", "collectionView", "outline", "browser", "webView",
+                     "cell", "tableRow", "outlineRow", "navigationBar", "toolbar"]:
+            with self.subTest(role=role):
+                tree, p = self.tree()
+                p["window"]["children"] = [el(role, f=(0, 0, 640, 960), children=[p["wrapper"]])]
+                self.assert_missing(tree)
+        tree, p = self.tree()
+        p["window"]["children"] = [el("other", label="Form", f=(0, 0, 640, 960), children=[p["wrapper"]])]
+        self.assert_missing(tree)
+
+    def test_ordinary_button_outside_presentation_is_reported(self):
+        self.assertEqual(kinds(self.assert_missing(doc(self.grabber()))), ["missing-identifier"])
+
+    def test_form_must_be_in_a_distinct_wrapped_content_branch(self):
+        for change in ["missing", "wrong-role", "wrong-label", "unwrapped", "grabber-in-branch"]:
+            with self.subTest(change=change):
+                tree, p = self.tree()
+                if change == "missing":
+                    p["inner"]["children"] = []
+                elif change == "wrong-role":
+                    p["form"]["type"] = "other"
+                elif change == "wrong-label":
+                    p["form"]["label"] = "Invented content"
+                elif change == "unwrapped":
+                    p["presentation"]["children"] = [p["form"], p["grabber"]]
+                else:
+                    p["presentation"]["children"].remove(p["grabber"])
+                    p["content"]["children"].append(p["grabber"])
+                self.assert_missing(tree)
+
+    def test_dismiss_region_must_be_the_direct_sibling_of_the_presentation(self):
+        for change in ["missing", "nested", "inside-presentation", "inside-content", "wrong-role", "similar-name"]:
+            with self.subTest(change=change):
+                tree, p = self.tree()
+                if change in ("missing", "nested", "inside-presentation", "inside-content"):
+                    p["wrapper"]["children"].remove(p["dismiss"])
+                if change == "nested":
+                    p["wrapper"]["children"].append(el("other", f=(0, 0, 640, 960), children=[p["dismiss"]]))
+                elif change == "inside-presentation":
+                    p["presentation"]["children"].append(p["dismiss"])
+                elif change == "inside-content":
+                    p["content"]["children"].append(p["dismiss"])
+                elif change == "wrong-role":
+                    p["dismiss"]["type"] = "group"
+                elif change == "similar-name":
+                    p["dismiss"]["identifier"] = "PopoverDismissRegionExtra"
+                self.assert_missing(tree)
+
+    def test_surrounding_containers_require_other_role_valid_frames_and_empty_fields(self):
+        for part in ["presentation", "wrapper", "content", "inner"]:
+            for key in ["identifier", "label", "value"]:
+                for value in ["work.sheet.named", False, 0, [], {}]:
+                    with self.subTest(part=part, key=key, value=value):
+                        tree, p = self.tree()
+                        p[part][key] = value
+                        self.assert_missing(tree)
+                with self.subTest(part=part, key=key, absent=True):
+                    tree, p = self.tree()
+                    del p[part][key]
+                    self.assert_missing(tree)
+            with self.subTest(part=part, role="group"):
+                tree, p = self.tree()
+                p[part]["type"] = "group"
+                self.assert_missing(tree)
+
+    def test_grabber_must_straddle_top_be_narrower_and_share_the_centre(self):
+        for f in [(302, 420, 36, 20), (302, 390, 36, 20), (302, 430, 36, 20),
+                  (302, 400, 36, 20), (60, 410, 520, 20), (50, 410, 540, 20),
+                  (302.51, 410, 36, 20), (301.49, 410, 36, 20)]:
+            with self.subTest(frame=f):
+                tree, p = self.tree()
+                p["grabber"]["frame"] = frame(*f)
+                self.assert_missing(tree)
+        for x in [301.5, 302.5]:
+            with self.subTest(centre_boundary=x):
+                tree, p = self.tree()
+                p["grabber"]["frame"]["x"] = x
+                self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_full_grabber_frame_must_remain_inside_the_window(self):
+        for f in [(303, 0, 337, 960), (0, 411, 640, 549), (0, 0, 337, 960), (0, 0, 640, 429),
+                  (302.1, 0, 337.9, 960), (0, 0, 337.9, 960)]:
+            with self.subTest(window=f):
+                tree, p = self.tree()
+                p["window"]["frame"] = tree["window"] = frame(*f)
+                self.assert_missing(tree)
+        tree, p = self.tree()
+        p["window"]["type"] = "other"
+        self.assert_missing(tree)
+
+    def test_all_evidence_requires_finite_positive_numeric_geometry(self):
+        for part in ["grabber", "presentation", "wrapper", "content", "inner", "form", "dismiss", "window"]:
+            for key, value in [("x", float("nan")), ("y", float("inf")), ("x", float("-inf")),
+                               ("width", float("inf")), ("height", float("inf")), ("x", "302"), ("x", True)]:
+                with self.subTest(part=part, key=key, value=value):
+                    tree, p = self.tree()
+                    p[part]["frame"][key] = value
+                    self.assert_missing(tree)
+            if part != "grabber":
+                for key in ["width", "height"]:
+                    for value in [0, -1, float("nan")]:
+                        with self.subTest(part=part, key=key, value=value):
+                            tree, p = self.tree()
+                            p[part]["frame"][key] = value
+                            self.assert_missing(tree)
+
+    def test_empty_grabber_frames_keep_the_existing_invisible_control_behavior(self):
+        for key in ["width", "height"]:
+            for value in [0, -1, float("nan")]:
+                with self.subTest(key=key, value=value):
+                    tree, p = self.tree()
+                    p["grabber"]["frame"][key] = value
+                    self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_malformed_frames_keep_the_existing_input_error(self):
+        for part in ["grabber", "presentation", "wrapper", "form", "dismiss", "window"]:
+            for value in [None, "broken", []]:
+                with self.subTest(part=part, value=value):
+                    tree, p = self.tree()
+                    p[part]["frame"]["x"] = value
+                    with self.assertRaises(hierarchy_check.InputError):
+                        hierarchy_check.check(tree)
+
+    def test_platform_and_schema_are_explicit_and_supported(self):
+        for platform in [None, "mac", "iOS", "ipados", "", False, []]:
+            with self.subTest(platform=platform):
+                tree, _ = self.tree()
+                tree["platform"] = platform
+                self.assert_missing(tree)
+        tree, _ = self.tree()
+        del tree["platform"]
+        self.assert_missing(tree)
+        for schema in [True, 1.0]:
+            with self.subTest(schema=schema):
+                tree, _ = self.tree()
+                tree["schema"] = schema
+                self.assert_missing(tree)
+        for schema in [None, 0, 2, "1"]:
+            with self.subTest(schema=schema):
+                tree, _ = self.tree()
+                tree["schema"] = schema
+                with self.assertRaises(hierarchy_check.InputError):
+                    hierarchy_check.check(tree)
+        tree, _ = self.tree()
+        del tree["schema"]
+        with self.assertRaises(hierarchy_check.InputError):
+            hierarchy_check.check(tree)
+
+    def test_other_detents_locales_and_malformed_or_absent_values_fail_closed(self):
+        for value in [None, "", "Full screen", "Large", "half screen", "Half screen ", 1, True, [], {}, ["Half screen"]]:
+            with self.subTest(value=value):
+                tree, p = self.tree()
+                p["grabber"]["value"] = value
+                self.assert_missing(tree)
+        tree, p = self.tree()
+        del p["grabber"]["value"]
+        self.assert_missing(tree)
+        for label in ["Poignée de feuille", "sheet grabber", "Sheet Grabber "]:
+            with self.subTest(label=label):
+                tree, p = self.tree()
+                p["grabber"]["label"] = label
+                self.assert_missing(tree, label=label)
+
+    def test_multiple_candidates_including_content_are_ambiguous(self):
+        for branch in ["presentation", "form"]:
+            with self.subTest(branch=branch):
+                tree, p = self.tree()
+                second = self.grabber()
+                second["frame"] = frame(100, 600, 80, 30)
+                p[branch]["children"].append(second)
+                self.assert_missing(tree, count=2)
+
+    def test_nonempty_app_identifiers_still_receive_format_and_duplicate_checks(self):
+        tree, p = self.tree()
+        p["grabber"]["identifier"] = "BadIdentifier"
+        self.assertEqual([(i["kind"], i["identifier"]) for i in hierarchy_check.check(tree)],
+                         [("bad-identifier", "BadIdentifier")])
+        tree, p = self.tree()
+        p["grabber"]["identifier"] = "work.sheet.apply"
+        p["content"]["children"].append(el("button", "work.sheet.apply", "Extra choice", f=(250, 550, 120, 44)))
+        issues = hierarchy_check.check(tree)
+        self.assertEqual(kinds(issues), ["duplicate-identifier"])
+        self.assertEqual(issues[0]["identifier"], "work.sheet.apply")
+        self.assertEqual(len(issues[0]["paths"]), 3)
+
+    def test_no_subtree_is_pruned_from_rows_overlap_or_outside_window_checks(self):
+        tree, p = self.tree()
+        p["form"]["children"].extend([
+            el("cell", label="Row without ID", f=(100, 600, 120, 44)),
+            el("button", "work.sheet.apply", "Duplicate action", f=(250, 600, 120, 44)),
+            el("staticText", "work.sheet.first", "First text", f=(100, 700, 100, 20)),
+            el("staticText", "work.sheet.second", "Second text", f=(120, 705, 100, 20)),
+        ])
+        p["grabber"]["children"] = [el("button", label="Child button", f=(305, 413, 10, 10)),
+                                   el("staticText", "work.sheet.outside", "Outside text", f=(630, 900, 40, 20))]
+        issues = self.assert_missing(tree, count=0)
+        self.assertEqual(kinds(issues), ["duplicate-identifier", "missing-identifier", "missing-identifier",
+                                        "text-outside-window", "text-overlap"])
+        self.assertEqual(sorted(i["label"] for i in issues if i["kind"] == "missing-identifier"),
+                         ["Child button", "Row without ID"])
+
+
 class IdentifierFormat(unittest.TestCase):
     def test_identifiers_follow_area_screen_element_and_an_optional_id(self):
         good = ["home.deckList.row", "home.deckList.row.1700000000000", "review.answer.again", "sample.sheet.timeZone",

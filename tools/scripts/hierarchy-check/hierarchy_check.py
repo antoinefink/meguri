@@ -42,6 +42,7 @@ Exit code: 0 no issue, 1 issues, 2 unreadable input. Issues also go to stderr.
 
 import argparse
 import json
+import math
 import re
 import sys
 
@@ -194,17 +195,91 @@ def describe(e):
     return {"type": e.type, "identifier": e.identifier, "label": e.label, "frame": e.frame, "path": e.path}
 
 
+def native_sheet_grabbers(document, root):
+    """Recognize only the captured English iOS half-screen chrome shape.
+
+    This is combined structural evidence, not framework ownership metadata.
+    The result is used only for missing identifiers; all elements remain in
+    every other check. An exact fabricated tree cannot be distinguished here.
+    """
+    if type(document.get("schema")) is not int or document["schema"] != 1 or document.get("platform") != "ios":
+        return set()
+
+    def geometry(e):
+        # Element accepts numeric strings for ordinary checks. Ownership
+        # evidence must instead have actual finite, positive numeric frames.
+        return (e is not None and all(type(e.frame.get(k)) in (int, float)
+                                     for k in ("x", "y", "width", "height"))
+                and all(math.isfinite(v) for v in (e.x, e.y, e.w, e.h, e.x + e.w, e.y + e.h))
+                and e.w > 0 and e.h > 0)
+
+    def is_unmarked_container(e):
+        return (e is not None and e.type == "other" and geometry(e)
+                and all(k in e.raw and e.raw[k] in (None, "") for k in ("identifier", "label", "value")))
+
+    def candidate(e):
+        return (e.type == "button" and e.visible and e.raw.get("identifier") in (None, "")
+                and e.label == "Sheet Grabber" and e.raw.get("value") == "Half screen")
+
+    def contains_sheet_content(e):
+        if not geometry(e):
+            return False
+        if e.type == "collectionView" and e.label == "Form":
+            return True
+        # This content ID is meaningful beneath an empty-field wrapper.
+        # The surrounding presentation nodes must pass their own checks.
+        if (e.type == "other" and e.identifier == "sync.status.popover"
+                and all(k in e.raw and e.raw[k] in (None, "") for k in ("label", "value"))):
+            return any(c.type == "collectionView" and geometry(c)
+                       and c.raw.get("identifier") == "" and c.raw.get("label") == ""
+                       for c in e.children)
+        return is_unmarked_container(e) and any(contains_sheet_content(c) for c in e.children)
+
+    recognized = set()
+    for e in root.walk():
+        if not candidate(e) or not geometry(e):
+            continue
+        parent = e.parent
+        wrapper = parent.parent if parent else None
+        if not is_unmarked_container(parent) or not is_unmarked_container(wrapper):
+            continue
+        if any(a.type in SCROLLING | ROWS | BARS or a.label == "Form" for a in e.ancestors):
+            continue
+        # Count throughout this presentation, including its content branch:
+        # two otherwise matching controls are ambiguous even if only one has
+        # the expected position at the top edge.
+        if sum(candidate(c) for c in parent.walk()) != 1:
+            continue
+        if not any(c is not e and is_unmarked_container(c) and contains_sheet_content(c) for c in parent.children):
+            continue
+        if not any(c is not parent and c.type == "other" and c.identifier == "PopoverDismissRegion" and geometry(c)
+                   for c in wrapper.children):
+            continue
+        window = next((a for a in reversed(e.ancestors) if a.type == "window"), None)
+        if not geometry(window):
+            continue
+        if not (e.y < parent.y < e.y + e.h and e.w < parent.w
+                and abs((e.x + e.w / 2) - (parent.x + parent.w / 2)) <= EDGE_TOLERANCE
+                and e.x >= window.x and e.y >= window.y
+                and e.x + e.w <= window.x + window.w and e.y + e.h <= window.y + window.h):
+            continue
+        recognized.add(e)
+    return recognized
+
+
 def check(document):
     """The issues in one hierarchy export, as a list of dicts with a `kind`."""
     if not isinstance(document, dict) or document.get("schema") != 1 or not isinstance(document.get("root"), dict):
         raise InputError("not a hierarchy export (schema 1 with a root element)")
     root = Element(document["root"], None, 0)
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
+    sheet_grabbers = native_sheet_grabbers(document, root)
     issues = []
 
     for e in elements:
         if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e.visible and not e.in_system_alert()
-                and not e.is_sidebar_toggle() and not (e.type in ROWS and e.identified_inside())):
+                and not e.is_sidebar_toggle() and e not in sheet_grabbers
+                and not (e.type in ROWS and e.identified_inside())):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
 
