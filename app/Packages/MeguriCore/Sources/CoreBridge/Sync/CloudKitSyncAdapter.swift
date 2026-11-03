@@ -1024,10 +1024,11 @@ public actor CloudKitSyncAdapter {
             guard let execution else { throw BridgeError.cloudPolicy(.staleCommand) }
             try await execution.validate()
             try checkMediaSendOwner(origin, instance: instance)
-            // Manual requests still obey the sync gate, exchange state and
-            // limit of eight active calls. No SDK operation starts on refusal.
-            // A returning sent handler permits another admission attempt;
-            // absent that evidence, retain the upload and report busy.
+            // Manual requests obey the sync gate, exchange state and eight-call
+            // exchange budget, which also counts calls that have returned.
+            // Refused admission starts no SDK operation. A sent handler's return
+            // permits an admission retry; without an active or newly returned
+            // sent handler, retain the upload and report busy.
             guard instance.sentHandlers > 0 || instance.sentHandlerReturns != returned else {
                 throw CloudMediaFailure.busy
             }

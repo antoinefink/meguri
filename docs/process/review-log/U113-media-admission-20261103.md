@@ -54,3 +54,7 @@ build/notes/media-post-admission-cleanup-followup-20261103.md.
 
 Swift77452: all four tests pass; MG still fails the Bool-optional macro warning.
 Export76113 does not resolve that diagnostic. Both failed runs remain retained.
+
+Export79429 uses an explicit unwrap; independent review clears it.
+Swift80509 passes all four tests with no compiler warning. Prior failures stay
+failed. The inherited cleanup follow-up and full batch gate remain open.

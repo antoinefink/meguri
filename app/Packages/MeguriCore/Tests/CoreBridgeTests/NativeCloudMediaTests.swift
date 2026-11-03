@@ -504,8 +504,9 @@ extension EventTests {
                 let running = Task { await executor.execute(resume) }
                 media = running
                 var entries = admissions.makeAsyncIterator()
-                let nextAdmission: Bool? = await entries.next()
-                let admitted = try #require(nextAdmission)
+                guard let admitted = await entries.next() else {
+                    throw CloudMediaFailure.missingReply
+                }
                 try #require(!admitted)
                 try #require(engine.acceptedNetworkCalls.value == calls)
                 if cancel {
