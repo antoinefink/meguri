@@ -60,8 +60,10 @@ nonisolated struct SyncCommandResult: Sendable {
     let error: (any Error)?
     let deferred: Bool
     let accountVerified: Bool
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false) {
+    let mediaCancellation: Bool
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
+        self.mediaCancellation = mediaCancellation
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }

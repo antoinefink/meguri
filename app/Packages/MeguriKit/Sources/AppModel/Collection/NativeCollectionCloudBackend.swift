@@ -220,7 +220,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
 #if canImport(CloudKit)
 extension SyncCommandResult {
     init(_ result: CloudPolicyNativeResult) {
-        self.init(outputs: result.outputs, error: result.error, deferred: result.deferred)
+        self.init(outputs: result.outputs, error: result.error, deferred: result.deferred, mediaCancellation: result.mediaCancellation)
     }
 }
 #endif

@@ -157,6 +157,11 @@ public actor CloudKitSyncAdapter {
     private var sendAdmissionObserver: (@Sendable (Bool) async -> Void)?
     // Observe exact Core call IDs at admission and successful finalization.
     private var sendCallObserver: (@Sendable (String, UInt64, Bool) -> Void)?
+    // Scheduling observation of the first source error, before cleanup awaits.
+    private var sendErrorObserver: (@Sendable () async -> Void)? = nil
+    func setSendErrorObserver(_ observer: (@Sendable () async -> Void)?) {
+        sendErrorObserver = observer
+    }
     private var mediaSendWaits = 0
     func setSendAdmissionObserver(_ observer: (@Sendable (Bool) async -> Void)?) {
         sendAdmissionObserver = observer
@@ -1068,7 +1073,12 @@ public actor CloudKitSyncAdapter {
                 try await operation.drain()
                 if let execution { try await execution.validate() }
             }
-            catch { sendError = error }
+            catch {
+                sendError = error
+                #if DEBUG
+                await sendErrorObserver?()
+                #endif
+            }
             policyOperationOutputs.append(contentsOf: invocationOutputs.take())
 
             if sendError == nil { sendError = instance.mediaSendFailure }

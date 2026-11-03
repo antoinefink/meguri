@@ -117,11 +117,13 @@ public struct CloudPolicyNativeResult: Sendable {
     public let outputs: [CloudPolicyOutput]
     public let error: (any Error)?
     public let deferred: Bool
+    public let mediaCancellation: Bool
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
     public let cleanupInventoryError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil) {
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
+        self.mediaCancellation = mediaCancellation
     }
 }
 public protocol CloudPolicyNativeExecuting: Sendable {

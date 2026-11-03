@@ -365,6 +365,111 @@ extension ReviewCollectionStartupTests {
     }
 }
 
+extension ReviewCollectionStartupTests {
+    @Test(arguments: [false, true])
+    func nativeMediaCancellationQualifierMappingPreservesOriginalResult(qualified: Bool) throws {
+        let original = NSError(domain: "synthetic-media-result", code: 20)
+        let native = CloudPolicyNativeResult(outputs: [.syncNowUnavailable(.paused), .commands([])],
+            error: original, deferred: true, mediaCancellation: qualified)
+        let mapped = SyncCommandResult(native)
+        #expect(mapped.mediaCancellation == qualified)
+        #expect((mapped.error as? NSError) === original)
+        #expect(mapped.deferred && !mapped.accountVerified)
+        try #require(mapped.outputs.count == 2)
+        if case .syncNowUnavailable(.paused) = mapped.outputs[0] {} else { Issue.record("Original unavailable output lost") }
+        if case .commands(let commands) = mapped.outputs[1] { #expect(commands.isEmpty) }
+        else { Issue.record("Original command output lost") }
+        #expect(!CloudPolicyNativeResult(outputs: [], error: nil, deferred: false).mediaCancellation)
+        #expect(!SyncCommandResult(outputs: [], error: nil, deferred: false).mediaCancellation)
+    }
+
+    #if DEBUG
+    @Test(arguments: ["qualifiedCancellation", "unqualifiedCancellation", "genuineError",
+                      "qualifiedGenuineError", "sdkWrapper20", "qualifiedSDKWrapper20"])
+    func mediaCancellationPresentationPreservesOutputsAndOriginalAcknowledgements(tag: String) async throws {
+        try await withShutdownCommands { media, update in
+            let backend = SyncOwnerFake()
+            let original = NSError(domain: "synthetic-media-presentation", code: 20)
+            let qualified = tag == "qualifiedCancellation" || tag == "qualifiedGenuineError" || tag == "qualifiedSDKWrapper20"
+            let cancellation = tag == "qualifiedCancellation" || tag == "unqualifiedCancellation"
+            let wrapper = tag == "sdkWrapper20" || tag == "qualifiedSDKWrapper20"
+            let error: any Error
+            if cancellation {
+                error = CancellationError()
+            } else if wrapper {
+                error = CloudKitSDKOperationFailure(underlying: original, code: 20, retryAfterMilliseconds: nil)
+            } else {
+                error = original
+            }
+            let expectsFailure = tag != "qualifiedCancellation"
+            let acknowledgements = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var mediaExecutions = 0, updateExecutions = 0, mediaACKs = 0, updateACKs = 0
+            var exactExecutions = true, exactACKs = true, originalResult: SyncCommandResult?
+            backend.executeCommand = { command in
+                #expect(!Task.isCancelled && !backend.closed)
+                if command.raw === media.raw {
+                    mediaExecutions += 1
+                    let result = SyncCommandResult(outputs: [.syncNowUnavailable(.paused), .commands([update])],
+                        error: error, deferred: true, mediaCancellation: qualified)
+                    originalResult = result
+                    return result
+                }
+                if command.raw === update.raw {
+                    updateExecutions += 1
+                    return .init(outputs: [.syncNowUnavailable(.notConnected)], error: nil, deferred: false)
+                }
+                exactExecutions = false
+                return .init(outputs: [], error: nil, deferred: false)
+            }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            sync.observeCausalBoundary = { boundary, command in
+                guard case .commandAcknowledgementJoined = boundary else { return }
+                if let command, command.raw === media.raw { mediaACKs += 1 }
+                else if let command, command.raw === update.raw { updateACKs += 1 }
+                else { exactACKs = false }
+                if mediaACKs == 1 && updateACKs == 1 { acknowledgements.continuation.yield(true) }
+            }
+            defer { sync.observeCausalBoundary = nil; acknowledgements.continuation.finish() }
+            do {
+                await sync.preparePlatform(); await sync.completeOpenedHost(generation: 600)
+                await sync.prepareConnectionAuthority()
+                #expect(!sync.operationFailed && sync.failureRevision == 0)
+                backend.nextCommands = [media]
+                sync.receive(.refresh(.cloud))
+                try #require(try await serviceAppSignal(acknowledgements.stream, stage: "media presentation original ACKs"))
+                await sync.waitForInputs()
+                let presented = (failed: sync.operationFailed, revision: sync.failureRevision,
+                    unavailable: sync.syncNowUnavailable, deferred: sync.hasDeferredNativeWork)
+                let drained = await sync.cancelAndDrain()
+                #expect(presented.failed == expectsFailure)
+                #expect(presented.revision == (expectsFailure ? 1 : 0))
+                #expect(presented.unavailable == .notConnected && presented.deferred)
+                #expect(exactExecutions && exactACKs)
+                #expect(mediaExecutions == 1 && updateExecutions == 1 && mediaACKs == 1 && updateACKs == 1)
+                #expect(drained && backend.quiesced && backend.closed && backend.closeCount == 1)
+                let result = try #require(originalResult)
+                #expect(result.mediaCancellation == qualified && result.deferred)
+                if cancellation { #expect(result.error is CancellationError) }
+                else if wrapper {
+                    let preserved = try #require(result.error as? CloudKitSDKOperationFailure)
+                    #expect(preserved.code == 20 && preserved.retryAfterMilliseconds == nil)
+                    #expect((preserved.underlying as? NSError) === original)
+                } else { #expect((result.error as? NSError) === original) }
+                try #require(result.outputs.count == 2)
+                if case .syncNowUnavailable(.paused) = result.outputs[0] {} else { Issue.record("Media unavailable output lost") }
+                if case .commands(let commands) = result.outputs[1] {
+                    let exactFollowup = commands.count == 1 && commands.first?.raw === update.raw
+                    #expect(exactFollowup)
+                } else { Issue.record("Required media follow-up lost") }
+            } catch {
+                _ = await sync.cancelAndDrain()
+                throw error
+            }
+        }
+    }
+    #endif
+}
+
 // The real harness retains its host; only copied, observed opaque handles reach
 // SyncOwnerFake. Its scheduler assertions do not prove native SDK acceptance.
 @MainActor private func withShutdownCommands(
