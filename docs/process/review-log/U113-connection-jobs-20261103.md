@@ -76,3 +76,23 @@ confirms the same short-circuit order and lock lifetime. Core-lint97183 passes
 all four checks, including layering. Core-test97539 passes the exact contention
 regression that exercises the edited hook. The earlier failed lint stays
 recorded. No limit, assertion or runtime guard is weakened.
+
+## Live checks after integration
+
+Personal Mac Release build9523 passes, source bf940b3e. Executable SHA-256:
+443a3a1dc10a366b96afae0b205f71ee0c5999c9d19f9fa7dfada3cbe0dd4435.
+The exact signed development app opens its retained collection. A real Sync Now
+attempt fails; a foreground comparison later returns Could Not Finish Yet.
+Media remains pending. Neither observation is round-trip acceptance.
+
+
+A restricted codesign probe warns that the entitlement blob is invalid.
+Independent host verification of the unchanged hash passes both strict checks
+and both entitlement-display forms, returning the valid signed capabilities.
+The warning is diagnostic-context dependent. No signing change is justified;
+tools/AGENTS.md records the trap.
+
+
+A normal team-signed Mac Debug build is being prepared for a scoped debugger
+observation of the original error class/code. The hardened Release app is not
+modified to permit attachment. The live failure and batch gate remain open.
