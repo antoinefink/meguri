@@ -4,7 +4,7 @@ Spec: engine/jobs
 Requirements: R170 (core side), R171, R1494, R1858, R1860
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Approved 2026-10-27 (R2066) for J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
+Status: Approved 2026-11-03 (R2066) for J2.1.1. J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3 remain approved 2026-10-27 (R2066), with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 Long work in the core runs as jobs (KTD9): a short call starts one and returns its handle at once; the work runs on core-owned threads; its end is one event. This spec also covers the cancel token and the progress sink every long operation takes, and the thread registry every core thread is created through.
 
@@ -34,6 +34,19 @@ Added for CloudKit. J2 does not change for other jobs.
   - jobs, as J1 says, for long core work of the recovery ops: the validation of a staged collection, and the exclusive phase with its safety backup and replace (`sync/cloudkit-recovery#V14.2` steps 5, 7 and 8). Each has a handle, a cancel token, progress and one `JobFinished`.
 - A Sync Now exchange is not a job. It has no `JobHandle` and publishes no `JobFinished`. It is cancelled through `SyncNowCancelled`, and it ends with the `ExchangeEnded` input and its result (`sync/policy#P12`). Background and quit flushes are not jobs either (`sync/policy#P11`).
 - CloudKit work takes no thread of its own in the core; the threads of J6 do not change.
+
+### J2.1.1 Internal policy work and lane contention
+
+J2.1's short-call classification requires bounded work and bounded lock acquisition. The pure policy `step` remains short; its collection-sized projections are separate work.
+
+- A CoreBridge lane never performs collection-sized policy work or waits behind it on the Driver lock. Internal Core calls that can do either use typed jobs on J2's existing pool, except the final enqueue checks below. This covers policy inputs, account and accepted-identity projections, status, Core actions, native admission, exchange capture and completion, readiness, and retained execution capabilities. Moving only Core actions to jobs is insufficient.
+- Subscribe to J1 completion before admission. Start through J2's existing pool, returning a handle and retained typed value without Driver locking or projection work. Read that value after completion. Ordinary policy jobs use no slot; recovery admission remains J3.
+- Retain the original Host, generation and issued command or capability. Revalidate them when the work runs, after queue delay and before mutation or admission. Preserve input and action order, the exact outputs and typed errors, required failure follow-ups, and P4's guard and instance checks. A completed-result read does not revalidate against a newer owner or discard the original outcome.
+- Queued cancellation follows J2. Check cancellation again before the first policy-state or durable mutation. Once effects occur, preserve the actual result and follow-up commands; do not replace them with `Cancelled`. Existing op-specific cancellation and commit rules remain `engine/op-model#O4` and `#O5`. Cancelling an awaiting Swift task alone neither cancels Core work nor discards its result (J4).
+- Register all work for `engine/suspend#S1` and `#S4` cancellation and drain. A listener-setup failure after start explicitly cancels and drains the job. A successful suspend or close leaves no detached work or retained connection in use.
+- Final native enqueue validation remains synchronous, with no intervening application await or fresh owner lookup. Its locks are released before native invocation. An asynchronous job conversion alone does not establish this boundary's responsiveness. Prove that final checks remain short while a projection is held, or obtain a separately reviewed design and any required approval before changing the boundary. This clarification does not reopen capped U114 native repair work.
+
+Focused checks hold a real projection and exercise input, status, admission, readiness and final enqueue checks while unrelated review start/end job admission completes. They also cover queued cancellation, owner close and replacement, exact error and follow-up retention after effects, and listener-setup failure with drain. Preserve all existing readiness conditions, deadlines and error behavior. A Sync Now exchange and background or quit flush remain non-jobs under J2.1; only their internal Core work uses these jobs.
 
 ## J3. Arbitration (C7)
 
