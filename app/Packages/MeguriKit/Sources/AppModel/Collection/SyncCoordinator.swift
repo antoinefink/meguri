@@ -490,6 +490,9 @@ public final class SyncCoordinator {
                     receive(.refresh(.cloud))
                 } else { preview = work }
             } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.connectionPreview, error: error)
+                #endif
                 if expected == generation, revision == hostRevision, !closing, !Task.isCancelled { recordConnectionFailure(error) }
             }
         }
@@ -736,6 +739,9 @@ public final class SyncCoordinator {
                 switch progress { case .progressed: continue; case .idle, .sendEntities: return }
             }
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.record(.ownWork, error: error)
+            #endif
             if expected == generation, !closing, !initialAdoptionCancelled, !(error is CancellationError) {
                 operationFailed = true
                 let failure: CloudConnectionFailure?

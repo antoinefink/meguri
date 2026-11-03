@@ -114,3 +114,22 @@ screen still shows Unknown and Try Again. No collection was adopted. Restricted
 probe18556 could not reach the device service; the host-context check supplies
 the observation. No failed receipt is reclassified. The native witness does
 not establish the cause of this live failure or supply a completed round trip.
+
+
+## Debug failure evidence
+
+Component start:25f0b383. Export19258 adds a DEBUG-only typed classifier.
+Seeded export22661 retains one safe value for the existing error accessibility
+metadata and caps unified-log output at 64 entries. Independent review finds
+one P2: deferred configuration failure names the outer exchange action.
+Export27795 changes that argument to the held action. Recheck finds no P0-P2.
+
+The classifier discards error and action payloads. It uses fixed enum tags and
+a bounded SDK code, with no raw error, description, account or record values.
+The sink runs outside the mutex. Release code and sync decisions are unchanged.
+This is diagnosis support, not a repair of the live transfer or another change
+to the approved Resume contract.
+
+Focused checks: Swift28882 passes 12 tests; Swift30717 passes 18 tests.
+Private28419 and Similarity30026 pass all five source paths.
+The signed live check and batch gate remain pending. No unit is accepted.

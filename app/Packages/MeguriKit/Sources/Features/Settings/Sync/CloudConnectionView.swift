@@ -76,7 +76,7 @@ public struct CloudConnectionView: View {
                     Text(SyncText.value("sync.recovery.error.other"))
                         .accessibilityIdentifier("sync.connect.operationError")
                         #if DEBUG
-                        .accessibilityValue(DebugCloudPreviewProbe.shared.latestTag)
+                        .accessibilityValue(DebugCloudDiagnostics.latestValue ?? DebugCloudPreviewProbe.shared.latestTag)
                         #endif
                 }
             }

@@ -318,6 +318,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             }
             return .init(outputs: outputs, error: nil, deferred: false)
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.record(.policyExecute, action: command.action, error: error)
+            #endif
             // A failed native event transaction may have stopped tracking. Its
             // real projection supplies StopEngine and any other required work.
             if let followup = try? await policy.input(.refresh(.cloud)) { outputs.append(followup) }
@@ -577,7 +580,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                         try await adapter.runPolicyExchange(runtimeID: runtimeID, execution: execution, prepared: preparedExchange)
                     }
                 }
-            } catch { failure = error }
+            } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.policyExchange, action: command.action, error: error)
+                #endif
+                failure = error
+            }
             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
             if captured {
                 outputs.append(try await policy.completeExchange(id))
@@ -594,10 +602,18 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     let configure = Task { try await adapter.executePolicyLifecycle(held.0, execution: held.1, policy: policy) }
                     _ = try await configure.value
                     outputs.append(try await policy.input(.refresh(.cloud)))
-                } catch { if failure == nil { failure = error } }
+                } catch {
+                    #if DEBUG
+                    DebugCloudDiagnostics.record(.policyExchange, action: held.0.action, error: error)
+                    #endif
+                    if failure == nil { failure = error }
+                }
             }
             return .init(outputs: outputs, error: failure, deferred: false)
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.record(.policyExchange, action: command.action, error: error)
+            #endif
             if let reservation { await adapter.releasePolicyExchange(reservation) }
             if let followup = try? await policy.input(.refresh(.cloud)) { outputs.append(followup) }
             return .init(outputs: outputs, error: error, deferred: false)
