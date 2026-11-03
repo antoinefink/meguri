@@ -180,4 +180,71 @@ final class DriveScriptTests: XCTestCase {
         XCTAssertEqual(HierarchyExport.pngPixelWidth(Data(header)), 1206)
         XCTAssertNil(HierarchyExport.pngPixelWidth(Data("not a png at all, really".utf8)))
     }
+
+    func testPreservePolicyRequiresPhysicalDebugDevelopmentProduct() throws {
+        let environment = ["MEGURI_DRIVE_KEEP_APP_RUNNING": "1"]
+        XCTAssertTrue(try DriveAppLifecycle.preserve(environment, physical: true, configuration: .debug,
+                                                     bundleIdentifier: "com.antoinefink.meguri.dev"))
+        for configuration in BuildUnderTest.Configuration.allCases where configuration != .debug {
+            XCTAssertThrowsError(try DriveAppLifecycle.preserve(environment, physical: true,
+                configuration: configuration, bundleIdentifier: "com.antoinefink.meguri.dev"))
+        }
+        XCTAssertThrowsError(try DriveAppLifecycle.preserve(environment, physical: false, configuration: .debug,
+                                                            bundleIdentifier: "com.antoinefink.meguri.dev"))
+        XCTAssertThrowsError(try DriveAppLifecycle.preserve(environment, physical: true, configuration: .debug,
+                                                            bundleIdentifier: "com.antoinefink.meguri"))
+        XCTAssertFalse(try DriveAppLifecycle.preserve([:], physical: true, configuration: .debug,
+                                                      bundleIdentifier: "com.antoinefink.meguri.dev"))
+        refused(["MEGURI_DRIVE_KEEP_APP_RUNNING": "1"], .policy)
+        refused(["MEGURI_DRIVE_KEEP_APP_RUNNING": "unknown"], .policy)
+        var nonphysical = inline(Data(#"{"name":"x","steps":[{"launch":{}}]}"#.utf8))
+        nonphysical["MEGURI_DRIVE_KEEP_APP_RUNNING"] = "1"
+        XCTAssertThrowsError(try DriveScriptInput.load(nonphysical, physical: false))
+    }
+
+    func testPreserveEveryLaunchActivatesWithoutStateOrLaunchFallback() {
+        var calls: [String] = []
+        // Includes first/later launches and absent/unknown state: state is not
+        // an input to this policy and cannot select a destructive fallback.
+        for _ in 0..<4 {
+            DriveAppLifecycle.start(preserve: true, activate: { calls.append("activate") }, launch: { calls.append("launch") })
+        }
+        XCTAssertEqual(calls, Array(repeating: "activate", count: 4))
+        DriveAppLifecycle.start(preserve: false, activate: { calls.append("activate") }, launch: { calls.append("launch") })
+        XCTAssertEqual(calls.last, "launch")
+    }
+
+    func testPreserveCleanupRetainsTargetOnSuccessStepAndCaptureFailure() {
+        enum SyntheticFailure: Error { case step, capture }
+        for preserve in [false, true] {
+            for failure in [nil, SyntheticFailure.step, .capture] {
+                var terminations = 0
+                func complete() throws {
+                    defer { DriveAppLifecycle.finish(preserve: preserve) { terminations += 1 } }
+                    if let failure { throw failure }
+                }
+                if failure != nil {
+                    XCTAssertThrowsError(try complete())
+                } else {
+                    XCTAssertNoThrow(try complete())
+                }
+                XCTAssertEqual(terminations, preserve ? 0 : 1)
+            }
+        }
+    }
+
+    @MainActor
+    func testPreservationIntentCannotClaimActivationOrContinuity() throws {
+        let log = AgentDriver.Log(script: "physical-drive", path: "", platform: "ios", kept_running: true)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(log)) as? [String: Any])
+        XCTAssertEqual(object["kept_running"] as? Bool, true)
+        XCTAssertEqual(object["activated_existing"] as? Bool, false)
+        XCTAssertEqual(object["activation_completed"] as? Bool, false)
+        var activated = log
+        activated.activation_completed = true
+        let observation = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(activated)) as? [String: Any])
+        XCTAssertEqual(observation["activation_completed"] as? Bool, true)
+        XCTAssertEqual(observation["activated_existing"] as? Bool, false)
+        XCTAssertNil(object["continuity"])
+    }
 }

@@ -3047,6 +3047,7 @@ import base64, os
 from pathlib import Path
 payload = base64.b64decode(os.environ['TEST_RUNNER_MEGURI_DRIVE_SCRIPT_BASE64'], validate=True)
 assert payload == (Path(os.environ['MG_RUN_DIR']) / 'physical-script.json').read_bytes()
+assert os.environ['TEST_RUNNER_MEGURI_DRIVE_KEEP_APP_RUNNING'] == ('1' if os.environ.get('FX_PRESERVE_FIXTURE') else '0')
 # The original file changing after validation cannot change the delivered bytes.
 if os.environ.get('FX_MUTATE_SCRIPT'):
     Path(os.environ['FX_DRIVE_SCRIPT']).write_text('changed source')
@@ -3055,6 +3056,11 @@ PY
   [ "$?" -eq 0 ] || return 2
   echo inline-transport-verified >>"$STUB_LOG"
   fx_original_test "$@"
+  local rc=$?
+  if [ "${FX_PRESERVE_CASE:-}" = transport ]; then
+    echo 'Connection lost to selected device' >>"$1.log"
+  fi
+  return "$rc"
 }
 mg_drive__export_attachments() {
   echo drive-export >>"$STUB_LOG"
@@ -3065,7 +3071,9 @@ from pathlib import Path
 import sys
 out = Path(sys.argv[1])
 mode = os.environ.get('FX_DRIVE_CASE', '')
-log = {'script':'physical-inspect','path':'','platform':'ios','steps':[]}
+log = {'script':'physical-drive','path':'','platform':'ios','steps':[],
+       'kept_running':bool(os.environ.get('FX_PRESERVE_FIXTURE')),
+       'activation_completed':bool(os.environ.get('FX_PRESERVE_FIXTURE'))}
 attachments = []
 for index, kind, phase in [(1, 'launch', 'after'), (2, 'snapshot', 'initial')]:
     name = f'drive-{index:02}-{kind}-{phase}'
@@ -3108,9 +3116,298 @@ FAKES
 
 physical_drive() { mg drive "$FX_DRIVE_SCRIPT" --physical-device "$PHONE" --platform iphone --config Debug "$@"; }
 
+# Exercise the real prepare/admit/complete helpers with synthetic public-tool
+# responses; the Python suite separately checks sealed products and missing proof.
+physical_preservation_facts() {
+  physical_drive_facts
+  export FX_PRESERVE_FIXTURE=1 FX_REAL_PYTHON="$(command -v python3)"
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKES'
+mg_app_input_digest() { printf '%064d\n' 0; }
+FAKES
+  cat >"$BIN/python3" <<'WRAPPER'
+#!/bin/bash
+if [ "$1 $2" = '-B -I' ] && [[ "$3" == */tools/scripts/physical-drive.py ]]; then
+  exec "$FX_REAL_PYTHON" -B - "$@" <<'PYCODE'
+import importlib.util, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('physical', sys.argv[3])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.argv = sys.argv[3:]
+action = sys.argv[1]
+root = Path(sys.argv[sys.argv.index('--root') + 1])
+with open(os.environ['STUB_LOG'], 'a') as log:
+    log.write('physical-helper ' + action + '\n')
+base = root / 'build/app/DerivedData/Build/Products'
+runner = base / 'Debug-iphoneos/MeguriUITests-Runner.app'
+artifacts = {'products': {kind: {'path': str(path), 'build': '1'} for kind, path in (
+    ('app', base / 'Debug-iphoneos/Meguri.app'), ('runner', runner),
+    ('test', runner / 'PlugIns/MeguriUITests.xctest'))},
+    'xctestrun': str(base / 'Meguri_UI_iphoneos27.0-arm64.xctestrun')}
+generated = {'MeguriUITests': {'BlueprintName':'MeguriUITests','IsUITestBundle':True,
+    'TestHostBundleIdentifier':module.RUNNER, 'ProductModuleName':'MeguriUITests',
+    'TestingEnvironmentVariables':{'SYNTHETIC_METADATA':'retained'}}}
+module.local_artifacts = lambda *_: (artifacts, generated)
+def query(device, output, arguments):
+    case = os.environ.get('FX_PRESERVE_CASE', '')
+    if arguments[:3] == ['device','install','app']:
+        with open(os.environ['STUB_LOG'], 'a') as log: log.write('bootstrap-install\n')
+        return {}
+    if arguments[:3] == ['device','process','launch']:
+        with open(os.environ['STUB_LOG'], 'a') as log: log.write('normal-final-launch\n')
+        return {'process':{'processIdentifier':17}}
+    if arguments[:3] == ['device','info','apps']:
+        identifier = module.RUNNER if module.RUNNER in arguments[-1] else module.APP
+        url = 'file:///private/synthetic/' + ('Runner.app/' if identifier == module.RUNNER else 'Meguri.app/')
+        if action == 'complete' and case == 'runner-changed' and identifier == module.RUNNER:
+            url = 'file:///private/replaced/Runner.app/'
+        return {'apps':[{'bundleIdentifier':identifier,'bundleVersion':'1','builtByDeveloper':True,'url':url}]}
+    if arguments[:3] == ['device','info','processes']:
+        if action == 'complete' and case == 'process-missing': return {'runningProcesses':[]}
+        return {'runningProcesses':[{'processIdentifier':17,'executable':'file:///private/synthetic/Meguri.app/Meguri'}]}
+    raise AssertionError('unexpected synthetic query')
+module.device_query = query
+result = module.main()
+# Faults occur after the real completion helper succeeds, at the publication
+# boundary. They must not be mistaken for successful but null jq extractions.
+if action == 'complete' and result == 0:
+    case = os.environ.get('FX_PUBLICATION_CASE', '')
+    evidence = Path(sys.argv[sys.argv.index('--output') + 1]) / 'evidence.json'
+    if case == 'missing-evidence': evidence.unlink()
+    elif case == 'invalid-json': evidence.write_text('PRIVATE_COMPLETION_SENTINEL')
+    elif case == 'empty-evidence': evidence.write_text('')
+    elif case == 'null-evidence': evidence.write_text('null')
+    elif case == 'multiple-evidence': evidence.write_text(evidence.read_text() + '\nnull')
+    elif case in ('missing-field', 'wrong-type', 'unproved-completion', 'unknown-continuity'):
+        value = module.read_json(evidence)
+        if case == 'missing-field': del value['continuity']
+        elif case == 'wrong-type': value['activated_existing'] = 'true'
+        elif case == 'unproved-completion': value['installed_test_bundle_verified'] = False
+        elif case == 'unknown-continuity': value['continuity']['status'] = 'unknown'
+        evidence.write_text(module.json.dumps(value))
+sys.exit(result)
+PYCODE
+fi
+exec "$FX_REAL_PYTHON" "$@"
+WRAPPER
+  chmod +x "$BIN/python3"
+  # The production physical guard reads this generated development identity.
+  mg run --physical-device "$PHONE" --platform iphone --config Debug
+  [ "$status" -eq 0 ]
+  called '^bootstrap-install$'
+  called '^normal-final-launch$'
+  : >"$STUB_LOG"
+}
+
+# Capture the receipt inputs before publication, then inject only the requested
+# synthetic I/O/export fault. All test execution and completion remain real seams.
+physical_publication_facts() {
+  physical_preservation_facts
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKES'
+eval "$(declare -f mg_drive__job | sed '1s/mg_drive__job/fx_publication_original_job/')"
+mg_drive__job() {
+  fx_publication_original_job "$@"
+  jq -s '{total:0, passed:0, failed:0, skipped:0} + (add // {})' "$MG_STATE/counts.jsonl" >"$MG_RUN_DIR/pre-completion-counts.json"
+  jq -s '.' "$MG_STATE/failures.jsonl" >"$MG_RUN_DIR/pre-completion-failures.json"
+  FX_PUBLICATION_READY=1
+  case "${FX_PUBLICATION_CASE:-}" in
+    merge) printf 'null\n' >"$MG_RUN_DIR/manifest.json" ;;
+    detail-parse)
+      jq '.steps = null' "$MG_RUN_DIR/manifest.json" >"$MG_RUN_DIR/synthetic-manifest.json"
+      command mv "$MG_RUN_DIR/synthetic-manifest.json" "$MG_RUN_DIR/manifest.json"
+      ;;
+  esac
+}
+mv() {
+  if [ "${FX_PUBLICATION_CASE:-}" = rename ] && [ "$1" = "$MG_RUN_DIR/manifest-completed.json" ]; then
+    echo completion-rename-refused >>"$STUB_LOG"
+    return 1
+  fi
+  command mv "$@"
+}
+eval "$(declare -f mg_detail | sed '1s/mg_detail/fx_publication_original_detail/')"
+mg_detail() {
+  if [ "${FX_PUBLICATION_READY:-0}" = 1 ]; then
+    case "${FX_PUBLICATION_CASE:-}/$1" in
+      detail-drive/drive|detail-activation/activated_existing|detail-continuity/continuity)
+        echo completion-detail-refused >>"$STUB_LOG"
+        return 1
+        ;;
+    esac
+  fi
+  fx_publication_original_detail "$@"
+}
+FAKES
+}
+
+physical_publication_failed() {
+  [ "$status" -ne 0 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[] | select(.id == "physical-completion-publication")] | length')" -eq 1 ]
+  local dir="${result%/result.json}"
+  jq -e --slurpfile counts "$dir/pre-completion-counts.json" \
+    --slurpfile failures "$dir/pre-completion-failures.json" '
+    .summary == $counts[0] and
+    .failures[:($failures[0] | length)] == $failures[0] and
+    (.failures | length) == (($failures[0] | length) + 1)' "$result"
+  [ -f "$dir/physical/admission.json" ]
+  [ -f "$dir/physical-completion.log" ]
+  [ -f "$dir/drive-log.json" ]
+  called '^physical-helper complete$'
+  not_called 'build-for-testing|bootstrap-install|normal-final-launch'
+  [[ "$output$stderr$(cat "$result")" != *PRIVATE_COMPLETION_SENTINEL* ]]
+}
+
+@test "physical preservation completion rename failure fails the receipt and retains earlier counts failures and private evidence" {
+  physical_publication_facts
+  local mode dir
+  for mode in '' step-failed; do
+    FX_PUBLICATION_CASE=rename FX_DRIVE_CASE="$mode" physical_drive --keep-app-running
+    physical_publication_failed
+    dir="${result%/result.json}"
+    [ -f "$dir/physical/evidence.json" ]
+    [ -f "$dir/manifest-completed.json" ]
+    jq -e '.activated_existing == false and .continuity == null' "$dir/manifest.json"
+    jq -e '.activated_existing == true and .continuity.status == "verified"' "$dir/manifest-completed.json"
+    if [ "$mode" = step-failed ]; then
+      [ "$(jq 'length' "$dir/pre-completion-failures.json")" -gt 0 ]
+      [ "$(field .summary.failed)" -gt 0 ]
+    fi
+  done
+  called '^completion-rename-refused$'
+}
+
+@test "physical preservation completion missing malformed or incomplete evidence cannot pass despite helper success" {
+  physical_publication_facts
+  local mode
+  for mode in missing-evidence invalid-json empty-evidence null-evidence multiple-evidence \
+      missing-field wrong-type unproved-completion unknown-continuity; do
+    FX_PUBLICATION_CASE="$mode" physical_drive --keep-app-running
+    physical_publication_failed
+    [ "$(field .details.activated_existing)" = false ]
+    [ "$(field .details.continuity)" = unknown ]
+  done
+}
+
+@test "physical preservation completion merge parse and refreshed detail export failures fail the receipt" {
+  physical_publication_facts
+  local mode
+  for mode in merge detail-parse detail-drive detail-activation detail-continuity; do
+    FX_PUBLICATION_CASE="$mode" physical_drive --keep-app-running
+    physical_publication_failed
+    [ -f "${result%/result.json}/physical/evidence.json" ]
+  done
+  called '^completion-detail-refused$'
+}
+
+@test "physical preservation executes installed destination artifacts and completes both brackets without preparation" {
+  physical_preservation_facts
+  physical_drive --keep-app-running
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.kept_running')" = true ]
+  [ "$(field '.details.activated_existing')" = true ]
+  [ "$(field '.details.continuity')" = verified ]
+  [ "$(field '.details.drive.device')" = null ]
+  called '^physical-helper admit$'
+  called '^physical-helper complete$'
+  called '^xcodebuild test-without-building -xctestrun .*physical/destination.xctestrun -destination platform=iOS,id='
+  not_called 'build-for-testing|bootstrap-install|normal-final-launch|allowProvisioning| -project | -scheme | -testPlan |^(lint|xcframework|sim-|vm-|open)'
+  local destination="${result%/result.json}/physical/destination.xctestrun"
+  "$FX_REAL_PYTHON" - "$destination" <<'PYCODE'
+import plistlib, sys
+with open(sys.argv[1], 'rb') as stream: target = plistlib.load(stream)['MeguriUITests']
+assert target['UseDestinationArtifacts'] is True
+assert target['TestBundleDestinationRelativePath'] == '__TESTHOST__/PlugIns/MeguriUITests.xctest'
+assert target['TestingEnvironmentVariables'] == {'SYNTHETIC_METADATA':'retained'}
+assert not any(k in target for k in ('TestBundlePath','TestHostPath','UITargetAppPath'))
+PYCODE
+  # A subsequent inspection still uses the original normal-launch witness.
+  physical_drive --keep-app-running
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.continuity')" = verified ]
+  [[ "$stderr" != *"$PHONE"* ]]
+  [[ "$stderr" != *'/private/synthetic'* ]]
+}
+
+@test "physical preservation retains continuity after a failed selected step capture hierarchy or XCTest without passing the drive" {
+  physical_preservation_facts
+  local mode
+  for mode in step-failed missing-capture hierarchy-failure; do
+    FX_DRIVE_CASE="$mode" physical_drive --keep-app-running
+    [ "$status" -ne 0 ]
+    [ "$(field '.details.continuity')" = verified ]
+    [ "$(field '.details.activated_existing')" = true ]
+  done
+  echo '{"result":"Failed","passedTests":0,"failedTests":1,"skippedTests":0}' >"$FX_SUMMARY"
+  test_tree '[{nodeType:"Test Case",nodeIdentifier:"AgentDriverTests/testDriveScript()",result:"Failed"}]'
+  FX_XCODE_RC=1 physical_drive --keep-app-running
+  [ "$status" -ne 0 ]
+  [ "$(field '.details.continuity')" = verified ]
+  called '^physical-helper complete$'
+  not_called 'build-for-testing|bootstrap-install|normal-final-launch'
+}
+
+@test "physical preservation cannot pass missing completion process changed runner installation or interrupted transport" {
+  physical_preservation_facts
+  local mode
+  for mode in process-missing runner-changed transport; do
+    FX_PRESERVE_CASE="$mode" physical_drive --keep-app-running
+    [ "$status" -ne 0 ]
+    [ "$(field '.details.activated_existing')" = false ]
+    [ "$(field '.details.continuity')" != verified ]
+  done
+  not_called 'build-for-testing|bootstrap-install|normal-final-launch'
+}
+
+@test "physical preservation public metadata destination contract and continuity seam tests" {
+  run python3 -B "$SB/tools/tests/physical_drive_test.py"
+  [ "$status" -eq 0 ]
+}
+
+@test "physical preservation rejects unsupported opt-ins and launch policy before any work" {
+  physical_drive_facts
+  local args
+  for args in '--platform mac' '--config Profile' '--record' '--device fake'; do
+    : >"$STUB_LOG"
+    physical_drive --keep-app-running $args
+    [ "$status" -ne 0 ]
+    not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild|xcrun)'
+  done
+  mg drive "$FX_DRIVE_SCRIPT" --keep-app-running
+  [ "$status" -ne 0 ]
+  mg run --keep-app-running --physical-device "$PHONE"
+  [ "$status" -ne 0 ]
+  printf '%s\n' '{"name":"x","steps":[{"launch":{"arguments":[]}}]}' >"$FX_DRIVE_SCRIPT"
+  physical_drive --keep-app-running
+  [ "$status" -ne 0 ]
+  not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild|xcrun)'
+}
+
+@test "physical preservation missing trusted preparation refuses without build installation or runner" {
+  physical_drive_facts
+  physical_drive --keep-app-running
+  [ "$status" -ne 0 ]
+  [ "$(field '.failures[0].id')" = physical-preservation ]
+  [ "$(field '.details.kept_running')" = true ]
+  [ "$(field '.details.activated_existing')" = false ]
+  [ "$(field '.details.continuity')" = unknown ]
+  not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild|xcrun)'
+  [[ "$stderr" != *"$PHONE"* ]]
+  [[ "$stderr" != *physical-inspect* ]]
+}
+
+@test "physical normal run refuses launch overrides before discovery or build" {
+  local args
+  for args in '--route sample/sheet' '--window-size default' '-- -MeguriFixture private'; do
+    mg run --physical-device "$PHONE" --platform iphone --config Debug $args
+    [ "$status" -ne 0 ]
+    not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild|xcrun)'
+  done
+}
+
 @test "physical drive routes frozen inline bytes through team Debug and exact selected test without VM or simulator" {
   physical_drive_facts
-  FX_MUTATE_SCRIPT=1 TEST_RUNNER_MEGURI_DRIVE_SCRIPT=/private/host-path physical_drive
+  FX_MUTATE_SCRIPT=1 TEST_RUNNER_MEGURI_DRIVE_KEEP_APP_RUNNING=1 TEST_RUNNER_MEGURI_DRIVE_SCRIPT=/private/host-path physical_drive
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
   [ "$(field .details.drive.hierarchy_checked)" = true ]

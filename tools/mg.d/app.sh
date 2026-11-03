@@ -15,7 +15,7 @@
 mg_job build-app host mg_build_app \
   "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI|CloudAgent] [--standalone|--personal-preview] (lint-ui first, core XCFramework; default build-for-testing with UI plan; CloudAgent: Debug only, no previews; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; previews never launch)"
 mg_job run host mg_run \
-  "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app (Debug only) runs hidden for N s (5), out of the Dock and never active (checked with lsappinfo every second), and quits"
+  "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug and a normal launch without overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
@@ -175,8 +175,13 @@ mg_app_build_action() {
     '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
     [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
-    mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
-      "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
+    if [ "$platform" = ios-device ]; then
+      # Signing diagnostics can include selected-device identities and paths.
+      mg_failure build "physical development build failed; diagnostics remain in the private build log"
+    else
+      mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
+        "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
+    fi
     mg_message "$MG_JOB: the $platform $config build failed; see $log"
     mg_status fail
     return 1
@@ -548,13 +553,28 @@ mg_app_xcodebuild_test() {
     [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 4
     [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 2
   else
-    # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
-    # and, on the Mac, are a sysdiagnose of the user's machine.
-    xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme "${MG_APP_TEST_SCHEME:-Meguri}" \
-      -testPlan "${MG_APP_TEST_PLAN:-UI}" -configuration "$config" \
-      -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
-      ${physical_args[0]+"${physical_args[@]}"} "$@" >"$prefix.log" 2>&1
-    rc=$?
+    # Destination artifacts reuse only the admitted installed runner/app. This
+    # invocation has no project, scheme, build settings or provisioning updates.
+    if [ -n "${MG_DRIVE_DESTINATION_XCTESTRUN:-}" ]; then
+      if [ "$platform" != ios-device ] || [ "$config" != Debug ] ||
+          [ "$MG_DRIVE_DESTINATION_XCTESTRUN" != "$MG_RUN_DIR/physical/destination.xctestrun" ]; then
+        mg_failure physical-preservation "destination artifact selection refused"
+        return 2
+      fi
+      xcodebuild test-without-building -xctestrun "$MG_DRIVE_DESTINATION_XCTESTRUN" \
+        -destination "$dest" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
+        -parallel-testing-enabled NO -destination-timeout 60 -test-timeouts-enabled YES \
+        "$@" >"$prefix.log" 2>&1
+      rc=$?
+    else
+      # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
+      # and, on the Mac, are a sysdiagnose of the user's machine.
+      xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme "${MG_APP_TEST_SCHEME:-Meguri}" \
+        -testPlan "${MG_APP_TEST_PLAN:-UI}" -configuration "$config" \
+        -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
+        ${physical_args[0]+"${physical_args[@]}"} "$@" >"$prefix.log" 2>&1
+      rc=$?
+    fi
     mg_artifact log "$prefix.log" "xcodebuild test ($platform)"
   fi
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
@@ -1088,7 +1108,14 @@ mg_run() {
     esac
   done
   mg_drive__args ${args[0]+"${args[@]}"} || return 0
-  [ "${#MG_D_POSITIONAL[@]}" -eq 0 ] || { mg_drive__usage "unexpected argument '${MG_D_POSITIONAL[0]}'"; return 0; }
+  [ "${#MG_D_POSITIONAL[@]}" -eq 0 ] || { mg_drive__usage "unexpected argument"; return 0; }
+  if [ -n "$MG_D_PHYSICAL" ]; then
+    [ -z "$window" ] && [ -z "$MG_D_ROUTE" ] && [ "${#MG_D_REST[@]}" -eq 0 ] || {
+      mg_drive__usage "physical run requires a normal launch without window, route or raw launch overrides"; return 0;
+    }
+    mg_run__physical "$MG_D_PHYSICAL" "$MG_D_KIND"
+    return 0
+  fi
   local launch=(-ApplePersistenceIgnoreState YES)
   [ -z "$MG_D_ROUTE" ] || launch=("${launch[@]}" -MeguriRoute "$MG_D_ROUTE")
   if [ -n "$window" ]; then
@@ -1153,6 +1180,36 @@ mg_run() {
   mg_detail udid "$(jq -n --arg u "$udid" '$u')"
   mg_detail pid "$(jq -n --arg p "$pid" '$p')"
   mg_message "run: Meguri ($MG_D_CONFIG) runs on $udid (pid $pid)$([ -n "$MG_D_UDID" ] || echo "; the simulator stays leased: tools/mg sim release $udid when done")"
+  mg_status pass
+}
+
+# Normal preparation is separate from preservation: a build, installation and
+# development-app restart are authorized here, never in --keep-app-running.
+mg_run__physical() {
+  local device="$1" kind="$2" source after xctestrun MG_UI_PHYSICAL_DEVICE=""
+  mg_ui_test__physical_check "$device" "$kind" || return 0
+  mg_host_lease --no-session || return 0
+  mg_ui_test__physical_check "$device" "$kind" || return 0
+  source="$(mg_app_input_digest)"
+  [ -n "$source" ] || { mg_failure physical-source "development source evidence unavailable"; mg_status fail; return 0; }
+  export MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
+  mg_app_build ios-device Debug || return 0
+  after="$(mg_app_input_digest)"
+  [ "$source" = "$after" ] || { mg_failure physical-source "development sources changed during preparation"; mg_status fail; return 0; }
+  xctestrun="$(MG_APP_TEST_SCHEME=Meguri mg__vm_xctestrun UI iphoneos Debug)"
+  if [ -z "$xctestrun" ] || ! python3 -B -I "$MG_TOOLS/scripts/physical-drive.py" prepare --root "$MG_ROOT" \
+      --output "$MG_RUN_DIR/physical" --device "$device" --source "$source" --xctestrun "$xctestrun" \
+      >"$MG_RUN_DIR/physical-preparation.log" 2>&1 || [ "$source" != "$(mg_app_input_digest)" ]; then
+    mg_failure physical-preparation "normal physical development preparation failed: require matching signed Debug products, targeted public installation metadata and the launched development process; see private build evidence"
+    mg_message "run: physical development preparation failed; no fallback"
+    mg_status fail
+    return 0
+  fi
+  mg_artifact json "$MG_RUN_DIR/physical/preparation.json" "private selected development app preparation"
+  mg_artifact json "$MG_RUN_DIR/physical/install-witness.json" "private sealed runner bootstrap witness"
+  mg_detail normal_launch_verified true
+  mg_detail continuity '"unknown"'
+  mg_message "run: signed Debug development app launched normally on the selected physical device; preservation remains unproved"
   mg_status pass
 }
 

@@ -30,6 +30,11 @@ enum DriveScriptInput {
     }
 
     static func load(_ environment: [String: String], physical: Bool = physicalDevice) throws -> Self? {
+        if let keep = environment["MEGURI_DRIVE_KEEP_APP_RUNNING"] {
+            guard keep == "0" || (keep == "1" && physical && environment["MEGURI_DRIVE_SCRIPT_BASE64"] != nil) else {
+                throw Failure.policy
+            }
+        }
         let path = environment["MEGURI_DRIVE_SCRIPT"]
         let encoded = environment["MEGURI_DRIVE_SCRIPT_BASE64"]
         if path != nil, encoded != nil { throw Failure.conflicting }
@@ -67,6 +72,28 @@ enum DriveScriptInput {
     }
 }
 
+/// Harness policy only. Activation never falls back to launch, including when
+/// XCTest cannot determine the target's state. Public process evidence belongs
+/// to MG; a successful activate() alone cannot set activated_existing.
+enum DriveAppLifecycle {
+    static func preserve(_ environment: [String: String], physical: Bool,
+                         configuration: BuildUnderTest.Configuration, bundleIdentifier: String) throws -> Bool {
+        guard environment["MEGURI_DRIVE_KEEP_APP_RUNNING"] == "1" else { return false }
+        guard physical, configuration == .debug, bundleIdentifier == "com.antoinefink.meguri.dev" else {
+            throw DriveScriptInput.Failure.policy
+        }
+        return true
+    }
+
+    static func start(preserve: Bool, activate: () -> Void, launch: () -> Void) {
+        if preserve { activate() } else { launch() }
+    }
+
+    static func finish(preserve: Bool, terminate: () -> Void) {
+        if !preserve { terminate() }
+    }
+}
+
 /// Runs one agent drive script (U8, R1961, R1965). `tools/mg drive` passes the
 /// path or private inline bytes through the test-runner environment
 /// (`TEST_RUNNER_` prefix); without a requested input the test skips, so the UI
@@ -89,7 +116,9 @@ final class AgentDriverTests: XCTestCase {
         do { input = try DriveScriptInput.load(ProcessInfo.processInfo.environment) }
         catch {
             let category = (error as? DriveScriptInput.Failure)?.rawValue ?? "drive input refused"
-            let log = AgentDriver.Log(script: "physical-drive", path: "", platform: AgentDriver.platform, error: category)
+            let log = AgentDriver.Log(script: "physical-drive", path: "", platform: AgentDriver.platform,
+                                      kept_running: ProcessInfo.processInfo.environment["MEGURI_DRIVE_KEEP_APP_RUNNING"] == "1",
+                                      error: category)
             let attachment = XCTAttachment(data: try JSONEncoder().encode(log), uniformTypeIdentifier: "public.json")
             attachment.name = "drive-log.json"
             attachment.lifetime = .keepAlways
@@ -105,7 +134,11 @@ final class AgentDriverTests: XCTestCase {
         case let .path(url):
             AgentDriver(build: try BuildUnderTest.current(), test: self).run(scriptAt: url)
         case let .inline(script):
-            AgentDriver(build: try BuildUnderTest.current(), test: self, privateInput: true).run(script)
+            let build = try BuildUnderTest.current()
+            let preserve = try DriveAppLifecycle.preserve(ProcessInfo.processInfo.environment,
+                physical: DriveScriptInput.physicalDevice, configuration: build.configuration,
+                bundleIdentifier: try build.bundleIdentifier)
+            AgentDriver(build: build, test: self, privateInput: true, preserve: preserve).run(script)
         }
     }
 
@@ -215,6 +248,11 @@ final class AgentDriver {
         var script: String
         var path: String
         var platform: String
+        var kept_running = false
+        var activated_existing = false
+        // XCTest activation completed; MG combines this with physical
+        // process/installation brackets to attest activated_existing.
+        var activation_completed = false
         var steps: [StepRecord] = []
         var error: String?
     }
@@ -230,6 +268,7 @@ final class AgentDriver {
 
     private let build: BuildUnderTest
     private let privateInput: Bool
+    private let preserve: Bool
     private unowned let test: XCTestCase
     /// Fixed-rate frames around marked steps (`FrameSampler`).
     private let sampleFrames = ProcessInfo.processInfo.environment["MEGURI_DRIVE_FRAMES"] == "1"
@@ -245,8 +284,9 @@ final class AgentDriver {
         #endif
     }
 
-    init(build: BuildUnderTest, test: XCTestCase, privateInput: Bool = false) {
+    init(build: BuildUnderTest, test: XCTestCase, privateInput: Bool = false, preserve: Bool = false) {
         self.privateInput = privateInput
+        self.preserve = preserve
         self.build = build
         self.test = test
         log = Log(script: "", path: "", platform: Self.platform)
@@ -268,7 +308,8 @@ final class AgentDriver {
     /// Runs the steps with a fresh log. The app the driver launched stays
     /// with it from one run to the next.
     func run(_ script: DriveScript, path: String = "") {
-        log = Log(script: privateInput ? "physical-drive" : script.name, path: path, platform: Self.platform)
+        log = Log(script: privateInput ? "physical-drive" : script.name, path: path, platform: Self.platform,
+                  kept_running: preserve)
         defer { attachLog() }
         for (offset, step) in script.steps.enumerated() {
             guard perform(step, index: offset + 1) else { return }
@@ -396,15 +437,21 @@ final class AgentDriver {
             throw StepFailure(message: "never launch \(id) on the Mac: it would replace the daily-driver app")
         }
         #endif
-        app?.terminate()
-        let app = XCUIApplication()
-        app.launchArguments = privateInput ? [] : arguments(options)
-        app.launch()
+        if !preserve { app?.terminate() }
+        let app = preserve ? XCUIApplication(bundleIdentifier: try build.bundleIdentifier) : XCUIApplication()
+        self.app = app
+        // Register before starting: failed activation, launch, step and capture
+        // paths all share this cleanup policy. The runner itself cleans up normally.
+        let preserve = self.preserve
+        test.addTeardownBlock { @MainActor in
+            DriveAppLifecycle.finish(preserve: preserve) { app.terminate() }
+        }
+        if !preserve { app.launchArguments = privateInput ? [] : arguments(options) }
+        DriveAppLifecycle.start(preserve: preserve, activate: { app.activate() }, launch: { app.launch() })
         guard app.wait(for: .runningForeground, timeout: 30) else {
             throw StepFailure(message: "the app is not running in the foreground 30 s after launch")
         }
-        self.app = app
-        test.addTeardownBlock { @MainActor in app.terminate() }
+        if preserve { log.activation_completed = true }
         try settleIdentifiers(app)
     }
 
