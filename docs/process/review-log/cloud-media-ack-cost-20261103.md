@@ -44,3 +44,11 @@ lint33699 passes4/4 and similarity34239 passes7/7 without exemptions.
 Log privacy32778 passes. Signed-app latency remains pending. Preserve
 the older native Resume failure and its repair cap. Full integration, signed
 media convergence and device round trip remain open.
+
+Build35490 passes from clean d0b17189. The signed executable SHA256 is
+522cf970ecd09be2e4dc33d0925959c621dea2971e651651342c0c00df05ca30.
+The old preview quit normally. The new preview reaches Syncing Media, but
+review preparation still waits. A one-second sample of PID38142 reaches
+policy_media_facts_locked through policy_projection on the maintenance lane.
+This is separate from the repaired ACK loop. No latency pass is claimed.
+Static35260 passes3/3; master was pushed through d0b17189.
