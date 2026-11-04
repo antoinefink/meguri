@@ -311,7 +311,7 @@ class SourceOnly(unittest.TestCase):
                 self.returncode = 23
 
             def wait(self, timeout):
-                return self.returncode
+                self_test.fail("normal completion already joined the original child")
 
         def dispatch(argv, **kwargs):
             if argv[0] == "/usr/bin/codesign":
@@ -320,10 +320,11 @@ class SourceOnly(unittest.TestCase):
 
         out, err = io.StringIO(), io.StringIO()
         with patch.object(m, "command", side_effect=dispatch), patch.object(subprocess, "Popen", FailedChild), \
-                patch.object(os, "killpg"), patch.object(sys, "argv", [str(SPEC.origin), "--check-source"]), \
+                patch.object(os, "killpg") as kill, patch.object(sys, "argv", [str(SPEC.origin), "--check-source"]), \
                 patch.object(m, "main", side_effect=lambda: m.check_source(self.context)), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(m.run(), 1)
+        kill.assert_not_called()
         self.assertEqual(json.loads(out.getvalue()), {"scope": "SOURCE-CHECK-ONLY", "outcome": "refused", "checks": {}})
         self.assertEqual((self.private / "source-command.stdout").read_bytes(), raw_out)
         self.assertEqual((self.private / "source-command.stderr").read_bytes(), raw_err)
@@ -863,7 +864,13 @@ class Staging(unittest.TestCase):
 
             def communicate(self, data, timeout):
                 test.assertIsNone(data)
-                test.assertEqual(timeout, m.COPY_WAIT)
+                if local_join:
+                    test.assertGreater(timeout, 0)
+                else:
+                    test.assertEqual(timeout, 0)
+                test.assertLessEqual(timeout, 0.2)
+                if not local_join:
+                    raise subprocess.TimeoutExpired("generated", timeout)
                 self.returncode = returncode
                 if damage is not None:
                     damage()
@@ -889,7 +896,7 @@ class Staging(unittest.TestCase):
                     return {"existing": False, "root": str(test.root), "work": "generated-work",
                             "receiver": "generated-token"}
                 test.assertEqual(operation, "join-receiver", "failed copy must never publish or activate")
-                test.assertGreaterEqual(events.count("local-join"), 2)
+                test.assertEqual(events.count("local-join"), int(not local_join))
                 if not guest_join:
                     self.safety["uncertain"] = True
                     raise m.Uncertain("generated-private-join-error-canary")
@@ -902,12 +909,16 @@ class Staging(unittest.TestCase):
             if argv[:4] == [sys.executable, "-B", "-I", "-c"]:
                 test.assertIs(type(kwargs.get("copy_diagnostics")), m.Directory)
                 test.assertEqual(kwargs["copy_diagnostics"].path, str(private))
+                test.assertEqual(kwargs["timeout"], m.COPY_WAIT)
+                if not local_join:
+                    kwargs["timeout"] = 0  # generated timeout with an unjoined original handle
                 return self.real_command(argv, **kwargs)
             return self.command(argv, **kwargs)
 
         out, err = io.StringIO(), io.StringIO()
         with patch.object(m, "VM", FakeVM), patch.object(m, "command", side_effect=dispatch), \
-                patch.object(subprocess, "Popen", FailedChild), patch.object(os, "killpg"), \
+                patch.object(subprocess, "Popen", FailedChild), patch.object(os, "killpg") as kill, \
+                patch.object(m.time, "sleep") as sleep, \
                 patch.object(m, "main", side_effect=lambda: m.host({
                     "selection": {}, "lease_slot": str(lease), "root": str(self.base),
                     "run": "generated-run", "private": str(private)})), \
@@ -915,8 +926,16 @@ class Staging(unittest.TestCase):
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(m.run(), 1)
         self.assertEqual(len(children), 1)
-        self.assertEqual(children[0].returncode, returncode)
-        self.assertEqual(events, ["prepare", "original-copy", "local-join", "local-join", "join-receiver", "close"])
+        self.assertEqual(children[0].returncode, returncode if local_join else None)
+        self.assertEqual(events, ["prepare", "original-copy"] +
+                         ([] if local_join else ["local-join"]) + ["join-receiver", "close"])
+        if local_join:
+            kill.assert_not_called()
+            sleep.assert_not_called()
+        else:
+            self.assertEqual([call.args for call in kill.call_args_list],
+                             [(children[0].pid, signal.SIGTERM), (children[0].pid, signal.SIGKILL)])
+            sleep.assert_called_once_with(m.SHUTDOWN)
         self.assertEqual(json.loads(out.getvalue()), m.report("refused"))
         for canary in (str(self.base), "generated-private-", "copy-command", "original_bytes",
                        "retained_bytes", "overflow", *[raw[:64].decode() for raw in streams.values()]):
@@ -930,11 +949,13 @@ class Staging(unittest.TestCase):
         private = self.base / "private"
         private.mkdir(mode=0o700)
         child = types.SimpleNamespace(pid=12345, stdin=None, returncode=0,
-                                      communicate=lambda *a, **kw: None, wait=lambda **kw: 0)
+                                      communicate=lambda *a, **kw: None,
+                                      wait=lambda **kw: self.fail("success must not rejoin a reaped child"))
         with m.Directory(str(private)) as directory, \
-                patch.object(subprocess, "Popen", return_value=child) as start, patch.object(os, "killpg"):
+                patch.object(subprocess, "Popen", return_value=child) as start, patch.object(os, "killpg") as kill:
             self.assertEqual(self.real_command(["generated-copy"], copy_diagnostics=directory), (0, b""))
         start.assert_called_once()
+        kill.assert_not_called()
         self.assertEqual(list(private.iterdir()), [])
 
     def test_failed_copy_retains_only_original_streams_and_status_privately(self):
@@ -1421,41 +1442,189 @@ mvl_copy_to vm_xcode_receiver dedicated "$source_bundle" "$destination"
                     self.assertEqual(m.inventory(bundle)["content"], m.inventory(copied)["content"])
             self.assertEqual(os.readlink(dest / "alias"), "payload")
 
-    def test_cancellation_joins_original_group_without_unbounded_pipe_communication(self):
-        events = []
+    def test_normal_completion_preserves_exact_result_without_signals_or_rejoining(self):
+        for returncode, check in ((0, True), (23, False), (23, True)):
+            with self.subTest(returncode=returncode, check=check):
+                child = types.SimpleNamespace(pid=12345, stdin=None, returncode=None)
 
-        class Child:
-            returncode = None
-            pid, stdin = 12345, None
+                def start_child(argv, **kwargs):
+                    kwargs["stdout"].write(b"generated output\x00\n")
+                    kwargs["stderr"].write(b"generated error\n")
+                    return child
 
-            def communicate(self, *args, **kwargs):
-                events.append("communicate")
-                raise m.Cancelled()
+                def communicate(data, timeout):
+                    self.assertIsNone(data)
+                    self.assertGreater(timeout, 0)
+                    self.assertLessEqual(timeout, 0.2)
+                    child.returncode = returncode
 
-            def wait(self, timeout):
-                self_test.assertEqual(timeout, m.SHUTDOWN)
-                events.append("wait")
-                if self.returncode is None:
-                    raise subprocess.TimeoutExpired("generated", timeout)
-                return self.returncode
+                child.communicate = communicate
+                child.wait = lambda **kw: self.fail("known reap must not be joined again")
+                with patch.object(subprocess, "Popen", side_effect=start_child), \
+                        patch.object(os, "killpg") as kill, patch.object(m.time, "sleep") as sleep:
+                    if check and returncode:
+                        with self.assertRaises(m.Refused) as failure:
+                            m.command(["generated-command"], check=check)
+                        self.assertIs(type(failure.exception), m.Refused)
+                    else:
+                        self.assertEqual(m.command(["generated-command"], check=check),
+                                         (returncode, b"generated output\x00\n"))
+                kill.assert_not_called()
+                sleep.assert_not_called()
 
-        self_test = self
-        def killpg(pid, sig):
-            self.assertEqual(pid, child.pid)
-            events.append(sig)
-            if sig == signal.SIGKILL:
-                child.returncode = -sig
+    def test_communication_retries_keep_input_and_original_deadline(self):
+        now, calls = [100.0], []
+        child = types.SimpleNamespace(pid=12345, stdin=io.BytesIO(), returncode=None)
 
-        child = Child()
-        with patch.object(subprocess, "Popen", return_value=child) as start, \
-                patch.object(os, "killpg", side_effect=killpg), self.assertRaises(m.Cancelled):
-            m.command(["generated-transport"])
-        self.assertEqual(start.call_count, 1)
-        self.assertTrue(start.call_args.kwargs["start_new_session"])
-        self.assertNotEqual(start.call_args.kwargs["stdout"], subprocess.PIPE)
-        self.assertEqual(events, ["communicate", signal.SIGTERM, "wait", signal.SIGKILL, "wait"])
+        def communicate(data, timeout):
+            calls.append((data, timeout))
+            self.assertLessEqual(timeout, 0.2)
+            if len(calls) < 3:
+                now[0] += timeout
+                raise subprocess.TimeoutExpired("generated", timeout)
+            child.returncode = 0
+
+        child.communicate = communicate
+        with patch.object(subprocess, "Popen", return_value=child), \
+                patch.object(m.time, "monotonic", side_effect=lambda: now[0]), patch.object(os, "killpg") as kill:
+            self.assertEqual(m.command(["generated"], data=b"generated input", timeout=0.5), (0, b""))
+        self.assertEqual([data for data, _ in calls], [b"generated input", None, None])
+        self.assertAlmostEqual(calls[-1][1], 0.1)
+        self.assertTrue(child.stdin.closed)
+        kill.assert_not_called()
+
+    def test_cancellation_during_communication_reap_is_recorded_before_cleanup(self):
+        child = types.SimpleNamespace(pid=12345, stdin=None, returncode=None)
+
+        def communicate(data, timeout):
+            signal.getsignal(signal.SIGHUP)(signal.SIGHUP, None)
+            self.assertIsNone(child.returncode)
+            child.returncode = 0
+
+        child.communicate = communicate
+        child.wait = lambda **kw: self.fail("cancellation must not rejoin a known reap")
+        with patch.object(subprocess, "Popen", return_value=child), patch.object(os, "killpg") as kill, \
+                self.assertRaises(m.Cancelled):
+            m.command(["generated"])
+        kill.assert_not_called()
+
+    def test_timeout_and_cancellation_hold_original_identity_through_last_signal_then_join(self):
+        for mode in ("timeout", "cancel", "launch-cancel"):
+            for term_exits in (False, True):
+                with self.subTest(mode=mode, term_exits=term_exits):
+                    events = []
+                    child = types.SimpleNamespace(pid=12345, stdin=io.BytesIO(), returncode=None, exited=None)
+
+                    def communicate(data, timeout):
+                        events.append("communicate")
+                        self.assertLessEqual(timeout, 0.2)
+                        if mode == "timeout":
+                            self.assertEqual(timeout, 0)
+                            raise subprocess.TimeoutExpired("generated", timeout)
+                        raise m.Cancelled()
+
+                    def start_child(argv, **kwargs):
+                        self.assertEqual(kwargs["stdin"], subprocess.PIPE)
+                        self.assertTrue(kwargs["start_new_session"])
+                        self.assertNotEqual(kwargs["stdout"], subprocess.PIPE)
+                        self.assertNotEqual(kwargs["stderr"], subprocess.PIPE)
+                        if mode == "launch-cancel":
+                            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                        return child
+
+                    def killpg(pid, sig):
+                        self.assertEqual(pid, child.pid)
+                        self.assertIsNone(child.returncode, "no signal may follow a reap")
+                        self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
+                        events.append(sig)
+                        if child.exited is None and (sig == signal.SIGKILL or term_exits):
+                            child.exited = -sig
+
+                    def sleep(timeout):
+                        self.assertEqual(timeout, m.SHUTDOWN)
+                        self.assertIsNone(child.returncode)
+                        events.append('sleep')
+
+                    def wait(timeout):
+                        self.assertEqual(timeout, m.SHUTDOWN)
+                        self.assertEqual(events[-1], signal.SIGKILL)
+                        events.append("wait")
+                        child.returncode = child.exited
+                        return child.returncode
+
+                    child.communicate, child.wait = communicate, wait
+                    expected = m.Refused if mode == "timeout" else m.Cancelled
+                    with patch.object(subprocess, "Popen", side_effect=start_child) as start, \
+                            patch.object(os, "killpg", side_effect=killpg), patch.object(m.time, "sleep", side_effect=sleep), \
+                            self.assertRaises(expected) as failure:
+                        m.command(["generated-transport"], data=b"generated input", timeout=0 if mode == "timeout" else 180)
+                    self.assertIs(type(failure.exception), expected)
+                    start.assert_called_once()
+                    self.assertEqual(events, ([] if mode == "launch-cancel" else ["communicate"]) +
+                                     [signal.SIGTERM, 'sleep', signal.SIGKILL, "wait"])
+                    self.assertEqual(child.returncode, -signal.SIGTERM if term_exits else -signal.SIGKILL)
+                    self.assertTrue(child.stdin.closed)
+
+    def test_receiver_known_completion_and_cancellation_during_reap_never_signal(self):
+        for returncode, cancel in ((0, False), (23, False), (0, True)):
+            with self.subTest(returncode=returncode, cancel=cancel):
+                child = types.SimpleNamespace(pid=12345, returncode=None)
+
+                def wait(timeout):
+                    self.assertEqual(timeout, 0.2)
+                    if cancel:
+                        signal.getsignal(signal.SIGHUP)(signal.SIGHUP, None)
+                    child.returncode = returncode
+                    return returncode
+
+                child.wait = wait
+                work = types.SimpleNamespace(path="/generated/work", check=lambda pins: None)
+                bundle = types.SimpleNamespace(check=lambda pins: None)
+                context = {"state": {"work_pins": [], "bundle_pins": [], "receiver": "generated"},
+                           "instance": ["generated", "boot"]}
+                with patch.object(subprocess, "Popen", return_value=child), \
+                        patch.object(m, "STAGING_SOURCE", "generated", create=True), \
+                        patch.object(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO())), \
+                        patch.object(os.path, "lexists", return_value=False), patch.object(m, "write_new") as receipt, \
+                        patch.object(os, "killpg") as kill:
+                    if cancel or returncode:
+                        with self.assertRaises(m.Cancelled if cancel else m.Refused):
+                            m.run_receiver_owner(bundle, work, context)
+                    else:
+                        m.run_receiver_owner(bundle, work, context)
+                kill.assert_not_called()
+                receipt.assert_called_once_with(work, "receiver-joined.json", {
+                    "token": "generated", "instance": context["instance"], "joined": True, "returncode": returncode})
+
+    def test_receiver_unconfirmed_join_never_writes_a_join_receipt(self):
+        from unittest.mock import Mock
+        child = types.SimpleNamespace(pid=12345, returncode=None)
+        child.wait = Mock(side_effect=lambda timeout: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired("generated", timeout)))
+        work = types.SimpleNamespace(path="/generated/work", check=lambda pins: None)
+        bundle = types.SimpleNamespace(check=lambda pins: None)
+        context = {"state": {"work_pins": [], "bundle_pins": [], "receiver": "generated"},
+                   "instance": ["generated", "boot"]}
+        with patch.object(subprocess, "Popen", return_value=child), \
+                patch.object(m, "STAGING_SOURCE", "generated", create=True), patch.object(m, "COPY_WAIT", 0), \
+                patch.object(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO())), \
+                patch.object(os.path, "lexists", return_value=False), patch.object(m, "write_new") as receipt, \
+                patch.object(os, "killpg") as kill, patch.object(m.time, "sleep") as sleep, self.assertRaises(m.Uncertain):
+            m.run_receiver_owner(bundle, work, context)
+        receipt.assert_not_called()
+        self.assertEqual([call.args for call in kill.call_args_list],
+                         [(child.pid, signal.SIGTERM), (child.pid, signal.SIGKILL)])
+        sleep.assert_called_once_with(m.SHUTDOWN)
+        self.assertEqual([call.kwargs for call in child.wait.call_args_list],
+                         [{"timeout": 0.2}, {"timeout": m.SHUTDOWN}])
 
     def test_live_descendant_holding_pipes_is_stopped_on_hangup(self):
+        self.generated_descendant_cleanup("hangup")
+
+    def test_live_descendant_holding_pipes_is_stopped_on_timeout(self):
+        self.generated_descendant_cleanup("timeout")
+
+    def generated_descendant_cleanup(self, mode):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             ready = root / "ready"
@@ -1479,8 +1648,10 @@ os.wait()
                 "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.SHUTDOWN=0.2\n"
                 "def cancel(*args): raise m.Cancelled()\n"
                 "signal.signal(signal.SIGHUP,cancel)\n"
-                "try: m.command([sys.executable," + repr(str(fixture)) + "," + repr(str(ready)) + ",sys.argv[1]],pass_fds=(int(sys.argv[1]),))\n"
-                "except m.Cancelled: sys.exit(130)\n")
+                "try: m.command([sys.executable," + repr(str(fixture)) + "," + repr(str(ready)) + ",sys.argv[1]],pass_fds=(int(sys.argv[1]),),timeout=" +
+                ("2" if mode == "timeout" else "180") + ")\n"
+                "except m.Cancelled: sys.exit(130)\n"
+                "except m.Refused: sys.exit(1)\n")
             child = subprocess.Popen([sys.executable, "-B", str(driver), str(writer)], pass_fds=(writer,))
             os.close(writer)
             try:
@@ -1491,8 +1662,9 @@ os.wait()
                 # A real descendant retains this pipe AND the command's output
                 # descriptors after the immediate child dies on SIGTERM.
                 self.assertEqual(os.read(reader, 4), b"live")
-                child.send_signal(signal.SIGHUP)
-                self.assertEqual(child.wait(timeout=5), 130)
+                if mode == "hangup":
+                    child.send_signal(signal.SIGHUP)
+                self.assertEqual(child.wait(timeout=5), 130 if mode == "hangup" else 1)
                 os.set_blocking(reader, False)
                 self.assertTrue(select.select([reader], [], [], 5)[0])
                 self.assertEqual(os.read(reader, 1), b"")
@@ -1574,15 +1746,30 @@ os.wait()
         self.assertEqual(released, [])
 
     def test_unconfirmed_local_group_join_stays_uncertain_with_bounded_waits(self):
-        child = types.SimpleNamespace(pid=12345)
+        child = types.SimpleNamespace(pid=12345, returncode=None)
         from unittest.mock import Mock
         child.wait = Mock(side_effect=subprocess.TimeoutExpired("generated", m.SHUTDOWN))
-        with patch.object(os, "killpg") as kill, self.assertRaises(m.Uncertain):
+        with patch.object(os, "killpg") as kill, patch.object(m.time, "sleep") as sleep, self.assertRaises(m.Uncertain):
             m.join_original(child)
         self.assertEqual([call.args for call in kill.call_args_list],
                          [(child.pid, signal.SIGTERM), (child.pid, signal.SIGKILL)])
-        self.assertEqual([call.kwargs for call in child.wait.call_args_list],
-                         [{"timeout": m.SHUTDOWN}, {"timeout": m.SHUTDOWN}])
+        sleep.assert_called_once_with(m.SHUTDOWN)
+        child.wait.assert_called_once_with(timeout=m.SHUTDOWN)
+
+    def test_cleanup_signal_or_join_errors_refuse_release_proof(self):
+        from unittest.mock import Mock
+        for mode in ("signal-error", "join-error", "missing-status"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp, \
+                    m.Directory(str(Path(temp).resolve())) as directory:
+                child = types.SimpleNamespace(pid=12345, returncode=None)
+                child.wait = Mock(side_effect=ChildProcessError() if mode == "join-error" else None)
+                with patch.object(os, "killpg", side_effect=PermissionError() if mode == "signal-error" else None), \
+                        patch.object(m.time, "sleep"), self.assertRaises(m.Uncertain):
+                    with m.release_proof(directory) as safety:
+                        safety.update(pending=True, joined=True)
+                        m.join_original(child)
+                self.assertFalse((Path(temp) / "lease-safe.json").exists())
+                self.assertEqual(child.wait.call_count, int(mode != "signal-error"))
 
     def test_release_proof_requires_confirmed_original_join_and_retains_guard(self):
         for mode in ("no-copy", "pending", "joined", "uncertain"):

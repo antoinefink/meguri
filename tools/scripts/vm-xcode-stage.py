@@ -170,6 +170,8 @@ def finishing():
 
 def join_original(child):
     with finishing():
+        if child.returncode is not None:
+            return
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(child.pid, sig)
@@ -177,11 +179,32 @@ def join_original(child):
                 pass
             except OSError:
                 raise Uncertain() from None
+            if sig == signal.SIGTERM:
+                time.sleep(SHUTDOWN)
+        try:
+            child.wait(timeout=SHUTDOWN)
+        except (subprocess.TimeoutExpired, OSError):
+            raise Uncertain() from None
+        if child.returncode is None:
+            raise Uncertain()
+
+
+def communicate_original(child, data, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        expired = None
+        # communicate() may reap. Defer cancellation until it has recorded
+        # that fact, in short slices so cancellation stays responsive.
+        with launching():
             try:
-                child.wait(timeout=SHUTDOWN)
-            except subprocess.TimeoutExpired:
-                if sig == signal.SIGKILL:
-                    raise Uncertain() from None
+                child.communicate(data, timeout=max(0, min(0.2, deadline - time.monotonic())))
+            except subprocess.TimeoutExpired as error:
+                expired = error
+        if expired is None:
+            return
+        if time.monotonic() >= deadline:
+            raise expired
+        data = None  # communicate retains any partially written input.
 
 
 def retain_source_failure(directory, argv, returncode, out, err):
@@ -263,7 +286,7 @@ def command(argv, *, data=None, pass_fds=(), check=True, env=None, timeout=180,
                 child = subprocess.Popen(argv, stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
                                          stdout=out, stderr=err, pass_fds=pass_fds, env=env,
                                          start_new_session=True, bufsize=0)
-            child.communicate(data, timeout=timeout)
+            communicate_original(child, data, timeout)
         except subprocess.TimeoutExpired:
             raise Refused() from None
         finally:
@@ -702,15 +725,22 @@ def run_receiver_owner(bundle, work, context):
                                          stdin=sys.stdin.buffer, stdout=out, stderr=err,
                                          start_new_session=True)
             deadline = time.monotonic() + COPY_WAIT
-            while child.poll() is None:
+            while True:
+                completed = False
+                # Record a reap before allowing cancellation to reach cleanup.
+                with launching():
+                    try:
+                        child.wait(timeout=0.2)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    else:
+                        completed = True
+                if completed:
+                    break
                 need(time.monotonic() < deadline)
                 if os.path.lexists(work.path + "/receiver-stop.json"):
                     receiver_record(work, "receiver-stop.json", context)
                     raise Refused()
-                try:
-                    child.wait(timeout=0.2)
-                except subprocess.TimeoutExpired:
-                    pass
             need(child.returncode == 0)
         finally:
             with finishing():
