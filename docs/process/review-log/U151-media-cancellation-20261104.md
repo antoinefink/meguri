@@ -42,3 +42,10 @@ runs; only its expected stale-command refusal retains owned cancellation.
 Swift42241: Pause and Stop pass. Private44512 passes. Review finds a P2 when
 Stop joins a drain already started by Pause. The follow-up and its deterministic
 regression remain pending. No unit acceptance.
+
+Test exports28514,38066,40180,41624,48164: reviewed corrections.
+Stop completes before EndRead. Its new token must exceed the old one;
+generation and binding stay the same. Swift45954: two failures.
+Swift50696: only qualification fails. The attachment fix follows that run.
+Native51946: 12 pass. AppModel53777: 18 pass. Private53470 passes.
+Similarity53143 passes. No full gate or unit acceptance.

@@ -1112,6 +1112,192 @@ extension EventTests {
         }
     }
 
+    #if DEBUG
+    @Test func nativePolicyMediaStopJoinsPauseDrainWithOriginalWitness() async throws {
+        // Count the original native work without changing its callback or
+        // cancellation semantics. Stop must only join Pause's existing drain.
+        struct Counts {
+            var prepared = 0, enqueued = 0, replies = 0, cancelled = 0
+            var context: CloudMediaCancellationContext?
+            var sameContext = true
+        }
+        final class Observations: Sendable {
+            let counts = Mutex(Counts())
+        }
+        struct Read: CloudPreparedMediaRead {
+            let original: any CloudPreparedMediaRead
+            let observations: Observations
+            func enqueue() -> Bool {
+                observations.counts.withLock { $0.enqueued += 1 }
+                return original.enqueue()
+            }
+            func reply() async throws -> CloudMediaTransportReply {
+                let context = CloudMediaCancellationContext.current
+                observations.counts.withLock {
+                    $0.replies += 1
+                    $0.sameContext = $0.sameContext && context != nil && context === $0.context
+                }
+                return try await original.reply()
+            }
+            func cancel() {
+                observations.counts.withLock { $0.cancelled += 1 }
+                original.cancel()
+            }
+        }
+        struct Transport: CloudMediaTransport {
+            let original: ObservedMediaTransport
+            let observations: Observations
+            func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead {
+                let context = CloudMediaCancellationContext.current
+                observations.counts.withLock {
+                    $0.prepared += 1
+                    if $0.context == nil { $0.context = context }
+                    $0.sameContext = $0.sameContext && context != nil && context === $0.context
+                }
+                return Read(original: try original.prepare(request), observations: observations)
+            }
+        }
+        try await withNativePolicyFixture { fixture in
+            let queue = HeldNativeMediaQueue()
+            let (cancellations, cancelled) = AsyncStream<Void>.makeStream()
+            let held = CloudCallbackGate(), endRead = CloudCallbackGate()
+            let (drainJoins, drainJoined) = AsyncStream<String>.makeStream()
+            let observations = Observations()
+            let callbacks = Mutex(0)
+            let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("pause-then-stop-media"), available: { UInt64.max })
+            let transport = Transport(original: .init(native: .init(queue: queue, staging: staging), cancelled: cancelled), observations: observations)
+            let (policy, setup) = try await nativePolicy(fixture)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+                mediaService: try await fixture.core.media(), mediaTransport: transport)
+            let name = try await CoreMediaService().addMedia(name: "pause-then-stop.asset", bytes: [2, 6, 1, 0, 2])
+            guard case .commands(let commands) = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true))) else {
+                throw CloudMediaFailure.missingReply
+            }
+            let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+            let original = try await fixture.engine()
+            let guardBefore = try await fixture.core.currentGuard()
+            let calls = original.acceptedNetworkCalls.value
+            let returned = Mutex((media: 0, pause: 0, stop: 0))
+            let enginesBefore = await fixture.factory.engines().map(\.instanceID)
+            let originalSDK = original.instanceID
+            await executor.setExistingMediaDrainObserver { drainJoined.yield($0) }
+            await executor.setMediaEndReadObserver { sdk in
+                if sdk == originalSDK { await endRead.enter() }
+            }
+            let running = Task {
+                let result = await executor.execute(resume)
+                returned.withLock { $0.media += 1 }
+                return result
+            }
+            let deadline = CloudPolicyReadinessDecision()
+            // Arm before the first callback arrival or cancellation wait.
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() {
+                    running.cancel()
+                    cancelled.finish()
+                    await held.abort(CancellationError())
+                    await endRead.abort(CancellationError())
+                    drainJoined.finish()
+                    try? await fixture.adapter.stop()
+                }
+            }
+            let responses = Task {
+                for await operation in queue.issued {
+                    callbacks.withLock { $0 += 1 }
+                    #expect(operation.desiredKeys == ["e"])
+                    await held.enter()
+                    #expect(operation.isCancelled)
+                    operation.fetchRecordsResultBlock?(.failure(CKError(.operationCancelled)))
+                }
+            }
+            var pause: Task<CloudPolicyNativeResult, any Error>?
+            var stopping: Task<Void, any Error>?
+            var failure: (any Error)?
+            do {
+                try await held.waitForArrival()
+                pause = Task {
+                    guard case .commands(let commands) = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))) else {
+                        throw CloudMediaFailure.missingReply
+                    }
+                    let command = try #require(commands.first { if case .pauseMedia = $0.action { true } else { false } })
+                    let result = await executor.execute(command)
+                    returned.withLock { $0.pause += 1 }
+                    return result
+                }
+                var cancelledReads = cancellations.makeAsyncIterator()
+                // The run's cancellation handler and worker.close each cancel
+                // this same read. The second observation locates Pause inside
+                // its already installed drain, waiting on the held callback.
+                try #require(await cancelledReads.next() != nil)
+                try #require(await cancelledReads.next() != nil)
+                try #require(observations.counts.withLock { $0.cancelled == 2 })
+                stopping = Task {
+                    try await fixture.adapter.stop()
+                    returned.withLock { $0.stop += 1 }
+                }
+                var joins = drainJoins.makeAsyncIterator()
+                // This branch exists on RED too: observe Stop joining Pause's
+                // actual drain, without requiring a successfully attached witness.
+                try #require(await joins.next() == original.instanceID)
+                try await fixture.core.validateSDK(original.instanceID)
+                try #require(await fixture.adapter.retainedInstanceIDs() == [original.instanceID])
+                try #require(!(await original.recordedTrace()).contains(.released))
+                try #require(returned.withLock { $0.media == 0 && $0.pause == 0 && $0.stop == 0 })
+                try #require(observations.counts.withLock { $0.cancelled == 2 && $0.prepared == 1 && $0.enqueued == 1 && $0.replies == 1 })
+                try #require(callbacks.withLock { $0 == 1 })
+                try #require(try await fixture.core.currentGuard() == guardBefore)
+                await held.open()
+                try await endRead.waitForArrival()
+                let stop = try #require(stopping)
+                try await stop.value
+                let guardAfter = try await fixture.core.currentGuard()
+                #expect(guardAfter.generation == guardBefore.generation)
+                #expect(guardAfter.binding == guardBefore.binding)
+                #expect(guardAfter.token > guardBefore.token)
+                try #require(await fixture.adapter.retainedInstanceIDs().isEmpty)
+                try #require(await original.recordedTrace().filter { $0 == .released }.count == 1)
+                await #expect(throws: (any Error).self) { try await fixture.core.validateSDK(originalSDK) }
+            } catch { failure = error; running.cancel() }
+            // Release every gate before the remaining joins, including assertion
+            // failures and watchdog expiry. No original callback escapes.
+            await held.open()
+            await endRead.open()
+            let result = await running.value
+            let paused = await pause?.result
+            let stopped = await stopping?.result
+            await executor.setExistingMediaDrainObserver(nil)
+            await executor.setMediaEndReadObserver(nil)
+            drainJoined.finish()
+            cancelled.finish()
+            queue.finish()
+            await responses.value
+            let inTime = deadline.observeReady()
+            watchdog.cancel()
+            await watchdog.value
+            #expect(inTime, "Pause-owned media drain joined by Stop exceeded ten seconds")
+            if let failure { throw failure }
+            let pauseResult = try #require(try paused?.get())
+            _ = try #require(try stopped?.get())
+            #expect(pauseResult.error == nil || (pauseResult.error as? BridgeError) == .cloudPolicy(.staleCommand))
+            #expect(!pauseResult.mediaCancellation && !pauseResult.deferred && !pauseResult.outputs.isEmpty)
+            #expect(result.error is CancellationError)
+            #expect(result.mediaCancellation)
+            #expect(!result.deferred && !result.outputs.isEmpty)
+            #expect(returned.withLock { $0.media == 1 && $0.pause == 1 && $0.stop == 1 })
+            #expect(observations.counts.withLock { $0.context != nil && $0.sameContext && $0.prepared == 1 && $0.enqueued == 1 && $0.replies == 1 && $0.cancelled == 2 })
+            #expect(callbacks.withLock { $0 == 1 })
+            #expect(original.acceptedNetworkCalls.value == calls)
+            let pending = try #require(try await CoreSmokeInspection().cloud(mediaName: name).entities.first)
+            #expect(!pending.acknowledged && !pending.blobPresent)
+            #expect(await fixture.factory.engines().map(\.instanceID) == enginesBefore)
+            #expect(await fixture.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await original.recordedTrace().filter { $0 == .released }.count == 1)
+        }
+    }
+    #endif
+
     @Test(arguments: [false, true]) func nativePolicyMediaPauseAndStopDrainOriginalCallback(stop: Bool) async throws {
         try await withNativePolicyFixture { fixture in
             let queue = HeldNativeMediaQueue()

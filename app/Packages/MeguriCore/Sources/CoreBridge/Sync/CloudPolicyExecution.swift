@@ -141,6 +141,11 @@ final class CloudMediaCancellationContext: Sendable {
     private let sdk: String
     init(sdk: String) { self.sdk = sdk }
 
+    func attachStopWitness(_ witness: CloudSDKStopWitness) {
+        guard witness.sdk == sdk else { return }
+        state.withLock { if $0.stopWitness == nil { $0.stopWitness = witness } }
+    }
+
     func cancel(_ origin: Origin, stopWitness: CloudSDKStopWitness? = nil, performing cancellation: () -> Void) {
         state.withLock {
             if $0.origin == nil { $0.origin = origin }
@@ -212,6 +217,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private var mediaRunIDs: [String: UUID] = [:]
     private var mediaRunContexts: [String: CloudMediaCancellationContext] = [:]
     private var mediaDrains: [String: Task<Void, Never>] = [:]
+    #if DEBUG
+    private var existingMediaDrainObserver: (@Sendable (String) -> Void)? = nil
+    func setExistingMediaDrainObserver(_ observer: (@Sendable (String) -> Void)?) {
+        existingMediaDrainObserver = observer
+    }
+    private var mediaEndReadObserver: (@Sendable (String) async -> Void)? = nil
+    func setMediaEndReadObserver(_ observer: (@Sendable (String) async -> Void)?) {
+        mediaEndReadObserver = observer
+    }
+    #endif
     private var heldMediaResume: [String: (CloudPolicyCommand, CoreCloudPolicyExecution)] = [:]
     private var mediaHookInstalled = false
     private var quiescing = false
@@ -505,7 +520,14 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         }
     }
     private func drainOriginalMedia(_ sdk: String, stopWitness: CloudSDKStopWitness? = nil) async {
-        if let draining = mediaDrains[sdk] { await draining.value; return }
+        if let stopWitness { mediaRunContexts[sdk]?.attachStopWitness(stopWitness) }
+        if let draining = mediaDrains[sdk] {
+            #if DEBUG
+            existingMediaDrainObserver?(sdk)
+            #endif
+            await draining.value
+            return
+        }
         heldMediaResume.removeValue(forKey: sdk)
         let original = mediaRuns[sdk]
         if let context = mediaRunContexts[sdk] { context.cancel(.owned, stopWitness: stopWitness) { original?.cancel() } }
@@ -568,6 +590,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     }
                 } catch { context.observe(error); readFailure = error }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                #if DEBUG
+                await mediaEndReadObserver?(instance)
+                #endif
                 do { outputs.append(try await permit.report(zones: [.media], kind: .read, started: false, error: sendStopped ? nil : readFailure)) }
                 catch {
                     if context.observeEndReadReportFailure(error, primary: readFailure) {
