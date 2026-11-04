@@ -85,3 +85,14 @@ Core28501 fails compilation at a new test's AdoptStep path; no tests ran.
 Core28181 could not reach Docker from the restricted process; it ran no tests.
 Neither result is semantic RED. Repair29327 includes the compilation correction
 and all six review findings. The full batch gate and signed import remain open.
+
+Export29327 fixes ordering and restores the native lifetime checks. Review still
+finds separate reservation accounting in the actual app path and an incorrect
+ordinary-read test expectation. Core34683 fails compilation at a new record
+comparison; no tests ran. Native verification is in progress. This intermediate
+source remains in its filtered export, without unit acceptance.
+
+Swift35699 fails compilation in CloudConnectionModels' new record conversion;
+no native tests ran. A proposed WIP commit was refused by the privacy check at
+two comments. The next repair must rewrite those comments, preserve the check,
+correct both compiler errors and close the remaining review findings.
