@@ -134,9 +134,9 @@ public enum CloudPublicationResult: Sendable {
     }
 }
 public enum CloudAdoptionAction: Sendable {
-    case read(CloudControlTarget), fetch(zone: String, cursor: Data?), fetchPayload(zone: String, name: String, expected: CloudControlRecord), validate, activate
+    case read(CloudControlTarget), fetch(zone: String, cursor: Data?, expectedEpoch: CloudControlRecord), fetchPayload(zone: String, name: String, expected: CloudControlRecord), validate, activate
     init(_ v: MeguriCoreBindings.CloudAdoptionAction) {
-        self = switch v { case .read(let t): .read(.init(t)); case .fetch(let z, let c): .fetch(zone: z, cursor: c); case .fetchPayload(let z, let n, let e): .fetchPayload(zone: z, name: n, expected: .init(encrypted: e.encrypted, systemFields: e.systemFields)); case .validate: .validate; case .activate: .activate }
+        self = switch v { case .read(let t): .read(.init(t)); case .fetch(let z, let c, let e): .fetch(zone: z, cursor: c, expectedEpoch: .init(encrypted: e.encrypted, systemFields: e.systemFields)); case .fetchPayload(let z, let n, let e): .fetchPayload(zone: z, name: n, expected: .init(encrypted: e.encrypted, systemFields: e.systemFields)); case .validate: .validate; case .activate: .activate }
     }
 }
 public struct CloudStagingRecord: Sendable {

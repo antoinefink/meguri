@@ -65,7 +65,9 @@ nonisolated struct ServiceOwnTransport: CloudOwnTransport {
             guard !batch.zones.isEmpty else { throw ServiceWorkflowFailure.unsupported }
             operations = batch.zones.map { .object(["DeleteZone": .object(["zone": .string($0), "cause": .string("Deleted")])]) }
         case .assetRead(let zone, let name): operations = [serviceReadOperation(zone: zone, name: name, fields: nil)]
-        case .adoptionPage(let zone, let cursor):
+        case .adoptionPayload(let zone, let name, _):
+            operations = [serviceReadOperation(zone: zone, name: name, fields: nil)]
+        case .adoptionPage(let zone, let cursor, _):
             let token = try cursor.map { try JSONDecoder().decode(ServiceJSON.self, from: $0) } ?? .null
             operations = [.object(["FetchZone": .object(["zone": .string(zone), "token": token])])]
         case .publication(.createZones(let zones)):

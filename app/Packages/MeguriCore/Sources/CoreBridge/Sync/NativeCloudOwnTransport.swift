@@ -117,6 +117,23 @@ enum NativeCloudStagingRecords {
         return .init(name: target.name, recordType: target.recordType,
                      record: try NativeCloudOwnRecords.control(record, target: target))
     }
+    static func epoch(_ record: CKRecord, target: CloudControlTarget, expected: CloudControlRecord,
+                      tagReader: @Sendable (CKRecord) -> String? = { $0.recordChangeTag }) throws -> CloudStagingRecord {
+        guard target.zone.hasPrefix("c-"), target.name == "epoch", target.recordType == "MGEpoch" else {
+            throw NativeCloudKitFailure.unsupportedRecord
+        }
+        let actual = try NativeCloudOwnRecords.control(record, target: target)
+        guard !record.encryptedValues.allKeys().contains(where: { record.encryptedValues[$0] is CKAsset }),
+              let encrypted = expected.encrypted, actual.encrypted == encrypted else {
+            throw NativeCloudKitFailure.unsupportedRecord
+        }
+        let restored = try NativeCloudKitSystemFields.restore(expected.systemFields, target: target)
+        guard let expectedTag = tagReader(restored), !expectedTag.isEmpty,
+              tagReader(record) == expectedTag else { throw NativeCloudKitFailure.unsupportedRecord }
+        // Archive bytes may differ for the same native version. Only this proof
+        // permits returning Core's original epoch read, including its archive.
+        return .init(name: target.name, recordType: target.recordType, record: expected)
+    }
     static func metadataBytes(_ value: CloudStagingRecord) throws -> Int {
         // Count actual encoded fields, including the opaque SDK archive.
         let sizes = [value.name.utf8.count, value.recordType.utf8.count,
@@ -271,7 +288,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         case .publication(.createZones(let zones)): return createZones(zones)
         case .publication(.save(let target, let encrypted, let fields)): return try save(target, encrypted: encrypted, fields: fields)
         case .adoptionPayload(let zone, let name, let expected): return try adoptionPayload(zone: zone, name: name, expected: expected)
-        case .adoptionPage(let zone, let cursor): return try page(zone: zone, cursor: cursor)
+        case .adoptionPage(let zone, let cursor, let expectedEpoch): return try page(zone: zone, cursor: cursor, expectedEpoch: expectedEpoch)
         }
     }
     private func read(_ target: CloudControlTarget, publication: Bool) -> NativePreparedOwnOperation {
@@ -501,7 +518,11 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         }
         return prepared
     }
-    private func page(zone: String, cursor: Data?) throws -> NativePreparedOwnOperation {
+    private func page(zone: String, cursor: Data?, expectedEpoch: CloudControlRecord) throws -> NativePreparedOwnOperation {
+        let epochTarget = CloudControlTarget(zone: zone, name: "epoch", recordType: "MGEpoch")
+        guard zone.hasPrefix("c-"), expectedEpoch.encrypted != nil else { throw NativeCloudKitFailure.unsupportedRecord }
+        _ = try NativeCloudKitSystemFields.restore(expectedEpoch.systemFields, target: epochTarget)
+        let tagReader = payloadTagReader
         let id = NativeCloudOwnRecords.zone(zone)
         let token: CKServerChangeToken?
         if let cursor {
@@ -545,7 +566,12 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 let record = try result.get()
                 guard record.recordID == recordID else { throw NativeCloudKitFailure.unsupportedRecord }
                 let target = CloudControlTarget(zone: zone, name: recordID.recordName, recordType: record.recordType)
-                let value = try NativeCloudStagingRecords.metadata(record, target: target)
+                let value: CloudStagingRecord
+                if record.recordType == "MGEpoch" || recordID.recordName == "epoch" {
+                    value = try NativeCloudStagingRecords.epoch(record, target: epochTarget, expected: expectedEpoch, tagReader: tagReader)
+                } else {
+                    value = try NativeCloudStagingRecords.metadata(record, target: target)
+                }
                 let bytes = try NativeCloudStagingRecords.metadataBytes(value)
                 state.withLock {
                     guard !$0.finished, $0.failure == nil else { return }

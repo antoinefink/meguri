@@ -47,34 +47,154 @@ struct NativeCloudOwnTransportTests {
         }
     }
 
-    /// Synthetic SDK identity only; this does not prove equivalence of
-    /// separately fetched real server objects.
-    @Test func epochReadAndIndependentPageProjectionsPreserveExactSystemFields() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        _ = try CloudMediaStaging(directory: directory, available: { UInt64.max })
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let target = CloudControlTarget(zone: "c-synthetic", name: "epoch", recordType: "MGEpoch")
-        let encrypted = Data([1, 3, 5])
-        let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
-        record.encryptedValues["e"] = encrypted as CKRecordValue
-        guard case .found(let read) = try NativeCloudOwnRecords.readResult(.success(record), target: target) else {
-            throw CloudOwnTransportFailure.unexpectedReply
-        }
-        let page = try NativeCloudStagingRecords.metadata(record, target: target)
-        #expect(read.encrypted == encrypted)
-        #expect(page.record.encrypted == encrypted)
-        #expect(page.payloadFile == nil)
-        // Each production projection independently archives system fields.
-        #expect(page.record.systemFields == read.systemFields)
+    private var epochTarget: CloudControlTarget {
+        .init(zone: "c-synthetic", name: "epoch", recordType: "MGEpoch")
+    }
+    private func epochNative() -> CKRecord {
+        let record = CKRecord(recordType: epochTarget.recordType, recordID: NativeCloudOwnRecords.id(epochTarget))
+        record.encryptedValues["e"] = Data([1, 3, 5]) as CKRecordValue
+        return record
+    }
+    private func epochExpected() throws -> CloudControlRecord {
+        try NativeCloudOwnRecords.control(epochNative(), target: epochTarget)
+    }
 
-        let restored = try NativeCloudKitSystemFields.restore(read.systemFields, target: target)
-        #expect(restored !== record)
-        restored.encryptedValues["e"] = encrypted as CKRecordValue
-        let restoredPage = try NativeCloudStagingRecords.metadata(restored, target: target)
-        #expect(restoredPage.record.encrypted == encrypted)
-        #expect(restoredPage.payloadFile == nil)
-        #expect(restoredPage.record.systemFields == read.systemFields)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    /// Public secure-coding formats deliberately differ. Only the tag reader
+    /// is synthetic; this fixture supplies no server-version or device proof.
+    @Test func epochEquivalentNativeVersionProjectsOriginalXMLArchive() throws {
+        let original = epochNative()
+        let xml = NSKeyedArchiver(requiringSecureCoding: true)
+        xml.outputFormat = .xml
+        original.encodeSystemFields(with: xml); xml.finishEncoding()
+        let expected = CloudControlRecord(encrypted: original.encryptedValues["e"] as? Data, systemFields: xml.encodedData)
+        let independent = epochNative()
+        let binary = try NativeCloudKitSystemFields.encode(independent)
+        #expect(expected.systemFields.starts(with: Data("<?xml".utf8)))
+        #expect(binary.starts(with: Data("bplist".utf8)))
+        #expect(expected.systemFields != binary)
+        for fields in [expected.systemFields, binary] {
+            let restored = try NativeCloudKitSystemFields.restore(fields, target: epochTarget)
+            #expect(restored.recordID == original.recordID && restored.recordType == original.recordType)
+        }
+        let calls = Mutex(0)
+        let projected = try NativeCloudStagingRecords.epoch(independent, target: epochTarget, expected: expected, tagReader: { _ in
+            calls.withLock { $0 += 1 }; return "synthetic-version"
+        })
+        #expect(calls.withLock { $0 } == 2)
+        #expect(projected.record.encrypted == expected.encrypted)
+        #expect(projected.record.systemFields == expected.systemFields)
+        #expect(projected.record.systemFields != binary && projected.payloadFile == nil)
+    }
+
+    @Test func ordinaryEntityMetadataProjectionRetainsItsOwnArchive() throws {
+        let target = CloudControlTarget(zone: epochTarget.zone, name: "ordinary", recordType: "MGEntity")
+        let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
+        record.encryptedValues["e"] = Data([7]) as CKRecordValue
+        let value = try NativeCloudStagingRecords.metadata(record, target: target)
+        #expect(value.record.encrypted == Data([7]) && value.payloadFile == nil)
+        let restored = try NativeCloudKitSystemFields.restore(value.record.systemFields, target: target)
+        #expect(restored.recordID == record.recordID && restored.recordType == record.recordType)
+    }
+
+    @Test func epochDefaultNativeTagReaderRefusesUntaggedRecord() throws {
+        let record = epochNative()
+        #expect(record.recordChangeTag == nil)
+        #expect(throws: NativeCloudKitFailure.self) {
+            try NativeCloudStagingRecords.epoch(record, target: epochTarget, expected: epochExpected())
+        }
+    }
+
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func epochMissingEmptyOrDifferentNativeVersionRefuses(variant: Int) throws {
+        let expected = try epochExpected()
+        #expect(throws: NativeCloudKitFailure.self) {
+            try NativeCloudStagingRecords.epoch(epochNative(), target: epochTarget, expected: expected, tagReader: { record in
+                let actual = record.encryptedValues["e"] != nil
+                switch variant {
+                case 0: return actual ? "synthetic-version" : nil
+                case 1: return ""
+                case 2: return actual ? "different-synthetic-version" : "synthetic-version"
+                case 3: return actual ? "" : "synthetic-version"
+                default: return actual ? nil : "synthetic-version"
+                }
+            })
+        }
+    }
+
+    @Test(arguments: Array(0..<12))
+    func epochPageRejectsIdentityEnvelopeAndAssetsBeforeVersionLookup(variant: Int) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let lookups = Mutex(0)
+        let prepared = try NativeCloudOwnTransport(queue: queue, payloadTagReader: { _ in
+            lookups.withLock { $0 += 1 }; return "synthetic-version"
+        }).prepare(.adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let changed = try #require(operation.recordWasChangedBlock)
+        let terminal = try #require(operation.fetchRecordZoneChangesResultBlock)
+        var id = NativeCloudOwnRecords.id(epochTarget)
+        if variant == 0 { id = .init(recordName: "other", zoneID: id.zoneID) }
+        if variant == 1 { id = .init(recordName: "epoch", zoneID: NativeCloudOwnRecords.zone("c-other")) }
+        if variant == 2 { id = .init(recordName: "epoch", zoneID: .init(zoneName: epochTarget.zone, ownerName: "synthetic-other-owner")) }
+        let record = CKRecord(recordType: variant == 3 ? "MGEntity" : "MGEpoch", recordID: id)
+        if variant != 5 { record.encryptedValues["e"] = Data(variant == 4 ? [9] : [1, 3, 5]) as CKRecordValue }
+        let asset = CKAsset(fileURL: URL(fileURLWithPath: "/tmp/synthetic-unread-epoch-asset"))
+        if (6...9).contains(variant) { record[["pa", "ma", "a", "otherAsset"][variant - 6]] = asset }
+        if variant == 10 { record.encryptedValues["e"] = "wrong-encrypted-type" as NSString }
+        // The callback id and actual record id must independently agree.
+        let callbackID = variant == 11 ? CKRecord.ID(recordName: "different-callback", zoneID: id.zoneID) : id
+        changed(callbackID, .success(record))
+        #expect(lookups.withLock { $0 } == 0)
+        terminal(.success(()))
+        await #expect(throws: NativeCloudKitFailure.self) { try await prepared.reply() }
+        #expect(queue.operations.withLock { $0.count == 1 && $0.first === operation })
+    }
+
+    @Test(arguments: Array(0..<6))
+    func epochInvalidOrAbsentExpectedEnvelopeNeverQueues(variant: Int) throws {
+        let queue = NativeOwnCapturingQueue()
+        let good = try epochExpected()
+        var fields = good.systemFields
+        if variant == 0 { fields = Data([0]) }
+        if variant == 1 { fields = Data() }
+        if variant >= 3 {
+            let id = CKRecord.ID(recordName: variant == 3 ? "other" : "epoch",
+                                 zoneID: NativeCloudOwnRecords.zone(variant == 4 ? "c-other" : epochTarget.zone))
+            fields = try NativeCloudKitSystemFields.encode(CKRecord(recordType: variant == 5 ? "MGEntity" : "MGEpoch", recordID: id))
+        }
+        let expected = CloudControlRecord(encrypted: variant == 2 ? nil : good.encrypted, systemFields: fields)
+        #expect(throws: (any Error).self) {
+            try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: expected))
+        }
+        #expect(queue.operations.withLock { $0.isEmpty })
+    }
+
+    @Test(arguments: [false, true])
+    func epochProjectionStillWaitsForOriginalPageAndRefusesLateFailure(zoneFailure: Bool) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let lookups = Mutex(0)
+        let prepared = try NativeCloudOwnTransport(queue: queue, payloadTagReader: { _ in
+            lookups.withLock { $0 += 1 }; return "synthetic-version"
+        }).prepare(.adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let changed = try #require(operation.recordWasChangedBlock)
+        let zoneFinished = try #require(operation.recordZoneFetchResultBlock)
+        let terminal = try #require(operation.fetchRecordZoneChangesResultBlock)
+        let record = epochNative()
+        changed(record.recordID, .success(record))
+        #expect(lookups.withLock { $0 } == 2)
+        if zoneFailure {
+            zoneFinished(NativeCloudOwnRecords.zone(epochTarget.zone), .failure(CKError(.networkFailure)))
+            terminal(.success(()))
+        } else {
+            terminal(.failure(CKError(.networkFailure)))
+        }
+        await #expect(throws: (any Error).self) { try await prepared.reply() }
+        // A late record on the original operation cannot stage another value.
+        changed(record.recordID, .success(record))
+        #expect(lookups.withLock { $0 } == 2)
+        #expect(queue.operations.withLock { $0.count == 1 && $0.first === operation })
     }
 
     @Test(arguments: [CKError.Code.serviceUnavailable, .requestRateLimited])
@@ -396,7 +516,7 @@ struct NativeCloudOwnTransportTests {
     }
     @Test func adoptionMetadataPageRequestsOnlyEnvelopeWithFixedLimit() async throws {
         let queue = NativeOwnCapturingQueue()
-        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
         #expect(queue.operations.withLock { $0.isEmpty })
         #expect(prepared.enqueue())
         let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
@@ -428,7 +548,7 @@ struct NativeCloudOwnTransportTests {
             if case .open = boundary { opened.withLock { $0 += 1 } }
         })
         let queue = NativeOwnCapturingQueue()
-        let prepared = try NativeCloudOwnTransport(queue: queue, staging: staging).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+        let prepared = try NativeCloudOwnTransport(queue: queue, staging: staging).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
         #expect(prepared.enqueue())
         let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
         let changed = try #require(operation.recordWasChangedBlock)
@@ -725,7 +845,7 @@ struct NativeCloudOwnTransportTests {
     @Test(arguments: [false, true])
     func adoptionCallbackBeyondRequestedBoundFailsBeforeCopyingAnotherFile(includeDeletion: Bool) async throws {
         let queue = NativeOwnCapturingQueue()
-        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
         #expect(prepared.enqueue())
         let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
         let zone = NativeCloudOwnRecords.zone("c-synthetic")
@@ -779,7 +899,7 @@ struct NativeCloudOwnTransportTests {
     @Test func stagingAssetFailureAndMissingZoneCompletionNeverProduceAnEmptyFinalPage() async throws {
         for withAsset in [false, true] {
             let queue = NativeOwnCapturingQueue()
-            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
             #expect(prepared.enqueue())
             let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
             #expect(!operation.fetchAllChanges)
@@ -797,7 +917,7 @@ struct NativeCloudOwnTransportTests {
     }
     @Test func adoptionMetadataActualEncodedBytesAreBoundedBeforeTerminal() async throws {
         let queue = NativeOwnCapturingQueue()
-        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil))
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
         #expect(prepared.enqueue())
         let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
         let record = CKRecord(recordType: "MGEntity", recordID: .init(recordName: "oversized-metadata", zoneID: NativeCloudOwnRecords.zone("c-synthetic")))
@@ -863,7 +983,7 @@ struct NativeCloudOwnTransportTests {
 
     @Test func corruptContinuationIsRejectedBeforeAZoneOperationCanBeQueued() {
         let queue = NativeOwnCapturingQueue()
-        #expect(throws: (any Error).self) { try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: Data([0, 1, 2]))) }
+        #expect(throws: (any Error).self) { try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: Data([0, 1, 2]), expectedEpoch: epochExpected())) }
         #expect(queue.operations.withLock { $0.isEmpty })
     }
     @Test func cancellationBeforeQueueRejectsAndCancellationAfterQueueDrainsOriginalSDKReply() async throws {

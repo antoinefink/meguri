@@ -326,6 +326,19 @@ actor ServiceWorkflowWire {
                 return .publication(.conflict(try ServiceRecordBytes(server).control))
             }
             throw ServiceWorkflowFailure.server(result["Err"]?["code"]?.text ?? "malformed-save")
+        case .adoptionPayload(let zone, let name, let expected):
+            guard replies.count == 1,
+                  reply.originalRequest["operation"]?["Read"]?["zone"]?.text == zone,
+                  reply.originalRequest["operation"]?["Read"]?["name"]?.text == name else {
+                throw ServiceWorkflowFailure.wire
+            }
+            let row = try ServiceRecordBytes(serviceRequired(try reply.ok()["Record"]))
+            guard row.name == name, row.recordType == "MGEntity",
+                  let encrypted = expected.encrypted, row.envelope == encrypted,
+                  row.systemFields == expected.systemFields else { throw ServiceWorkflowFailure.wire }
+            let lease = try serviceRequired(try retainAsset(row.asset("pa"), payload: true))
+            return .adoptionPayload(.init(name: row.name, recordType: row.recordType,
+                record: row.control, payloadLease: lease))
         case .adoptionPage:
             let page = try serviceRequired(try reply.ok()["ZoneChanges"])
             var records: [CloudStagingRecord] = [], deleted: [String] = []

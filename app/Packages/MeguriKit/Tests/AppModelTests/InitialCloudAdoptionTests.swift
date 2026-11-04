@@ -1308,11 +1308,15 @@ private nonisolated final class InitialCloudTransport: CloudOwnTransport, Sendab
         case .read(let target):
             let record = records.first { $0.zone == target.zone && $0.name == target.name && $0.recordType == target.recordType }
             return InitialCloudImmediateReply(.read(record.map { .found($0.control) } ?? .missing))
-        case .adoptionPage(let zone, _):
+        case .adoptionPage(let zone, _, _):
             if !page.wasQueued { return page }
             let entities = records.filter { $0.zone == zone && $0.recordType == "MGEntity" }
                 .map { CloudStagingRecord(name: $0.name, recordType: $0.recordType, record: $0.control) }
             return InitialCloudImmediateReply(.page(records: entities, deleted: [], next: nil))
+        case .adoptionPayload:
+            // This complete-page fixture has no external payload reader. Core
+            // and native payload workflows require their separate coverage.
+            throw CloudOwnTransportFailure.unexpectedReply
         case .zoneDeletionActiveRead(let target):
             let record = records.first { $0.zone == target.zone && $0.name == target.name && $0.recordType == target.recordType }
             return InitialCloudImmediateReply(.zoneDeletionActiveRead(.init(read: record.map { .found($0.control) } ?? .missing)))

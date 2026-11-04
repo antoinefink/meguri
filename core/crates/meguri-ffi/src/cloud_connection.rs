@@ -544,6 +544,12 @@ pub struct CloudAdoptionWork {
     generation: u64,
     work: a::AdoptionWork,
 }
+#[cfg(test)]
+impl CloudAdoptionWork {
+    pub(crate) fn operation_id_for_test(&self) -> [u8; 16] {
+        self.work.op
+    }
+}
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionAction {
     Read {
@@ -552,6 +558,7 @@ pub enum CloudAdoptionAction {
     Fetch {
         zone: String,
         cursor: Option<Vec<u8>>,
+        expected_epoch: CloudControlRecord,
     },
     FetchPayload {
         zone: String,
@@ -825,10 +832,21 @@ impl CloudConnection {
                                 record_type: "MGMediaRoot".into(),
                             },
                         },
-                        a::AdoptionTask::Fetch { cursor } => CloudAdoptionAction::Fetch {
-                            zone: c::adapter::collection_zone(op.epoch),
-                            cursor: cursor.as_ref().map(|v| v.0.clone()),
-                        },
+                        a::AdoptionTask::Fetch { cursor } => {
+                            // Retain the exact epoch read owned by this work's validated op.
+                            let expected = op
+                                .epoch_record
+                                .as_ref()
+                                .ok_or_else(|| failure(CloudConnectionFailure::AuthorityChanged))?;
+                            CloudAdoptionAction::Fetch {
+                                zone: c::adapter::collection_zone(op.epoch),
+                                cursor: cursor.as_ref().map(|v| v.0.clone()),
+                                expected_epoch: CloudControlRecord {
+                                    encrypted: expected.encrypted.clone(),
+                                    system_fields: expected.system_fields.0.clone(),
+                                },
+                            }
+                        }
                         a::AdoptionTask::FetchPayload {
                             name,
                             encrypted,

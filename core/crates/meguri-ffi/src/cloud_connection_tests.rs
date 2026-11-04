@@ -860,7 +860,15 @@ fn bridge_adoption_opaque_page_cursor_round_trips_and_deletions_abort_actual_hos
     let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
         panic!("actual stage page")
     };
-    assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: None, .. }));
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    assert_eq!(handle.operation_id_for_test(), op.id);
+    let expected = op.epoch_record.as_ref().unwrap();
+    assert!(
+        matches!(action, CloudAdoptionAction::Fetch { cursor: None, ref expected_epoch, ref zone }
+        if expected_epoch.encrypted == expected.encrypted
+            && expected_epoch.system_fields == expected.system_fields.0
+            && zone == &c::adapter::collection_zone(op.epoch))
+    );
     let cursor = vec![5, 4, 3];
     connection
         .adoption_result(
@@ -875,7 +883,13 @@ fn bridge_adoption_opaque_page_cursor_round_trips_and_deletions_abort_actual_hos
     let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
         panic!("next actual page")
     };
-    assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: Some(ref value), .. } if value == &cursor));
+    assert_eq!(handle.operation_id_for_test(), op.id);
+    assert!(
+        matches!(action, CloudAdoptionAction::Fetch { cursor: Some(ref value), ref expected_epoch, ref zone }
+        if value == &cursor && expected_epoch.encrypted == expected.encrypted
+            && expected_epoch.system_fields == expected.system_fields.0
+            && zone == &c::adapter::collection_zone(op.epoch))
+    );
     assert!(
         connection
             .adoption_result(
@@ -1826,6 +1840,46 @@ fn adoption_repeated_name_stages_external_then_inline_and_inline_then_external_i
         connection
             .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
             .unwrap();
+    }
+}
+
+#[test]
+fn adoption_direct_epoch_page_tampering_still_refuses_and_cleans_up() {
+    for tamper_archive in [false, true] {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        let before = fixture.workflow.host.collection().unwrap().generation();
+        adoption_fetch_ready(&connection);
+        let (handle, action) = adoption_action(&connection);
+        let CloudAdoptionAction::Fetch { mut expected_epoch, .. } = action else {
+            panic!("epoch-bound page")
+        };
+        if tamper_archive {
+            expected_epoch.system_fields.push(9);
+        } else {
+            expected_epoch.encrypted.as_mut().unwrap().push(9);
+        }
+        assert!(
+            connection
+                .adoption_result(
+                    handle,
+                    CloudAdoptionResult::Page {
+                        records: vec![CloudStagingRecord {
+                            name: "epoch".into(),
+                            record_type: "MGEpoch".into(),
+                            record: expected_epoch,
+                            payload_file: None,
+                        }],
+                        deleted: vec![],
+                        next: Some(vec![5]),
+                    }
+                )
+                .is_err()
+        );
+        assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+        assert!(connection.recovery_status().unwrap().is_none());
+        assert_eq!(fixture.workflow.host.collection().unwrap().generation(), before);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
     }
 }
 

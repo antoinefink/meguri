@@ -20,7 +20,7 @@ public enum CloudOwnTransportCommand: Sendable {
     /// Fetch every zone in the private database, without a guessed zone list.
     case zoneInventory
     case adoptionPayload(zone: String, name: String, expected: CloudControlRecord)
-    case adoptionPage(zone: String, cursor: Data?)
+    case adoptionPage(zone: String, cursor: Data?, expectedEpoch: CloudControlRecord)
 }
 public enum CloudOwnTransportReply: Sendable {
     case publication(CloudPublicationResult)
@@ -544,9 +544,9 @@ public actor CloudOwnExecutor {
                 #else
                 try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission)))
                 #endif
-            case .fetch(let zone, let cursor):
+            case .fetch(let zone, let cursor, let expectedEpoch):
                 do {
-                    let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor)); prepared = op
+                    let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor, expectedEpoch: expectedEpoch)); prepared = op
                     try checkStopping()
                     guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                     #if DEBUG

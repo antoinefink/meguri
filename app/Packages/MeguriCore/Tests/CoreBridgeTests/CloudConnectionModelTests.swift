@@ -4,6 +4,19 @@ import Testing
 @testable import CoreBridge
 
 struct CloudConnectionModelTests {
+    @Test func adoptionFetchMapsExactEpochOnEveryCursorPage() throws {
+        let epoch = MeguriCoreBindings.CloudControlRecord(encrypted: Data([1, 3, 5]), systemFields: Data([2, 4, 6]))
+        let cursors: [Data?] = [nil, Data([7, 8])]
+        for cursor in cursors {
+            let mapped = CoreBridge.CloudAdoptionAction(MeguriCoreBindings.CloudAdoptionAction.fetch(
+                zone: "c-synthetic", cursor: cursor, expectedEpoch: epoch))
+            guard case .fetch(let zone, let receivedCursor, let expected) = mapped else {
+                Issue.record("fetch mapping changed action"); return
+            }
+            #expect(zone == "c-synthetic" && receivedCursor == cursor)
+            #expect(expected.encrypted == epoch.encrypted && expected.systemFields == epoch.systemFields)
+        }
+    }
     @Test func resumeDecisionAndCountsAreMappedWithoutCreatingAuthority() {
         let summary = CoreBridge.CloudConnectionSummary(MeguriCoreBindings.CloudConnectionSummary(
             localCollectionPresent: true, initialAdoptionRequired: false,
