@@ -76,7 +76,8 @@ public struct CloudConnectionView: View {
                     Text(SyncText.value("sync.recovery.error.other"))
                         .accessibilityIdentifier("sync.connect.operationError")
                         #if DEBUG
-                        .accessibilityValue(DebugCloudDiagnostics.latestValue ?? DebugCloudPreviewProbe.shared.latestTag)
+                        .accessibilityValue((DebugCloudDiagnostics.latestValue ?? DebugCloudPreviewProbe.shared.latestTag)
+                            + (DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag.map { ";ownWorkLastEnteredStage:\($0)" } ?? ""))
                         #endif
                 }
             }

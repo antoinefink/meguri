@@ -166,10 +166,14 @@ struct DebugCloudPreviewProbeTests {
         let work = DebugCloudPreviewProbe()
         let previewAttempt = preview.begin()
         #expect(work.latestTag == "unobserved")
+        #expect(work.lastEnteredWorkStageTag == nil)
         let workAttempt = work.begin()
         preview.finish(previewAttempt)
         #expect(preview.latestTag == "finished")
         #expect(work.latestTag == "running")
+        work.enter(.performLocal, attempt: workAttempt)
+        #expect(preview.lastEnteredWorkStageTag == nil)
+        #expect(work.lastEnteredWorkStageTag == "performLocal")
         work.finish(workAttempt, progress: .sendEntities)
         #expect(preview.latestTag == "finished")
         #expect(work.latestTag == "sendEntities")
@@ -177,6 +181,11 @@ struct DebugCloudPreviewProbeTests {
         preview.fail(nextPreview, error: CloudOwnTransportFailure.closed)
         #expect(preview.latestTag == "transportClosed")
         #expect(work.latestTag == "sendEntities")
+        #expect(preview.lastEnteredWorkStageTag == nil)
+        #expect(work.lastEnteredWorkStageTag == "performLocal")
+        _ = work.begin()
+        #expect(work.lastEnteredWorkStageTag == nil)
+        #expect(preview.latestTag == "transportClosed")
     }
 
     @Test func olderWorkCompletionsCannotReplaceNewRunningOrTerminalAttempt() {
@@ -220,38 +229,98 @@ struct DebugCloudPreviewProbeTests {
         for (stage, expected) in stages {
             work.enter(stage, attempt: current)
             #expect(work.latestTag == expected)
+            #expect(work.lastEnteredWorkStageTag == expected)
             work.enter(stage, attempt: older)
             #expect(work.latestTag == expected)
+            #expect(work.lastEnteredWorkStageTag == expected)
+            work.fail(current, error: CloudOwnTransportFailure.busy)
+            #expect(work.latestTag == "transportBusy")
+            #expect(work.lastEnteredWorkStageTag == expected)
         }
+        work.finish(current)
+        #expect(work.latestTag == "finished")
+        #expect(work.lastEnteredWorkStageTag == "afterActivation")
         work.finish(current, progress: .progressed)
         #expect(work.latestTag == "progressed")
+        #expect(work.lastEnteredWorkStageTag == "afterActivation")
     }
 
     @Test func olderWorkStagesCannotReplaceNewRunningOrTerminalAttempt() {
         let work = DebugCloudPreviewProbe()
         let older = work.begin()
+        work.enter(.performLocal, attempt: older)
         _ = work.begin()
+        #expect(work.lastEnteredWorkStageTag == nil)
         for stage in DebugCloudPreviewProbe.WorkStage.allCases {
             work.enter(stage, attempt: older)
+            work.fail(older, error: CloudOwnTransportFailure.closed)
+            work.finish(older)
+            work.finish(older, progress: .progressed)
             #expect(work.latestTag == "running")
+            #expect(work.lastEnteredWorkStageTag == nil)
         }
         let completions: [(CloudConnectionProgress, String)] = [
             (.progressed, "progressed"), (.sendEntities, "sendEntities"), (.idle, "idle")
         ]
         for (progress, expected) in completions {
             let current = work.begin()
+            work.enter(.adoptionValidation, attempt: current)
             work.finish(current, progress: progress)
             for stage in DebugCloudPreviewProbe.WorkStage.allCases {
                 work.enter(stage, attempt: older)
+                work.fail(older, error: CancellationError())
+                work.finish(older, progress: .sendEntities)
                 #expect(work.latestTag == expected)
+                #expect(work.lastEnteredWorkStageTag == "adoptionValidation")
             }
         }
         let current = work.begin()
+        #expect(work.lastEnteredWorkStageTag == nil)
+        work.enter(.adoptionActivation, attempt: current)
         work.fail(current, error: CloudOwnTransportFailure.busy)
         for stage in DebugCloudPreviewProbe.WorkStage.allCases {
             work.enter(stage, attempt: older)
+            work.fail(older, error: CancellationError())
+            work.finish(older)
             #expect(work.latestTag == "transportBusy")
+            #expect(work.lastEnteredWorkStageTag == "adoptionActivation")
         }
+    }
+
+    @Test func workStageChangesAndResetNotifyObserverThatSynchronouslyReadsStage() {
+        final class CallbackState: Sendable {
+            let value = Mutex<(calls: Int, tag: String?)>((0, nil))
+        }
+        let work = DebugCloudPreviewProbe()
+        let attempt = work.begin()
+        let entered = CallbackState()
+        let initialStage = withObservationTracking {
+            work.lastEnteredWorkStageTag
+        } onChange: {
+            let tag = work.lastEnteredWorkStageTag
+            entered.value.withLock { $0.calls += 1; $0.tag = tag }
+        }
+        #expect(initialStage == nil)
+        work.enter(.performLocal, attempt: attempt)
+        let entryCallback = entered.value.withLock { $0 }
+        #expect(entryCallback.calls == 1)
+        #expect(entryCallback.tag == nil || entryCallback.tag == "performLocal")
+        #expect(work.lastEnteredWorkStageTag == "performLocal")
+
+        let reset = CallbackState()
+        let trackedStage = withObservationTracking {
+            work.lastEnteredWorkStageTag
+        } onChange: {
+            let tag = work.lastEnteredWorkStageTag
+            reset.value.withLock { $0.calls += 1; $0.tag = tag }
+        }
+        #expect(trackedStage == "performLocal")
+        _ = work.begin()
+        let resetCallback = reset.value.withLock { $0 }
+        #expect(resetCallback.calls == 1)
+        #expect(resetCallback.tag == "performLocal" || resetCallback.tag == nil)
+        #expect(work.lastEnteredWorkStageTag == nil)
+        #expect(work.latestTag == "running")
     }
 
     @Test func typedWorkCompletionNotifiesObserverThatSynchronouslyReadsTag() {

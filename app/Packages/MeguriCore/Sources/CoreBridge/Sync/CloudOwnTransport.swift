@@ -36,19 +36,35 @@ public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
 #if DEBUG
-/// Temporary, memory-only diagnosis. Each instance stores one attempt and a bounded safe tag.
+/// Temporary, memory-only diagnosis. Each instance stores one attempt and bounded safe tags.
 public final class DebugCloudPreviewProbe: Observable, Sendable {
     enum WorkStage: CaseIterable, Equatable, Sendable {
         case nextPublicationWork, performLocal
         case adoptionControlRead, adoptionControlResult
         case adoptionPageReply, adoptionPageResult, adoptionPageFailureResult
         case adoptionValidation, beforeActivation, adoptionActivation, afterActivation
+
+        var tag: String {
+            switch self {
+            case .nextPublicationWork: "nextPublicationWork"
+            case .performLocal: "performLocal"
+            case .adoptionControlRead: "adoptionControlRead"
+            case .adoptionControlResult: "adoptionControlResult"
+            case .adoptionPageReply: "adoptionPageReply"
+            case .adoptionPageResult: "adoptionPageResult"
+            case .adoptionPageFailureResult: "adoptionPageFailureResult"
+            case .adoptionValidation: "adoptionValidation"
+            case .beforeActivation: "beforeActivation"
+            case .adoptionActivation: "adoptionActivation"
+            case .afterActivation: "afterActivation"
+            }
+        }
     }
 
     public static let shared = DebugCloudPreviewProbe()
     public static let ownWork = DebugCloudPreviewProbe()
     private let changes = ObservationRegistrar()
-    private let latest = Mutex<(attempt: UUID, tag: String)?>(nil)
+    private let latest = Mutex<(attempt: UUID, tag: String, stage: WorkStage?)?>(nil)
 
     init() {}
 
@@ -57,10 +73,18 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
         return latest.withLock { $0?.tag ?? "unobserved" }
     }
 
+    /// Last entered stage for this attempt, not evidence of completion or cause.
+    public var lastEnteredWorkStageTag: String? {
+        changes.access(self, keyPath: \.lastEnteredWorkStageTag)
+        return latest.withLock { $0?.stage?.tag }
+    }
+
     func begin() -> UUID {
         let attempt = UUID()
         changes.withMutation(of: self, keyPath: \.latestTag) {
-            latest.withLock { $0 = (attempt, "running") }
+            changes.withMutation(of: self, keyPath: \.lastEnteredWorkStageTag) {
+                latest.withLock { $0 = (attempt, "running", nil) }
+            }
         }
         return attempt
     }
@@ -69,21 +93,11 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
 
     /// The tag marks the last entered await boundary, not its completion.
     func enter(_ stage: WorkStage, attempt: UUID) {
-        let tag: String
-        switch stage {
-        case .nextPublicationWork: tag = "nextPublicationWork"
-        case .performLocal: tag = "performLocal"
-        case .adoptionControlRead: tag = "adoptionControlRead"
-        case .adoptionControlResult: tag = "adoptionControlResult"
-        case .adoptionPageReply: tag = "adoptionPageReply"
-        case .adoptionPageResult: tag = "adoptionPageResult"
-        case .adoptionPageFailureResult: tag = "adoptionPageFailureResult"
-        case .adoptionValidation: tag = "adoptionValidation"
-        case .beforeActivation: tag = "beforeActivation"
-        case .adoptionActivation: tag = "adoptionActivation"
-        case .afterActivation: tag = "afterActivation"
+        changes.withMutation(of: self, keyPath: \.latestTag) {
+            changes.withMutation(of: self, keyPath: \.lastEnteredWorkStageTag) {
+                latest.withLock { if $0?.attempt == attempt { $0 = (attempt, stage.tag, stage) } }
+            }
         }
-        update(attempt, tag: tag)
     }
 
     func finish(_ attempt: UUID, progress: CloudConnectionProgress) {
@@ -105,7 +119,7 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
         // Native observation notifies outside the mutex, including synchronous
         // observers that read latestTag. Recheck the attempt at the state update.
         changes.withMutation(of: self, keyPath: \.latestTag) {
-            latest.withLock { if $0?.attempt == attempt { $0 = (attempt, tag) } }
+            latest.withLock { if $0?.attempt == attempt { $0?.tag = tag } }
         }
     }
 
