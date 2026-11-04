@@ -4,7 +4,177 @@ import Testing
 
 private final class BufferedNativeFailure: Error {}
 
+private enum NetworkAdmissionTaskLocals {
+    // Synthetic ancestry only; this does not model a private SDK callback context.
+    @TaskLocal static var callbackMarker: String?
+}
+
+private enum NetworkEntryObservationError: Error { case deadline }
+
+private func drainNetworkEntryObservation(_ operation: CloudKitNetworkOperation,
+                                          queued: CloudCallbackGate, observed: CloudCallbackGate) async throws {
+    let watchdog = Task {
+        let failure: any Error
+        do {
+            try await Task.sleep(for: .seconds(10))
+            failure = NetworkEntryObservationError.deadline
+        } catch { failure = error }
+        operation.cancel()
+        await queued.abort(failure)
+        await observed.abort(failure)
+    }
+    try await withTaskCancellationHandler {
+        do {
+            try await queued.waitForArrival()
+            await queued.open()
+            try await observed.waitForArrival()
+            await observed.open()
+            try await operation.drain()
+        } catch {
+            await queued.abort(error)
+            await observed.abort(error)
+            watchdog.cancel()
+            await watchdog.value
+            await operation.cancelAndDrain()
+            #expect(await queued.pendingWaiterCount() == 0)
+            #expect(await observed.pendingWaiterCount() == 0)
+            throw error
+        }
+        watchdog.cancel()
+        await watchdog.value
+        #expect(await queued.pendingWaiterCount() == 0)
+        #expect(await observed.pendingWaiterCount() == 0)
+    } onCancel: {
+        operation.cancel()
+        watchdog.cancel()
+    }
+}
+
 struct CloudKitNetworkOperationTests {
+    @Test(arguments: [false, true])
+    func networkEntryObservationDeadlineDrainsEarlyCompletedOriginal(queuedArrived: Bool) async throws {
+        let lifetime = CloudKitNetworkLifetime()
+        let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+        let completed = CloudAcceptedNetworkCalls()
+        await queued.open()
+        let operation = try lifetime.admit(cancelSDK: {}) {
+            if queuedArrived { await queued.enter() }
+            completed.record()
+        }
+        try await operation.drain()
+        #expect(completed.value == 1)
+        do {
+            try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+            Issue.record("missing arrival did not fail at the observation deadline")
+        } catch { #expect(error is NetworkEntryObservationError) }
+        #expect(await queued.pendingWaiterCount() == 0)
+        #expect(await observed.pendingWaiterCount() == 0)
+        try await operation.drain()
+        #expect(completed.value == 1)
+    }
+
+    @Test func admittedTaskDropsArbitraryCallerMarkerAtSDKEntry() async throws {
+        let lifetime = CloudKitNetworkLifetime()
+        let generation = lifetime.authority()
+        let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+        let callerPriority = Task.currentPriority
+        let operation = try NetworkAdmissionTaskLocals.$callbackMarker.withValue("synthetic-callback-marker") {
+            try lifetime.admit(cancelSDK: {
+                await queued.abort(CancellationError())
+                await observed.abort(CancellationError())
+            }) {
+                await queued.enter()
+                do {
+                    try lifetime.enqueue(generation: generation, validate: {}, begin: {})
+                    // Stand-in SDK entry in this original admitted body. The
+                    // gate precedes final validation; admission is not acceptance.
+                    #expect(NetworkAdmissionTaskLocals.callbackMarker == nil)
+                    #expect(Task.currentPriority >= callerPriority,
+                            "caller priority must survive admission; escalation is allowed")
+                    await observed.enter()
+                } catch {
+                    await queued.abort(error)
+                    await observed.abort(error)
+                    throw error
+                }
+            }
+        }
+        // The caller's synthetic binding has ended before the body is released.
+        try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+    }
+
+    @Test func admittedTaskPreservesMediaContextIdentityAndCallerPriorityAtSDKEntry() async throws {
+        // A high-priority caller makes lost priority visible even when a naive
+        // detached task would otherwise happen to use the test's default priority.
+        let caller = Task(priority: .high) {
+            let lifetime = CloudKitNetworkLifetime()
+            let generation = lifetime.authority()
+            let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+            let context = CloudMediaCancellationContext(sdk: "synthetic-admission-context")
+            let callerPriority = Task.currentPriority
+            #expect(callerPriority >= .high)
+            let operation = try CloudMediaCancellationContext.$current.withValue(context) {
+                try lifetime.admit(cancelSDK: {
+                    await queued.abort(CancellationError())
+                    await observed.abort(CancellationError())
+                }) {
+                    await queued.enter()
+                    do {
+                        try lifetime.enqueue(generation: generation, validate: {}, begin: {})
+                        // Stand-in SDK entry, before any drain can escalate it.
+                        #expect(CloudMediaCancellationContext.current === context)
+                        #expect(Task.currentPriority >= callerPriority,
+                                "caller priority must survive admission; escalation is allowed")
+                        await observed.enter()
+                    } catch {
+                        await queued.abort(error)
+                        await observed.abort(error)
+                        throw error
+                    }
+                }
+            }
+            // Rebinding in production must retain this exact application object
+            // after the caller's TaskLocal scope has ended.
+            try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+        }
+        try await withTaskCancellationHandler {
+            try await caller.value
+        } onCancel: { caller.cancel() }
+    }
+
+    #if DEBUG
+    @Test func admittedTaskPreservesSelectedActionAtSDKEntry() async throws {
+        let lifetime = CloudKitNetworkLifetime()
+        let generation = lifetime.authority()
+        let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+        let action = CloudPolicyAction.requestFetch(zones: [.collection, .media])
+        let operation = try CloudMediaCancellationContext.$selectedAction.withValue(action) {
+            try lifetime.admit(cancelSDK: {
+                await queued.abort(CancellationError())
+                await observed.abort(CancellationError())
+            }) {
+                await queued.enter()
+                do {
+                    try lifetime.enqueue(generation: generation, validate: {}, begin: {})
+                    // Match the concrete case and its associated values without
+                    // requiring CloudPolicyAction to conform to Equatable.
+                    if case .some(.requestFetch(let zones)) = CloudMediaCancellationContext.selectedAction {
+                        #expect(zones == [.collection, .media])
+                    } else {
+                        Issue.record("selected requestFetch action was lost or changed at SDK entry")
+                    }
+                    await observed.enter()
+                } catch {
+                    await queued.abort(error)
+                    await observed.abort(error)
+                    throw error
+                }
+            }
+        }
+        try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+    }
+    #endif
+
     @Test func ownedTaskInvokesSDKAndBuffersInlineFailure() async throws {
         let accepted = CloudAcceptedNetworkCalls()
         let completion = CloudKitNetworkCompletion()

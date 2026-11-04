@@ -18,5 +18,6 @@
 - Preparation cancellation uses the drained job’s policy id, never history differencing. Recovery Preview can retain activation/acceptance evidence; closing its native view does not cancel that operation. Publication checks the manual operation’s own cancellation state.
 
 - Swift `CKSyncEngine`: async fetch/send APIs only. Objective-C completion overloads are unavailable in Swift.
+- A plain `Task` retains callback task-local context after the callback returns. Keep SDK network admission detached; restore only the explicit media cancellation context and DEBUG action, with caller priority and owned cancellation/drain preserved.
 - Raw CloudKit terminal partial-failure tests capture installed handlers: SDK callback getter round-trips normalize them. Preserve maximum-delay assertions.
 - Cloud media read failures cross as numeric facts. They do not retain the SDK object. Check the wrapper code and retry delay; its underlying error can be local.

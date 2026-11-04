@@ -149,7 +149,21 @@ final class CloudKitNetworkLifetime: Sendable {
             guard !state.retired, state.cancelling == 0 else { throw CancellationError() }
             try Task.checkCancellation()
             let id = UUID()
-            let task = Task { try await body() }
+            let context = CloudMediaCancellationContext.current
+            #if DEBUG
+            let selectedAction = CloudMediaCancellationContext.selectedAction
+            #endif
+            let task = Task.detached(priority: Task.currentPriority) {
+                try await CloudMediaCancellationContext.$current.withValue(context) {
+                    #if DEBUG
+                    try await CloudMediaCancellationContext.$selectedAction.withValue(selectedAction) {
+                        try await body()
+                    }
+                    #else
+                    try await body()
+                    #endif
+                }
+            }
             let operation = CloudKitNetworkOperation(task: task,
                 willCancel: { self.startCancellationFence() },
                 cancelSDK: { await cancelSDK(); self.endCancellation() },
