@@ -431,6 +431,7 @@ struct NativeCloudOwnTransportTests {
         let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
         let zone = NativeCloudOwnRecords.zone("c-synthetic")
         let configuration = try #require(operation.configurationsByRecordZoneID?[zone])
+        #expect(operation.configuration.qualityOfService == .userInitiated)
         #expect(CloudMediaStaging.assetLimit == 100 * 1_024 * 1_024)
         #expect(CloudMediaStaging.stagedLimit == 256 * 1_024 * 1_024)
         #expect(CloudMediaStaging.reserve == 512 * 1_024 * 1_024)

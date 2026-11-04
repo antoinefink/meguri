@@ -34,3 +34,21 @@ A source review finds that adoption pages request at most two records to keep
 retained assets within the staging budget. The request includes every field.
 Raising that limit alone would break the worst-case asset bound. Neither this
 limit nor the SDK's discretionary default proves the cause of the long wait.
+
+## User-requested download priority
+
+Component start: 594a6797. Filtered export71955 adds one native configuration
+assignment and one assertion to an existing test. Adoption pages now request
+user-initiated priority. Other operations retain their existing priority.
+Page sizes, asset budgets, timeouts and cancellation remain unchanged.
+
+The installed SDK defines the default as discretionary. The user explicitly
+requests this download and cannot review the collection until it finishes.
+This justifies the priority choice; it does not establish the delay's cause.
+Reference: https://developer.apple.com/documentation/cloudkit/ckoperation/configuration-swift.class/qualityofservice
+
+Test-only Swift73381 fails at the new priority assertion in both cancellation
+variants. After the production assignment, Swift74744 passes all 22 native
+transport tests, including both variants and the original asset-retention
+checks. Private76004 and similarity76251 pass. Independent review reports no
+P0–P2 findings. A signed device run and the full batch gate remain outstanding.

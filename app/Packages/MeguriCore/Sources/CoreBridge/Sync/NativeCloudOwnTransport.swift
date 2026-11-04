@@ -412,6 +412,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         configuration.previousServerChangeToken = token; configuration.desiredKeys = nil
         configuration.resultsLimit = NativeCloudStagingRecords.pageLimit
         let operation = CKFetchRecordZoneChangesOperation(recordZoneIDs: [id], configurationsByRecordZoneID: [id: configuration])
+        operation.configuration.qualityOfService = .userInitiated
         operation.fetchAllChanges = false
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
         let staging = try self.staging ?? CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
