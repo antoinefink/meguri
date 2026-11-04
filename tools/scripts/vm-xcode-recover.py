@@ -760,6 +760,9 @@ class Recovery:
             if raw is None:
                 continue  # Absence is pinned; it says nothing about activity.
             context = loads(raw)
+            if (isinstance(context, dict) and set(context) == {"private"}
+                    and isinstance(context["private"], str) and context["private"] == directory):
+                continue  # SourceCheckOnly is pinned, but is not a run candidate.
             need(isinstance(context, dict) and isinstance(context.get("run"), str) and context["run"])
             if context["run"] == RUN:
                 candidates.append((directory, context))

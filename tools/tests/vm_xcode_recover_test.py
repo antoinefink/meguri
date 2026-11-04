@@ -302,6 +302,81 @@ class RecoveryCase(unittest.TestCase):
             self.assertEqual(pin["sha256"], m.sha(m.encoded(context)))
             self.assertEqual(pin["pin"], list(m.file_identity((directory / "context.json").stat())))
 
+    def test_exact_self_bound_source_only_context_retains_pins_and_activity_proofs(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        context = {"private": str(other)}
+        write(other / "context.json", context)
+        proof = self.assert_discovery_archived()
+        self.assertEqual(self.recovery.pins.checks[str(self.temp_root)], {self.private.name, other.name})
+        self.assertIn(str(other), self.recovery.pins.directories)
+        pin = next(pin for pin in proof["pins"] if pin["path"] == str(other / "context.json"))
+        self.assertEqual(pin["sha256"], m.sha(m.encoded(context)))
+        self.assertEqual(pin["pin"], list(m.file_identity((other / "context.json").stat())))
+        self.assertEqual(json.loads((other / "context.json").read_bytes()), context)
+
+    def test_source_only_near_matches_and_unknown_missing_run_shapes_refuse(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        for context in ({"private": str(self.private)}, {"private": str(other) + "/."},
+                        {"private": str(other) + "/../" + other.name},
+                        *({"private": value} for value in (None, 7, True, [], {})),
+                        {"private": str(other), "extra": True},
+                        {"private": str(other), "run": None},
+                        {"private": str(other), "run": ""},
+                        {}, {"unknown": "generated"}, [], None, "generated", 7):
+            with self.subTest(context=context):
+                write(other / "context.json", context)
+                self.refuses()
+                self.assertNotIn("stop", self.system.events)
+                self.recovery.pins.close()
+                self.recovery = m.Recovery(self.route, self.system)
+                self.addCleanup(self.recovery.pins.close)
+
+    def test_source_only_context_mutation_after_discovery_refuses_through_retained_pin(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        context = {"private": str(other)}
+        write(other / "context.json", context)
+        def change(event):
+            if event == "guest":
+                write(other / "context.json", {"private": str(self.private)})
+        self.system.hook = change
+        self.refuses()
+        self.assertIn("guest", self.system.events)
+        self.assertNotIn("stop", self.system.events)
+        pin = next(pin for pin in self.recovery.pins.files if pin[0] == str(other / "context.json"))
+        self.assertEqual(pin[3], m.encoded(context))
+        with self.assertRaises(m.Refused):
+            self.recovery.pins.check()
+
+    def test_source_only_context_does_not_prove_original_controller_or_worker_dead(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        write(other / "context.json", {"private": str(other)})
+        for live_pid in (self.holder["pid"], 17002):
+            with self.subTest(live_pid=live_pid), \
+                    patch.object(m, "dead", side_effect=lambda pid: pid != live_pid) as dead:
+                self.refuses()
+                dead.assert_any_call(live_pid)
+                self.assertNotIn("stop", self.system.events)
+                self.recovery.pins.close()
+                self.recovery = m.Recovery(self.route, self.system)
+                self.addCleanup(self.recovery.pins.close)
+
+    def test_source_only_context_does_not_hide_managed_host_activity(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        write(other / "context.json", {"private": str(other)})
+        self.system.process_table = {29001: "python vm-xcode-stage.py"}
+        self.refuses()
+        self.assertIn("host", self.system.events)
+        self.assertNotIn("stop", self.system.events)
+
+    def test_source_only_context_does_not_hide_unknown_guest_activity(self):
+        other = self.temp_root / "meguri-vm-xcode.SRC001"
+        write(other / "context.json", {"private": str(other)})
+        self.system.fail_at = "guest"
+        self.refuses()
+        self.assertIn("guest", self.system.events)
+        self.assertTrue((self.guard / "recovery/claim.json").is_file())
+        self.assertNotIn("stop", self.system.events)
+
     def test_exact_run_requires_every_full_binding_field(self):
         self.historical_stage()
         for key, value in (("lease_slot", str(self.base / "other-lease")),

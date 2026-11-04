@@ -37,3 +37,9 @@ Inspect67021 still refuses without a VM change. Export67742 adds only a private
 failure location trace: fixed classes, bounded numbers and helper frames, with
 no exception text or paths. Review is clear. Selftest83818: three pass.
 Private83562 and similarity83966 pass. Actual recovery remains unverified.
+
+Inspect84573 identifies the exact refusal: admission expects a run field in
+four valid source-only contexts. MG creates that format without any VM work.
+Export87320 accepts only its exact self-bound schema as a noncandidate; pins
+and activity checks remain required. Unknown formats still refuse. Review is
+clear. Selftest92871: three pass. Private92662 and similarity92435 pass.
