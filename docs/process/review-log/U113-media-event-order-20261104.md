@@ -27,3 +27,14 @@ The existing P2/P4/P13.1/J2.1.1 contract permits event waiting during preparatio
 before a contiguous final validation and invocation on the retained SDK. No
 retry, timer, second wake or relaxed guard is required. A filtered repair follows.
 The separate Core14413 final-validation responsiveness failure stays open.
+
+Export16161 waits for event bookkeeping during retained-operation preparation
+in both engines, before final validation and invocation in one actor turn.
+Captured SDK ownership, detached context and final guards are unchanged.
+Independent review finds no P0–P2 issue, including waiter cancellation and the
+returned-work wait graph. Native21165 passes the forced wake case and all four
+send/fetch cancellation/release cases. The earlier failures remain retained.
+
+Private23470 flags one comment in the new test. Its filtered removal is pending;
+the production candidate and exact proof remain in its export. Broader native
+checks, actual SDK behavior and the full batch gate are still required.
