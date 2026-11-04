@@ -1899,7 +1899,15 @@ fn prior_binding_media_and_resolution_intents_settle_before_new_publication_scan
     for resolution in [false, true] {
         let run = tempfile::tempdir().unwrap();
         let scope = scope("intent-order");
-        let mut service = service(run.path());
+        let mut service = Service::open(
+            run.path(),
+            Config {
+                page_size: 32,
+                ..Config::default()
+            },
+            SeededRandom::new(SEED),
+        )
+        .unwrap();
         let sender_dir = generated(run.path(), "sender", true);
         let mut sender = open(&sender_dir, &scope, ORIGIN, ScriptedKeys::new(None));
         publish(&mut sender, &mut service);

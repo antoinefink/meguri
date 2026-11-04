@@ -127,3 +127,14 @@ Core89112 also retains one older P24 test failure at page_validation. Its
 synthetic service uses pages of 200, while adoption now admits at most 32.
 A local fixture correction must preserve all records, continuations and
 assertions, then expose any remaining failure in the intended intent phase.
+
+Export93777 removes that comment and changes only the named P24 fixture's page
+size. Review is clear. Core95005 passes its media/resolution-intent witness.
+Core96685 passes the full selected group: 52/52. Core-lint97306 and private98488
+pass. Similarity735 scans the batch: 739 files, no flags or allowlists.
+
+Native97307 compiles and runs 114 cases: 112 pass, two fail. The new payload
+test compares /var and /private/var path strings for the same staged location.
+The existing media wake test also returns taskCancelled after one SDK call;
+its earlier failure remains recorded. Both need resolution. No signed-device
+import, full batch gate or unit acceptance is claimed.

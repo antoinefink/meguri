@@ -17,3 +17,8 @@ Independent review clears both changes. Core89112 passes the diagnostic cases;
 Core58796's teardown abort is retained as the pre-repair result. Private89953
 still flags one comment in the test file. That file remains outside this WIP
 source commit until its filtered comment repair. Native checks remain pending.
+
+Export93777 removes only that flagged comment. Private98488 and the commit hook
+pass. Core96685 passes all 52 selected checks, including the diagnostic cases.
+Native97307 compiles the new bridge and runs its selected diagnostics without
+failure; two other native cases remain red. The full batch gate is still open.
