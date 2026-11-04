@@ -23,4 +23,6 @@ identify invalidated, superseded account work; the reducer handles that case
 without setting generic failure. A later generic footer has no matching error
 event. Export8959 adds DEBUG origins to eleven existing silent catches. Review
 is clear. No runtime decision changes. Core20689: 17 pass. Private20624 and
-similarity20627 pass. AppModel compilation is pending.
+similarity20627 pass. AppModel24217: three pass. The eleven-origin build has
+not run live yet. Backlog movement alone does not prove saved media or a
+completed round trip.
