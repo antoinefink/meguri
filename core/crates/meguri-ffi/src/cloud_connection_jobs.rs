@@ -38,7 +38,179 @@ typed_result!(
 pub struct CloudAdoptionApplied {
     pub applied: bool,
 }
-typed_result!(CloudAdoptionAppliedResult, CloudAdoptionResultJob, CloudAdoptionApplied);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudAdoptionDiagnosticTask {
+    ReadActive,
+    ReadEpoch,
+    ReadMediaRoot,
+    Fetch,
+    FetchPayload,
+    Validate,
+    RecheckActive,
+    Activate,
+}
+impl From<a::AdoptionDiagnosticTask> for CloudAdoptionDiagnosticTask {
+    fn from(value: a::AdoptionDiagnosticTask) -> Self {
+        match value {
+            a::AdoptionDiagnosticTask::ReadActive => Self::ReadActive,
+            a::AdoptionDiagnosticTask::ReadEpoch => Self::ReadEpoch,
+            a::AdoptionDiagnosticTask::ReadMediaRoot => Self::ReadMediaRoot,
+            a::AdoptionDiagnosticTask::Fetch => Self::Fetch,
+            a::AdoptionDiagnosticTask::FetchPayload => Self::FetchPayload,
+            a::AdoptionDiagnosticTask::Validate => Self::Validate,
+            a::AdoptionDiagnosticTask::RecheckActive => Self::RecheckActive,
+            a::AdoptionDiagnosticTask::Activate => Self::Activate,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudAdoptionDiagnosticStage {
+    Operation,
+    Owner,
+    Claim,
+    Authority,
+    ActiveValidation,
+    EpochShape,
+    EpochValidation,
+    EpochWrite,
+    MediaRootShape,
+    MediaRootValidation,
+    MediaRootWrite,
+    MediaRootEpoch,
+    MediaRootStageCreate,
+    MediaRootSpace,
+    PageValidation,
+    PageRecordValidation,
+    PageSpace,
+    PayloadValidation,
+    PayloadRead,
+    PayloadSpace,
+    PayloadWrite,
+    ReceivedValidation,
+    RecordEncode,
+    RecordSpace,
+    RecordWrite,
+    RowStage,
+    FinalSpace,
+    PageAdvance,
+    PageFinish,
+    NextAuthority,
+    Transport,
+}
+impl From<a::AdoptionDiagnosticStage> for CloudAdoptionDiagnosticStage {
+    fn from(value: a::AdoptionDiagnosticStage) -> Self {
+        match value {
+            a::AdoptionDiagnosticStage::Operation => Self::Operation,
+            a::AdoptionDiagnosticStage::Owner => Self::Owner,
+            a::AdoptionDiagnosticStage::Claim => Self::Claim,
+            a::AdoptionDiagnosticStage::Authority => Self::Authority,
+            a::AdoptionDiagnosticStage::ActiveValidation => Self::ActiveValidation,
+            a::AdoptionDiagnosticStage::EpochShape => Self::EpochShape,
+            a::AdoptionDiagnosticStage::EpochValidation => Self::EpochValidation,
+            a::AdoptionDiagnosticStage::EpochWrite => Self::EpochWrite,
+            a::AdoptionDiagnosticStage::MediaRootShape => Self::MediaRootShape,
+            a::AdoptionDiagnosticStage::MediaRootValidation => Self::MediaRootValidation,
+            a::AdoptionDiagnosticStage::MediaRootWrite => Self::MediaRootWrite,
+            a::AdoptionDiagnosticStage::MediaRootEpoch => Self::MediaRootEpoch,
+            a::AdoptionDiagnosticStage::MediaRootStageCreate => Self::MediaRootStageCreate,
+            a::AdoptionDiagnosticStage::MediaRootSpace => Self::MediaRootSpace,
+            a::AdoptionDiagnosticStage::PageValidation => Self::PageValidation,
+            a::AdoptionDiagnosticStage::PageRecordValidation => Self::PageRecordValidation,
+            a::AdoptionDiagnosticStage::PageSpace => Self::PageSpace,
+            a::AdoptionDiagnosticStage::PayloadValidation => Self::PayloadValidation,
+            a::AdoptionDiagnosticStage::PayloadRead => Self::PayloadRead,
+            a::AdoptionDiagnosticStage::PayloadSpace => Self::PayloadSpace,
+            a::AdoptionDiagnosticStage::PayloadWrite => Self::PayloadWrite,
+            a::AdoptionDiagnosticStage::ReceivedValidation => Self::ReceivedValidation,
+            a::AdoptionDiagnosticStage::RecordEncode => Self::RecordEncode,
+            a::AdoptionDiagnosticStage::RecordSpace => Self::RecordSpace,
+            a::AdoptionDiagnosticStage::RecordWrite => Self::RecordWrite,
+            a::AdoptionDiagnosticStage::RowStage => Self::RowStage,
+            a::AdoptionDiagnosticStage::FinalSpace => Self::FinalSpace,
+            a::AdoptionDiagnosticStage::PageAdvance => Self::PageAdvance,
+            a::AdoptionDiagnosticStage::PageFinish => Self::PageFinish,
+            a::AdoptionDiagnosticStage::NextAuthority => Self::NextAuthority,
+            a::AdoptionDiagnosticStage::Transport => Self::Transport,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudAdoptionFailureCategory {
+    Validation,
+    Tracking,
+    Engine,
+    Cancelled,
+    AuthorityChanged,
+    AccountUnavailable,
+    Publication,
+    Incomplete,
+    FileIdentityUnavailable,
+    Transport,
+}
+impl From<a::AdoptionFailureCategory> for CloudAdoptionFailureCategory {
+    fn from(value: a::AdoptionFailureCategory) -> Self {
+        match value {
+            a::AdoptionFailureCategory::Validation => Self::Validation,
+            a::AdoptionFailureCategory::Tracking => Self::Tracking,
+            a::AdoptionFailureCategory::Engine => Self::Engine,
+            a::AdoptionFailureCategory::Cancelled => Self::Cancelled,
+            a::AdoptionFailureCategory::AuthorityChanged => Self::AuthorityChanged,
+            a::AdoptionFailureCategory::AccountUnavailable => Self::AccountUnavailable,
+            a::AdoptionFailureCategory::Publication => Self::Publication,
+            a::AdoptionFailureCategory::Incomplete => Self::Incomplete,
+            a::AdoptionFailureCategory::FileIdentityUnavailable => Self::FileIdentityUnavailable,
+            a::AdoptionFailureCategory::Transport => Self::Transport,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct CloudAdoptionFailureDiagnostic {
+    pub task: CloudAdoptionDiagnosticTask,
+    pub last_entered_stage: CloudAdoptionDiagnosticStage,
+    pub primary_category: Option<CloudAdoptionFailureCategory>,
+    pub cleanup_category: Option<CloudAdoptionFailureCategory>,
+}
+impl From<a::AdoptionFailureDiagnostic> for CloudAdoptionFailureDiagnostic {
+    fn from(value: a::AdoptionFailureDiagnostic) -> Self {
+        Self {
+            task: value.task.into(),
+            last_entered_stage: value.last_entered_stage.into(),
+            primary_category: value.primary_category.map(Into::into),
+            cleanup_category: value.cleanup_category.map(Into::into),
+        }
+    }
+}
+#[derive(uniffi::Object)]
+pub struct CloudAdoptionAppliedResult {
+    cell: Arc<Cell<CloudAdoptionApplied>>,
+    diagnostic: Arc<std::sync::OnceLock<Option<CloudAdoptionFailureDiagnostic>>>,
+}
+#[uniffi::export]
+impl CloudAdoptionAppliedResult {
+    pub fn result(&self) -> Result<Option<CloudAdoptionApplied>, CoreError> {
+        callback::enter("CloudAdoptionAppliedResult.result");
+        self.cell
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .transpose()
+    }
+    /// None means no captured failure (also while pending). Never consumes the
+    /// typed outcome, including when result() throws. No later job can write it.
+    pub fn failure_diagnostic(&self) -> Result<Option<CloudAdoptionFailureDiagnostic>, CoreError> {
+        callback::enter("CloudAdoptionAppliedResult.failure_diagnostic");
+        if self.cell.0.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+            return Ok(None);
+        }
+        Ok(self.diagnostic.get().cloned().flatten())
+    }
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAdoptionResultJob {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<CloudAdoptionAppliedResult>,
+}
 
 impl CloudConnection {
     fn start_connection<T: Send + 'static>(
@@ -100,18 +272,25 @@ impl CloudConnection {
     ) -> Result<CloudAdoptionResultJob, CoreError> {
         callback::enter("CloudConnection.start_adoption_result");
         self.owns(&handle.owner)?;
+        let diagnostic = Arc::new(std::sync::OnceLock::new());
+        let frozen = diagnostic.clone();
         let (handle, cell) = self.start_connection(
             "CloudConnection.adoption_result",
             handle.generation,
             move |owner, work| {
-                owner
-                    .adoption_result_with_work(handle, result, work)
-                    .map(|()| CloudAdoptionApplied { applied: true })
+                let mut recorder = a::AdoptionDiagnosticRecorder::new(&handle.work.task);
+                let outcome = owner
+                    .adoption_result_with_work(handle, result, work, &mut recorder)
+                    .map(|()| CloudAdoptionApplied { applied: true });
+                // Freeze before start_connection publishes the existing typed
+                // completion. This never changes its outcome or final check.
+                let _ = frozen.set(recorder.snapshot().map(Into::into));
+                outcome
             },
         )?;
         Ok(CloudAdoptionResultJob {
             handle,
-            result: Arc::new(CloudAdoptionAppliedResult { cell }),
+            result: Arc::new(CloudAdoptionAppliedResult { cell, diagnostic }),
         })
     }
 }

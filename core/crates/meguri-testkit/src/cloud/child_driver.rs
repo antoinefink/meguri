@@ -438,6 +438,7 @@ pub(crate) enum Input {
     PublicationCancel([u8; 16]),
     PublicationTrigger,
     PublicationFacts,
+    AuthorityStatus,
     PublicationControl,
     CollectionRows,
     MediaRows,
@@ -1328,6 +1329,7 @@ impl ChildDriver {
             Input::PublicationCancel(..) => "PublicationCancel",
             Input::PublicationTrigger => "PublicationTrigger",
             Input::PublicationFacts => "PublicationFacts",
+            Input::AuthorityStatus => "AuthorityStatus",
             Input::PublicationControl => "PublicationControl",
             Input::PreviewBegin => "PreviewBegin",
             Input::PreviewActive(..) => "PreviewActive",
@@ -2982,6 +2984,7 @@ impl Device {
             | Input::PublicationCancel(..)
             | Input::PublicationTrigger
             | Input::PublicationFacts
+            | Input::AuthorityStatus
             | Input::CollectionRows
             | Input::MediaRows
             | Input::CollectionHeader

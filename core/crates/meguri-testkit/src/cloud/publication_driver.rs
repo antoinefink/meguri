@@ -241,6 +241,10 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
             value(())
         }
         Input::PublicationFacts => value(device.runtime()?.publication_facts(&collection)?),
+        Input::AuthorityStatus => {
+            let status = device.runtime()?.status()?;
+            value((status.stored_usable, status.identity_verified))
+        }
         Input::CollectionRows => value(device.collection_rows()?),
         Input::MediaRows => value(device.media_rows()?),
         Input::CollectionHeader => {

@@ -14,6 +14,12 @@ private final class ForeignPublicationQueue: MeguriCoreBindings.CloudPublication
 private struct CloudConnectionJobValue<Value: Sendable>: Sendable {
     let handle: MeguriCoreBindings.JobHandle
     let read: @Sendable () throws -> Value?
+    let adoptionResult: MeguriCoreBindings.CloudAdoptionAppliedResult?
+    init(handle: MeguriCoreBindings.JobHandle,
+         adoptionResult: MeguriCoreBindings.CloudAdoptionAppliedResult? = nil,
+         read: @escaping @Sendable () throws -> Value?) {
+        self.handle = handle; self.read = read; self.adoptionResult = adoptionResult
+    }
 }
 
 public actor CoreCloudConnectionService {
@@ -38,8 +44,16 @@ public actor CoreCloudConnectionService {
         do {
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(startName, start)
-            let job = try await Jobs.trackDraining(started.handle, setup: track)
+            let job: CoreJob
+            do {
+                job = try await Jobs.trackDraining(started.handle, setup: track)
+            } catch {
+                // trackDraining has already drained on listener setup failure.
+                await recordAdoptionFailure(started.adoptionResult)
+                throw error
+            }
             let outcome = await job.outcome()
+            await recordAdoptionFailure(started.adoptionResult)
             // The permit and payload leases survive setup failure and terminal
             // drain. Cancellation of a waiting Task cannot drop a predecessor.
             if let value = try await MaintenanceLane.shared.call(resultName, started.read) {
@@ -55,6 +69,18 @@ public actor CoreCloudConnectionService {
             await order.release()
             throw error
         }
+    }
+
+    private func recordAdoptionFailure(_ result: MeguriCoreBindings.CloudAdoptionAppliedResult?) async {
+        #if DEBUG
+        guard let result else { return }
+        // Best effort: a diagnostic read must never replace the original error.
+        if let diagnostic = try? await MaintenanceLane.shared.call(.cloudAdoptionFailureDiagnostic, {
+            try result.failureDiagnostic().map(CloudAdoptionFailureDiagnostic.init)
+        }) {
+            DebugCloudDiagnostics.recordAdoptionFailure(diagnostic)
+        }
+        #endif
     }
 
     public func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation {
@@ -122,7 +148,7 @@ public actor CoreCloudConnectionService {
             // listener setup (including failure drain), terminal and typed read.
             let _: MeguriCoreBindings.CloudAdoptionApplied = try await run(.cloudConnectionStartAdoptionResult, result: .cloudAdoptionAppliedResult) { [raw] in
                 let started = try raw.startAdoptionResult(handle: handle.raw, result: value)
-                return CloudConnectionJobValue(handle: started.handle, read: { try started.result.result() })
+                return CloudConnectionJobValue(handle: started.handle, adoptionResult: started.result, read: { try started.result.result() })
             }
         }
     }

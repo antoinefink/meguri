@@ -8,6 +8,26 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func adoptionFailureTagsKeepPrimaryAndCleanupSeparate() {
+        let cases: [(CloudAdoptionFailureDiagnostic.Category?, CloudAdoptionFailureDiagnostic.Category?, String)] = [
+            (.validation, nil, "primary=validation cleanup=none"),
+            (nil, .fileIdentityUnavailable, "primary=none cleanup=fileIdentityUnavailable"),
+            (.validation, .fileIdentityUnavailable, "primary=validation cleanup=fileIdentityUnavailable")
+        ]
+        for (primary, cleanup, suffix) in cases {
+            let snapshot = CloudAdoptionFailureDiagnostic(
+                task: .fetchPayload, lastEnteredStage: .receivedValidation,
+                primaryCategory: primary, cleanupCategory: cleanup)
+            let value = Value.adoption(snapshot)
+            #expect(value.formatted == "boundary=connectionFailure action=adoptionResult task=fetchPayload lastEnteredStage=receivedValidation \(suffix)")
+            #expect(value.code == nil && value.zone == nil && value.kind == nil)
+            let recorder = DebugCloudDiagnostics.Recorder()
+            var logged: [Value] = []
+            recorder.emit(value) { logged.append($0) }
+            #expect(logged == [value])
+        }
+    }
+
     @Test func policyFailuresHaveExactTags() {
         let cases: [(CloudPolicyFailure, String)] = [
             (.closed, "policy.closed"), (.wrongOwner, "policy.wrongOwner"),

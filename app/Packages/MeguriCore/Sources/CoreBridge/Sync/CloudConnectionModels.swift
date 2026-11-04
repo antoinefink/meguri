@@ -200,3 +200,139 @@ public struct CloudRecoveryStatus: Sendable {
         step = switch v.step { case .confirmed: .confirmed; case .bound: .bound; case .zones: .zones; case .sent: .sent; case .complete: .complete; case .cancelling: .cancelling; case .staging: .staging; case .staged: .staged; case .ready: .ready }
     }
 }
+
+#if DEBUG
+/// Frozen content-free failure from the exact drained adoption result.
+struct CloudAdoptionFailureDiagnostic: Sendable, Equatable {
+    enum Task: String, Sendable {
+        case readActive
+        case readEpoch
+        case readMediaRoot
+        case fetch
+        case fetchPayload
+        case validate
+        case recheckActive
+        case activate
+        init(_ value: MeguriCoreBindings.CloudAdoptionDiagnosticTask) {
+            self = switch value {
+            case .readActive: .readActive
+            case .readEpoch: .readEpoch
+            case .readMediaRoot: .readMediaRoot
+            case .fetch: .fetch
+            case .fetchPayload: .fetchPayload
+            case .validate: .validate
+            case .recheckActive: .recheckActive
+            case .activate: .activate
+            }
+        }
+    }
+    enum Stage: String, Sendable {
+        case operation
+        case owner
+        case claim
+        case authority
+        case activeValidation
+        case epochShape
+        case epochValidation
+        case epochWrite
+        case mediaRootShape
+        case mediaRootValidation
+        case mediaRootWrite
+        case mediaRootEpoch
+        case mediaRootStageCreate
+        case mediaRootSpace
+        case pageValidation
+        case pageRecordValidation
+        case pageSpace
+        case payloadValidation
+        case payloadRead
+        case payloadSpace
+        case payloadWrite
+        case receivedValidation
+        case recordEncode
+        case recordSpace
+        case recordWrite
+        case rowStage
+        case finalSpace
+        case pageAdvance
+        case pageFinish
+        case nextAuthority
+        case transport
+        init(_ value: MeguriCoreBindings.CloudAdoptionDiagnosticStage) {
+            self = switch value {
+            case .operation: .operation
+            case .owner: .owner
+            case .claim: .claim
+            case .authority: .authority
+            case .activeValidation: .activeValidation
+            case .epochShape: .epochShape
+            case .epochValidation: .epochValidation
+            case .epochWrite: .epochWrite
+            case .mediaRootShape: .mediaRootShape
+            case .mediaRootValidation: .mediaRootValidation
+            case .mediaRootWrite: .mediaRootWrite
+            case .mediaRootEpoch: .mediaRootEpoch
+            case .mediaRootStageCreate: .mediaRootStageCreate
+            case .mediaRootSpace: .mediaRootSpace
+            case .pageValidation: .pageValidation
+            case .pageRecordValidation: .pageRecordValidation
+            case .pageSpace: .pageSpace
+            case .payloadValidation: .payloadValidation
+            case .payloadRead: .payloadRead
+            case .payloadSpace: .payloadSpace
+            case .payloadWrite: .payloadWrite
+            case .receivedValidation: .receivedValidation
+            case .recordEncode: .recordEncode
+            case .recordSpace: .recordSpace
+            case .recordWrite: .recordWrite
+            case .rowStage: .rowStage
+            case .finalSpace: .finalSpace
+            case .pageAdvance: .pageAdvance
+            case .pageFinish: .pageFinish
+            case .nextAuthority: .nextAuthority
+            case .transport: .transport
+            }
+        }
+    }
+    enum Category: String, Sendable {
+        case validation
+        case tracking
+        case engine
+        case cancelled
+        case authorityChanged
+        case accountUnavailable
+        case publication
+        case incomplete
+        case fileIdentityUnavailable
+        case transport
+        init(_ value: MeguriCoreBindings.CloudAdoptionFailureCategory) {
+            self = switch value {
+            case .validation: .validation
+            case .tracking: .tracking
+            case .engine: .engine
+            case .cancelled: .cancelled
+            case .authorityChanged: .authorityChanged
+            case .accountUnavailable: .accountUnavailable
+            case .publication: .publication
+            case .incomplete: .incomplete
+            case .fileIdentityUnavailable: .fileIdentityUnavailable
+            case .transport: .transport
+            }
+        }
+    }
+    let task: Task
+    let lastEnteredStage: Stage
+    let primaryCategory: Category?
+    let cleanupCategory: Category?
+
+    init(task: Task, lastEnteredStage: Stage, primaryCategory: Category?, cleanupCategory: Category?) {
+        self.task = task; self.lastEnteredStage = lastEnteredStage
+        self.primaryCategory = primaryCategory; self.cleanupCategory = cleanupCategory
+    }
+    init(_ value: MeguriCoreBindings.CloudAdoptionFailureDiagnostic) {
+        self.init(task: Task(value.task), lastEnteredStage: Stage(value.lastEnteredStage),
+                  primaryCategory: value.primaryCategory.map(Category.init),
+                  cleanupCategory: value.cleanupCategory.map(Category.init))
+    }
+}
+#endif

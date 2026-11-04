@@ -27,6 +27,13 @@ public enum DebugCloudDiagnostics {
         }
     }
 
+    static func recordAdoptionFailure(_ diagnostic: CloudAdoptionFailureDiagnostic) {
+        let value = Value.adoption(diagnostic)
+        recorder.emit(value) { value in
+            logger.error("cloudFailure \(value.formatted, privacy: .public)")
+        }
+    }
+
     public static func recordStatus(_ detail: CloudPolicyErrorDetail?) {
         let value = detail.map {
             Value.status($0.error, zone: $0.operation.zone, kind: $0.operation.kind, code: $0.code)
@@ -44,9 +51,11 @@ public enum DebugCloudDiagnostics {
         let code: Int32?
         let zone: String?
         let kind: String?
+        private let adoption: CloudAdoptionFailureDiagnostic?
 
         init(_ boundary: Boundary, action: CloudPolicyAction? = nil, error: any Error) {
             self.boundary = boundary
+            adoption = nil
             switch boundary {
             case .ownWork: self.action = "ownWork"
             case .commandResult, .policyStatus, .coreActionFailed, .applyDeferred,
@@ -72,6 +81,7 @@ public enum DebugCloudDiagnostics {
         }
 
         private init(failure: String, code: Int32?, zone: String, kind: String) {
+            adoption = nil
             boundary = .policyStatus
             action = "none"
             self.failure = failure
@@ -80,7 +90,22 @@ public enum DebugCloudDiagnostics {
             self.kind = kind
         }
 
+        static func adoption(_ diagnostic: CloudAdoptionFailureDiagnostic) -> Self {
+            Self(adoption: diagnostic)
+        }
+
+        private init(adoption: CloudAdoptionFailureDiagnostic) {
+            boundary = .connectionFailure
+            action = "adoptionResult"
+            failure = "adoption"
+            code = nil; zone = nil; kind = nil
+            self.adoption = adoption
+        }
+
         var formatted: String {
+            if let adoption {
+                return "boundary=connectionFailure action=adoptionResult task=\(adoption.task.rawValue) lastEnteredStage=\(adoption.lastEnteredStage.rawValue) primary=\(adoption.primaryCategory?.rawValue ?? "none") cleanup=\(adoption.cleanupCategory?.rawValue ?? "none")"
+            }
             var tags = "boundary=\(boundary.rawValue) action=\(action) failure=\(failure)"
             if let zone, let kind { tags += " zone=\(zone) kind=\(kind)" }
             if let code { return "\(tags) code=\(code)" }

@@ -169,14 +169,29 @@ impl CoreHost {
         reply: AdoptionReply,
         authority: &mut meguri_sync::cloud::policy::PolicyWork,
     ) -> Result<(), RuntimeError> {
+        self.cloud_adoption_reply_with_diagnostic(
+            work,
+            reply,
+            authority,
+            &mut meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task),
+        )
+    }
+    pub fn cloud_adoption_reply_with_diagnostic(
+        &self,
+        work: &AdoptionWork,
+        reply: AdoptionReply,
+        authority: &mut meguri_sync::cloud::policy::PolicyWork,
+        diagnostic: &mut meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder,
+    ) -> Result<(), RuntimeError> {
         self.cloud_runtime()
             .ok_or_else(unavailable)?
-            .cloud_adoption_reply_with_work(
+            .cloud_adoption_reply_with_diagnostic(
                 work,
                 reply,
                 self.cloud_adoption_collection()?.as_ref(),
                 self.backup_inputs.space.as_ref(),
                 authority,
+                diagnostic,
             )
     }
     pub fn perform_cloud_adoption_local(&self, work: &AdoptionWork) -> Result<(), RuntimeError> {

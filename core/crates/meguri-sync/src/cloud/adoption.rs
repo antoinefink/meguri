@@ -155,3 +155,129 @@ impl From<AdoptOp> for RecoveryOpFacts {
         }
     }
 }
+
+// Ephemeral, content-free evidence for one reply invocation; never serialized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionDiagnosticTask {
+    ReadActive,
+    ReadEpoch,
+    ReadMediaRoot,
+    Fetch,
+    FetchPayload,
+    Validate,
+    RecheckActive,
+    Activate,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionDiagnosticStage {
+    Operation,
+    Owner,
+    Claim,
+    Authority,
+    ActiveValidation,
+    EpochShape,
+    EpochValidation,
+    EpochWrite,
+    MediaRootShape,
+    MediaRootValidation,
+    MediaRootWrite,
+    MediaRootEpoch,
+    MediaRootStageCreate,
+    MediaRootSpace,
+    PageValidation,
+    PageRecordValidation,
+    PageSpace,
+    PayloadValidation,
+    PayloadRead,
+    PayloadSpace,
+    PayloadWrite,
+    ReceivedValidation,
+    RecordEncode,
+    RecordSpace,
+    RecordWrite,
+    RowStage,
+    FinalSpace,
+    PageAdvance,
+    PageFinish,
+    NextAuthority,
+    Transport,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionFailureCategory {
+    Validation,
+    Tracking,
+    Engine,
+    Cancelled,
+    AuthorityChanged,
+    AccountUnavailable,
+    Publication,
+    Incomplete,
+    FileIdentityUnavailable,
+    Transport,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdoptionFailureDiagnostic {
+    pub task: AdoptionDiagnosticTask,
+    /// The last entered stage, not necessarily the operation that failed.
+    pub last_entered_stage: AdoptionDiagnosticStage,
+    pub primary_category: Option<AdoptionFailureCategory>,
+    pub cleanup_category: Option<AdoptionFailureCategory>,
+}
+/// Owned only by the current call chain. Only a frozen failure is exported.
+pub struct AdoptionDiagnosticRecorder {
+    value: AdoptionFailureDiagnostic,
+}
+impl AdoptionDiagnosticRecorder {
+    pub fn new(task: &AdoptionTask) -> Self {
+        Self {
+            value: AdoptionFailureDiagnostic {
+                task: match task {
+                    AdoptionTask::ReadActive => AdoptionDiagnosticTask::ReadActive,
+                    AdoptionTask::ReadEpoch => AdoptionDiagnosticTask::ReadEpoch,
+                    AdoptionTask::ReadMediaRoot => AdoptionDiagnosticTask::ReadMediaRoot,
+                    AdoptionTask::Fetch { .. } => AdoptionDiagnosticTask::Fetch,
+                    AdoptionTask::FetchPayload { .. } => AdoptionDiagnosticTask::FetchPayload,
+                    AdoptionTask::Validate => AdoptionDiagnosticTask::Validate,
+                    AdoptionTask::RecheckActive => AdoptionDiagnosticTask::RecheckActive,
+                    AdoptionTask::Activate => AdoptionDiagnosticTask::Activate,
+                },
+                last_entered_stage: AdoptionDiagnosticStage::Operation,
+                primary_category: None,
+                cleanup_category: None,
+            },
+        }
+    }
+    pub(super) fn enter(&mut self, stage: AdoptionDiagnosticStage) {
+        self.value.last_entered_stage = stage;
+    }
+    pub(super) fn primary(&mut self, error: &runtime::RuntimeError) {
+        if self.value.primary_category.is_none() && self.value.cleanup_category.is_none() {
+            self.value.primary_category = Some(AdoptionFailureCategory::of(error));
+        }
+    }
+    pub(super) fn transport(&mut self) {
+        self.value.primary_category = Some(AdoptionFailureCategory::Transport);
+    }
+    pub(super) fn cleanup(&mut self, error: &runtime::RuntimeError) {
+        self.value.cleanup_category = Some(AdoptionFailureCategory::of(error));
+    }
+    pub fn snapshot(&self) -> Option<AdoptionFailureDiagnostic> {
+        (self.value.primary_category.is_some() || self.value.cleanup_category.is_some()).then_some(self.value)
+    }
+}
+impl AdoptionFailureCategory {
+    fn of(error: &runtime::RuntimeError) -> Self {
+        use runtime::RuntimeError as R;
+        match error {
+            R::Tracking(Error::InvalidData | Error::InvalidIdentifier) => Self::Validation,
+            R::Tracking(_) => Self::Tracking,
+            R::Engine(meguri_engine::EngineError::Cancelled) => Self::Cancelled,
+            R::Engine(_) => Self::Engine,
+            R::StaleIncarnation | R::Publication(PublicationError::AuthorityChanged) => Self::AuthorityChanged,
+            R::IdentityUnverified | R::Publication(PublicationError::AccountUnavailable) => Self::AccountUnavailable,
+            R::Publication(_) => Self::Publication,
+            R::Incomplete(_) => Self::Incomplete,
+            R::FileIdentityUnavailable => Self::FileIdentityUnavailable,
+        }
+    }
+}

@@ -547,12 +547,6 @@ impl Runtime {
                 if store.publication_op()?.is_some() || store.adoption_op()?.is_some() {
                     return Err(PublicationError::Busy.into());
                 }
-                if store
-                    .publication_binding_for_account(&preview.account)?
-                    .is_some_and(|b| b.facts.state == BindingState::Isolated(IsolationReason::EncryptedDataReset))
-                {
-                    return Err(PublicationError::ResetRecoveryUnavailable.into());
-                }
                 Ok(())
             })?;
         }
@@ -750,7 +744,9 @@ impl Runtime {
         op: &AdoptOp,
         item: StagingRecord,
         space: &dyn SpaceProvider,
+        diagnostic: &mut AdoptionDiagnosticRecorder,
     ) -> Result<(), RuntimeError> {
+        diagnostic.enter(AdoptionDiagnosticStage::PayloadValidation);
         let mut record = StagedRecord {
             name: item.name,
             envelope: item.record.encrypted.ok_or_else(refused)?,
@@ -774,27 +770,35 @@ impl Runtime {
             {
                 return Err(refused());
             }
+            diagnostic.enter(AdoptionDiagnosticStage::PayloadRead);
             let bytes = super::payload_asset::read(&source)?;
+            diagnostic.enter(AdoptionDiagnosticStage::PayloadSpace);
             check_space_for(space, &owner.directory, bytes.len() as u64)?;
             let name = format!("{}.pa", record.name);
             let path = owner.directory.join("payloads").join(&name);
+            diagnostic.enter(AdoptionDiagnosticStage::PayloadWrite);
             let mut file = AtomicFile::new(&path, Purpose::Stage)?;
             file.file_mut().write_all(&bytes).map_err(storage_io)?;
             file.publish(|_| Ok(()))?;
             record.payload_file = Some(name);
         }
         // Validate/decode the owned copy, never an SDK path.
+        diagnostic.enter(AdoptionDiagnosticStage::ReceivedValidation);
         let incoming = received(&owner.directory, op, &record)?;
         // receive checked the HMAC name before it becomes a path.
         let path = owner.directory.join("incoming").join(&record.name);
+        diagnostic.enter(AdoptionDiagnosticStage::RecordEncode);
         let bytes = serde_json::to_vec(&record).map_err(|_| refused())?;
+        diagnostic.enter(AdoptionDiagnosticStage::RecordSpace);
         check_space_for(space, &owner.directory, bytes.len() as u64)?;
+        diagnostic.enter(AdoptionDiagnosticStage::RecordWrite);
         let mut file = AtomicFile::new(&path, Purpose::Stage)?;
         file.file_mut().write_all(&bytes).map_err(storage_io)?;
         file.publish(|_| Ok(()))?;
         if let Some(payload) = incoming.payload
             && payload.kind() != codec::Kind::MediaName
         {
+            diagnostic.enter(AdoptionDiagnosticStage::RowStage);
             let clock = self.adoption_clock()?;
             let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
             meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(
@@ -806,10 +810,17 @@ impl Runtime {
                 },
             )?;
         }
+        diagnostic.enter(AdoptionDiagnosticStage::FinalSpace);
         check_space(space, &owner.directory)?;
         Ok(())
     }
-    fn finish_adoption_page(&self, op: &mut AdoptOp, next: Option<OpaqueBytes>) -> Result<AdoptionTask, RuntimeError> {
+    fn finish_adoption_page(
+        &self,
+        op: &mut AdoptOp,
+        next: Option<OpaqueBytes>,
+        diagnostic: &mut AdoptionDiagnosticRecorder,
+    ) -> Result<AdoptionTask, RuntimeError> {
+        diagnostic.enter(AdoptionDiagnosticStage::PageFinish);
         if let Some(cursor) = next {
             Ok(AdoptionTask::Fetch { cursor: Some(cursor) })
         } else {
@@ -826,8 +837,10 @@ impl Runtime {
         op: &mut AdoptOp,
         space: &dyn SpaceProvider,
         authority: &crate::cloud::policy::PolicyWork,
+        diagnostic: &mut AdoptionDiagnosticRecorder,
     ) -> Result<AdoptionTask, RuntimeError> {
         loop {
+            diagnostic.enter(AdoptionDiagnosticStage::PageAdvance);
             authority.check()?;
             let item = owner
                 .pending_page
@@ -844,10 +857,11 @@ impl Runtime {
                     .take()
                     .ok_or_else(refused)?
                     .next;
-                return self.finish_adoption_page(op, next);
+                return self.finish_adoption_page(op, next, diagnostic);
             };
             // Epoch records were checked against the read epoch at admission.
             if item.record_type != "MGEpoch" {
+                diagnostic.enter(AdoptionDiagnosticStage::PageRecordValidation);
                 let codec::DecodeOutcome::Supported(entity) =
                     codec::Entity::decode(item.record.encrypted.as_deref().ok_or_else(refused)?)
                         .map_err(|_| refused())?
@@ -857,7 +871,7 @@ impl Runtime {
                 if entity.payload.is_none() && item.payload_file.is_none() {
                     return payload_task(&item);
                 }
-                self.stage_adoption_record(owner, op, item, space)?;
+                self.stage_adoption_record(owner, op, item, space, diagnostic)?;
             }
             owner
                 .pending_page
@@ -877,6 +891,24 @@ impl Runtime {
         space: &dyn SpaceProvider,
         authority: &mut crate::cloud::policy::PolicyWork,
     ) -> Result<(), RuntimeError> {
+        self.cloud_adoption_reply_with_diagnostic(
+            work,
+            reply,
+            collection,
+            space,
+            authority,
+            &mut AdoptionDiagnosticRecorder::new(&work.task),
+        )
+    }
+    pub fn cloud_adoption_reply_with_diagnostic(
+        &self,
+        work: &AdoptionWork,
+        reply: AdoptionReply,
+        collection: Option<&Collection>,
+        space: &dyn SpaceProvider,
+        authority: &mut crate::cloud::policy::PolicyWork,
+        diagnostic: &mut AdoptionDiagnosticRecorder,
+    ) -> Result<(), RuntimeError> {
         authority.check()?;
         #[cfg(feature = "test-hooks")]
         let task = match &work.task {
@@ -894,22 +926,26 @@ impl Runtime {
         #[cfg(feature = "test-hooks")]
         let mut page = ("None", false, false, false, false, false);
         macro_rules! adoption_stage {
-            ($value:literal) => {
+            ($value:literal, $stage:ident) => {
+                diagnostic.enter(AdoptionDiagnosticStage::$stage);
                 #[cfg(feature = "test-hooks")]
                 {
                     stage = $value;
                 }
             };
         }
+        // Refusals before the exact owner/task claim have no failure evidence.
+        let mut claimed = false;
         let result = (|| {
             let mut op = self
                 .adoption_op()?
                 .filter(|p| p.id == work.op)
                 .ok_or(RuntimeError::StaleIncarnation)?;
-            adoption_stage!("owner");
+            adoption_stage!("owner", Owner);
             let owner = self.adoption_owner()?;
-            adoption_stage!("claim");
+            adoption_stage!("claim", Claim);
             owner.claim_with_work(&work.task, authority)?;
+            claimed = true;
             #[cfg(feature = "test-hooks")]
             {
                 let hook = self
@@ -922,7 +958,10 @@ impl Runtime {
                 }
             }
             if matches!(&reply, AdoptionReply::Failed) {
-                self.abort_adoption(&op, collection)?;
+                diagnostic.enter(AdoptionDiagnosticStage::Transport);
+                diagnostic.transport();
+                self.abort_adoption(&op, collection)
+                    .inspect_err(|error| diagnostic.cleanup(error))?;
                 return Err(refused());
             }
             if matches!(
@@ -935,9 +974,13 @@ impl Runtime {
                 owner.set_next(work.task.clone());
                 return Err(PublicationError::AccountUnavailable.into());
             }
-            adoption_stage!("authority");
+            adoption_stage!("authority", Authority);
             if self.check_adoption_before(&op, collection).is_err() {
-                return self.abort_adoption(&op, collection);
+                // This pre-existing path discards the authority check error.
+                // Only an abort failure contributes a category here.
+                return self
+                    .abort_adoption(&op, collection)
+                    .inspect_err(|error| diagnostic.cleanup(error));
             }
             if matches!(&reply, AdoptionReply::Read(RecordRead::Failed))
                 && matches!(
@@ -957,7 +1000,7 @@ impl Runtime {
                         AdoptionTask::ReadActive | AdoptionTask::RecheckActive,
                         AdoptionReply::Read(RecordRead::Found(record)),
                     ) => {
-                        adoption_stage!("active_validation");
+                        adoption_stage!("active_validation", ActiveValidation);
                         if record != op.active {
                             return Err(PublicationError::AuthorityChanged.into());
                         }
@@ -968,28 +1011,28 @@ impl Runtime {
                         }
                     }
                     (AdoptionTask::ReadEpoch, AdoptionReply::Read(RecordRead::Found(record))) => {
-                        adoption_stage!("epoch_shape");
+                        adoption_stage!("epoch_shape", EpochShape);
                         if record.system_fields.0.is_empty() {
                             return Err(refused());
                         }
                         op.epoch_record = Some(record);
-                        adoption_stage!("epoch_validation");
+                        adoption_stage!("epoch_validation", EpochValidation);
                         epoch(&op)?;
-                        adoption_stage!("epoch_write");
+                        adoption_stage!("epoch_write", EpochWrite);
                         self.write_adoption(&op)?;
                         AdoptionTask::ReadMediaRoot
                     }
                     (AdoptionTask::ReadMediaRoot, AdoptionReply::Read(RecordRead::Found(record))) => {
-                        adoption_stage!("media_root_shape");
+                        adoption_stage!("media_root_shape", MediaRootShape);
                         if record.system_fields.0.is_empty() {
                             return Err(refused());
                         }
                         op.media_root = Some(record);
-                        adoption_stage!("media_root_validation");
+                        adoption_stage!("media_root_validation", MediaRootValidation);
                         root(&op)?;
-                        adoption_stage!("media_root_write");
+                        adoption_stage!("media_root_write", MediaRootWrite);
                         self.write_adoption(&op)?;
-                        adoption_stage!("media_root_epoch");
+                        adoption_stage!("media_root_epoch", MediaRootEpoch);
                         let source = epoch(&op)?;
                         let clock = self.adoption_clock()?;
                         let now = EpochMillis(self.adapter_now()?);
@@ -1000,7 +1043,7 @@ impl Runtime {
                             schema_modified: now,
                             ..Col::default()
                         };
-                        adoption_stage!("media_root_stage_create");
+                        adoption_stage!("media_root_stage_create", MediaRootStageCreate);
                         meguri_storage::bootstrap::create::<RuntimeError>(
                             &owner.directory.join("collection.anki2"),
                             &col,
@@ -1008,14 +1051,14 @@ impl Runtime {
                             clock.as_ref(),
                             |_| Ok(()),
                         )?;
-                        adoption_stage!("media_root_space");
+                        adoption_stage!("media_root_space", MediaRootSpace);
                         check_space(space, &owner.directory)?;
                         AdoptionTask::Fetch { cursor: None }
                     }
                     (AdoptionTask::Fetch { .. }, AdoptionReply::Page { records, deleted, next }) => {
                         // A from-start snapshot may page while the server changes;
                         // deletion/control changes invalidate the candidate as a whole.
-                        adoption_stage!("page_validation");
+                        adoption_stage!("page_validation", PageValidation);
                         if !deleted.is_empty() {
                             return Err(refused());
                         }
@@ -1042,6 +1085,7 @@ impl Runtime {
                         }
                         let mut pending = VecDeque::new();
                         for item in records {
+                            diagnostic.enter(AdoptionDiagnosticStage::PageRecordValidation);
                             #[cfg(feature = "test-hooks")]
                             {
                                 stage = "page_record_validation";
@@ -1088,13 +1132,14 @@ impl Runtime {
                             }
                             pending.push_back(item);
                         }
-                        adoption_stage!("page_space");
+                        adoption_stage!("page_space", PageSpace);
                         check_space(space, &owner.directory)?;
                         *owner.pending_page.lock().unwrap_or_else(PoisonError::into_inner) =
                             Some(PendingPage { records: pending, next });
-                        self.advance_adoption_page(&owner, &mut op, space, authority)?
+                        self.advance_adoption_page(&owner, &mut op, space, authority, diagnostic)?
                     }
                     (AdoptionTask::FetchPayload { .. }, AdoptionReply::Payload { record }) => {
+                        diagnostic.enter(AdoptionDiagnosticStage::PayloadValidation);
                         // The claimed task serializes intake. Keep the first metadata
                         // record until its exact returned payload has been staged.
                         let expected = owner
@@ -1112,7 +1157,7 @@ impl Runtime {
                         {
                             return Err(refused());
                         }
-                        self.stage_adoption_record(&owner, &op, record, space)?;
+                        self.stage_adoption_record(&owner, &op, record, space, diagnostic)?;
                         owner
                             .pending_page
                             .lock()
@@ -1121,21 +1166,27 @@ impl Runtime {
                             .ok_or_else(refused)?
                             .records
                             .pop_front();
-                        self.advance_adoption_page(&owner, &mut op, space, authority)?
+                        self.advance_adoption_page(&owner, &mut op, space, authority, diagnostic)?
                     }
                     _ => return Err(refused()),
                 };
+                diagnostic.enter(AdoptionDiagnosticStage::NextAuthority);
                 authority.check()?;
                 self.check_adoption_before(&op, collection)?;
                 owner.set_next(next);
                 Ok(())
             })();
             if let Err(error) = outcome {
-                self.abort_adoption(&op, collection)?;
+                diagnostic.primary(&error);
+                self.abort_adoption(&op, collection)
+                    .inspect_err(|error| diagnostic.cleanup(error))?;
                 return Err(error);
             }
             Ok(())
         })();
+        if claimed && let Err(error) = &result {
+            diagnostic.primary(error);
+        }
         #[cfg(feature = "test-hooks")]
         if result.is_err() {
             eprintln!(

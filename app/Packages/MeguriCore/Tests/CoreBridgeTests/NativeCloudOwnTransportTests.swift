@@ -619,7 +619,7 @@ struct NativeCloudOwnTransportTests {
         for copy in owned {
             #expect(UInt64(try #require(copy.resourceValues(forKeys: [.fileSizeKey]).fileSize)) == CloudMediaStaging.assetLimit)
             let file = try FileHandle(forReadingFrom: copy)
-            let marker = try #require(file.read(upToCount: 1))
+            let marker = try #require(try file.read(upToCount: 1))
             markers.insert(marker)
             try file.seek(toOffset: CloudMediaStaging.assetLimit - 1)
             #expect(try file.read(upToCount: 1) == marker)
@@ -681,7 +681,7 @@ struct NativeCloudOwnTransportTests {
             guard case .fetched(_, let records, _) = try #require(value?.events.first) else { throw CloudOwnTransportFailure.unexpectedReply }
             return try #require(records.first).assetURL
         }
-        let engineCopy = try #require(assetURL(delivery))
+        let engineCopy = try #require(try assetURL(delivery))
         #expect(engineCopy.deletingLastPathComponent().deletingLastPathComponent() == engineCopies)
         let adoptionCopy = try #require(FileManager.default.contentsOfDirectory(at: copies, includingPropertiesForKeys: nil).first).appendingPathComponent("asset")
         #expect(FileManager.default.fileExists(atPath: adoptionCopy.path))
@@ -702,7 +702,7 @@ struct NativeCloudOwnTransportTests {
         #expect(!FileManager.default.fileExists(atPath: adoptionCopy.path))
         #expect(FileManager.default.fileExists(atPath: engineCopy.path))
         var retry: NativeCloudFetchedPayloads? = try .init(records: [engineRecord], deleted: [], staging: engineStaging)
-        let retryCopy = try #require(assetURL(retry))
+        let retryCopy = try #require(try assetURL(retry))
         #expect(opened.withLock { $0 } == 3)
         delivery = nil
         retry = nil

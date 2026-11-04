@@ -21,6 +21,8 @@ use std::{
 pub enum Point {
     Confirmed,
     AdoptionStagingRecorded,
+    /// The real Activate task, after validation recorded Ready and the active recheck returned.
+    AdoptionBeforeActivate,
     BoundBeforeDecision,
     BoundAfterDecision,
     BeforeScan,
@@ -351,6 +353,10 @@ impl PublicationRig {
     }
     pub fn facts(&self) -> Result<PublicationFacts> {
         self.sdk.borrow_mut().driver.call(Input::PublicationFacts)
+    }
+    /// Actual runtime status, without binding, account or collection payloads.
+    pub fn authority_status(&self) -> Result<(bool, bool)> {
+        self.sdk.borrow_mut().driver.call(Input::AuthorityStatus)
     }
     fn control(&self) -> Result<cloud::testing::PublicationControl> {
         self.sdk.borrow_mut().driver.call(Input::PublicationControl)
@@ -911,6 +917,9 @@ impl PublicationRig {
                 },
                 PublicationWork::Adoption(work) if work.task == cloud::adoption::AdoptionTask::ReadActive => {
                     Some(Point::AdoptionStagingRecorded)
+                }
+                PublicationWork::Adoption(work) if work.task == cloud::adoption::AdoptionTask::Activate => {
+                    Some(Point::AdoptionBeforeActivate)
                 }
                 PublicationWork::Scan => Some(Point::BeforeScan),
                 _ => None,

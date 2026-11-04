@@ -922,7 +922,8 @@ impl CloudConnection {
         result: CloudAdoptionResult,
     ) -> Result<(), CoreError> {
         callback::enter("CloudConnection.adoption_result");
-        self.adoption_result_with_work(handle, result, &mut c::policy::PolicyWork::default())
+        let mut diagnostic = a::AdoptionDiagnosticRecorder::new(&handle.work.task);
+        self.adoption_result_with_work(handle, result, &mut c::policy::PolicyWork::default(), &mut diagnostic)
     }
 }
 
@@ -932,6 +933,7 @@ impl CloudConnection {
         handle: Arc<CloudAdoptionWork>,
         result: CloudAdoptionResult,
         authority: &mut c::policy::PolicyWork,
+        diagnostic: &mut a::AdoptionDiagnosticRecorder,
     ) -> Result<(), CoreError> {
         self.owns(&handle.owner)?;
         self.owner.check_generation(handle.generation)?;
@@ -962,7 +964,7 @@ impl CloudConnection {
         };
         self.owner
             .host
-            .cloud_adoption_reply_with_work(&handle.work, reply, authority)
+            .cloud_adoption_reply_with_diagnostic(&handle.work, reply, authority, diagnostic)
             .map_err(error)
     }
 }

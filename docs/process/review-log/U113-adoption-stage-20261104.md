@@ -116,3 +116,14 @@ evidence, not a signed-device import or full sync round trip.
 Native73566 compiles the production modules but fails while compiling the new
 test code: throwing expressions inside require macros need explicit try
 handling. No native tests run in this result. A test-only correction is needed.
+
+Export82718 adds only the three inner try markers; source review is clear.
+Exports47369/64985 add exact-job failure diagnostics. Core89112 passes all
+selected FFI adoption checks, including primary/cleanup error precedence,
+pre-entry refusal, immutable results and payload stages. The private check89953
+flags one comment in that new test file; its repair remains pending.
+
+Core89112 also retains one older P24 test failure at page_validation. Its
+synthetic service uses pages of 200, while adoption now admits at most 32.
+A local fixture correction must preserve all records, continuations and
+assertions, then expose any remaining failure in the intended intent phase.

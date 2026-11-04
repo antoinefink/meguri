@@ -71,7 +71,8 @@ impl Runtime {
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
-        if self.status()?.binding.is_some() && self.status()?.identity_verified {
+        let status = self.status()?;
+        if status.binding.is_some() && status.stored_usable && status.identity_verified {
             self.replay_media_intents(collection, &self.media_service(collection)?)?;
         }
         let has_work = {
