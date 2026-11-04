@@ -23,6 +23,10 @@ pub enum Point {
     AdoptionStagingRecorded,
     /// The real Activate task, after validation recorded Ready and the active recheck returned.
     AdoptionBeforeActivate,
+    /// Hold the original selected continuation, after a complete fetched page.
+    AdoptionBeforeNextFetch,
+    /// Hold the original Core-selected external payload read after metadata intake.
+    AdoptionBeforeFetchPayload,
     BoundBeforeDecision,
     BoundAfterDecision,
     BeforeScan,
@@ -920,6 +924,16 @@ impl PublicationRig {
                 }
                 PublicationWork::Adoption(work) if work.task == cloud::adoption::AdoptionTask::Activate => {
                     Some(Point::AdoptionBeforeActivate)
+                }
+                PublicationWork::Adoption(work)
+                    if matches!(work.task, cloud::adoption::AdoptionTask::Fetch { cursor: Some(_) }) =>
+                {
+                    Some(Point::AdoptionBeforeNextFetch)
+                }
+                PublicationWork::Adoption(work)
+                    if matches!(work.task, cloud::adoption::AdoptionTask::FetchPayload { .. }) =>
+                {
+                    Some(Point::AdoptionBeforeFetchPayload)
                 }
                 PublicationWork::Scan => Some(Point::BeforeScan),
                 _ => None,

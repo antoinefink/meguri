@@ -9,7 +9,7 @@ use meguri_model::{
     clock::{Clock, StepClock, UtcOffset},
     ids::{CardId, DeckId, NoteId},
 };
-use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+use meguri_storage::{ReadRows, ReaderRole, RowKey, Table, space::SpaceProvider};
 use meguri_sync::cloud::{
     self as core, entity_codec as codec,
     runtime::{self, IdentityProvider, IdentityStatus},
@@ -210,6 +210,7 @@ pub struct AdoptionCompletion {
     pub stored_usable: bool,
     pub identity_verified: bool,
     pub proof_matches: bool,
+    pub replacement_recorded: bool,
 }
 #[derive(Clone, Debug)]
 pub struct Killed {
@@ -432,6 +433,8 @@ pub(crate) enum Input {
     AdoptionConfirm(core::publication::Preview),
     AdoptionReply(core::adoption::AdoptionWork, core::adoption::AdoptionReply),
     AdoptionLocal(core::adoption::AdoptionWork),
+    Capacity(Option<u64>),
+    PadAdoptionCandidate,
     PublicationNext,
     PublicationLocal([u8; 16], core::publication::LocalWork),
     PublicationExecute(core::publication::OwnRequest),
@@ -469,7 +472,7 @@ enum ChildMessage {
 }
 
 // This closed catalog is the entire error channel: no source error or payload
-// is serialized. Nested categories also contain only fieldless fixed tags.
+// is serialized. Capacity failures retain only their two typed byte counts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum ChildFailure {
     Unknown,
@@ -504,6 +507,7 @@ enum ChildFailure {
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 enum EngineFailure {
+    InsufficientSpace { required: u64, available: u64 },
     StaleGeneration,
     CollectionUnavailable,
     Busy,
@@ -561,6 +565,11 @@ impl ChildFailure {
         Self::Unknown
     }
     fn into_error(self) -> Box<dyn std::error::Error + Send + Sync> {
+        if let Self::RuntimeEngine(EngineFailure::InsufficientSpace { required, available })
+        | Self::Engine(EngineFailure::InsufficientSpace { required, available }) = self
+        {
+            return Box::new(meguri_storage::StorageError::InsufficientSpace { required, available });
+        }
         if matches!(self, Self::RuntimeResetRecoveryUnavailable) {
             return Box::new(ResetRecoveryUnavailable);
         }
@@ -587,6 +596,12 @@ impl EngineFailure {
             EngineError::CollectionUnavailable { .. } => Self::CollectionUnavailable,
             EngineError::Busy { .. } => Self::Busy,
             EngineError::Open(_) => Self::Open,
+            EngineError::Storage(meguri_storage::StorageError::InsufficientSpace { required, available }) => {
+                Self::InsufficientSpace {
+                    required: *required,
+                    available: *available,
+                }
+            }
             EngineError::Storage(_) => Self::Storage,
             EngineError::Internal { .. } => Self::Internal,
             EngineError::InvalidArgument { message }
@@ -1531,6 +1546,14 @@ impl ChildDriver {
     pub fn adoption_completion(&mut self, op: &core::adoption::AdoptOp) -> Result<AdoptionCompletion> {
         self.call(Input::AdoptionCompletion(op.clone()))
     }
+    pub fn set_available_capacity(&mut self, bytes: Option<u64>) -> Result<()> {
+        self.call(Input::Capacity(bytes))
+    }
+    /// One sparse file in the current, durable adoption row's owned candidate.
+    /// Returns the actual logical size of the whole candidate after padding.
+    pub fn pad_adoption_candidate(&mut self) -> Result<u64> {
+        self.call(Input::PadAdoptionCandidate)
+    }
     /// Called after the command's EOF. Require a real abort, never a rig hold.
     pub fn reap_adoption_activation_crash(&mut self) -> Result<()> {
         let mut child = self.child.take().ok_or_else(failure)?;
@@ -1794,6 +1817,16 @@ impl Drop for ChildDriver {
     }
 }
 struct Account(Mutex<IdentityStatus>);
+#[derive(Default)]
+struct MutableSpace(Mutex<Option<u64>>);
+impl SpaceProvider for MutableSpace {
+    fn available_bytes(&self, directory: &std::path::Path) -> std::result::Result<u64, meguri_storage::StorageError> {
+        match *self.0.lock().unwrap() {
+            Some(bytes) => Ok(bytes),
+            None => meguri_storage::space::StatvfsSpace.available_bytes(directory),
+        }
+    }
+}
 static ADOPTION_IDENTITY_CHANGES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl IdentityProvider for Account {
     fn read_identity(&self, _: &core::BuildScope) -> IdentityStatus {
@@ -1802,6 +1835,7 @@ impl IdentityProvider for Account {
 }
 struct Device {
     host: meguri_host::CoreHost,
+    capacity: Arc<MutableSpace>,
     options: meguri_host::HostConfig,
     automatic: bool,
     account: Arc<Account>,
@@ -1830,6 +1864,8 @@ impl Device {
             IdentityReads::TemporarilyUnavailable => IdentityStatus::TemporarilyUnavailable,
         })));
         let mut options = devices::options(&b.directory, b.now, b.seed);
+        let capacity = Arc::new(MutableSpace::default());
+        options.disk_space_provider = capacity.clone();
         options.clock = clock.clone();
         options.cloud = Some(runtime::CloudInputs {
             scope: devices::build_scope(&b.scope)?,
@@ -1848,6 +1884,7 @@ impl Device {
         }
         Ok(Self {
             host,
+            capacity,
             options,
             automatic: b.automatic,
             account,
@@ -1988,6 +2025,10 @@ impl Device {
             Ok(serde_json::to_value(v)?)
         }
         match input {
+            Input::Capacity(bytes) => {
+                *self.capacity.0.lock().unwrap() = bytes;
+                value(())
+            }
             Input::PublicationControl => value(self.runtime()?.publication_control_for_testing()?),
             Input::PayloadMemoryReset => {
                 use crate::bench::peak_alloc::PeakAlloc;
@@ -2288,12 +2329,19 @@ impl Device {
                     .engine()
                     .acquire_slot(meguri_engine::LongOp::CloudAdopt)
                     .is_ok();
+                let replacement_recorded = match &op.before {
+                    Some(before) => meguri_engine::device_state::DeviceState::for_collection(collection.path())
+                        .replacement_evidence_for(before.publication.identity)?
+                        .is_some_and(|evidence| evidence.candidate == op.candidate),
+                    None => false,
+                };
                 value(AdoptionCompletion {
                     identity_changes: ADOPTION_IDENTITY_CHANGES.load(std::sync::atomic::Ordering::SeqCst),
                     slot_available,
                     stored_usable: status.stored_usable,
                     identity_verified: status.identity_verified,
                     proof_matches,
+                    replacement_recorded,
                 })
             }
             Input::ArmAdoptionActivationCrash => {
@@ -2979,6 +3027,7 @@ impl Device {
             | Input::AdoptionConfirm(..)
             | Input::AdoptionReply(..)
             | Input::AdoptionLocal(..)
+            | Input::PadAdoptionCandidate
             | Input::PublicationNext
             | Input::PublicationLocal(..)
             | Input::PublicationCancel(..)

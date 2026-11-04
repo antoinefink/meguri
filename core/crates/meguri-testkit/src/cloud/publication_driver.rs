@@ -8,6 +8,61 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Component, PathBuf};
 
 impl Device {
+    fn pad_adoption_candidate(&self) -> Result<u64> {
+        use meguri_sync::cloud::adoption::AdoptStep;
+        use std::fs::{self, OpenOptions};
+        use std::path::{Component, Path};
+
+        // Resolve ownership afresh; callers cannot supply a path or an old row.
+        let op = self.runtime()?.adoption_op()?.ok_or_else(failure)?;
+        let mut components = Path::new(&op.staging_name).components();
+        if op.step != AdoptStep::Staging
+            || !op.staging_name.starts_with(".meguri-stage-")
+            || op.staging_name.len() <= ".meguri-stage-".len()
+            || !matches!(components.next(), Some(Component::Normal(_)))
+            || components.next().is_some()
+        {
+            return Err(failure());
+        }
+        let directory = self.options.collection_directory.join(&op.staging_name);
+        if !directory.symlink_metadata()?.file_type().is_dir()
+            || !directory
+                .join("collection.anki2")
+                .symlink_metadata()?
+                .file_type()
+                .is_file()
+        {
+            return Err(failure());
+        }
+        fn logical_size(directory: &Path) -> Result<u64> {
+            let mut bytes = 0_u64;
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                let meta = entry.path().symlink_metadata()?;
+                let size = if meta.file_type().is_dir() {
+                    logical_size(&entry.path())?
+                } else if meta.file_type().is_file() {
+                    meta.len()
+                } else {
+                    return Err(failure());
+                };
+                bytes = bytes.checked_add(size).ok_or_else(failure)?;
+            }
+            Ok(bytes)
+        }
+        // Place the present requirement at the floor crossover. Only the new
+        // file is changed; incoming, payloads and collection.anki2 stay intact.
+        let before = logical_size(&directory)?;
+        let padding = (224_u64 * 1024 * 1024).checked_sub(before).ok_or_else(failure)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(".capacity-padding"))?;
+        file.set_len(padding)?;
+        file.sync_all()?;
+        logical_size(&directory)
+    }
+
     pub(super) fn collection_rows(&self) -> Result<Vec<codec::Payload>> {
         let collection = self.host.collection()?;
         let lease = collection.reader(ReaderRole::Query)?;
@@ -155,6 +210,7 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
     }
     let collection = device.host.collection()?;
     match input {
+        Input::PadAdoptionCandidate => value(device.pad_adoption_candidate()?),
         Input::BackupPath(name) => value(device.backup_path(&name)?),
         Input::BackupNotices => {
             use super::super::coordinator::BackupNotice;
