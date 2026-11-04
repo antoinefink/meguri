@@ -21,6 +21,29 @@ pub struct Command {
     backend_guard: crate::cloud::adapter::Guard,
     // Part of command equality: an old handle cannot consume a later drain.
     cleanup_drain: Option<crate::cloud::publication::CleanupDrain>,
+    quiet_proof: Option<QuietProof>,
+}
+#[derive(Clone, Debug)]
+struct QuietProof(Arc<QuietIssuance>);
+#[derive(Debug)]
+struct QuietIssuance {
+    guard: Guard,
+    at_ms: i64,
+    ordinal: u64,
+    consumed: std::sync::atomic::AtomicBool,
+}
+impl PartialEq for QuietProof {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for QuietProof {}
+impl QuietProof {
+    fn qualifies(&self, action: &Action) -> bool {
+        self.0.guard == action.guard
+            && action.kind == (ActionKind::RecordQuietPoint { at_ms: self.0.at_ms })
+            && !self.0.consumed.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 #[derive(Clone, Debug)]
 pub enum DeviceEvent {
@@ -117,8 +140,23 @@ struct Owned {
     captures: BTreeMap<u64, (String, u64)>,
     last_owner: String,
     issued_records: BTreeMap<u64, ExchangeRecord>,
-    issued_quiet: Option<(Guard, i64)>,
+    next_quiet_ordinal: u64,
+    recorded_quiet_ordinal: Option<u64>,
     issued_cleanup: Option<Command>,
+}
+impl Owned {
+    fn issue_quiet(&mut self, guard: Guard, at_ms: i64) -> Result<QuietProof, DriverError> {
+        let ordinal = self.next_quiet_ordinal;
+        self.next_quiet_ordinal = ordinal
+            .checked_add(1)
+            .ok_or_else(|| DriverError::Runtime(Error::InvalidData.into()))?;
+        Ok(QuietProof(Arc::new(QuietIssuance {
+            guard,
+            at_ms,
+            ordinal,
+            consumed: std::sync::atomic::AtomicBool::new(false),
+        })))
+    }
 }
 /// Explicit authority for one facade job, passed through its first effect.
 /// Synchronous callers have no cancellation authority. After an effect, the
@@ -450,7 +488,8 @@ impl Driver {
         if owner != owned.last_owner {
             owned.captures.clear();
             owned.issued_records.clear();
-            owned.issued_quiet = None;
+            owned.next_quiet_ordinal = 0;
+            owned.recorded_quiet_ordinal = None;
             owned.issued_cleanup = None;
             owned.last_owner = owner.clone();
             owned.sdk = None;
@@ -589,30 +628,32 @@ impl Driver {
             if action.guard.generation == current_guard.generation && action.guard.binding == current_guard.binding {
                 action.guard.token = current_guard.token;
             }
-            match &action.kind {
-                ActionKind::RecordExchange(record) => {
-                    owned.issued_records.insert(record.exchange, record.clone());
-                }
-                ActionKind::RecordQuietPoint { at_ms } => owned.issued_quiet = Some((action.guard.clone(), *at_ms)),
-                _ => {}
+            if let ActionKind::RecordExchange(record) = &action.kind {
+                owned.issued_records.insert(record.exchange, record.clone());
             }
         }
         let commands = actions
             .into_iter()
             .map(|action| {
+                // Allocate in action order: several drains can emit in this projection.
+                let quiet_proof = match &action.kind {
+                    ActionKind::RecordQuietPoint { at_ms } => Some(owned.issue_quiet(action.guard.clone(), *at_ms)?),
+                    _ => None,
+                };
                 let cleanup_drain = if action.kind == ActionKind::RunCleanup {
                     projection.cleanup_drain.clone()
                 } else {
                     None
                 };
-                Command {
+                Ok(Command {
                     action,
                     owner: owner.clone(),
                     backend_guard: projection.backend_guard.clone(),
                     cleanup_drain,
-                }
+                    quiet_proof,
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, DriverError>>()?;
         for command in &commands {
             if command.action.kind == ActionKind::RunCleanup {
                 owned.issued_cleanup = Some(command.clone());
@@ -760,6 +801,14 @@ impl Driver {
             );
             return Err(DriverError::StaleCommand);
         }
+        if (command.quiet_proof.is_some() || matches!(command.action.kind, ActionKind::RecordQuietPoint { .. }))
+            && command
+                .quiet_proof
+                .as_ref()
+                .is_none_or(|proof| !proof.qualifies(&command.action))
+        {
+            return Err(DriverError::UnqualifiedCompletion);
+        }
         Ok(())
     }
     /// Performs actual core actions. Native must execute the others, in emission order,
@@ -813,9 +862,7 @@ impl Driver {
                 }
             }
             ActionKind::RecordQuietPoint { at_ms } => {
-                if owned.issued_quiet.as_ref() != Some(&(command.action.guard.clone(), *at_ms)) {
-                    return Err(DriverError::UnqualifiedCompletion);
-                }
+                let proof = command.quiet_proof.as_ref().ok_or(DriverError::UnqualifiedCompletion)?;
                 let current = self.runtime.policy_projection_with_work(
                     lifecycle_kind(&lifecycle),
                     collection.generation().0,
@@ -836,12 +883,22 @@ impl Driver {
                     // Valid work can arrive after this drain qualified. Consume
                     // its candidate without stamping or retrying the same drain.
                     work.effect()?;
-                    owned.issued_quiet = None;
+                    proof.0.consumed.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                } else if owned
+                    .recorded_quiet_ordinal
+                    .is_some_and(|ordinal| ordinal > proof.0.ordinal)
+                {
+                    // A later issued command only supersedes this stamp after
+                    // its Runtime write succeeds, regardless of clock movement.
                     Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
                 } else {
                     self.runtime
                         .policy_record_quiet_with_work(guard, *at_ms, work)
-                        .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
+                        .map(|evidence| {
+                            owned.recorded_quiet_ordinal = Some(proof.0.ordinal);
+                            Event::EvidenceCommitted(Box::new(evidence))
+                        })
                 }
             }
             ActionKind::RecordExchange(record) => {
@@ -901,6 +958,7 @@ impl Driver {
                         owner: command.owner.clone(),
                         backend_guard: backend_guard.clone(),
                         cleanup_drain: None,
+                        quiet_proof: None,
                     })
                     .collect();
                 Err(DriverError::CoreActionFailed { error, commands })
@@ -1095,3 +1153,26 @@ mod native_execution;
 
 #[path = "zone_deletion.rs"]
 mod zone_deletion;
+
+#[cfg(test)]
+mod quiet_proof_tests {
+    use super::*;
+
+    #[test]
+    fn quiet_issuance_exhaustion_is_checked_without_reusing_an_ordinal() {
+        let mut owned = Owned {
+            next_quiet_ordinal: u64::MAX - 1,
+            ..Owned::default()
+        };
+        let proof = owned.issue_quiet(owned.state.guard(), 0).unwrap();
+        assert_eq!(proof.0.ordinal, u64::MAX - 1);
+        for _ in 0..2 {
+            assert!(matches!(
+                owned.issue_quiet(owned.state.guard(), 0),
+                Err(DriverError::Runtime(RuntimeError::Tracking(Error::InvalidData)))
+            ));
+            assert_eq!(owned.next_quiet_ordinal, u64::MAX);
+        }
+        assert_eq!(proof.0.ordinal, u64::MAX - 1);
+    }
+}

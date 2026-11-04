@@ -2227,6 +2227,440 @@ fn actual_quiet_candidate_superseded_by_local_work_is_observation_only_until_a_n
     host.close().unwrap();
 }
 
+// P14.3: keep the actual SDK/Runtime drain route separate from fabricated
+// command negatives. This returns an issued command without executing it.
+fn actual_retained_quiet_candidate(
+    fixture: &Fixture,
+    sdk: &CloudEngineRegistration,
+) -> meguri_sync::cloud::policy::Command {
+    use meguri_sync::cloud::policy as p;
+
+    let host = &fixture.workflow.host;
+    let id = fixture
+        .workflow
+        .begin_fetch(
+            sdk.instance_id.clone(),
+            vec!["meguri-root".into(), sdk.collection_zone.clone()],
+        )
+        .unwrap();
+    for zone in [p::Zone::Root, p::Zone::Collection] {
+        let started = host
+            .cloud_policy_input(p::DeviceEvent::Operation {
+                instance: sdk.instance_id.clone(),
+                operation: p::Operation {
+                    zone,
+                    kind: p::OperationKind::Fetch,
+                },
+                phase: p::Activity::Started,
+            })
+            .unwrap();
+        assert!(
+            !started
+                .iter()
+                .any(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. }))
+        );
+    }
+    fixture
+        .workflow
+        .will_fetch(sdk.instance_id.clone(), "policy-overlap-fetch".into(), true)
+        .unwrap();
+    fixture
+        .workflow
+        .did_fetch(sdk.instance_id.clone(), "policy-overlap-fetch".into(), true)
+        .unwrap();
+    assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), id).unwrap());
+    let mut quiet = Vec::new();
+    for zone in [p::Zone::Root, p::Zone::Collection] {
+        quiet.extend(
+            host.cloud_policy_input(p::DeviceEvent::Operation {
+                instance: sdk.instance_id.clone(),
+                operation: p::Operation {
+                    zone,
+                    kind: p::OperationKind::Fetch,
+                },
+                phase: p::Activity::Ended {
+                    outcome: p::Outcome::Ok,
+                    saved: 0,
+                },
+            })
+            .unwrap()
+            .into_iter()
+            .filter(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. })),
+        );
+    }
+    assert_eq!(quiet.len(), 1, "one candidate for the actual two-zone drain");
+    quiet.pop().unwrap()
+}
+
+fn actual_overlapping_quiet_candidates(
+    fixture: &Fixture,
+    sdk: &CloudEngineRegistration,
+) -> (meguri_sync::cloud::policy::Command, meguri_sync::cloud::policy::Command) {
+    use meguri_sync::cloud::policy as p;
+
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let quiet_ms = || {
+        fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .evidence
+            .quiet_ms
+    };
+    assert_eq!(quiet_ms(), None);
+    let a = actual_retained_quiet_candidate(fixture, sdk);
+    assert_eq!(a.action.kind, p::ActionKind::RecordQuietPoint { at_ms: NOW });
+    assert_eq!(quiet_ms(), None);
+    fixture.clock.step_ms(1_000);
+    let b = actual_retained_quiet_candidate(fixture, sdk);
+    assert_eq!(b.action.kind, p::ActionKind::RecordQuietPoint { at_ms: NOW + 1_000 });
+    assert_eq!(a.action.guard, b.action.guard);
+    let driver = host.cloud_policy_driver().unwrap();
+    driver.validate(&a).unwrap();
+    driver.validate(&b).unwrap();
+    assert_eq!(quiet_ms(), None);
+    (a, b)
+}
+
+fn actual_overlapping_quiet_completion_order(newer_first: bool) {
+    use meguri_sync::cloud::policy as p;
+
+    let (fixture, sdk, _) = rig();
+    let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let quiet_ms = || {
+        fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .evidence
+            .quiet_ms
+    };
+    let order = if newer_first { [&b, &a] } else { [&a, &b] };
+    for (index, command) in order.into_iter().enumerate() {
+        host.cloud_policy_driver().unwrap().validate(command).unwrap();
+        host.execute_cloud_policy_core(command, Duration::from_secs(1))
+            .expect("a genuinely issued current-guard quiet command must execute successfully");
+        if newer_first || index == 1 {
+            assert_eq!(
+                quiet_ms(),
+                Some(NOW + 1_000),
+                "B's quiet evidence must never move backwards"
+            );
+        } else {
+            // P14.3 does not settle whether A stamps before B completes.
+            // Require safety here and B's exact final point below.
+            assert!(quiet_ms().is_none_or(|at_ms| at_ms <= NOW + 1_000));
+        }
+    }
+    assert_eq!(quiet_ms(), Some(NOW + 1_000));
+    host.close().unwrap();
+}
+
+#[test]
+fn actual_overlapping_quiet_candidates_complete_a_then_b() {
+    actual_overlapping_quiet_completion_order(false);
+}
+
+#[test]
+fn actual_overlapping_quiet_candidates_complete_b_then_a_without_backdating() {
+    actual_overlapping_quiet_completion_order(true);
+}
+
+fn actual_quiet_clock_completion_order(offset_ms: i64, newer_first: bool) {
+    use meguri_sync::cloud::policy as p;
+
+    let (fixture, sdk, _) = rig();
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let a = actual_retained_quiet_candidate(&fixture, &sdk);
+    fixture.clock.step_ms(offset_ms);
+    let b = actual_retained_quiet_candidate(&fixture, &sdk);
+    assert_eq!(a.action.guard, b.action.guard);
+    assert_eq!(
+        b.action.kind,
+        p::ActionKind::RecordQuietPoint { at_ms: NOW + offset_ms }
+    );
+    assert_ne!(a, b);
+    if offset_ms == 0 {
+        assert_eq!(a.action, b.action);
+    }
+    let quiet_ms = || {
+        fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .evidence
+            .quiet_ms
+    };
+    let order = if newer_first { [&b, &a] } else { [&a, &b] };
+    for (index, command) in order.into_iter().enumerate() {
+        let clone = command.clone();
+        host.execute_cloud_policy_core(command, Duration::from_secs(1)).unwrap();
+        // Successful execution leaves the same issued proof replayable.
+        assert_eq!(command, &clone);
+        host.execute_cloud_policy_core(&clone, Duration::from_secs(1)).unwrap();
+        if newer_first || index == 1 {
+            assert_eq!(quiet_ms(), Some(NOW + offset_ms));
+        }
+    }
+    // In A->B order this is a replay of A's successful write; in B->A
+    // order it is another observation of an older, never-recorded candidate.
+    host.execute_cloud_policy_core(&a, Duration::from_secs(1)).unwrap();
+    assert_eq!(quiet_ms(), Some(NOW + offset_ms));
+    host.execute_cloud_policy_core(&b, Duration::from_secs(1)).unwrap();
+    assert_eq!(quiet_ms(), Some(NOW + offset_ms));
+    host.close().unwrap();
+}
+
+#[test]
+fn actual_same_ms_quiet_candidates_keep_distinct_proofs_in_both_completion_orders() {
+    for newer_first in [false, true] {
+        actual_quiet_clock_completion_order(0, newer_first);
+    }
+}
+
+#[test]
+fn actual_backward_clock_quiet_candidates_follow_drain_order_in_both_completion_orders() {
+    for newer_first in [false, true] {
+        actual_quiet_clock_completion_order(-1_000, newer_first);
+    }
+}
+
+#[test]
+fn actual_forward_clock_quiet_successful_replays_preserve_the_latest_record() {
+    actual_quiet_clock_completion_order(1_000, false);
+}
+
+#[test]
+fn actual_same_ms_quiet_proof_tokens() {
+    use meguri_sync::cloud::policy as p;
+
+    let (fixture, sdk, _) = rig();
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let driver = host.cloud_policy_driver().unwrap();
+    let a = actual_retained_quiet_candidate(&fixture, &sdk);
+    let clone = a.clone();
+    let b = actual_retained_quiet_candidate(&fixture, &sdk);
+    assert_eq!(a.action, b.action);
+    assert_ne!(a, b);
+    let mut changed_action = b.clone();
+    changed_action.action.kind = p::ActionKind::ProbeTracking;
+    assert!(matches!(
+        host.execute_cloud_policy_core(&changed_action, Duration::from_secs(1)),
+        Err(p::DriverError::UnqualifiedCompletion)
+    ));
+    let mut changed_guard = b.clone();
+    changed_guard.action.guard.token = changed_guard.action.guard.token.wrapping_add(1);
+    assert!(matches!(
+        host.execute_cloud_policy_core(&changed_guard, Duration::from_secs(1)),
+        Err(p::DriverError::StaleCommand)
+    ));
+    let id = fixture
+        .workflow
+        .begin_fetch(sdk.instance_id.clone(), vec!["meguri-root".into()])
+        .unwrap();
+    let operation = p::Operation {
+        zone: p::Zone::Root,
+        kind: p::OperationKind::Fetch,
+    };
+    host.cloud_policy_input(p::DeviceEvent::Operation {
+        instance: sdk.instance_id.clone(),
+        operation,
+        phase: p::Activity::Started,
+    })
+    .unwrap();
+    fixture
+        .workflow
+        .will_fetch(sdk.instance_id.clone(), "policy-proof-fetch".into(), true)
+        .unwrap();
+    let followups = host.execute_cloud_policy_core(&a, Duration::from_secs(1)).unwrap();
+    assert!(
+        followups
+            .iter()
+            .all(|c| matches!(c.action.kind, p::ActionKind::StatusChanged(_)))
+    );
+    assert_eq!(a, clone);
+    for consumed in [&a, &clone] {
+        assert!(matches!(
+            host.execute_cloud_policy_core(consumed, Duration::from_secs(1)),
+            Err(p::DriverError::UnqualifiedCompletion)
+        ));
+    }
+    driver.validate(&b).unwrap();
+    assert_eq!(
+        fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .evidence
+            .quiet_ms,
+        None
+    );
+    fixture
+        .workflow
+        .did_fetch(sdk.instance_id.clone(), "policy-proof-fetch".into(), true)
+        .unwrap();
+    assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), id).unwrap());
+    let later = host
+        .cloud_policy_input(p::DeviceEvent::Operation {
+            instance: sdk.instance_id.clone(),
+            operation,
+            phase: p::Activity::Ended {
+                outcome: p::Outcome::Ok,
+                saved: 0,
+            },
+        })
+        .unwrap();
+    assert!(
+        later
+            .iter()
+            .any(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. }))
+    );
+    host.execute_cloud_policy_core(&b, Duration::from_secs(1)).unwrap();
+    host.execute_cloud_policy_core(&b.clone(), Duration::from_secs(1))
+        .unwrap();
+    assert_eq!(
+        fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap()
+            .evidence
+            .quiet_ms,
+        Some(NOW)
+    );
+    host.close().unwrap();
+}
+
+#[test]
+fn actual_overlapping_quiet_candidates_with_new_local_work_are_observation_only() {
+    use meguri_sync::cloud::policy as p;
+
+    let (fixture, sdk, _) = rig();
+    let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let driver = host.cloud_policy_driver().unwrap();
+    let quiet_serial = driver.state().quiet_serial;
+    let added = meguri_engine::decks::add(&collection, "Overlapping quiet candidate deck".into()).unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, added.seq.0)
+        .unwrap();
+    assert_eq!(captured_decks(&fixture, "Overlapping quiet candidate deck").len(), 1);
+    for command in [&a, &b] {
+        driver.validate(command).unwrap();
+        let followups = host.execute_cloud_policy_core(command, Duration::from_secs(1)).unwrap();
+        assert!(
+            followups
+                .iter()
+                .all(|c| matches!(c.action.kind, p::ActionKind::StatusChanged(_)))
+        );
+        let projection = fixture
+            .workflow
+            .core
+            .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+            .unwrap();
+        assert!(projection.facts.summary.pending_unheld > 0);
+        assert_eq!(projection.evidence.quiet_ms, None);
+        assert_eq!(driver.state().quiet_serial, quiet_serial);
+        let status = fixture.workflow.policy().unwrap().status().unwrap();
+        assert!(status.as_of_ms.is_none());
+        assert!(!matches!(status.state, CloudPolicyStatusState::UpToDate { .. }));
+    }
+    host.close().unwrap();
+}
+
+#[test]
+fn actual_overlapping_quiet_candidates_with_a_new_undrained_fetch_are_observation_only() {
+    use meguri_sync::cloud::policy as p;
+
+    // Each zone gets an independent fixture: either new fetch invalidates quiet.
+    for zone in [p::Zone::Root, p::Zone::Collection] {
+        let (fixture, sdk, _) = rig();
+        let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
+        let host = &fixture.workflow.host;
+        let collection = host.collection().unwrap();
+        let driver = host.cloud_policy_driver().unwrap();
+        let quiet_serial = driver.state().quiet_serial;
+        let zone_name = if zone == p::Zone::Root {
+            "meguri-root".into()
+        } else {
+            sdk.collection_zone.clone()
+        };
+        let id = fixture
+            .workflow
+            .begin_fetch(sdk.instance_id.clone(), vec![zone_name])
+            .unwrap();
+        let operation = p::Operation {
+            zone,
+            kind: p::OperationKind::Fetch,
+        };
+        let started = host
+            .cloud_policy_input(p::DeviceEvent::Operation {
+                instance: sdk.instance_id.clone(),
+                operation,
+                phase: p::Activity::Started,
+            })
+            .unwrap();
+        assert!(
+            !started
+                .iter()
+                .any(|c| matches!(c.action.kind, p::ActionKind::RecordQuietPoint { .. }))
+        );
+        fixture
+            .workflow
+            .will_fetch(sdk.instance_id.clone(), "policy-overlap-undrained-fetch".into(), true)
+            .unwrap();
+        assert_ne!(driver.state().drained, [true, true]);
+        for command in [&a, &b] {
+            driver.validate(command).unwrap();
+            let followups = host.execute_cloud_policy_core(command, Duration::from_secs(1)).unwrap();
+            assert!(
+                followups
+                    .iter()
+                    .all(|c| matches!(c.action.kind, p::ActionKind::StatusChanged(_)))
+            );
+            let projection = fixture
+                .workflow
+                .core
+                .policy_projection(p::Lifecycle::Ready, collection.generation().0)
+                .unwrap();
+            assert_eq!(projection.facts.summary.pending_unheld, 0);
+            assert_eq!(projection.evidence.quiet_ms, None);
+            assert_eq!(driver.state().quiet_serial, quiet_serial);
+            assert_ne!(driver.state().drained, [true, true]);
+            let status = fixture.workflow.policy().unwrap().status().unwrap();
+            assert!(status.as_of_ms.is_none());
+            assert!(!matches!(status.state, CloudPolicyStatusState::UpToDate { .. }));
+        }
+        // Finish only after the assertions; do not execute any new candidate.
+        fixture
+            .workflow
+            .did_fetch(sdk.instance_id.clone(), "policy-overlap-undrained-fetch".into(), true)
+            .unwrap();
+        assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), id).unwrap());
+        host.cloud_policy_input(p::DeviceEvent::Operation {
+            instance: sdk.instance_id.clone(),
+            operation,
+            phase: p::Activity::Ended {
+                outcome: p::Outcome::Ok,
+                saved: 0,
+            },
+        })
+        .unwrap();
+        host.close().unwrap();
+    }
+}
+
 #[test]
 fn policy_empty_media_ledger_and_unqualified_completion_never_claim_success() {
     let (fixture, _, _) = rig();
