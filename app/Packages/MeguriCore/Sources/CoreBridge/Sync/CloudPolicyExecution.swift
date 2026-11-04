@@ -111,6 +111,18 @@ final class CloudPolicyReadinessDecision: Sendable {
     }
 }
 
+/// Value-only evidence from one exact Instance, retained after adapter removal.
+/// This grants no authority and never calls Core, UI or cancellation handlers.
+final class CloudSDKStopWitness: Sendable {
+    let sdk: String
+    private let state = Mutex((stopping: false, authorityRetired: false))
+    init(sdk: String) { self.sdk = sdk }
+    func update(stopping: Bool, authorityRetired: Bool) {
+        state.withLock { $0 = (stopping, authorityRetired) }
+    }
+    var stoppingOrRetired: Bool { state.withLock { $0.stopping || $0.authorityRetired } }
+}
+
 /// Shared by one actual media run and its child work. Cancellation handlers can
 /// race actor-owned drains, so origin and first error observation are synchronous.
 final class CloudMediaCancellationContext: Sendable {
@@ -123,11 +135,19 @@ final class CloudMediaCancellationContext: Sendable {
         var origin: Origin?
         var qualified: Bool?
         var genuineFailure = false
+        var stopWitness: CloudSDKStopWitness?
     }
     private let state = Mutex(State())
+    private let sdk: String
+    init(sdk: String) { self.sdk = sdk }
 
-    func cancel(_ origin: Origin, performing cancellation: () -> Void) {
-        state.withLock { if $0.origin == nil { $0.origin = origin } }
+    func cancel(_ origin: Origin, stopWitness: CloudSDKStopWitness? = nil, performing cancellation: () -> Void) {
+        state.withLock {
+            if $0.origin == nil { $0.origin = origin }
+            if origin == .owned, let stopWitness, stopWitness.sdk == sdk, $0.stopWitness == nil {
+                $0.stopWitness = stopWitness
+            }
+        }
         // Task/transport cancellation can synchronously invoke other handlers.
         cancellation()
     }
@@ -139,6 +159,16 @@ final class CloudMediaCancellationContext: Sendable {
             if !cancellation { $0.genuineFailure = true }
             return $0.qualified == true && !$0.genuineFailure
         }
+    }
+
+    /// Only a secondary EndRead refusal can use this evidence. Never establish
+    /// qualification here or erase a previous source/error decision.
+    func observeEndReadReportFailure(_ error: any Error, primary: (any Error)?) -> Bool {
+        let expected = primary is CancellationError && (error as? BridgeError) == .cloudPolicy(.staleCommand) && state.withLock {
+            $0.origin == .owned && $0.qualified == true && !$0.genuineFailure && $0.stopWitness?.stoppingOrRetired == true
+        }
+        if !expected { observe(error) }
+        return expected
     }
 }
 
@@ -214,10 +244,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         var outputs: [CloudPolicyOutput] = []
         if !mediaHookInstalled {
             mediaHookInstalled = true
-            await adapter.setOriginalMediaDrain { [weak self] sdk in
+            await adapter.setOriginalMediaDrainWithWitness { [weak self] witness in
+                let sdk = witness.sdk
                 await self?.drainCleanups(sdk: sdk)
                 await self?.drainZoneDeletions(sdk: sdk)
-                await self?.drainOriginalMedia(sdk)
+                await self?.drainOriginalMedia(sdk, stopWitness: witness)
             }
         }
         do {
@@ -305,7 +336,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                         mediaExecutors[instance] = worker
                     }
                     let runID = UUID()
-                    let context = CloudMediaCancellationContext()
+                    let context = CloudMediaCancellationContext(sdk: instance)
                     let running = Task {
                         await CloudMediaCancellationContext.$current.withValue(context) {
                             await self.performMediaRound(command, permit: permit, instance: instance, runID: runID, worker: worker, coreMedia: mediaService, context: context)
@@ -473,11 +504,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             return .init(outputs: outputs, error: error, deferred: false)
         }
     }
-    private func drainOriginalMedia(_ sdk: String) async {
+    private func drainOriginalMedia(_ sdk: String, stopWitness: CloudSDKStopWitness? = nil) async {
         if let draining = mediaDrains[sdk] { await draining.value; return }
         heldMediaResume.removeValue(forKey: sdk)
         let original = mediaRuns[sdk]
-        if let context = mediaRunContexts[sdk] { context.cancel(.owned) { original?.cancel() } }
+        if let context = mediaRunContexts[sdk] { context.cancel(.owned, stopWitness: stopWitness) { original?.cancel() } }
         else { original?.cancel() }
         guard let executor = mediaExecutors.removeValue(forKey: sdk) else { return }
         let task = Task { await executor.close() }
@@ -538,7 +569,14 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 } catch { context.observe(error); readFailure = error }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 do { outputs.append(try await permit.report(zones: [.media], kind: .read, started: false, error: sendStopped ? nil : readFailure)) }
-                catch { context.observe(error); if readFailure == nil { readFailure = error } }
+                catch {
+                    if context.observeEndReadReportFailure(error, primary: readFailure) {
+                        #if DEBUG
+                        DebugCloudDiagnostics.record(.policyExecute, action: issued.action, error: error)
+                        #endif
+                    }
+                    if readFailure == nil { readFailure = error }
+                }
                 if let readFailure { throw readFailure }
                 outputs.append(try await policy.input(.refresh(.cloud)))
                 guard let queuedResume = heldMediaResume.removeValue(forKey: instance) else { break }
@@ -558,7 +596,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     mediaExecutors[instance] = replacement
                 }
                 let replacementID = UUID()
-                let replacementContext = CloudMediaCancellationContext()
+                let replacementContext = CloudMediaCancellationContext(sdk: instance)
                 let pendingRun = Task {
                     await CloudMediaCancellationContext.$current.withValue(replacementContext) {
                         await self.performMediaRound(queuedResume.0, permit: queuedResume.1, instance: instance, runID: replacementID, worker: replacement, coreMedia: coreMedia, context: replacementContext)

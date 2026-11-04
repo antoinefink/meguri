@@ -84,8 +84,13 @@ public actor CloudKitSyncAdapter {
         var assetDrain: Task<Void, Never>?
         var assetFirstReadJoins = 0
         var assetClosed = false
-        var stopping = false
-        var authorityRetired = false
+        let stopWitness: CloudSDKStopWitness
+        var stopping = false {
+            didSet { stopWitness.update(stopping: stopping, authorityRetired: authorityRetired) }
+        }
+        var authorityRetired = false {
+            didSet { stopWitness.update(stopping: stopping, authorityRetired: authorityRetired) }
+        }
         var released = false
         var handlers = 0
         var sentHandlers = 0
@@ -97,7 +102,9 @@ public actor CloudKitSyncAdapter {
         var operationSaved: UInt64 = 0
         var observationOrdinal: UInt64 = 0
         var mediaSendFailure: CloudKitSDKOperationFailure?
-        init(engine: any CloudKitEngine, zone: String) { self.engine = engine; self.zone = zone }
+        init(engine: any CloudKitEngine, zone: String, sdk: String) {
+            self.engine = engine; self.zone = zone; self.stopWitness = CloudSDKStopWitness(sdk: sdk)
+        }
     }
     private let core: CoreCloudWorkflowService
     private let factory: any CloudKitEngineFactory
@@ -149,8 +156,11 @@ public actor CloudKitSyncAdapter {
     private var version: UInt64 = 0
     private var waiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var readinessObservers: [UUID: AsyncStream<Void>.Continuation] = [:]
-    private var originalMediaDrain: (@Sendable (String) async -> Void)?
-    func setOriginalMediaDrain(_ drain: @escaping @Sendable (String) async -> Void) { originalMediaDrain = drain }
+    private var originalMediaDrain: (@Sendable (CloudSDKStopWitness) async -> Void)?
+    func setOriginalMediaDrain(_ drain: @escaping @Sendable (String) async -> Void) {
+        originalMediaDrain = { witness in await drain(witness.sdk) }
+    }
+    func setOriginalMediaDrainWithWitness(_ drain: @escaping @Sendable (CloudSDKStopWitness) async -> Void) { originalMediaDrain = drain }
 
     #if DEBUG
     // Scheduling observation only, after the lane-backed call releases Core.
@@ -282,7 +292,7 @@ public actor CloudKitSyncAdapter {
             created = engine
             try checkIntent(intent)
             if let execution { try await execution.validate(); try checkIntent(intent) }
-            owned[registration.instanceID] = Instance(engine: engine, zone: registration.collectionZone)
+            owned[registration.instanceID] = Instance(engine: engine, zone: registration.collectionZone, sdk: registration.instanceID)
             current = registration.instanceID
             published = true
             changed()
@@ -359,9 +369,9 @@ public actor CloudKitSyncAdapter {
                 let engine = instance.engine
                 return Task { await engine.cancelOperations() }
             }
-            for (origin, _) in originals {
+            for (origin, instance) in originals {
                 await self.drainOriginalAssetReads(origin)
-                await self.originalMediaDrain?(origin)
+                await self.originalMediaDrain?(instance.stopWitness)
             }
             await policyCancellation.value
             for cancellation in cancellations { await cancellation.value }
@@ -450,7 +460,7 @@ public actor CloudKitSyncAdapter {
         guard let instance = owned[origin] else { return }
         instance.rootReadOperation?.cancel()
         await drainOriginalAssetReads(origin)
-        await originalMediaDrain?(origin)
+        await originalMediaDrain?(instance.stopWitness)
         guard !quiescing || final else { instance.stopping = false; changed(); return }
         if !instance.authorityRetired {
             // If publication inspection or persistence fails, Core still owns the SDK.

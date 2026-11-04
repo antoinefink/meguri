@@ -36,3 +36,9 @@ Native20884: ten pass, one Stop test fails. AppModel23135: 18 pass.
 Private and similarity pass. Stop's EndRead uses a retired backend token;
 review requires a retained witness for that original SDK. All guards and error
 controls remain required. No unit acceptance.
+
+Export26102 retains the original SDK stop state after removal. EndRead still
+runs; only its expected stale-command refusal retains owned cancellation.
+Swift42241: Pause and Stop pass. Private44512 passes. Review finds a P2 when
+Stop joins a drain already started by Pause. The follow-up and its deterministic
+regression remain pending. No unit acceptance.
