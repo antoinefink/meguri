@@ -68,3 +68,14 @@ comparison. Expected state stays required; present Running must be Boolean
 and agree with it. Other fields stay strict and full metadata stays private.
 Independent review is clear. Selftest60040: three pass. Private60349 and
 similarity60568 pass. Actual recovery and app acceptance remain unverified.
+
+Recovery61073 passes: the original stop joined, stopped state was independently
+confirmed, separate proof became durable and the whole lease was archived
+without replacement. All activity counts are zero. Failed receipts remain
+failed. This proves maintenance recovery only.
+
+The dated recovery utility, synthetic tests, historical fixture and its registry
+exception are now removed. Their commits and private evidence remain available.
+The general staging child-lifetime repair stays in place. Doctor64457 confirms
+the restarted VM answers SSH; its Xcode version still differs from the host.
+Review: clear. Selftest65881: 12 pass. Private65812: pass.

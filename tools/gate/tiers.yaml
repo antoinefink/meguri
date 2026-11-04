@@ -768,7 +768,6 @@ utilities:
   - {job: vm-crash-info, why: "Explicit bounded retained Mac UI crash taxonomy with original-receipt unzoned admission and guest-completion lease fencing only; no app or gate acceptance"}
   - {job: cloudkit-account-setup, why: "OWNER ONLY J2.2.1 explicit interactive account source producer; setup-only, never gates or catch-up"}
   - {job: vm-xcode-stage, why: "Explicit dedicated-VM Xcode staging and existing prompt-free activation only; no signed execution or app gate coverage"}
-  - {job: vm-xcode-recover, why: "Root-owned exact 20261102T200056Z-94582 pre-prepare stop, independent stopped confirmation and whole fenced-lease archive only; no start or acceptance"}
   - {job: cloudkit-agent-install, why: "Explicit J2.1 product transfer from admitted build inputs to the parent's frozen VM selection; runtime evidence remains incomplete"}
   - {job: mac-hosted-test, why: "on-demand exact Mac app-hosted method diagnostic; focused execution receipt only, no automatic snapshot or Xcode gate coverage"}
   - {job: core-update, why: "explicitly changes a dependency; core-deny, lint and tests verify its result"}
