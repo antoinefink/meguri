@@ -50,3 +50,9 @@ records and identifies them as foreign. Exports2542 and10030 use that public
 ownership record before full reads. Relevant and pinned lifetimes still need
 full checks; unknown ownership still refuses. Review is clear.
 Selftest16399: three pass. Private16661 and similarity16157 pass.
+
+Inspect17478 rejects a new owned process before classifying its activity.
+Export28212 captures its full identity and arguments under the existing cap;
+managed work still refuses through the same activity check. Pinned checks stay
+required. Independent review is clear. Export35730 only removes a comment.
+Selftest37394: three pass. Private37305 and similarity37332 pass.

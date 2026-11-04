@@ -492,6 +492,18 @@ def host_processes(lib=None, libc=None):
         return b" ".join(words).decode("utf-8", "strict")
 
     pins, result, total = {}, {}, 0
+
+    def capture(pid, before):
+        nonlocal total
+        args = argv(pid)
+        after = info(pid)
+        if after is None:
+            return None
+        need(after == before and args is not None)
+        total += len(args.encode("utf-8"))
+        need(total <= LIMIT)
+        return args
+
     for pid in sorted(pids()):
         credentials = short_credentials(pid)
         if credentials is None or owner not in credentials[:3]:
@@ -502,15 +514,11 @@ def host_processes(lib=None, libc=None):
         need(before[3:9] == credentials)
         pins[pid] = before
         need(pid != own_pid or before == own)
-        args = argv(pid)
-        after = info(pid)
-        if after is None:
-            continue
-        need(after == before and args is not None)
-        total += len(args.encode("utf-8"))
-        need(total <= LIMIT)
-        result[pid] = args
-    # Revalidate only relevant lifetimes, and detect new relevant arrivals.
+        args = capture(pid, before)
+        if args is not None:
+            result[pid] = args
+    # Revalidate pinned lifetimes and capture new relevant arrivals for activity
+    # classification, sharing the first pass's total argv-byte budget.
     # Foreign creation/exit does not invalidate the snapshot. Missing relevant
     # PIDs still require ESRCH; an omitted list entry alone is not exit proof.
     for pid in sorted(pids() | set(pins)):
@@ -536,7 +544,9 @@ def host_processes(lib=None, libc=None):
             else:
                 need(after == current and args == result[pid])
         elif relevant(current):
-            raise Refused()
+            args = capture(pid, current)
+            if args is not None:
+                result[pid] = args
     need(info(own_pid) == own and own_pid in result)
     return result
 

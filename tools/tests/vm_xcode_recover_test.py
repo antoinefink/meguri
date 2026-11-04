@@ -1157,6 +1157,17 @@ class GeneratedKernel:
 
 
 class KernelReaderCase(unittest.TestCase):
+    selection = {"name": "GeneratedOnly", "ssh": "/generated/ssh", "tart": "/generated/tart"}
+
+    def new_arrival(self, *words):
+        kernel, pid = GeneratedKernel(), 32000
+        def arrive(count):
+            if count == 2:
+                kernel.records[pid] = kernel.record(pid)
+                kernel.args[pid] = kernel.arguments(*words)
+        kernel.on_list = arrive
+        return kernel, pid
+
     def test_short_public_abi_size_and_offsets(self):
         self.assertEqual(ctypes.sizeof(m.ProcBSDShortInfo), 64)
         for name, offset in (("pid", 0), ("ppid", 4), ("pgid", 8), ("status", 12), ("comm", 16),
@@ -1341,17 +1352,165 @@ class KernelReaderCase(unittest.TestCase):
     def test_relevant_new_arrival_or_final_pin_change_refuses(self):
         for kind in ("arrival", "reuse", "foreign-to-owner"):
             kernel = GeneratedKernel()
+            pid = 32000 if kind == "arrival" else kernel.foreign
             def change(count):
                 if count == 2:
-                    if kind == "arrival":
-                        kernel.records[32000] = kernel.record(32000)
-                    elif kind == "reuse":
+                    if kind == "reuse":
                         kernel.records[kernel.worker] = kernel.record(kernel.worker, start=102)
                     else:
-                        kernel.records[kernel.foreign] = kernel.record(kernel.foreign)
+                        kernel.records[pid] = kernel.record(pid)
+                        kernel.args_errors.pop(pid, None)
+                        kernel.args[pid] = kernel.arguments(b"/generated/tools/mg", b"sim", b"acquire", b"iphone")
             kernel.on_list = change
-            with self.subTest(kind=kind), self.assertRaises(m.Refused):
+            with self.subTest(kind=kind):
+                if kind == "reuse":
+                    with self.assertRaises(m.Refused):
+                        kernel.read()
+                else:
+                    rows = kernel.read()
+                    self.assertEqual(set(rows), {kernel.own, kernel.worker, pid})
+                    self.assertEqual(rows[pid], "/generated/tools/mg sim acquire iphone")
+                    self.assertEqual(kernel.info_calls[pid], 2)
+                    self.assertEqual(kernel.argv_calls.count(pid), 1)
+                    with patch.object(m.os, "getpid", return_value=kernel.own), self.assertRaises(m.Refused):
+                        m.host_activity(rows, self.selection)
+
+    def test_stable_unrelated_new_owned_activity_is_captured_and_classified(self):
+        for foreign_to_owner in (False, True):
+            kernel, pid = self.new_arrival(b"/generated/unrelated", b"idle")
+            if foreign_to_owner:
+                kernel.records[pid] = kernel.record(pid, uid=80)
+                kernel.args_errors[pid] = errno.EPERM
+                arrive = kernel.on_list
+                def become_owned(count):
+                    arrive(count)
+                    if count == 2:
+                        kernel.args_errors.pop(pid)
+                kernel.on_list = become_owned
+            with self.subTest(foreign_to_owner=foreign_to_owner):
+                rows = kernel.read()
+                self.assertEqual(set(rows), {kernel.own, kernel.worker, pid})
+                self.assertEqual(rows[pid], "/generated/unrelated idle")
+                self.assertEqual(kernel.info_calls[pid], 2)
+                self.assertEqual(kernel.argv_calls.count(pid), 1)
+                self.assertEqual(kernel.short_calls[pid], 2 if foreign_to_owner else 1)
+                self.assertEqual(kernel.enumerations, 2)
+                with patch.object(m.os, "getpid", return_value=kernel.own):
+                    self.assertEqual(m.host_activity(rows, self.selection),
+                                     {"host_jobs": 0, "host_workers": 0, "host_controls": 0})
+
+    def test_new_managed_and_control_activity_is_captured_then_refused(self):
+        for words in ((b"/generated/tools/mg", b"sim", b"acquire", b"iphone"),
+                      (b"/generated/tools/mg", b"run", b"--platform", b"mac"),
+                      (b"/generated/tools/mg", b"xcode-check", b"--mac-unit-only"),
+                      (b"python3", b"/generated/vm-xcode-stage.py"),
+                      (b"python3", b"/generated/vnc-holder.py"),
+                      (b"/generated/ssh", b"generated-command"),
+                      (b"/generated/tart", b"stop", b"GeneratedOnly"),
+                      (b"/generated/tart", b"run", b"GeneratedOnly", b"--vnc-experimental")):
+            kernel, pid = self.new_arrival(*words)
+            with self.subTest(words=words):
+                rows = kernel.read()
+                self.assertEqual(rows[pid], b" ".join(words).decode())
+                self.assertEqual(kernel.info_calls[pid], 2)
+                self.assertEqual(kernel.argv_calls.count(pid), 1)
+                self.assertEqual(kernel.enumerations, 2)
+                with patch.object(m.os, "getpid", return_value=kernel.own), self.assertRaises(m.Refused):
+                    m.host_activity(rows, self.selection)
+
+    def test_new_owned_full_unknown_or_malformed_identity_refuses(self):
+        for at in (1, 2):
+            for error in (errno.EPERM, errno.EACCES, errno.EIO, errno.EINVAL, 0):
+                kernel, pid = self.new_arrival(b"generated-idle")
+                def fail_full(current, count):
+                    if current == pid and count == at:
+                        kernel.info_errors[pid] = error
+                kernel.on_info = fail_full
+                with self.subTest(at=at, error=error), self.assertRaises(m.Refused):
+                    kernel.read()
+                self.assertEqual(kernel.info_calls[pid], at)
+                self.assertEqual(kernel.argv_calls.count(pid), at - 1)
+            for raw in (GeneratedKernel.record(31999), GeneratedKernel.record(32000, start=0),
+                        GeneratedKernel.record(32000, usec=1000000), b"\0" * 136):
+                kernel, pid = self.new_arrival(b"generated-idle")
+                def malformed(current, count):
+                    if current == pid and count == at:
+                        kernel.records[pid] = raw
+                kernel.on_info = malformed
+                with self.subTest(at=at, raw=raw), self.assertRaises(m.Refused):
+                    kernel.read()
+
+    def test_new_owned_unreadable_or_malformed_argv_refuses(self):
+        for error in (errno.EPERM, errno.EACCES, errno.EIO, errno.EINVAL, errno.ESRCH, 0):
+            kernel, pid = self.new_arrival(b"generated-idle")
+            kernel.args_errors[pid] = error
+            with self.subTest(error=error), self.assertRaises(m.Refused):
                 kernel.read()
+            self.assertIn(pid, kernel.argv_calls)
+        for size in (0, 4, 262144, 262145):
+            kernel, pid = self.new_arrival(b"generated-idle")
+            kernel.args_sizes[pid] = size
+            with self.subTest(size=size), self.assertRaises(m.Refused):
+                kernel.read()
+        for raw in (struct.pack("=i", 0) + b"/x\0x\0", struct.pack("=i", 16384) + b"/x\0x\0",
+                    struct.pack("=i", 1) + b"/unterminated", struct.pack("=i", 1) + b"relative\0x\0",
+                    struct.pack("=i", 2) + b"/x\0one\0partial", struct.pack("=i", 1) + b"/x\0partial",
+                    struct.pack("=i", 1) + b"/x\0\xff\0", struct.pack("=i", 1) + b"/x\0\0"):
+            kernel, pid = self.new_arrival(b"generated-idle")
+            def corrupt(current):
+                if current == pid:
+                    kernel.args[pid] = raw
+            kernel.on_argv = corrupt
+            with self.subTest(raw=raw), self.assertRaises((m.Refused, UnicodeError)):
+                kernel.read()
+
+    def test_new_owned_lifetime_credentials_exec_and_pid_reuse_refuse(self):
+        for field in (3, 5, 6, 7, 8, 9, 10, 12, 13, 20, 21):
+            kernel, pid = self.new_arrival(b"generated-idle")
+            def replace(current):
+                if current == pid:
+                    fields = list(struct.unpack("=12I16s32s6I2Q", kernel.records[pid]))
+                    fields[field] = b"changed-exec" if field in (12, 13) else fields[field] + 1
+                    kernel.records[pid] = struct.pack("=12I16s32s6I2Q", *fields)
+            kernel.on_argv = replace
+            with self.subTest(field=field), self.assertRaises(m.Refused):
+                kernel.read()
+            self.assertEqual(kernel.info_calls[pid], 2)
+            self.assertIn(pid, kernel.argv_calls)
+
+    def test_new_owned_positive_full_esrch_is_exit_control(self):
+        for at in ("before", "argv", "after"):
+            kernel, pid = self.new_arrival(b"generated-idle")
+            def exit_full(current, count):
+                if current == pid and count == (1 if at == "before" else 2) and at != "argv":
+                    kernel.info_errors[pid] = errno.ESRCH
+            def exit_argv(current):
+                if current == pid and at == "argv":
+                    kernel.args_errors[pid] = errno.ESRCH
+                    kernel.info_errors[pid] = errno.ESRCH
+            kernel.on_info, kernel.on_argv = exit_full, exit_argv
+            with self.subTest(at=at):
+                self.assertEqual(set(kernel.read()), {kernel.own, kernel.worker})
+                self.assertEqual(kernel.argv_calls.count(pid), 0 if at == "before" else 1)
+                self.assertEqual(kernel.info_calls[pid], {"before": 1, "argv": 3, "after": 2}[at])
+
+    def test_total_argv_byte_cap_is_shared_by_first_and_new_second_pass(self):
+        for extra in (0, 1):
+            new_bytes = m.LIMIT - 4 * 240000 + extra
+            kernel, pid = self.new_arrival(b"n" * new_bytes)
+            for old in (kernel.own, kernel.worker, 31003, 31004):
+                kernel.records[old] = kernel.record(old)
+                kernel.args[old] = kernel.arguments(b"o" * 240000)
+            with self.subTest(extra=extra):
+                if extra:
+                    with self.assertRaises(m.Refused):
+                        kernel.read()
+                else:
+                    rows = kernel.read()
+                    self.assertEqual(sum(len(args.encode()) for args in rows.values()), m.LIMIT)
+                    self.assertEqual(rows[pid], "n" * new_bytes)
+                self.assertEqual(kernel.info_calls[pid], 2)
+                self.assertEqual(kernel.argv_calls.count(pid), 1)
 
     def test_relevant_exit_after_argv_is_positive_and_reuse_still_refuses(self):
         for reuse in (False, True):
