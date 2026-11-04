@@ -79,3 +79,11 @@ exception are now removed. Their commits and private evidence remain available.
 The general staging child-lifetime repair stays in place. Doctor64457 confirms
 the restarted VM answers SSH; its Xcode version still differs from the host.
 Review: clear. Selftest65881: 12 pass. Private65812: pass.
+
+Stage65208 verifies the copied Xcode contents and signature but remains a staged
+warning; it does not claim activation. Under the user's VM maintenance approval,
+the separate first-launch installation and selection completed. All six commands
+joined with exit 0; no license acceptance or host setting changed. Private proof:
+build/diagnostics/vm-xcode-first-launch-20261104T075356Z-78956/result.json.
+Doctor79728 passes and confirms the running VM answers SSH with Xcode matching
+the host. The original staged warning remains unchanged.
