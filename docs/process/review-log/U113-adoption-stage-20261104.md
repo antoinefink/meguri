@@ -103,3 +103,16 @@ maps both record fields, and the tests use the correct read result and field
 comparisons. Independent round-three review finds no P0/P1 blockers or new P2
 findings. Private44631 and format45138 pass. Runtime checks still await disk
 headroom; this is WIP, with no successful signed import or unit acceptance.
+
+After disk space is restored, Core58796 compiles and runs 19 checks: 14 pass,
+five fail. The metadata assertions pass. One diagnostic test aborts during
+teardown with a retained adoption slot; four recovery tests fail during their
+normal bound-adoption setup. Those are not expected reset-guard failures.
+
+Core65740 then passes all four ordinary-adoption checks, including metadata
+payload intake, collection reopen and reviewability. This is synthetic test
+evidence, not a signed-device import or full sync round trip.
+
+Native73566 compiles the production modules but fails while compiling the new
+test code: throwing expressions inside require macros need explicit try
+handling. No native tests run in this result. A test-only correction is needed.

@@ -16,3 +16,10 @@ private43933 passes. Format45138 formats the test target. Only the tests are
 retained here. The production guard remains until the tests run against it.
 Disk headroom must be restored before compilation and behavioral checks.
 No semantic RED, passing runtime checks or full reset acceptance is claimed.
+
+Core58796 compiles this target, but all four cases fail before reset injection
+in the normal sender-adoption setup with RuntimeStaleIncarnation. This is not
+semantic RED for the reset guard. Core65740 passes ordinary first adoption.
+Source inspection identifies ordinary media replay during activation after the
+old binding is marked unusable. A focused witness and repair are required before
+continuing the reset cases. The reset-only guard remains unchanged.
