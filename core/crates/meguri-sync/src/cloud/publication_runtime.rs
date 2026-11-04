@@ -133,14 +133,20 @@ impl Runtime {
         Ok(PreviewWork::ReadActive { id })
     }
     pub(super) fn require_supported_publication(op: &PublishOp) -> Result<(), RuntimeError> {
-        if op
-            .binding_before
-            .as_ref()
-            .is_some_and(|b| b.state == BindingState::Isolated(IsolationReason::EncryptedDataReset))
-        {
-            return Err(PublicationError::ResetRecoveryUnavailable.into());
-        }
-        Ok(())
+        // Reset publication supports only the non-destructive first-root cases.
+        // Unsupported root outcomes stay at Bound; adoption has its own guard.
+        op.validate().map_err(Into::into)
+    }
+    fn reset_root_missing_locked(s: &State, op: &PublishOp) -> bool {
+        s.publication.reset_root_missing.as_ref().is_some_and(|(read, guard)| {
+            read.kind == OwnKind::ReadResetMediaRoot
+                && read.op == op.id
+                && read.incarnation == s.incarnation
+                && read.generation == s.bound.as_ref().map_or(0, |b| b.evidence.generation.0)
+                && read.decision_before == op.fence_before
+                && Self::instance_locked(s).is_ok_and(|instance| instance == read.instance)
+                && *guard == Self::adapter_guard_locked(s)
+        })
     }
     pub fn attach_key_bytes(&self, source: Arc<dyn KeyByteSource>) {
         *self.key_bytes.lock().unwrap_or_else(PoisonError::into_inner) = Some(source);
@@ -399,18 +405,6 @@ impl Runtime {
             })? {
                 return Err(PublicationError::Busy.into());
             }
-            // The 37-code reset recovery/Q11 phase has not landed. Refuse the
-            // entire reset path before entropy, recovery rows or publication writes.
-            let reset = with_tracking_access(|| -> Result<bool, Error> {
-                Ok(s.store
-                    .as_ref()
-                    .ok_or(Error::Database)?
-                    .publication_binding_for_account(&p.account)?
-                    .is_some_and(|b| b.facts.state == BindingState::Isolated(IsolationReason::EncryptedDataReset)))
-            })?;
-            if reset {
-                return Err(PublicationError::ResetRecoveryUnavailable.into());
-            }
         }
         let source = self
             .key_bytes
@@ -435,14 +429,6 @@ impl Runtime {
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
             let before = store.publication_binding_for_account(&p.account)?;
-            // Recheck after platform key draws: isolation may have changed while
-            // the provider was running outside these locks.
-            if before
-                .as_ref()
-                .is_some_and(|b| b.facts.state == BindingState::Isolated(IsolationReason::EncryptedDataReset))
-            {
-                return Err(PublicationError::ResetRecoveryUnavailable.into());
-            }
             let reason = match decision_before.pending_reason {
                 Some(PendingDecisionReason::Restore) => EpochReason::Restore,
                 Some(PendingDecisionReason::ColpkgImport) => EpochReason::CollectionPackageImport,
@@ -483,6 +469,7 @@ impl Runtime {
         s.publication.preview = None;
         s.publication.resume = None;
         s.publication.waiting = false;
+        s.publication.reset_root_missing = None;
         Ok(id)
     }
     /// Event trigger, never a retry timer. One failed attempt remains waiting
@@ -655,6 +642,18 @@ impl Runtime {
                 OwnKind::CreateZones,
                 OwnOperation::CreateZones(vec![zone.clone(), "meguri-root".into(), "meguri-media".into()]),
             ),
+            PublishStep::Bound
+                if !op.root_acked && op.is_encrypted_reset() && !Self::reset_root_missing_locked(&s, &op) =>
+            {
+                s.publication.reset_root_missing = None;
+                (
+                    OwnKind::ReadResetMediaRoot,
+                    OwnOperation::Read {
+                        zone: "meguri-media".into(),
+                        name: "root".into(),
+                    },
+                )
+            }
             PublishStep::Bound if !op.root_acked => (
                 OwnKind::SaveMediaRoot,
                 save(
@@ -769,6 +768,9 @@ impl Runtime {
             decision_before: op.fence_before.clone(),
             decision_current: desired,
         };
+        if kind == OwnKind::ReadResetMediaRoot {
+            s.publication.reset_root_read_guard = Some(Self::adapter_guard_locked(&s));
+        }
         s.publication.submitted = false;
         s.publication.running = Some(request.clone());
         Ok(PublicationWork::Own(Box::new(request)))
@@ -910,6 +912,17 @@ impl Runtime {
                 {
                     return Err(RuntimeError::StaleIncarnation);
                 }
+                if request.kind == OwnKind::ReadResetMediaRoot
+                    && s.publication.reset_root_read_guard.as_ref() != Some(&Self::adapter_guard_locked(&s))
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                if request.kind == OwnKind::SaveMediaRoot
+                    && op.is_encrypted_reset()
+                    && !Self::reset_root_missing_locked(&s, &op)
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
                 if request.kind == OwnKind::SaveActive {
                     let OwnOperation::Save { encrypted, .. } = &request.operation else {
                         return Err(Error::InvalidData.into());
@@ -921,6 +934,11 @@ impl Runtime {
                 }
                 Ok(())
             })?;
+            if matches!(request.kind, OwnKind::ReadResetMediaRoot | OwnKind::SaveMediaRoot) {
+                // Each permission is single-attempt, including a rejected enqueue
+                // or a save with a lost/failed reply. The next attempt rereads.
+                s.publication.reset_root_missing = None;
+            }
             s.publication.submitted = true;
         }
         // A submitted mutation whose reply is lost remains durably distinct
@@ -998,6 +1016,11 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
+        if request.kind == OwnKind::ReadResetMediaRoot
+            && s.publication.reset_root_read_guard.as_ref() != Some(&Self::adapter_guard_locked(&s))
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         s.publication.running = None;
         let mut op = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?
             .filter(|o| o.id == request.op)
@@ -1029,6 +1052,31 @@ impl Runtime {
             (OwnKind::CreateZones, OwnResult::ZonesCreated) if op.step == PublishStep::Bound => {
                 s.publication.zones_created = true;
                 accepted = true;
+            }
+            (OwnKind::ReadResetMediaRoot, OwnResult::Read(read))
+                if op.step == PublishStep::Bound && op.is_encrypted_reset() && !op.root_acked =>
+            {
+                match read {
+                    RecordRead::Missing => {
+                        s.publication.reset_root_missing = Some((request.clone(), Self::adapter_guard_locked(&s)));
+                        accepted = true;
+                    }
+                    RecordRead::Found(record) => {
+                        if let Some(DecodeOutcome::Supported(root)) = record
+                            .encrypted
+                            .as_deref()
+                            .and_then(|e| control_codec::MediaRoot::decode(e).ok())
+                            && !record.system_fields.0.is_empty()
+                        {
+                            op.media_key = RecordKey(root.media_key);
+                            op.root_acked = true;
+                            accepted = true;
+                        }
+                        // An absent e requires the own-epoch/second-root protocol.
+                        // That destructive phase is unsupported here: wait, save nothing.
+                    }
+                    RecordRead::ZoneMissing | RecordRead::Failed => {}
+                }
             }
             (OwnKind::SaveMediaRoot, OwnResult::Saved(record) | OwnResult::Conflict(record))
                 if op.step == PublishStep::Bound =>
@@ -1136,7 +1184,12 @@ impl Runtime {
         }
         if accepted {
             op.retry_after_ms = None;
-            with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.publication_ack_control(&op))?;
+            if let Err(error) =
+                with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.publication_ack_control(&op))
+            {
+                s.publication.reset_root_missing = None;
+                return Err(error.into());
+            }
         } else {
             s.publication.waiting = true;
         }

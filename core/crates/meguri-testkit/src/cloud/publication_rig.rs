@@ -27,6 +27,10 @@ pub enum Point {
     ScanCommitted,
     BeforeEpochRead,
     BeforeActiveSave,
+    /// Before dispatch of the real reset-owned root read.
+    BeforeResetMediaRootRead,
+    /// Before dispatch of the real conditional root save, including initial publication.
+    BeforeMediaRootSave,
     BeforeZoneDeletion,
     AfterCollectionCleanup,
     ZoneDeletionReply,
@@ -701,7 +705,10 @@ impl PublicationRig {
         let Some(PublicationWork::Own(request)) = &self.work else {
             return Err(failure());
         };
-        if self.held != Some(Point::BeforeActiveSave) {
+        if !matches!(
+            self.held,
+            Some(Point::BeforeActiveSave | Point::BeforeResetMediaRootRead | Point::BeforeMediaRootSave)
+        ) {
             return Err(failure());
         }
         if self.transport_queued {
@@ -714,6 +721,33 @@ impl PublicationRig {
             .enqueue(Input::PublicationExecute(*request.clone()))?;
         self.transport_queued = true;
         Ok(queued)
+    }
+    /// Consume one captured reset-root reply with the original production
+    /// request, then stop before scheduling any subsequent recovery operation.
+    pub fn deliver_reset_media_root_reply(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        result: std::result::Result<Reply, ServiceError>,
+    ) -> Result<Response> {
+        let Some(PublicationWork::Own(request)) = self.work.clone() else {
+            return Err(failure());
+        };
+        if self.held != Some(Point::BeforeResetMediaRootRead) || request.kind != OwnKind::ReadResetMediaRoot {
+            return Err(failure());
+        }
+        self.held_request()?;
+        let original = self
+            .sdk
+            .get_mut()
+            .driver
+            .capture_reset_media_root_reply(service, &self.scope, result)?;
+        let replies = self.sdk.get_mut().driver.resume(service, &self.scope)?;
+        self.remember_replies(&request, replies);
+        self.transport_queued = false;
+        self.work = None;
+        self.release(Point::BeforeResetMediaRootRead)?;
+        self.refresh()?;
+        Ok(original)
     }
     pub fn drive_ready(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         let result = (|| {
@@ -813,6 +847,8 @@ impl PublicationRig {
                     OwnKind::CreateZones => Some(Point::BoundAfterDecision),
                     OwnKind::ReadOwnEpoch => Some(Point::BeforeEpochRead),
                     OwnKind::SaveActive => Some(Point::BeforeActiveSave),
+                    OwnKind::ReadResetMediaRoot => Some(Point::BeforeResetMediaRootRead),
+                    OwnKind::SaveMediaRoot => Some(Point::BeforeMediaRootSave),
                     _ => None,
                 },
                 PublicationWork::Adoption(work) if work.task == cloud::adoption::AdoptionTask::ReadActive => {

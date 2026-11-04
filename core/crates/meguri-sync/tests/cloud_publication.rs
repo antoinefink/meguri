@@ -65,9 +65,10 @@ use meguri_sync::cloud::{
 };
 use meguri_testkit::{
     cloud::{
-        Caller, Config, Field, LogOutcome, Mutation, Operation, Record, RemovalCause, ReplyReference, RequestKind,
-        RequestedFields, Scope, Service,
+        Asset, Caller, Config, ErrorCode, Field, LogOutcome, Mutation, Operation, Record, RecordInput, RemovalCause,
+        ReplyReference, RequestKind, RequestedFields, Scope, Service,
         adapter::Observation,
+        child_driver::is_reset_recovery_unavailable,
         coordinator::{BackupNotice, ConnectDecision, Point, PublicationRig, PublishStep},
         devices::IdentityReads,
     },
@@ -299,6 +300,775 @@ fn publish(rig: &mut PublicationRig, service: &mut Service<SeededRandom>) {
     assert!(rig.facts().unwrap().recovery_ops.is_empty());
     assert_server_rows(service, rig);
 }
+
+// Reset authority comes from a real expired-zone cleanup response, after two
+// normal publications. No prebound fixture or tracking/ACK setter participates.
+fn published_then_reset(
+    root: &Path,
+    service: &mut Service<SeededRandom>,
+    scope: &Scope,
+    keys: Arc<ScriptedKeys>,
+) -> (PathBuf, PublicationRig) {
+    let prior_dir = generated(root, "reset-prior", true);
+    let mut prior = open(&prior_dir, scope, ORIGIN, ScriptedKeys::new(None));
+    publish(&mut prior, service);
+    let expired_zone = prior.collection_zone().unwrap();
+    prior.close_clean().unwrap();
+
+    let dir = generated(root, "reset-local", true);
+    let mut rig = open(&dir, scope, ORIGIN, keys);
+    let unbound = rig.facts().unwrap();
+    assert!(unbound.current.is_none() && unbound.bindings.is_empty());
+    publish(&mut rig, service);
+    let published = rig.facts().unwrap();
+    let binding = published.current.as_ref().unwrap();
+    assert_eq!(binding.facts.state, BindingState::Active);
+    let rows = rig.driver().collection_rows().unwrap();
+    assert_eq!(published.zones[&expired_zone].first_seen_ms, ORIGIN);
+    rig.hold(Point::BeforeZoneDeletion).unwrap();
+    rig.advance_clock_ms(30 * DAY).unwrap();
+    rig.sync_now_and_drain(service, STEPS).unwrap();
+    assert!(rig.is_held(Point::BeforeZoneDeletion));
+    assert!(rig.facts().unwrap().zones[&expired_zone].deletion_due);
+
+    assert!(
+        service
+            .request(
+                scope,
+                Caller::default(),
+                Operation::DeleteZone {
+                    zone: expired_zone.clone(),
+                    cause: RemovalCause::EncryptedDataReset,
+                }
+            )
+            .unwrap()
+            .result
+            .is_ok()
+    );
+    let after = cursor(service);
+    rig.hold(Point::ZoneDeletionReply).unwrap();
+    rig.release(Point::BeforeZoneDeletion).unwrap();
+    rig.drive_ready(service, STEPS).unwrap();
+    assert!(rig.is_held(Point::ZoneDeletionReply));
+    let held = rig.held_request().unwrap();
+    assert!(
+        matches!(&held.operation, Operation::DeleteZone { zone, cause: RemovalCause::Deleted }
+        if zone == &expired_zone)
+    );
+    let logs = service.request_log().unwrap();
+    let cleanup: Vec<_> = logs
+        .iter()
+        .filter(|r| r.request_id > after && r.kind == RequestKind::DeleteZone)
+        .collect();
+    assert_eq!(cleanup.len(), 1);
+    let reply_id = cleanup[0].request_id;
+    assert!(cleanup[0].caller == held.caller);
+    assert_eq!(cleanup[0].outcome, LogOutcome::Failure(ErrorCode::ZoneNotFound));
+    assert!(logs.iter().any(|r| r.request_id > after
+        && r.request_id < reply_id
+        && r.kind == RequestKind::Read
+        && r.zone.as_deref() == Some("meguri-root")
+        && r.outcome == LogOutcome::Success));
+    let outcomes = service.outcomes().unwrap();
+    let failure = outcomes
+        .iter()
+        .find(|o| o.request_id == reply_id)
+        .unwrap()
+        .result
+        .as_ref()
+        .unwrap_err();
+    assert_eq!(failure.code, ErrorCode::ZoneNotFound);
+    assert!(failure.encrypted_data_reset);
+    // Service has answered, but only delivery of that original reply can isolate.
+    assert_eq!(
+        rig.facts().unwrap().current.as_ref().unwrap().facts.state,
+        BindingState::Active
+    );
+    rig.release(Point::ZoneDeletionReply).unwrap();
+    rig.drive_ready(service, STEPS).unwrap();
+    let isolated = rig.facts().unwrap();
+    let current = isolated.current.as_ref().unwrap();
+    assert_eq!(current.id, binding.id);
+    assert_eq!(
+        current.facts.state,
+        BindingState::Isolated(IsolationReason::EncryptedDataReset)
+    );
+    assert!(
+        isolated
+            .bindings
+            .iter()
+            .any(|b| b.id == binding.id && b.facts.state == current.facts.state)
+    );
+    assert!(!isolated.zones.contains_key(&expired_zone));
+    assert!(isolated.decision == published.decision);
+    assert_eq!(isolated.native_file, published.native_file);
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+    assert_eq!(
+        service
+            .request_log()
+            .unwrap()
+            .iter()
+            .filter(|r| r.request_id > after && r.kind == RequestKind::DeleteZone)
+            .count(),
+        1
+    ); // no transport replay
+    (dir, rig)
+}
+
+#[test]
+fn real_reset_cleanup_response_isolates_normally_published_binding_durably() {
+    let run = tempfile::tempdir().unwrap();
+    let scope = scope("real-reset-authority");
+    let mut service = service(run.path());
+    let keys = ScriptedKeys::new(None);
+    let (dir, mut rig) = published_then_reset(run.path(), &mut service, &scope, keys.clone());
+    let isolated = rig.facts().unwrap();
+    rig.close_clean().unwrap();
+    let after = cursor(&service);
+    let mut reopened = open(&dir, &scope, ORIGIN + 30 * DAY, keys.clone());
+    let persisted = reopened.facts().unwrap();
+    assert!(persisted.bindings == isolated.bindings);
+    let original_id = isolated.current.as_ref().unwrap().id;
+    assert!(
+        persisted.bindings.iter().any(
+            |b| b.id == original_id && b.facts.state == BindingState::Isolated(IsolationReason::EncryptedDataReset)
+        )
+    );
+    assert!(persisted.recovery_ops.is_empty());
+    assert_eq!(keys.calls(), 2);
+    no_mutations_since(&service, after);
+    reopened.close_clean().unwrap();
+}
+
+/// Fresh reset publication is authorized; a cancelled preview stays stale.
+#[test]
+fn reset_publication_accepts_fresh_preview_and_rejects_cancelled_preview() {
+    let run = tempfile::tempdir().unwrap();
+    let scope = scope("reset-current-guard");
+    let mut service = service(run.path());
+    let keys = ScriptedKeys::new(None);
+    let (_, mut rig) = published_then_reset(run.path(), &mut service, &scope, keys.clone());
+    let before = rig.facts().unwrap();
+    let stale = rig.preview(&mut service, STEPS).unwrap();
+    rig.cancel_preview().unwrap();
+    let earlier = rig.confirm_publication(&stale).unwrap_err();
+    assert!(!is_reset_recovery_unavailable(earlier.as_ref()));
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    let after = cursor(&service);
+    rig.confirm_publication(&preview).unwrap();
+    let confirmed = rig.facts().unwrap();
+    assert!(confirmed.current == before.current && confirmed.bindings == before.bindings);
+    assert!(confirmed.decision == before.decision);
+    assert_eq!(confirmed.recovery_ops.len(), 1);
+    assert_eq!(
+        confirmed.recovery_ops[0].step,
+        meguri_sync::cloud::adoption::RecoveryStep::Publish(PublishStep::Confirmed)
+    );
+    assert!(!confirmed.recovery_ops[0].switch_sent);
+    assert_eq!(keys.calls(), 4);
+    no_mutations_since(&service, after);
+    rig.close_clean().unwrap();
+}
+
+// A real competing Service inventory, under the root's actual published key.
+// This writes no local media ledger, binding, fence or acknowledgment.
+fn retain_server_blob(service: &mut Service<SeededRandom>, scope: &Scope) {
+    use sha1::Digest as _;
+    use sha2::Digest as _;
+    let bytes = b"public synthetic retained reset blob";
+    let root = supported_media_root(encrypted(&server_record(service, scope, "meguri-media", "root")));
+    let blob = meguri_sync::cloud::media::blob::Blob {
+        sha256: sha2::Sha256::digest(bytes).into(),
+        sha1: sha1::Sha1::digest(bytes).into(),
+        size: bytes.len() as u64,
+    };
+    let mut record = RecordInput::encrypted(blob.name(&root.media_key), "MGBlob", blob.encode().unwrap());
+    record
+        .fields
+        .insert("a".into(), Field::Asset(Asset::synthetic(bytes.to_vec())));
+    let reply = service
+        .request(
+            scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: "meguri-media".into(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record,
+                    if_unchanged: None,
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(meguri_testkit::cloud::Reply::Modified(results)) = reply.result else {
+        panic!("real retained blob save required")
+    };
+    assert_eq!(results.len(), 1);
+    assert!(results[0].result.is_ok());
+}
+
+// Shared first RED slice: inspect the original guarded ReadResetMediaRoot
+// request, then deliver its one actual Service reply through the normal driver.
+fn start_reset_root_read(rig: &mut PublicationRig, service: &mut Service<SeededRandom>) -> u64 {
+    let preview = rig.preview(service, STEPS).unwrap();
+    rig.hold(Point::BeforeResetMediaRootRead).unwrap();
+    rig.hold(Point::BeforeMediaRootSave).unwrap();
+    let after = cursor(service);
+    rig.confirm_publication(&preview).unwrap();
+    rig.drive_ready(service, STEPS).unwrap();
+    assert!(rig.is_held(Point::BeforeResetMediaRootRead));
+    let request = rig.held_request().unwrap();
+    assert!(
+        matches!(&request.operation, Operation::Read { zone, name, fields: RequestedFields::All }
+        if zone == "meguri-media" && name == "root")
+    );
+    assert!(request.caller.own_operation.is_some() && request.caller.instance.is_none());
+    let repeated = rig.held_request().unwrap();
+    assert!(repeated.operation == request.operation && repeated.caller == request.caller);
+    let logs = service.request_log().unwrap();
+    let creates: Vec<_> = logs
+        .iter()
+        .filter(|r| r.request_id > after && r.kind == RequestKind::CreateZone)
+        .collect();
+    assert_eq!(creates.len(), 3);
+    assert_eq!(
+        creates.iter().map(|r| r.zone.clone().unwrap()).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            rig.collection_zone().unwrap(),
+            "meguri-media".into(),
+            "meguri-root".into()
+        ])
+    );
+    assert!(creates.iter().all(|r| r.outcome == LogOutcome::Success));
+    assert!(
+        creates
+            .iter()
+            .all(|r| r.caller.own_operation == creates[0].caller.own_operation)
+    );
+    assert!(!rig.facts().unwrap().root_acked);
+    assert!(!logs.iter().any(|r| r.request_id > after
+        && r.zone.as_deref() == Some("meguri-media")
+        && matches!(
+            r.kind,
+            RequestKind::Read | RequestKind::Modify | RequestKind::DeleteZone
+        )));
+    rig.release(Point::BeforeResetMediaRootRead).unwrap();
+    rig.drive_ready(service, STEPS).unwrap();
+    let logs = service.request_log().unwrap();
+    let reads: Vec<_> = logs
+        .iter()
+        .filter(|r| {
+            r.request_id > after
+                && r.kind == RequestKind::Read
+                && r.zone.as_deref() == Some("meguri-media")
+                && r.caller == request.caller
+        })
+        .collect();
+    assert_eq!(reads.len(), 1);
+    assert!(creates.iter().all(|r| r.request_id < reads[0].request_id));
+    reads[0].request_id
+}
+
+/// Desired workflow RED: the readable root is acknowledged without a root save.
+#[test]
+fn reset_publication_reads_and_reuses_readable_root_without_media_mutation() {
+    let run = tempfile::tempdir().unwrap();
+    let scope = scope("reset-readable-root");
+    let mut service = service(run.path());
+    let (_, mut rig) = published_then_reset(run.path(), &mut service, &scope, ScriptedKeys::new(None));
+    retain_server_blob(&mut service, &scope);
+    let before = service.inspect(&scope).unwrap().unwrap().zones["meguri-media"].clone();
+    let root = supported_media_root(encrypted(&before.records["root"]));
+    assert_eq!(before.records.values().filter(|r| r.record_type == "MGBlob").count(), 1);
+    let read_id = start_reset_root_read(&mut rig, &mut service);
+    assert!(!rig.is_held(Point::BeforeMediaRootSave));
+    let outcomes = service.outcomes().unwrap();
+    let Ok(ReplyReference::Record(reference)) = &outcomes.iter().find(|o| o.request_id == read_id).unwrap().result
+    else {
+        panic!("actual readable reset root reply required")
+    };
+    assert_eq!(
+        service.resolve_record(&scope, reference).unwrap(),
+        before.records["root"]
+    );
+    let facts = rig.facts().unwrap();
+    assert!(facts.root_acked && facts.media_key.as_ref().unwrap().0 == root.media_key);
+    assert!(facts.recovery_ops.is_empty());
+    assert_eq!(facts.current.as_ref().unwrap().facts.state, BindingState::Active);
+    assert_eq!(service.inspect(&scope).unwrap().unwrap().zones["meguri-media"], before);
+    assert!(!service.request_log().unwrap().iter().any(|r| r.request_id > read_id
+        && r.zone.as_deref() == Some("meguri-media")
+        && matches!(r.kind, RequestKind::Modify | RequestKind::DeleteZone)));
+    rig.close_clean().unwrap();
+}
+
+#[test]
+fn reset_publication_missing_root_conditional_save_uses_server_conflict() {
+    let run = tempfile::tempdir().unwrap();
+    let scope = scope("reset-missing-root");
+    let mut service = service(run.path());
+    let (_, mut rig) = published_then_reset(run.path(), &mut service, &scope, ScriptedKeys::new(None));
+    retain_server_blob(&mut service, &scope);
+    let old_root = server_record(&service, &scope, "meguri-media", "root");
+    let removed = service
+        .request(
+            &scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: "meguri-media".into(),
+                atomic: false,
+                changes: vec![Mutation::Delete { name: "root".into() }],
+            },
+        )
+        .unwrap();
+    let Ok(meguri_testkit::cloud::Reply::Modified(results)) = removed.result else {
+        panic!("real root removal required")
+    };
+    assert!(matches!(results.as_slice(), [result] if matches!(&result.result,
+        Ok(meguri_testkit::cloud::MutationSuccess::Deleted))));
+    let blobs = service.inspect(&scope).unwrap().unwrap().zones["meguri-media"]
+        .records
+        .clone();
+    assert_eq!(blobs.len(), 1);
+    let read_id = start_reset_root_read(&mut rig, &mut service);
+    let outcomes = service.outcomes().unwrap();
+    let missing = outcomes
+        .iter()
+        .find(|o| o.request_id == read_id)
+        .unwrap()
+        .result
+        .as_ref()
+        .unwrap_err();
+    assert_eq!(missing.code, ErrorCode::UnknownItem);
+    assert!(!missing.encrypted_data_reset);
+    assert!(rig.is_held(Point::BeforeMediaRootSave));
+    let request = rig.held_request().unwrap();
+    let Operation::Modify {
+        zone,
+        atomic: false,
+        changes,
+    } = &request.operation
+    else {
+        panic!("original conditional media-root save required")
+    };
+    assert_eq!(zone, "meguri-media");
+    let [
+        Mutation::Save {
+            record,
+            if_unchanged: None,
+        },
+    ] = changes.as_slice()
+    else {
+        panic!("create-if-missing root save required")
+    };
+    assert_eq!(
+        (record.name.as_str(), record.record_type.as_str()),
+        ("root", "MGMediaRoot")
+    );
+    assert!(
+        supported_media_root(match &record.fields["e"] {
+            Field::EncryptedBytes(e) => e,
+            _ => panic!("supported root bytes required"),
+        })
+        .media_key
+            != supported_media_root(encrypted(&old_root)).media_key
+    );
+    assert!(!rig.facts().unwrap().root_acked);
+    assert_eq!(
+        service.inspect(&scope).unwrap().unwrap().zones["meguri-media"].records,
+        blobs
+    );
+    let competitor = service
+        .request(
+            &scope,
+            Caller::default(),
+            Operation::Modify {
+                zone: "meguri-media".into(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: RecordInput::encrypted("root", "MGMediaRoot", encrypted(&old_root).to_vec()),
+                    if_unchanged: None,
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(meguri_testkit::cloud::Reply::Modified(results)) = competitor.result else {
+        panic!("real competing root save required")
+    };
+    assert!(matches!(results.as_slice(), [result] if result.result.is_ok()));
+    let winner = server_record(&service, &scope, "meguri-media", "root");
+    let inventory = service.inspect(&scope).unwrap().unwrap().zones["meguri-media"].clone();
+    let after = cursor(&service);
+    rig.release(Point::BeforeMediaRootSave).unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let logs = service.request_log().unwrap();
+    let saves: Vec<_> = logs
+        .iter()
+        .filter(|r| r.request_id > after && r.kind == RequestKind::Modify && r.zone.as_deref() == Some("meguri-media"))
+        .collect();
+    assert_eq!(saves.len(), 1);
+    assert!(saves[0].caller == request.caller);
+    assert_eq!(saves[0].outcome, LogOutcome::Failure(ErrorCode::ServerRecordChanged));
+    let outcomes = service.outcomes().unwrap();
+    let Ok(ReplyReference::Modified(items)) = &outcomes
+        .iter()
+        .find(|o| o.request_id == saves[0].request_id)
+        .unwrap()
+        .result
+    else {
+        panic!("original root save reply required")
+    };
+    assert_eq!(items.len(), 1);
+    let conflict = items[0].result.as_ref().unwrap_err();
+    assert_eq!(conflict.code, ErrorCode::ServerRecordChanged);
+    assert_eq!(
+        service
+            .resolve_record(&scope, conflict.server_record.as_ref().unwrap())
+            .unwrap(),
+        winner
+    );
+    let facts = rig.facts().unwrap();
+    assert!(
+        facts.root_acked && facts.media_key.as_ref().unwrap().0 == supported_media_root(encrypted(&winner)).media_key
+    );
+    assert!(facts.recovery_ops.is_empty());
+    assert_eq!(facts.current.as_ref().unwrap().facts.state, BindingState::Active);
+    assert_eq!(
+        service.inspect(&scope).unwrap().unwrap().zones["meguri-media"],
+        inventory
+    );
+    assert!(!logs.iter().any(|r| r.request_id > read_id
+        && r.kind == RequestKind::DeleteZone
+        && r.zone.as_deref() == Some("meguri-media")));
+    rig.close_clean().unwrap();
+}
+
+/// Missing permission cannot survive either a clean reopen or a killed process.
+#[test]
+fn reset_publication_missing_root_permission_reopens_with_a_fresh_read() {
+    for kill in [false, true] {
+        let run = tempfile::tempdir().unwrap();
+        let scope = scope("reset-missing-reopen");
+        let mut service = service(run.path());
+        let keys = ScriptedKeys::new(None);
+        let (dir, mut rig) = published_then_reset(run.path(), &mut service, &scope, keys.clone());
+        let old_root = server_record(&service, &scope, "meguri-media", "root");
+        let response = service
+            .request(
+                &scope,
+                Caller::default(),
+                Operation::Modify {
+                    zone: "meguri-media".into(),
+                    atomic: false,
+                    changes: vec![Mutation::Delete { name: "root".into() }],
+                },
+            )
+            .unwrap();
+        let Ok(meguri_testkit::cloud::Reply::Modified(items)) = response.result else {
+            panic!("real root removal required")
+        };
+        assert!(matches!(items.as_slice(), [item] if matches!(&item.result,
+            Ok(meguri_testkit::cloud::MutationSuccess::Deleted))));
+        start_reset_root_read(&mut rig, &mut service);
+        assert!(rig.is_held(Point::BeforeMediaRootSave));
+        let pending = rig.facts().unwrap();
+        assert!(!pending.root_acked && pending.recovery_ops.len() == 1);
+        let calls = keys.calls();
+        if kill {
+            rig.kill().unwrap();
+        } else {
+            rig.close_clean().unwrap();
+        }
+        // A different publisher wins while this process is gone.
+        let response = service
+            .request(
+                &scope,
+                Caller::default(),
+                Operation::Modify {
+                    zone: "meguri-media".into(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: RecordInput::encrypted("root", "MGMediaRoot", encrypted(&old_root).to_vec()),
+                        if_unchanged: None,
+                    }],
+                },
+            )
+            .unwrap();
+        let Ok(meguri_testkit::cloud::Reply::Modified(items)) = response.result else {
+            panic!("real competing root save required")
+        };
+        assert!(matches!(items.as_slice(), [item] if item.result.is_ok()));
+        let inventory = service.inspect(&scope).unwrap().unwrap().zones["meguri-media"].clone();
+        let after = cursor(&service);
+        let mut reopened = open(&dir, &scope, ORIGIN + 30 * DAY, keys.clone());
+        reopened.hold(Point::BeforeResetMediaRootRead).unwrap();
+        reopened.hold(Point::BeforeMediaRootSave).unwrap();
+        reopened.drive_ready(&mut service, STEPS).unwrap();
+        assert!(reopened.is_held(Point::BeforeResetMediaRootRead));
+        let request = reopened.held_request().unwrap();
+        assert!(
+            matches!(&request.operation, Operation::Read { zone, name, fields: RequestedFields::All }
+            if zone == "meguri-media" && name == "root")
+        );
+        assert!(request.caller.own_operation.is_some() && request.caller.instance.is_none());
+        let facts = reopened.facts().unwrap();
+        assert!(!facts.root_acked && facts.recovery_ops == pending.recovery_ops);
+        let logs = service.request_log().unwrap();
+        let creates: Vec<_> = logs
+            .iter()
+            .filter(|r| r.request_id > after && r.kind == RequestKind::CreateZone)
+            .collect();
+        assert_eq!(creates.len(), 3);
+        assert!(creates.iter().all(|r| r.outcome == LogOutcome::Success));
+        assert!(!logs.iter().any(|r| r.request_id > after
+            && r.zone.as_deref() == Some("meguri-media")
+            && matches!(
+                r.kind,
+                RequestKind::Read | RequestKind::Modify | RequestKind::DeleteZone
+            )));
+        reopened.release(Point::BeforeResetMediaRootRead).unwrap();
+        reopened.drive_ready(&mut service, STEPS).unwrap();
+        assert!(!reopened.is_held(Point::BeforeMediaRootSave));
+        let logs = service.request_log().unwrap();
+        let reads: Vec<_> = logs
+            .iter()
+            .filter(|r| {
+                r.request_id > after && r.kind == RequestKind::Read && r.zone.as_deref() == Some("meguri-media")
+            })
+            .collect();
+        assert_eq!(reads.len(), 2);
+        let owned_reads = reads
+            .iter()
+            .copied()
+            .filter(|r| r.caller == request.caller)
+            .collect::<Vec<_>>();
+        let media_reads = reads
+            .iter()
+            .copied()
+            .filter(|r| r.caller != request.caller)
+            .collect::<Vec<_>>();
+        assert_eq!(owned_reads.len(), 1);
+        assert_eq!(owned_reads[0].outcome, LogOutcome::Success);
+        assert!(creates.iter().all(|r| r.request_id < owned_reads[0].request_id));
+        assert_eq!(media_reads.len(), 1);
+        assert!(
+            media_reads[0].caller.own_operation.as_deref() == Some("media-runtime")
+                && media_reads[0].caller.instance.is_none()
+        );
+        assert_eq!(media_reads[0].outcome, LogOutcome::Success);
+        assert!(owned_reads[0].request_id < media_reads[0].request_id);
+        assert!(!logs.iter().any(|r| r.request_id > after
+            && r.zone.as_deref() == Some("meguri-media")
+            && matches!(r.kind, RequestKind::Modify | RequestKind::DeleteZone)));
+        let done = reopened.facts().unwrap();
+        assert!(done.root_acked && done.recovery_ops.is_empty());
+        assert_eq!(done.current.as_ref().unwrap().facts.state, BindingState::Active);
+        assert!(done.media_key.as_ref().unwrap().0 == supported_media_root(encrypted(&old_root)).media_key);
+        assert_eq!(keys.calls(), calls);
+        assert_eq!(
+            service.inspect(&scope).unwrap().unwrap().zones["meguri-media"],
+            inventory
+        );
+        reopened.close_clean().unwrap();
+    }
+}
+
+enum ResetRootReply {
+    Failed(ErrorCode),
+    ZoneMissing,
+    Malformed,
+    Newer,
+    AbsentE,
+}
+
+// K2/V15.2.3/V26.1/P24/Q11: first-read proof only. The driver consumes
+// the captured reply; no second-read or destructive recovery is dispatched.
+fn reset_root_reply_preserves_pending_publication(case: ResetRootReply) {
+    let run = tempfile::tempdir().unwrap();
+    let scope = scope("reset-root-outcome");
+    let mut service = service(run.path());
+    let (dir, mut rig) = published_then_reset(run.path(), &mut service, &scope, ScriptedKeys::new(None));
+    let isolated = rig.facts().unwrap();
+    let rows = rig.driver().collection_rows().unwrap();
+    retain_server_blob(&mut service, &scope);
+    let inventory = service.inspect(&scope).unwrap().unwrap().zones["meguri-media"].clone();
+    let mut record = inventory.records["root"].clone();
+    let mut bytes = supported_media_root(encrypted(&record)).encode().unwrap();
+    let result = match case {
+        ResetRootReply::Failed(code) => {
+            assert!(!matches!(code, ErrorCode::UnknownItem | ErrorCode::ZoneNotFound));
+            Err(meguri_testkit::cloud::ServiceError {
+                code,
+                encrypted_data_reset: false,
+                server_record: None,
+            })
+        }
+        ResetRootReply::ZoneMissing => Err(meguri_testkit::cloud::ServiceError {
+            code: ErrorCode::ZoneNotFound,
+            encrypted_data_reset: false,
+            server_record: None,
+        }),
+        ResetRootReply::Malformed => {
+            // The codec's existing short-key control: canonical V1 wire,
+            // but a 31-byte key where MediaRoot requires exactly 32 bytes.
+            assert_eq!(&bytes[..4], &[0x08, 0x01, 0x12, 0x20]);
+            bytes[3] = 31;
+            bytes.remove(4);
+            assert_eq!(MediaRoot::decode(&bytes), Err(codec::CodecError::InvalidLength));
+            record.fields.insert("e".into(), Field::EncryptedBytes(bytes));
+            Ok(meguri_testkit::cloud::Reply::Record(record))
+        }
+        ResetRootReply::Newer => {
+            // The format discriminator is probed before any V1 body fields.
+            assert_eq!(&bytes[..2], &[0x08, 0x01]);
+            bytes[1] = 2;
+            assert_eq!(
+                MediaRoot::decode(&bytes),
+                Ok(control_codec::DecodeOutcome::UnsupportedFormat(2))
+            );
+            record.fields.insert("e".into(), Field::EncryptedBytes(bytes));
+            Ok(meguri_testkit::cloud::Reply::Record(record))
+        }
+        ResetRootReply::AbsentE => {
+            assert!(record.fields.remove("e").is_some());
+            assert!(!record.fields.contains_key("e"));
+            Ok(meguri_testkit::cloud::Reply::Record(record))
+        }
+    };
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    rig.hold(Point::BeforeResetMediaRootRead).unwrap();
+    rig.hold(Point::BeforeMediaRootSave).unwrap();
+    let after = cursor(&service);
+    // Expected current RED. Refusal here cannot satisfy any outcome below.
+    rig.confirm_publication(&preview).unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    assert!(rig.is_held(Point::BeforeResetMediaRootRead));
+    let request = rig.held_request().unwrap();
+    assert!(
+        matches!(&request.operation, Operation::Read { zone, name, fields: RequestedFields::All }
+        if zone == "meguri-media" && name == "root")
+    );
+    assert!(request.caller.own_operation.is_some() && request.caller.instance.is_none());
+    let repeated = rig.held_request().unwrap();
+    assert!(repeated.operation == request.operation && repeated.caller == request.caller);
+    let before = rig.facts().unwrap();
+    assert!(!before.root_acked);
+    assert_eq!(before.recovery_ops.len(), 1);
+    assert_eq!(
+        before.recovery_ops[0].step,
+        meguri_sync::cloud::adoption::RecoveryStep::Publish(PublishStep::Bound)
+    );
+    assert!(!before.recovery_ops[0].switch_sent);
+    assert!(before.bindings.iter().any(|b| Some(b) == isolated.current.as_ref()));
+    let logs = service.request_log().unwrap();
+    let creates: Vec<_> = logs
+        .iter()
+        .filter(|r| r.request_id > after && r.kind == RequestKind::CreateZone)
+        .collect();
+    assert_eq!(creates.len(), 3);
+    assert_eq!(
+        creates.iter().map(|r| r.zone.clone().unwrap()).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            rig.collection_zone().unwrap(),
+            "meguri-media".into(),
+            "meguri-root".into()
+        ])
+    );
+    assert!(creates.iter().all(|r| r.outcome == LogOutcome::Success
+        && r.caller == creates[0].caller
+        && r.caller.own_operation.is_some()
+        && r.caller.instance.is_none()));
+    assert!(!logs.iter().any(|r| r.request_id > after
+        && r.zone.as_deref() == Some("meguri-media")
+        && matches!(
+            r.kind,
+            RequestKind::Read | RequestKind::Modify | RequestKind::DeleteZone
+        )));
+
+    let original = rig
+        .deliver_reset_media_root_reply(&mut service, result.clone())
+        .unwrap();
+    assert!(original.result == Ok(meguri_testkit::cloud::Reply::Record(inventory.records["root"].clone())));
+    let consumed = rig.sent_request(original.request_id).unwrap().response;
+    assert_eq!(consumed.request_id, original.request_id);
+    assert!(consumed.result == result);
+    assert!(!rig.is_held(Point::BeforeResetMediaRootRead));
+    // Every unsupported first-read outcome waits, including e-absent success:
+    // its own-epoch/second-root destructive protocol remains unsupported here.
+    // Missing (unknownItem) is deliberately excluded from these refusal cases.
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    assert!(!rig.is_held(Point::BeforeMediaRootSave));
+    let pending = rig.facts().unwrap();
+    assert!(pending.current == before.current && pending.bindings == before.bindings);
+    assert!(pending.decision == before.decision && pending.native_file == before.native_file);
+    assert!(pending.media_key == before.media_key && !pending.root_acked);
+    assert_eq!(pending.recovery_ops.len(), 1);
+    assert_eq!(pending.recovery_ops[0].id, before.recovery_ops[0].id);
+    assert_eq!(pending.recovery_ops[0].step, before.recovery_ops[0].step);
+    assert!(!pending.recovery_ops[0].switch_sent);
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+    let logs = service.request_log().unwrap();
+    let reads: Vec<_> = logs
+        .iter()
+        .filter(|r| r.request_id > after && r.zone.as_deref() == Some("meguri-media") && r.kind == RequestKind::Read)
+        .collect();
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].request_id, original.request_id);
+    assert!(reads[0].caller == request.caller && reads[0].outcome == LogOutcome::Success);
+    assert!(creates.iter().all(|r| r.request_id < original.request_id));
+    assert!(!logs.iter().any(|r| r.request_id > after
+        && r.zone.as_deref() == Some("meguri-media")
+        && matches!(r.kind, RequestKind::Modify | RequestKind::DeleteZone)));
+    no_mutations_since(&service, original.request_id);
+    assert_eq!(
+        service.inspect(&scope).unwrap().unwrap().zones["meguri-media"],
+        inventory
+    );
+    rig.close_clean().unwrap();
+    let mut reopened = open(&dir, &scope, ORIGIN + 30 * DAY, ScriptedKeys::new(None));
+    let durable = reopened.facts().unwrap();
+    assert!(durable.bindings == pending.bindings && durable.recovery_ops == pending.recovery_ops);
+    assert!(durable.decision == pending.decision && durable.native_file == pending.native_file);
+    assert_eq!(reopened.driver().collection_rows().unwrap(), rows);
+    no_mutations_since(&service, original.request_id);
+    reopened.close_clean().unwrap();
+}
+
+#[test]
+fn reset_publication_failed_root_read_waits_without_media_mutation() {
+    for code in [
+        ErrorCode::ServerRecordChanged,
+        ErrorCode::InvalidArguments,
+        ErrorCode::LimitExceeded,
+        ErrorCode::QuotaExceeded,
+        ErrorCode::BatchRequestFailed,
+        ErrorCode::UserDeletedZone,
+        ErrorCode::ChangeTokenExpired,
+    ] {
+        reset_root_reply_preserves_pending_publication(ResetRootReply::Failed(code));
+    }
+}
+
+#[test]
+fn reset_publication_first_root_zone_missing_waits_without_media_mutation() {
+    reset_root_reply_preserves_pending_publication(ResetRootReply::ZoneMissing);
+}
+
+#[test]
+fn reset_publication_malformed_root_waits_without_media_mutation() {
+    reset_root_reply_preserves_pending_publication(ResetRootReply::Malformed);
+}
+
+#[test]
+fn reset_publication_newer_root_waits_without_media_mutation() {
+    reset_root_reply_preserves_pending_publication(ResetRootReply::Newer);
+}
+
+#[test]
+fn reset_publication_absent_e_root_is_not_acked_or_saved_at_first_reply() {
+    reset_root_reply_preserves_pending_publication(ResetRootReply::AbsentE);
+}
+
 #[test]
 fn collection_rows_stay_sql_only_while_media_rows_verify_retained_file_hashes() {
     let run = tempfile::tempdir().unwrap();

@@ -128,6 +128,11 @@ pub struct PublishOp {
     pub reason: u8,
 }
 impl PublishOp {
+    pub(crate) fn is_encrypted_reset(&self) -> bool {
+        self.binding_before
+            .as_ref()
+            .is_some_and(|b| b.state == BindingState::Isolated(IsolationReason::EncryptedDataReset))
+    }
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.account.0.is_empty()
             || self.confirmed_file.created_nanos >= 1_000_000_000
@@ -240,6 +245,9 @@ pub(crate) struct ProcessState {
     pub running: Option<OwnRequest>,
     pub submitted: bool,
     pub zones_created: bool,
+    /// Only a validated Missing reply grants a conditional root save. Never persisted.
+    pub reset_root_missing: Option<(OwnRequest, super::adapter::Guard)>,
+    pub reset_root_read_guard: Option<super::adapter::Guard>,
     pub own_epoch_read: bool,
     pub waiting: bool,
     pub last_cleanup_ms: Option<i64>,

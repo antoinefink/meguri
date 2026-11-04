@@ -635,6 +635,8 @@ impl Runtime {
     }
     // Caller holds both runtime state and tracking access.
     fn invalidate_tracking_locked(state: &mut State) {
+        state.publication.reset_root_missing = None;
+        state.publication.reset_root_read_guard = None;
         match state.invalidation.checked_add(1) {
             Some(next) => state.invalidation = next,
             None => state.invalidation_exhausted = true,
@@ -717,6 +719,8 @@ impl Runtime {
         state.publication.preview = None;
         state.publication.running = None;
         state.publication.zones_created = false;
+        state.publication.reset_root_missing = None;
+        state.publication.reset_root_read_guard = None;
         state.publication.own_epoch_read = false;
         state.actions.rebind(retained_sdk);
         state.incoming.failed_this_open.clear();
@@ -922,6 +926,8 @@ impl Runtime {
             work.effect()?;
             state.publication.resume = None;
             state.publication.preview = None;
+            state.publication.reset_root_missing = None;
+            state.publication.reset_root_read_guard = None;
             state.adapter.token = state.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         }
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {

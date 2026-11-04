@@ -44,3 +44,34 @@ transport tests, including the 37-code matrix. Independent review reports no
 P0–P2 findings in this bounded change. This is native mapping evidence, not
 proof of the full reset workflow or signed cross-device convergence.
 Private5415 and similarity5416 pass.
+
+## Bounded publication recovery
+
+Core component start: 39e2fca9. Export97071 adds the first reset-root read
+after zone creation. A readable root supplies its existing media key. Only a
+missing-root result permits a conditional save. Failed, zone-missing,
+malformed, newer-format and absent-e results remain pending without a media
+root save or deletion.
+
+Permission to save retains the original request and guard, is consumed before
+submission, and is not persisted. Binding changes, invalidation and reopen
+clear it. Reopen must read again. No storage schema or FFI signature changes.
+
+Core6235 records the pre-implementation result: one authority test passes and
+nine required workflows fail at the old guard. Core7180 then passes 40 of 41
+tests across publication, cleanup, intent replay, submission and adoption.
+The remaining assertion counted both the publication read and a normal media
+startup read. Independent review traced both owners. Export9243 requires
+exactly two reads, one per owner, in order; its first compile10640 failed type
+inference. Export11914 changes only collection syntax. Core13341 passes the
+corrected test, including clean close and process-kill variants. All other
+assertions and production bytes remain unchanged from Core7180.
+
+Final independent review reports no P0–P2 findings. Core lint14792, private14216
+and similarity14217 pass. Swift15665 passes 18 connection bridge tests against
+the rebuilt core. The earlier native suite4229 passes 22 tests.
+
+The full batch gate remains pending. P24/Q11 remains open for the complete
+bridge witness and destructive reset protocol, including the own-epoch proof,
+second read and deletion timing. Adoption after a reset is unchanged. No unit
+acceptance or signed cross-device convergence is claimed.

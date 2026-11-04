@@ -109,6 +109,19 @@ pub(crate) fn is_work_paused(error: &(dyn std::error::Error + Send + Sync + 'sta
     error.is::<WorkPaused>()
 }
 
+#[derive(Debug)]
+struct ResetRecoveryUnavailable;
+impl std::fmt::Display for ResetRecoveryUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("cloud child reset recovery unavailable")
+    }
+}
+impl std::error::Error for ResetRecoveryUnavailable {}
+/// Exact production guard, preserved through the payload-free child channel.
+pub fn is_reset_recovery_unavailable(error: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    error.is::<ResetRecoveryUnavailable>()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingInboxEntry {
     pub id: i64,
@@ -484,6 +497,7 @@ enum ChildFailure {
     RuntimeIncompleteRootConfirmationAndSending,
     RuntimeFileIdentityUnavailable,
     RuntimePublication,
+    RuntimeResetRecoveryUnavailable,
     Engine(EngineFailure),
     Store(StoreFailure),
 }
@@ -531,6 +545,9 @@ impl ChildFailure {
                     Incomplete::RootConfirmationAndSending => Self::RuntimeIncompleteRootConfirmationAndSending,
                 },
                 RuntimeError::FileIdentityUnavailable => Self::RuntimeFileIdentityUnavailable,
+                RuntimeError::Publication(core::publication::PublicationError::ResetRecoveryUnavailable) => {
+                    Self::RuntimeResetRecoveryUnavailable
+                }
                 RuntimeError::Publication(_) => Self::RuntimePublication,
             };
         }
@@ -543,6 +560,9 @@ impl ChildFailure {
         Self::Unknown
     }
     fn into_error(self) -> Box<dyn std::error::Error + Send + Sync> {
+        if matches!(self, Self::RuntimeResetRecoveryUnavailable) {
+            return Box::new(ResetRecoveryUnavailable);
+        }
         if matches!(self, Self::Unknown) {
             return failure();
         }
@@ -1430,6 +1450,30 @@ impl ChildDriver {
         let request = self.enqueue(input)?;
         self.queued_response = Some(service.request(scope, request.caller, request.operation)?);
         Ok(())
+    }
+    /// Replace only the result of one already-enqueued reset root read. Retain
+    /// its Service request id and deliver it once through the existing resume.
+    pub(crate) fn capture_reset_media_root_reply(
+        &mut self,
+        service: &mut super::Service<meguri_model::rng::SeededRandom>,
+        scope: &Scope,
+        result: std::result::Result<super::Reply, super::ServiceError>,
+    ) -> Result<super::Response> {
+        let request = self.queued_request()?;
+        if self.queued_response.is_some()
+            || request.caller.own_operation.is_none()
+            || request.caller.instance.is_some()
+            || !matches!(&request.operation, super::Operation::Read { zone, name,
+                fields: super::RequestedFields::All } if zone == "meguri-media" && name == "root")
+        {
+            return Err(failure());
+        }
+        let original = service.request(scope, request.caller, request.operation)?;
+        self.queued_response = Some(super::Response {
+            request_id: original.request_id,
+            result,
+        });
+        Ok(original)
     }
     fn transport_replies<T: DeserializeOwned>(
         &mut self,
@@ -3091,9 +3135,33 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
                 )
             })??;
             let response = transport_reply(device, stream)?;
-            let deleted = response.result.is_ok()
-                || matches!(&response.result, Err(e) if e.code == super::ErrorCode::ZoneNotFound);
-            runtime.zone_deletion_result(&guard, &zone, deleted, &collection)?;
+            // Keep the actual Service failure: ZoneNotFound alone removes the
+            // retained row; its reset bit additionally isolates this binding.
+            // The original guard/collection and single transport reply still own
+            // completion, including when a nested command invalidated authority.
+            let failure = response.result.as_ref().err().map(|error| {
+                use super::ErrorCode;
+                core::zone_deletion::FailureFacts {
+                    code: Some(match error.code {
+                        ErrorCode::UnknownItem => 11,
+                        ErrorCode::ServerRecordChanged => 14,
+                        ErrorCode::InvalidArguments => 12,
+                        ErrorCode::LimitExceeded => 27,
+                        ErrorCode::QuotaExceeded => 25,
+                        ErrorCode::BatchRequestFailed => 22,
+                        ErrorCode::ZoneNotFound => 26,
+                        ErrorCode::UserDeletedZone => 28,
+                        ErrorCode::ChangeTokenExpired => 21,
+                    }),
+                    retry_after_ms: None, // Service has no retry-after field.
+                    encrypted_data_reset: error.encrypted_data_reset,
+                }
+            });
+            runtime.zone_deletion_batch_result(
+                &guard,
+                &collection,
+                &[core::zone_deletion::ZoneResult { zone, failure }],
+            )?;
             Ok(serde_json::to_value(response)?)
         }
         input => device.handle(input),
