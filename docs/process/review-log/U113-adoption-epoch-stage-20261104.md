@@ -29,3 +29,21 @@ acceptance. Integrated Core 10195 and wider Core 11450 also pass. Source
 privacy and Core-lint 13692 pass. Native 14656 passes all 46 selected tests,
 including the new finite-stage mapping test. A new signed observation remains
 pending. No live failure repair or unit acceptance is claimed.
+
+## Signed observation
+
+Signed run 18686 installs clean source f90fb368. Drive 20558 completes its
+nine observation steps within the unchanged download limit, but the app still
+reports failure. The received count is again 158 pages and 5,033 records.
+The retained stage is now pageEpochSystemFields. Earlier ordered predicates
+therefore passed: matching epoch record kind/name, no payload, retained
+expected record, and equal encrypted data. Only the opaque archives differ.
+The observation does not establish equal native server version tags.
+
+Independent contract review confirms that a strict native version projection
+supports K10.1, K18.4 and V14.2. Native receives the epoch from the same work
+request. It may preserve that original archive only after
+checking identity, type, current owner, asset absence, exact encrypted data
+and equal nonempty server change tags. Missing or unequal tags must refuse.
+Core's byte equality and cleanup remain required. No rule is amended and no
+version-equality claim is made before the native check runs.
