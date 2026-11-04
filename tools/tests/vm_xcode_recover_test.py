@@ -236,6 +236,246 @@ class RecoveryCase(unittest.TestCase):
         self.refuses()
         self.assertNotIn("stop", self.system.events)
 
+    def historical_stage(self, suffix="OLD001"):
+        directory = self.temp_root / ("meguri-vm-xcode." + suffix)
+        context = dict(self.context, run="20261101T010203Z-10000", private=str(directory))
+        write(directory / "context.json", context)
+        return directory, context
+
+    def assert_discovery_archived(self):
+        report = self.run_recovery()
+        self.assertEqual(report["outcome"], "archived")
+        self.assertTrue(all(report["checks"].values()))
+        self.assertEqual(self.system.events.count("stop"), 1)
+        self.assertEqual(self.system.events[-1], "archive")
+        self.assertGreaterEqual(self.system.events.count("guest"), 2)
+        self.assertGreaterEqual(self.system.events.count("host"), 3)
+        proof = json.loads((Path(self.recovery.evidence) / "recovery-proof.json").read_bytes())
+        self.assertTrue(proof["original_stop_completed_and_joined"])
+        self.assertEqual(proof["independent_state"], "stopped")
+        self.assertEqual(proof["original_query_completion"], "unknown")
+        self.assertTrue(all(value == 0 for value in proof["no_active_work"].values()
+                            if type(value) is int))
+        context_pin = next(pin for pin in proof["pins"] if pin["path"] == str(self.private / "context.json"))
+        self.assertEqual(context_pin["pin"], list(m.file_identity((self.private / "context.json").stat())))
+        self.assertEqual(context_pin["sha256"], m.sha(m.encoded(self.context)))
+        self.assertEqual(snapshot(self.private), self.original_private)
+        self.assertEqual(snapshot(self.receipt_dir), self.original_receipt)
+        self.assertNotIn(str(self.temp_root), self.recovery.pins.inventories)
+        return proof
+
+    def test_more_than_8192_unrelated_names_admit_with_original_proofs(self):
+        for number in range(8193):
+            (self.temp_root / ("generated-unrelated-%05d" % number)).touch(mode=0o600)
+        # Near matches are unrelated too; none may be opened as stage dirs.
+        for name in ("meguri-vm-xcode.ABC12", "meguri-vm-xcode.ABC1234", "meguri-vm-xcode.ABC_12"):
+            write(self.temp_root / name, b"generated unrelated entry")
+        self.assert_discovery_archived()
+        self.assertEqual(self.recovery.pins.checks[str(self.temp_root)], {self.private.name})
+        self.assertFalse(any(name.startswith("generated-unrelated-") for _, name, *_ in self.recovery.pins.entries))
+
+    def test_unrelated_name_churn_through_stop_and_proof_is_tolerated(self):
+        unrelated = self.temp_root / "generated-unrelated-changing"
+        def churn(event):
+            if unrelated.exists():
+                unrelated.unlink()
+            else:
+                write(unrelated, b"generated unrelated entry")
+        self.system.hook = churn
+        self.assert_discovery_archived()
+        self.assertEqual(self.recovery.pins.checks[str(self.temp_root)], {self.private.name})
+        self.assertFalse(any(name == unrelated.name for _, name, *_ in self.recovery.pins.entries))
+
+    def test_contextless_stage_is_only_ignored_as_candidate(self):
+        other = self.temp_root / "meguri-vm-xcode.EMPTY1"
+        other.mkdir(mode=0o700)
+        self.assert_discovery_archived()
+        self.assertEqual(self.recovery.pins.checks[str(self.temp_root)], {self.private.name, other.name})
+        self.assertIn((self.recovery.pins.directories[str(other)], "context.json"), self.recovery.pins.absences)
+
+    def test_seven_different_runs_sharing_lease_admit_with_context_pins(self):
+        historical = [self.historical_stage("OLD%03d" % n) for n in range(7)]
+        proof = self.assert_discovery_archived()
+        self.assertEqual(len(self.recovery.pins.checks[str(self.temp_root)]), 8)
+        for directory, context in historical:
+            pin = next(pin for pin in proof["pins"] if pin["path"] == str(directory / "context.json"))
+            self.assertEqual(pin["sha256"], m.sha(m.encoded(context)))
+            self.assertEqual(pin["pin"], list(m.file_identity((directory / "context.json").stat())))
+
+    def test_exact_run_requires_every_full_binding_field(self):
+        self.historical_stage()
+        for key, value in (("lease_slot", str(self.base / "other-lease")),
+                           ("root", str(self.base / "other-root")),
+                           ("private", str(self.base / "other-private")),
+                           ("selection", dict(self.vm, state="stopped"))):
+            with self.subTest(key=key):
+                write(self.private / "context.json", dict(self.context, **{key: value}))
+                self.refuses()
+                self.assertNotIn("stop", self.system.events)
+                self.recovery.pins.close()
+                self.recovery = m.Recovery(self.route, self.system)
+                self.addCleanup(self.recovery.pins.close)
+
+    def test_present_unrelated_context_must_be_readable_valid_run_object(self):
+        other, context = self.historical_stage()
+        for raw in (b'{"run":', b'{"run":"one","run":"two"}', b'[]', b'{}',
+                    m.encoded(dict(context, run=None)), b"x" * 65537):
+            with self.subTest(raw_size=len(raw)):
+                write(other / "context.json", raw)
+                self.refuses()
+                self.assertNotIn("stop", self.system.events)
+                self.recovery.pins.close()
+                self.recovery = m.Recovery(self.route, self.system)
+                self.addCleanup(self.recovery.pins.close)
+
+    def test_present_unrelated_context_permission_error_is_not_absence(self):
+        other, _ = self.historical_stage()
+        original = m.os.open
+        def unreadable(name, flags, *args, **kwargs):
+            if name == "context.json" and kwargs.get("dir_fd") == self.recovery.pins.directories.get(str(other)):
+                raise PermissionError(errno.EACCES, "generated unreadable context")
+            return original(name, flags, *args, **kwargs)
+        with patch.object(m.os, "open", side_effect=unreadable):
+            self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_present_unrelated_context_symlink_is_not_absence(self):
+        other, _ = self.historical_stage()
+        (other / "context.json").unlink()
+        (other / "context.json").symlink_to("generated-missing")
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_present_unrelated_context_nonregular_refuses(self):
+        other, _ = self.historical_stage()
+        (other / "context.json").unlink()
+        (other / "context.json").mkdir(mode=0o700)
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_relevant_name_overflow_refuses_without_control(self):
+        for number in range(64):
+            (self.temp_root / ("meguri-vm-xcode.N%05d" % number)).mkdir(mode=0o700)
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_relevant_enumeration_time_is_bounded_even_for_unrelated_names(self):
+        write(self.temp_root / "generated-unrelated", b"generated entry")
+        original = m.os.scandir
+        clock = [0.0]
+        @contextlib.contextmanager
+        def slow(fd):
+            with original(fd) as entries:
+                def delayed():
+                    for entry in entries:
+                        if fd == self.recovery.pins.directories.get(str(self.temp_root)) and \
+                                entry.name == "generated-unrelated":
+                            clock[0] += m.DISCOVERY_SECONDS
+                        yield entry
+                yield delayed()
+        with patch.object(m.os, "scandir", side_effect=slow), \
+                patch.object(m.time, "monotonic", side_effect=lambda: clock[0]):
+            self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_relevant_enumeration_completion_must_meet_time_bound(self):
+        original = m.os.scandir
+        clock = [0.0]
+        @contextlib.contextmanager
+        def slow_close(fd):
+            with original(fd) as entries:
+                yield entries
+            if fd == self.recovery.pins.directories.get(str(self.temp_root)):
+                clock[0] += m.DISCOVERY_SECONDS
+        with patch.object(m.os, "scandir", side_effect=slow_close), \
+                patch.object(m.time, "monotonic", side_effect=lambda: clock[0]):
+            self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_relevant_enumeration_timeout_on_pin_recheck_refuses(self):
+        self.recovery.admit()
+        clock = [0.0]
+        def elapsed():
+            clock[0] += m.DISCOVERY_SECONDS
+            return clock[0]
+        with patch.object(m.time, "monotonic", side_effect=elapsed), self.assertRaises(m.Refused):
+            self.recovery.pins.check()
+        self.assertNotIn("stop", self.system.events)
+        self.assertNotIn("archive", self.system.events)
+        self.assertTrue(self.guard.is_dir())
+
+    def test_relevant_name_added_between_discovery_and_first_file_pin_refuses(self):
+        original = self.recovery.pins.freeze_stages
+        def change(path):
+            names = original(path)
+            (self.temp_root / "meguri-vm-xcode.NEW001").mkdir(mode=0o700)
+            return names
+        with patch.object(self.recovery.pins, "freeze_stages", side_effect=change):
+            self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_relevant_name_removed_before_stop_refuses(self):
+        other, _ = self.historical_stage()
+        def change(event):
+            if event == "guest":
+                other.rename(self.temp_root / "generated-retained")
+        self.system.hook = change
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_context_absence_cannot_turn_into_present_context_before_stop(self):
+        other = self.temp_root / "meguri-vm-xcode.EMPTY1"
+        other.mkdir(mode=0o700)
+        def change(event):
+            if event == "guest":
+                write(other / "context.json", dict(self.context, private=str(other)))
+        self.system.hook = change
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_historical_context_cannot_change_run_after_discovery(self):
+        other, context = self.historical_stage()
+        def change(event):
+            if event == "guest":
+                write(other / "context.json", dict(context, run=m.RUN))
+        self.system.hook = change
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_present_historical_context_cannot_disappear_after_discovery(self):
+        other, _ = self.historical_stage()
+        def change(event):
+            if event == "guest":
+                (other / "context.json").unlink()
+        self.system.hook = change
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_contextless_and_historical_metadata_do_not_prove_workers_dead(self):
+        (self.temp_root / "meguri-vm-xcode.EMPTY1").mkdir(mode=0o700)
+        self.historical_stage()
+        for live_pid in (self.holder["pid"], 17002):
+            with self.subTest(live_pid=live_pid), patch.object(m, "dead", side_effect=lambda pid: pid != live_pid):
+                self.refuses()
+                self.assertNotIn("stop", self.system.events)
+                self.recovery.pins.close()
+                self.recovery = m.Recovery(self.route, self.system)
+                self.addCleanup(self.recovery.pins.close)
+
+    def test_contextless_and_historical_metadata_do_not_hide_managed_activity(self):
+        (self.temp_root / "meguri-vm-xcode.EMPTY1").mkdir(mode=0o700)
+        self.historical_stage()
+        self.system.process_table = {29001: "python vm-xcode-stage.py"}
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
+    def test_contextless_and_historical_metadata_do_not_hide_unknown_guest_activity(self):
+        (self.temp_root / "meguri-vm-xcode.EMPTY1").mkdir(mode=0o700)
+        self.historical_stage()
+        self.system.fail_at = "guest"
+        self.refuses()
+        self.assertNotIn("stop", self.system.events)
+
     def test_receiver_or_unknown_entries(self):
         write(self.private / "receiver-pending.json", {"pending": True})
         self.refuses()

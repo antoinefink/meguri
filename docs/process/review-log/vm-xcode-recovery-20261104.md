@@ -24,3 +24,11 @@ Exports40652 and45532 preserve behavior; independent review is clear.
 
 Selftest48651: 15 pass. Private48637 passes. No VM operation has run yet.
 These focused checks do not provide staging, signed execution or app acceptance.
+
+Inspect50038 refuses before any stop or lease change. Admission counted 11,791
+unrelated temporary entries, read a contextless folder and selected seven old
+contexts by lease instead of the exact run. The original context still matches.
+Export56656 limits discovery to 64 relevant names within five seconds, selects
+the exact run and keeps the full binding and stability checks. Separate activity
+proof remains required. Export63105 changes one internal name; review is clear.
+Selftest65675: three pass. Private65597 and similarity66085 pass.

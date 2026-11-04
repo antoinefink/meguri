@@ -33,6 +33,7 @@ FRAMES = list(zip(("run", "main", "host", "__init__", "call_command", "command",
                   (1072, 1067, 1016, 841, 865, 281, 57)))
 DIAGNOSTIC = {"exception": "Refused", "stack": [{"function": f, "line": n} for f, n in FRAMES]}
 LIMIT = 1024 * 1024
+DISCOVERY_SECONDS = 5
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -91,6 +92,7 @@ class Pins:
     """Retain no-follow ancestor and entry descriptors until the final rename."""
     def __init__(self):
         self.fds, self.entries, self.files, self.inventories = [], [], [], {}
+        self.checks, self.absences = {}, []
         self.rootfd = os.open("/", DIR_FLAGS)
         self.fds.append(self.rootfd)
         self.directories = {"/": self.rootfd}
@@ -110,9 +112,16 @@ class Pins:
         self.directories[path] = fd
         return fd
 
-    def file(self, path, limit=LIMIT, executable=False):
+    def file(self, path, limit=LIMIT, executable=False, optional=False):
         parent = self.directory(os.path.dirname(path))
         name = os.path.basename(path)
+        if optional:
+            try:
+                os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                self.absences.append((parent, name))
+                self.check()
+                return None
         fd = os.open(name, FILE_FLAGS, dir_fd=parent)
         self.fds.append(fd)
         s = os.fstat(fd)
@@ -143,6 +152,28 @@ class Pins:
         self.inventories[path] = (names, maximum)
         return names
 
+    def stage_names(self, path):
+        deadline = time.monotonic() + DISCOVERY_SECONDS
+        fd = self.directory(path)
+        names = set()
+        # Only exact stage names matter. Unrelated OS entries may churn and
+        # never consume the relevant-context bound or acquire individual pins.
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                need(time.monotonic() < deadline)
+                if re.fullmatch(r"meguri-vm-xcode\.[A-Za-z0-9]{6}", entry.name):
+                    need(entry.name not in names)
+                    names.add(entry.name)
+                    need(len(names) <= 64)
+        need(time.monotonic() < deadline)
+        return names
+
+    def freeze_stages(self, path):
+        names = self.stage_names(path)
+        need(path not in self.checks or self.checks[path] == names)
+        self.checks[path] = names
+        return names
+
     def check(self):
         for parent, name, fd, original, regular in self.entries:
             pin = file_identity if regular else identity
@@ -151,6 +182,14 @@ class Pins:
             need(os.pread(fd, len(raw) + 1, 0) == raw)
         for path, (names, maximum) in self.inventories.items():
             need(self.inventory(path, maximum) == names)
+        for parent, name in self.absences:
+            try:
+                os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise Refused()
+        for path, names in self.checks.items():
+            need(self.stage_names(path) == names)
 
     def manifest(self):
         return [{"path": path, "pin": list(pin), "sha256": sha(raw)}
@@ -665,18 +704,17 @@ class Recovery:
              and holder["job"] == "vm-xcode-stage" and holder["run_id"] == RUN
              and holder["worktree"] == self.root and isinstance(holder["started_at"], str))
         self.holder_pid = holder["pid"]
-        # Inventory only the trusted temp root, not caller-supplied directories.
+        # Retain only the relevant discovery set in the trusted temp root.
         candidates = []
-        context_count = 0
-        for name in p.inventory(r["temp_root"], maximum=8192):
-            if not re.fullmatch(r"meguri-vm-xcode\.[A-Za-z0-9]{6}", name):
-                continue
-            context_count += 1
-            need(context_count <= 64)
+        for name in sorted(p.freeze_stages(r["temp_root"])):
             directory = r["temp_root"] + "/" + name
             p.directory(directory)
-            context = loads(p.file(directory + "/context.json", 65536))
-            if context.get("run") == RUN or context.get("lease_slot") == self.lease:
+            raw = p.file(directory + "/context.json", 65536, optional=True)
+            if raw is None:
+                continue  # Absence is pinned; it says nothing about activity.
+            context = loads(raw)
+            need(isinstance(context, dict) and isinstance(context.get("run"), str) and context["run"])
+            if context["run"] == RUN:
                 candidates.append((directory, context))
         need(len(candidates) == 1)
         private, context = candidates[0]
