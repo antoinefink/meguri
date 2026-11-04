@@ -12,6 +12,13 @@ final class NativeOwnCapturingQueue: NativeCloudDatabaseQueue, Sendable {
     let operations = Mutex<[CKDatabaseOperation]>([])
     func add(_ operation: CKDatabaseOperation) -> Bool { operations.withLock { $0.append(operation) }; return true }
 }
+/// Retain the exact closures installed by production, before SDK getter bridging.
+final class NativeOwnReadHandlers: Sendable {
+    typealias PerRecord = @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void
+    typealias Terminal = @Sendable (Result<Void, any Error>) -> Void
+    let perRecord = Mutex<PerRecord?>(nil)
+    let terminal = Mutex<Terminal?>(nil)
+}
 struct NativeCloudOwnTransportTests {
     let active = CloudControlTarget(zone: "meguri-root", name: "active", recordType: "MGActive")
     let root = CloudControlTarget(zone: "meguri-media", name: "root", recordType: "MGMediaRoot")
@@ -254,15 +261,68 @@ struct NativeCloudOwnTransportTests {
     @Test(arguments: Array(1...37))
     func noCloudKitReadErrorBecomesFoundWithAbsentE(rawCode: Int) async throws {
         let code = try #require(CKError.Code(rawValue: rawCode))
-        let queue = NativeOwnCapturingQueue()
-        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.read(root))
-        #expect(prepared.enqueue())
-        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordsOperation })
-        operation.perRecordResultBlock?(NativeCloudOwnRecords.id(root), .failure(CKError(code)))
-        operation.fetchRecordsResultBlock?(.failure(CKError(.partialFailure)))
-        guard case .read(let read) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
-        if case .found = read { Issue.record("error became encrypted reset evidence") }
-        #expect(queue.operations.withLock { $0.allSatisfy { $0 is CKFetchRecordsOperation } })
+        let id = NativeCloudOwnRecords.id(root)
+        for publication in [false, true] {
+            // Preserve both per-record branches; also exercise terminal-only
+            // exact, empty, mismatched-ID and foreign-domain partial failures.
+            for source in 0...8 {
+                let queue = NativeOwnCapturingQueue()
+                let handlers = NativeOwnReadHandlers()
+                let transport = NativeCloudOwnTransport(queue: queue,
+                    readPerRecordHandlerInstalled: { handler in handlers.perRecord.withLock { $0 = handler } },
+                    readTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } })
+                let command: CloudOwnTransportCommand = publication ? .publication(.read(root)) : .read(root)
+                let prepared = try transport.prepare(command)
+                #expect(prepared.enqueue())
+                let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordsOperation })
+                #expect(operation.recordIDs == [id] && operation.desiredKeys == nil)
+                let perItem = try #require(handlers.perRecord.withLock { $0 })
+                let terminal = try #require(handlers.terminal.withLock { $0 })
+                if source == 0 {
+                    perItem(id, .failure(CKError(code)))
+                    terminal(.failure(CKError(.partialFailure)))
+                } else {
+                    let error = NSError(domain: source == 7 ? "synthetic.foreign" : CKErrorDomain, code: rawCode)
+                    let itemID: CKRecord.ID
+                    switch source {
+                    case 4: itemID = .init(recordName: "other", zoneID: id.zoneID)
+                    case 5: itemID = .init(recordName: id.recordName, zoneID: NativeCloudOwnRecords.zone("other"))
+                    case 6: itemID = .init(recordName: id.recordName, zoneID: .init(zoneName: root.zone, ownerName: "foreign-owner"))
+                    default: itemID = id
+                    }
+                    let dictionary: [CKRecord.ID: NSError] = source == 3 ? [:] : [itemID: error]
+                    let partial = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue,
+                                          userInfo: [CKPartialErrorsByItemIDKey: dictionary])
+                    let items = try #require(partial.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: NSError])
+                    #expect(partial.domain == CKErrorDomain && partial.code == CKError.Code.partialFailure.rawValue)
+                    #expect(items.count == (source == 3 ? 0 : 1))
+                    if source != 3 {
+                        let item = try #require(items[itemID])
+                        #expect(item.domain == error.domain && item.code == rawCode)
+                    }
+                    if source == 1 { perItem(id, .failure(error)) }
+                    if source == 8 {
+                        // The original per-record result outranks a conflicting
+                        // terminal dictionary for the exact same requested ID.
+                        perItem(id, .failure(CKError(.networkFailure)))
+                    }
+                    terminal(.failure(partial))
+                }
+                let reply = try await prepared.reply()
+                let read: CloudControlRead
+                if publication {
+                    guard case .publication(.read(let value)) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    read = value
+                } else {
+                    guard case .read(let value) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    read = value
+                }
+                let expected: CloudControlRead = source < 3
+                    ? (rawCode == 11 ? .missing : (rawCode == 26 ? .zoneMissing : .failed)) : .failed
+                #expect(read == expected)
+                #expect(queue.operations.withLock { $0.count == 1 && $0.allSatisfy { $0 is CKFetchRecordsOperation } })
+            }
+        }
     }
     @Test func recordReadRejectsWrongOwnerTypeNameAndZoneBeforeReturningControlBytes() throws {
         let id = NativeCloudOwnRecords.id(active)

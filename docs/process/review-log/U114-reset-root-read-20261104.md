@@ -28,3 +28,19 @@ stronger native error-outcome coverage remain in progress. The original
 classification-only 37-code test does not close Q11. Production reset behavior
 is unchanged. Destructive recovery, its epoch proof and timing checks remain
 outstanding.
+
+## Native error mapping
+
+Export97071 preserves the original generic read tests and adds publication
+reads, terminal-only partial errors, unmatched record IDs and precedence cases.
+An independently reviewed callback-capture seam exposes the original installed
+handlers. It changes no production callback behavior.
+
+With only that seam and the tests, Swift2812 fails four expectations: terminal
+errors for codes 11 and 26 become generic failure in both read modes. The
+decoder fix uses only the requested record's result in the terminal dictionary.
+Per-record callbacks retain precedence. Swift4229 then passes all 22 native
+transport tests, including the 37-code matrix. Independent review reports no
+P0–P2 findings in this bounded change. This is native mapping evidence, not
+proof of the full reset workflow or signed cross-device convergence.
+Private5415 and similarity5416 pass.

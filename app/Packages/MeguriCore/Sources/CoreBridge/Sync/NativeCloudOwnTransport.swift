@@ -191,6 +191,8 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
 public struct NativeCloudOwnTransport: CloudOwnTransport {
     let queue: any NativeCloudDatabaseQueue
     private let staging: CloudMediaStaging?
+    let readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)?
+    let readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     let zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     let zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)?
     let zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
@@ -199,6 +201,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
+        readPerRecordHandlerInstalled = nil
+        readTerminalHandlerInstalled = nil
         zoneDeletionTerminalHandlerInstalled = nil
         zoneInventoryPerZoneHandlerInstalled = nil
         zoneInventoryTerminalHandlerInstalled = nil
@@ -208,17 +212,23 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
         self.staging = staging
+        readPerRecordHandlerInstalled = nil
+        readTerminalHandlerInstalled = nil
         zoneDeletionTerminalHandlerInstalled = nil
         zoneInventoryPerZoneHandlerInstalled = nil
         zoneInventoryTerminalHandlerInstalled = nil
         zoneInventoryOriginalReplyWaiting = nil
     }
     init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil,
+         readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)? = nil,
+         readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryOriginalReplyWaiting: (@Sendable () -> Void)? = nil) {
         self.queue = queue; self.staging = staging
+        self.readPerRecordHandlerInstalled = readPerRecordHandlerInstalled
+        self.readTerminalHandlerInstalled = readTerminalHandlerInstalled
         self.zoneDeletionTerminalHandlerInstalled = zoneDeletionTerminalHandlerInstalled
         self.zoneInventoryPerZoneHandlerInstalled = zoneInventoryPerZoneHandlerInstalled
         self.zoneInventoryTerminalHandlerInstalled = zoneInventoryTerminalHandlerInstalled
@@ -243,13 +253,15 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         operation.desiredKeys = nil // Include encrypted e and every asset field.
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
         let record = Mutex<Result<CKRecord, any Error>?>(nil)
-        operation.perRecordResultBlock = { received, result in
+        let perRecord: @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void = { received, result in
             record.withLock { value in
                 if received == id { value = result }
                 else { value = .failure(NativeCloudKitFailure.unsupportedRecord) }
             }
         }
-        operation.fetchRecordsResultBlock = { [weak prepared] result in
+        operation.perRecordResultBlock = perRecord
+        readPerRecordHandlerInstalled?(perRecord)
+        let terminal: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
             guard let prepared else { return }
             do {
                 let received = record.withLock { $0 }
@@ -260,7 +272,16 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 }
                 let read: CloudControlRead
                 if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
-                else if case .failure(let error) = result { read = NativeCloudOwnRecords.readError(error) }
+                else if case .failure(let error) = result {
+                    let native = error as NSError
+                    // Only the exact requested ID can supply a terminal-only
+                    // partial outcome. Per-record callbacks retain precedence.
+                    if native.domain == CKErrorDomain, native.code == CKError.Code.partialFailure.rawValue,
+                       let items = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any],
+                       let item = items[id] as? any Error {
+                        read = NativeCloudOwnRecords.readError(item)
+                    } else { read = NativeCloudOwnRecords.readError(error) }
+                }
                 else { throw CloudOwnTransportFailure.missingReply }
                 if !publication {
                     let failure: CloudZoneDeletionFailure?
@@ -275,6 +296,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 prepared.finish(.failure(error))
             }
         }
+        operation.fetchRecordsResultBlock = terminal
+        readTerminalHandlerInstalled?(terminal)
         return prepared
     }
     private func assetRead(zone: String, name: String) throws -> NativePreparedOwnOperation {
