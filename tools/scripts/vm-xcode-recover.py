@@ -60,6 +60,53 @@ def need(condition):
         raise Refused()
 
 
+# Exact compiler filename of this helper, captured without a filesystem probe.
+PRIVATE_SOURCE = need.__code__.co_filename
+PRIVATE_FRAME_CAP = 8
+PRIVATE_RECORD_CAP = 2048
+PRIVATE_CLASSES = ((Refused, "Refused"), (Cancelled, "Cancelled"),
+                   (OSError, "OSError"), (PermissionError, "PermissionError"),
+                   (FileNotFoundError, "FileNotFoundError"),
+                   (ProcessLookupError, "ProcessLookupError"),
+                   (ChildProcessError, "ChildProcessError"),
+                   (TimeoutError, "TimeoutError"),
+                   (subprocess.TimeoutExpired, "TimeoutExpired"),
+                   (ValueError, "ValueError"), (TypeError, "TypeError"),
+                   (KeyError, "KeyError"), (RuntimeError, "RuntimeError"),
+                   (json.JSONDecodeError, "JSONDecodeError"))
+
+
+def private_failure(error):
+    """Only bounded class/errno/own-frame locations go to the private sink."""
+    try:
+        label = next((name for cls, name in PRIVATE_CLASSES if type(error) is cls), "Other")
+        record = {"exception": label, "stack": []}
+        if isinstance(error, OSError):
+            number = error.errno
+            if type(number) is int and 0 <= number <= 4095:
+                record["errno"] = number
+        frame = error.__traceback__
+        while frame is not None:
+            code = frame.tb_frame.f_code
+            if code.co_filename == PRIVATE_SOURCE:
+                name, line = code.co_name, frame.tb_lineno
+                if (type(name) is str and re.fullmatch(
+                        r"[A-Za-z_][A-Za-z0-9_]{0,63}|<(module|lambda|listcomp|dictcomp|setcomp|genexpr)>", name)
+                        and type(line) is int and 1 <= line <= 1000000):
+                    record["stack"].append({"function": name, "line": line})
+                    # Retain the innermost failing location when truncating.
+                    if len(record["stack"]) > PRIVATE_FRAME_CAP:
+                        del record["stack"][0]
+            frame = frame.tb_next
+        rendered = json.dumps(record, separators=(",", ":")) + "\n"
+        if len(rendered) <= PRIVATE_RECORD_CAP:
+            sys.stderr.write(rendered)
+            sys.stderr.flush()
+    except BaseException:
+        # Even cancellation or a broken renderer/sink cannot replace refusal.
+        pass
+
+
 def loads(raw):
     def pairs(items):
         result = {}
@@ -872,7 +919,7 @@ class Recovery:
         return self.report("archived")
 
 
-def main():
+def main(diagnose=private_failure):
     need(sys.platform == "darwin")
     need(len(sys.argv) == 4 and sys.argv[1:3] == ["--stage-run", RUN]
          and sys.argv[3] in ("--inspect", "--stop-and-archive"))
@@ -887,16 +934,30 @@ def main():
         # Failure to publish the report remains an error after the lease is retired.
         print(json.dumps(report), flush=True)
         return 0
-    except (Exception, Cancelled):
+    except (Exception, Cancelled) as error:
+        diagnose(error)
         print(json.dumps(recovery.report("refused")), flush=True)
         return 1
     finally:
         recovery.pins.close()
 
 
-if __name__ == "__main__":
+def run():
+    diagnosed = False
+
+    def diagnose(error):
+        nonlocal diagnosed
+        if not diagnosed:
+            diagnosed = True
+            private_failure(error)
+
     try:
-        sys.exit(main())
-    except (Exception, Cancelled):
+        return main(diagnose)
+    except (Exception, Cancelled) as error:
+        diagnose(error)
         # Public output never contains exception text, paths or process arguments.
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run())

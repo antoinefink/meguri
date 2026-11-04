@@ -732,6 +732,211 @@ class RecoveryCase(unittest.TestCase):
         self.assertFalse(guest_read(own))
 
 
+class PrivateFailureCase(unittest.TestCase):
+    def diagnostic(self, error):
+        public, private = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(public), contextlib.redirect_stderr(private):
+            m.private_failure(error)
+        self.assertEqual(public.getvalue(), "")
+        self.assertEqual(len(private.getvalue().splitlines()), 1)
+        self.assertLessEqual(len(private.getvalue()), 2048)
+        record = json.loads(private.getvalue())
+        self.assertIn(set(record), ({"exception", "stack"}, {"exception", "stack", "errno"}))
+        self.assertIs(type(record["exception"]), str)
+        self.assertIs(type(record["stack"]), list)
+        self.assertLessEqual(len(record["stack"]), 8)
+        for frame in record["stack"]:
+            self.assertEqual(set(frame), {"function", "line"})
+            self.assertIs(type(frame["function"]), str)
+            self.assertRegex(frame["function"], r"\A(?:[A-Za-z_][A-Za-z0-9_]{0,63}|<(?:module|lambda|listcomp|dictcomp|setcomp|genexpr)>)\Z")
+            self.assertIs(type(frame["line"]), int)
+            self.assertTrue(1 <= frame["line"] <= 1000000)
+        if "errno" in record:
+            self.assertIs(type(record["errno"]), int)
+            self.assertTrue(0 <= record["errno"] <= 4095)
+        self.assertNotIn(CANARY, private.getvalue())
+        return record
+
+    def test_finite_exact_class_mapping_and_static_fallback(self):
+        cases = ((m.Refused(), "Refused"), (m.Cancelled(), "Cancelled"),
+                 (OSError(), "OSError"), (PermissionError(), "PermissionError"),
+                 (FileNotFoundError(), "FileNotFoundError"),
+                 (ProcessLookupError(), "ProcessLookupError"),
+                 (ChildProcessError(), "ChildProcessError"), (TimeoutError(), "TimeoutError"),
+                 (subprocess.TimeoutExpired(CANARY, 1), "TimeoutExpired"),
+                 (ValueError(), "ValueError"), (TypeError(), "TypeError"),
+                 (KeyError(), "KeyError"), (RuntimeError(), "RuntimeError"),
+                 (json.JSONDecodeError(CANARY, CANARY, 0), "JSONDecodeError"),
+                 (type(CANARY, (m.Refused,), {})(CANARY), "Other"),
+                 (Exception(CANARY), "Other"))
+        for error, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(self.diagnostic(error), {"exception": expected, "stack": []})
+
+    def test_errno_requires_exact_bounded_integer(self):
+        for number in (0, 1, 4095, -1, 4096, 2**100, True, 1.0, "1", None,
+                       type("GeneratedInt", (int,), {})(1)):
+            error = OSError(CANARY)
+            error.errno = number
+            record = self.diagnostic(error)
+            expected = type(number) is int and 0 <= number <= 4095
+            self.assertEqual("errno" in record, expected)
+            if expected:
+                self.assertEqual(record["errno"], number)
+        error = ValueError(CANARY)
+        error.errno = 1
+        self.assertNotIn("errno", self.diagnostic(error))
+
+    @staticmethod
+    def generated_failure(filename, depth=0, name="generated_leaf"):
+        # Compiler frames only: no file access or real helper operations.
+        source = "def %s():\n    raise error\n" % name
+        previous = name
+        for number in range(depth):
+            current = "generated_frame_%d" % number
+            source += "def %s():\n    %s()\n" % (current, previous)
+            previous = current
+        namespace = {"error": ValueError(CANARY + "/generated/private/path")}
+        exec(compile(source, filename, "exec"), namespace)
+        try:
+            namespace[previous]()
+        except ValueError as error:
+            return error
+
+    def test_fixed_source_filter_and_innermost_frame_cap(self):
+        for filename in ("vm-xcode-recover.py", "/generated/vm-xcode-recover.py",
+                         m.PRIVATE_SOURCE + ".other", "/generated/" + m.PRIVATE_SOURCE,
+                         CANARY + "/vm-xcode-recover.py"):
+            self.assertEqual(self.diagnostic(self.generated_failure(filename))["stack"], [])
+        record = self.diagnostic(self.generated_failure(m.PRIVATE_SOURCE, depth=12))
+        self.assertEqual(len(record["stack"]), 8)
+        self.assertEqual([frame["function"] for frame in record["stack"]],
+                         ["generated_frame_%d" % number for number in range(6, -1, -1)] + ["generated_leaf"])
+        self.assertEqual(record["stack"][-1], {"function": "generated_leaf", "line": 2})
+        self.assertEqual(self.diagnostic(self.generated_failure(m.PRIVATE_SOURCE, name="g" * 65))["stack"], [])
+        try:
+            m.need(False)
+        except m.Refused as error:
+            self.assertEqual(self.diagnostic(error)["stack"],
+                             [{"function": "need", "line": m.need.__code__.co_firstlineno + 2}])
+
+    def test_message_path_and_exception_rendering_are_never_used(self):
+        class GeneratedError(OSError):
+            def __str__(self):
+                raise AssertionError("exception string accessed")
+
+            def __repr__(self):
+                raise AssertionError("exception repr accessed")
+        error = GeneratedError(1, CANARY, "/generated/" + CANARY)
+        self.assertEqual(self.diagnostic(error), {"exception": "Other", "errno": 1, "stack": []})
+
+    def invoke(self, failure=None, phase="execute", sink_failure=None, close_failure=None,
+               publish_failure=False):
+        recovery = SimpleNamespace(execute=unittest.mock.Mock(return_value={"outcome": "inspected"}),
+                                   report=unittest.mock.Mock(return_value={"outcome": "refused"}),
+                                   pins=SimpleNamespace(close=unittest.mock.Mock(side_effect=close_failure)))
+        constructor = unittest.mock.Mock(return_value=recovery)
+        if phase == "execute":
+            recovery.execute.side_effect = failure
+        elif phase == "constructor":
+            constructor.side_effect = failure
+        public, private = io.StringIO(), io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(m.sys, "platform", "generated-other" if phase == "platform" else "darwin"))
+            stack.enter_context(patch.object(m.sys, "argv", ["helper", "--stage-run", m.RUN, "--inspect"]))
+            stack.enter_context(patch.object(m.signal, "signal"))
+            dup = stack.enter_context(patch.object(m.os, "dup", return_value=999,
+                                                  side_effect=failure if phase == "context" else None))
+            stack.enter_context(patch.object(m.os, "fdopen", return_value=io.BytesIO(b"{}")))
+            stack.enter_context(patch.object(m, "Recovery", constructor))
+            # A missed seam must never inspect a real process or start a child.
+            stack.enter_context(patch.object(m, "host_processes", side_effect=AssertionError("real processes")))
+            stack.enter_context(patch.object(m.subprocess, "Popen", side_effect=AssertionError("real child")))
+            stack.enter_context(contextlib.redirect_stdout(public))
+            stack.enter_context(contextlib.redirect_stderr(private))
+            if sink_failure:
+                stack.enter_context(patch.object(private, "write", side_effect=sink_failure))
+            if publish_failure:
+                stack.enter_context(patch("builtins.print", side_effect=OSError(CANARY)))
+            status = m.run()
+        self.assertNotIn(CANARY, public.getvalue() + private.getvalue())
+        return status, public.getvalue(), private.getvalue(), recovery, constructor, dup
+
+    def test_inner_refusal_and_cancellation_keep_public_report_and_status(self):
+        for error in (m.Refused(CANARY), m.Cancelled(CANARY), OSError(1, CANARY)):
+            status, public, private, recovery, _, _ = self.invoke(error)
+            self.assertEqual(status, 1)
+            self.assertEqual(public, json.dumps({"outcome": "refused"}) + "\n")
+            self.assertEqual(len(private.splitlines()), 1)
+            self.assertEqual(json.loads(private)["exception"],
+                             "Cancelled" if type(error) is m.Cancelled else "Refused" if type(error) is m.Refused else "PermissionError")
+            recovery.report.assert_called_once_with("refused")
+            recovery.pins.close.assert_called_once_with()
+
+    def test_outer_context_and_constructor_errors_have_no_public_report(self):
+        for phase in ("context", "constructor"):
+            for error in (m.Refused(CANARY), m.Cancelled(CANARY)):
+                status, public, private, recovery, constructor, _ = self.invoke(error, phase)
+                self.assertEqual((status, public), (1, ""))
+                self.assertEqual(len(private.splitlines()), 1)
+                self.assertEqual(json.loads(private)["exception"],
+                                 "Cancelled" if type(error) is m.Cancelled else "Refused")
+                recovery.execute.assert_not_called()
+                recovery.pins.close.assert_not_called()
+                if phase == "context":
+                    constructor.assert_not_called()
+
+    def test_initial_admission_refusal_retains_own_predicate_location(self):
+        status, public, private, recovery, constructor, dup = self.invoke(phase="platform")
+        self.assertEqual((status, public), (1, ""))
+        self.assertEqual(len(private.splitlines()), 1)
+        record = json.loads(private)
+        self.assertEqual(record["exception"], "Refused")
+        self.assertEqual(record["stack"][-1],
+                         {"function": "need", "line": m.need.__code__.co_firstlineno + 2})
+        dup.assert_not_called()
+        constructor.assert_not_called()
+        recovery.pins.close.assert_not_called()
+
+    def test_success_preserves_public_bytes_without_diagnostics(self):
+        status, public, private, recovery, _, _ = self.invoke()
+        self.assertEqual((status, public, private), (0, json.dumps({"outcome": "inspected"}) + "\n", ""))
+        recovery.execute.assert_called_once_with("--inspect")
+        recovery.report.assert_not_called()
+        recovery.pins.close.assert_called_once_with()
+
+    def test_private_sink_failure_cannot_change_inner_or_outer_refusal(self):
+        for phase in ("execute", "context", "constructor"):
+            for sink_error in (OSError(CANARY), m.Cancelled(CANARY), SystemExit(0)):
+                status, public, private, recovery, _, _ = self.invoke(
+                    m.Refused(CANARY), phase, sink_failure=sink_error)
+                self.assertEqual(status, 1)
+                self.assertEqual(private, "")
+                self.assertEqual(public, json.dumps({"outcome": "refused"}) + "\n" if phase == "execute" else "")
+                self.assertEqual(recovery.pins.close.call_count, int(phase == "execute"))
+
+    def test_render_and_flush_failures_are_suppressed(self):
+        for operation in ("render", "flush"):
+            private = io.StringIO()
+            with contextlib.redirect_stderr(private), contextlib.ExitStack() as stack:
+                if operation == "render":
+                    stack.enter_context(patch.object(m.json, "dumps", side_effect=m.Cancelled()))
+                else:
+                    stack.enter_context(patch.object(private, "flush", side_effect=SystemExit(0)))
+                m.private_failure(m.Refused(CANARY))
+            self.assertEqual(len(private.getvalue().splitlines()), int(operation == "flush"))
+
+    def test_outer_catch_does_not_duplicate_first_inner_diagnostic(self):
+        for extra in ({"close_failure": OSError(CANARY)}, {"publish_failure": True}):
+            status, _, private, _, _, _ = self.invoke(m.Refused(CANARY), **extra)
+            self.assertEqual(status, 1)
+            self.assertEqual(len(private.splitlines()), 1)
+            self.assertEqual(json.loads(private)["exception"], "Refused")
+        status, _, private, _, _, _ = self.invoke(close_failure=OSError(CANARY))
+        self.assertEqual(status, 1)
+        self.assertEqual(len(private.splitlines()), 1)
+
+
 class IsolatedFunctions(unittest.TestCase):
     def test_managed_predicates_and_host_only_exclusions(self):
         selection = {"name": "generated", "ssh": "/generated/ssh", "tart": "/generated/tart"}

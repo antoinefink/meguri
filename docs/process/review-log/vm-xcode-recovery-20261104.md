@@ -32,3 +32,8 @@ Export56656 limits discovery to 64 relevant names within five seconds, selects
 the exact run and keeps the full binding and stability checks. Separate activity
 proof remains required. Export63105 changes one internal name; review is clear.
 Selftest65675: three pass. Private65597 and similarity66085 pass.
+
+Inspect67021 still refuses without a VM change. Export67742 adds only a private
+failure location trace: fixed classes, bounded numbers and helper frames, with
+no exception text or paths. Review is clear. Selftest83818: three pass.
+Private83562 and similarity83966 pass. Actual recovery remains unverified.
