@@ -222,7 +222,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
     private var returnedWork: Task<Void, Never>?
     private let networkLifetime = CloudKitNetworkLifetime()
-    private var networkEventWaiters: [CheckedContinuation<Void, Never>] = []
+    private var networkEventWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var batches: [String: UInt64] = [:]
     private var pendingBatch: UInt64?
     private var failure: (any Error)?
@@ -296,10 +296,25 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     }
     func waitForEventBookkeeping() async throws {
         repeat {
-            while activeEvent { await withCheckedContinuation { networkEventWaiters.append($0) } }
+            try await waitForEvents()
             try await drainReturnedWork()
         } while activeEvent
         try Task.checkCancellation()
+    }
+    private func waitForEvents() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            while activeEvent {
+                try Task.checkCancellation()
+                await withCheckedContinuation { networkEventWaiters[id] = $0 }
+            }
+            try Task.checkCancellation()
+        } onCancel: {
+            Task { await self.cancelNetworkEventWaiter(id) }
+        }
+    }
+    private func cancelNetworkEventWaiter(_ id: UUID) {
+        networkEventWaiters.removeValue(forKey: id)?.resume()
     }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
@@ -314,8 +329,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             }) {
                 var operationError: (any Error)?
                 do {
-                    try lifetime.enqueue(generation: generation, validate: validate, begin: {})
-                    try await sdk.sendChanges(options)
+                    try await self.invokePreparedSend(sdk: sdk, options: options, generation: generation, validate: validate)
                 } catch { operationError = Self.networkFailure(error) }
                 // Even SDK failure/cancellation must drain returned event work.
                 do { try await self.drainReturnedWork() }
@@ -323,6 +337,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 if let operationError { throw operationError }
             }
         }
+    }
+    private func invokePreparedSend(sdk: CKSyncEngine, options: CKSyncEngine.SendChangesOptions,
+                                    generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while activeEvent
+        // Same actor turn: event-idle admission, Core validation, lock release,
+        // then the captured SDK invocation without another application await.
+        try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
+        try await sdk.sendChanges(options)
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
@@ -340,14 +362,19 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             }) {
                 var operationError: (any Error)?
                 do {
-                    try lifetime.enqueue(generation: generation, validate: validate, begin: {})
-                    try await sdk.fetchChanges(prepared)
+                    try await self.invokePreparedFetch(sdk: sdk, options: prepared, generation: generation, validate: validate)
                 } catch { operationError = Self.networkFailure(error) }
                 do { try await self.drainReturnedWork() }
                 catch { if operationError == nil { operationError = error } }
                 if let operationError { throw operationError }
             }
         }
+    }
+    private func invokePreparedFetch(sdk: CKSyncEngine, options: CKSyncEngine.FetchChangesOptions,
+                                     generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while activeEvent
+        try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
+        try await sdk.fetchChanges(options)
     }
     func sendChanges(zones: [String]) async throws {
         let prepared = try await prepareSend(zones: zones)
@@ -474,7 +501,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if eventWaiters.isEmpty {
             activeEvent = false; networkLifetime.endEvent()
             let pending = networkEventWaiters; networkEventWaiters.removeAll()
-            for waiter in pending { waiter.resume() }
+            for waiter in pending.values { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
         await delegate.eventBookkeepingCompleted(event, engine: self)
     }

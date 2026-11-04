@@ -38,3 +38,9 @@ send/fetch cancellation/release cases. The earlier failures remain retained.
 Private23470 flags one comment in the new test. Its filtered removal is pending;
 the production candidate and exact proof remain in its export. Broader native
 checks, actual SDK behavior and the full batch gate are still required.
+
+Export25807 removes only that comment; all executable bytes stay identical.
+Native32386 then passes all 125 selected native checks, including the forced
+media wake and existing cancellation/finalization cases. Core-lint32716 passes.
+This closes the controlled race proof; the historical failed receipts stay
+failed. Actual SDK convergence and the full batch gate remain unverified.

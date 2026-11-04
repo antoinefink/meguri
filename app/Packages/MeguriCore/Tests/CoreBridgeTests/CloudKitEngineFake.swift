@@ -153,7 +153,11 @@ actor CloudKitEngineFake: CloudKitEngine {
     private var cancelPause: CloudCallbackGate?
     private var nativeWorkPause: CloudCallbackGate?
     private var operationTaskPause: CloudCallbackGate?
-    private var networkEventWaiters: [CheckedContinuation<Void, Never>] = []
+    #if DEBUG
+    private var sendFinalEntryObserver: (@Sendable (CloudKitNetworkLifetime.FinalEntryObservation) -> Void)?
+    private var networkEventWaitObserver: (@Sendable () -> Void)?
+    #endif
+    private var networkEventWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var nextOperationError: (any Error)?
     private let networkLifetime = CloudKitNetworkLifetime()
     nonisolated let acceptedNetworkCalls = CloudAcceptedNetworkCalls()
@@ -227,7 +231,7 @@ actor CloudKitEngineFake: CloudKitEngine {
         if eventWaiters.isEmpty {
             eventActive = false; networkLifetime.endEvent()
             let pending = networkEventWaiters; networkEventWaiters.removeAll()
-            for waiter in pending { waiter.resume() }
+            for waiter in pending.values { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
         if notifyBookkeeping, let delegate { await delegate.eventBookkeepingCompleted(event, engine: self) }
     }
@@ -245,17 +249,42 @@ actor CloudKitEngineFake: CloudKitEngine {
 
     func pauseNativeReturnedWork(_ gate: CloudCallbackGate) { nativeWorkPause = gate }
     func pauseNextOperationTask(_ gate: CloudCallbackGate) { operationTaskPause = gate }
+    #if DEBUG
+    func observeNextSendFinalEntry(_ observer: (@Sendable (CloudKitNetworkLifetime.FinalEntryObservation) -> Void)?) {
+        sendFinalEntryObserver = observer
+    }
+    func observeNextNetworkEventWait(_ observer: (@Sendable () -> Void)?) { networkEventWaitObserver = observer }
+    func networkEventWaiterCount() -> Int { networkEventWaiters.count }
+    #endif
     func failNextOperation(_ error: any Error) { nextOperationError = error }
     func waitForEventBookkeeping() async throws {
-        repeat { await prepareNativeWork() } while eventActive
+        repeat { try await prepareNativeWork() } while eventActive
         try Task.checkCancellation()
     }
-    private func prepareNativeWork() async {
-        while eventActive { await withCheckedContinuation { networkEventWaiters.append($0) } }
+    private func prepareNativeWork() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            while eventActive {
+                try Task.checkCancellation()
+                await withCheckedContinuation {
+                    networkEventWaiters[id] = $0
+                    #if DEBUG
+                    let observer = networkEventWaitObserver; networkEventWaitObserver = nil
+                    observer?()
+                    #endif
+                }
+            }
+            try Task.checkCancellation()
+        } onCancel: {
+            Task { await self.cancelNetworkEventWaiter(id) }
+        }
         if let gate = nativeWorkPause { nativeWorkPause = nil; await gate.enter() }
     }
+    private func cancelNetworkEventWaiter(_ id: UUID) {
+        networkEventWaiters.removeValue(forKey: id)?.resume()
+    }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
-        await prepareNativeWork()
+        try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = networkLifetime; let generation = lifetime.authority()
         return CloudKitNetworkEnqueue { validate in
@@ -266,11 +295,21 @@ actor CloudKitEngineFake: CloudKitEngine {
     }
     private func invokePreparedSend(zones: [String], generation: UInt64, validate: @Sendable () throws -> Void) async throws {
         if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
+        #if DEBUG
+        if let observer = sendFinalEntryObserver {
+            sendFinalEntryObserver = nil
+            observer(networkLifetime.finalEntryObservation(generation: generation))
+        }
+        #endif
+        repeat { try await waitForEventBookkeeping() } while eventActive
+        // The observer stays before preparation can wait for the held event.
+        // Idle admission, final validation and this retained fake's entry share
+        // the event actor, with no application suspension between them.
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await sendChanges(zones: zones)
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
-        await prepareNativeWork()
+        try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = networkLifetime; let generation = lifetime.authority()
         return CloudKitNetworkEnqueue { validate in
@@ -281,6 +320,7 @@ actor CloudKitEngineFake: CloudKitEngine {
     }
     private func invokePreparedFetch(options: CloudFetchOptions, generation: UInt64, validate: @Sendable () throws -> Void) async throws {
         if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
+        repeat { try await waitForEventBookkeeping() } while eventActive
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await fetchChanges(options: options)
     }

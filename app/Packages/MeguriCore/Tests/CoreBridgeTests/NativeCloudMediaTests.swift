@@ -307,6 +307,15 @@ private final class NativeMediaReadFailure: Error {}
 #if DEBUG
 private final class NativeMediaPendingUpdateFailure: Error {}
 
+private struct NativeEventWaitDelegate: CloudKitEngineDelegate {
+    func eventWillDeliver(engine: any CloudKitEngine) async {}
+    func handleEvent(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {}
+    func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {}
+    func nextRecordZoneChangeBatch(pending: [String: CloudPendingChange], zone: String,
+                                   engine: any CloudKitEngine) async -> CloudEngineBatch? { nil }
+    func nextFetchChangesOptions(_ options: CloudFetchOptions, engine: any CloudKitEngine) async -> CloudFetchOptions { options }
+}
+
 // Keep the fake's concrete nonthrowing API used by other witnesses. Only this
 // wrapper's protocol application can fail; every SDK operation still delegates.
 private actor NativeMediaPendingUpdateEngine: CloudKitEngine {
@@ -339,14 +348,83 @@ private actor NativeMediaPendingUpdateEngine: CloudKitEngine {
 
 extension EventTests {
     #if DEBUG
+    @Test(arguments: [false, true], [false, true])
+    func nativeRetainedOperationEventWaitCancellationAndRelease(stop: Bool, fetch: Bool) async throws {
+        let zone = "event-wait-zone"
+        let engine = CloudKitEngineFake(configuration: .init(instanceID: "event-wait", automaticallySync: false,
+            serialization: nil, collectionZone: zone), delegate: NativeEventWaitDelegate(), a23: true, keepAlive: false)
+        let prepared: CloudKitNetworkEnqueue
+        if fetch {
+            prepared = try await engine.prepareFetch(options: .init(zones: [zone], priorityZones: [], groupID: "event-wait"))
+        } else { prepared = try await engine.prepareSend(zones: [zone]) }
+        let held = CloudCallbackGate()
+        await engine.pauseNextCallback(held)
+        let (waits, observedWait) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        await engine.observeNextNetworkEventWait { _ = observedWait.yield(()) }
+        let callback = Task { await engine.emitRetained(.willSend(zone: zone), label: "held") }
+        let deadline = CloudPolicyReadinessDecision()
+        let watchdog = Task {
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            if deadline.expire() {
+                observedWait.finish()
+                await held.abort(CancellationError())
+                await engine.cancelOperations()
+            }
+        }
+        let validations = Mutex(0)
+        var operation: CloudKitNetworkOperation?
+        var joined: Task<(any Error)?, Never>?
+        var failure: (any Error)?
+        do {
+            try await held.waitForArrival()
+            let retained = try prepared.enqueue(validate: { validations.withLock { $0 += 1 } })
+            operation = retained
+            let running = Task<(any Error)?, Never> {
+                do { try await retained.drain(); return nil } catch { return error }
+            }
+            joined = running
+            var entries = waits.makeAsyncIterator()
+            guard await entries.next() != nil else { throw CancellationError() }
+            try #require(await engine.networkEventWaiterCount() == 1)
+            try #require(engine.acceptedNetworkCalls.value == 0 && validations.withLock { $0 } == 0)
+            if stop { await engine.release() } else { running.cancel() }
+            let result = await running.value
+            try #require(result is CancellationError)
+            try #require(await engine.networkEventWaiterCount() == 0)
+            let trace = await engine.recordedTrace()
+            try #require(trace.contains(.eventEntered("held")) && !trace.contains(.eventReturned("held")))
+            try #require(trace.contains(.cancelReturned))
+        } catch { failure = error }
+        let inTime = deadline.observeReady()
+        await held.open()
+        await callback.value
+        joined?.cancel()
+        if let operation { await operation.cancelAndDrain() }
+        _ = await joined?.value
+        await engine.observeNextNetworkEventWait(nil)
+        observedWait.finish()
+        await engine.release()
+        watchdog.cancel()
+        await watchdog.value
+        #expect(inTime, "Retained operation event-wait cancellation/drain exceeded ten seconds")
+        #expect(await held.pendingWaiterCount() == 0)
+        #expect(await engine.networkEventWaiterCount() == 0)
+        #expect(engine.acceptedNetworkCalls.value == 0 && validations.withLock { $0 } == 0)
+        if let failure { throw failure }
+    }
+
     @Test func nativeMediaUploadsResumeAfterUnrelatedPersistedSentHandlerReturns() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, _) = try await nativePolicy(fixture)
             let engine = try await fixture.engine()
             let guardBefore = try await fixture.core.currentGuard()
-            let held = CloudCallbackGate()
+            let held = CloudCallbackGate(), afterSent = CloudCallbackGate()
+            let mediaTask = CloudCallbackGate(), didSend = CloudCallbackGate()
             await fixture.probe.pauseSent(held)
+            await engine.pauseAfterSentHandler(afterSent)
             let (admissions, observedAdmission) = AsyncStream<Bool>.makeStream()
+            let (finalEntries, observedFinalEntry) = AsyncStream<CloudKitNetworkLifetime.FinalEntryObservation>
+                .makeStream(bufferingPolicy: .bufferingNewest(1))
             let admissionEvidence = Mutex<(handlerReleased: Bool,
                 entries: [(admitted: Bool, beforeHandlerRelease: Bool)])>((false, []))
             let callEvidence = Mutex<(admitted: [UInt64], finalized: [UInt64],
@@ -396,7 +474,11 @@ extension EventTests {
                 if deadline.expire() {
                     admissionEvidence.withLock { $0.handlerReleased = true }
                     await held.abort(CancellationError())
+                    await afterSent.abort(CancellationError())
+                    await mediaTask.abort(CancellationError())
+                    await didSend.abort(CancellationError())
                     observedAdmission.finish()
+                    observedFinalEntry.finish()
                     try? await fixture.adapter.stop()
                 }
             }
@@ -405,6 +487,7 @@ extension EventTests {
             let original = Task { try await fixture.adapter.requestSend(zones: [fixture.zone]) }
             var media: Task<CloudPolicyNativeResult, Never>?
             var names: [String] = []
+            var finalEntry: CloudKitNetworkLifetime.FinalEntryObservation?
             var failure: (any Error)?
             do {
                 try await held.waitForArrival()
@@ -459,8 +542,34 @@ extension EventTests {
                     let size = try #require(pending.mediaBytes)
                     try #require(size > 0 && !pending.blobPresent && !pending.acknowledged)
                 }
+                // Arm only after this round's first actual nil admission;
+                // the unrelated original SDK task must never take this gate.
+                await engine.pauseNextOperationTask(mediaTask)
+                await engine.observeNextSendFinalEntry { entry in
+                    _ = observedFinalEntry.yield(entry)
+                }
                 admissionEvidence.withLock { $0.handlerReleased = true }
                 await held.open()
+                try await afterSent.waitForArrival()
+                try await mediaTask.waitForArrival()
+                // Preparation saw the completed sent slot. Independently start
+                // the original didSend before the detached task's final entry.
+                await engine.pauseNextCallback(didSend)
+                await afterSent.open()
+                try await didSend.waitForArrival()
+                let activeTrace = await engine.recordedTrace()
+                try #require(activeTrace.contains(.eventEntered("didSend")))
+                try #require(!activeTrace.contains(.eventReturned("didSend")))
+                await mediaTask.open()
+                var finals = finalEntries.makeAsyncIterator()
+                guard let entry = await finals.next() else { throw CancellationError() }
+                finalEntry = entry
+                // Observe entry, never completion or successful admission under
+                // the held callback. A future final-entry event wait can finish
+                // as soon as this original didSend is released.
+                await didSend.open()
+                #expect(!entry.taskCancelled && entry.eventActive && entry.generationMatches && entry.sdkLive,
+                    "Final entry must isolate active-event rejection from task cancellation or revoked SDK authority")
                 try await original.value
                 _ = await running.value
             } catch { failure = error }
@@ -470,17 +579,26 @@ extension EventTests {
             // watchdog's failure-only stop/drain and the native responder.
             admissionEvidence.withLock { $0.handlerReleased = true }
             await held.open()
+            await afterSent.open()
+            await mediaTask.open()
+            await didSend.open()
             media?.cancel()
             let originalResult = await original.result
             let mediaResult = await media?.value
             await fixture.adapter.setSendAdmissionObserver(nil)
             await fixture.adapter.setSendCallObserver(nil)
+            await engine.observeNextSendFinalEntry(nil)
             observedAdmission.finish()
+            observedFinalEntry.finish()
             queue.finish()
             await responses.value
             let inTime = deadline.observeReady()
             watchdog.cancel()
             await watchdog.value
+            for gate in [held, afterSent, mediaTask, didSend] {
+                #expect(await gate.pendingWaiterCount() == 0)
+            }
+            #expect(await engine.networkEventWaiterCount() == 0)
             let evidence = admissionEvidence.withLock { $0.entries }
             let calls = callEvidence.withLock { $0 }
             let exactCallsMatch = calls.admitted.count == calls.finalized.count
@@ -493,12 +611,17 @@ extension EventTests {
             let adapterFailure = adapterError.map {
                 DebugCloudDiagnostics.Value(.policyExecute, error: $0).failure
             } ?? "none"
+            let finalEvidence = finalEntry.map {
+                "taskCancelled=\($0.taskCancelled) eventActive=\($0.eventActive)"
+                    + " generationMatches=\($0.generationMatches) sdkLive=\($0.sdkLive)"
+            } ?? "finalEntry=unobserved"
             // IDs remain internal to the bounded exact-call comparison.
             let diagnostic = "mediaFailure=\(mediaFailure) adapterFailure=\(adapterFailure)"
                 + " sdkCallsSinceOriginal=\(engine.acceptedNetworkCalls.value - sdkCallsBeforeOriginal)"
                 + " admittedCalls=\(calls.admitted.count) finalizedCalls=\(calls.finalized.count)"
                 + " exactCallsMatch=\(exactCallsMatch) admissionOwnersMatch=\(calls.admissionOwnersMatch)"
                 + " finalizationOwnersMatch=\(calls.finalizationOwnersMatch) callEvidenceCapped=\(calls.capped)"
+                + " \(finalEvidence)"
             #expect(inTime, "Media admission or original callback drain exceeded the existing ten-second bound; first eight admissions (admitted, before-handler-release): \(evidence); \(diagnostic)")
             if let failure { throw failure }
             try originalResult.get()

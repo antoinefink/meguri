@@ -132,6 +132,23 @@ final class CloudKitNetworkLifetime: Sendable {
     func authority() -> UInt64 { state.withLock { $0.generation } }
     func invalidate() { state.withLock { $0.generation &+= 1 } }
     func retire() { state.withLock { $0.retired = true; $0.generation &+= 1 } }
+    #if DEBUG
+    struct FinalEntryObservation: Sendable {
+        let taskCancelled: Bool
+        let eventActive: Bool
+        let generationMatches: Bool
+        let sdkLive: Bool
+    }
+    /// Bounded facts for a fake's final task entry, before any event wait or
+    /// guard. Observation neither admits work nor changes lifetime authority.
+    func finalEntryObservation(generation: UInt64) -> FinalEntryObservation {
+        state.withLock { state in
+            FinalEntryObservation(taskCancelled: Task.isCancelled, eventActive: state.eventActive,
+                generationMatches: generation == state.generation,
+                sdkLive: !state.retired && state.cancelling == 0)
+        }
+    }
+    #endif
     /// Final task-body validation. begin is only synchronous instrumentation in
     /// fakes; it does not claim that CloudKit has accepted network work.
     func enqueue(generation: UInt64, validate: @Sendable () throws -> Void, begin: () -> Void) throws {
