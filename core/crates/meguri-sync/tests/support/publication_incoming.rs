@@ -59,6 +59,11 @@ pub fn open(directory: &Path, identity: IdentityReads, fresh: bool) -> Publicati
         Some("receiver") => 809,
         _ => panic!("expected synthetic sender or receiver fixture"),
     };
+    open_with_seed(directory, identity, fresh, seed)
+}
+// A second publication after relaunch needs a distinct stream, while keeping
+// the same platform key provider construction and entropy-free recovery path.
+pub fn open_with_seed(directory: &Path, identity: IdentityReads, fresh: bool, seed: u64) -> PublicationRig {
     PublicationRig::open(
         directory,
         &scope(),
