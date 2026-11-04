@@ -138,3 +138,8 @@ test compares /var and /private/var path strings for the same staged location.
 The existing media wake test also returns taskCancelled after one SDK call;
 its earlier failure remains recorded. Both need resolution. No signed-device
 import, full batch gate or unit acceptance is claimed.
+
+Export3768 corrects only the staged-file comparison to require its returned URL
+and compare canonical locations. Review is clear. Native8859 passes all 29
+native own-transport tests. The media wake failure remains open and is being
+given a deterministic event-order witness; no unchanged rerun is used as a fix.

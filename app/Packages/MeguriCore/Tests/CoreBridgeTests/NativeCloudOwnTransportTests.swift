@@ -525,7 +525,9 @@ struct NativeCloudOwnTransportTests {
             await Task.yield()
             try await MaintenanceLane.shared.call(.cloudConnectionAdoptionResult) {
                 guard case .payload(let value) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
-                #expect(value.payloadFile == copied.path)
+                let payloadFile = try #require(value.payloadFile)
+                let payloadURL = URL(fileURLWithPath: payloadFile)
+                #expect(payloadURL.resolvingSymlinksInPath() == copied.resolvingSymlinksInPath())
                 #expect(try Data(contentsOf: copied) == bytes)
             }
         }
