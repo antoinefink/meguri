@@ -807,6 +807,98 @@ class RecoveryCase(unittest.TestCase):
         self.assertFalse(guest_read(own))
 
 
+class NamespaceMetadataCase(unittest.TestCase):
+    @contextlib.contextmanager
+    def fixture(self):
+        case = RecoveryCase()
+        try:
+            case.setUp()
+            rows = [{"Name": case.vm["name"], "State": state,
+                     "Source": "generated-source", "Disk": "generated-disk",
+                     "FutureIdentity": {"Accessed": "nested-stable-value"},
+                     "Accessed": "generated-access-%d" % number, "Size": number + 10,
+                     "Running": state == "running"}
+                    for number, state in enumerate(("running", "running", "stopped", "stopped"))]
+            pending = iter(rows)
+            original = case.system.state
+            def state(selection):
+                original(selection)  # Preserve existing boundary events/hooks.
+                with patch.object(m, "command", return_value=m.encoded([next(pending)])) as command:
+                    result = m.System.state(case.system, selection)
+                command.assert_called_once_with([case.vm["tart"], "list", "--format", "json"], 10)
+                return result
+            with patch.object(case.system, "state", side_effect=state):
+                yield case, rows
+        finally:
+            case.doCleanups()
+
+    def assert_boundary_refusal(self, case, boundary):
+        case.refuses()
+        self.assertEqual(case.system.events.count("stop"), int(boundary >= 2))
+        self.assertEqual(case.recovery.claimed, boundary > 0)
+        self.assertEqual(case.recovery.stopped, boundary >= 2)
+        self.assertEqual(case.recovery.proved, boundary == 3)
+        self.assertEqual((case.guard / "recovery/claim.json").is_file(), boundary > 0)
+        evidence = Path(case.recovery.evidence)
+        self.assertTrue((evidence / "admission.json").is_file())
+        self.assertEqual((evidence / "stop-intent.json").is_file(), boundary >= 2)
+        self.assertEqual((evidence / "recovery-proof.json").is_file(), boundary == 3)
+        self.assertEqual((case.lease / "holder.json").read_bytes(), case.original_holder)
+        self.assertEqual(snapshot(case.private), case.original_private)
+        self.assertEqual(snapshot(case.receipt_dir), case.original_receipt)
+        self.assertFalse(case.recovery.archived)
+
+    def test_rows_are_saved(self):
+        for absent in ((), (0, 2), (1, 3), (0, 1, 2, 3)):
+            with self.subTest(absent=absent), self.fixture() as (case, rows):
+                for boundary in absent:
+                    del rows[boundary]["Running"]
+                proof = case.assert_discovery_archived()
+                self.assertEqual(proof["namespace_before"],
+                                 {key: value for key, value in rows[0].items() if key != "State"})
+                self.assertEqual(proof["namespace_metadata"],
+                                 {key: value for key, value in rows[2].items() if key != "State"})
+                self.assertEqual(proof["independent_state"], "stopped")
+
+    def test_stable_changes_and_removals_refuse_at_every_comparison(self):
+        for boundary in (1, 2, 3):
+            for key in ("Name", "Source", "Disk", "FutureIdentity"):
+                for operation in ("change", "remove"):
+                    with self.subTest(boundary=boundary, key=key, operation=operation), \
+                            self.fixture() as (case, rows):
+                        if operation == "remove":
+                            del rows[boundary][key]
+                        elif key == "FutureIdentity":
+                            rows[boundary][key] = {"Accessed": "changed-nested-stable-value"}
+                        else:
+                            rows[boundary][key] = "generated-changed-value"
+                        self.assert_boundary_refusal(case, boundary)
+
+    def test_stable_additions_refuse_at_every_comparison(self):
+        for boundary in (1, 2, 3):
+            for key in ("Source", "Disk", "FutureIdentity", "NewUnknownField"):
+                with self.subTest(boundary=boundary, key=key), self.fixture() as (case, rows):
+                    for row in rows:
+                        row.pop(key, None)
+                    rows[boundary][key] = "generated-added-value"
+                    self.assert_boundary_refusal(case, boundary)
+
+    def test_expected_state_remains_required_at_every_boundary(self):
+        for boundary in range(4):
+            with self.subTest(boundary=boundary), self.fixture() as (case, rows):
+                row = rows[boundary]
+                row["State"] = "stopped" if row["State"] == "running" else "running"
+                row["Running"] = row["State"] == "running"
+                self.assert_boundary_refusal(case, boundary)
+
+    def test_invalid_running_retains_evidence_at_every_boundary(self):
+        for boundary in range(4):
+            for malformed in (False, True):
+                with self.subTest(boundary=boundary, malformed=malformed), self.fixture() as (case, rows):
+                    rows[boundary]["Running"] = 1 if malformed else not rows[boundary]["Running"]
+                    self.assert_boundary_refusal(case, boundary)
+
+
 class PrivateFailureCase(unittest.TestCase):
     def diagnostic(self, error):
         public, private = io.StringIO(), io.StringIO()
@@ -1013,6 +1105,26 @@ class PrivateFailureCase(unittest.TestCase):
 
 
 class IsolatedFunctions(unittest.TestCase):
+    def test_real_state_parser_running_contract(self):
+        selection = {"name": "GeneratedOnly", "tart": "/generated/tart"}
+        for state in ("running", "stopped"):
+            for fields in ({}, {"Running": state == "running"}):
+                row = dict(fields, Name=selection["name"], State=state, Accessed="generated-access",
+                           Size=42, Disk="generated-disk", Source="generated-source", Unknown={"value": 7})
+                original = dict(row)
+                with self.subTest(state=state, fields=fields), \
+                        patch.object(m, "command", return_value=m.encoded([row])) as command:
+                    self.assertEqual(m.System().state(selection),
+                                     (state, {key: value for key, value in original.items() if key != "State"}))
+                command.assert_called_once_with([selection["tart"], "list", "--format", "json"], 10)
+                self.assertEqual(row, original)
+            for invalid in (not (state == "running"), 0, 1, "true", "false", None, [], {}):
+                with self.subTest(state=state, invalid=invalid), \
+                        patch.object(m, "command", return_value=m.encoded([
+                            {"Name": selection["name"], "State": state, "Running": invalid}])):
+                    with self.assertRaises(m.Refused):
+                        m.System().state(selection)
+
     def test_managed_predicates_and_host_only_exclusions(self):
         selection = {"name": "generated", "ssh": "/generated/ssh", "tart": "/generated/tart"}
         for args in ("tools/mg sim acquire iphone", "python vm-xcode-stage.py", "bash sim-record.sh",

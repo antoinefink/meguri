@@ -671,6 +671,14 @@ finally:
 '''.replace('PATTERN', repr(MANAGED + '|' + EXTRA))
 
 
+def same_namespace(before, after):
+    # State travels separately and is checked at each boundary. Exclude only
+    # known nonidentity metadata; unknown fields remain part of the binding.
+    def stable(value):
+        return {key: item for key, item in value.items() if key not in ("Accessed", "Size", "Running")}
+    return stable(before) == stable(after)
+
+
 class System:
     def processes(self):
         return host_processes()
@@ -687,8 +695,11 @@ class System:
         need(isinstance(records, list) and len(records) <= 64 and all(isinstance(r, dict) for r in records))
         matches = [r for r in records if r.get("Name") == selection["name"]]
         need(len(matches) == 1 and matches[0].get("State") in ("running", "stopped"))
-        # Configured namespace binding only. Preserve any returned metadata
-        # privately and require that it does not change except for State.
+        if "Running" in matches[0]:
+            need(type(matches[0]["Running"]) is bool
+                 and matches[0]["Running"] == (matches[0]["State"] == "running"))
+        # Configured namespace binding only. Preserve full returned metadata
+        # privately, with State carried separately from namespace comparison.
         value = dict(matches[0]); state = value.pop("State")
         return state, value
 
@@ -922,7 +933,8 @@ class Recovery:
             return self.report("inspected")
         # Fresh read checks immediately before control. Mutex is closed before
         # every worker/SSH/Tart launch; the fixed guard plus claim persists.
-        need(self.system.state(self.vm) == ("running", namespace))
+        state_before, namespace_before = self.system.state(self.vm)
+        need(state_before == "running" and same_namespace(namespace, namespace_before))
         self.activity.update(self.system.guest(self.vm))
         with self.mutex():
             self.exclusion()
@@ -939,21 +951,22 @@ class Recovery:
         self.stopped = True
         self.pins.check()
         state_after, namespace_after = self.system.state(self.vm)
-        need(state_after == "stopped" and namespace_after == namespace)
+        need(state_after == "stopped" and same_namespace(namespace, namespace_after))
         self.pins.check()
         write_new(self.evidence_fd, "recovery-proof.json", {
             "original_run": RUN, "original_receipt_unchanged": True, "original_private": self.original_private,
             "source": self.source_proof, "diagnostic": self.diagnostic, "pins": self.pins.manifest(),
             "exclusive_claim": self.claim_path, "no_active_work": self.activity,
             "original_stop_completed_and_joined": True, "independent_state": "stopped",
-            "namespace_metadata": namespace_after,
+            "namespace_before": namespace, "namespace_metadata": namespace_after,
             "binding": "existing trusted root-controlled configured dedicated VM namespace; not an incarnation pin",
             "historical_identity": None, "original_query_completion": "unknown",
             "abandoned_guest_query_closed_by_confirmed_hypervisor_stop": True})
         self.proved = True
         self.pins.file(self.evidence + "/recovery-proof.json", LIMIT)
         self.pins.freeze(self.evidence, {"admission.json", "stop-intent.json", "recovery-proof.json"})
-        need(self.system.state(self.vm) == ("stopped", namespace))
+        state_final, namespace_final = self.system.state(self.vm)
+        need(state_final == "stopped" and same_namespace(namespace, namespace_final))
         with self.mutex():
             self.exclusion()
             self.activity.update(self.host())
