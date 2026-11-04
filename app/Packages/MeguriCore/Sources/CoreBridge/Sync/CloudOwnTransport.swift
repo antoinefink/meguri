@@ -19,6 +19,7 @@ public enum CloudOwnTransportCommand: Sendable {
     case deleteZones(CloudZoneDeletionBatch)
     /// Fetch every zone in the private database, without a guessed zone list.
     case zoneInventory
+    case adoptionPayload(zone: String, name: String, expected: CloudControlRecord)
     case adoptionPage(zone: String, cursor: Data?)
 }
 public enum CloudOwnTransportReply: Sendable {
@@ -30,6 +31,7 @@ public enum CloudOwnTransportReply: Sendable {
     /// Complete, validated private-owner names from the original successful
     /// all-zones terminal callback, sorted deterministically. Empty is success.
     case zoneInventory(zones: [String])
+    case adoptionPayload(CloudStagingRecord)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
 }
 public enum CloudOwnTransportFailure: Error, Sendable {
@@ -454,27 +456,46 @@ public actor CloudOwnExecutor {
                 try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission)))
                 #endif
             case .fetch(let zone, let cursor):
-                let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor)); prepared = op
-                try checkStopping()
-                guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                 do {
+                    let op = try transport.prepare(.adoptionPage(zone: zone, cursor: cursor)); prepared = op
+                    try checkStopping()
+                    guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                     #if DEBUG
                     recordWorkStage(.adoptionPageReply)
                     #endif
                     let reply = try await op.reply(); prepared = nil
                     guard case .page(let records, let deleted, let next) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    try checkStopping()
+                    try admission?.check()
                     #if DEBUG
                     recordWorkStage(.adoptionPageResult)
                     #endif
                     try await core.adoptionResult(handle, result: .page(records: records, deleted: deleted, next: next))
                 } catch {
                     prepared = nil
-                    // A failed page is an actual failed read, never an empty
-                    // final page. Host retains or aborts staging by its policy.
+                    // A queued operation has joined its original terminal here.
+                    // Explicit cancel/close keeps its existing Core cleanup owner.
                     #if DEBUG
                     recordWorkStage(.adoptionPageFailureResult)
                     #endif
-                    try? await core.adoptionResult(handle, result: .read(.failed))
+                    if !stopping && !closed { try? await core.adoptionResult(handle, result: .failed) }
+                    throw error
+                }
+            case .fetchPayload(let zone, let name, let expected):
+                do {
+                    let op = try transport.prepare(.adoptionPayload(zone: zone, name: name, expected: expected)); prepared = op
+                    try checkStopping()
+                    guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
+                    let reply = try await op.reply(); prepared = nil
+                    guard case .adoptionPayload(let record) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    try checkStopping()
+                    try admission?.check()
+                    // The projection retains its file lease through the typed
+                    // Core job's terminal delivery and result inspection.
+                    try await core.adoptionResult(handle, result: .payload(record))
+                } catch {
+                    prepared = nil
+                    if !stopping && !closed { try? await core.adoptionResult(handle, result: .failed) }
                     throw error
                 }
             case .validate:

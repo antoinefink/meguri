@@ -31,15 +31,36 @@ impl std::fmt::Debug for AdoptOp {
         f.write_str("AdoptOp")
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdoptionTask {
     ReadActive,
     ReadEpoch,
     ReadMediaRoot,
-    Fetch { cursor: Option<OpaqueBytes> },
+    Fetch {
+        cursor: Option<OpaqueBytes>,
+    },
+    FetchPayload {
+        name: String,
+        encrypted: OpaqueBytes,
+        system_fields: OpaqueBytes,
+    },
     Validate,
     RecheckActive,
     Activate,
+}
+impl std::fmt::Debug for AdoptionTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::ReadActive => "ReadActive",
+            Self::ReadEpoch => "ReadEpoch",
+            Self::ReadMediaRoot => "ReadMediaRoot",
+            Self::Fetch { .. } => "Fetch",
+            Self::FetchPayload { .. } => "FetchPayload",
+            Self::Validate => "Validate",
+            Self::RecheckActive => "RecheckActive",
+            Self::Activate => "Activate",
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdoptionWork {
@@ -58,6 +79,11 @@ pub struct StagingRecord {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum AdoptionReply {
     Read(RecordRead),
+    /// A terminal transport failure invalidates the entire unpublished candidate.
+    Failed,
+    Payload {
+        record: StagingRecord,
+    },
     Page {
         records: Vec<StagingRecord>,
         deleted: Vec<String>,

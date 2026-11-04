@@ -546,8 +546,18 @@ pub struct CloudAdoptionWork {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionAction {
-    Read { target: CloudControlTarget },
-    Fetch { zone: String, cursor: Option<Vec<u8>> },
+    Read {
+        target: CloudControlTarget,
+    },
+    Fetch {
+        zone: String,
+        cursor: Option<Vec<u8>>,
+    },
+    FetchPayload {
+        zone: String,
+        name: String,
+        expected: CloudControlRecord,
+    },
     Validate,
     Activate,
 }
@@ -560,6 +570,10 @@ pub struct CloudStagingRecord {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionResult {
+    Failed,
+    Payload {
+        record: CloudStagingRecord,
+    },
     Read {
         read: CloudControlRead,
     },
@@ -815,6 +829,18 @@ impl CloudConnection {
                             zone: c::adapter::collection_zone(op.epoch),
                             cursor: cursor.as_ref().map(|v| v.0.clone()),
                         },
+                        a::AdoptionTask::FetchPayload {
+                            name,
+                            encrypted,
+                            system_fields,
+                        } => CloudAdoptionAction::FetchPayload {
+                            zone: c::adapter::collection_zone(op.epoch),
+                            name: name.clone(),
+                            expected: CloudControlRecord {
+                                encrypted: Some(encrypted.0.clone()),
+                                system_fields: system_fields.0.clone(),
+                            },
+                        },
                         a::AdoptionTask::Validate => CloudAdoptionAction::Validate,
                         a::AdoptionTask::Activate => CloudAdoptionAction::Activate,
                     };
@@ -910,6 +936,15 @@ impl CloudConnection {
         self.owns(&handle.owner)?;
         self.owner.check_generation(handle.generation)?;
         let reply = match result {
+            CloudAdoptionResult::Failed => a::AdoptionReply::Failed,
+            CloudAdoptionResult::Payload { record: v } => a::AdoptionReply::Payload {
+                record: a::StagingRecord {
+                    name: v.name,
+                    record_type: v.record_type,
+                    record: v.record.into(),
+                    payload_file: v.payload_file.map(std::path::PathBuf::from),
+                },
+            },
             CloudAdoptionResult::Read { read } => a::AdoptionReply::Read(read.into()),
             CloudAdoptionResult::Page { records, deleted, next } => a::AdoptionReply::Page {
                 records: records

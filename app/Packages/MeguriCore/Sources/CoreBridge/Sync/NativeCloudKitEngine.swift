@@ -226,14 +226,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var batches: [String: UInt64] = [:]
     private var pendingBatch: UInt64?
     private var failure: (any Error)?
-    private var payloadStaging: CloudMediaStaging?
     private func fetchedPayloadStaging() throws -> CloudMediaStaging {
-        if let payloadStaging { return payloadStaging }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MeguriCloudPayloads", isDirectory: true)
-        let staging = try CloudMediaStaging(directory: directory)
-        payloadStaging = staging
-        return staging
+        try CloudMediaStaging.sharedDefault()
     }
     init(instanceID: String, delegate: any CloudKitEngineDelegate) {
         self.instanceID = instanceID; self.delegate = delegate

@@ -170,6 +170,7 @@ pub struct PublicationRig {
     holds: BTreeSet<Point>,
     held: Option<Point>,
     work: Option<PublicationWork>,
+    adoption_metadata_first: bool,
     scan_committed: bool,
     transport_queued: bool,
     started_host_instance: Option<String>,
@@ -326,6 +327,7 @@ impl PublicationRig {
             cleanup_zones: VecDeque::new(),
             cleanup_reply_pending: false,
             last_sync_phase: "idle",
+            adoption_metadata_first: false,
         };
         // Refresh only real account/local facts. Unbound discovery registers no SDK.
         rig.sdk.get_mut().driver.call::<()>(Input::Identity(None))?;
@@ -538,6 +540,52 @@ impl PublicationRig {
             T::ReadMediaRoot => {
                 AdoptionReply::Read(self.read(service, "meguri-media".into(), "root", RequestedFields::All)?)
             }
+            T::FetchPayload {
+                name,
+                encrypted,
+                system_fields,
+            } => {
+                let response = service.request(
+                    &self.scope,
+                    Caller::default(),
+                    Operation::Read {
+                        zone: cloud::adapter::collection_zone(epoch),
+                        name: name.clone(),
+                        fields: RequestedFields::All,
+                    },
+                )?;
+                match response.result {
+                    Ok(Reply::Record(record))
+                        if record.name == *name
+                            && record.record_type == "MGEntity"
+                            && record.system_fields.bytes() == system_fields.0
+                            && matches!(record.fields.get("e"), Some(Field::EncryptedBytes(bytes)) if *bytes == encrypted.0) =>
+                    {
+                        if let Some(Field::Asset(asset)) = record.fields.get("pa") {
+                            use std::io::Write;
+                            let mut file = tempfile::NamedTempFile::new()?;
+                            file.write_all(asset.bytes())?;
+                            file.as_file().sync_all()?;
+                            let path = file.path().to_path_buf();
+                            payload_files.push(file);
+                            AdoptionReply::Payload {
+                                record: StagingRecord {
+                                    name: name.clone(),
+                                    record_type: "MGEntity".into(),
+                                    record: ControlRecord {
+                                        encrypted: Some(encrypted.0.clone()),
+                                        system_fields: system_fields.clone(),
+                                    },
+                                    payload_file: Some(path),
+                                },
+                            }
+                        } else {
+                            AdoptionReply::Failed
+                        }
+                    }
+                    _ => AdoptionReply::Failed,
+                }
+            }
             T::Fetch { cursor } => {
                 let token = cursor.as_ref().map(|c| serde_json::from_slice(&c.0)).transpose()?;
                 let response = service.request(
@@ -557,6 +605,11 @@ impl PublicationRig {
                     match change {
                         RecordChange::Saved(record) => {
                             let payload_file = match record.fields.get("pa") {
+                                Some(Field::Asset(_))
+                                    if record.record_type == "MGEntity" && self.adoption_metadata_first =>
+                                {
+                                    None
+                                }
                                 Some(Field::Asset(asset)) if record.record_type == "MGEntity" => {
                                     use std::io::Write;
                                     let mut file = tempfile::NamedTempFile::new()?;
@@ -605,6 +658,11 @@ impl PublicationRig {
         let result = self.sdk.get_mut().driver.call(Input::AdoptionReply(work, reply));
         drop(payload_files);
         result
+    }
+    /// Project actual Service metadata first; resolve each payload from its
+    /// current immutable Service version when Core asks for it.
+    pub fn use_metadata_first_adoption(&mut self) {
+        self.adoption_metadata_first = true;
     }
     pub fn verify_identity(&mut self, account: String) -> Result<()> {
         self.sdk.get_mut().driver.call::<()>(Input::Identity(Some(account)))?;

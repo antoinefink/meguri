@@ -102,30 +102,50 @@ enum NativeCloudOwnRecords {
     }
 }
 
-/// Adoption's MGEntity projection owns downloaded pa bytes. Control operations
-/// keep using the asset-free projection above; Swift never parses the payload.
+/// Metadata stays opaque here. Core chooses inline versus external payloads.
 enum NativeCloudStagingRecords {
-    // A page owns every pa until the original operation replies. Size the SDK
-    // request for the worst case: one maximum-size asset per changed record.
-    static let pageLimit = Int(CloudMediaStaging.stagedLimit / CloudMediaStaging.assetLimit)
+    static let pageLimit = 32
+    static let metadataLimit = 32 * 1_024 * 1_024
 
-    static func project(_ record: CKRecord, target: CloudControlTarget, staging: CloudMediaStaging,
-                        cancelled: @Sendable () -> Bool) throws -> CloudStagingRecord {
-        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
-        guard record.recordID == NativeCloudOwnRecords.id(target), record.recordType == target.recordType else { throw NativeCloudKitFailure.unsupportedRecord }
-        if record.recordType == "MGEpoch", target.name == "epoch", target.zone.hasPrefix("c-") {
-            return .init(name: target.name, recordType: target.recordType, record: try NativeCloudOwnRecords.control(record, target: target))
-        }
-        guard record.recordType == "MGEntity", target.zone.hasPrefix("c-") else { throw NativeCloudKitFailure.unsupportedRecord }
-        let metadata = try NativeCloudRecordConversion.decode(record)
-        var lease: CloudMediaStagedAsset?
-        if let asset = record["pa"] as? CKAsset {
-            guard let source = asset.fileURL, source.isFileURL else { throw CloudMediaSourceFailure.invalidShape }
-            lease = try staging.copyPayload(source, cancelled: cancelled, retainedAssetLimit: Int.max)
+    static func metadata(_ record: CKRecord, target: CloudControlTarget) throws -> CloudStagingRecord {
+        // Refuse unexpected SDK assets before any source URL is opened or copied.
+        try NativeCloudOwnRecords.requireNoAssets(record)
+        guard target.zone.hasPrefix("c-"), target.recordType == "MGEntity"
+                || (target.recordType == "MGEpoch" && target.name == "epoch") else {
+            throw NativeCloudKitFailure.unsupportedRecord
         }
         return .init(name: target.name, recordType: target.recordType,
-                     record: .init(encrypted: metadata.envelope, systemFields: try NativeCloudKitSystemFields.encode(record)),
-                     payloadLease: lease)
+                     record: try NativeCloudOwnRecords.control(record, target: target))
+    }
+    static func metadataBytes(_ value: CloudStagingRecord) throws -> Int {
+        // Count actual encoded fields, including the opaque SDK archive.
+        let sizes = [value.name.utf8.count, value.recordType.utf8.count,
+                     value.record.encrypted?.count ?? 0, value.record.systemFields.count]
+        var total = 0
+        for size in sizes {
+            guard size <= metadataLimit - total else { throw NativeCloudKitFailure.unsupportedRecord }
+            total += size
+        }
+        return total
+    }
+    static func payload(_ record: CKRecord, target: CloudControlTarget, expected: CloudControlRecord,
+                        staging: CloudMediaStaging, cancelled: @Sendable () -> Bool,
+                        tagReader: @Sendable (CKRecord) -> String? = { $0.recordChangeTag }) throws -> CloudStagingRecord {
+        let restored = try NativeCloudKitSystemFields.restore(expected.systemFields, target: target)
+        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
+        // Both archives refer to the very same fetched version. Keep the original
+        // metadata archive only after checking actual SDK identity/tag and e.
+        guard target.recordType == "MGEntity", target.zone.hasPrefix("c-"),
+              record.recordID == restored.recordID, record.recordType == restored.recordType,
+              let expectedTag = tagReader(restored), !expectedTag.isEmpty,
+              tagReader(record) == expectedTag,
+              let encrypted = expected.encrypted, record.encryptedValues["e"] as? Data == encrypted,
+              record["ma"] == nil, record["a"] == nil,
+              !record.allKeys().contains(where: { $0 != "pa" && record[$0] is CKAsset }),
+              let asset = record["pa"] as? CKAsset,
+              let source = asset.fileURL, source.isFileURL else { throw NativeCloudKitFailure.unsupportedRecord }
+        let lease = try staging.copyPayload(source, cancelled: cancelled)
+        return .init(name: target.name, recordType: target.recordType, record: expected, payloadLease: lease)
     }
 }
 
@@ -191,6 +211,8 @@ final class NativePreparedOwnOperation: CloudPreparedOwnOperation, Sendable {
 public struct NativeCloudOwnTransport: CloudOwnTransport {
     let queue: any NativeCloudDatabaseQueue
     private let staging: CloudMediaStaging?
+    // Only the internal initializer can substitute lookup for synthetic tests.
+    private let payloadTagReader: @Sendable (CKRecord) -> String?
     let readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)?
     let readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     let zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
@@ -200,7 +222,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
     public init(database: CKDatabase) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
-        staging = try CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
+        payloadTagReader = { $0.recordChangeTag }
+        staging = try CloudMediaStaging.sharedDefault()
         readPerRecordHandlerInstalled = nil
         readTerminalHandlerInstalled = nil
         zoneDeletionTerminalHandlerInstalled = nil
@@ -211,6 +234,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
     public init(database: CKDatabase, staging: CloudMediaStaging) throws {
         guard database.databaseScope == .private else { throw CloudOwnTransportFailure.privateDatabaseRequired }
         queue = PrivateCloudDatabaseQueue(database: database)
+        payloadTagReader = { $0.recordChangeTag }
         self.staging = staging
         readPerRecordHandlerInstalled = nil
         readTerminalHandlerInstalled = nil
@@ -220,6 +244,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         zoneInventoryOriginalReplyWaiting = nil
     }
     init(queue: any NativeCloudDatabaseQueue, staging: CloudMediaStaging? = nil,
+         payloadTagReader: @escaping @Sendable (CKRecord) -> String? = { $0.recordChangeTag },
          readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)? = nil,
          readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
@@ -227,6 +252,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
          zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryOriginalReplyWaiting: (@Sendable () -> Void)? = nil) {
         self.queue = queue; self.staging = staging
+        self.payloadTagReader = payloadTagReader
         self.readPerRecordHandlerInstalled = readPerRecordHandlerInstalled
         self.readTerminalHandlerInstalled = readTerminalHandlerInstalled
         self.zoneDeletionTerminalHandlerInstalled = zoneDeletionTerminalHandlerInstalled
@@ -244,6 +270,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         case .publication(.read(let target)): return read(target, publication: true)
         case .publication(.createZones(let zones)): return createZones(zones)
         case .publication(.save(let target, let encrypted, let fields)): return try save(target, encrypted: encrypted, fields: fields)
+        case .adoptionPayload(let zone, let name, let expected): return try adoptionPayload(zone: zone, name: name, expected: expected)
         case .adoptionPage(let zone, let cursor): return try page(zone: zone, cursor: cursor)
         }
     }
@@ -307,7 +334,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         let operation = CKFetchRecordsOperation(recordIDs: [id])
         operation.desiredKeys = nil // All fields, including encrypted e and pa.
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
-        let staging = try self.staging ?? CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
+        let staging = try self.staging ?? CloudMediaStaging.sharedDefault()
         struct Read {
             var received = false
             var result: CloudAssetReadResult?
@@ -368,6 +395,58 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let result = read.result else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
             prepared.finish(.success(.assetRead(result)))
         }
+        return prepared
+    }
+    private func adoptionPayload(zone: String, name: String, expected: CloudControlRecord) throws -> NativePreparedOwnOperation {
+        let target = CloudControlTarget(zone: zone, name: name, recordType: "MGEntity")
+        guard zone.hasPrefix("c-"), expected.encrypted != nil else { throw NativeCloudKitFailure.unsupportedRecord }
+        _ = try NativeCloudKitSystemFields.restore(expected.systemFields, target: target)
+        let id = NativeCloudOwnRecords.id(target)
+        let operation = CKFetchRecordsOperation(recordIDs: [id])
+        operation.desiredKeys = nil
+        operation.configuration.qualityOfService = .userInitiated
+        let tagReader = payloadTagReader
+        let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
+        let staging = try self.staging ?? CloudMediaStaging.sharedDefault()
+        struct Read {
+            var received = false
+            var record: CloudStagingRecord?
+            var failure: (any Error)?
+            var finished = false
+        }
+        let state = Mutex(Read())
+        let perRecord: @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void = { [weak prepared] received, result in
+            // No Core call or callback wait. Serialize only local projection with
+            // the original terminal so every SDK source is copied before return.
+            state.withLock { value in
+                guard !value.finished else { return }
+                guard !value.received else { value.failure = NativeCloudKitFailure.unsupportedRecord; return }
+                value.received = true
+                do {
+                    guard let prepared, !prepared.cancelled else { throw CancellationError() }
+                    guard received == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                    value.record = try NativeCloudStagingRecords.payload(result.get(), target: target, expected: expected,
+                                                                         staging: staging, cancelled: { prepared.cancelled }, tagReader: tagReader)
+                } catch { value.failure = error }
+            }
+        }
+        operation.perRecordResultBlock = perRecord
+        readPerRecordHandlerInstalled?(perRecord)
+        let terminal: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
+            let read = state.withLock { value in
+                let read = value
+                value.record = nil; value.finished = true
+                return read
+            }
+            guard let prepared else { return }
+            if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
+            if let error = read.failure { prepared.finish(.failure(error)); return }
+            if case .failure(let error) = result { prepared.finish(.failure(error)); return }
+            guard let record = read.record else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
+            prepared.finish(.success(.adoptionPayload(record)))
+        }
+        operation.fetchRecordsResultBlock = terminal
+        readTerminalHandlerInstalled?(terminal)
         return prepared
     }
     private func createZones(_ names: [String]) -> NativePreparedOwnOperation {
@@ -432,13 +511,12 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             } catch { throw CloudOwnTransportFailure.invalidCursor }
         } else { token = nil }
         let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
-        configuration.previousServerChangeToken = token; configuration.desiredKeys = nil
+        configuration.previousServerChangeToken = token; configuration.desiredKeys = ["e"]
         configuration.resultsLimit = NativeCloudStagingRecords.pageLimit
         let operation = CKFetchRecordZoneChangesOperation(recordZoneIDs: [id], configurationsByRecordZoneID: [id: configuration])
         operation.configuration.qualityOfService = .userInitiated
         operation.fetchAllChanges = false
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
-        let staging = try self.staging ?? CloudMediaStaging(directory: FileManager.default.temporaryDirectory.appendingPathComponent("meguri-cloud-adoption", isDirectory: true))
         struct Page {
             var records: [CloudStagingRecord] = []
             var deleted: [String] = []
@@ -447,6 +525,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             var failure: (any Error)?
             var finished = false
             var changes = 0
+            var metadataBytes = 0
             mutating func acceptChange() -> Bool {
                 guard !finished, failure == nil else { return false }
                 guard changes < NativeCloudStagingRecords.pageLimit else {
@@ -466,14 +545,25 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 let record = try result.get()
                 guard record.recordID == recordID else { throw NativeCloudKitFailure.unsupportedRecord }
                 let target = CloudControlTarget(zone: zone, name: recordID.recordName, recordType: record.recordType)
-                let value = try NativeCloudStagingRecords.project(record, target: target, staging: staging, cancelled: { prepared.cancelled })
-                state.withLock { if !$0.finished { $0.records.append(value) } }
+                let value = try NativeCloudStagingRecords.metadata(record, target: target)
+                let bytes = try NativeCloudStagingRecords.metadataBytes(value)
+                state.withLock {
+                    guard !$0.finished, $0.failure == nil else { return }
+                    guard bytes <= NativeCloudStagingRecords.metadataLimit - $0.metadataBytes else {
+                        $0.failure = NativeCloudKitFailure.unsupportedRecord; return
+                    }
+                    $0.metadataBytes += bytes; $0.records.append(value)
+                }
             } catch { state.withLock { if !$0.finished { $0.failure = error } } }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
             state.withLock { value in
                 guard value.acceptChange() else { return }
-                if recordID.zoneID == id { value.deleted.append(recordID.recordName) }
+                if recordID.zoneID == id,
+                   recordID.recordName.utf8.count <= NativeCloudStagingRecords.metadataLimit - value.metadataBytes {
+                    value.metadataBytes += recordID.recordName.utf8.count
+                    value.deleted.append(recordID.recordName)
+                }
                 else { value.failure = NativeCloudKitFailure.unsupportedRecord }
             }
         }
@@ -482,7 +572,10 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 guard zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
                 let page = try result.get()
                 let next = page.moreComing ? try NSKeyedArchiver.archivedData(withRootObject: page.serverChangeToken, requiringSecureCoding: true) : nil
-                state.withLock { $0.next = next; $0.completed = true }
+                state.withLock {
+                    guard !$0.finished, !$0.completed else { $0.failure = NativeCloudKitFailure.unsupportedRecord; return }
+                    $0.next = next; $0.completed = true
+                }
             } catch { state.withLock { $0.failure = error } }
         }
         operation.fetchRecordZoneChangesResultBlock = { [weak prepared] result in

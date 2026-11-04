@@ -96,3 +96,10 @@ Swift35699 fails compilation in CloudConnectionModels' new record conversion;
 no native tests ran. A proposed WIP commit was refused by the privacy check at
 two comments. The next repair must rewrite those comments, preserve the check,
 correct both compiler errors and close the remaining review findings.
+
+Export40462 closes the remaining source findings: public staging allocators
+share reservation accounting while keeping their own directories, the bridge
+maps both record fields, and the tests use the correct read result and field
+comparisons. Independent round-three review finds no P0/P1 blockers or new P2
+findings. Private44631 and format45138 pass. Runtime checks still await disk
+headroom; this is WIP, with no successful signed import or unit acceptance.

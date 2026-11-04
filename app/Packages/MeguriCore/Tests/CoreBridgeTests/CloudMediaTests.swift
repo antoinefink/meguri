@@ -1,5 +1,6 @@
 import Foundation
 import Instrumentation
+import Synchronization
 import Testing
 @testable import CoreBridge
 
@@ -9,6 +10,88 @@ struct CloudMediaTests {
             let ran = try await CoreCloudMediaService.call(selector, probe)
             #expect(ran.queueLabel == Lane.maintenance.queueLabel && !ran.isMainThread)
         }
+    }
+
+    @Test func sharedStagingCachesSuccessButPropagatesAndDoesNotCacheInitializationFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blocked = root.appendingPathComponent("blocked")
+        try Data([1]).write(to: blocked)
+        let cache = Mutex<CloudMediaStaging?>(nil)
+        var attempts = 0
+        #expect(throws: (any Error).self) {
+            try CloudMediaStaging.initializedDefault(in: cache) {
+                attempts += 1
+                return try CloudMediaStaging(directory: blocked.appendingPathComponent("runs"))
+            }
+        }
+        #expect(attempts == 1)
+        #expect(cache.withLock { $0 == nil })
+        try FileManager.default.removeItem(at: blocked)
+        let first = try CloudMediaStaging.initializedDefault(in: cache) {
+            attempts += 1
+            return try CloudMediaStaging(directory: blocked.appendingPathComponent("runs"))
+        }
+        let second = try CloudMediaStaging.initializedDefault(in: cache) {
+            attempts += 1
+            throw CloudMediaFailure.noSpace
+        }
+        #expect(first === second)
+        #expect(attempts == 2)
+        let shared = try CloudMediaStaging.sharedDefault()
+        #expect(shared === (try CloudMediaStaging.sharedDefault()))
+    }
+
+    @Test func publicStagingAllocatorsShareByteAndCountCapsAcrossDistinctDirectories() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("sdk-source")
+        try Data([7]).write(to: source)
+        let writer = try FileHandle(forWritingTo: source)
+        try writer.truncate(atOffset: CloudMediaStaging.assetLimit)
+        try writer.close()
+        let tiny = root.appendingPathComponent("sdk-tiny")
+        try Data([9]).write(to: tiny)
+        let appRoot = root.appendingPathComponent("app-root/cloud-native-staging", isDirectory: true)
+        let defaultRoot = root.appendingPathComponent("default/MeguriCloudPayloads", isDirectory: true)
+        let app = try CloudMediaStaging(directory: appRoot)
+        let engine = try CloudMediaStaging(directory: defaultRoot)
+        #expect(app !== engine)
+        var adoption: CloudMediaStagedAsset? = try app.copyPayload(source, cancelled: { false })
+        var event: CloudMediaStagedAsset? = try engine.copy(source, cancelled: { false }, retainedAssetLimit: 256)
+        let adoptionURL = try #require(adoption?.url)
+        let eventURL = try #require(event?.url)
+        #expect(adoptionURL.deletingLastPathComponent().deletingLastPathComponent() == appRoot)
+        #expect(eventURL.deletingLastPathComponent().deletingLastPathComponent() == defaultRoot)
+        do {
+            let unexpected = try engine.copy(source, cancelled: { false }, retainedAssetLimit: 256)
+            withExtendedLifetime(unexpected) {}
+            Issue.record("aggregate byte limit was not enforced")
+        } catch CloudMediaFailure.stagingLimit {}
+        do {
+            let unexpected = try app.copyPayload(tiny, cancelled: { false })
+            withExtendedLifetime(unexpected) {}
+            Issue.record("aggregate count limit was not enforced")
+        } catch CloudMediaFailure.stagingLimit {}
+        adoption = nil
+        #expect(!FileManager.default.fileExists(atPath: adoptionURL.path))
+        #expect(FileManager.default.fileExists(atPath: eventURL.path))
+        var retry: CloudMediaStagedAsset? = try engine.copy(source, cancelled: { false }, retainedAssetLimit: 256)
+        let retryURL = try #require(retry?.url)
+        event = nil
+        retry = nil
+        #expect(!FileManager.default.fileExists(atPath: eventURL.path))
+        #expect(!FileManager.default.fileExists(atPath: retryURL.path))
+        var afterRelease: CloudMediaStagedAsset? = try app.copyPayload(tiny, cancelled: { false })
+        let finalURL = try #require(afterRelease?.url)
+        afterRelease = nil
+        #expect(!FileManager.default.fileExists(atPath: finalURL.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: appRoot.path).isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: defaultRoot.path).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: source.path))
+        #expect(FileManager.default.fileExists(atPath: tiny.path))
     }
 
     @Test func stagingOwnsNonemptyBytesAndRemovesOnlyItsRun() throws {

@@ -856,50 +856,7 @@ fn bridge_adoption_opaque_page_cursor_round_trips_and_deletions_abort_actual_hos
     let collection = fixture.workflow.host.collection().unwrap();
     let before = collection.generation();
     let connection = fixture.workflow.connection().unwrap();
-    let (preview, active) = adoption_preview(&connection);
-    connection.confirm_adoption(preview).unwrap();
-    let source_epoch = CloudControlRecord {
-        encrypted: Some(
-            control_codec::Epoch {
-                epoch_id: [8; 16],
-                record_key: [19; 32],
-                crt: NOW / 1000,
-                ver: 18,
-                state: control_codec::EpochState::Complete,
-                reason: control_codec::EpochReason::Initial,
-                published_at_ms: NOW,
-                counts: vec![],
-            }
-            .encode()
-            .unwrap(),
-        ),
-        system_fields: vec![2],
-    };
-    let root = CloudControlRecord {
-        encrypted: Some(
-            control_codec::MediaRoot {
-                media_key: [23; 32],
-                created_at_ms: NOW,
-            }
-            .encode()
-            .unwrap(),
-        ),
-        system_fields: vec![3],
-    };
-    for record in [active, source_epoch, root] {
-        let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
-            panic!("actual host adoption read")
-        };
-        assert!(matches!(action, CloudAdoptionAction::Read { .. }));
-        connection
-            .adoption_result(
-                handle,
-                CloudAdoptionResult::Read {
-                    read: CloudControlRead::Found { record },
-                },
-            )
-            .unwrap();
-    }
+    adoption_fetch_ready(&connection);
     let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
         panic!("actual stage page")
     };
@@ -1602,3 +1559,413 @@ fn server_retry_duration_uses_reply_clock_and_survives_actual_host_restart() {
 
 #[path = "cloud_connection_job_tests.rs"]
 mod jobs;
+
+// Real Host stage setup shared by the focused metadata/payload boundary tests.
+fn adoption_fetch_ready(connection: &CloudConnection) {
+    let (preview, active) = adoption_preview(connection);
+    connection.confirm_adoption(preview).unwrap();
+    let source_epoch = CloudControlRecord {
+        encrypted: Some(
+            control_codec::Epoch {
+                epoch_id: [8; 16],
+                record_key: [19; 32],
+                crt: NOW / 1000,
+                ver: 18,
+                state: control_codec::EpochState::Complete,
+                reason: control_codec::EpochReason::Initial,
+                published_at_ms: NOW,
+                counts: vec![],
+            }
+            .encode()
+            .unwrap(),
+        ),
+        system_fields: vec![2],
+    };
+    let root = CloudControlRecord {
+        encrypted: Some(
+            control_codec::MediaRoot {
+                media_key: [23; 32],
+                created_at_ms: NOW,
+            }
+            .encode()
+            .unwrap(),
+        ),
+        system_fields: vec![3],
+    };
+    for record in [active, source_epoch, root] {
+        let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
+            panic!("actual host adoption read")
+        };
+        assert!(matches!(action, CloudAdoptionAction::Read { .. }));
+        connection
+            .adoption_result(
+                handle,
+                CloudAdoptionResult::Read {
+                    read: CloudControlRead::Found { record },
+                },
+            )
+            .unwrap();
+    }
+}
+
+fn adoption_config_record(key: &[u8], external: bool) -> (CloudStagingRecord, Vec<u8>) {
+    use c::entity_codec as codec;
+    let mut val = if external {
+        vec![b'x'; codec::INLINE_ENVELOPE_BYTES + 16]
+    } else {
+        vec![b'x']
+    };
+    val.insert(0, b'"');
+    val.push(b'"');
+    let payload = codec::Payload::Config(codec::Config {
+        key: key.to_vec(),
+        mtime_secs: 1,
+        val,
+    });
+    let bytes = payload.encode().unwrap();
+    let entity = codec::Entity::build(
+        codec::EntityFields {
+            kind: codec::Kind::Config,
+            key: key.to_vec(),
+            origin: [1; 16],
+            erev: 1,
+            generation: None,
+            tombstone: false,
+            deleted_at_ms: 0,
+            writer: [2; 16],
+            base_sha256: None,
+        },
+        &bytes,
+    )
+    .unwrap();
+    assert_eq!(entity.payload.is_none(), external);
+    let name = codec::entity_name(&[19; 32], codec::Kind::Config, key).unwrap();
+    (
+        CloudStagingRecord {
+            name,
+            record_type: "MGEntity".into(),
+            record: CloudControlRecord {
+                encrypted: Some(entity.encode().unwrap()),
+                system_fields: vec![4],
+            },
+            payload_file: None,
+        },
+        bytes,
+    )
+}
+fn adoption_action(connection: &CloudConnection) -> (Arc<CloudAdoptionWork>, CloudAdoptionAction) {
+    let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
+        panic!("actual adoption work")
+    };
+    (handle, action)
+}
+
+#[test]
+fn adoption_metadata_stages_inline_and_fetches_external_serially_before_cursor_or_validate() {
+    for next in [None, Some(vec![5, 4, 3])] {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        adoption_fetch_ready(&connection);
+        let (inline, _) = adoption_config_record(b"inline", false);
+        let (one, one_bytes) = adoption_config_record(b"external-one", true);
+        let (two, two_bytes) = adoption_config_record(b"external-two", true);
+        let (page, action) = adoption_action(&connection);
+        assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: None, .. }));
+        connection
+            .adoption_result(
+                page,
+                CloudAdoptionResult::Page {
+                    records: vec![inline, one.clone(), two.clone()],
+                    deleted: vec![],
+                    next: next.clone(),
+                },
+            )
+            .unwrap();
+        for (mut expected, bytes) in [(one, one_bytes), (two, two_bytes)] {
+            let (handle, action) = adoption_action(&connection);
+            assert!(
+                matches!(action, CloudAdoptionAction::FetchPayload { ref name, expected: ref record, .. }
+                if name == &expected.name && record.encrypted == expected.record.encrypted && record.system_fields == expected.record.system_fields)
+            );
+            assert_eq!(
+                fixture.workflow.core.adoption_op().unwrap().unwrap().step,
+                c::adoption::AdoptStep::Staging
+            );
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), &bytes).unwrap();
+            expected.payload_file = Some(file.path().to_str().unwrap().into());
+            connection
+                .adoption_result(
+                    handle.clone(),
+                    CloudAdoptionResult::Payload {
+                        record: expected.clone(),
+                    },
+                )
+                .unwrap();
+            // A consumed work handle never admits a second outstanding intake.
+            assert!(
+                connection
+                    .adoption_result(handle, CloudAdoptionResult::Payload { record: expected })
+                    .is_err()
+            );
+            assert_eq!(std::fs::read(file.path()).unwrap(), bytes);
+        }
+        let (_, action) = adoption_action(&connection);
+        match next {
+            Some(cursor) => {
+                assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: Some(value), .. } if value == cursor))
+            }
+            None => assert!(matches!(action, CloudAdoptionAction::Validate)),
+        }
+        let status = connection.recovery_status().unwrap().unwrap();
+        connection.cancel_operation(status.operation).unwrap();
+        assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    }
+}
+
+#[test]
+fn adoption_repeated_name_stages_external_then_inline_and_inline_then_external_in_arrival_order() {
+    use c::entity_codec as codec;
+    use meguri_storage::raw::{PlainDatabase, RawValue};
+    for external_first in [true, false] {
+        let account = c::OpaqueBytes(b"synthetic-account-A".to_vec());
+        let identity = Arc::new(CachedIdentity(Mutex::new(Some(r::IdentityStatus::Available(
+            account.clone(),
+        )))));
+        let fixture = Fixture::with_identity(Keys::new([]), Some(identity.clone()));
+        let connection = fixture.workflow.connection().unwrap();
+        adoption_fetch_ready(&connection);
+        let (inline, inline_bytes) = adoption_config_record(b"repeated", false);
+        let (external, external_bytes) = adoption_config_record(b"repeated", true);
+        let (barrier, barrier_bytes) = adoption_config_record(b"barrier", true);
+        assert_eq!(inline.name, external.name);
+        let final_record = if external_first {
+            inline.clone()
+        } else {
+            external.clone()
+        };
+        let final_bytes = if external_first { &inline_bytes } else { &external_bytes };
+        let records = if external_first {
+            vec![external.clone(), inline, barrier.clone()]
+        } else {
+            vec![inline, external.clone(), barrier.clone()]
+        };
+        let (page, _) = adoption_action(&connection);
+        connection
+            .adoption_result(
+                page,
+                CloudAdoptionResult::Page {
+                    records,
+                    deleted: vec![],
+                    next: Some(vec![7, 8]),
+                },
+            )
+            .unwrap();
+        let (payload, action) = adoption_action(&connection);
+        assert!(matches!(action, CloudAdoptionAction::FetchPayload { ref name, .. } if name == &external.name));
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), &external_bytes).unwrap();
+        let mut returned = external;
+        returned.payload_file = Some(file.path().to_str().unwrap().into());
+        identity.set(r::IdentityStatus::ReadFailed);
+        failure_is(
+            connection.adoption_result(
+                payload,
+                CloudAdoptionResult::Payload {
+                    record: returned.clone(),
+                },
+            ),
+            CloudConnectionFailure::AccountUnavailable,
+        );
+        assert_eq!(
+            fixture.workflow.core.adoption_op().unwrap().unwrap().step,
+            c::adoption::AdoptStep::Staging
+        );
+        identity.set(r::IdentityStatus::Available(account));
+        let (restored, action) = adoption_action(&connection);
+        assert!(
+            matches!(action, CloudAdoptionAction::FetchPayload { ref name, expected: ref record, .. }
+            if name == &returned.name && record.encrypted == returned.record.encrypted
+                && record.system_fields == returned.record.system_fields)
+        );
+        connection
+            .adoption_result(restored, CloudAdoptionResult::Payload { record: returned })
+            .unwrap();
+        // The later record wins in both the staged row and retained envelope.
+        // Another external record holds the page cursor pending at this point.
+        let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+        assert_eq!(op.step, c::adoption::AdoptStep::Staging);
+        let directory = fixture._directory.path().join("collection").join(&op.staging_name);
+        let codec::Payload::Config(expected) = codec::Payload::decode(codec::Kind::Config, final_bytes).unwrap() else {
+            panic!("config payload")
+        };
+        let db = PlainDatabase::open(&directory.join("collection.anki2")).unwrap();
+        assert_eq!(
+            db.rows("SELECT val FROM config WHERE key = ?", &[RawValue::text("repeated")])
+                .unwrap(),
+            vec![vec![RawValue::Blob(expected.val)]]
+        );
+        db.close().unwrap();
+        let spool: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.join("incoming").join(&final_record.name)).unwrap())
+                .unwrap();
+        assert_eq!(
+            spool["envelope"],
+            serde_json::json!(final_record.record.encrypted.unwrap())
+        );
+        let (payload, action) = adoption_action(&connection);
+        assert!(matches!(action, CloudAdoptionAction::FetchPayload { ref name, .. } if name == &barrier.name));
+        std::fs::write(file.path(), &barrier_bytes).unwrap();
+        let mut returned = barrier;
+        returned.payload_file = Some(file.path().to_str().unwrap().into());
+        connection
+            .adoption_result(payload, CloudAdoptionResult::Payload { record: returned })
+            .unwrap();
+        assert!(matches!(adoption_action(&connection).1,
+            CloudAdoptionAction::Fetch { cursor: Some(cursor), .. } if cursor == vec![7, 8]));
+        connection
+            .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+            .unwrap();
+    }
+}
+
+#[test]
+fn adoption_failed_missing_changed_or_corrupt_payload_aborts_candidate_and_provisional_cursor() {
+    for failure in 0..6 {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        let before = fixture.workflow.host.collection().unwrap().generation();
+        adoption_fetch_ready(&connection);
+        let (record, bytes) = adoption_config_record(b"external", true);
+        let (page, _) = adoption_action(&connection);
+        connection
+            .adoption_result(
+                page,
+                CloudAdoptionResult::Page {
+                    records: vec![record.clone()],
+                    deleted: vec![],
+                    next: Some(vec![5]),
+                },
+            )
+            .unwrap();
+        let (handle, _) = adoption_action(&connection);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), &bytes).unwrap();
+        let mut returned = record;
+        returned.payload_file = Some(file.path().to_str().unwrap().into());
+        let reply = match failure {
+            0 => CloudAdoptionResult::Failed,
+            1 => {
+                returned.payload_file = None;
+                CloudAdoptionResult::Payload { record: returned }
+            }
+            2 => {
+                returned.record.system_fields.push(9);
+                CloudAdoptionResult::Payload { record: returned }
+            }
+            3 => {
+                returned.record.encrypted.as_mut().unwrap().push(9);
+                CloudAdoptionResult::Payload { record: returned }
+            }
+            4 => {
+                std::fs::write(file.path(), b"wrong-payload").unwrap();
+                CloudAdoptionResult::Payload { record: returned }
+            }
+            _ => CloudAdoptionResult::Read {
+                read: CloudControlRead::Failed,
+            },
+        };
+        assert!(connection.adoption_result(handle, reply).is_err());
+        assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+        assert!(connection.recovery_status().unwrap().is_none());
+        assert_eq!(fixture.workflow.host.collection().unwrap().generation(), before);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+    }
+}
+
+#[test]
+fn adoption_inline_metadata_selects_validate_and_oversized_metadata_aborts() {
+    for variant in 0..3 {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        adoption_fetch_ready(&connection);
+        let (mut record, _) = adoption_config_record(b"inline", false);
+        let records = match variant {
+            0 => vec![record],
+            1 => vec![record; 33],
+            _ => {
+                record.record.system_fields = vec![1; 32 * 1024 * 1024];
+                vec![record]
+            }
+        };
+        let (page, _) = adoption_action(&connection);
+        let result = connection.adoption_result(
+            page,
+            CloudAdoptionResult::Page {
+                records,
+                deleted: vec![],
+                next: None,
+            },
+        );
+        if variant == 0 {
+            result.unwrap();
+            assert!(matches!(adoption_action(&connection).1, CloudAdoptionAction::Validate));
+            connection
+                .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+                .unwrap();
+        } else {
+            assert!(result.is_err());
+            assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn adoption_pending_payload_cancel_and_late_page_failure_keep_old_collection() {
+    for pending_payload in [false, true] {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        let before = fixture.workflow.host.collection().unwrap().generation();
+        adoption_fetch_ready(&connection);
+        let (page, _) = adoption_action(&connection);
+        if pending_payload {
+            let (record, _) = adoption_config_record(b"external", true);
+            connection
+                .adoption_result(
+                    page,
+                    CloudAdoptionResult::Page {
+                        records: vec![record],
+                        deleted: vec![],
+                        next: Some(vec![5]),
+                    },
+                )
+                .unwrap();
+            let (handle, action) = adoption_action(&connection);
+            assert!(matches!(action, CloudAdoptionAction::FetchPayload { .. }));
+            connection
+                .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+                .unwrap();
+            assert!(connection.adoption_result(handle, CloudAdoptionResult::Failed).is_err());
+        } else {
+            // A later fetch failure must discard earlier staged input.
+            let (record, _) = adoption_config_record(b"inline", false);
+            connection
+                .adoption_result(
+                    page,
+                    CloudAdoptionResult::Page {
+                        records: vec![record],
+                        deleted: vec![],
+                        next: Some(vec![5]),
+                    },
+                )
+                .unwrap();
+            let (handle, action) = adoption_action(&connection);
+            assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: Some(_), .. }));
+            assert!(connection.adoption_result(handle, CloudAdoptionResult::Failed).is_err());
+        }
+        assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+        assert!(connection.recovery_status().unwrap().is_none());
+        assert_eq!(fixture.workflow.host.collection().unwrap().generation(), before);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+    }
+}

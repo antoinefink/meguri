@@ -18,9 +18,32 @@ public final class CloudMediaStagedAsset: Sendable {
     deinit { release() }
 }
 
-/// Files live on the caller's media volume. The executor admits one read at a
-/// time; this shared reservation also bounds multiple users of the same seam.
+/// Files live on the caller's media volume. Production allocators share byte
+/// and count reservations while retaining their own directories and leases.
 public final class CloudMediaStaging: Sendable {
+    final class Reservations: Sendable {
+        fileprivate struct State { var bytes: UInt64 = 0; var active = 0 }
+        fileprivate let state = Mutex(State())
+    }
+    private static let productionReservations = Reservations()
+    private static let shared = Mutex<CloudMediaStaging?>(nil)
+    static func sharedDefault() throws -> CloudMediaStaging {
+        try initializedDefault(in: shared) {
+            try CloudMediaStaging(directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("MeguriCloudPayloads", isDirectory: true))
+        }
+    }
+    // Cache only a successful local initialization. A later caller can try again
+    // after a filesystem failure; no CloudKit operation is submitted here.
+    static func initializedDefault(in cache: borrowing Mutex<CloudMediaStaging?>,
+                                   create: () throws -> CloudMediaStaging) throws -> CloudMediaStaging {
+        try cache.withLock { value in
+            if let value { return value }
+            let staging = try create()
+            value = staging
+            return staging
+        }
+    }
     static let assetLimit: UInt64 = 100 * 1_024 * 1_024
     static let reserve: UInt64 = 512 * 1_024 * 1_024
     static let stagedLimit: UInt64 = 256 * 1_024 * 1_024
@@ -29,11 +52,11 @@ public final class CloudMediaStaging: Sendable {
     enum SourceReadBoundary { case open, read(FileHandle) }
     // Internal fault seam: observes real source operations, never supplies bytes.
     private let beforeSourceRead: (@Sendable (URL, SourceReadBoundary) throws -> Void)?
-    private struct State { var bytes: UInt64 = 0; var active = 0 }
-    private let state = Mutex(State())
+    private let reservations: Reservations
     public init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         self.directory = directory
+        reservations = Self.productionReservations
         beforeSourceRead = nil
         available = {
             let values = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
@@ -41,10 +64,14 @@ public final class CloudMediaStaging: Sendable {
             return UInt64(capacity)
         }
     }
+    // Injected filesystem tests get an isolated owner unless they explicitly
+    // share one to exercise reservation accounting across directories.
     init(directory: URL, available: @Sendable @escaping () throws -> UInt64,
+         reservations: Reservations = Reservations(),
          beforeSourceRead: (@Sendable (URL, SourceReadBoundary) throws -> Void)? = nil) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         self.directory = directory; self.available = available
+        self.reservations = reservations
         self.beforeSourceRead = beforeSourceRead
     }
     func copy(_ source: URL, cancelled: @Sendable () -> Bool, retainedAssetLimit: Int = 2) throws -> CloudMediaStagedAsset {
@@ -60,7 +87,7 @@ public final class CloudMediaStaging: Sendable {
         }
     }
 
-    // Only fetched pa intake uses source failures to omit one entry's file.
+    // Fetched pa intake distinguishes source failures from destination failures.
     func copyPayload(_ source: URL, cancelled: @Sendable () -> Bool, retainedAssetLimit: Int = 2) throws -> CloudMediaStagedAsset {
         if cancelled() { throw CancellationError() }
         let values = try sourceOperation {
@@ -70,7 +97,7 @@ public final class CloudMediaStaging: Sendable {
         let size = UInt64(length)
         guard size <= Self.assetLimit else { throw CloudMediaSourceFailure.invalidSize }
         guard try available() >= Self.reserve + size else { throw CloudMediaFailure.noSpace }
-        try state.withLock { value in
+        try reservations.state.withLock { value in
             guard value.active < retainedAssetLimit, value.bytes <= Self.stagedLimit - size else { throw CloudMediaFailure.stagingLimit }
             value.bytes += size; value.active += 1
         }
@@ -80,7 +107,7 @@ public final class CloudMediaStaging: Sendable {
         defer {
             if !retained {
                 try? FileManager.default.removeItem(at: run)
-                state.withLock { $0.bytes -= size; $0.active -= 1 }
+                reservations.state.withLock { $0.bytes -= size; $0.active -= 1 }
             }
         }
         try FileManager.default.createDirectory(at: run, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -111,7 +138,7 @@ public final class CloudMediaStaging: Sendable {
         retained = true
         return CloudMediaStagedAsset(url: target) { [self] in
             try? FileManager.default.removeItem(at: run)
-            state.withLock { $0.bytes -= size; $0.active -= 1 }
+            reservations.state.withLock { $0.bytes -= size; $0.active -= 1 }
         }
     }
 

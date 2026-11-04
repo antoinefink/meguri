@@ -9,16 +9,21 @@ use support::*;
 
 #[test]
 fn fetched_empty_media_collection_replaces_local_and_reopens_with_its_safety_package() {
-    collection_adoption(false);
+    collection_adoption(false, false);
 }
 
 /// K3/K7/K18.4/K20, V14: ordinary adapter pa bytes survive first adoption.
 #[test]
 fn fetched_ordinary_note_payload_asset_replaces_local_and_reopens_acked_and_reviewable() {
-    collection_adoption(true);
+    collection_adoption(true, false);
 }
 
-fn collection_adoption(with_payload_asset: bool) {
+#[test]
+fn metadata_first_ordinary_payload_adoption_reopens_acked_and_reviewable() {
+    collection_adoption(true, true);
+}
+
+fn collection_adoption(with_payload_asset: bool, metadata_first: bool) {
     let mut pair = Pair::published();
     let large_note = with_payload_asset.then(|| {
         let id = notes(&mut pair.sender)[0].id;
@@ -33,6 +38,9 @@ fn collection_adoption(with_payload_asset: bool) {
     // Key provider refuses every draw, including after relaunch.
     pair.receiver.close_clean().unwrap();
     pair.receiver = online(&pair.receiver_dir, false);
+    if metadata_first {
+        pair.receiver.use_metadata_first_adoption();
+    }
     let before = pair.receiver.facts().unwrap();
     let local = pair.receiver.driver().collection_rows().unwrap();
     let remote = pair.sender.driver().collection_rows().unwrap();

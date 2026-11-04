@@ -134,9 +134,9 @@ public enum CloudPublicationResult: Sendable {
     }
 }
 public enum CloudAdoptionAction: Sendable {
-    case read(CloudControlTarget), fetch(zone: String, cursor: Data?), validate, activate
+    case read(CloudControlTarget), fetch(zone: String, cursor: Data?), fetchPayload(zone: String, name: String, expected: CloudControlRecord), validate, activate
     init(_ v: MeguriCoreBindings.CloudAdoptionAction) {
-        self = switch v { case .read(let t): .read(.init(t)); case .fetch(let z, let c): .fetch(zone: z, cursor: c); case .validate: .validate; case .activate: .activate }
+        self = switch v { case .read(let t): .read(.init(t)); case .fetch(let z, let c): .fetch(zone: z, cursor: c); case .fetchPayload(let z, let n, let e): .fetchPayload(zone: z, name: n, expected: .init(encrypted: e.encrypted, systemFields: e.systemFields)); case .validate: .validate; case .activate: .activate }
     }
 }
 public struct CloudStagingRecord: Sendable {
@@ -158,10 +158,12 @@ public struct CloudStagingRecord: Sendable {
     var raw: MeguriCoreBindings.CloudStagingRecord { .init(name: name, recordType: recordType, record: record.raw, payloadFile: payloadFile?.path) }
 }
 public enum CloudAdoptionResult: Sendable {
+    case failed
+    case payload(CloudStagingRecord)
     case read(CloudControlRead)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
     var raw: MeguriCoreBindings.CloudAdoptionResult {
-        switch self { case .read(let r): .read(read: r.raw); case .page(let r, let d, let n): .page(records: r.map(\.raw), deleted: d, next: n) }
+        switch self { case .failed: .failed; case .payload(let r): .payload(record: r.raw); case .read(let r): .read(read: r.raw); case .page(let r, let d, let n): .page(records: r.map(\.raw), deleted: d, next: n) }
     }
     /// Keep the concrete staging projection alive across the awaited lane.
     /// Capturing raw paths alone would allow ARC to release native file leases.
