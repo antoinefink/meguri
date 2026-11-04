@@ -345,6 +345,255 @@ struct DebugCloudPreviewProbeTests {
         #expect(work.latestTag == "progressed")
     }
 
+    @Test func adoptionPagesAccumulateAcrossWorkAttempts() {
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        owner.reset(in: work)
+        for records in [3, 0, 7] {
+            let attempt = work.begin()
+            let session = owner.capture()
+            work.pageEnqueued(session: session)
+            work.enter(.adoptionPageReply, attempt: attempt)
+            work.pageReplied(session: session, recordCount: records)
+            work.enter(.adoptionPageResult, attempt: attempt)
+            work.finish(attempt, progress: .progressed)
+        }
+        #expect(work.adoptionProgressTag == "pagesEnqueued:3;pageRepliesReceived:3;recordsReturned:10")
+        #expect(work.latestTag == "progressed")
+        #expect(work.lastEnteredWorkStageTag == "adoptionPageResult")
+    }
+
+    @Test func newAdoptionResetsCountersWithoutResettingAttemptTags() {
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        owner.reset(in: work)
+        let session = owner.capture()
+        let attempt = work.begin()
+        work.pageEnqueued(session: session)
+        work.pageReplied(session: session, recordCount: 59_000)
+        work.enter(.adoptionPageResult, attempt: attempt)
+        work.finish(attempt, progress: .progressed)
+        owner.reset(in: work)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0")
+        #expect(work.latestTag == "progressed")
+        #expect(work.lastEnteredWorkStageTag == "adoptionPageResult")
+        work.pageEnqueued(session: owner.capture())
+        work.pageReplied(session: owner.capture(), recordCount: 2)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:2")
+    }
+
+    @Test func busyAndRejectedWorkAttemptsDoNotResetAdoption() {
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        owner.reset(in: work)
+        let session = owner.capture()
+        work.pageEnqueued(session: session)
+        work.pageReplied(session: session, recordCount: 4)
+        for failure in [CloudOwnTransportFailure.busy, .queueRejected] {
+            let attempt = work.begin()
+            work.fail(attempt, error: failure)
+            #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:4")
+        }
+        work.pageEnqueued(session: session)
+        work.pageReplied(session: session, recordCount: 5)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:2;pageRepliesReceived:2;recordsReturned:9")
+    }
+
+    @Test func lateRepliesAndOldConnectionSessionsCannotUpdateNewAdoption() {
+        let work = DebugCloudPreviewProbe()
+        let original = DebugCloudPreviewProbe.AdoptionSession()
+        original.reset(in: work)
+        let beforeNewAdoption = original.capture()
+        original.reset(in: work)
+        work.pageEnqueued(session: beforeNewAdoption)
+        work.pageReplied(session: beforeNewAdoption, recordCount: 99)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0")
+
+        let attached = DebugCloudPreviewProbe.AdoptionSession()
+        attached.reset(in: work)
+        work.pageEnqueued(session: attached.capture())
+        work.pageReplied(session: attached.capture(), recordCount: 6)
+        work.pageEnqueued(session: original.capture())
+        work.pageReplied(session: original.capture(), recordCount: 100)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:6")
+    }
+
+    @Test func pageReplyCountsRecordsExactlyAndDoesNotImplyCoreIntake() {
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        work.pageEnqueued(session: owner.capture())
+        work.pageReplied(session: owner.capture(), recordCount: 12)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0")
+        owner.reset(in: work)
+        let session = owner.capture()
+        work.pageEnqueued(session: session)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:0;recordsReturned:0")
+        // Only the count crosses the probe, including any epoch/control records.
+        work.pageReplied(session: session, recordCount: 3)
+        let attempt = work.begin()
+        work.fail(attempt, error: BridgeError.internal("synthetic"))
+        #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:3")
+        work.pageEnqueued(session: session)
+        work.pageReplied(session: session, recordCount: 0)
+        #expect(work.adoptionProgressTag == "pagesEnqueued:2;pageRepliesReceived:2;recordsReturned:3")
+    }
+
+    @Test func adoptionCountersSaturateWithoutOverflow() {
+        var counters = DebugCloudPreviewProbe.AdoptionCounters(
+            pagesEnqueued: .max - 1, pageRepliesReceived: .max - 1, recordsReturned: .max - 2)
+        counters.enqueue()
+        counters.reply(recordCount: 1)
+        #expect(counters.pagesEnqueued == .max)
+        #expect(counters.pageRepliesReceived == .max)
+        #expect(counters.recordsReturned == UInt64.max - 1)
+        counters.enqueue()
+        counters.reply(recordCount: Int.max)
+        counters.enqueue()
+        counters.reply(recordCount: 1)
+        #expect(counters.pagesEnqueued == .max)
+        #expect(counters.pageRepliesReceived == .max)
+        #expect(counters.recordsReturned == .max)
+    }
+
+    @Test func adoptionProgressAndResetNotifyObserverThatSynchronouslyRereads() {
+        final class CallbackState: Sendable {
+            let value = Mutex<(calls: Int, tag: String?)>((0, nil))
+        }
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        owner.reset(in: work)
+        let session = owner.capture()
+        let mutations: [() -> Void] = [
+            { work.pageEnqueued(session: session) },
+            { work.pageReplied(session: session, recordCount: 8) },
+            { owner.reset(in: work) }
+        ]
+        let expected = [
+            "pagesEnqueued:1;pageRepliesReceived:0;recordsReturned:0",
+            "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:8",
+            "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0"
+        ]
+        for (mutate, finalTag) in zip(mutations, expected) {
+            let callback = CallbackState()
+            let before = withObservationTracking {
+                work.adoptionProgressTag
+            } onChange: {
+                let tag = work.adoptionProgressTag
+                callback.value.withLock { $0.calls += 1; $0.tag = tag }
+            }
+            mutate()
+            let observed = callback.value.withLock { $0 }
+            #expect(observed.calls == 1)
+            #expect(observed.tag == before || observed.tag == finalTag)
+            #expect(work.adoptionProgressTag == finalTag)
+        }
+    }
+
+    @Test func adoptionFailureRetainsExactTypedDetailAcrossFollowups() {
+        let categories: [(CloudAdoptionFailureDiagnostic.Category?, CloudAdoptionFailureDiagnostic.Category?, String)] = [
+            (.validation, nil, "adoptionPrimary:validation;adoptionCleanup:none"),
+            (nil, .fileIdentityUnavailable, "adoptionPrimary:none;adoptionCleanup:fileIdentityUnavailable"),
+            (.validation, .fileIdentityUnavailable, "adoptionPrimary:validation;adoptionCleanup:fileIdentityUnavailable")
+        ]
+        for (primary, cleanup, suffix) in categories {
+            let work = DebugCloudPreviewProbe()
+            let owner = DebugCloudPreviewProbe.AdoptionSession()
+            owner.reset(in: work)
+            let session = owner.capture()
+            let original = CloudAdoptionFailureDiagnostic(
+                task: .fetchPayload, lastEnteredStage: .receivedValidation,
+                primaryCategory: primary, cleanupCategory: cleanup)
+            work.recordAdoptionFailure(original, session: session)
+            let expected = "adoptionTask:fetchPayload;adoptionLastEnteredStage:receivedValidation;\(suffix)"
+            #expect(work.adoptionFailureTag == expected)
+            let followup = work.begin()
+            work.enter(.adoptionPageFailureResult, attempt: followup)
+            work.fail(followup, error: BridgeError.cloudConnection(.tracking))
+            work.recordAdoptionFailure(.init(task: .fetch, lastEnteredStage: .transport,
+                primaryCategory: .transport, cleanupCategory: .tracking), session: session)
+            #expect(work.adoptionFailureTag == expected)
+            #expect(expected.count < 256)
+            #expect(work.adoptionProgressTag == "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0")
+        }
+    }
+
+    @Test func adoptionFailureRejectsStaleAndOldConnectionSessions() {
+        let work = DebugCloudPreviewProbe()
+        let original = DebugCloudPreviewProbe.AdoptionSession()
+        let failure = CloudAdoptionFailureDiagnostic(task: .fetch, lastEnteredStage: .rowStage,
+            primaryCategory: .tracking, cleanupCategory: nil)
+        work.recordAdoptionFailure(failure, session: original.capture())
+        #expect(work.adoptionFailureTag == nil)
+        original.reset(in: work)
+        let stale = original.capture()
+        original.reset(in: work)
+        work.recordAdoptionFailure(failure, session: stale)
+        #expect(work.adoptionFailureTag == nil)
+        let attached = DebugCloudPreviewProbe.AdoptionSession()
+        attached.reset(in: work)
+        work.recordAdoptionFailure(failure, session: original.capture())
+        #expect(work.adoptionFailureTag == nil)
+        work.recordAdoptionFailure(failure, session: attached.capture())
+        let expected = "adoptionTask:fetch;adoptionLastEnteredStage:rowStage;adoptionPrimary:tracking;adoptionCleanup:none"
+        #expect(work.adoptionFailureTag == expected)
+        work.recordAdoptionFailure(.init(task: .activate, lastEnteredStage: .authority,
+            primaryCategory: .authorityChanged, cleanupCategory: .cancelled), session: stale)
+        #expect(work.adoptionFailureTag == expected)
+    }
+
+    @Test func adoptionSessionResetClearsFailureAndCountersTogether() {
+        let work = DebugCloudPreviewProbe()
+        let original = DebugCloudPreviewProbe.AdoptionSession()
+        original.reset(in: work)
+        let failure = CloudAdoptionFailureDiagnostic(task: .fetch, lastEnteredStage: .pageAdvance,
+            primaryCategory: .engine, cleanupCategory: .tracking)
+        for owner in [original, DebugCloudPreviewProbe.AdoptionSession()] {
+            let session = original.capture()
+            work.pageEnqueued(session: session)
+            work.pageReplied(session: session, recordCount: 9)
+            work.recordAdoptionFailure(failure, session: session)
+            #expect(work.adoptionFailureTag != nil)
+            #expect(work.adoptionProgressTag == "pagesEnqueued:1;pageRepliesReceived:1;recordsReturned:9")
+            owner.reset(in: work)
+            #expect(work.adoptionFailureTag == nil)
+            #expect(work.adoptionProgressTag == "pagesEnqueued:0;pageRepliesReceived:0;recordsReturned:0")
+        }
+    }
+
+    @Test func adoptionFailureAndResetNotifyObserverThatSynchronouslyRereads() {
+        final class CallbackState: Sendable {
+            let value = Mutex<(calls: Int, tag: String?)>((0, nil))
+        }
+        let work = DebugCloudPreviewProbe()
+        let owner = DebugCloudPreviewProbe.AdoptionSession()
+        owner.reset(in: work)
+        let session = owner.capture()
+        let failure = CloudAdoptionFailureDiagnostic(task: .fetch, lastEnteredStage: .pageSpace,
+            primaryCategory: .incomplete, cleanupCategory: nil)
+        let mutations: [() -> Void] = [
+            { work.recordAdoptionFailure(failure, session: session) },
+            { owner.reset(in: work) }
+        ]
+        let expected: [String?] = [
+            "adoptionTask:fetch;adoptionLastEnteredStage:pageSpace;adoptionPrimary:incomplete;adoptionCleanup:none", nil
+        ]
+        for (mutate, finalTag) in zip(mutations, expected) {
+            let callback = CallbackState()
+            let before = withObservationTracking {
+                work.adoptionFailureTag
+            } onChange: {
+                let tag = work.adoptionFailureTag
+                _ = work.adoptionProgressTag
+                callback.value.withLock { $0.calls += 1; $0.tag = tag }
+            }
+            mutate()
+            let observed = callback.value.withLock { $0 }
+            #expect(observed.calls == 1)
+            #expect(observed.tag == before || observed.tag == finalTag)
+            #expect(work.adoptionFailureTag == finalTag)
+        }
+    }
+
     private func expectTag(_ error: any Error, expected: String, sentinel: String? = nil) {
         let tag = DebugCloudPreviewProbe.classify(error)
         let classificationMatches = tag == expected

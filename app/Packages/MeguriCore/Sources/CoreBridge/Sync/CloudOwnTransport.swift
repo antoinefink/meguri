@@ -38,8 +38,41 @@ public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
 #if DEBUG
-/// Temporary, memory-only diagnosis. Each instance stores one attempt and bounded safe tags.
+/// Temporary, memory-only diagnosis: one attempt and bounded adoption counters.
 public final class DebugCloudPreviewProbe: Observable, Sendable {
+    /// Retained by one connection, never derived from an FFI wrapper's identity.
+    final class AdoptionSession: Sendable {
+        private let current = Mutex<UUID?>(nil)
+
+        func reset(in probe: DebugCloudPreviewProbe) {
+            let session = probe.beginAdoption()
+            current.withLock { $0 = session }
+        }
+
+        func capture() -> UUID? { current.withLock { $0 } }
+    }
+
+    struct AdoptionCounters: Equatable, Sendable {
+        var pagesEnqueued: UInt64 = 0
+        var pageRepliesReceived: UInt64 = 0
+        var recordsReturned: UInt64 = 0
+
+        mutating func enqueue() { pagesEnqueued = Self.add(1, to: pagesEnqueued) }
+        mutating func reply(recordCount: Int) {
+            pageRepliesReceived = Self.add(1, to: pageRepliesReceived)
+            recordsReturned = Self.add(UInt64(clamping: recordCount), to: recordsReturned)
+        }
+
+        private static func add(_ count: UInt64, to value: UInt64) -> UInt64 {
+            let (sum, overflow) = value.addingReportingOverflow(count)
+            return overflow ? .max : sum
+        }
+
+        var tag: String {
+            "pagesEnqueued:\(pagesEnqueued);pageRepliesReceived:\(pageRepliesReceived);recordsReturned:\(recordsReturned)"
+        }
+    }
+
     enum WorkStage: CaseIterable, Equatable, Sendable {
         case nextPublicationWork, performLocal
         case adoptionControlRead, adoptionControlResult
@@ -67,6 +100,7 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     public static let ownWork = DebugCloudPreviewProbe()
     private let changes = ObservationRegistrar()
     private let latest = Mutex<(attempt: UUID, tag: String, stage: WorkStage?)?>(nil)
+    private let adoption = Mutex<(session: UUID?, counters: AdoptionCounters, failure: CloudAdoptionFailureDiagnostic?)>((nil, .init(), nil))
 
     init() {}
 
@@ -79,6 +113,56 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     public var lastEnteredWorkStageTag: String? {
         changes.access(self, keyPath: \.lastEnteredWorkStageTag)
         return latest.withLock { $0?.stage?.tag }
+    }
+
+    /// Transport facts only, including control records; no Core validation or
+    /// cursor advancement is implied. Independent of the per-run attempt reset.
+    public var adoptionProgressTag: String {
+        changes.access(self, keyPath: \.adoptionProgressTag)
+        return adoption.withLock { $0.counters.tag }
+    }
+
+    /// First original typed failure in this adoption, independent of later work.
+    public var adoptionFailureTag: String? {
+        changes.access(self, keyPath: \.adoptionFailureTag)
+        return adoption.withLock {
+            guard let failure = $0.failure else { return nil }
+            return "adoptionTask:\(failure.task.rawValue);adoptionLastEnteredStage:\(failure.lastEnteredStage.rawValue);adoptionPrimary:\(failure.primaryCategory?.rawValue ?? "none");adoptionCleanup:\(failure.cleanupCategory?.rawValue ?? "none")"
+        }
+    }
+
+    private func beginAdoption() -> UUID {
+        let session = UUID()
+        changes.withMutation(of: self, keyPath: \.adoptionProgressTag) {
+            changes.withMutation(of: self, keyPath: \.adoptionFailureTag) {
+                adoption.withLock { $0 = (session, .init(), nil) }
+            }
+        }
+        return session
+    }
+
+    func recordAdoptionFailure(_ diagnostic: CloudAdoptionFailureDiagnostic, session: UUID?) {
+        changes.withMutation(of: self, keyPath: \.adoptionFailureTag) {
+            adoption.withLock {
+                if session != nil, $0.session == session, $0.failure == nil { $0.failure = diagnostic }
+            }
+        }
+    }
+
+    func pageEnqueued(session: UUID?) {
+        changes.withMutation(of: self, keyPath: \.adoptionProgressTag) {
+            adoption.withLock {
+                if session != nil, $0.session == session { $0.counters.enqueue() }
+            }
+        }
+    }
+
+    func pageReplied(session: UUID?, recordCount: Int) {
+        changes.withMutation(of: self, keyPath: \.adoptionProgressTag) {
+            adoption.withLock {
+                if session != nil, $0.session == session { $0.counters.reply(recordCount: recordCount) }
+            }
+        }
     }
 
     func begin() -> UUID {
@@ -373,6 +457,11 @@ public actor CloudOwnExecutor {
     private func executeNext(admission: CloudOwnWorkAdmission?,
                              beforeActivation: (@Sendable () async throws -> Void)?,
                              afterActivation: (@Sendable () async -> Void)?) async throws -> CloudConnectionProgress {
+        #if DEBUG
+        // Capture from the retained connection before any work suspension. A
+        // new adoption/attachment invalidates this token, including late replies.
+        let adoptionSession = core.debugAdoptionSession.capture()
+        #endif
         try admission?.check()
         #if DEBUG
         recordWorkStage(.nextPublicationWork)
@@ -461,10 +550,14 @@ public actor CloudOwnExecutor {
                     try checkStopping()
                     guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                     #if DEBUG
+                    DebugCloudPreviewProbe.ownWork.pageEnqueued(session: adoptionSession)
                     recordWorkStage(.adoptionPageReply)
                     #endif
                     let reply = try await op.reply(); prepared = nil
                     guard case .page(let records, let deleted, let next) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
+                    #if DEBUG
+                    DebugCloudPreviewProbe.ownWork.pageReplied(session: adoptionSession, recordCount: records.count)
+                    #endif
                     try checkStopping()
                     try admission?.check()
                     #if DEBUG

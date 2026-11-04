@@ -359,6 +359,9 @@ public final class SyncCoordinator {
         retainedRecoveryStart = nil
         switch result {
         case .success(let status):
+            #if DEBUG
+            backend.connection?.debugResetAdoptionProgress()
+            #endif
             recovery = status
             if status != nil { retainedRecoveryStart = (backend, generation, revision) }
         case .failure:

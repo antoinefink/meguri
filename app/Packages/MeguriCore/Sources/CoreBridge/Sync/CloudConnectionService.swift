@@ -15,6 +15,9 @@ private struct CloudConnectionJobValue<Value: Sendable>: Sendable {
     let handle: MeguriCoreBindings.JobHandle
     let read: @Sendable () throws -> Value?
     let adoptionResult: MeguriCoreBindings.CloudAdoptionAppliedResult?
+    #if DEBUG
+    var debugAdoptionSession: UUID?
+    #endif
     init(handle: MeguriCoreBindings.JobHandle,
          adoptionResult: MeguriCoreBindings.CloudAdoptionAppliedResult? = nil,
          read: @escaping @Sendable () throws -> Value?) {
@@ -30,6 +33,15 @@ public actor CoreCloudConnectionService {
     private let onJobQueued: @Sendable () -> Void
     private let raw: MeguriCoreBindings.CloudConnection
     private let track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob
+    #if DEBUG
+    nonisolated let debugAdoptionSession = DebugCloudPreviewProbe.AdoptionSession()
+
+    /// Only successful confirmation or validated recovery attachment starts a
+    /// diagnostic session. Ordinary work/status reads must never reset it.
+    public nonisolated func debugResetAdoptionProgress() {
+        debugAdoptionSession.reset(in: .ownWork)
+    }
+    #endif
     init(_ raw: MeguriCoreBindings.CloudConnection,
          onJobQueued: @escaping @Sendable () -> Void = {},
          track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }) {
@@ -49,11 +61,15 @@ public actor CoreCloudConnectionService {
                 job = try await Jobs.trackDraining(started.handle, setup: track)
             } catch {
                 // trackDraining has already drained on listener setup failure.
-                await recordAdoptionFailure(started.adoptionResult)
+                #if DEBUG
+                await recordAdoptionFailure(started.adoptionResult, session: started.debugAdoptionSession)
+                #endif
                 throw error
             }
             let outcome = await job.outcome()
-            await recordAdoptionFailure(started.adoptionResult)
+            #if DEBUG
+            await recordAdoptionFailure(started.adoptionResult, session: started.debugAdoptionSession)
+            #endif
             // The permit and payload leases survive setup failure and terminal
             // drain. Cancellation of a waiting Task cannot drop a predecessor.
             if let value = try await MaintenanceLane.shared.call(resultName, started.read) {
@@ -71,17 +87,18 @@ public actor CoreCloudConnectionService {
         }
     }
 
-    private func recordAdoptionFailure(_ result: MeguriCoreBindings.CloudAdoptionAppliedResult?) async {
-        #if DEBUG
+    #if DEBUG
+    private func recordAdoptionFailure(_ result: MeguriCoreBindings.CloudAdoptionAppliedResult?, session: UUID?) async {
         guard let result else { return }
         // Best effort: a diagnostic read must never replace the original error.
         if let diagnostic = try? await MaintenanceLane.shared.call(.cloudAdoptionFailureDiagnostic, {
             try result.failureDiagnostic().map(CloudAdoptionFailureDiagnostic.init)
         }) {
+            DebugCloudPreviewProbe.ownWork.recordAdoptionFailure(diagnostic, session: session)
             DebugCloudDiagnostics.recordAdoptionFailure(diagnostic)
         }
-        #endif
     }
+    #endif
 
     public func localPublicationInformation(generation: UInt64) async throws(BridgeError) -> LocalPublicationInformation {
         try await MaintenanceLane.shared.call(.cloudConnectionLocalPublicationInformation) { [raw] in
@@ -110,7 +127,16 @@ public actor CoreCloudConnectionService {
     }
     public func confirmAdoption(_ preview: CloudConnectionPreview) async throws -> CloudRecoveryOperation {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudConnectionConfirmAdoption) { [raw] in CloudRecoveryOperation(raw: try raw.confirmAdoption(preview: preview.raw)) }
+        #if DEBUG
+        let session = debugAdoptionSession
+        #endif
+        return try await MaintenanceLane.shared.call(.cloudConnectionConfirmAdoption) { [raw] in
+            let operation = CloudRecoveryOperation(raw: try raw.confirmAdoption(preview: preview.raw))
+            #if DEBUG
+            session.reset(in: .ownWork)
+            #endif
+            return operation
+        }
     }
     /// Rust consumes and revalidates the retained preview, commits activation,
     /// removes the cursor and settles/reconciles before this returns.
@@ -143,12 +169,23 @@ public actor CoreCloudConnectionService {
     }
     public func adoptionResult(_ handle: CloudAdoptionWork, result: CloudAdoptionResult) async throws {
         let raw = self.raw
+        #if DEBUG
+        // Bind this exact result job before lease preparation or order awaits.
+        let adoptionSession = debugAdoptionSession.capture()
+        #endif
         try await result.withRaw { value in
             // Keep every native payload/staging lease through admission,
             // listener setup (including failure drain), terminal and typed read.
             let _: MeguriCoreBindings.CloudAdoptionApplied = try await run(.cloudConnectionStartAdoptionResult, result: .cloudAdoptionAppliedResult) { [raw] in
                 let started = try raw.startAdoptionResult(handle: handle.raw, result: value)
-                return CloudConnectionJobValue(handle: started.handle, adoptionResult: started.result, read: { try started.result.result() })
+                let job = CloudConnectionJobValue(handle: started.handle, adoptionResult: started.result, read: { try started.result.result() })
+                #if DEBUG
+                var diagnosticJob = job
+                diagnosticJob.debugAdoptionSession = adoptionSession
+                return diagnosticJob
+                #else
+                return job
+                #endif
             }
         }
     }

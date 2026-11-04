@@ -77,7 +77,9 @@ public struct CloudConnectionView: View {
                         .accessibilityIdentifier("sync.connect.operationError")
                         #if DEBUG
                         .accessibilityValue((DebugCloudDiagnostics.latestValue ?? DebugCloudPreviewProbe.shared.latestTag)
-                            + (DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag.map { ";ownWorkLastEnteredStage:\($0)" } ?? ""))
+                            + (DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag.map { ";ownWorkLastEnteredStage:\($0)" } ?? "")
+                            + ";\(DebugCloudPreviewProbe.ownWork.adoptionProgressTag)"
+                            + (DebugCloudPreviewProbe.ownWork.adoptionFailureTag.map { ";\($0)" } ?? ""))
                         #endif
                 }
             }
@@ -85,7 +87,8 @@ public struct CloudConnectionView: View {
                 ProgressView(SyncText.value("sync.connect.downloading"))
                     .accessibilityIdentifier("sync.connect.download")
                     #if DEBUG
-                    .accessibilityValue("preview:\(DebugCloudPreviewProbe.shared.latestTag);work:\(DebugCloudPreviewProbe.ownWork.latestTag)")
+                    .accessibilityValue("preview:\(DebugCloudPreviewProbe.shared.latestTag);work:\(DebugCloudPreviewProbe.ownWork.latestTag);\(DebugCloudPreviewProbe.ownWork.adoptionProgressTag)"
+                        + (DebugCloudPreviewProbe.ownWork.adoptionFailureTag.map { ";\($0)" } ?? ""))
                     #endif
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
