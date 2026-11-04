@@ -1074,18 +1074,29 @@ public actor CloudKitSyncAdapter {
                 if let execution { try await execution.validate() }
             }
             catch {
+                CloudMediaCancellationContext.current?.observe(error)
                 sendError = error
                 #if DEBUG
+                if CloudMediaCancellationContext.current != nil, let action = CloudMediaCancellationContext.selectedAction {
+                    DebugCloudDiagnostics.record(.policyExecute, action: action, error: error)
+                }
                 await sendErrorObserver?()
                 #endif
             }
             policyOperationOutputs.append(contentsOf: invocationOutputs.take())
 
-            if sendError == nil { sendError = instance.mediaSendFailure }
+            if let failure = instance.mediaSendFailure {
+                CloudMediaCancellationContext.current?.observe(failure)
+                if sendError == nil { sendError = failure }
+            }
             // SDK delivery has returned. Join its original first-read/apply work
             // before finishSend observes pending changes and decides another round.
             await joinOriginalFirstAssetReads(instance)
-            if sendError == nil, Task.isCancelled { sendError = CancellationError() }
+            if sendError == nil, Task.isCancelled {
+                let cancellation = CancellationError()
+                CloudMediaCancellationContext.current?.observe(cancellation)
+                sendError = cancellation
+            }
             if await valid(origin) {
                 try await reportOperation(execution, zones: reportedZones, kind: .send, started: false, error: sendError, saved: instance.operationSaved)
             }
@@ -1102,7 +1113,7 @@ public actor CloudKitSyncAdapter {
             try await finishSend(origin: origin, call: call, pending: pending)
             try await consumePendingUpdates(origin: origin)
             if let sendError { throw sendError }
-        } catch { operationError = error }
+        } catch { CloudMediaCancellationContext.current?.observe(error); operationError = error }
         // Admission owns only this original call, even when later work returns
         // early or throws. Normal finalization consumes its single attempt too.
         if requireMediaAdmission, let call, !finalizationAttempted {
@@ -1110,6 +1121,7 @@ public actor CloudKitSyncAdapter {
             let pending = await instance.engine.pendingRecordZoneChanges()
             do { try await finishSend(origin: origin, call: call, pending: pending) }
             catch {
+                CloudMediaCancellationContext.current?.observe(error)
                 lastFailure = error
                 if operationError == nil { operationError = error }
             }

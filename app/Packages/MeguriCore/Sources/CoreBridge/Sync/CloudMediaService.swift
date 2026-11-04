@@ -137,6 +137,7 @@ public actor CloudMediaExecutor {
     private let sdk: String
     private let transport: any CloudMediaTransport
     private var active: Task<CloudMediaProgress, any Error>?
+    private var activeCancellationContext: CloudMediaCancellationContext?
     private var prepared: (any CloudPreparedMediaRead)?
     private var stopping = false
     private var queued: Set<String> = []
@@ -148,10 +149,18 @@ public actor CloudMediaExecutor {
     public func runNext(metadataOnly: Bool = false) async throws -> CloudMediaProgress {
         guard !stopping else { throw CloudMediaFailure.closed }
         guard active == nil else { throw CloudMediaFailure.busy }
-        let task = Task { try await self.execute(metadataOnly: metadataOnly) }
+        let context = CloudMediaCancellationContext.current
+        let task = Task {
+            do { return try await self.execute(metadataOnly: metadataOnly) }
+            catch { context?.observe(error); throw error }
+        }
         active = task
-        defer { active = nil; prepared = nil }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        activeCancellationContext = context
+        defer { active = nil; prepared = nil; activeCancellationContext = nil }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: {
+            if let context { context.cancel(.caller) { task.cancel() } }
+            else { task.cancel() }
+        }
     }
     private func execute(metadataOnly: Bool) async throws -> CloudMediaProgress {
         guard let work = try await core.nextWork(sdk: sdk) else {
@@ -184,15 +193,29 @@ public actor CloudMediaExecutor {
                 if case .download = work.request, try await core.downloadsBlocked(sdk: sdk) { return .waitingForCollectionDrain }
                 throw CloudMediaFailure.queueRejected
             }
-        } catch { operation.cancel(); throw error }
-        let reply = try await withTaskCancellationHandler { try await operation.reply() } onCancel: { operation.cancel() }
+        } catch {
+            CloudMediaCancellationContext.current?.observe(error)
+            operation.cancel(); throw error
+        }
+        let reply: CloudMediaTransportReply
+        do {
+            reply = try await withTaskCancellationHandler { try await operation.reply() } onCancel: { operation.cancel() }
+        } catch {
+            CloudMediaCancellationContext.current?.observe(error)
+            throw error
+        }
+        let replyFailure = reply.failure()
+        if let replyFailure, !(Task.isCancelled && cloudOperationWasCancelled(replyFailure)) {
+            CloudMediaCancellationContext.current?.observe(replyFailure)
+        }
         try Task.checkCancellation()
         do { try await core.reply(work.handle, result: reply.result) }
         catch {
+            CloudMediaCancellationContext.current?.observe(error)
             if let failure = reply.failure(underlying: error) { throw failure }
             throw error
         }
-        if let failure = reply.failure() { throw failure }
+        if let replyFailure { throw replyFailure }
         let outcome: CloudMediaReadResult
         if case .record(let name, let type, let envelope, _) = reply.result {
             outcome = .record(name: name, recordType: type, envelope: envelope, asset: nil)
@@ -201,8 +224,9 @@ public actor CloudMediaExecutor {
     }
     public func close() async {
         stopping = true
-        prepared?.cancel()
-        active?.cancel()
+        let cancel: () -> Void = { self.prepared?.cancel(); self.active?.cancel() }
+        if let context = activeCancellationContext { context.cancel(.owned, performing: cancel) }
+        else { cancel() }
         if let active { _ = await active.result }
     }
 }

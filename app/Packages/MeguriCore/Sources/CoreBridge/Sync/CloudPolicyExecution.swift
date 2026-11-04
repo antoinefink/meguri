@@ -111,6 +111,37 @@ final class CloudPolicyReadinessDecision: Sendable {
     }
 }
 
+/// Shared by one actual media run and its child work. Cancellation handlers can
+/// race actor-owned drains, so origin and first error observation are synchronous.
+final class CloudMediaCancellationContext: Sendable {
+    @TaskLocal static var current: CloudMediaCancellationContext?
+    #if DEBUG
+    @TaskLocal static var selectedAction: CloudPolicyAction?
+    #endif
+    enum Origin { case caller, owned }
+    private struct State {
+        var origin: Origin?
+        var qualified: Bool?
+        var genuineFailure = false
+    }
+    private let state = Mutex(State())
+
+    func cancel(_ origin: Origin, performing cancellation: () -> Void) {
+        state.withLock { if $0.origin == nil { $0.origin = origin } }
+        // Task/transport cancellation can synchronously invoke other handlers.
+        cancellation()
+    }
+
+    @discardableResult func observe(_ error: any Error) -> Bool {
+        let cancellation = error is CancellationError
+        return state.withLock {
+            if $0.qualified == nil { $0.qualified = cancellation && $0.origin == .owned }
+            if !cancellation { $0.genuineFailure = true }
+            return $0.qualified == true && !$0.genuineFailure
+        }
+    }
+}
+
 /// A coordinator owns this executor alongside its ONE adapter. Outputs include
 /// required failure follow-ups. Deferred configuration is not completed work.
 public struct CloudPolicyNativeResult: Sendable {
@@ -149,6 +180,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private var mediaExecutors: [String: CloudMediaExecutor] = [:]
     private var mediaRuns: [String: Task<CloudPolicyNativeResult, Never>] = [:]
     private var mediaRunIDs: [String: UUID] = [:]
+    private var mediaRunContexts: [String: CloudMediaCancellationContext] = [:]
     private var mediaDrains: [String: Task<Void, Never>] = [:]
     private var heldMediaResume: [String: (CloudPolicyCommand, CoreCloudPolicyExecution)] = [:]
     private var mediaHookInstalled = false
@@ -273,9 +305,15 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                         mediaExecutors[instance] = worker
                     }
                     let runID = UUID()
-                    let running = Task { await self.performMediaRound(command, permit: permit, instance: instance, runID: runID, worker: worker, coreMedia: mediaService) }
-                    mediaRuns[instance] = running; mediaRunIDs[instance] = runID
-                    return await withTaskCancellationHandler { await running.value } onCancel: { running.cancel() }
+                    let context = CloudMediaCancellationContext()
+                    let running = Task {
+                        await CloudMediaCancellationContext.$current.withValue(context) {
+                            await self.performMediaRound(command, permit: permit, instance: instance, runID: runID, worker: worker, coreMedia: mediaService, context: context)
+                        }
+                    }
+                    mediaRuns[instance] = running; mediaRunIDs[instance] = runID; mediaRunContexts[instance] = context
+                    return await withTaskCancellationHandler { await running.value }
+                        onCancel: { context.cancel(.caller) { running.cancel() } }
                 }
             case .backgroundFlush(let until), .quitFlush(let until):
                 guard flushTask == nil else { return .init(outputs: [], error: nil, deferred: true) }
@@ -438,7 +476,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private func drainOriginalMedia(_ sdk: String) async {
         if let draining = mediaDrains[sdk] { await draining.value; return }
         heldMediaResume.removeValue(forKey: sdk)
-        mediaRuns[sdk]?.cancel()
+        let original = mediaRuns[sdk]
+        if let context = mediaRunContexts[sdk] { context.cancel(.owned) { original?.cancel() } }
+        else { original?.cancel() }
         guard let executor = mediaExecutors.removeValue(forKey: sdk) else { return }
         let task = Task { await executor.close() }
         mediaDrains[sdk] = task
@@ -446,9 +486,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         mediaDrains.removeValue(forKey: sdk)
     }
     private func performMediaRound(_ issued: CloudPolicyCommand, permit: CoreCloudPolicyExecution, instance: String, runID: UUID,
-                          worker: CloudMediaExecutor, coreMedia: CoreCloudMediaService) async -> CloudPolicyNativeResult {
+                          worker: CloudMediaExecutor, coreMedia: CoreCloudMediaService, context: CloudMediaCancellationContext) async -> CloudPolicyNativeResult {
         defer {
-            if mediaRunIDs[instance] == runID { mediaRuns.removeValue(forKey: instance); mediaRunIDs.removeValue(forKey: instance) }
+            if mediaRunIDs[instance] == runID {
+                mediaRuns.removeValue(forKey: instance); mediaRunIDs.removeValue(forKey: instance); mediaRunContexts.removeValue(forKey: instance)
+            }
         }
         var outputs: [CloudPolicyOutput] = []
         var selected = (issued, permit)
@@ -474,8 +516,17 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                             try await adapter.waitForMediaFetchDrain(core: coreMedia, execution: permit)
                         case .engineSendRequired:
                             guard !onlyEnvelopes else { throw CloudMediaFailure.metadataScope }
-                            do { try await adapter.sendPolicyMedia(execution: permit) }
+                            do {
+                                #if DEBUG
+                                try await CloudMediaCancellationContext.$selectedAction.withValue(issued.action) {
+                                    try await adapter.sendPolicyMedia(execution: permit)
+                                }
+                                #else
+                                try await adapter.sendPolicyMedia(execution: permit)
+                                #endif
+                            }
                             catch {
+                                context.observe(error)
                                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                                 if try await permit.continueMediaAfterSend(error) == false { sendStopped = true; throw error }
                             }
@@ -484,10 +535,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                             if let error = reply.failure() { throw error }
                         }
                     }
-                } catch { readFailure = error }
+                } catch { context.observe(error); readFailure = error }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 do { outputs.append(try await permit.report(zones: [.media], kind: .read, started: false, error: sendStopped ? nil : readFailure)) }
-                catch { if readFailure == nil { readFailure = error } }
+                catch { context.observe(error); if readFailure == nil { readFailure = error } }
                 if let readFailure { throw readFailure }
                 outputs.append(try await policy.input(.refresh(.cloud)))
                 guard let queuedResume = heldMediaResume.removeValue(forKey: instance) else { break }
@@ -495,6 +546,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             } while true
             return .init(outputs: outputs, error: nil, deferred: false)
         } catch {
+            var mediaCancellation = context.observe(error)
+            #if DEBUG
+            DebugCloudDiagnostics.record(.policyExecute, action: selected.0.action, error: error)
+            #endif
             if let queuedResume = heldMediaResume.removeValue(forKey: instance), let mediaTransport {
                 let replacement: CloudMediaExecutor
                 if let retained = mediaExecutors[instance] { replacement = retained }
@@ -503,13 +558,22 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     mediaExecutors[instance] = replacement
                 }
                 let replacementID = UUID()
-                let pendingRun = Task { await self.performMediaRound(queuedResume.0, permit: queuedResume.1, instance: instance, runID: replacementID, worker: replacement, coreMedia: coreMedia) }
-                mediaRuns[instance] = pendingRun; mediaRunIDs[instance] = replacementID
+                let replacementContext = CloudMediaCancellationContext()
+                let pendingRun = Task {
+                    await CloudMediaCancellationContext.$current.withValue(replacementContext) {
+                        await self.performMediaRound(queuedResume.0, permit: queuedResume.1, instance: instance, runID: replacementID, worker: replacement, coreMedia: coreMedia, context: replacementContext)
+                    }
+                }
+                mediaRuns[instance] = pendingRun; mediaRunIDs[instance] = replacementID; mediaRunContexts[instance] = replacementContext
                 let completed = await pendingRun.value
                 outputs.append(contentsOf: completed.outputs)
+                if let failure = completed.error {
+                    mediaCancellation = mediaCancellation && completed.mediaCancellation && failure is CancellationError
+                }
             }
-            if let refreshed = try? await policy.input(.refresh(.cloud)) { outputs.append(refreshed) }
-            return .init(outputs: outputs, error: error, deferred: false)
+            do { outputs.append(try await policy.input(.refresh(.cloud))) }
+            catch { mediaCancellation = context.observe(error) && mediaCancellation }
+            return .init(outputs: outputs, error: error, deferred: false, mediaCancellation: mediaCancellation)
         }
     }
 

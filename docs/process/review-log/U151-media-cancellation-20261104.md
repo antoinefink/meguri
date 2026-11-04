@@ -30,3 +30,9 @@ The corrected AppModel run executes both selected tests: mapping and all
 negative controls pass. Only qualified cancellation fails presentation and
 revision assertions. Outputs, original ACKs and cleanup checks pass. This is
 the app-facing RED witness. Producer and presentation repair remain pending.
+
+Export18960 requires one ordering repair. Export20222 applies it; review clear.
+Native20884: ten pass, one Stop test fails. AppModel23135: 18 pass.
+Private and similarity pass. Stop's EndRead uses a retired backend token;
+review requires a retained witness for that original SDK. All guards and error
+controls remain required. No unit acceptance.

@@ -907,7 +907,9 @@ public final class SyncCoordinator {
                     #if DEBUG
                     DebugCloudDiagnostics.record(.commandResult, error: error)
                     #endif
-                    if !supersededAccountCancellation { operationFailed = true; failureRevision &+= 1 }
+                    if !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
+                        operationFailed = true; failureRevision &+= 1
+                    }
                 }
                 if !closing, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
                 if !closing, initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
