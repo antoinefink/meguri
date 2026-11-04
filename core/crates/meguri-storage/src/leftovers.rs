@@ -74,8 +74,12 @@ fn reserved(name: &str) -> bool {
 /// Launch cleanup sweeps this namespace at the collection root and inside
 /// media.staging. Consumers keep only unpublished, independently owned bytes.
 pub fn staging_directory(directory: &Path) -> Result<tempfile::TempDir, StorageError> {
+    use std::os::unix::fs::PermissionsExt;
+
     Ok(tempfile::Builder::new()
         .prefix(".meguri-stage-")
+        // Apply owner-only permissions at creation, before any staged bytes.
+        .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in(directory)?)
 }
 

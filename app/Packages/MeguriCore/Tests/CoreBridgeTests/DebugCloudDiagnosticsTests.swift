@@ -8,6 +8,23 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func pageEpochStagesMapAndFormatOnlyFiniteTags() {
+        let cases: [(CloudAdoptionFailureDiagnostic.Stage, String)] = [
+            (.init(.pageEpochShape), "pageEpochShape"),
+            (.init(.pageEpochData), "pageEpochData"),
+            (.init(.pageEpochSystemFields), "pageEpochSystemFields")
+        ]
+        for (stage, tag) in cases {
+            let snapshot = CloudAdoptionFailureDiagnostic(
+                task: .fetch, lastEnteredStage: stage,
+                primaryCategory: .validation, cleanupCategory: .fileIdentityUnavailable)
+            #expect(snapshot.lastEnteredStage.rawValue == tag)
+            let value = Value.adoption(snapshot)
+            #expect(value.formatted == "boundary=connectionFailure action=adoptionResult task=fetch lastEnteredStage=\(tag) primary=validation cleanup=fileIdentityUnavailable")
+            #expect(value.code == nil && value.zone == nil && value.kind == nil)
+        }
+    }
+
     @Test func adoptionFailureTagsKeepPrimaryAndCleanupSeparate() {
         let cases: [(CloudAdoptionFailureDiagnostic.Category?, CloudAdoptionFailureDiagnostic.Category?, String)] = [
             (.validation, nil, "primary=validation cleanup=none"),

@@ -243,6 +243,9 @@ struct CloudAdoptionFailureDiagnostic: Sendable, Equatable {
         case mediaRootSpace
         case pageValidation
         case pageRecordValidation
+        case pageEpochShape
+        case pageEpochData
+        case pageEpochSystemFields
         case pageSpace
         case payloadValidation
         case payloadRead
@@ -276,6 +279,9 @@ struct CloudAdoptionFailureDiagnostic: Sendable, Equatable {
             case .mediaRootSpace: .mediaRootSpace
             case .pageValidation: .pageValidation
             case .pageRecordValidation: .pageRecordValidation
+            case .pageEpochShape: .pageEpochShape
+            case .pageEpochData: .pageEpochData
+            case .pageEpochSystemFields: .pageEpochSystemFields
             case .pageSpace: .pageSpace
             case .payloadValidation: .payloadValidation
             case .payloadRead: .payloadRead

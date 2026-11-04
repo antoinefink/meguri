@@ -1069,3 +1069,211 @@ fn connection_adoption_diagnostic_payload_helper_reports_its_last_entered_stage(
     assert_eq!(snapshot.cleanup_category, None);
     fixture.workflow.host.close().unwrap();
 }
+
+fn diagnostic_epoch_record(fixture: &Fixture) -> CloudStagingRecord {
+    let epoch = fixture
+        .workflow
+        .core
+        .adoption_op()
+        .unwrap()
+        .unwrap()
+        .epoch_record
+        .unwrap();
+    CloudStagingRecord {
+        name: "epoch".into(),
+        record_type: "MGEpoch".into(),
+        record: CloudControlRecord {
+            encrypted: epoch.encrypted,
+            system_fields: epoch.system_fields.0,
+        },
+        payload_file: None,
+    }
+}
+
+fn assert_page_epoch_rejection(stage: CloudAdoptionDiagnosticStage, mutate: impl Fn(&mut CloudStagingRecord)) {
+    for cleanup_fails in [false, true] {
+        let (fixture, files) = diagnostic_fixture();
+        let connection = fixture.workflow.connection().unwrap();
+        adoption_fetch_ready(&connection);
+        let operation = fixture.workflow.core.adoption_op().unwrap().unwrap();
+        let directory = fixture
+            .workflow
+            .host
+            .cloud_connection_directory()
+            .join(operation.staging_name);
+        let mut record = diagnostic_epoch_record(&fixture);
+        mutate(&mut record);
+        let (page, _) = adoption_action(&connection);
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let job = connection
+            .clone()
+            .start_adoption_result(
+                page.clone(),
+                CloudAdoptionResult::Page {
+                    records: vec![record],
+                    deleted: vec![],
+                    next: None,
+                },
+            )
+            .unwrap();
+        assert!(job.result.result().unwrap().is_none());
+        assert!(job.result.failure_diagnostic().unwrap().is_none());
+        std::thread::scope(|scope| {
+            // Admit cancellation before the reply claim, as in the control-read
+            // diagnostic cases, so a failed abort can be drained publicly.
+            let cancellation = if cleanup_fails {
+                let operation = connection.recovery_status().unwrap().unwrap().operation;
+                let (entered, reached) = mpsc::channel();
+                let (release, resume) = mpsc::channel();
+                *files.before_read.lock().unwrap() = Some(Box::new(move || {
+                    entered.send(()).unwrap();
+                    resume.recv_timeout(Duration::from_secs(20)).unwrap();
+                }));
+                let cancel_connection = connection.clone();
+                let cancel = scope.spawn(move || cancel_connection.cancel_operation(operation));
+                let release = Release(release);
+                reached.recv_timeout(Duration::from_secs(5)).unwrap();
+                Some((release, cancel))
+            } else {
+                None
+            };
+            let armed = files.clone();
+            fixture
+                .workflow
+                .core
+                .set_adoption_reply_claim_hook_for_testing(move || {
+                    armed
+                        .remaining
+                        .store(if cleanup_fails { 1 } else { -1 }, Ordering::SeqCst);
+                });
+            drop(pool);
+            assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+            let returned = if cleanup_fails {
+                CloudConnectionFailure::FileIdentityUnavailable
+            } else {
+                CloudConnectionFailure::Tracking
+            };
+            failure_is(job.result.result(), returned);
+            let snapshot = CloudAdoptionFailureDiagnostic {
+                task: CloudAdoptionDiagnosticTask::Fetch,
+                last_entered_stage: stage,
+                primary_category: Some(CloudAdoptionFailureCategory::Validation),
+                cleanup_category: cleanup_fails.then_some(CloudAdoptionFailureCategory::FileIdentityUnavailable),
+            };
+            assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot.clone()));
+            failure_is(job.result.result(), returned);
+            files.remaining.store(-1, Ordering::SeqCst);
+            if let Some((release, cancel)) = cancellation {
+                assert_eq!(
+                    fixture.workflow.host.engine().slot_holder(),
+                    Some(meguri_engine::LongOp::CloudAdopt)
+                );
+                assert!(fixture.workflow.core.adoption_op().unwrap().is_some());
+                assert!(connection.recovery_status().unwrap().is_some());
+                assert!(directory.exists());
+                drop(release);
+                cancel.join().unwrap().unwrap();
+            }
+            assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+            assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+            assert!(connection.recovery_status().unwrap().is_none());
+            assert!(!directory.exists());
+            let followup = connection
+                .clone()
+                .start_adoption_result(page, CloudAdoptionResult::Failed)
+                .unwrap();
+            assert!(matches!(
+                finished(&events, followup.handle.id),
+                JobOutcome::Failed { .. }
+            ));
+            failure_is(followup.result.result(), CloudConnectionFailure::AuthorityChanged);
+            assert!(followup.result.failure_diagnostic().unwrap().is_none());
+            assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot.clone()));
+            fixture.workflow.host.close().unwrap();
+            failure_is(job.result.result(), returned);
+            failure_is(followup.result.result(), CloudConnectionFailure::AuthorityChanged);
+            assert!(followup.result.failure_diagnostic().unwrap().is_none());
+            assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot));
+        });
+    }
+}
+
+#[test]
+fn connection_adoption_page_epoch_shape_diagnostic_preserves_exact_result_and_cleanup() {
+    assert_page_epoch_rejection(CloudAdoptionDiagnosticStage::PageEpochShape, |record| {
+        record.payload_file = Some("synthetic-unread-payload".into());
+        record.record.encrypted = None;
+        record.record.system_fields.clear();
+    });
+}
+
+#[test]
+fn connection_adoption_page_epoch_data_diagnostic_preserves_exact_result_and_cleanup() {
+    for encrypted in [None, Some(vec![]), Some(vec![0])] {
+        assert_page_epoch_rejection(CloudAdoptionDiagnosticStage::PageEpochData, |record| {
+            record.record.encrypted = encrypted.clone();
+            record.record.system_fields.clear();
+        });
+    }
+}
+
+#[test]
+fn connection_adoption_page_epoch_system_fields_diagnostic_preserves_exact_result_and_cleanup() {
+    for system_fields in [vec![], vec![3]] {
+        assert_page_epoch_rejection(CloudAdoptionDiagnosticStage::PageEpochSystemFields, |record| {
+            record.record.system_fields = system_fields.clone();
+        });
+    }
+}
+
+#[test]
+fn connection_adoption_page_epoch_unchanged_projection_is_accepted_without_staging_a_record() {
+    let fixture = Fixture::new(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    adoption_fetch_ready(&connection);
+    let operation = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    let directory = fixture
+        .workflow
+        .host
+        .cloud_connection_directory()
+        .join(operation.staging_name);
+    let before = stage_bytes(&directory);
+    let record = diagnostic_epoch_record(&fixture);
+    let (page, _) = adoption_action(&connection);
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let job = connection
+        .clone()
+        .start_adoption_result(
+            page,
+            CloudAdoptionResult::Page {
+                records: vec![record],
+                deleted: vec![],
+                next: Some(vec![7]),
+            },
+        )
+        .unwrap();
+    assert!(job.result.result().unwrap().is_none());
+    assert!(job.result.failure_diagnostic().unwrap().is_none());
+    drop(pool);
+    assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
+    assert!(job.result.result().unwrap().unwrap().applied);
+    assert!(job.result.failure_diagnostic().unwrap().is_none());
+    assert_eq!(stage_bytes(&directory), before);
+    assert!(matches!(adoption_action(&connection).1,
+        CloudAdoptionAction::Fetch { cursor: Some(cursor), .. } if cursor == vec![7]));
+    assert_eq!(
+        fixture.workflow.host.engine().slot_holder(),
+        Some(meguri_engine::LongOp::CloudAdopt)
+    );
+    connection
+        .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+        .unwrap();
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+    assert!(!directory.exists());
+    fixture.workflow.host.close().unwrap();
+    assert!(job.result.result().unwrap().unwrap().applied);
+    assert!(job.result.failure_diagnostic().unwrap().is_none());
+}

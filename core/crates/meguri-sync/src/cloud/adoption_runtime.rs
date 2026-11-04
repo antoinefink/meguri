@@ -22,9 +22,10 @@ use meguri_storage::{
     space::SpaceProvider,
 };
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
     io::{Read, Write},
+    os::unix::fs::MetadataExt,
 };
 
 pub(super) struct AdoptionOwner {
@@ -38,6 +39,7 @@ pub(super) struct AdoptionOwner {
     >,
     directory: PathBuf,
     stage: Mutex<Option<ReplacementStage>>,
+    spool_sizes: Mutex<SpoolSizes>,
     next: Mutex<Option<AdoptionTask>>,
     // No page cursor or pending metadata survives this in-memory owner.
     pending_page: Mutex<Option<PendingPage>>,
@@ -220,27 +222,212 @@ fn spool(directory: &Path) -> Result<Vec<PathBuf>, RuntimeError> {
     paths.sort();
     Ok(paths)
 }
-fn check_space(space: &dyn SpaceProvider, directory: &Path) -> Result<(), RuntimeError> {
-    check_space_for(space, directory, 0)
+// Count actual entry inspections, including bounded stats, rather than logical
+// writes. Thread-local so unrelated tests cannot change a witness's count.
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static ADOPTION_SPACE_ENTRY_VISITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-fn check_space_for(space: &dyn SpaceProvider, directory: &Path, additional: u64) -> Result<(), RuntimeError> {
-    fn size(path: &Path) -> Result<u64, RuntimeError> {
+#[cfg(feature = "test-hooks")]
+fn space_entry_visit() {
+    ADOPTION_SPACE_ENTRY_VISITS.with(|count| count.set(count.get() + 1));
+}
+fn space_metadata(path: &Path) -> Result<fs::Metadata, RuntimeError> {
+    #[cfg(feature = "test-hooks")]
+    space_entry_visit();
+    fs::symlink_metadata(path).map_err(storage_io)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SpoolStamp {
+    device: u64,
+    inode: u64,
+    bytes: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+impl SpoolStamp {
+    fn of(meta: &fs::Metadata) -> Self {
+        Self {
+            device: meta.dev(),
+            inode: meta.ino(),
+            bytes: meta.len(),
+            modified: (meta.mtime(), meta.mtime_nsec()),
+            changed: (meta.ctime(), meta.ctime_nsec()),
+        }
+    }
+}
+const SPOOLS: [&str; 2] = ["incoming", "payloads"];
+
+// Only the private, non-cloneable ReplacementStage's exact claimed task writes
+// these directories. SQL writes affect root files, never either spool. No
+// owner/ledger survives reopen: recovery discards the unpublished stage.
+struct SpoolSizes {
+    root: (u64, u64),
+    directories: [SpoolStamp; 2],
+    files: BTreeMap<PathBuf, SpoolStamp>,
+    bytes: u64,
+    usable: bool,
+}
+fn regular_size(meta: &fs::Metadata) -> Result<u64, RuntimeError> {
+    if !meta.is_file() || meta.nlink() != 1 {
+        return Err(refused());
+    }
+    Ok(meta.len())
+}
+impl SpoolSizes {
+    fn publish(
+        &mut self,
+        file: AtomicFile,
+        directory: &Path,
+        spool: &str,
+        name: &str,
+        length: u64,
+    ) -> Result<(), RuntimeError> {
+        if let Err(error) = file.publish(|_| Ok(())) {
+            // Rename may have succeeded before directory sync failed. Never
+            // resume cached checks on that uncertain result; caller aborts.
+            self.usable = false;
+            return Err(error.into());
+        }
+        self.published(directory, spool, name, length)
+    }
+    fn read(directory: &Path) -> Result<Self, RuntimeError> {
+        let root = space_metadata(directory)?;
+        // Verify the TempDir's actual privacy, not just its reserved name.
+        if !root.is_dir() || root.mode() & 0o077 != 0 {
+            return Err(refused());
+        }
+        let mut directories = Vec::new();
+        let mut files = BTreeMap::new();
         let mut bytes = 0_u64;
-        for entry in fs::read_dir(path).map_err(storage_io)? {
-            let entry = entry.map_err(storage_io)?;
-            let meta = entry.metadata().map_err(storage_io)?;
-            let n = if meta.is_dir() {
-                size(&entry.path())?
-            } else if meta.is_file() {
-                meta.len()
-            } else {
+        for spool in SPOOLS {
+            let path = directory.join(spool);
+            let meta = space_metadata(&path)?;
+            if !meta.is_dir() {
                 return Err(refused());
-            };
-            bytes = bytes.checked_add(n).ok_or_else(refused)?;
+            }
+            directories.push(SpoolStamp::of(&meta));
+            // Flat spools only: unexpected directories/types are refused,
+            // never skipped or treated as empty (also bounds traversal depth).
+            for entry in fs::read_dir(&path).map_err(storage_io)? {
+                let entry = entry.map_err(storage_io)?;
+                let meta = space_metadata(&entry.path())?;
+                let size = regular_size(&meta)?;
+                let limit = if spool == "incoming" {
+                    8 * 1024 * 1024
+                } else {
+                    codec::MAX_PAYLOAD_BYTES
+                };
+                if size > limit {
+                    return Err(refused());
+                }
+                bytes = bytes.checked_add(size).ok_or_else(refused)?;
+                files.insert(Path::new(spool).join(entry.file_name()), SpoolStamp::of(&meta));
+            }
+            if directories.last() != Some(&SpoolStamp::of(&space_metadata(&path)?)) {
+                return Err(refused());
+            }
+        }
+        let sizes = Self {
+            root: (root.dev(), root.ino()),
+            directories: directories.try_into().map_err(|_| refused())?,
+            files,
+            bytes,
+            usable: true,
+        };
+        sizes.current_size(directory)?;
+        Ok(sizes)
+    }
+    fn current_size(&self, directory: &Path) -> Result<u64, RuntimeError> {
+        let root = space_metadata(directory)?;
+        if !self.usable || !root.is_dir() || root.mode() & 0o077 != 0 || self.root != (root.dev(), root.ino()) {
+            return Err(refused());
+        }
+        let mut seen = [false; 2];
+        let mut bytes = self.bytes;
+        // Every existing capacity guard still enumerates/stats the flat root,
+        // including SQLite, WAL, SHM, journal and any other regular root files.
+        for entry in fs::read_dir(directory).map_err(storage_io)? {
+            let entry = entry.map_err(storage_io)?;
+            let meta = space_metadata(&entry.path())?;
+            if let Some(index) = SPOOLS
+                .iter()
+                .position(|name| entry.file_name().as_os_str() == std::ffi::OsStr::new(name))
+            {
+                if !meta.is_dir() || SpoolStamp::of(&meta) != self.directories[index] {
+                    return Err(refused());
+                }
+                seen[index] = true;
+            } else {
+                bytes = bytes.checked_add(regular_size(&meta)?).ok_or_else(refused)?;
+            }
+        }
+        if seen != [true; 2] {
+            return Err(refused());
         }
         Ok(bytes)
     }
-    let required = size(directory)?
+    fn published(&mut self, directory: &Path, spool: &str, name: &str, length: u64) -> Result<(), RuntimeError> {
+        // Called only after AtomicFile::publish succeeds. A failure here, or
+        // an uncertain publish, makes the owner unusable until it is discarded.
+        let was_usable = self.usable;
+        self.usable = false;
+        let index = SPOOLS.iter().position(|s| *s == spool).ok_or_else(refused)?;
+        if !was_usable
+            || !matches!(
+                Path::new(name).components().next(),
+                Some(std::path::Component::Normal(_))
+            )
+            || Path::new(name).components().count() != 1
+        {
+            return Err(refused());
+        }
+        let relative = Path::new(spool).join(name);
+        let meta = space_metadata(&directory.join(&relative))?;
+        if regular_size(&meta)? != length {
+            return Err(refused());
+        }
+        let dir = space_metadata(&directory.join(spool))?;
+        let prior = &self.directories[index];
+        if !dir.is_dir() || (dir.dev(), dir.ino()) != (prior.device, prior.inode) {
+            return Err(refused());
+        }
+        let bytes = self
+            .bytes
+            .checked_sub(self.files.get(&relative).map_or(0, |old| old.bytes))
+            .and_then(|n| n.checked_add(length))
+            .ok_or_else(refused)?;
+        self.files.insert(relative, SpoolStamp::of(&meta));
+        self.bytes = bytes;
+        self.directories[index] = SpoolStamp::of(&dir);
+        self.usable = true;
+        Ok(())
+    }
+    fn reconcile(&self, directory: &Path) -> Result<(), RuntimeError> {
+        let actual = Self::read(directory)?;
+        if !self.usable
+            || self.root != actual.root
+            || self.directories != actual.directories
+            || self.files != actual.files
+            || self.bytes != actual.bytes
+        {
+            return Err(refused());
+        }
+        Ok(())
+    }
+}
+fn check_space(space: &dyn SpaceProvider, directory: &Path, sizes: &SpoolSizes) -> Result<(), RuntimeError> {
+    check_space_for(space, directory, 0, sizes)
+}
+fn check_space_for(
+    space: &dyn SpaceProvider,
+    directory: &Path,
+    additional: u64,
+    sizes: &SpoolSizes,
+) -> Result<(), RuntimeError> {
+    let required = sizes
+        .current_size(directory)?
         .checked_add(additional)
         .ok_or_else(refused)?
         .checked_mul(2)
@@ -567,6 +754,7 @@ impl Runtime {
         fs::create_dir(stage.directory().join("incoming")).map_err(storage_io)?;
         fs::create_dir(stage.directory().join("payloads")).map_err(storage_io)?;
         meguri_storage::atomic_file::sync_directory(stage.directory())?;
+        let spool_sizes = SpoolSizes::read(stage.directory())?;
         let id = self.publication_random_id()?;
         let candidate = publication_id(self.publication_random_id()?);
         if decision_before.is_some_and(|d| candidate == d.publication.identity) || candidate == publication_id(id) {
@@ -619,6 +807,7 @@ impl Runtime {
             cleanup_evidence: Mutex::new(cleanup_evidence),
             directory: stage.directory().to_owned(),
             stage: Mutex::new(Some(stage)),
+            spool_sizes: Mutex::new(spool_sizes),
             next: Mutex::new(Some(AdoptionTask::ReadActive)),
             pending_page: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -773,13 +962,22 @@ impl Runtime {
             diagnostic.enter(AdoptionDiagnosticStage::PayloadRead);
             let bytes = super::payload_asset::read(&source)?;
             diagnostic.enter(AdoptionDiagnosticStage::PayloadSpace);
-            check_space_for(space, &owner.directory, bytes.len() as u64)?;
+            check_space_for(
+                space,
+                &owner.directory,
+                bytes.len() as u64,
+                &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+            )?;
             let name = format!("{}.pa", record.name);
             let path = owner.directory.join("payloads").join(&name);
             diagnostic.enter(AdoptionDiagnosticStage::PayloadWrite);
             let mut file = AtomicFile::new(&path, Purpose::Stage)?;
             file.file_mut().write_all(&bytes).map_err(storage_io)?;
-            file.publish(|_| Ok(()))?;
+            owner
+                .spool_sizes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .publish(file, &owner.directory, "payloads", &name, bytes.len() as u64)?;
             record.payload_file = Some(name);
         }
         // Validate/decode the owned copy, never an SDK path.
@@ -790,11 +988,20 @@ impl Runtime {
         diagnostic.enter(AdoptionDiagnosticStage::RecordEncode);
         let bytes = serde_json::to_vec(&record).map_err(|_| refused())?;
         diagnostic.enter(AdoptionDiagnosticStage::RecordSpace);
-        check_space_for(space, &owner.directory, bytes.len() as u64)?;
+        check_space_for(
+            space,
+            &owner.directory,
+            bytes.len() as u64,
+            &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+        )?;
         diagnostic.enter(AdoptionDiagnosticStage::RecordWrite);
         let mut file = AtomicFile::new(&path, Purpose::Stage)?;
         file.file_mut().write_all(&bytes).map_err(storage_io)?;
-        file.publish(|_| Ok(()))?;
+        owner
+            .spool_sizes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .publish(file, &owner.directory, "incoming", &record.name, bytes.len() as u64)?;
         if let Some(payload) = incoming.payload
             && payload.kind() != codec::Kind::MediaName
         {
@@ -811,7 +1018,11 @@ impl Runtime {
             )?;
         }
         diagnostic.enter(AdoptionDiagnosticStage::FinalSpace);
-        check_space(space, &owner.directory)?;
+        check_space(
+            space,
+            &owner.directory,
+            &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+        )?;
         Ok(())
     }
     fn finish_adoption_page(
@@ -1052,7 +1263,11 @@ impl Runtime {
                             |_| Ok(()),
                         )?;
                         adoption_stage!("media_root_space", MediaRootSpace);
-                        check_space(space, &owner.directory)?;
+                        check_space(
+                            space,
+                            &owner.directory,
+                            &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+                        )?;
                         AdoptionTask::Fetch { cursor: None }
                     }
                     (AdoptionTask::Fetch { .. }, AdoptionReply::Page { records, deleted, next }) => {
@@ -1103,7 +1318,17 @@ impl Runtime {
                                 );
                             }
                             if item.record_type == "MGEpoch" && item.name == "epoch" {
-                                if item.payload_file.is_some() || Some(&item.record) != op.epoch_record.as_ref() {
+                                diagnostic.enter(AdoptionDiagnosticStage::PageEpochShape);
+                                if item.payload_file.is_some() {
+                                    return Err(refused());
+                                }
+                                diagnostic.enter(AdoptionDiagnosticStage::PageEpochData);
+                                let expected = op.epoch_record.as_ref().ok_or_else(refused)?;
+                                if item.record.encrypted != expected.encrypted {
+                                    return Err(refused());
+                                }
+                                diagnostic.enter(AdoptionDiagnosticStage::PageEpochSystemFields);
+                                if item.record.system_fields != expected.system_fields {
                                     return Err(refused());
                                 }
                                 pending.push_back(item);
@@ -1133,7 +1358,11 @@ impl Runtime {
                             pending.push_back(item);
                         }
                         adoption_stage!("page_space", PageSpace);
-                        check_space(space, &owner.directory)?;
+                        check_space(
+                            space,
+                            &owner.directory,
+                            &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+                        )?;
                         *owner.pending_page.lock().unwrap_or_else(PoisonError::into_inner) =
                             Some(PendingPage { records: pending, next });
                         self.advance_adoption_page(&owner, &mut op, space, authority, diagnostic)?
@@ -1439,6 +1668,13 @@ impl Runtime {
         space: &dyn SpaceProvider,
     ) -> Result<(), RuntimeError> {
         let epoch = epoch(op)?;
+        // Enumerate and compare every actual spool file before any Validate
+        // reads/SQL preparation. Root/SQLite bytes are also inspected afresh.
+        owner
+            .spool_sizes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .reconcile(&owner.directory)?;
         let paths = spool(&owner.directory)?;
         let mut keys = BTreeSet::new();
         let mut live_keys = BTreeSet::new();
@@ -1517,7 +1753,11 @@ impl Runtime {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .ok_or(Error::InvalidData)?;
-        check_space(space, &owner.directory)?;
+        check_space(
+            space,
+            &owner.directory,
+            &owner.spool_sizes.lock().unwrap_or_else(PoisonError::into_inner),
+        )?;
         // Gate, integrity, checkpoint and immutable integrity all precede ready.
         {
             let stage = owner.stage.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1802,6 +2042,337 @@ fn load_notetype(owner: &AdoptionOwner, op: &AdoptOp, id: i64) -> Result<codec::
     match payload {
         codec::Payload::Notetype(nt) => Ok(nt),
         _ => Err(refused()),
+    }
+}
+
+#[cfg(all(test, feature = "test-hooks"))]
+mod capacity_entry_visits {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    pub(super) struct Capacity {
+        pub available: AtomicU64,
+        pub calls: AtomicUsize,
+    }
+    impl Capacity {
+        pub(super) fn unlimited() -> Self {
+            Self {
+                available: AtomicU64::new(u64::MAX),
+                calls: AtomicUsize::new(0),
+            }
+        }
+    }
+    impl SpaceProvider for Capacity {
+        fn available_bytes(&self, _: &Path) -> Result<u64, meguri_storage::StorageError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.available.load(Ordering::SeqCst))
+        }
+    }
+    pub(super) fn new_stage() -> (tempfile::TempDir, ReplacementStage) {
+        let parent = tempfile::tempdir().unwrap();
+        let stage = ReplacementStage::new(parent.path()).unwrap();
+        // Inspect the actual constructor result before even creating children.
+        let root = fs::symlink_metadata(stage.directory()).unwrap();
+        assert!(root.is_dir());
+        assert_eq!(root.mode() & 0o077, 0, "stage must be private before its first write");
+        fs::create_dir(stage.directory().join("incoming")).unwrap();
+        fs::create_dir(stage.directory().join("payloads")).unwrap();
+        (parent, stage)
+    }
+    fn staging_entry_visits(count: usize) -> u64 {
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        fs::write(stage.path(), b"synthetic candidate bytes").unwrap();
+        let space = Capacity::unlimited();
+        ADOPTION_SPACE_ENTRY_VISITS.with(|visits| visits.set(0));
+        let mut sizes = SpoolSizes::read(directory).unwrap();
+        for index in 0..count {
+            // Actual AtomicFile temp/write/publish, two pre-write guards and
+            // the post-row guard, as in external-payload staging. No timing.
+            for spool in ["payloads", "incoming"] {
+                let name = format!("entity-{index}");
+                let bytes = b"synthetic immutable spool bytes";
+                check_space_for(&space, directory, bytes.len() as u64, &sizes).unwrap();
+                let mut file = AtomicFile::new(&directory.join(spool).join(&name), Purpose::Stage).unwrap();
+                file.file_mut().write_all(bytes).unwrap();
+                sizes
+                    .publish(file, directory, spool, &name, bytes.len() as u64)
+                    .unwrap();
+            }
+            check_space(&space, directory, &sizes).unwrap();
+        }
+        sizes.reconcile(directory).unwrap();
+        assert_eq!(space.calls.load(Ordering::SeqCst), 3 * count);
+        ADOPTION_SPACE_ENTRY_VISITS.with(std::cell::Cell::get)
+    }
+    #[test]
+    fn adoption_space_entry_visits_scale_linearly() {
+        let small = staging_entry_visits(32);
+        let large = staging_entry_visits(64);
+        eprintln!("adoption capacity entry visits: N={small}, 2N={large}");
+        assert!(small >= 6 * 32, "must observe real per-write filesystem inspections");
+        assert!(large > small);
+        assert!(large <= small * 5 / 2, "whole-spool rewalk: N={small}, 2N={large}");
+    }
+}
+
+#[cfg(all(test, feature = "test-hooks"))]
+mod capacity_tests {
+    use super::capacity_entry_visits::{Capacity, new_stage};
+    use super::*;
+    use std::{os::unix::fs::symlink, sync::atomic::Ordering};
+
+    #[test]
+    fn adoption_space_real_stage_is_private_and_initial_reads_repeat() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // new_stage checks privacy immediately after ReplacementStage::new,
+        // before creating incoming/payloads. No candidate or spool files yet.
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let sizes = SpoolSizes::read(directory).unwrap();
+        for _ in 0..3 {
+            let fresh = SpoolSizes::read(directory).unwrap();
+            assert_eq!(fresh.current_size(directory).unwrap(), 0);
+            fresh.reconcile(directory).unwrap();
+        }
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(SpoolSizes::read(directory).is_err());
+        assert!(check_space(&Capacity::unlimited(), directory, &sizes).is_err());
+    }
+
+    fn publish(sizes: &mut SpoolSizes, directory: &Path, spool: &str, name: &str, bytes: &[u8]) {
+        check_space_for(&Capacity::unlimited(), directory, bytes.len() as u64, sizes).unwrap();
+        let mut file = AtomicFile::new(&directory.join(spool).join(name), Purpose::Stage).unwrap();
+        file.file_mut().write_all(bytes).unwrap();
+        sizes.publish(file, directory, spool, name, bytes.len() as u64).unwrap();
+    }
+    fn actual_bytes(directory: &Path) -> u64 {
+        fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let meta = entry.metadata().unwrap();
+                if meta.is_dir() {
+                    actual_bytes(&entry.path())
+                } else {
+                    meta.len()
+                }
+            })
+            .sum()
+    }
+    fn exact_budget(sizes: &SpoolSizes, directory: &Path, additional: u64) {
+        let required = (2 * (actual_bytes(directory) + additional) + 64 * 1024 * 1024).max(512 * 1024 * 1024);
+        let space = Capacity::unlimited();
+        space.available.store(required - 1, Ordering::SeqCst);
+        let error = check_space_for(&space, directory, additional, sizes).unwrap_err();
+        assert!(matches!(error,
+            RuntimeError::Engine(EngineError::Storage(meguri_storage::StorageError::InsufficientSpace {
+                required: found_required, available: found_available,
+            })) if found_required == required && found_available == required - 1
+        ));
+        space.available.store(required, Ordering::SeqCst);
+        check_space_for(&space, directory, additional, sizes).unwrap();
+        assert_eq!(space.calls.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn adoption_space_replacements_and_inline_orphans_count_actual_files_and_temp_peak() {
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let mut sizes = SpoolSizes::read(directory).unwrap();
+        // Sparse logical bytes put the guard above its floor, below the
+        // existing 256 MiB staging bound, without allocating that much RAM.
+        fs::File::create(stage.path())
+            .unwrap()
+            .set_len(225 * 1024 * 1024)
+            .unwrap();
+        publish(
+            &mut sizes,
+            directory,
+            "payloads",
+            "entity.pa",
+            b"original external body",
+        );
+        let mut record = StagedRecord {
+            name: "entity".into(),
+            envelope: vec![1; 21],
+            system_fields: vec![2],
+            payload_file: Some("entity.pa".into()),
+        };
+        publish(
+            &mut sizes,
+            directory,
+            "incoming",
+            "entity",
+            &serde_json::to_vec(&record).unwrap(),
+        );
+        let before = sizes.current_size(directory).unwrap();
+        exact_budget(&sizes, directory, 97);
+        publish(&mut sizes, directory, "payloads", "entity.pa", &[3; 97]);
+        assert_eq!(
+            sizes.current_size(directory).unwrap(),
+            before - b"original external body".len() as u64 + 97
+        );
+        record.payload_file = None;
+        record.envelope = vec![4; 7];
+        publish(
+            &mut sizes,
+            directory,
+            "incoming",
+            "entity",
+            &serde_json::to_vec(&record).unwrap(),
+        );
+        assert!(
+            saved(&directory.join("incoming/entity"))
+                .unwrap()
+                .payload_file
+                .is_none()
+        );
+        assert_eq!(fs::metadata(directory.join("payloads/entity.pa")).unwrap().len(), 97);
+        // Inline replacement leaves the actual orphan in the ledger.
+        assert_eq!(sizes.current_size(directory).unwrap(), actual_bytes(directory));
+        exact_budget(&sizes, directory, 0);
+        sizes.reconcile(directory).unwrap();
+        // A newly opened ledger must inventory pre-existing files, too.
+        let reopened = SpoolSizes::read(directory).unwrap();
+        assert_eq!(reopened.current_size(directory).unwrap(), actual_bytes(directory));
+    }
+    #[test]
+    fn adoption_space_sqlite_growth_and_siblings_are_always_fresh() {
+        use meguri_model::{
+            clock::{FixedClock, UtcOffset},
+            config::ConfigEntry,
+        };
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let sizes = SpoolSizes::read(directory).unwrap();
+        let clock = FixedClock::new(1, UtcOffset::UTC);
+        meguri_storage::bootstrap::create::<RuntimeError>(&stage.path(), &Col::default(), &[], &clock, |_| Ok(()))
+            .unwrap();
+        let before = sizes.current_size(directory).unwrap();
+        meguri_storage::verified_replace::write_cloud_stage::<RuntimeError>(&stage, &clock, |scope| {
+            scope.put_config_entry(&ConfigEntry {
+                key: "capacity-synthetic".into(),
+                value: serde_json::to_vec(&"x".repeat(128 * 1024)).unwrap(),
+                ..ConfigEntry::default()
+            })?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(sizes.current_size(directory).unwrap() > before);
+        assert_eq!(sizes.current_size(directory).unwrap(), actual_bytes(directory));
+        // A separate ordinary flat root file retains the seeded capacity
+        // fixture's padding behavior and moves the budget above the floor.
+        fs::File::create(directory.join(".capacity-padding"))
+            .unwrap()
+            .set_len(225 * 1024 * 1024)
+            .unwrap();
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let path = directory.join(format!("collection.anki2{suffix}"));
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            file.set_len(file.metadata().unwrap().len() + 4096).unwrap();
+            exact_budget(&sizes, directory, 0);
+        }
+        sizes.reconcile(directory).unwrap();
+    }
+    #[test]
+    fn adoption_space_reconciliation_refuses_in_place_changes_and_untracked_entries() {
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let mut sizes = SpoolSizes::read(directory).unwrap();
+        publish(&mut sizes, directory, "incoming", "entity", b"original");
+        // An in-place writer need not change its directory's metadata. The
+        // full pre-Validate comparison still refuses the stale file size.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(directory.join("incoming/entity"))
+            .unwrap()
+            .set_len(19)
+            .unwrap();
+        assert!(sizes.reconcile(directory).is_err());
+        let sizes = SpoolSizes::read(directory).unwrap();
+        fs::write(directory.join("payloads/untracked"), b"unexpected").unwrap();
+        assert!(sizes.reconcile(directory).is_err());
+    }
+    #[test]
+    fn adoption_space_refuses_unknown_directories_links_and_special_types() {
+        for kind in ["directory", "symlink", "hardlink", "socket", "root-directory"] {
+            let (_parent, stage) = new_stage();
+            let directory = stage.directory();
+            let sizes = SpoolSizes::read(directory).unwrap();
+            let path = directory.join("incoming/unexpected");
+            match kind {
+                "directory" => fs::create_dir(&path).unwrap(),
+                "symlink" => symlink(directory.join("payloads"), &path).unwrap(),
+                "hardlink" => {
+                    let source = directory.join("owned");
+                    fs::write(&source, b"independent required").unwrap();
+                    fs::hard_link(source, &path).unwrap();
+                }
+                "socket" => {
+                    let _socket = std::os::unix::net::UnixListener::bind(&path).unwrap();
+                }
+                "root-directory" => fs::create_dir(directory.join("unknown")).unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(sizes.reconcile(directory).is_err(), "{kind}");
+            assert!(SpoolSizes::read(directory).is_err(), "{kind}");
+        }
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let sizes = SpoolSizes::read(directory).unwrap();
+        fs::rename(directory.join("incoming"), directory.join("retired")).unwrap();
+        symlink(directory.join("retired"), directory.join("incoming")).unwrap();
+        assert!(check_space(&Capacity::unlimited(), directory, &sizes).is_err());
+    }
+    #[test]
+    fn adoption_space_failed_and_uncertain_publication_never_resume_cached_checks() {
+        use meguri_model::faultpoint::{Fault, arm, disarm};
+        for point in ["storage.stage.before_rename", "storage.atomic.after_rename"] {
+            let (_parent, stage) = new_stage();
+            let directory = stage.directory();
+            let mut sizes = SpoolSizes::read(directory).unwrap();
+            publish(&mut sizes, directory, "incoming", "entity", b"old");
+            let mut file = AtomicFile::new(&directory.join("incoming/entity"), Purpose::Stage).unwrap();
+            file.file_mut().write_all(b"replacement").unwrap();
+            arm(point, Fault::IoError(std::io::ErrorKind::Other));
+            let result = sizes.publish(file, directory, "incoming", "entity", 11);
+            disarm(point);
+            assert!(result.is_err());
+            let expected: &[u8] = if point == "storage.atomic.after_rename" {
+                b"replacement"
+            } else {
+                b"old"
+            };
+            assert_eq!(fs::read(directory.join("incoming/entity")).unwrap(), expected);
+            assert_eq!(sizes.bytes, 3);
+            assert!(check_space(&Capacity::unlimited(), directory, &sizes).is_err());
+        }
+    }
+    #[test]
+    fn adoption_space_refuses_overflow_oversize_and_nonprivate_stage() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_parent, stage) = new_stage();
+        let directory = stage.directory();
+        let sizes = SpoolSizes::read(directory).unwrap();
+        let space = Capacity::unlimited();
+        // Overflow is rejected before asking the provider, even for an empty
+        assert!(check_space_for(&space, directory, u64::MAX, &sizes).is_err());
+        assert_eq!(space.calls.load(Ordering::SeqCst), 0);
+        for (spool, limit) in [("incoming", 8 * 1024 * 1024), ("payloads", codec::MAX_PAYLOAD_BYTES)] {
+            let path = directory.join(spool).join("oversize");
+            fs::File::create(&path).unwrap().set_len(limit + 1).unwrap();
+            assert!(SpoolSizes::read(directory).is_err());
+            fs::remove_file(path).unwrap();
+        }
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(SpoolSizes::read(directory).is_err());
+        assert!(check_space(&space, directory, &sizes).is_err());
     }
 }
 
