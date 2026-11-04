@@ -35,3 +35,16 @@ those properties as assumed. No new queue, worker pool or weakened guard lands.
 The existing native Resume check also fails. Its cause is unproven, and its
 authorized repair rounds remain exhausted. Retain its original assertions and
 evidence. No native ownership repair is included here.
+
+## Draft review, 2026-11-04
+
+The dormant-receipt draft uses the existing pool and fixed worker wakeups.
+Independent review still finds missing bounded validation and immediate
+revocation details. A follow-up table maps current authority checks and proposes
+revocation before ordered mutation. Exact account-proof classification, internal
+mutation coverage, reentrant follow-ups and lifecycle wiring remain unproved.
+
+These drafts change no authoritative contract or production code. Core14413
+remains failed. Further design iterations are deferred while normal adoption
+and signed review/sync checks receive priority. R2066 approval is still required
+before implementing a change to this final boundary.
