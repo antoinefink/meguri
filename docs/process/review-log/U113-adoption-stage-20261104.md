@@ -52,3 +52,23 @@ variants. After the production assignment, Swift74744 passes all 22 native
 transport tests, including both variants and the original asset-retention
 checks. Private76004 and similarity76251 pass. Independent review reports no
 P0–P2 findings. A signed device run and the full batch gate remain outstanding.
+
+## Retained phone outcome
+
+Run79217 installs the priority change; inspection81037 shows no collection.
+The new import84366 again exceeds its 300-second observation window.
+Inspection90968 still shows adoptionPageReply. Observation93745 reaches its
+600-second wait failure, then the test runner exits unexpectedly. Its selected
+test and completion evidence are invalid; it proves neither an app crash nor
+a completed import.
+
+Inspection23627 observes the same installed source2a7044ae without reinstalling.
+Only that source's app/core files were selected for this read-only check; master
+was restored cleanly afterward. The app reports connection.tracking, with
+last-entered stage adoptionPageFailureResult. Tracking includes validation and
+storage failures; the exact cause remains unknown. No current-head or complete
+sync acceptance is claimed from that inspection.
+
+The next component starts at f30ada47. Native21297 records two semantic RED
+tests for metadata-only pages and refusal of unexpected assets before copying.
+The implementation will retain resource limits and complete-candidate validation.
