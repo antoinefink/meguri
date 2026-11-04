@@ -1069,6 +1069,14 @@ class GeneratedKernel:
         return struct.pack("=12I16s32s6I2Q", 0, 2, 0, pid, 1, uid, 20, ruid, 20, svuid, 20, 0,
                            b"generated", b"generated", 3, pid, 0, 0, 0, 0, start, usec)
 
+    @classmethod
+    def short_record(cls, pid, uid=None, ruid=None, svuid=None, status=2):
+        uid = cls.owner if uid is None else uid
+        ruid = uid if ruid is None else ruid
+        svuid = uid if svuid is None else svuid
+        return struct.pack("=4I16s8I", pid, 1, pid, status, b"generated",
+                           0, uid, 20, ruid, 20, svuid, 20, 0)
+
     @staticmethod
     def arguments(*words):
         return struct.pack("=i", len(words)) + b"/generated/executable\0\0" + b"\0".join(words) + b"\0K=V\0"
@@ -1079,6 +1087,7 @@ class GeneratedKernel:
         self.args = {pid: self.arguments(b"generated-idle") for pid in self.records}
         self.info_errors, self.args_errors = {}, {self.foreign: errno.EPERM}
         self.info_sizes, self.args_sizes = {}, {}
+        self.short_records, self.short_errors, self.short_sizes, self.short_calls = {}, {}, {}, {}
         self.info_calls, self.argv_calls, self.enumerations = {}, [], 0
         self.on_info = lambda pid, count: None
         self.on_argv = lambda pid: None
@@ -1099,6 +1108,20 @@ class GeneratedKernel:
         return self.list_size if self.list_size is not None else len(data)
 
     def pidinfo(self, pid, flavor, arg, buffer, capacity):
+        if flavor == 13:
+            assert (arg, capacity) == (0, 64)
+            self.short_calls[pid] = self.short_calls.get(pid, 0) + 1
+            if pid in self.short_errors or pid not in self.records:
+                ctypes.set_errno(self.short_errors.get(pid, errno.ESRCH))
+                return 0
+            if pid in self.short_records:
+                data = self.short_records[pid]
+            else:
+                # Independently map the generated FULL wire record to SHORT.
+                fields = struct.unpack_from("=12I", self.records[pid])
+                data = self.short_record(fields[3], fields[5], fields[7], fields[9], fields[1])
+            ctypes.memmove(buffer, data, min(len(data), capacity))
+            return self.short_sizes.get(pid, len(data))
         assert (flavor, arg, capacity) == (3, 0, 136)
         self.info_calls[pid] = self.info_calls.get(pid, 0) + 1
         self.on_info(pid, self.info_calls[pid])
@@ -1134,12 +1157,21 @@ class GeneratedKernel:
 
 
 class KernelReaderCase(unittest.TestCase):
+    def test_short_public_abi_size_and_offsets(self):
+        self.assertEqual(ctypes.sizeof(m.ProcBSDShortInfo), 64)
+        for name, offset in (("pid", 0), ("ppid", 4), ("pgid", 8), ("status", 12), ("comm", 16),
+                             ("flags", 32), ("uid", 36), ("gid", 40), ("ruid", 44), ("rgid", 48),
+                             ("svuid", 52), ("svgid", 56), ("rfu", 60)):
+            self.assertEqual(getattr(m.ProcBSDShortInfo, name).offset, offset)
+
     def test_protected_foreign_uid_skips_argv(self):
         kernel = GeneratedKernel()
+        kernel.info_errors[kernel.foreign] = errno.EPERM
         rows = kernel.read()
         self.assertEqual(set(rows), {kernel.own, kernel.worker})
         self.assertNotIn(kernel.foreign, kernel.argv_calls)
-        self.assertGreaterEqual(kernel.info_calls[kernel.foreign], 2)
+        self.assertNotIn(kernel.foreign, kernel.info_calls)
+        self.assertEqual(kernel.short_calls[kernel.foreign], 2)
 
     def test_real_effective_and_saved_owner_uids_are_relevant(self):
         for credentials in ((501, 0, 0), (0, 501, 0), (0, 0, 501)):
@@ -1161,11 +1193,101 @@ class KernelReaderCase(unittest.TestCase):
 
     def test_unknown_ownership_even_of_foreign_process_refuses(self):
         for pid in (GeneratedKernel.worker, GeneratedKernel.foreign):
-            for error in (errno.EPERM, errno.EIO, errno.EINVAL, 0):
+            for error in (errno.EPERM, errno.EACCES, errno.EIO, errno.EINVAL, 0):
                 kernel = GeneratedKernel()
-                kernel.info_errors[pid] = error
+                kernel.short_errors[pid] = error
                 with self.subTest(pid=pid, error=error), self.assertRaises(m.Refused):
                     kernel.read()
+                self.assertNotIn(pid, kernel.info_calls)
+                self.assertNotIn(pid, kernel.argv_calls)
+
+    def test_each_owned_short_uid_requires_readable_full_identity(self):
+        for credentials in ((501, 0, 0), (0, 501, 0), (0, 0, 501)):
+            for error in (errno.EPERM, errno.EACCES, errno.EIO, errno.EINVAL, 0):
+                kernel = GeneratedKernel()
+                kernel.records[kernel.worker] = kernel.record(kernel.worker, *credentials)
+                kernel.info_errors[kernel.worker] = error
+                with self.subTest(credentials=credentials, error=error), self.assertRaises(m.Refused):
+                    kernel.read()
+                self.assertEqual(kernel.info_calls[kernel.worker], 1)
+                self.assertNotIn(kernel.worker, kernel.argv_calls)
+
+    def test_short_partial_malformed_and_unverified_pid_refuse(self):
+        for pid in (GeneratedKernel.worker, GeneratedKernel.foreign):
+            for size in (0, -1, 35, 40, 63, 65):
+                kernel = GeneratedKernel()
+                kernel.short_sizes[pid] = size
+                with self.subTest(pid=pid, size=size), self.assertRaises(m.Refused):
+                    kernel.read()
+                self.assertNotIn(pid, kernel.info_calls)
+                self.assertNotIn(pid, kernel.argv_calls)
+            for raw in (GeneratedKernel.short_record(31999, uid=0),
+                        GeneratedKernel.short_record(pid, uid=0, status=0),
+                        GeneratedKernel.short_record(pid, uid=0, status=6),
+                        GeneratedKernel.short_record(pid, uid=2**32 - 1),
+                        GeneratedKernel.short_record(pid, uid=0, ruid=2**32 - 1),
+                        GeneratedKernel.short_record(pid, uid=0, svuid=2**32 - 1),
+                        GeneratedKernel.short_record(pid, uid=0)[:40], b"\0" * 64):
+                kernel = GeneratedKernel()
+                kernel.short_records[pid] = raw
+                with self.subTest(pid=pid, raw=raw), self.assertRaises(m.Refused):
+                    kernel.read()
+                self.assertNotIn(pid, kernel.info_calls)
+                self.assertNotIn(pid, kernel.argv_calls)
+
+    def test_owner_checks_must_match(self):
+        for second_pass in (False, True):
+            # Each real/effective/saved UID and GID must agree, including a FULL
+            # transition to entirely foreign credentials after an owned SHORT.
+            for index in (5, 6, 7, 8, 9, 10, None):
+                kernel = GeneratedKernel()
+                pid = 32000 if second_pass else kernel.worker
+                def change(count):
+                    if count == (2 if second_pass else 1):
+                        kernel.short_records[pid] = kernel.short_record(pid)
+                        fields = list(struct.unpack("=12I16s32s6I2Q", kernel.record(pid)))
+                        if index is None:
+                            for field in (5, 7, 9):
+                                fields[field] = 0
+                        else:
+                            fields[index] = 0
+                        kernel.records[pid] = struct.pack("=12I16s32s6I2Q", *fields)
+                kernel.on_list = change
+                with self.subTest(second_pass=second_pass, index=index), self.assertRaises(m.Refused):
+                    kernel.read()
+                self.assertEqual(kernel.info_calls[pid], 1)
+                self.assertNotIn(pid, kernel.argv_calls)
+
+    def test_pinned_identity_never_uses_short_foreign_or_exit_exclusion(self):
+        for short_exit in (False, True):
+            for full_result in ("foreign", errno.EPERM, errno.EIO, errno.ESRCH):
+                kernel = GeneratedKernel()
+                def change(count):
+                    if count == 2:
+                        if short_exit:
+                            kernel.short_errors[kernel.worker] = errno.ESRCH
+                        else:
+                            kernel.short_records[kernel.worker] = kernel.short_record(kernel.worker, uid=0)
+                        if full_result == "foreign":
+                            kernel.records[kernel.worker] = kernel.record(kernel.worker, uid=0)
+                        else:
+                            kernel.info_errors[kernel.worker] = full_result
+                kernel.on_list = change
+                with self.subTest(short_exit=short_exit, full_result=full_result):
+                    if full_result == errno.ESRCH:
+                        self.assertEqual(set(kernel.read()), {kernel.own})
+                    else:
+                        with self.assertRaises(m.Refused):
+                            kernel.read()
+                    self.assertEqual(kernel.short_calls[kernel.worker], 1)
+                    self.assertEqual(kernel.info_calls[kernel.worker], 3)
+
+    def test_short_positive_esrch_only_is_exit(self):
+        kernel = GeneratedKernel()
+        kernel.short_errors[kernel.worker] = errno.ESRCH
+        self.assertEqual(set(kernel.read()), {kernel.own})
+        self.assertNotIn(kernel.worker, kernel.info_calls)
+        self.assertNotIn(kernel.worker, kernel.argv_calls)
 
     def test_positive_kernel_esrch_exit_can_be_skipped(self):
         kernel = GeneratedKernel()
@@ -1275,6 +1397,7 @@ class KernelReaderCase(unittest.TestCase):
                     GeneratedKernel.record(31001, usec=1000000), b"\0" * 136):
             kernel = GeneratedKernel()
             kernel.records[kernel.worker] = raw
+            kernel.short_records[kernel.worker] = kernel.short_record(kernel.worker)
             with self.subTest(raw=raw), self.assertRaises(m.Refused):
                 kernel.read()
 

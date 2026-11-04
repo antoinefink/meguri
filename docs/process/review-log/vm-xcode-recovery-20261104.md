@@ -43,3 +43,10 @@ four valid source-only contexts. MG creates that format without any VM work.
 Export87320 accepts only its exact self-bound schema as a noncandidate; pins
 and activity checks remain required. Unknown formats still refuse. Review is
 clear. Selftest92871: three pass. Private92662 and similarity92435 pass.
+
+Inspect97198 reaches the process reader. Full BSD metadata is protected for
+some system processes. A separate numeric-only host probe reads 260 short
+records and identifies them as foreign. Exports2542 and10030 use that public
+ownership record before full reads. Relevant and pinned lifetimes still need
+full checks; unknown ownership still refuses. Review is clear.
+Selftest16399: three pass. Private16661 and similarity16157 pass.

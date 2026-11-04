@@ -390,6 +390,13 @@ class ProcBSDInfo(ctypes.Structure):
     _fields_ += [("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
 
 
+class ProcBSDShortInfo(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in ("pid", "ppid", "pgid", "status")]
+    _fields_ += [("comm", ctypes.c_char * 16)]
+    _fields_ += [(name, ctypes.c_uint32) for name in
+                ("flags", "uid", "gid", "ruid", "rgid", "svuid", "svgid", "rfu")]
+
+
 def host_processes(lib=None, libc=None):
     """Bounded in-process activity snapshot of the configured namespace owner.
 
@@ -404,6 +411,11 @@ def host_processes(lib=None, libc=None):
     """
     need(sys.platform == "darwin" and os.geteuid() == os.getuid())
     need(ctypes.sizeof(ProcBSDInfo) == 136 and ProcBSDInfo.start_sec.offset == 120)
+    need(ctypes.sizeof(ProcBSDShortInfo) == 64 and all(
+        getattr(ProcBSDShortInfo, name).offset == offset for name, offset in
+        (("pid", 0), ("ppid", 4), ("pgid", 8), ("status", 12), ("comm", 16),
+         ("flags", 32), ("uid", 36), ("gid", 40), ("ruid", 44), ("rgid", 48),
+         ("svuid", 52), ("svgid", 56), ("rfu", 60))))
     lib = lib if lib is not None else ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
     libc = libc if libc is not None else ctypes.CDLL(None, use_errno=True)
     lib.proc_listpids.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_int]
@@ -433,6 +445,16 @@ def host_processes(lib=None, libc=None):
 
     def relevant(pin):
         return owner in pin[3:6]
+
+    def short_credentials(pid):
+        value = ProcBSDShortInfo()
+        ctypes.set_errno(0)
+        size = lib.proc_pidinfo(pid, 13, 0, ctypes.byref(value), ctypes.sizeof(value))
+        if size == 0 and ctypes.get_errno() == errno.ESRCH:
+            return None
+        need(size == ctypes.sizeof(value) and value.pid == pid and 0 < value.status <= 5
+             and all(uid < 2**32 - 1 for uid in (value.uid, value.ruid, value.svuid)))
+        return (value.uid, value.ruid, value.svuid, value.gid, value.rgid, value.svgid)
 
     def pids():
         values = (ctypes.c_int * 32768)()
@@ -471,9 +493,13 @@ def host_processes(lib=None, libc=None):
 
     pins, result, total = {}, {}, 0
     for pid in sorted(pids()):
+        credentials = short_credentials(pid)
+        if credentials is None or owner not in credentials[:3]:
+            continue  # Positive exit or positively foreign; neither creates a pin.
         before = info(pid)
-        if before is None or not relevant(before):
+        if before is None:
             continue
+        need(before[3:9] == credentials)
         pins[pid] = before
         need(pid != own_pid or before == own)
         args = argv(pid)
@@ -488,11 +514,19 @@ def host_processes(lib=None, libc=None):
     # Foreign creation/exit does not invalidate the snapshot. Missing relevant
     # PIDs still require ESRCH; an omitted list entry alone is not exit proof.
     for pid in sorted(pids() | set(pins)):
+        if pid not in pins:
+            # Never cache a foreign classification across enumerations. Pinned
+            # lifetimes bypass this exclusion and always require FULL revalidation.
+            credentials = short_credentials(pid)
+            if credentials is None or owner not in credentials[:3]:
+                continue
         current = info(pid)
         if current is None:
             need(pid != own_pid)
             result.pop(pid, None)
             continue
+        if pid not in pins:
+            need(current[3:9] == credentials)
         if pid in pins:
             need(current == pins[pid] and pid in result)
             args = argv(pid)
