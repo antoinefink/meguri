@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import CoreBridge
 
@@ -7,6 +8,26 @@ private final class BufferedNativeFailure: Error {}
 private enum NetworkAdmissionTaskLocals {
     // Synthetic ancestry only; this does not model a private SDK callback context.
     @TaskLocal static var callbackMarker: String?
+}
+
+private struct NetworkSDKEntryObservation: Sendable {
+    let callbackMarker = NetworkAdmissionTaskLocals.callbackMarker
+    let mediaContext = CloudMediaCancellationContext.current
+    let priority = Task.currentPriority
+    #if DEBUG
+    let selectedAction = CloudMediaCancellationContext.selectedAction
+    #endif
+}
+
+private final class NetworkSDKEntryObservationBox: Sendable {
+    private let storage = Mutex<NetworkSDKEntryObservation?>(nil)
+
+    func record() {
+        let observation = NetworkSDKEntryObservation()
+        storage.withLock { $0 = observation }
+    }
+
+    var value: NetworkSDKEntryObservation? { storage.withLock { $0 } }
 }
 
 private enum NetworkEntryObservationError: Error { case deadline }
@@ -77,6 +98,7 @@ struct CloudKitNetworkOperationTests {
         let lifetime = CloudKitNetworkLifetime()
         let generation = lifetime.authority()
         let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+        let observation = NetworkSDKEntryObservationBox()
         let callerPriority = Task.currentPriority
         let operation = try NetworkAdmissionTaskLocals.$callbackMarker.withValue("synthetic-callback-marker") {
             try lifetime.admit(cancelSDK: {
@@ -88,9 +110,7 @@ struct CloudKitNetworkOperationTests {
                     try lifetime.enqueue(generation: generation, validate: {}, begin: {})
                     // Stand-in SDK entry in this original admitted body. The
                     // gate precedes final validation; admission is not acceptance.
-                    #expect(NetworkAdmissionTaskLocals.callbackMarker == nil)
-                    #expect(Task.currentPriority >= callerPriority,
-                            "caller priority must survive admission; escalation is allowed")
+                    observation.record()
                     await observed.enter()
                 } catch {
                     await queued.abort(error)
@@ -101,6 +121,10 @@ struct CloudKitNetworkOperationTests {
         }
         // The caller's synthetic binding has ended before the body is released.
         try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+        let entry = try #require(observation.value)
+        #expect(entry.callbackMarker == nil)
+        #expect(entry.priority >= callerPriority,
+                "caller priority must survive admission; escalation is allowed")
     }
 
     @Test func admittedTaskPreservesMediaContextIdentityAndCallerPriorityAtSDKEntry() async throws {
@@ -110,9 +134,9 @@ struct CloudKitNetworkOperationTests {
             let lifetime = CloudKitNetworkLifetime()
             let generation = lifetime.authority()
             let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+            let observation = NetworkSDKEntryObservationBox()
             let context = CloudMediaCancellationContext(sdk: "synthetic-admission-context")
             let callerPriority = Task.currentPriority
-            #expect(callerPriority >= .high)
             let operation = try CloudMediaCancellationContext.$current.withValue(context) {
                 try lifetime.admit(cancelSDK: {
                     await queued.abort(CancellationError())
@@ -122,9 +146,7 @@ struct CloudKitNetworkOperationTests {
                     do {
                         try lifetime.enqueue(generation: generation, validate: {}, begin: {})
                         // Stand-in SDK entry, before any drain can escalate it.
-                        #expect(CloudMediaCancellationContext.current === context)
-                        #expect(Task.currentPriority >= callerPriority,
-                                "caller priority must survive admission; escalation is allowed")
+                        observation.record()
                         await observed.enter()
                     } catch {
                         await queued.abort(error)
@@ -136,10 +158,16 @@ struct CloudKitNetworkOperationTests {
             // Rebinding in production must retain this exact application object
             // after the caller's TaskLocal scope has ended.
             try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+            return (callerPriority: callerPriority, context: context, observation: observation.value)
         }
-        try await withTaskCancellationHandler {
+        let result = try await withTaskCancellationHandler {
             try await caller.value
         } onCancel: { caller.cancel() }
+        let entry = try #require(result.observation)
+        #expect(result.callerPriority >= .high)
+        #expect(entry.mediaContext === result.context)
+        #expect(entry.priority >= result.callerPriority,
+                "caller priority must survive admission; escalation is allowed")
     }
 
     #if DEBUG
@@ -147,6 +175,7 @@ struct CloudKitNetworkOperationTests {
         let lifetime = CloudKitNetworkLifetime()
         let generation = lifetime.authority()
         let queued = CloudCallbackGate(), observed = CloudCallbackGate()
+        let observation = NetworkSDKEntryObservationBox()
         let action = CloudPolicyAction.requestFetch(zones: [.collection, .media])
         let operation = try CloudMediaCancellationContext.$selectedAction.withValue(action) {
             try lifetime.admit(cancelSDK: {
@@ -156,13 +185,7 @@ struct CloudKitNetworkOperationTests {
                 await queued.enter()
                 do {
                     try lifetime.enqueue(generation: generation, validate: {}, begin: {})
-                    // Match the concrete case and its associated values without
-                    // requiring CloudPolicyAction to conform to Equatable.
-                    if case .some(.requestFetch(let zones)) = CloudMediaCancellationContext.selectedAction {
-                        #expect(zones == [.collection, .media])
-                    } else {
-                        Issue.record("selected requestFetch action was lost or changed at SDK entry")
-                    }
+                    observation.record()
                     await observed.enter()
                 } catch {
                     await queued.abort(error)
@@ -172,6 +195,14 @@ struct CloudKitNetworkOperationTests {
             }
         }
         try await drainNetworkEntryObservation(operation, queued: queued, observed: observed)
+        let entry = try #require(observation.value)
+        // Match the concrete case and its associated values without
+        // requiring CloudPolicyAction to conform to Equatable.
+        if case .some(.requestFetch(let zones)) = entry.selectedAction {
+            #expect(zones == [.collection, .media])
+        } else {
+            Issue.record("selected requestFetch action was lost or changed at SDK entry")
+        }
     }
     #endif
 

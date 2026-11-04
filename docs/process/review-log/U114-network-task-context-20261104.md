@@ -31,3 +31,11 @@ Independent review is clear. Swift71438: 22 pass. Private72529 and similarity725
 pass. Profile73206: 9 pass, with DEBUG disabled. Docs private74669 passes.
 The live signed check remains required. A further test-only change will move
 SDK-entry observations to parent assertions for consistent test attribution.
+
+Export79345 captures entry facts before any join, then asserts them in the
+parent test. Independent review is clear. Swift81600: 10 pass. Production code
+is unchanged. Private83051 and similarity83027 pass. Signed build77287 passes
+its flag, signature, profile and hash
+checks. It stays running through a manual sync attempt beyond the earlier
+crash point. That run still stops: its first new failure is RecordQuietPoint
+with UnqualifiedCompletion. Full sync and the batch gate remain incomplete.
