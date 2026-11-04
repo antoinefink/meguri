@@ -19,3 +19,18 @@ it. Error classification, transport behavior and Release output are unchanged.
 Independent review is clear. Core44522: 16 pass. Kit46302: 16 pass.
 Private45686 and similarity45934 pass. A new signed phone run must capture the
 failure stage before any repair is selected. The full batch gate remains open.
+
+Signed phone run57377 uses source17998998. Its first seven steps pass, but the
+300-second wait for download completion fails. The XCTest harness exits
+successfully; the drive receipt correctly records the failed step. This is
+not a successful import.
+
+The retained hierarchy ends at adoptionPageReply. Inspection65612 later sees
+adoptionPageResult without restarting the app. This proves a page reply reached
+Core; it does not prove collection replacement or media convergence. The app
+remains running for the import to finish. No unchanged import was restarted.
+
+A source review finds that adoption pages request at most two records to keep
+retained assets within the staging budget. The request includes every field.
+Raising that limit alone would break the worst-case asset bound. Neither this
+limit nor the SDK's discretionary default proves the cause of the long wait.
