@@ -115,7 +115,15 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     func prepareAccountRead(_ id: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
         let complete = await accounts.prepareRead(id)
         return { [self] admitted in
-            guard admitted else { return .init(outputs: [], error: CancellationError(), deferred: false) }
+            guard admitted else {
+                #if DEBUG
+                let error = CancellationError()
+                DebugCloudDiagnostics.record(.accountCompletionRefused, error: error)
+                return .init(outputs: [], error: error, deferred: false)
+                #else
+                return .init(outputs: [], error: CancellationError(), deferred: false)
+                #endif
+            }
             return await projectAccountRead(await complete())
         }
     }

@@ -8,6 +8,8 @@ public enum DebugCloudDiagnostics {
     public enum Boundary: String, Sendable {
         case policyExecute, policyExchange, ownWork, connectionPreview
         case commandResult, policyStatus, coreActionFailed, applyDeferred
+        case accountCompletionRefused, accountResultCurrent, accountResultSuperseded
+        case accountReaderClosed, accountReaderFrozen, accountReaderTaskCancelled, accountReaderInvalidated
     }
 
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
@@ -44,7 +46,10 @@ public enum DebugCloudDiagnostics {
             self.boundary = boundary
             switch boundary {
             case .ownWork: self.action = "ownWork"
-            case .commandResult, .policyStatus, .coreActionFailed, .applyDeferred: self.action = "none"
+            case .commandResult, .policyStatus, .coreActionFailed, .applyDeferred,
+                 .accountCompletionRefused, .accountResultCurrent, .accountResultSuperseded,
+                 .accountReaderClosed, .accountReaderFrozen, .accountReaderTaskCancelled,
+                 .accountReaderInvalidated: self.action = "none"
             default: self.action = action.map(DebugCloudDiagnostics.actionTag) ?? "none"
             }
             failure = DebugCloudDiagnostics.failureTag(error)

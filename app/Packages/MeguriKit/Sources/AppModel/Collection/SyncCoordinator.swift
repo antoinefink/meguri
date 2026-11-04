@@ -863,6 +863,12 @@ public final class SyncCoordinator {
             let supersededAccountCancellation = result.error is CancellationError
                 && pendingAccountRead.map { $0 != read } == true
                 && expected == generation && revision == hostRevision && backend === original
+            #if DEBUG
+            if let error = result.error, error is CancellationError {
+                DebugCloudDiagnostics.record(
+                    supersededAccountCancellation ? .accountResultSuperseded : .accountResultCurrent, error: error)
+            }
+            #endif
             await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false,
                 supersededAccountCancellation: supersededAccountCancellation, acknowledged: nil))
             #if DEBUG

@@ -126,7 +126,18 @@ public final class CloudAppAccountReader {
         !frozen && !closed && !Task.isCancelled && epoch == expected && latest == id
     }
     private func cancelled() -> CloudAppAccountReadResult {
+        #if DEBUG
+        let error = CancellationError()
+        let boundary: DebugCloudDiagnostics.Boundary
+        if closed { boundary = .accountReaderClosed }
+        else if frozen { boundary = .accountReaderFrozen }
+        else if Task.isCancelled { boundary = .accountReaderTaskCancelled }
+        else { boundary = .accountReaderInvalidated }
+        DebugCloudDiagnostics.record(boundary, error: error)
+        return .init(outputs: [], error: error, verified: false)
+        #else
         .init(outputs: [], error: CancellationError(), verified: false)
+        #endif
     }
     public func freeze() async {
         replayPermit.revoke()
