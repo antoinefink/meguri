@@ -72,3 +72,16 @@ sync acceptance is claimed from that inspection.
 The next component starts at f30ada47. Native21297 records two semantic RED
 tests for metadata-only pages and refusal of unexpected assets before copying.
 The implementation will retain resource limits and complete-candidate validation.
+
+## Metadata adoption review
+
+Export22877 adds metadata pages, serial payload reads and a provisional cursor.
+It is not accepted. Independent review found six issues: mixed-form record
+order, untagged native test records, missing payload request priority, separate
+staging budgets, cached initialization failure and a removed release assertion.
+The next repair retains input order and all original resource and cleanup checks.
+
+Core28501 fails compilation at a new test's AdoptStep path; no tests ran.
+Core28181 could not reach Docker from the restricted process; it ran no tests.
+Neither result is semantic RED. Repair29327 includes the compilation correction
+and all six review findings. The full batch gate and signed import remain open.
