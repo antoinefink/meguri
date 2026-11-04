@@ -17,3 +17,10 @@ does not prove the later owner check accepts that result.
 
 Core68917: 17 pass. AppModel70116: three pass. Private68629 and similarity68364
 pass. A live capture and the full batch gate remain required.
+
+Build85526 passes team-signing checks and runs the new tags. Its three events
+identify invalidated, superseded account work; the reducer handles that case
+without setting generic failure. A later generic footer has no matching error
+event. Export8959 adds DEBUG origins to eleven existing silent catches. Review
+is clear. No runtime decision changes. Core20689: 17 pass. Private20624 and
+similarity20627 pass. AppModel compilation is pending.

@@ -281,7 +281,12 @@ public final class SyncCoordinator {
             defer { platformTask = nil }
             do { try await bootstrap(); platformPrepared = true; setupState = .prepared }
             catch SyncOwnerFailure.configurationUnavailable { setupState = .configurationUnavailable }
-            catch { setupState = .failed; operationFailed = true }
+            catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.platformBootstrap, error: error)
+                #endif
+                setupState = .failed; operationFailed = true
+            }
         }
         platformTask = task
         await task.value
@@ -332,7 +337,12 @@ public final class SyncCoordinator {
                 enqueue(.policy(.refresh(.cloud)))
                 enqueue(.account(false))
                 if observeSignals { observePlatformSignals() }
-            } catch { operationFailed = true; setupState = .failed }
+            } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.backendAttachment, error: error)
+                #endif
+                operationFailed = true; setupState = .failed
+            }
         }
         attachmentTask = task
         await task.value
@@ -352,6 +362,11 @@ public final class SyncCoordinator {
             recovery = status
             if status != nil { retainedRecoveryStart = (backend, generation, revision) }
         case .failure:
+            #if DEBUG
+            if case .failure(let error) = result {
+                DebugCloudDiagnostics.record(.retainedRecoveryFailure, error: error)
+            }
+            #endif
             recovery = nil
             operationFailed = true
         }
@@ -528,6 +543,9 @@ public final class SyncCoordinator {
     public func confirmAdoption() async { await confirmConnection(.adoption) }
     public func confirmResume() async { await confirmConnection(.resume) }
     private func recordConnectionFailure(_ error: any Error) {
+        #if DEBUG
+        DebugCloudDiagnostics.record(.connectionFailure, error: error)
+        #endif
         operationFailed = true
         if case BridgeError.cloudConnection(let failure) = error { connectionFailure = failure }
     }
@@ -659,7 +677,14 @@ public final class SyncCoordinator {
                 if initialAdoptionEnabledBefore == nil { try await connection.trigger() }
                 await runOwnWork(backend, generation: expected, revision: revision)
             }
-            catch { if expected == generation, !closing { operationFailed = true } }
+            catch {
+                if expected == generation, !closing {
+                    #if DEBUG
+                    DebugCloudDiagnostics.record(.ownWorkTrigger, error: error)
+                    #endif
+                    operationFailed = true
+                }
+            }
         }
     }
     private func finishOwnWork() {
@@ -676,7 +701,12 @@ public final class SyncCoordinator {
             recovery = try await backend.connection?.recoveryStatus()
             await reconcileInitialAdoption(backend)
             receive(.refresh(.cloud))
-        } catch { operationFailed = true }
+        } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.record(.connectionOperationCancel, error: error)
+            #endif
+            operationFailed = true
+        }
     }
     private func saveEnabled(_ enabled: Bool) {
         saveSettings(.init(enabled: enabled, paused: settings.paused,
@@ -800,7 +830,13 @@ public final class SyncCoordinator {
         do {
             try await backend?.freezeForSuspend()
             return true
-        } catch { suspended = false; await backend?.resumeAfterCoreResume(); operationFailed = true; return false }
+        } catch {
+            suspended = false; await backend?.resumeAfterCoreResume()
+            #if DEBUG
+            DebugCloudDiagnostics.record(.suspendFreeze, error: error)
+            #endif
+            operationFailed = true; return false
+        }
     }
     public func backgroundExpired() {
         if suspended { pendingExpiry = true }
@@ -975,7 +1011,12 @@ public final class SyncCoordinator {
                 pendingAccountRead = try await backend.beginAccountRead(transition: transition)
                 if awaitingInitialOwnProof { initialOwnResumeRead = pendingAccountRead }
                 startAccountRead()
-            } catch { operationFailed = true }
+            } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.beginAccountRead, error: error)
+                #endif
+                operationFailed = true
+            }
         }
     }
     private func policy(_ event: CloudPolicyEvent) async {
@@ -1016,6 +1057,9 @@ public final class SyncCoordinator {
                     return
                 }
             }
+            #if DEBUG
+            DebugCloudDiagnostics.record(.policyInput, error: error)
+            #endif
             operationFailed = true; failureRevision &+= 1
         }
     }
@@ -1181,7 +1225,12 @@ public final class SyncCoordinator {
                 await reconcileInitialAdoption(successor)
                 return
             }
-        } catch { replacing = true; operationFailed = true; setupState = .failed }
+        } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.record(.backendReplacement, error: error)
+            #endif
+            replacing = true; operationFailed = true; setupState = .failed
+        }
     }
     private static func requiredDuringClose(_ action: CloudPolicyAction) -> Bool {
         switch action {
@@ -1295,7 +1344,12 @@ public final class SyncCoordinator {
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; platformPrepared = false
                 return true
-            } catch { operationFailed = true; return false }
+            } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.record(.closeDrain, error: error)
+                #endif
+                operationFailed = true; return false
+            }
         }
         closeTask = task
         let result = await task.value

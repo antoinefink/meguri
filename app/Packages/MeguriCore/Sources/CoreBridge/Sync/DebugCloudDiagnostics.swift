@@ -10,6 +10,9 @@ public enum DebugCloudDiagnostics {
         case commandResult, policyStatus, coreActionFailed, applyDeferred
         case accountCompletionRefused, accountResultCurrent, accountResultSuperseded
         case accountReaderClosed, accountReaderFrozen, accountReaderTaskCancelled, accountReaderInvalidated
+        case platformBootstrap, backendAttachment, retainedRecoveryFailure, connectionFailure
+        case ownWorkTrigger, connectionOperationCancel, suspendFreeze, beginAccountRead
+        case policyInput, backendReplacement, closeDrain
     }
 
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
@@ -49,7 +52,10 @@ public enum DebugCloudDiagnostics {
             case .commandResult, .policyStatus, .coreActionFailed, .applyDeferred,
                  .accountCompletionRefused, .accountResultCurrent, .accountResultSuperseded,
                  .accountReaderClosed, .accountReaderFrozen, .accountReaderTaskCancelled,
-                 .accountReaderInvalidated: self.action = "none"
+                 .accountReaderInvalidated, .platformBootstrap, .backendAttachment,
+                 .retainedRecoveryFailure, .connectionFailure, .ownWorkTrigger,
+                 .connectionOperationCancel, .suspendFreeze, .beginAccountRead,
+                 .policyInput, .backendReplacement, .closeDrain: self.action = "none"
             default: self.action = action.map(DebugCloudDiagnostics.actionTag) ?? "none"
             }
             failure = DebugCloudDiagnostics.failureTag(error)
