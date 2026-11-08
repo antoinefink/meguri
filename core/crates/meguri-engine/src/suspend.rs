@@ -289,7 +289,7 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
                 .as_ref()
                 .ok_or_else(|| EngineError::unavailable("collection closed"))?;
             reply.review_identity = Some((
-                collection.writer().native_identity()?,
+                collection.writer().validate_native_identity()?,
                 collection.writer().persistent_identity()?,
                 [env.reopen.random.next_u64(), env.reopen.random.next_u64()],
             ));

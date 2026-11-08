@@ -1,4 +1,5 @@
 //! C12 ordered file worker. It owns no collection/SQLite/dispatcher/session lock.
+pub(in crate::session) mod managed;
 use super::frozen::{Base, FrozenAnswer, error};
 use crate::{EngineError, Generation, Qos, Seq, ThreadRegistry, monotonic};
 use meguri_storage::atomic_file::{AtomicFile, Purpose, full_sync};
@@ -55,12 +56,14 @@ enum Native {
 enum MigrationReason {
     LegacyHeaderOnlyRebound,
     LegacyIdentityUpgraded,
+    PristineV2Rebound,
 }
 impl MigrationReason {
     fn as_str(self) -> &'static str {
         match self {
             Self::LegacyHeaderOnlyRebound => "legacy_header_only_rebound",
             Self::LegacyIdentityUpgraded => "legacy_identity_upgraded",
+            Self::PristineV2Rebound => "pristine_v2_rebound",
         }
     }
 }
@@ -150,6 +153,7 @@ enum Work {
     Barrier(mpsc::SyncSender<Result<(), EngineError>>),
     Compact(mpsc::SyncSender<Result<(), EngineError>>),
     Migrate(PersistentIdentity, mpsc::SyncSender<Result<(), EngineError>>),
+    OpeningEvidence(Box<managed::Evidence>, mpsc::SyncSender<Result<(), EngineError>>),
     #[cfg(feature = "test-hooks")]
     Fault(JournalStage, mpsc::SyncSender<()>),
     #[cfg(feature = "test-hooks")]
@@ -602,6 +606,16 @@ impl Migration {
         state: &State,
         archive_durable: impl FnOnce(),
     ) -> Result<(Header, RecoveryBinding), EngineError> {
+        self.publish_checked(path, state, archive_durable, || Ok(()))
+    }
+    fn publish_checked(
+        &self,
+        path: &Path,
+        state: &State,
+        archive_durable: impl FnOnce(),
+        check: impl Fn() -> Result<(), EngineError>,
+    ) -> Result<(Header, RecoveryBinding), EngineError> {
+        check()?;
         if state.retired || state.events.values().any(|e| e.terminal.is_none()) {
             return Err(corruption());
         }
@@ -615,25 +629,35 @@ impl Migration {
         // A crash may have already published it: verify exact bytes and repeat
         // file/directory sync, without ever overwriting a collision or link.
         let archive = self.archive_path();
-        let archival = (|| -> Result<(), EngineError> {
+        let archival = (|| -> Result<RecoveryBinding, EngineError> {
+            let mut published = None;
             match std::fs::symlink_metadata(&archive) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     let mut copy = AtomicFile::new(&archive, Purpose::Sidecar)?;
                     copy.file_mut().write_all(&self.original.bytes).map_err(error)?;
+                    published = Some(RecoveryBinding {
+                        file: copy.file_mut().try_clone().map_err(error)?,
+                        bytes: self.original.bytes.clone(),
+                    });
                     copy.publish_new(|_| require_migration_source(&current, path))?;
                 }
                 Err(e) => return Err(error(e)),
                 Ok(_) => {}
+            }
+            if let Some(published) = &published {
+                published.require(&archive)?;
             }
             let archived = RecoveryBinding::read(&archive)?;
             if archived.bytes != self.original.bytes {
                 return Err(migration_io());
             }
             archived.sync(&archive)?;
-            Ok(())
+            Ok(archived)
         })();
-        archival.map_err(migration_failure)?;
+        let archived = archival.map_err(migration_failure)?;
         archive_durable();
+        check()?;
+        archived.require(&archive).map_err(|_| identity_mismatch())?;
         current.require(path).map_err(|_| identity_mismatch())?;
         require_live(&self.collection, self.live, &self.next.path).map_err(|_| identity_mismatch())?;
         let mut h = self.next.clone();
@@ -655,6 +679,10 @@ impl Migration {
                 bytes,
             };
             next.publish(|_| {
+                archived.require(&archive)?;
+                check().map_err(|_| meguri_storage::StorageError::Io {
+                    detail: "pending_answer_identity_mismatch".into(),
+                })?;
                 require_migration_source(&current, path)?;
                 require_live(&self.collection, self.live, &self.next.path)
             })?;
@@ -662,6 +690,8 @@ impl Migration {
             Ok(landed)
         })();
         let landed = publication.map_err(migration_failure)?;
+        archived.require(&archive).map_err(|_| identity_mismatch())?;
+        check()?;
         Ok((h, landed))
     }
 }
@@ -781,7 +811,7 @@ impl Journal {
                 Qos::UserInitiated,
                 "review-session",
                 move |activity| {
-                    file_loop(rx, file, path, shared, number, migration, activity);
+                    file_loop(rx, file, path, shared, number, (migration, None), activity);
                 },
             )
             .map_err(error)?;
@@ -1005,7 +1035,7 @@ fn file_loop(
     path: PathBuf,
     state: Arc<Mutex<State>>,
     mut number: u64,
-    mut migration: Option<Migration>,
+    (mut migration, mut opening): (Option<Migration>, Option<managed::Evidence>),
     activity: &crate::threads::ThreadActivity,
 ) {
     #[cfg(feature = "test-hooks")]
@@ -1034,10 +1064,22 @@ fn file_loop(
             Work::Barrier(reply) => {
                 let _ = reply.send(state.lock().unwrap().failure.clone().map_or(Ok(()), Err));
             }
+            Work::OpeningEvidence(evidence, reply) => {
+                let result = evidence.require();
+                if result.is_ok() {
+                    opening = Some(*evidence);
+                } else if let Err(e) = &result {
+                    state.lock().unwrap().failure = Some(e.clone());
+                }
+                let _ = reply.send(result);
+            }
             Work::Migrate(persistent, reply) => {
                 let result = (|| {
                     if let Some(e) = &state.lock().unwrap().failure {
                         return Err(e.clone());
+                    }
+                    if let Some(evidence) = &opening {
+                        evidence.require()?;
                     }
                     if let Some(pending) = &migration {
                         if pending.next.native != Native::Persistent(persistent) {
@@ -1063,6 +1105,10 @@ fn file_loop(
                         number = 1;
                         migration = None;
                     }
+                    if let Some(evidence) = &opening {
+                        evidence.require()?;
+                    }
+                    opening = None;
                     Ok(())
                 })();
                 if let Err(e) = &result {
@@ -1092,8 +1138,14 @@ fn file_loop(
                     // Acceptances can enqueue while this file operation runs.
                     // The worker will append them after the new header; no UI
                     // mutex is held across full sync or directory publication.
-                    create(&path, &h, true)?;
-                    file = OpenOptions::new().append(true).open(&path).map_err(error)?;
+                    if let Some(evidence) = &mut opening {
+                        evidence.compact(&h)?;
+                        file = append_file(&path)?;
+                        evidence.require_append(&file)?;
+                    } else {
+                        create(&path, &h, true)?;
+                        file = OpenOptions::new().append(true).open(&path).map_err(error)?;
+                    }
                     state.lock().unwrap().events.retain(|id, _| *id >= h.next_event);
                     validated.events.retain(|id, _| *id >= h.next_event);
                     number = 1;
@@ -1124,6 +1176,9 @@ fn file_loop(
                     if let Some(e) = &state.lock().unwrap().failure {
                         return Err(e.clone());
                     }
+                    if let Some(evidence) = &opening {
+                        evidence.require_append(&file)?;
+                    }
                     for (offset, (record, _, _)) in batch.iter().enumerate() {
                         // Live request admission, not disk-record validation:
                         // undo may durably cancel between the writer's check
@@ -1144,6 +1199,9 @@ fn file_loop(
                         #[cfg(feature = "test-hooks")]
                         stage(&mut fault, &hook, record_stages(record)[0])?;
                         file.write_all(&bytes).map_err(error)?;
+                        if let Some(evidence) = &mut opening {
+                            evidence.appended(&bytes);
+                        }
                         if let Some(pending) = &mut migration {
                             pending.current_bytes.extend(&bytes);
                         }
@@ -1153,6 +1211,9 @@ fn file_loop(
                     }
                     if written != 0 {
                         full_sync(&file)?;
+                    }
+                    if let Some(evidence) = &opening {
+                        evidence.require_append(&file)?;
                     }
                     let covered_at = monotonic::now();
                     for ((record, _, _), cancelled) in batch.iter().zip(&cancelled_prepares) {

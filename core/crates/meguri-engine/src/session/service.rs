@@ -549,6 +549,7 @@ pub struct ReviewService {
     inner: Arc<Inner>,
     stream: crate::ChangeStream,
     threads: crate::ThreadRegistry,
+    engine: crate::WeakEngine,
     start_hooks: Mutex<Vec<Arc<dyn SessionStartHook>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
     control: LifecycleGate,
@@ -611,6 +612,7 @@ impl ReviewService {
             inner,
             stream: engine.stream().clone(),
             threads: engine.threads().clone(),
+            engine: engine.downgrade(),
             start_hooks: Mutex::new(vec![Arc::new(engine.jobs().clone())]),
             worker: Mutex::new(Some(worker)),
             control: LifecycleGate::default(),
@@ -2971,7 +2973,7 @@ type NativeBinding = (
     [u64; 2],
 );
 
-fn native_binding(c: &Collection) -> Result<NativeBinding, EngineError> {
+pub(super) fn native_binding(c: &Collection) -> Result<NativeBinding, EngineError> {
     c.core
         .exec
         .control(crate::suspend::Control::ReviewIdentity)
@@ -3089,16 +3091,7 @@ impl OpenStep for ReviewService {
         "review-session"
     }
     fn run(&self, c: &Collection) -> Result<(), EngineError> {
-        let (identity, persistent, incarnation) = native_binding(c)?;
-        let journal = Journal::open(
-            c.path(),
-            identity,
-            persistent,
-            incarnation,
-            c.generation(),
-            &self.threads,
-            || native_binding(c).map(|(_, _, incarnation)| incarnation),
-        )?;
+        let journal = super::journal::managed::open(c, &self.engine, &self.threads)?;
         *c.core.exec.review_journal.lock().unwrap() = Some(Arc::downgrade(&journal));
         let recovery = replay(c, &journal).and_then(|()| {
             // Re-read through the retained Writer descriptor after recovery,
