@@ -696,6 +696,13 @@ impl Migration {
     }
 }
 
+// Current live checks never use a retained header's historical locator.
+struct CurrentBinding<'a> {
+    collection: &'a Path,
+    native: (u64, u64),
+    canonical: &'a [u8],
+}
+
 impl Journal {
     pub(crate) fn open(
         collection: &Path,
@@ -771,11 +778,13 @@ impl Journal {
             });
         }
         Self::initialize_retained(
-            collection,
-            native,
+            CurrentBinding {
+                collection,
+                native,
+                canonical: &header.path,
+            },
             generation,
             threads,
-            &header.path,
             (original, loaded, number, complete),
             migration,
             None,
@@ -784,11 +793,13 @@ impl Journal {
     // Both strict and qualified managed opens initialize the source they decoded.
     // The live canonical binding is independent of the historical header locator.
     fn initialize_retained(
-        collection: &Path,
-        native: (u64, u64),
+        CurrentBinding {
+            collection,
+            native,
+            canonical,
+        }: CurrentBinding<'_>,
         generation: Generation,
         threads: &ThreadRegistry,
-        canonical: &[u8],
         (original, mut loaded, number, complete): (RecoveryBinding, State, u64, usize),
         migration: Option<Migration>,
         mut opening: Option<managed::Evidence>,

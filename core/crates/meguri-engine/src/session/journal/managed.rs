@@ -190,6 +190,30 @@ impl Evidence {
     pub(super) fn appended(&mut self, bytes: &[u8]) {
         self.active.bytes.extend(bytes);
     }
+    fn reset_retired(&mut self, header: &Header) -> Result<RecoveryBinding, EngineError> {
+        self.require()?;
+        let encoded = encode(1, &Record::Header(header.clone()))?;
+        let mut staged = AtomicFile::new(&self.path, Purpose::Sidecar)?;
+        staged.file_mut().write_all(&encoded).map_err(error)?;
+        let published = RecoveryBinding {
+            file: staged.file_mut().try_clone().map_err(error)?,
+            bytes: encoded,
+        };
+        staged.publish(|_| {
+            self.require().map_err(|_| meguri_storage::StorageError::Io {
+                detail: "pending_answer_identity_mismatch".into(),
+            })
+        })?;
+        // Keep the qualified retired descriptor through the final barrier;
+        // the replacement is the staged descriptor, never a newly chosen file.
+        self.original = Some(std::mem::replace(&mut self.active, published));
+        self.active.sync(&self.path)?;
+        self.require()?;
+        Ok(RecoveryBinding {
+            file: self.active.file.try_clone().map_err(error)?,
+            bytes: self.active.bytes.clone(),
+        })
+    }
     pub(super) fn compact(&mut self, header: &Header) -> Result<(), EngineError> {
         self.require()?;
         let encoded = encode(1, &Record::Header(header.clone()))?;
@@ -279,8 +303,8 @@ pub(in crate::session) fn open(
         }
         // Historical-path decoding is confined to the exact Darwin authority
         // above. The full ordinary codec still validates every complete frame.
-        let (loaded, number, complete) = read_bytes_bound(&original.bytes, &h, native)?;
-        if loaded.retired {
+        let (mut loaded, mut number, mut complete) = read_bytes_bound(&original.bytes, &h, native)?;
+        if loaded.retired && h.path != canonical {
             return Err(identity_mismatch());
         }
         let archive = match &h.notice {
@@ -296,7 +320,7 @@ pub(in crate::session) fn open(
             file: original.file.try_clone().map_err(error)?,
             bytes: original.bytes.clone(),
         };
-        let evidence = Evidence {
+        let mut evidence = Evidence {
             proof,
             directory,
             original: None,
@@ -304,12 +328,37 @@ pub(in crate::session) fn open(
             active,
             path,
         };
+        let original = if loaded.retired {
+            let next_incarnation = if incarnation == h.incarnation {
+                super::super::service::native_binding(c)?.2
+            } else {
+                incarnation
+            };
+            if next_incarnation == h.incarnation {
+                return Err(identity_mismatch());
+            }
+            let next = Header {
+                version: 2,
+                path: canonical.clone(),
+                native: Native::Persistent(persistent),
+                incarnation: next_incarnation,
+                next_event: 1,
+                notice: None,
+            };
+            let reset = evidence.reset_retired(&next)?;
+            (loaded, number, complete) = read_bytes_bound(&reset.bytes, &next, native)?;
+            reset
+        } else {
+            original
+        };
         return Journal::initialize_retained(
-            c.path(),
-            native,
+            CurrentBinding {
+                collection: c.path(),
+                native,
+                canonical: &canonical,
+            },
             c.generation(),
             threads,
-            &canonical,
             (original, loaded, number, complete),
             None,
             Some(evidence),
@@ -871,6 +920,23 @@ mod lifecycle_tests {
             let (_dir, path, journal, original) = fresh();
             let mut candidate_header = first_header(&original).unwrap();
             candidate_header.path.push(b'x');
+            if matches!(case, "highwater" | "torn" | "intent") {
+                candidate_header.native = match candidate_header.native {
+                    Native::Persistent(PersistentIdentity::Darwin { volume_uuid, inode }) => {
+                        Native::Persistent(PersistentIdentity::Darwin {
+                            volume_uuid,
+                            inode: inode ^ 1,
+                        })
+                    }
+                    Native::Persistent(PersistentIdentity::NonDarwin { device, inode }) => {
+                        Native::Persistent(PersistentIdentity::NonDarwin {
+                            device,
+                            inode: inode ^ 1,
+                        })
+                    }
+                    _ => unreachable!(),
+                };
+            }
             match case {
                 "zero" => candidate_header.next_event = 0,
                 "highwater" => candidate_header.next_event = 11,
@@ -968,7 +1034,7 @@ mod lifecycle_tests {
         }
     }
     #[test]
-    fn c12_managed_rebind_accepts_native_change_once_then_rejects_relocation() {
+    fn c12_managed_rebind_accepts_native_change_once_then_rejects_replacement() {
         let (_dir, path, journal, original) = fresh();
         let mut old = first_header(&original).unwrap();
         old.native = match old.native {
@@ -1001,7 +1067,11 @@ mod lifecycle_tests {
         assert!(finish(engine, review, result));
         assert_eq!(std::fs::read(&journal).unwrap(), landed);
         let moved = path.with_file_name("moved.anki2");
-        std::fs::rename(&path, &moved).unwrap();
+        std::fs::copy(&path, &moved).unwrap();
+        assert_ne!(
+            std::fs::metadata(&path).unwrap().ino(),
+            std::fs::metadata(&moved).unwrap().ino()
+        );
         let (engine, review, result) = open_review(&moved);
         assert!(!finish(engine, review, result));
         assert_eq!(std::fs::read(&journal).unwrap(), landed);

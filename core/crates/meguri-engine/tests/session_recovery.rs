@@ -261,6 +261,142 @@ fn c12_replace_checkpoint_failure_reopens_and_rebinds_the_unchanged_file() {
 }
 
 #[test]
+fn c12_managed_retired_same_path_recovers_moved_path_refuses() {
+    let outer = tempfile::tempdir().unwrap();
+    let h = Harness::new(4);
+    let path = h.collection.path().to_owned();
+    let clock = h.clock.clone();
+    h.engine.close().unwrap();
+    drop(h.collection);
+    drop(h.review);
+    drop(h.engine);
+    let seed_dir = h.dir;
+    let pristine = fs::read(journal_path(&path)).unwrap();
+    let directory = outer.path().join("migration");
+    fs::rename(path.parent().unwrap(), &directory).unwrap();
+    let path = directory.join("collection.anki2");
+    let archive = identity_archive(&path, &pristine);
+    let (engine, c, review) = session_support::open(&path, clock);
+    let header = journal_header(&fs::read(journal_path(&path)).unwrap());
+    assert_eq!(header["notice"]["reason"], "pristine_v2_rebound");
+    assert_eq!(fs::read(&archive).unwrap(), pristine);
+    let (id, head) = start(&review);
+    accept(&review, id, &head, Rating::Easy, NOW);
+    review.flush_for_background().unwrap();
+    let expected_logs = logs(&c);
+    let expected = common::steps::dump(&c);
+    assert_eq!(expected_logs.len(), 1);
+    let generation = c.generation();
+    let stream = engine.stream().subscribe();
+    let captured = Arc::new(Mutex::new(None));
+    let capture = captured.clone();
+    let failure = EngineError::InvalidArgument {
+        message: "checkpoint fixture".into(),
+    };
+    let returned = failure.clone();
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    assert_eq!(
+        exclusive
+            .replace(move |live| {
+                let retired = fs::read(journal_path(live)).unwrap();
+                assert!(String::from_utf8_lossy(&retired).contains("Retired"));
+                *capture.lock().unwrap() = Some(retired);
+                Err(returned)
+            })
+            .unwrap_err(),
+        failure
+    );
+    drop(exclusive);
+    drop(slot);
+    assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+    assert_eq!(engine.generation(), generation);
+    assert!(replacement_events(&stream).is_empty());
+    assert_eq!(review.active_session(), None);
+    assert_eq!(logs(&c), expected_logs);
+    assert_ne!(
+        journal_header(&fs::read(journal_path(&path)).unwrap())["incarnation"],
+        header["incarnation"]
+    );
+    engine.close().unwrap();
+    drop(c);
+    drop(review);
+    drop(engine);
+
+    let retired = captured.lock().unwrap().take().unwrap();
+    let retired_header = journal_header(&retired);
+    for field in ["path", "native", "incarnation", "notice"] {
+        assert_eq!(retired_header[field], header[field]);
+    }
+    assert!(retired_header["next_event"].as_u64().unwrap() > 1);
+    fs::write(journal_path(&path), &retired).unwrap();
+    let database = fs::read(&path).unwrap();
+    let saved_archive = directory.join("saved-archive");
+    fs::rename(&archive, &saved_archive).unwrap();
+    let (engine, review, _, opened) = try_review(&path, NOW, UtcOffset::UTC);
+    let failed = opened.is_err();
+    let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+    let refused = review.start(DeckId(1), None).is_err();
+    engine.close().unwrap();
+    drop(opened);
+    drop(review);
+    drop(engine);
+    assert!(failed && !ready && refused);
+    assert_eq!(fs::read(journal_path(&path)).unwrap(), retired);
+    assert_eq!(fs::read(&path).unwrap(), database);
+    assert_eq!(fs::read(&saved_archive).unwrap(), pristine);
+    fs::rename(saved_archive, &archive).unwrap();
+
+    let mut recovered_header = None;
+    for _ in 0..2 {
+        let (engine, review, _, opened) = try_review(&path, NOW, UtcOffset::UTC);
+        let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+        let observed = opened.as_ref().ok().map(|c| (logs(c), common::steps::dump(c)));
+        let open_error = opened.err();
+        engine.close().unwrap();
+        drop(review);
+        drop(engine);
+        assert!(ready && open_error.is_none(), "{open_error:?}");
+        let (actual_logs, actual) = observed.unwrap();
+        assert_eq!(actual_logs, expected_logs, "no duplicate accepted answer");
+        assert_eq!(actual["cards"], expected["cards"]);
+        assert_eq!(actual["revlog"], expected["revlog"]);
+        let current = journal_header(&fs::read(journal_path(&path)).unwrap());
+        assert_ne!(current["incarnation"], header["incarnation"]);
+        assert_eq!(current["path"], header["path"]);
+        assert_eq!(current["native"], header["native"]);
+        assert_eq!(current["next_event"], 1);
+        assert!(current.get("notice").is_none());
+        if let Some(previous) = &recovered_header {
+            assert_eq!(&current, previous, "ordinary reopen retains the new incarnation");
+        }
+        recovered_header = Some(current);
+        assert_eq!(fs::read(&archive).unwrap(), pristine);
+    }
+
+    fs::write(journal_path(&path), &retired).unwrap();
+    let binding = native(&path);
+    let moved = outer.path().join("moved");
+    fs::rename(directory, &moved).unwrap();
+    let path = moved.join("collection.anki2");
+    assert_eq!(native(&path), binding);
+    let database = fs::read(&path).unwrap();
+    let (engine, review, _, opened) = try_review(&path, NOW, UtcOffset::UTC);
+    let failed = opened.is_err();
+    let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+    let refused = review.start(DeckId(1), None).is_err();
+    engine.close().unwrap();
+    drop(opened);
+    drop(review);
+    drop(engine);
+    assert!(failed && !ready && refused, "old marker cannot open at another path");
+    assert_eq!(fs::read(journal_path(&path)).unwrap(), retired);
+    assert_eq!(fs::read(&path).unwrap(), database);
+    assert_eq!(fs::read(identity_archive(&path, &pristine)).unwrap(), pristine);
+    drop(seed_dir);
+}
+
+#[test]
 fn c12_rebind_io_or_corruption_failure_forbids_ready_and_keeps_retired_evidence() {
     for mode in ["io", "corrupt"] {
         let h = Harness::new(3);
