@@ -36,3 +36,31 @@ network access or main-checkout writes were performed by this fixer.
 ## Integration
 
 Independent source review: no P0–P2 findings. Privacy passes. `swift-test/20261108T213918Z-25729` passes the focused test with both held-start and held-load cases. Similarity `20261108T213936Z-26896` passes. These checks verify the diagnostic only; actual phone startup and the underlying repair remain pending.
+
+## Bounded identity observation (verification pending)
+
+Same fixer session/provenance; this pass starts at
+`d360e8e9709f3b5a951a01068121888c749e773a`.
+Supplied actual `e788c867` normal-phone run `28864` succeeded, but preserved drive
+`30623` failed step 2 on collection reopen, before review start; the review-start
+diagnostic was not reached. The existing retry diagnostic was
+`phase:coreResult;bridge:invalidArgument;lifecycle:failed.openStep;step:review-session;reason:pending_answer_identity_mismatch`.
+Baseline `9dad9d02` opened and showed actual decks in `14206`; no answer was sent
+during the review spinner in `15742`. No answer or reset was performed in this
+pass. Successful opening cannot be assumed to persist. Path versus native
+mismatch remains unknown: installation bundle URLs do not identify the journal
+or current collection and cannot prove path-only relocation.
+
+This static DEBUG observation adds only fixed `_path`, `_native`, `_path_native`
+classifications at the existing managed-open migration-header mismatch refusal,
+and exact whole-message Swift allowlist coverage using synthetic constants.
+Release retains the generic refusal; other failure sites remain generic. No
+identity values are exposed, no repair or relocation is implemented, and native
+equality and all proof/archive/refusal ordering remain required under
+`sched/review-session` C12.5/C12.8. The entire preexisting `journal.rs` test module,
+including the protected RED proof, is unchanged. Bounded comparison observation,
+builds, tests, independent review and provenance/privacy/similarity verification
+remain pending with root. No phone artifacts, research, network, builds, tests,
+scans or main-checkout writes were used for this pass.
+
+Independent review clears the fixed comparison categories and unchanged refusal. `core-test/20261108T215127Z-35874` passes 68 engine tests. Privacy `20261108T215123Z-35619` passes. Similarity `20261108T215306Z-37866` passes three files. Swift run `20261108T215302Z-36812` matched no tests and fails; corrected selection `20261108T215449Z-39740` passes both diagnostic and presentation tests. Actual phone comparisons remain unknown until the next signed run.

@@ -257,7 +257,17 @@ pub(in crate::session) fn open(
     directory.require_file(&path)?;
     original.require(&path)?;
     if let Some(h) = migration_header {
-        if h.path != canonical || h.native != Native::Persistent(persistent) {
+        let path_differs = h.path != canonical;
+        let native_differs = h.native != Native::Persistent(persistent);
+        if path_differs || native_differs {
+            #[cfg(debug_assertions)]
+            return Err(error(match (path_differs, native_differs) {
+                (true, false) => "pending_answer_identity_mismatch_path",
+                (false, true) => "pending_answer_identity_mismatch_native",
+                (true, true) => "pending_answer_identity_mismatch_path_native",
+                (false, false) => "pending_answer_identity_mismatch",
+            }));
+            #[cfg(not(debug_assertions))]
             return Err(identity_mismatch());
         }
         let archived = verify_migration_archive(c.path(), &h, &directory)?.ok_or_else(identity_mismatch)?;

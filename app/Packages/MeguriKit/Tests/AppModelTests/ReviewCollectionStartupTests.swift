@@ -457,7 +457,8 @@ import Testing
             }
         }
         let markers = ["pending_answer_identity_mismatch", "pending_answer_journal_corruption",
-            "pending_answer_identity_migration_io"]
+            "pending_answer_identity_migration_io", "pending_answer_identity_mismatch_path",
+            "pending_answer_identity_mismatch_native", "pending_answer_identity_mismatch_path_native"]
         for marker in markers {
             let message = "review journal: \(marker)"
             let cases: [(any Error, String, String)] = [

@@ -1336,6 +1336,9 @@ enum OpenFailureDiagnostic {
         // Match the whole message; attached details are never trusted as markers.
         switch message {
         case "review journal: pending_answer_identity_mismatch": return "pending_answer_identity_mismatch"
+        case "review journal: pending_answer_identity_mismatch_path": return "pending_answer_identity_mismatch_path"
+        case "review journal: pending_answer_identity_mismatch_native": return "pending_answer_identity_mismatch_native"
+        case "review journal: pending_answer_identity_mismatch_path_native": return "pending_answer_identity_mismatch_path_native"
         case "review journal: pending_answer_journal_corruption": return "pending_answer_journal_corruption"
         case "review journal: pending_answer_identity_migration_io": return "pending_answer_identity_migration_io"
         default: return message.hasPrefix("review journal: ") ? "review_journal_other" : "review_service_other"
