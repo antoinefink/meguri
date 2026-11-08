@@ -184,6 +184,9 @@ public struct HomeView: View {
         case .failed(let message):
             ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: message),
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
+                #if DEBUG
+                .debugRetryAccessibilityValue(collection.openFailureDiagnosticValue ?? "")
+                #endif
         case .ready:
             if deckPageDetail == nil, collection.decks.isEmpty {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",

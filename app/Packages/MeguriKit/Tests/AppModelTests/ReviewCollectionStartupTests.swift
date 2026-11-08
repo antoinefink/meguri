@@ -367,12 +367,18 @@ import Testing
             await owner.start()
             let closed = await owner.close()
             try #require(closed)
+            #if DEBUG
+            #expect(owner.openFailureDiagnosticValue == nil, "A new no-file attempt clears the previous failure")
+            #endif
 
             try files.moveItem(at: recovery, to: database)
             var recoveryFailure: (any Error)?
             do {
                 await owner.start()
                 try #require(owner.state == .ready, "Recovery open failed: \(owner.error ?? String(describing: owner.state))")
+                #if DEBUG
+                #expect(owner.openFailureDiagnosticValue == nil)
+                #endif
                 #expect(try await service.lifecycle() == .ready(generation: owner.generation))
                 #expect(try Data(contentsOf: archive) == original)
             } catch { recoveryFailure = error }
@@ -396,6 +402,12 @@ import Testing
                 #expect(!message.contains("detail:"))
                 #expect(!message.contains("not a database"))
                 #expect(!message.contains(root.path))
+                #if DEBUG
+                let diagnostic = try #require(owner.openFailureDiagnosticValue)
+                #expect(diagnostic.hasPrefix("phase:coreResult;bridge:open;lifecycle:failed.open."))
+                #expect(diagnostic.hasSuffix(";step:none"))
+                #expect(!diagnostic.contains(root.path))
+                #endif
             } else {
                 Issue.record("An existing invalid collection must present an open failure")
             }
@@ -411,6 +423,74 @@ import Testing
         }
         if let failure { throw failure }
     }
+
+    #if DEBUG
+    @Test func openFailureDiagnosticUsesOnlyFixedCategories() {
+        let detail = "synthetic-private-detail;phase:injected;step:injected"
+        let bridges: [(BridgeError, String)] = [
+            (.cloudPolicy(.closed), "cloudPolicy"), (.cloudConnection(.closed), "cloudConnection"),
+            (.maintenance(.io(detail)), "maintenance"), (.exportSourceChanged, "exportSourceChanged"),
+            (.exportSourceInvalid, "exportSourceInvalid"), (.exportFormatLimit, "exportFormatLimit"),
+            (.deckOptionsInvalid([]), "deckOptionsInvalid"), (.stale(table: .col, key: detail), "stale"),
+            (.staleGeneration(planned: 123, current: 456), "staleGeneration"),
+            (.undoUnavailable(reason: .none), "undoUnavailable"),
+            (.notetypeRefused(.template(kind: .unknownField, template: 123, side: .front, name: detail, earlier: 456)), "notetypeRefused"),
+            (.deckRefused(.filteredParent), "deckRefused"), (.noteNotFound(id: 123), "noteNotFound"),
+            (.notFound(table: .notes, key: detail), "notFound"),
+            (.insufficientSpace(required: 123, available: 456), "insufficientSpace"),
+            (.open(.io(detail: detail)), "open"), (.suspendDeadline(phase: detail), "suspendDeadline"),
+            (.schedOpRefused(.presetUnsupported(presetIDs: [123])), "schedOpRefused"),
+            (.sessionActive, "sessionActive"), (.invalidTypeAnswerReplacement, "invalidTypeAnswerReplacement"),
+            (.cancelled, "cancelled"), (.busy(runningOperation: detail), "busy"),
+            (.unavailable(reason: detail), "unavailable"), (.unsupported(feature: detail), "unsupported"),
+            (.invalidArgument(detail), "invalidArgument"), (.internal(detail), "internal"),
+            (.mediaCommitPending(sequence: 123, message: detail), "mediaCommitPending"),
+            (.commitCompleted(sequence: 456, message: detail), "commitCompleted")
+        ]
+        for (error, expected) in bridges {
+            #expect(OpenFailureDiagnostic.bridgeCategory(error) == expected)
+            for phase in OpenFailureDiagnostic.Phase.allCases {
+                #expect(OpenFailureDiagnostic.value(phase: phase, error: error,
+                    lifecycle: .failed(.openStep(step: detail, detail: detail))) ==
+                    "phase:\(phase.rawValue);bridge:\(expected);lifecycle:failed.openStep;step:other")
+            }
+        }
+        let states: [(CollectionLifecycle?, String)] = [
+            (nil, "queryFailed"), (.noCollection, "noCollection"), (.opening, "opening"),
+            (.upgrading(from: 123, step: 456), "upgrading"), (.ready(generation: 123), "ready"),
+            (.exclusiveBusy(op: .restore, phase: .working, cancellable: true), "exclusiveBusy"),
+            (.failed(.replace(detail: detail)), "failed.replace"),
+            (.failed(.corrupt(detail: detail)), "failed.corrupt")
+        ]
+        for (state, expected) in states {
+            #expect(OpenFailureDiagnostic.value(phase: .coreResult,
+                error: NSError(domain: detail, code: 123), lifecycle: state) ==
+                "phase:coreResult;bridge:other;lifecycle:\(expected);step:none")
+        }
+        let failures: [(CollectionOpenFailure, String)] = [
+            (.openInAnotherProgram, "openInAnotherProgram"), (.tooOld(version: 123), "tooOld"),
+            (.tooNew(version: 456), "tooNew"), (.v1Scheduler, "v1Scheduler"),
+            (.notACollection(missingTables: [detail]), "notACollection"),
+            (.upgradeFailed(version: 123, stage: .step(456), detail: detail), "upgradeFailed"),
+            (.upgradeFailed(version: 123, stage: .copy, detail: detail), "upgradeFailed"),
+            (.corrupt(detail: detail), "corrupt"), (.connectionInit(detail: detail), "connectionInit"),
+            (.notFound, "notFound"), (.io(detail: detail), "io")
+        ]
+        for (failure, expected) in failures {
+            #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: BridgeError.open(failure),
+                lifecycle: .failed(.open(failure))) ==
+                "phase:coreResult;bridge:open;lifecycle:failed.open.\(expected);step:none")
+        }
+        let knownSteps = ["open", "ownership", "open_evidence", "writer", "fsrs_policy", "day_clock",
+            "derived-store", "media", "review-session", "cloud-note-capture"]
+        for step in knownSteps + [detail, "", "media/\(detail)", "dayclock", " media", "MEDIA"] {
+            let expected = knownSteps.contains(step) ? step : "other"
+            #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: BridgeError.internal(detail),
+                lifecycle: .failed(.openStep(step: step, detail: detail))) ==
+                "phase:coreResult;bridge:internal;lifecycle:failed.openStep;step:\(expected)")
+        }
+    }
+    #endif
 
     @Test func openFailurePresentationDoesNotEchoDiagnosticDetails() {
         let diagnostic = "synthetic-diagnostic-must-stay-private"

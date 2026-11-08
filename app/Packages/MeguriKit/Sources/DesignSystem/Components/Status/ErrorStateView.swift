@@ -14,6 +14,16 @@ public struct ErrorStateView: View {
     private let title: Text
     private let message: Text
     private let retry: Retry?
+    #if DEBUG
+    private var retryDiagnosticValue: String?
+
+    /// Apply a category diagnostic to the retry button itself, never its container.
+    public func debugRetryAccessibilityValue(_ value: String) -> Self {
+        var view = self
+        view.retryDiagnosticValue = value
+        return view
+    }
+    #endif
 
     /// A failure that cannot be retried.
     public init(_ title: Text, message: Text) {
@@ -43,7 +53,7 @@ public struct ErrorStateView: View {
             message.foregroundStyle(.token(.textSecondary))
         } actions: {
             if let retry {
-                Button(action: retry.action) {
+                let button = Button(action: retry.action) {
                     Text("Try Again", bundle: .module)
                 }
                 .accessibilityIdentifier(retry.identifier)
@@ -51,6 +61,15 @@ public struct ErrorStateView: View {
                 #if os(macOS)
                 .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                 .contentShape(Rectangle())
+                #endif
+                #if DEBUG
+                if let retryDiagnosticValue {
+                    button.accessibilityValue(Text(verbatim: retryDiagnosticValue))
+                } else {
+                    button
+                }
+                #else
+                button
                 #endif
             }
         }

@@ -13,6 +13,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     public enum State: Equatable { case unopened, loading, noFile, ready, unavailable, failed(String) }
     public private(set) var state: State = .unopened
     public private(set) var lifecycle: CollectionLifecycle = .noCollection
+    #if DEBUG
+    public private(set) var openFailureDiagnosticValue: String?
+    #endif
     public private(set) var generation: UInt64 = 0
     public private(set) var decks: [CountedDeckNode] = []
     /// Page content may belong to a deck intentionally absent from the tree.
@@ -425,6 +428,9 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     public func start() async {
         guard state == .unopened || state == .noFile || isFailed, !opening else { return }
+        #if DEBUG
+        openFailureDiagnosticValue = nil
+        #endif
         opening = true
         let task = Task { await openCollection() }
         openTask = task
@@ -433,18 +439,49 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
+        #if DEBUG
+        var openPhase = OpenFailureDiagnostic.Phase.platformPreparation
+        #endif
         do {
             await sync.preparePlatform()
             try await configuration.nativeReviewInput?.prepare()
+            #if DEBUG
+            openPhase = .eventSubscription
+            #endif
             try await subscribe()
+            #if DEBUG
+            openPhase = .pathPreparation
+            #endif
             let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
             guard await Self.exists(configuration.collectionLocation.collectionFile) else { state = .noFile; return }
+            #if DEBUG
+            openPhase = .seedPreparation
+            #endif
             let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+            #if DEBUG
+            openPhase = .coreStartOpen
+            do {
+                let job = try await collection.startOpen(location, randomSeed: seed)
+                openPhase = .coreResult
+                try await job.value()
+            }
+            openPhase = .postOpenHostSetup
+            #else
             try await collection.startOpen(location, randomSeed: seed).value()
+            #endif
             try await completeOpenedHost(loadRecord: true)
+            #if DEBUG
+            openFailureDiagnosticValue = nil
+            #endif
         } catch {
             let message = Self.openExplanation(error)
             state = .failed(message); self.error = message
+            #if DEBUG
+            // Query the global lifecycle, including when no ready Host survived.
+            // Event delivery may already have been replaced by the generic catch.
+            let snapshot = try? await collection.lifecycle()
+            openFailureDiagnosticValue = OpenFailureDiagnostic.value(phase: openPhase, error: error, lifecycle: snapshot)
+            #endif
         }
     }
     private func subscribe() async throws {
@@ -1262,6 +1299,103 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
 }
+
+#if DEBUG
+/// Categories only: never format an error payload or return an input step name.
+enum OpenFailureDiagnostic {
+    enum Phase: String, CaseIterable {
+        case platformPreparation, eventSubscription, pathPreparation, seedPreparation
+        case coreStartOpen, coreResult, postOpenHostSetup
+    }
+
+    static func value(phase: Phase, error: any Error, lifecycle: CollectionLifecycle?) -> String {
+        let category: String
+        var step = "none"
+        switch lifecycle {
+        case nil: category = "queryFailed"
+        case .noCollection: category = "noCollection"
+        case .opening: category = "opening"
+        case .upgrading: category = "upgrading"
+        case .ready: category = "ready"
+        case .exclusiveBusy: category = "exclusiveBusy"
+        case .failed(let reason):
+            switch reason {
+            case .open(let failure): category = "failed.open.\(openCategory(failure))"
+            case .openStep(let name, _): category = "failed.openStep"; step = stepCategory(name)
+            case .replace: category = "failed.replace"
+            case .corrupt: category = "failed.corrupt"
+            }
+        }
+        return "phase:\(phase.rawValue);bridge:\(bridgeCategory(error));lifecycle:\(category);step:\(step)"
+    }
+
+    static func bridgeCategory(_ error: any Error) -> String {
+        guard let error = error as? BridgeError else { return "other" }
+        switch error {
+        case .cloudPolicy: return "cloudPolicy"
+        case .cloudConnection: return "cloudConnection"
+        case .maintenance: return "maintenance"
+        case .exportSourceChanged: return "exportSourceChanged"
+        case .exportSourceInvalid: return "exportSourceInvalid"
+        case .exportFormatLimit: return "exportFormatLimit"
+        case .deckOptionsInvalid: return "deckOptionsInvalid"
+        case .stale: return "stale"
+        case .staleGeneration: return "staleGeneration"
+        case .undoUnavailable: return "undoUnavailable"
+        case .notetypeRefused: return "notetypeRefused"
+        case .deckRefused: return "deckRefused"
+        case .noteNotFound: return "noteNotFound"
+        case .notFound: return "notFound"
+        case .insufficientSpace: return "insufficientSpace"
+        case .open: return "open"
+        case .suspendDeadline: return "suspendDeadline"
+        case .schedOpRefused: return "schedOpRefused"
+        case .sessionActive: return "sessionActive"
+        case .invalidTypeAnswerReplacement: return "invalidTypeAnswerReplacement"
+        case .cancelled: return "cancelled"
+        case .busy: return "busy"
+        case .unavailable: return "unavailable"
+        case .unsupported: return "unsupported"
+        case .invalidArgument: return "invalidArgument"
+        case .internal: return "internal"
+        case .mediaCommitPending: return "mediaCommitPending"
+        case .commitCompleted: return "commitCompleted"
+        }
+    }
+
+    private static func openCategory(_ failure: CollectionOpenFailure) -> String {
+        switch failure {
+        case .openInAnotherProgram: return "openInAnotherProgram"
+        case .tooOld: return "tooOld"
+        case .tooNew: return "tooNew"
+        case .v1Scheduler: return "v1Scheduler"
+        case .notACollection: return "notACollection"
+        case .upgradeFailed: return "upgradeFailed"
+        case .corrupt: return "corrupt"
+        case .connectionInit: return "connectionInit"
+        case .notFound: return "notFound"
+        case .io: return "io"
+        }
+    }
+
+    private static func stepCategory(_ name: String) -> String {
+        // Engine lifecycle's fixed steps and the ports registered by Host::open.
+        switch name {
+        case "open": return "open"
+        case "ownership": return "ownership"
+        case "open_evidence": return "open_evidence"
+        case "writer": return "writer"
+        case "fsrs_policy": return "fsrs_policy"
+        case "day_clock": return "day_clock"
+        case "derived-store": return "derived-store"
+        case "media": return "media"
+        case "review-session": return "review-session"
+        case "cloud-note-capture": return "cloud-note-capture"
+        default: return "other"
+        }
+    }
+}
+#endif
 
 private nonisolated struct LaunchCollectionClock: CollectionClock {
     let clock: AppClock

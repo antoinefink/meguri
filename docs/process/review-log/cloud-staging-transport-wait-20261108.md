@@ -27,3 +27,9 @@ Two reviewers checked contract conformance, correctness and the failure boundari
 ## Open evidence
 
 The earlier phone screenshot showed No Decks; no usable phone import or two-device review/media convergence is claimed. The phone was not detected at this resume. Cold reopen and the independent deck picker remain the next live checks. The full batch gate, retained Core14413 responsiveness failure, destructive-reset proof and final acceptance remain open. This log grants no unit or release acceptance.
+
+## Cold-open observation
+
+Signed physical run `run/20261108T195514Z-52888` and preserved inspection `drive/20261108T195629Z-55396` completed. The inspection preserved the invocation and captured Home showing Couldn’t Open Collection, with deck actions disabled. This is a functional failure, despite the successful inspection receipt. Earlier inspection `drive/20261108T194918Z-50387` did not run its script: automation setup timed out; Antoine then unlocked the phone.
+
+No persistence repair was selected from the screenshot alone. Filtered export `cleanroom/20261108T200145Z-58615` adds a Debug-only, fixed-category probe on the existing retry control. It queries global lifecycle after failure and exposes no associated details or paths. Independent source review is clear. `swift-test/20261108T200728Z-61947` passed both diagnostic and original-file recovery tests. Actual category observation remains pending.
