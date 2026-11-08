@@ -48,3 +48,9 @@ These drafts change no authoritative contract or production code. Core14413
 remains failed. Further design iterations are deferred while normal adoption
 and signed review/sync checks receive priority. R2066 approval is still required
 before implementing a change to this final boundary.
+
+## Prepared test restored, 2026-11-08
+
+Export `cleanroom/20261103T171225Z-12087` is restored unchanged, including its full nextest reservation. Focused `core-test/20261108T221600Z-53422` compiles and reproduces the intended before-release failure: final execution validation waits for Driver. Workers join and Host closes before the assertion. No assertion, timing limit or production boundary changed. This enabled regression remains RED and blocks technical acceptance.
+
+Two bounded source reviews identify concrete existing-pool reservation/cancellation/wake and original-SDK callback ordering work. Those are feasibility findings only. The separate R2066 contract approval and implementation/verification remain pending; no new queue, SDK permission or production repair is introduced here. Phone opening/review recovery retains priority.

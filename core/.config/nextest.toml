@@ -107,3 +107,7 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-host) and test(=completion_clock_reenters_runtime_and_rechecks_live_completion_facts)'
 threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and test(=sync::tests::policy_execution::registered_execution_final_validation_completes_while_real_driver_projection_is_held)'
+threads-required = "num-test-threads"

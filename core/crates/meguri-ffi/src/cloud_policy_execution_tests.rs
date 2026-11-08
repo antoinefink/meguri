@@ -96,6 +96,72 @@ fn guarded_registration_accepts_once_and_retains_actual_sdk_identity() {
     fixture.workflow.host.close().unwrap();
 }
 
+// engine/jobs J2.1.1: final native enqueue checks stay short under projection.
+#[test]
+fn registered_execution_final_validation_completes_while_real_driver_projection_is_held() {
+    use std::sync::mpsc;
+
+    struct ReleaseProjection(mpsc::Sender<()>);
+    impl Drop for ReleaseProjection {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    let (fixture, policy, execution) = start();
+    let registration = execution.register_sdk().unwrap();
+    execution.validate_execution().unwrap();
+    fixture.workflow.validate_sdk(registration.instance_id).unwrap();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (released, did_release) = mpsc::channel();
+    driver.set_projection_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume
+            .recv_timeout(Duration::from_secs(10))
+            .expect("projection release");
+        released.send(()).unwrap();
+    });
+    let (entry, before_release, released, projection, validation) = std::thread::scope(|scope| {
+        // This must drop inside the closure, before automatic scope joining.
+        let release = ReleaseProjection(release);
+        let held = scope.spawn(move || policy.input(CloudPolicyEvent::Foreground));
+        let entry = reached.recv_timeout(Duration::from_secs(5));
+        let (validated, completed) = mpsc::channel();
+        // Never exercise the check without positively observing Driver ownership.
+        let validation = if entry.is_ok() {
+            Some(scope.spawn(move || {
+                let _ = validated.send(execution.validate_execution());
+            }))
+        } else {
+            None
+        };
+        let before_release = validation
+            .as_ref()
+            .map(|_| completed.recv_timeout(Duration::from_secs(5)));
+        drop(release);
+        let released = did_release.recv_timeout(Duration::from_secs(5));
+        // Capture both joins before inspecting either outcome, including panics.
+        let projection = held.join();
+        let validation = validation.map(|worker| worker.join());
+        (entry, before_release, released, projection, validation)
+    });
+    // Complete real Host teardown before the expected RED assertion can unwind.
+    let closed = fixture.workflow.host.close();
+    closed.unwrap();
+    entry.expect("real projection owns Driver");
+    released.expect("projection released");
+    let _ = commands(projection.expect("projection worker panicked").unwrap());
+    validation
+        .expect("validation worker started")
+        .expect("validation worker panicked");
+    before_release
+        .expect("validation started after projection entry")
+        .expect("final execution validation waited for Driver")
+        .unwrap();
+}
+
 #[test]
 fn issued_start_cannot_register_after_pause_account_generation_or_close() {
     for transition in 0..4 {
