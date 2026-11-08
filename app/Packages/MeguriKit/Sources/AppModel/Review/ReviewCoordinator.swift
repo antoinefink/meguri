@@ -106,14 +106,21 @@ public final class ReviewCoordinator {
     private var startObservation: ReviewStartObservation?
     public var debugSessionStatus: String {
         switch phase {
-        case .loading: sessionID == nil ? (startObservation?.stage?.rawValue ?? "coreStart") : "cardLoad"
-        case .question: "question"
-        case .answer: "answer"
-        case .transition: "transition"
-        case .waiting: "waiting"
-        case .finished: "finished"
-        case .ended: "ended"
-        case .error: "error"
+        case .loading:
+            if sessionID != nil { return "cardLoad" }
+            let stage = startObservation?.stage
+            if stage == .maintenanceQueued,
+               let call = MaintenanceCallObservation.shared.currentCall {
+                return "maintenanceQueued:\(call.name)"
+            }
+            return stage?.rawValue ?? "coreStart"
+        case .question: return "question"
+        case .answer: return "answer"
+        case .transition: return "transition"
+        case .waiting: return "waiting"
+        case .finished: return "finished"
+        case .ended: return "ended"
+        case .error: return "error"
         }
     }
     #endif

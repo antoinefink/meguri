@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import Instrumentation
 import MeguriCoreBindings
 import Synchronization
 import Testing
@@ -13,8 +14,8 @@ final class MaintenanceOccupancy: Sendable {
     init() { (entered, signal) = AsyncStream.makeStream() }
 }
 extension MaintenanceLane {
-    func occupy(_ gate: MaintenanceOccupancy) throws {
-        try call("test.occupyMaintenance") {
+    func occupy(_ gate: MaintenanceOccupancy, call name: BridgeCall = "test.occupyMaintenance") throws {
+        try call(name) {
             gate.signal.yield(())
             defer { gate.signal.finish() }
             if gate.release.wait(timeout: .now() + 15) == .timedOut {

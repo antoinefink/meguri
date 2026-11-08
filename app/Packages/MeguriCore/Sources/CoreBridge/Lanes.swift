@@ -1,6 +1,44 @@
 import Dispatch
 import Foundation
 import Instrumentation
+#if DEBUG
+import Observation
+import Synchronization
+
+/// Observational only: the current registered call on the one shared
+/// maintenance lane, never proof that it caused a particular wait. UI data
+/// must never enter this state; it retains only a call name, without history.
+public final class MaintenanceCallObservation: Observable, Sendable {
+    public static let shared = MaintenanceCallObservation()
+    private let changes = ObservationRegistrar()
+    private let current = Mutex<BridgeCall?>(nil)
+    private init() {}
+
+    public var currentCall: BridgeCall? {
+        changes.access(self, keyPath: \.currentCall)
+        return current.withLock { $0 }
+    }
+
+    func withCall<T>(_ name: BridgeCall, _ body: () throws -> T) rethrows -> T {
+        dispatchPrecondition(condition: .onQueue(MaintenanceLane.shared.queue))
+        let previous = replace(with: name)
+        defer { _ = replace(with: previous) }
+        return try body()
+    }
+
+    private func replace(with call: BridgeCall?) -> BridgeCall? {
+        // Synchronous observers may read currentCall. Notify outside the
+        // mutex; only the owner swap is locked, never the body or FFI.
+        changes.withMutation(of: self, keyPath: \.currentCall) {
+            current.withLock {
+                let previous = $0
+                $0 = call
+                return previous
+            }
+        }
+    }
+}
+#endif
 
 /// The four core lanes (KTD9). Each is an actor whose serial executor is its
 /// own `DispatchSerialQueue`, so blocking FFI calls run there and never on the
@@ -43,6 +81,13 @@ extension CoreLane {
     func call<T: Sendable>(_ name: BridgeCall, _ body: () throws -> T) throws(BridgeError) -> T {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
+            #if DEBUG
+            if self === MaintenanceLane.shared {
+                return try MaintenanceCallObservation.shared.withCall(name) {
+                    try Signposts.bridge(name, lane: Self.lane.rawValue, body)
+                }
+            }
+            #endif
             return try Signposts.bridge(name, lane: Self.lane.rawValue, body)
         } catch {
             throw BridgeError(error)

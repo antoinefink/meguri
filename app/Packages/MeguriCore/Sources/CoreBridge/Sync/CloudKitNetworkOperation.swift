@@ -16,7 +16,15 @@ func cloudFinalCoreCall<T: Sendable>(_ name: BridgeCall, _ body: @Sendable () th
     let queue = MaintenanceLane.shared.queue
     dispatchPrecondition(condition: .notOnQueue(queue))
     return try queue.sync {
-        do { return try Signposts.bridge(name, lane: Lane.maintenance.rawValue, body) }
+        do {
+            #if DEBUG
+            return try MaintenanceCallObservation.shared.withCall(name) {
+                try Signposts.bridge(name, lane: Lane.maintenance.rawValue, body)
+            }
+            #else
+            return try Signposts.bridge(name, lane: Lane.maintenance.rawValue, body)
+            #endif
+        }
         catch { throw BridgeError(error) }
     }
 }

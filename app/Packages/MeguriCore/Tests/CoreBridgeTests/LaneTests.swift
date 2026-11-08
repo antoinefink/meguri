@@ -1,10 +1,79 @@
 import Dispatch
 import Foundation
+import Instrumentation
 import MeguriCoreBindings
 import Synchronization
 import Testing
 
 @testable import CoreBridge
+#if DEBUG
+import Observation
+
+extension EventTests {
+    @Test func maintenanceCallObservationTracksOnlyExecutingMaintenanceBody() async throws {
+        let observation = MaintenanceCallObservation.shared
+        let gate = MaintenanceOccupancy()
+        let changed = Mutex(false)
+        let occupying = Task { @MaintenanceLane in
+            #expect(observation.currentCall == nil)
+            try MaintenanceLane.shared.call(.coreVersion) {
+                #expect(observation.currentCall == .coreVersion)
+                try MaintenanceLane.shared.occupy(gate, call: .startSession)
+                #expect(observation.currentCall == .coreVersion)
+                #expect(throws: BridgeError.cancelled) {
+                    try MaintenanceLane.shared.call(.reviewSessionJobResult) {
+                        #expect(observation.currentCall == .reviewSessionJobResult)
+                        throw BridgeError.cancelled
+                    }
+                }
+                #expect(observation.currentCall == .coreVersion)
+            }
+            #expect(observation.currentCall == nil)
+            #expect(throws: BridgeError.cancelled) {
+                try MaintenanceLane.shared.call(.startSession) {
+                    #expect(observation.currentCall == .startSession)
+                    throw BridgeError.cancelled
+                }
+            }
+            #expect(observation.currentCall == nil)
+        }
+        defer { gate.release.signal() }
+        for await _ in gate.entered { break }
+        #expect(observation.currentCall == .startSession)
+        withObservationTracking {
+            _ = observation.currentCall
+        } onChange: {
+            // Synchronous read: no mutex may span this callback.
+            _ = observation.currentCall
+            changed.withLock { $0 = true }
+        }
+        let otherOwners = [
+            try await InteractiveLane.shared.call(.coreVersion) { observation.currentCall },
+            try await QueryLane.shared.call(.coreVersion) { observation.currentCall },
+            try await ControlLane.shared.call(.coreVersion) { observation.currentCall },
+        ]
+        #expect(otherOwners == [.startSession, .startSession, .startSession])
+        #expect(!changed.withLock { $0 }, "other lanes must not mutate the maintenance owner")
+        #expect(!gate.watchdogFired.withLock { $0 })
+        gate.release.signal()
+        try await occupying.value
+        #expect(changed.withLock { $0 }, "the nested observable getter must invalidate on release")
+        #expect(!gate.watchdogFired.withLock { $0 })
+        #expect(observation.currentCall == nil)
+        try cloudFinalCoreCall(.cloudWorkflowValidateSdk) {
+            #expect(observation.currentCall == .cloudWorkflowValidateSdk)
+        }
+        #expect(observation.currentCall == nil)
+        #expect(throws: BridgeError.cancelled) {
+            try cloudFinalCoreCall(.cloudFetchReadValidate) {
+                #expect(observation.currentCall == .cloudFetchReadValidate)
+                throw BridgeError.cancelled
+            }
+        }
+        #expect(observation.currentCall == nil)
+    }
+}
+#endif
 
 /// Where a lane call's body ran.
 struct Probe: Sendable {
