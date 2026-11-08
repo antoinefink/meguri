@@ -1230,6 +1230,164 @@ fn stage(fault: &mut Option<JournalStage>, hook: &Option<StageHook>, stage: Jour
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn c12_managed_open_rebinds_pristine_v2_after_path_change_before_ready() {
+        use crate::{Collection, Engine, EngineConfig, LifecycleState, OpenConfig, OpenStep, Ports};
+        use crate::{sched::queue::QueueProvider, session::ReviewService};
+        use meguri_model::{
+            clock::{StepClock, UtcOffset},
+            rng::SeededRandom,
+        };
+        use meguri_storage::{ReadRows, ReaderRole, Table};
+        use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+
+        // Observe publication after the actual review-session step, while the
+        // privileged opening handle is still the only admitted collection.
+        struct BeforeReady(Mutex<Option<(Vec<u8>, Vec<u8>)>>, PathBuf);
+        impl OpenStep for BeforeReady {
+            fn name(&self) -> &str {
+                "pristine-v2-publication-evidence"
+            }
+            fn run(&self, c: &Collection) -> Result<(), EngineError> {
+                let active = std::fs::read(c.path().with_file_name("meguri-pending-answers.jsonl")).map_err(error)?;
+                let archive = std::fs::read(&self.1).map_err(error)?;
+                *self.0.lock().unwrap() = Some((active, archive));
+                Ok(())
+            }
+        }
+        fn managed_open(
+            path: &Path,
+            clock: Arc<StepClock>,
+            evidence: Option<Arc<BeforeReady>>,
+        ) -> (Engine, Arc<ReviewService>, Result<Collection, EngineError>) {
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            let queue = Arc::new(QueueProvider::default());
+            let review = ReviewService::new(&engine, queue.clone()).unwrap();
+            let mut ports = Ports::new()
+                .observer(queue.clone())
+                .generation_listener(queue)
+                .open_step(review.clone())
+                .observer(review.clone())
+                .generation_listener(review.clone())
+                .suspend_participant(review.clone());
+            if let Some(evidence) = evidence {
+                ports = ports.open_step(evidence);
+            }
+            let opened = engine.open_raw(
+                path,
+                OpenConfig::new(clock, Arc::new(SeededRandom::new(43))).ports(ports),
+            );
+            (engine, review, opened)
+        }
+        fn header_json(bytes: &[u8]) -> serde_json::Value {
+            assert_eq!(bytes.last(), Some(&b'\n'));
+            assert_eq!(
+                bytes.iter().filter(|b| **b == b'\n').count(),
+                1,
+                "exact header-only EOF"
+            );
+            let frame: Frame = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+            assert_eq!(frame.number, 1);
+            assert_eq!(frame.checksum, checksum(1, frame.payload.as_bytes()));
+            let payload: serde_json::Value = serde_json::from_str(&frame.payload).unwrap();
+            payload["Header"].clone()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let original_path = dir.path().join("collection.anki2");
+        let clock = Arc::new(StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC"));
+        crate::bootstrap::create(&original_path, clock.as_ref(), &SeededRandom::new(43)).unwrap();
+        let (engine, review, opened) = managed_open(&original_path, clock.clone(), None);
+        let collection = opened.unwrap();
+        engine.close().unwrap();
+        drop(collection);
+        drop(review);
+        drop(engine);
+
+        let collection_bytes = std::fs::read(&original_path).unwrap();
+        let journal_path = original_path.with_file_name("meguri-pending-answers.jsonl");
+        let original = std::fs::read(&journal_path).unwrap();
+        let old_header = header_json(&original);
+        assert_eq!(old_header["version"], 2);
+        assert_eq!(old_header["next_event"], 1);
+        assert!(old_header.get("notice").is_none());
+        let persistent: PersistentIdentity = serde_json::from_value(old_header["native"].clone()).unwrap();
+        assert!(persistent.valid_for_platform());
+
+        // Rename only the collection, keeping its inode, contents and the
+        // colocated journal exactly as the first managed open left them.
+        let moved = dir.path().join("renamed.anki2");
+        std::fs::rename(&original_path, &moved).unwrap();
+        let current_path = moved.canonicalize().unwrap().as_os_str().as_bytes().to_vec();
+        assert_ne!(old_header["path"], serde_json::json!(current_path));
+        assert_eq!(std::fs::read(&journal_path).unwrap(), original);
+        let hash: [u8; 32] = Sha256::digest(&original).into();
+        let hash_text: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+        let archive_path = moved.with_file_name(format!("meguri-pending-answers.{hash_text}.identity.jsonl"));
+
+        // Raw strict open remains a refusal, even for this unused v2 journal.
+        let raw_engine = Engine::new(EngineConfig::default()).unwrap();
+        let raw_collection = raw_engine
+            .open_raw(&moved, OpenConfig::new(clock.clone(), Arc::new(SeededRandom::new(43))))
+            .unwrap();
+        let metadata = std::fs::metadata(&moved).unwrap();
+        let raw = Journal::open(
+            &moved,
+            (metadata.dev(), metadata.ino()),
+            persistent,
+            [31, 32],
+            raw_collection.generation(),
+            raw_engine.threads(),
+            || Ok([33, 34]),
+        );
+        let raw_error = raw.err(); // Drop/join any unexpectedly created file worker.
+        let raw_close = raw_engine.close();
+        drop(raw_collection);
+        drop(raw_engine);
+        raw_close.unwrap();
+        assert_eq!(raw_error, Some(identity_mismatch()));
+        assert_eq!(std::fs::read(&journal_path).unwrap(), original);
+        assert_eq!(std::fs::read(&moved).unwrap(), collection_bytes);
+        assert!(!archive_path.exists(), "raw refusal must not migrate evidence");
+
+        let evidence = Arc::new(BeforeReady(Mutex::new(None), archive_path.clone()));
+        let (engine, review, opened) = managed_open(&moved, clock, Some(evidence.clone()));
+        let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+        let revlogs = opened.as_ref().ok().map(|c| {
+            c.reader(ReaderRole::Query)
+                .and_then(|r| r.ids_after(Table::Revlog, None, 1).map_err(EngineError::from))
+        });
+        let open_error = opened.err();
+        let closed = engine.close();
+        drop(review);
+        drop(engine); // Release/join all workers before the intentional RED.
+        closed.unwrap();
+        assert!(
+            ready && open_error.is_none(),
+            "C12.5: managed opening must rebind the exact unused v2 journal before Ready: {open_error:?}"
+        );
+        assert!(revlogs.unwrap().unwrap().is_empty(), "zero replayed answers");
+        assert_eq!(std::fs::read(&moved).unwrap(), collection_bytes);
+        let (published, archived) = evidence
+            .0
+            .lock()
+            .unwrap()
+            .take()
+            .expect("publication observed before Ready");
+        assert_eq!(archived, original, "exact original archive must precede Ready");
+        assert_eq!(std::fs::read(&archive_path).unwrap(), original);
+        assert_eq!(std::fs::read(&journal_path).unwrap(), published);
+        let landed = header_json(&published);
+        assert_eq!(landed["version"], 2);
+        assert_eq!(landed["path"], serde_json::json!(current_path));
+        assert_eq!(landed["native"], old_header["native"]);
+        assert_ne!(landed["incarnation"], old_header["incarnation"]);
+        assert_eq!(landed["next_event"], 1);
+        assert_eq!(landed["notice"]["reason"], "pristine_v2_rebound");
+        assert_eq!(landed["notice"]["archive_sha256"], serde_json::json!(hash));
+    }
+
     #[test]
     fn c12_v2_durable_identity_changes_and_compacted_highwater() {
         let mut h = header_v2();
