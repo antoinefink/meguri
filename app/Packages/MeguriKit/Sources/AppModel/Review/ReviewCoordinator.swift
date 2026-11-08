@@ -102,6 +102,20 @@ public final class ReviewCoordinator {
         return String(format: "%02llu:%02llu", seconds / 60, seconds % 60)
     }
     public var remainingDescription: String { "\(counts.new) new, \(counts.learning) learning, \(counts.review) to review" }
+    #if DEBUG
+    public var debugSessionStatus: String {
+        switch phase {
+        case .loading: sessionID == nil ? "coreStart" : "cardLoad"
+        case .question: "question"
+        case .answer: "answer"
+        case .transition: "transition"
+        case .waiting: "waiting"
+        case .finished: "finished"
+        case .ended: "ended"
+        case .error: "error"
+        }
+    }
+    #endif
 
     public func start() async {
         guard sessionID == nil, !busy, phase == .loading else { return }

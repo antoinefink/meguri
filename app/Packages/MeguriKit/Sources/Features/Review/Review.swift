@@ -45,6 +45,9 @@ public struct ReviewView: View {
         switch model.phase {
         case .loading:
             ReviewStatusLayout { LoadingStateView(Text("Preparing review…", bundle: .module)) }
+                #if DEBUG
+                .debugStatusAccessibilityValue(model.debugSessionStatus)
+                #endif
         case .waiting:
             ReviewStatusLayout {
                 EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
@@ -56,6 +59,9 @@ public struct ReviewView: View {
                             #endif
                     }
             }
+            #if DEBUG
+            .debugStatusAccessibilityValue(model.debugSessionStatus)
+            #endif
         case .finished:
             ReviewStatusLayout {
                 EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
@@ -67,13 +73,22 @@ public struct ReviewView: View {
                             #endif
                     }
             }
+            #if DEBUG
+            .debugStatusAccessibilityValue(model.debugSessionStatus)
+            #endif
         case .error:
             ReviewStatusLayout {
                 ErrorStateView(Text("Review Paused", bundle: .module), message: Text(verbatim: model.notice ?? ""),
                     retryIdentifier: "review.session.retry", retry: model.retry)
             }
+            #if DEBUG
+            .debugStatusAccessibilityValue(model.debugSessionStatus)
+            #endif
         case .ended:
             ReviewStatusLayout { Text("Session Ended", bundle: .module) }
+                #if DEBUG
+                .debugStatusAccessibilityValue(model.debugSessionStatus)
+                #endif
         case .transition:
             if model.item == nil { ProgressView() }
         case .question, .answer: EmptyView()
@@ -97,6 +112,19 @@ public struct ReviewView: View {
 
 struct ReviewStatusLayout<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    #if DEBUG
+    private var diagnosticValue: String?
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    func debugStatusAccessibilityValue(_ value: String) -> Self {
+        var view = self
+        view.diagnosticValue = value
+        return view
+    }
+    #endif
 
     var body: some View {
         GeometryReader { viewport in
@@ -108,6 +136,9 @@ struct ReviewStatusLayout<Content: View>: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("review.session.status")
+            #if DEBUG
+            .accessibilityValue(Text(verbatim: diagnosticValue ?? ""))
+            #endif
         }
     }
 }

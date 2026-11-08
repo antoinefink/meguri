@@ -45,3 +45,9 @@ R2 review receipts: two independent reviewers, no P0–P2 findings. This pass pe
 R2: `core-test/20261108T211451Z-3729`, 68 passed. R3/R4 change new names and log text only. Final source review: no P0/P1 findings; previous P2 closed. The complete existing journal test module matches `b2238289`, including the protected regression.
 
 `private/20261108T212217Z-8036` passes. Final formatting passes without edits. `core-test/20261108T212300Z-8917`: 104 passed, 19 excluded by the focused filter. Coverage includes engine library tests, session recovery, session durability with process-kill cases, and five host adoption guards. Native checks, phone outcome, lint, similarity and the integration gate remain pending. No Unit acceptance.
+
+## Native and phone results
+
+Repair commit: `9dad9d02`, pushed to master. Lint `core-lint/20261108T212345Z-9372` passes. Similarity `20261108T212346Z-9654` passes all four changed Rust files, with no exceptions. Native durability `20261108T213412Z-18934`: 191 passed, zero failed.
+
+Normal signed phone run `20261108T212437Z-10768` passes. Preserved inspection `drive/20261108T212720Z-14206` passes both steps with continuity verified: existing decks appear, collection actions are enabled and the opening error is absent. No reset or import was used. Review render drive `20261108T212926Z-15742` fails wait step 6 after Study: the review remains loading. No rating was sent. See `cloud-phone-review-start-20261108.md`. Real review/media convergence and the full integration gate remain pending; U113/U114/U151 are unaccepted.

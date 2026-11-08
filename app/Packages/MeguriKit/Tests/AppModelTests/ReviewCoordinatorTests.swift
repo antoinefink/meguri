@@ -6,6 +6,33 @@ import Testing
 
 @MainActor
 @Suite struct ReviewCoordinatorTests {
+    #if DEBUG
+    @Test(arguments: [false, true])
+    func startDiagnostic(cardLoad: Bool) async {
+        let fixture = Fixture()
+        let held = SummaryGate(state: Self.summary(waiting: false))
+        defer { held.release() }
+        if cardLoad {
+            fixture.surface.onLoad = { _ = await held.value() }
+        } else {
+            fixture.client.onStartResult = { _ = await held.value() }
+        }
+        let start = Task { await fixture.model.start() }
+        await held.requested()
+        #expect(fixture.model.phase == .loading)
+        #expect((fixture.model.sessionID != nil) == cardLoad)
+        #expect(fixture.model.debugSessionStatus == (cardLoad ? "cardLoad" : "coreStart"))
+        #expect(fixture.surface.presented.isEmpty)
+        held.release()
+        await start.value
+        #expect(fixture.model.phase == .question)
+        #expect(fixture.model.debugSessionStatus == "question")
+        #expect(fixture.surface.presented == [1])
+        #expect(fixture.client.answers == 0)
+        #expect(await fixture.model.end())
+    }
+    #endif
+
     @Test func doubleInputAndStaleAnswerNeverReplay() async throws {
         let fixture = Fixture()
         await fixture.model.start()
