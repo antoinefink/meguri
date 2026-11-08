@@ -24,7 +24,7 @@ private extension MaintenanceLane {
                 }
                 Issue.record("Expected BridgeError.cancelled from the nested maintenance call")
             } catch {
-                #expect(error == BridgeError.cancelled)
+                #expect((error as? BridgeError) == .cancelled)
             }
             #expect(observation.currentCall == .coreVersion)
         }
@@ -36,7 +36,7 @@ private extension MaintenanceLane {
             }
             Issue.record("Expected BridgeError.cancelled from the maintenance call")
         } catch {
-            #expect(error == BridgeError.cancelled)
+            #expect((error as? BridgeError) == .cancelled)
         }
         #expect(observation.currentCall == nil)
     }
