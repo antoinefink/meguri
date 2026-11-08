@@ -3,6 +3,55 @@ import Testing
 import Instrumentation
 import MeguriCoreBindings
 @testable import CoreBridge
+#if DEBUG
+import Observation
+import Synchronization
+
+// Re-arm synchronous one-shot observation without scheduling observer tasks.
+// Reading in the callback also catches notification under the storage mutex.
+private final class StartBoundaryRecorder: Sendable {
+    let previous = Mutex<[ReviewStartObservation.Stage?]>([])
+    func observe(_ observation: ReviewStartObservation) {
+        withObservationTracking {
+            _ = observation.stage
+        } onChange: {
+            let stage = observation.stage
+            self.previous.withLock { $0.append(stage) }
+            if stage != .resultRead { self.observe(observation) }
+        }
+    }
+}
+
+extension EventTests {
+    @Test func reviewStartObservationFollowsRealBridgeAndRetainsExactInvocation() async throws {
+        try await withCloudConnection { _ in
+            let first = ReviewStartObservation(), second = ReviewStartObservation()
+            let boundaries = StartBoundaryRecorder()
+            boundaries.observe(first)
+            let firstJob = try await Core.startSessionJob(deckID: 1, observation: first)
+            #expect(first.stage == .jobWait)
+            #expect(second.stage == nil)
+            let secondJob = try await Core.startSessionJob(deckID: 1, observation: second)
+            let secondResult = try await secondJob.value()
+            #expect(second.stage == .resultReturned)
+            #expect(first.stage == .jobWait, "another job's result must not advance this invocation")
+            // Completion alone does not read the native result or advance stages.
+            try await firstJob.job.value()
+            #expect(first.stage == .jobWait)
+            _ = try await firstJob.value()
+            #expect(first.stage == .resultReturned)
+            let expected: [ReviewStartObservation.Stage?] = [
+                nil, .eventSubscription, .maintenanceQueued, .startExport,
+                .progressAttach, .jobWait, .resultQueued, .resultRead,
+            ]
+            #expect(boundaries.previous.withLock { $0 } == expected)
+            if case .started(let session, _, _, _) = secondResult {
+                try await Core.endSession(sessionID: session)
+            }
+        }
+    }
+}
+#endif
 
 @Suite struct ReviewSessionBridgeTests {
     static let memory = MeguriCoreBindings.ReviewMemoryState(stability: 2.75, difficulty: 6.125)

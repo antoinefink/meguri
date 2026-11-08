@@ -1,6 +1,35 @@
 internal import MeguriCoreBindings
 import Instrumentation
 import Foundation
+#if DEBUG
+import Observation
+import Synchronization
+
+/// One start's last boundary, not evidence of completion or a failure cause.
+public final class ReviewStartObservation: Observable, Sendable {
+    public enum Stage: String, Sendable {
+        case eventSubscription, maintenanceQueued, startExport, progressAttach
+        case jobWait, resultQueued, resultRead, resultReturned
+    }
+
+    private let changes = ObservationRegistrar()
+    private let current = Mutex<Stage?>(nil)
+    public init() {}
+
+    public var stage: Stage? {
+        changes.access(self, keyPath: \.stage)
+        return current.withLock { $0 }
+    }
+
+    public func enter(_ stage: Stage) {
+        // Observation callbacks may synchronously read stage; notify outside
+        // the mutex. No lock spans an FFI call or a suspension.
+        changes.withMutation(of: self, keyPath: \.stage) {
+            current.withLock { $0 = stage }
+        }
+    }
+}
+#endif
 
 // Epoch millisecond answer inputs and epoch second head/waiting values remain
 // distinct fields. No generated binding type enters the public API.
@@ -761,14 +790,32 @@ public enum ReviewUndoStatus: Sendable, Hashable {
 public final class CoreReviewSessionJob: Sendable {
     public let job: CoreJob
     private let raw: MeguriCoreBindings.ReviewSessionJob
+    #if DEBUG
+    private let observation: ReviewStartObservation?
+    init(job: CoreJob, raw: MeguriCoreBindings.ReviewSessionJob, observation: ReviewStartObservation? = nil) {
+        self.job = job; self.raw = raw; self.observation = observation
+    }
+    #else
     init(job: CoreJob, raw: MeguriCoreBindings.ReviewSessionJob) { self.job = job; self.raw = raw }
+    #endif
     public func value() async throws(BridgeError) -> ReviewStartResult {
         try await job.value()
         let raw = raw
-        return try await MaintenanceLane.shared.call(.reviewSessionJobResult) {
+        #if DEBUG
+        let observation = observation
+        observation?.enter(.resultQueued)
+        #endif
+        let result = try await MaintenanceLane.shared.call(.reviewSessionJobResult) {
+            #if DEBUG
+            observation?.enter(.resultRead)
+            #endif
             guard let result = try raw.result() else { throw BridgeError.internal("Successful job has no result") }
             return ReviewStartResult(result)
         }
+        #if DEBUG
+        observation?.enter(.resultReturned)
+        #endif
+        return result
     }
 }
 
@@ -778,12 +825,32 @@ extension Core {
         return try await job.value()
     }
     public static func startSessionJob(deckID: Int64, resumeCardID: Int64? = nil) async throws(BridgeError) -> CoreReviewSessionJob {
+        #if DEBUG
+        return try await startSessionJob(deckID: deckID, resumeCardID: resumeCardID, observation: nil)
+        #else
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startSession) {
             let raw = try MeguriCoreBindings.startSession(deckId: deckID, resumeCardId: resumeCardID)
             return CoreReviewSessionJob(job: try Jobs.track(raw.handle), raw: raw.result)
         }
+        #endif
     }
+    #if DEBUG
+    public static func startSessionJob(deckID: Int64, resumeCardID: Int64? = nil,
+                                       observation: ReviewStartObservation?) async throws(BridgeError) -> CoreReviewSessionJob {
+        observation?.enter(.eventSubscription)
+        try await CoreEventStream.shared.start()
+        observation?.enter(.maintenanceQueued)
+        return try await MaintenanceLane.shared.call(.startSession) {
+            observation?.enter(.startExport)
+            let raw = try MeguriCoreBindings.startSession(deckId: deckID, resumeCardId: resumeCardID)
+            observation?.enter(.progressAttach)
+            let job = try Jobs.track(raw.handle)
+            observation?.enter(.jobWait)
+            return CoreReviewSessionJob(job: job, raw: raw.result, observation: observation)
+        }
+    }
+    #endif
     public static func peekFirstCard(deckID: Int64) async throws(BridgeError) -> ReviewPeekResult {
         try await InteractiveLane.shared.call(.peekFirstCard) {
             ReviewPeekResult(try MeguriCoreBindings.peekFirstCard(deckId: deckID))

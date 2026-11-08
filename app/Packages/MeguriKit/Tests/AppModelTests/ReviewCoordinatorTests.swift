@@ -3,6 +3,10 @@ import CoreBridge
 import Foundation
 import Testing
 @testable import AppModel
+#if DEBUG
+import Observation
+import Synchronization
+#endif
 
 @MainActor
 @Suite struct ReviewCoordinatorTests {
@@ -30,6 +34,60 @@ import Testing
         #expect(fixture.surface.presented == [1])
         #expect(fixture.client.answers == 0)
         #expect(await fixture.model.end())
+    }
+
+    @Test func startObservationBelongsToItsInvocationAndStopsAtCardLoad() async throws {
+        let first = Fixture(), second = Fixture()
+        let firstStart = SummaryGate(state: Self.summary(waiting: false))
+        let secondStart = SummaryGate(state: Self.summary(waiting: false))
+        let cardLoad = SummaryGate(state: Self.summary(waiting: false))
+        defer { firstStart.release(); secondStart.release(); cardLoad.release() }
+        var firstObservation: ReviewStartObservation?
+        var secondObservation: ReviewStartObservation?
+        first.client.onStartObservation = { firstObservation = $0; $0.enter(.jobWait) }
+        second.client.onStartObservation = { secondObservation = $0; $0.enter(.startExport) }
+        first.client.onStartResult = { _ = await firstStart.value() }
+        second.client.onStartResult = { _ = await secondStart.value() }
+        first.surface.onLoad = { _ = await cardLoad.value() }
+        let firstTask = Task { await first.model.start() }
+        let secondTask = Task { await second.model.start() }
+        await firstStart.requested(); await secondStart.requested()
+        let firstOwned = try #require(firstObservation)
+        let secondOwned = try #require(secondObservation)
+        #expect(firstOwned !== secondOwned)
+        #expect(first.model.debugSessionStatus == "jobWait")
+        #expect(second.model.debugSessionStatus == "startExport")
+        #expect(first.model.sessionID == nil && second.model.sessionID == nil)
+        let notified = Mutex(false)
+        withObservationTracking {
+            _ = first.model.debugSessionStatus
+        } onChange: {
+            _ = firstOwned.stage
+            notified.withLock { $0 = true }
+        }
+        firstOwned.enter(.resultQueued)
+        #expect(notified.withLock { $0 }, "the existing status must observe nested lane updates")
+        #expect(first.model.debugSessionStatus == "resultQueued")
+        #expect(second.model.debugSessionStatus == "startExport")
+
+        firstStart.release()
+        await cardLoad.requested()
+        #expect(first.model.phase == .loading && first.model.sessionID != nil)
+        #expect(first.model.debugSessionStatus == "cardLoad")
+        firstOwned.enter(.resultReturned)
+        #expect(first.model.debugSessionStatus == "cardLoad")
+        #expect(second.model.debugSessionStatus == "startExport")
+        cardLoad.release(); secondStart.release()
+        await firstTask.value; await secondTask.value
+        #expect(first.model.debugSessionStatus == "question")
+        #expect(second.model.debugSessionStatus == "question")
+        secondOwned.enter(.resultRead)
+        #expect(first.model.debugSessionStatus == "question")
+        #expect(second.model.debugSessionStatus == "question")
+        #expect(first.surface.presented == [1] && second.surface.presented == [1])
+        #expect(first.client.answers == 0 && second.client.answers == 0)
+        #expect(await first.model.end())
+        #expect(await second.model.end())
     }
     #endif
 
@@ -509,6 +567,13 @@ import Testing
         var summary: ReviewDeckStudyState?
         var summaryGate: SummaryGate?
         var onStartResult: (() async -> Void)?
+        #if DEBUG
+        var onStartObservation: ((ReviewStartObservation) -> Void)?
+        func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult {
+            onStartObservation?(observation)
+            return try await start(deckID: deckID)
+        }
+        #endif
         var currentHead = ReviewCoordinatorTests.head(1)
         var answerHead = ReviewAnswerOutcome.accepted(headDiff: ReviewHeadDiff(head: ReviewCoordinatorTests.head(2), marks: [], removed: [1]), leech: false, suspended: false, rolledOver: false)
         func start(deckID: Int64) async throws -> ReviewStartResult {

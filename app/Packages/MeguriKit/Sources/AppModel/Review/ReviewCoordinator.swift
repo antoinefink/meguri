@@ -103,9 +103,10 @@ public final class ReviewCoordinator {
     }
     public var remainingDescription: String { "\(counts.new) new, \(counts.learning) learning, \(counts.review) to review" }
     #if DEBUG
+    private var startObservation: ReviewStartObservation?
     public var debugSessionStatus: String {
         switch phase {
-        case .loading: sessionID == nil ? "coreStart" : "cardLoad"
+        case .loading: sessionID == nil ? (startObservation?.stage?.rawValue ?? "coreStart") : "cardLoad"
         case .question: "question"
         case .answer: "answer"
         case .transition: "transition"
@@ -126,7 +127,14 @@ public final class ReviewCoordinator {
     }
     private func startOwned() async {
         do {
-            switch try await client.start(deckID: record.deckID) {
+            #if DEBUG
+            let observation = ReviewStartObservation()
+            startObservation = observation
+            let result = try await client.start(deckID: record.deckID, observation: observation)
+            #else
+            let result = try await client.start(deckID: record.deckID)
+            #endif
+            switch result {
             case .refused(.fsrsPolicyPending): onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
             case .refused(.presetUnsupported): phase = .error; notice = "This preset needs a newer Meguri"
             case .started(let id, let generation, let head, _):

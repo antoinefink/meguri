@@ -3,6 +3,9 @@ import CoreBridge
 /// A narrow failure/order seam; scheduling and restoration remain core calls.
 public protocol ReviewSessionClient {
     func start(deckID: Int64) async throws -> ReviewStartResult
+    #if DEBUG
+    func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult
+    #endif
     func head(sessionID: UInt64) async throws -> ReviewHead
     func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome
     func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus
@@ -11,6 +14,14 @@ public protocol ReviewSessionClient {
     func end(sessionID: UInt64) async throws
 }
 
+#if DEBUG
+extension ReviewSessionClient {
+    public func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult {
+        try await start(deckID: deckID)
+    }
+}
+#endif
+
 public struct CoreReviewSessionClient: ReviewSessionClient {
     private let undo = CoreUndoService()
     private let decks = CoreDeckService()
@@ -18,6 +29,11 @@ public struct CoreReviewSessionClient: ReviewSessionClient {
     public func start(deckID: Int64) async throws -> ReviewStartResult {
         try await Core.startSessionJob(deckID: deckID).value()
     }
+    #if DEBUG
+    public func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult {
+        try await Core.startSessionJob(deckID: deckID, observation: observation).value()
+    }
+    #endif
     public func head(sessionID: UInt64) async throws -> ReviewHead { try await Core.sessionHead(sessionID: sessionID, count: 3) }
     public func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
         try await Core.answerSession(sessionID: sessionID, cardID: item.cardId, rating: rating,
