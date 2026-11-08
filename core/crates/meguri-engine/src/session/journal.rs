@@ -732,10 +732,9 @@ impl Journal {
             Err(e) => return Err(error(e)),
             Ok(_) => {}
         }
-        let original = RecoveryBinding::read(&path)?;
-        let (mut loaded, mut number, complete) = read_bytes_bound(&original.bytes, &header, native)?;
+        let mut original = RecoveryBinding::read(&path)?;
+        let (mut loaded, mut number, mut complete) = read_bytes_bound(&original.bytes, &header, native)?;
         let mut migration = None;
-        let was_retired = loaded.retired;
         let rebound = loaded.header.version == 1 && loaded.header.native != Native::Legacy(native);
         if (loaded.retired || rebound) && header.incarnation == loaded.header.incarnation {
             header.incarnation = fresh_incarnation()?;
@@ -747,61 +746,91 @@ impl Journal {
             original.require(&path)?;
             require_live(collection, native, &header.path)?;
             create(&path, &header, true)?;
-            loaded = read_bytes_bound(&RecoveryBinding::read(&path)?.bytes, &header, native)?.0;
-            number = 1;
-        } else {
-            if loaded.header.version == 1 {
-                let reason = if loaded.header.native == Native::Legacy(native) {
-                    MigrationReason::LegacyIdentityUpgraded
-                } else {
-                    MigrationReason::LegacyHeaderOnlyRebound
-                };
-                let mut next = header.clone();
-                if reason == MigrationReason::LegacyIdentityUpgraded {
-                    next.incarnation = loaded.header.incarnation;
-                }
-                migration = Some(Migration {
-                    collection: collection.to_owned(),
-                    live: native,
-                    current_bytes: original.bytes[..complete].to_vec(),
-                    original: RecoveryBinding {
-                        file: original.file.try_clone().map_err(error)?,
-                        bytes: original.bytes.clone(),
-                    },
-                    next,
-                    reason,
-                });
+            original = RecoveryBinding::read(&path)?;
+            (loaded, number, complete) = read_bytes_bound(&original.bytes, &header, native)?;
+        } else if loaded.header.version == 1 {
+            let reason = if loaded.header.native == Native::Legacy(native) {
+                MigrationReason::LegacyIdentityUpgraded
+            } else {
+                MigrationReason::LegacyHeaderOnlyRebound
+            };
+            let mut next = header.clone();
+            if reason == MigrationReason::LegacyIdentityUpgraded {
+                next.incarnation = loaded.header.incarnation;
             }
-            // No acknowledgement came from a torn frame. Keep the original
-            // legacy bytes for its permanent archive, including that tail.
-            let retained = &original;
-            retained.require(&path)?;
-            if retained.bytes.len() != complete {
-                use std::os::unix::fs::OpenOptionsExt;
-                let file = OpenOptions::new()
-                    .write(true)
-                    .custom_flags(libc::O_NOFOLLOW)
-                    .open(&path)
-                    .map_err(error)?;
-                same_file(&file, &retained.file)?;
-                file.set_len(complete as u64).map_err(error)?;
-                full_sync(&file)?;
+            migration = Some(Migration {
+                collection: collection.to_owned(),
+                live: native,
+                current_bytes: original.bytes[..complete].to_vec(),
+                original: RecoveryBinding {
+                    file: original.file.try_clone().map_err(error)?,
+                    bytes: original.bytes.clone(),
+                },
+                next,
+                reason,
+            });
+        }
+        Self::initialize_retained(
+            collection,
+            native,
+            generation,
+            threads,
+            &header.path,
+            (original, loaded, number, complete),
+            migration,
+            None,
+        )
+    }
+    // Both strict and qualified managed opens initialize the source they decoded.
+    // The live canonical binding is independent of the historical header locator.
+    fn initialize_retained(
+        collection: &Path,
+        native: (u64, u64),
+        generation: Generation,
+        threads: &ThreadRegistry,
+        canonical: &[u8],
+        (original, mut loaded, number, complete): (RecoveryBinding, State, u64, usize),
+        migration: Option<Migration>,
+        mut opening: Option<managed::Evidence>,
+    ) -> Result<Arc<Self>, EngineError> {
+        let path = collection.with_file_name("meguri-pending-answers.jsonl");
+        if let Some(evidence) = &opening {
+            evidence.require()?;
+        }
+        original.require(&path)?;
+        require_live(collection, native, canonical)?;
+        // No acknowledgement came from a torn frame. A legacy migration keeps
+        // the entire original (including that tail) in its permanent archive.
+        if original.bytes.len() != complete {
+            use std::os::unix::fs::OpenOptionsExt;
+            let file = OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+                .map_err(error)?;
+            same_file(&file, &original.file)?;
+            file.set_len(complete as u64).map_err(error)?;
+            full_sync(&file)?;
+            if let Some(evidence) = &mut opening {
+                evidence.truncated(complete);
             }
         }
         // Re-establish durability even when a prior process died after rename.
         let active = RecoveryBinding::read(&path)?;
-        if !was_retired {
-            same_file(&active.file, &original.file)?;
-            if active.bytes != original.bytes[..complete] {
-                return Err(identity_mismatch());
-            }
+        same_file(&active.file, &original.file)?;
+        if active.bytes != original.bytes[..complete] {
+            return Err(identity_mismatch());
         }
         active.sync(&path)?;
-        require_live(collection, native, &header.path)?;
+        require_live(collection, native, canonical)?;
         loaded.header.next_event = loaded.next_event;
         let file = append_file(&path)?;
         same_file(&file, &active.file)?;
         active.require(&path)?;
+        if let Some(evidence) = &opening {
+            evidence.require_append(&file)?;
+            evidence.require()?;
+        }
         let state = Arc::new(Mutex::new(loaded));
         let (tx, rx) = mpsc::channel();
         let shared = state.clone();
@@ -815,13 +844,22 @@ impl Journal {
                 },
             )
             .map_err(error)?;
-        Ok(Arc::new(Self {
+        let journal = Arc::new(Self {
             tx,
             state,
             worker: Mutex::new(Some(worker)),
             generation,
             live_native: native,
-        }))
+        });
+        if let Some(evidence) = opening {
+            let (tx, rx) = mpsc::sync_channel(1);
+            journal
+                .tx
+                .send(Work::OpeningEvidence(Box::new(evidence), tx))
+                .map_err(error)?;
+            rx.recv().map_err(error)??;
+        }
+        Ok(journal)
     }
     pub(crate) fn finish_identity_migration(
         &self,

@@ -96,6 +96,13 @@ fn pristine(bytes: &[u8]) -> Option<Header> {
     }
     Some(h)
 }
+fn same_darwin_file(header: &Header, persistent: PersistentIdentity, canonical: &[u8]) -> bool {
+    header.version == 2
+        && header.path != canonical
+        && Path::new(std::ffi::OsStr::from_bytes(&header.path)).is_absolute()
+        && matches!(header.native, Native::Persistent(identity @ PersistentIdentity::Darwin { .. })
+            if identity.valid_for_platform() && identity == persistent)
+}
 fn archive_path(collection: &Path, hash: &[u8; 32]) -> PathBuf {
     let name: String = hash.iter().map(|b| format!("{b:02x}")).collect();
     collection.with_file_name(format!("meguri-pending-answers.{name}.identity.jsonl"))
@@ -144,8 +151,7 @@ pub(super) struct Evidence {
     proof: Opening,
     directory: Directory,
     original: Option<RecoveryBinding>,
-    archive: RecoveryBinding,
-    archive_path: PathBuf,
+    archive: Option<(RecoveryBinding, PathBuf)>,
     active: RecoveryBinding,
     path: PathBuf,
 }
@@ -158,7 +164,10 @@ impl Evidence {
         let exec = self.proof.executor.upgrade().ok_or_else(identity_mismatch)?;
         require_live(&exec.path, self.proof.native, &self.proof.canonical)?;
         self.directory.require_file(&self.path)?;
-        self.directory.require_file(&self.archive_path)?;
+        if let Some((archive, path)) = &self.archive {
+            self.directory.require_file(path)?;
+            archive.require(path)?;
+        }
         if let Some(original) = &self.original {
             retained_bytes(original)?;
             let metadata = original.file.metadata().map_err(error)?;
@@ -166,7 +175,6 @@ impl Evidence {
                 return Err(identity_mismatch());
             }
         }
-        self.archive.require(&self.archive_path)?;
         self.active.require(&self.path)?;
         Ok(())
     }
@@ -175,6 +183,9 @@ impl Evidence {
         // here; initialization, compaction and Migrate check the SQLite binding.
         self.require_files()?;
         same_file(file, &self.active.file)
+    }
+    pub(super) fn truncated(&mut self, complete: usize) {
+        self.active.bytes.truncate(complete);
     }
     pub(super) fn appended(&mut self, bytes: &[u8]) {
         self.active.bytes.extend(bytes);
@@ -234,13 +245,17 @@ pub(in crate::session) fn open(
     {
         return recover_existing();
     }
-    let migration_header = first_header(&original.bytes).filter(|header| {
+    let retained_header = first_header(&original.bytes);
+    let migration_header = retained_header.as_ref().filter(|header| {
         header
             .notice
             .as_ref()
             .is_some_and(|notice| notice.reason == MigrationReason::PristineV2Rebound)
     });
-    if eligible_header.is_none() && migration_header.is_none() {
+    let same_file_path = retained_header
+        .as_ref()
+        .is_some_and(|header| same_darwin_file(header, persistent, &canonical));
+    if eligible_header.is_none() && migration_header.is_none() && !same_file_path {
         return recover_existing();
     }
     let proof = Opening {
@@ -256,45 +271,49 @@ pub(in crate::session) fn open(
     let directory = Directory::read(path.parent().ok_or_else(identity_mismatch)?)?;
     directory.require_file(&path)?;
     original.require(&path)?;
-    if let Some(h) = migration_header {
-        let path_differs = h.path != canonical;
-        let native_differs = h.native != Native::Persistent(persistent);
-        if path_differs || native_differs {
-            #[cfg(debug_assertions)]
-            return Err(error(match (path_differs, native_differs) {
-                (true, false) => "pending_answer_identity_mismatch_path",
-                (false, true) => "pending_answer_identity_mismatch_native",
-                (true, true) => "pending_answer_identity_mismatch_path_native",
-                (false, false) => "pending_answer_identity_mismatch",
-            }));
-            #[cfg(not(debug_assertions))]
+    // An exact unused v2 source always takes the existing fresh-binding path.
+    if eligible_header.is_none() {
+        let h = retained_header.ok_or_else(identity_mismatch)?;
+        if h.native != Native::Persistent(persistent) || (h.path != canonical && !same_file_path) {
             return Err(identity_mismatch());
         }
-        let archived = verify_migration_archive(c.path(), &h, &directory)?.ok_or_else(identity_mismatch)?;
+        // Historical-path decoding is confined to the exact Darwin authority
+        // above. The full ordinary codec still validates every complete frame.
+        let (loaded, number, complete) = read_bytes_bound(&original.bytes, &h, native)?;
+        if loaded.retired {
+            return Err(identity_mismatch());
+        }
+        let archive = match &h.notice {
+            Some(notice) if notice.reason == MigrationReason::PristineV2Rebound => Some((
+                verify_migration_archive(c.path(), &h, &directory)?.ok_or_else(identity_mismatch)?,
+                archive_path(c.path(), &notice.archive_sha256),
+            )),
+            _ => None,
+        };
         original.require(&path)?;
         proof.require()?;
-        let journal = recover_existing()?;
-        let archive = archive_path(c.path(), &h.notice.as_ref().unwrap().archive_sha256);
-        archived.require(&archive)?;
-        directory.require_file(&archive)?;
-        proof.require()?;
-        let active = RecoveryBinding::read(&path)?;
+        let active = RecoveryBinding {
+            file: original.file.try_clone().map_err(error)?,
+            bytes: original.bytes.clone(),
+        };
         let evidence = Evidence {
             proof,
             directory,
             original: None,
-            archive: archived,
-            archive_path: archive,
+            archive,
             active,
             path,
         };
-        let (tx, rx) = mpsc::sync_channel(1);
-        journal
-            .tx
-            .send(Work::OpeningEvidence(Box::new(evidence), tx))
-            .map_err(error)?;
-        rx.recv().map_err(error)??;
-        return Ok(journal);
+        return Journal::initialize_retained(
+            c.path(),
+            native,
+            c.generation(),
+            threads,
+            &canonical,
+            (original, loaded, number, complete),
+            None,
+            Some(evidence),
+        );
     }
     let old = eligible_header.ok_or_else(identity_mismatch)?;
     let next_incarnation = if incarnation == old.incarnation {
@@ -384,8 +403,7 @@ pub(in crate::session) fn open(
                         proof,
                         directory,
                         original: Some(migration.original),
-                        archive: archived,
-                        archive_path: archive,
+                        archive: Some((archived, archive)),
                         active: landed,
                         path: worker_path.clone(),
                     };

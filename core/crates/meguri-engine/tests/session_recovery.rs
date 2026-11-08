@@ -783,6 +783,380 @@ fn identity_archive(path: &Path, bytes: &[u8]) -> PathBuf {
     path.with_file_name(format!("meguri-pending-answers.{hash}.identity.jsonl"))
 }
 
+// C12.8 full-history/crash witness: production Intent and Prepared captures,
+// including the exact committed witness and an unacknowledged torn final frame.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_managed_darwin_same_file_crash_recovery_replays_once() {
+    for mode in ["intent", "prepared", "committed", "torn"] {
+        let outer = tempfile::tempdir().unwrap();
+        let mut a = capture_answer(|_| {});
+        let mut source = if mode == "intent" {
+            a.intent.clone()
+        } else {
+            a.prepared.clone()
+        };
+        if mode == "torn" {
+            source.extend_from_slice(b"{\"number\":4,\"payload\":\"unacknowledged");
+        }
+        if mode == "committed" {
+            fs::write(journal_path(&a.path), &source).unwrap();
+        } else {
+            restore_uncommitted(&a, &source);
+        }
+        let original_header = journal_header(&source);
+        let original_native = native(&a.path);
+        for relocation in 0..2 {
+            let directory = outer.path().join(format!("{mode}-{relocation}"));
+            fs::rename(a.path.parent().unwrap(), &directory).unwrap();
+            a.path = directory.join("collection.anki2");
+            assert_eq!(native(&a.path), original_native);
+            let trace = MigrationTrace::default();
+            let (engine, review, stream, opened) =
+                tracing::subscriber::with_default(trace.clone(), || try_review(&a.path, NOW, UtcOffset::UTC));
+            let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+            let observed = opened.as_ref().ok().map(common::steps::dump);
+            let flush = opened.as_ref().ok().map(|_| review.flush_for_background());
+            let failure = opened.err();
+            let closed = engine.close();
+            drop(review);
+            drop(engine);
+            closed.unwrap();
+            assert!(ready && failure.is_none(), "{mode}: {failure:?}");
+            flush.unwrap().unwrap();
+            assert!(dropped(&stream).is_empty(), "{mode}");
+            assert!(trace.0.lock().unwrap().is_empty(), "{mode}: no path migration event");
+            assert_eq!(observed.unwrap(), a.after, "{mode}: exactly one answer");
+            let landed = fs::read(journal_path(&a.path)).unwrap();
+            let header = journal_header(&landed);
+            for field in ["path", "native", "incarnation", "notice"] {
+                assert_eq!(header.get(field), original_header.get(field), "{mode}: {field}");
+            }
+            assert_eq!(header["next_event"], 2);
+            assert!(!String::from_utf8_lossy(&landed).contains("unacknowledged"));
+            assert!(!identity_archive(&a.path, &source).exists());
+        }
+    }
+}
+
+#[test]
+fn c12_managed_same_file_native_change_copy_and_invalid_journals_refuse() {
+    let outer = tempfile::tempdir().unwrap();
+    let mut a = capture_answer(|_| {});
+    restore_uncommitted(&a, &a.prepared);
+    let directory = outer.path().join("current");
+    fs::rename(a.path.parent().unwrap(), &directory).unwrap();
+    a.path = directory.join("collection.anki2");
+    for mode in [
+        "uuid",
+        "inode",
+        "copy",
+        "unsupported",
+        "legacy",
+        "foreign",
+        "retired",
+        "complete",
+        "dependency",
+        "notice",
+        "hardlink",
+        "symlink",
+    ] {
+        let mut candidate = a.prepared.clone();
+        match mode {
+            "uuid" => {
+                candidate = change_record(&candidate, 0, |r| {
+                    let native = &mut r["Header"]["native"];
+                    if native["platform"] == "darwin" {
+                        native["volume_uuid"][0] = (native["volume_uuid"][0].as_u64().unwrap() ^ 1).into();
+                    } else {
+                        native["device"] = (native["device"].as_u64().unwrap() ^ 1).into();
+                    }
+                })
+            }
+            "inode" => {
+                candidate = change_record(&candidate, 0, |r| {
+                    let inode = &mut r["Header"]["native"]["inode"];
+                    *inode = (inode.as_u64().unwrap() ^ 1).into();
+                })
+            }
+            "unsupported" => candidate = change_record(&candidate, 0, |r| r["Header"]["version"] = 99.into()),
+            "legacy" => candidate = legacy_journal(&candidate, &a.path, false),
+            "foreign" => {
+                candidate = change_record(&candidate, 0, |r| {
+                    r["Header"]["native"] = if cfg!(target_vendor = "apple") {
+                        serde_json::json!({"platform":"non_darwin","device":7,"inode":9})
+                    } else {
+                        // A wrong-platform negative; never used for a positive open.
+                        serde_json::json!({"platform":"darwin","volume_uuid":vec![3; 16],"inode":9})
+                    };
+                })
+            }
+            "retired" => candidate = change_record(&a.intent, 1, |r| *r = serde_json::json!("Retired")),
+            "complete" => candidate.extend_from_slice(b"complete corruption\n"),
+            "dependency" => {
+                candidate = change_record(&candidate, 1, |r| {
+                    r["Intent"]["answer"]["base"] = serde_json::json!({"Predecessor":8});
+                })
+            }
+            "notice" => {
+                candidate = change_record(&candidate, 0, |r| {
+                    r["Header"]["notice"] = serde_json::json!({"reason":"unknown","archive_sha256":vec![0; 32]});
+                })
+            }
+            _ => {}
+        }
+        fs::write(journal_path(&a.path), &candidate).unwrap();
+        let saved = directory.join("retained-source");
+        let alias = directory.join("journal-alias");
+        match mode {
+            "copy" => {
+                fs::rename(&a.path, &saved).unwrap();
+                fs::copy(&saved, &a.path).unwrap();
+                assert_ne!(native(&saved), native(&a.path));
+            }
+            "hardlink" => fs::hard_link(journal_path(&a.path), &alias).unwrap(),
+            "symlink" => {
+                fs::rename(journal_path(&a.path), &saved).unwrap();
+                std::os::unix::fs::symlink(&saved, journal_path(&a.path)).unwrap();
+            }
+            _ => {}
+        }
+        let database = fs::read(&a.path).unwrap();
+        let (engine, review, _, opened) = try_review(&a.path, NOW, UtcOffset::UTC);
+        let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+        let failed = opened.is_err();
+        let refused = review.start(DeckId(1), None).is_err();
+        let closed = engine.close();
+        drop(opened);
+        drop(review);
+        drop(engine);
+        closed.unwrap();
+        assert!(failed && !ready && refused, "{mode}");
+        assert_eq!(fs::read(journal_path(&a.path)).unwrap(), candidate, "{mode}");
+        assert_eq!(fs::read(&a.path).unwrap(), database, "{mode}: no replay");
+        match mode {
+            "copy" => {
+                fs::remove_file(&a.path).unwrap();
+                fs::rename(&saved, &a.path).unwrap();
+            }
+            "hardlink" => fs::remove_file(&alias).unwrap(),
+            "symlink" => {
+                fs::remove_file(journal_path(&a.path)).unwrap();
+                fs::rename(&saved, journal_path(&a.path)).unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
+// Produce the required archive/notice through real pristine-v2 migration, then
+// answer normally before a second whole-directory rename. All owners are closed.
+fn moved_history_with_notice() -> (tempfile::TempDir, PathBuf, Vec<u8>, Vec<u8>) {
+    let outer = tempfile::tempdir().unwrap();
+    let h = Harness::new(3);
+    let path = h.collection.path().to_owned();
+    h.engine.close().unwrap();
+    drop(h.collection);
+    drop(h.review);
+    drop(h.engine);
+    let archived = fs::read(journal_path(&path)).unwrap();
+    let migration_dir = outer.path().join("migration");
+    fs::rename(path.parent().unwrap(), &migration_dir).unwrap();
+    let path = migration_dir.join("collection.anki2");
+    let (engine, collection, review) = session_support::open(&path, h.clock);
+    let (id, head) = start(&review);
+    accept(&review, id, &head, Rating::Easy, NOW);
+    review.flush_for_background().unwrap();
+    review.end(id).unwrap();
+    engine.close().unwrap();
+    drop(collection);
+    drop(review);
+    drop(engine);
+    let source = fs::read(journal_path(&path)).unwrap();
+    assert_eq!(journal_header(&source)["notice"]["reason"], "pristine_v2_rebound");
+    assert_eq!(fs::read(identity_archive(&path, &archived)).unwrap(), archived);
+    let current = outer.path().join("current");
+    fs::rename(migration_dir, &current).unwrap();
+    (outer, current.join("collection.anki2"), source, archived)
+}
+
+#[test]
+fn c12_managed_same_file_required_archive_failures_preserve_evidence() {
+    use sha2::{Digest, Sha256};
+    let (_outer, path, source, archived) = moved_history_with_notice();
+    let original_archive = identity_archive(&path, &archived);
+    for mode in [
+        "missing",
+        "hash",
+        "same_incarnation",
+        "same_binding",
+        "hardlink",
+        "symlink",
+    ] {
+        let mut candidate = source.clone();
+        let mut archive_bytes = archived.clone();
+        let mut archive_path = original_archive.clone();
+        if matches!(mode, "same_incarnation" | "same_binding") {
+            let current = journal_header(&source);
+            archive_bytes = change_record(&archived, 0, |r| {
+                if mode == "same_incarnation" {
+                    r["Header"]["incarnation"] = current["incarnation"].clone();
+                } else {
+                    r["Header"]["path"] = current["path"].clone();
+                    r["Header"]["native"] = current["native"].clone();
+                }
+            });
+            let digest: [u8; 32] = Sha256::digest(&archive_bytes).into();
+            candidate = change_record(&source, 0, |r| {
+                r["Header"]["notice"]["archive_sha256"] = serde_json::to_value(digest).unwrap();
+            });
+            archive_path = identity_archive(&path, &archive_bytes);
+        }
+        if mode == "hash" {
+            archive_bytes = change_record(&archive_bytes, 0, |r| {
+                r["Header"]["path"] = serde_json::json!([47, 120])
+            });
+        }
+        fs::write(journal_path(&path), &candidate).unwrap();
+        fs::write(&archive_path, &archive_bytes).unwrap();
+        let alias = path.with_file_name("archive-alias");
+        match mode {
+            "missing" => fs::remove_file(&archive_path).unwrap(),
+            "hardlink" => fs::hard_link(&archive_path, &alias).unwrap(),
+            "symlink" => {
+                fs::rename(&archive_path, &alias).unwrap();
+                std::os::unix::fs::symlink(&alias, &archive_path).unwrap();
+            }
+            _ => {}
+        }
+        let database = fs::read(&path).unwrap();
+        let (engine, review, _, opened) = try_review(&path, NOW, UtcOffset::UTC);
+        let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+        let failed = opened.is_err();
+        let closed = engine.close();
+        drop(opened);
+        drop(review);
+        drop(engine);
+        closed.unwrap();
+        assert!(failed && !ready, "{mode}");
+        assert_eq!(fs::read(journal_path(&path)).unwrap(), candidate, "{mode}");
+        assert_eq!(fs::read(&path).unwrap(), database, "{mode}");
+        if mode != "missing" {
+            assert_eq!(fs::read(&archive_path).unwrap(), archive_bytes, "{mode}");
+            fs::remove_file(&archive_path).unwrap();
+        }
+        if matches!(mode, "hardlink" | "symlink") {
+            fs::remove_file(&alias).unwrap();
+        }
+        fs::write(&original_archive, &archived).unwrap();
+    }
+}
+
+#[cfg(target_vendor = "apple")]
+static SAME_FILE_SUBSTITUTION: Mutex<Option<(PathBuf, PathBuf, PathBuf)>> = Mutex::new(None);
+#[cfg(target_vendor = "apple")]
+fn substitute_current_same_file_binding() {
+    use meguri_model::faultpoint;
+    faultpoint::disarm("storage.commit.before");
+    faultpoint::disarm("storage.atomic.after_write");
+    let (target, saved, replacement) = SAME_FILE_SUBSTITUTION.lock().unwrap().take().unwrap();
+    // Rename precreated files; never open another descriptor of the locked DB.
+    fs::rename(&target, saved).unwrap();
+    fs::rename(replacement, target).unwrap();
+}
+#[cfg(target_vendor = "apple")]
+struct ArmSameFileSubstitution(&'static str);
+#[cfg(target_vendor = "apple")]
+impl meguri_engine::OpenStep for ArmSameFileSubstitution {
+    fn name(&self) -> &str {
+        "arm-current-same-file-substitution"
+    }
+    fn run(&self, _: &Collection) -> Result<(), EngineError> {
+        use meguri_model::faultpoint::{self, Fault};
+        faultpoint::arm(self.0, Fault::Callback(substitute_current_same_file_binding));
+        Ok(())
+    }
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_managed_darwin_live_binding_mutation_refuses_before_append_and_compaction() {
+    use meguri_model::faultpoint;
+    for boundary in ["append", "compaction"] {
+        for target in ["collection", "journal"] {
+            let outer = tempfile::tempdir().unwrap();
+            let mut a = capture_answer(|_| {});
+            if boundary == "append" {
+                restore_uncommitted(&a, &a.intent);
+            }
+            let directory = outer.path().join("current");
+            fs::rename(a.path.parent().unwrap(), &directory).unwrap();
+            a.path = directory.join("collection.anki2");
+            let journal = journal_path(&a.path);
+            let before = fs::read(&journal).unwrap();
+            assert_eq!(
+                journal_header(&before)["next_event"],
+                if boundary == "append" { 1 } else { 2 }
+            );
+            let target_path = if target == "collection" {
+                a.path.clone()
+            } else {
+                journal.clone()
+            };
+            let replacement = directory.join("replacement");
+            fs::copy(&target_path, &replacement).unwrap(); // Before SQLite opens.
+            let replacement_bytes = fs::read(&replacement).unwrap();
+            let saved = directory.join("retained-original");
+            *SAME_FILE_SUBSTITUTION.lock().unwrap() = Some((target_path.clone(), saved.clone(), replacement));
+            let point = if boundary == "append" {
+                "storage.commit.before"
+            } else {
+                "storage.atomic.after_write"
+            };
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            let queues = Arc::new(QueueProvider::default());
+            let review = ReviewService::new(&engine, queues.clone()).unwrap();
+            let ports = Ports::new()
+                .observer(queues.clone())
+                .generation_listener(queues)
+                .open_step(Arc::new(ArmSameFileSubstitution(point)))
+                .open_step(review.clone())
+                .observer(review.clone())
+                .generation_listener(review.clone())
+                .suspend_participant(review.clone());
+            let opened = engine.open_raw(
+                &a.path,
+                OpenConfig::new(
+                    Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC")),
+                    Arc::new(SeededRandom::new(43)),
+                )
+                .ports(ports),
+            );
+            faultpoint::disarm(point);
+            let visited = SAME_FILE_SUBSTITUTION.lock().unwrap().take().is_none();
+            let failed = opened.is_err();
+            let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+            let refused = review.start(DeckId(1), None).is_err();
+            let closed = engine.close();
+            drop(opened);
+            drop(review);
+            drop(engine);
+            closed.unwrap();
+            assert!(visited, "{boundary}/{target}: required boundary reached");
+            assert!(failed && !ready && refused, "{boundary}/{target}");
+            assert_eq!(
+                fs::read(&journal).unwrap(),
+                before,
+                "{boundary}/{target}: no append/compaction"
+            );
+            assert_eq!(fs::read(&target_path).unwrap(), replacement_bytes);
+            if target == "journal" {
+                assert_eq!(fs::read(saved).unwrap(), before, "original evidence retained");
+            }
+        }
+    }
+}
+
 #[test]
 fn c12_managed_same_file_path_reopen_preserves_darwin_history_and_refuses_non_darwin() {
     use std::{collections::BTreeMap, ffi::OsString, os::unix::ffi::OsStrExt};
