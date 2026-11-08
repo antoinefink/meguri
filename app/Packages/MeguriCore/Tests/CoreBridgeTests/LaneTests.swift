@@ -9,33 +9,51 @@ import Testing
 #if DEBUG
 import Observation
 
+private extension MaintenanceLane {
+    func exerciseMaintenanceCallObservation(_ gate: MaintenanceOccupancy) throws {
+        let observation = MaintenanceCallObservation.shared
+        #expect(observation.currentCall == nil)
+        try call(.coreVersion) {
+            #expect(observation.currentCall == .coreVersion)
+            try occupy(gate, call: .startSession)
+            #expect(observation.currentCall == .coreVersion)
+            do {
+                try call(.reviewSessionJobResult) {
+                    #expect(observation.currentCall == .reviewSessionJobResult)
+                    throw BridgeError.cancelled
+                }
+                Issue.record("Expected BridgeError.cancelled from the nested maintenance call")
+            } catch {
+                #expect(error == BridgeError.cancelled)
+            }
+            #expect(observation.currentCall == .coreVersion)
+        }
+        #expect(observation.currentCall == nil)
+        do {
+            try call(.startSession) {
+                #expect(observation.currentCall == .startSession)
+                throw BridgeError.cancelled
+            }
+            Issue.record("Expected BridgeError.cancelled from the maintenance call")
+        } catch {
+            #expect(error == BridgeError.cancelled)
+        }
+        #expect(observation.currentCall == nil)
+    }
+
+    // A plain actor method orders this read after other calls without setting an owner.
+    func expectMaintenanceCallObservationIdle() {
+        #expect(MaintenanceCallObservation.shared.currentCall == nil)
+    }
+}
+
 extension EventTests {
     @Test func maintenanceCallObservationTracksOnlyExecutingMaintenanceBody() async throws {
         let observation = MaintenanceCallObservation.shared
         let gate = MaintenanceOccupancy()
         let changed = Mutex(false)
-        let occupying = Task { @MaintenanceLane in
-            #expect(observation.currentCall == nil)
-            try MaintenanceLane.shared.call(.coreVersion) {
-                #expect(observation.currentCall == .coreVersion)
-                try MaintenanceLane.shared.occupy(gate, call: .startSession)
-                #expect(observation.currentCall == .coreVersion)
-                #expect(throws: BridgeError.cancelled) {
-                    try MaintenanceLane.shared.call(.reviewSessionJobResult) {
-                        #expect(observation.currentCall == .reviewSessionJobResult)
-                        throw BridgeError.cancelled
-                    }
-                }
-                #expect(observation.currentCall == .coreVersion)
-            }
-            #expect(observation.currentCall == nil)
-            #expect(throws: BridgeError.cancelled) {
-                try MaintenanceLane.shared.call(.startSession) {
-                    #expect(observation.currentCall == .startSession)
-                    throw BridgeError.cancelled
-                }
-            }
-            #expect(observation.currentCall == nil)
+        let occupying = Task {
+            try await MaintenanceLane.shared.exerciseMaintenanceCallObservation(gate)
         }
         defer { gate.release.signal() }
         for await _ in gate.entered { break }
@@ -59,18 +77,18 @@ extension EventTests {
         try await occupying.value
         #expect(changed.withLock { $0 }, "the nested observable getter must invalidate on release")
         #expect(!gate.watchdogFired.withLock { $0 })
-        #expect(observation.currentCall == nil)
+        await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
         try cloudFinalCoreCall(.cloudWorkflowValidateSdk) {
             #expect(observation.currentCall == .cloudWorkflowValidateSdk)
         }
-        #expect(observation.currentCall == nil)
+        await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
         #expect(throws: BridgeError.cancelled) {
             try cloudFinalCoreCall(.cloudFetchReadValidate) {
                 #expect(observation.currentCall == .cloudFetchReadValidate)
                 throw BridgeError.cancelled
             }
         }
-        #expect(observation.currentCall == nil)
+        await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
     }
 }
 #endif
