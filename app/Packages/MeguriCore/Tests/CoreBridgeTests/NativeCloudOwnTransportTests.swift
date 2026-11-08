@@ -842,8 +842,8 @@ struct NativeCloudOwnTransportTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: engineCopies.path).isEmpty)
     }
 
-    @Test(arguments: [false, true])
-    func adoptionCallbackBeyondRequestedBoundFailsBeforeCopyingAnotherFile(includeDeletion: Bool) async throws {
+    @Test(arguments: [false, true], [false, true])
+    func adoptionCallbackBeyondRequestedBoundFailsBeforeCopyingAnotherFile(includeDeletion: Bool, failureCallbacks: Bool) async throws {
         let queue = NativeOwnCapturingQueue()
         let prepared = try NativeCloudOwnTransport(queue: queue).prepare(.adoptionPage(zone: "c-synthetic", cursor: nil, expectedEpoch: epochExpected()))
         #expect(prepared.enqueue())
@@ -854,6 +854,7 @@ struct NativeCloudOwnTransportTests {
         for index in 0..<limit {
             let id = CKRecord.ID(recordName: "ordinary-\(index)", zoneID: zone)
             if includeDeletion && index == 0 { operation.recordWithIDWasDeletedBlock?(id, "MGEntity") }
+            else if failureCallbacks { operation.recordWasChangedBlock?(id, .failure(CKError(.networkFailure))) }
             else {
                 let record = CKRecord(recordType: "MGEntity", recordID: id)
                 record.encryptedValues["e"] = Data([1]) as CKRecordValue
@@ -862,7 +863,9 @@ struct NativeCloudOwnTransportTests {
         }
         let extra = CKRecord(recordType: "MGEntity", recordID: .init(recordName: "excess", zoneID: zone))
         extra.encryptedValues["e"] = Data([1]) as CKRecordValue
-        operation.recordWasChangedBlock?(extra.recordID, .success(extra))
+        if failureCallbacks {
+            operation.recordWasChangedBlock?(extra.recordID, .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 120.0])))
+        } else { operation.recordWasChangedBlock?(extra.recordID, .success(extra)) }
         operation.fetchRecordZoneChangesResultBlock?(.success(()))
         await #expect(throws: NativeCloudKitFailure.self) { try await prepared.reply() }
     }
@@ -1024,15 +1027,32 @@ struct NativeCloudOwnTransportTests {
     @Test func adoptionPartialFailureUsesOnlyExactIssuedZone() async throws {
         for relevant in [true, false] {
             let queue = NativeOwnCapturingQueue()
-            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
+            let handlers = NativeOwnReadHandlers()
+            let prepared = try NativeCloudOwnTransport(queue: queue,
+                readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } }).prepare(
                 .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
             #expect(prepared.enqueue())
             let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
-            let zone = NativeCloudOwnRecords.zone(relevant ? epochTarget.zone : "unrelated")
-            let original = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [zone: CKError(.networkUnavailable)]])
-            operation.fetchRecordZoneChangesResultBlock?(.failure(original))
+            #expect(operation.recordZoneIDs?.count == 1)
+            let issuedZone = try #require(operation.recordZoneIDs?.first)
+            let terminal = try #require(handlers.terminal.withLock { $0 })
+            let zone = relevant ? issuedZone : NativeCloudOwnRecords.zone("unrelated")
+            #expect((zone == issuedZone) == relevant)
+            let leaf = NSError(domain: CKErrorDomain, code: CKError.Code.networkUnavailable.rawValue)
+            let partials: [AnyHashable: Any] = [zone: leaf]
+            let original = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue,
+                userInfo: [CKPartialErrorsByItemIDKey: partials])
+            // Check dictionary/key bridging separately from SDK getter normalization.
+            let classified = NativeCloudOwnRecords.adoptionSDKFailure(original, item: issuedZone)
+            #expect((classified is CloudAdoptionSDKFailure) == relevant)
+            if let fact = classified as? CloudAdoptionSDKFailure {
+                #expect(fact.code == Int64(leaf.code))
+                #expect((fact.original as NSError) === original)
+            }
+            terminal(.failure(original))
             do { _ = try await prepared.reply(); Issue.record("partial failure unexpectedly succeeded") }
             catch { #expect((error is CloudAdoptionSDKFailure) == relevant) }
+            #expect(queue.operations.withLock { $0.count } == 1)
         }
     }
 
@@ -1055,6 +1075,140 @@ struct NativeCloudOwnTransportTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func adoptionPageMergesRecordZoneAndTerminalDelays(recordHasDelay: Bool) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { callback in handlers.perRecord.withLock { $0 = callback } },
+            readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } }).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let changed = try #require(handlers.perRecord.withLock { $0 })
+        let zoneFinished = try #require(operation.recordZoneFetchResultBlock)
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        let original = NSError(domain: CKErrorDomain, code: CKError.Code.networkFailure.rawValue,
+            userInfo: recordHasDelay ? [CKErrorRetryAfterKey: 1.0] : [:])
+        changed(NativeCloudOwnRecords.id(epochTarget), .failure(original))
+        zoneFinished(NativeCloudOwnRecords.zone(epochTarget.zone),
+            .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 120.0])))
+        terminal(.failure(CKError(.networkFailure)))
+        do { _ = try await prepared.reply(); Issue.record("page failure unexpectedly succeeded") }
+        catch {
+            let fact = try #require(error as? CloudAdoptionSDKFailure)
+            #expect(fact.code == 4 && fact.retryAfterDurationMilliseconds == 120_000)
+            #expect((fact.original as NSError) === original)
+        }
+        #expect(queue.operations.withLock { $0.count } == 1)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func adoptionPageMergesEveryOriginalRecordFailureBeforeTerminal(recordHasDelay: Bool, laterLargerDelay: Bool) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { callback in handlers.perRecord.withLock { $0 = callback } },
+            readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } }).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let changed = try #require(handlers.perRecord.withLock { $0 })
+        let zoneFinished = try #require(operation.recordZoneFetchResultBlock)
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        let zone = try #require(operation.recordZoneIDs?.first)
+        let original = NSError(domain: CKErrorDomain, code: CKError.Code.networkFailure.rawValue,
+            userInfo: recordHasDelay ? [CKErrorRetryAfterKey: 1.0] : [:])
+        changed(.init(recordName: "first", zoneID: zone), .failure(original))
+        changed(.init(recordName: "second", zoneID: zone),
+            .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 120.0])))
+        if laterLargerDelay {
+            changed(.init(recordName: "third", zoneID: zone),
+                .failure(CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 180.0])))
+        }
+        // Success and deletion still receive no admission after a failure.
+        let refused = epochNative()
+        refused.encryptedValues["e"] = Data([99]) as CKRecordValue
+        changed(refused.recordID, .success(refused))
+        operation.recordWithIDWasDeletedBlock?(.init(recordName: "deleted", zoneID: zone), "MGEntity")
+        zoneFinished(zone, .failure(CKError(.networkFailure)))
+        #expect(!prepared.enqueue())
+        // Only the original operation terminal drains the retained failures.
+        terminal(.failure(CKError(.networkFailure)))
+        // Callbacks after that terminal cannot increase or replace its result.
+        changed(.init(recordName: "late", zoneID: zone),
+            .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 600.0])))
+        zoneFinished(zone, .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 600.0])))
+        terminal(.failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 600.0])))
+        do { _ = try await prepared.reply(); Issue.record("page failure unexpectedly succeeded") }
+        catch {
+            let fact = try #require(error as? CloudAdoptionSDKFailure)
+            #expect(fact.code == 4 && fact.retryAfterDurationMilliseconds == (laterLargerDelay ? 180_000 : 120_000))
+            #expect((fact.original as NSError) === original)
+        }
+        #expect(queue.operations.withLock { $0.count == 1 && $0.first === operation })
+    }
+
+    @Test(arguments: [false, true])
+    func adoptionPagePermanentRecordFailureDominatesFurtherOriginalFailures(permanentFirst: Bool) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { callback in handlers.perRecord.withLock { $0 = callback } },
+            readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } }).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let changed = try #require(handlers.perRecord.withLock { $0 })
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        let zone = try #require(operation.recordZoneIDs?.first)
+        let refusal = NSError(domain: CKErrorDomain, code: CKError.Code.permissionFailure.rawValue)
+        if !permanentFirst {
+            changed(.init(recordName: "transient-first", zoneID: zone), .failure(CKError(.networkFailure)))
+        }
+        changed(.init(recordName: "refused", zoneID: zone), .failure(refusal))
+        changed(.init(recordName: "transient-later", zoneID: zone),
+            .failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 120.0])))
+        operation.recordZoneFetchResultBlock?(zone, .failure(CKError(.networkFailure)))
+        terminal(.failure(CKError(.networkFailure)))
+        changed(.init(recordName: "late", zoneID: zone), .failure(CKError(.networkFailure)))
+        terminal(.failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 600.0])))
+        do { _ = try await prepared.reply(); Issue.record("permanent refusal unexpectedly succeeded") }
+        catch {
+            #expect(!(error is CloudAdoptionSDKFailure))
+            #expect((error as NSError) === refusal)
+        }
+        #expect(queue.operations.withLock { $0.count == 1 && $0.first === operation })
+    }
+
+    @Test func adoptionPageKeepsOuterPartialDelayWithoutZoneEntry() async throws {
+        let queue = NativeOwnCapturingQueue()
+        let handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { callback in handlers.perRecord.withLock { $0 = callback } },
+            readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } }).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let changed = try #require(handlers.perRecord.withLock { $0 })
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        let recordID = NativeCloudOwnRecords.id(epochTarget)
+        let original = NSError(domain: CKErrorDomain, code: CKError.Code.networkFailure.rawValue,
+            userInfo: [CKErrorRetryAfterKey: 1.0])
+        changed(recordID, .failure(original))
+        // The terminal wrapper has the record entry but no zone entry. Its
+        // own larger delay still applies to the original issued page request.
+        let wrapper = NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue,
+            userInfo: [CKErrorRetryAfterKey: 180.0, CKPartialErrorsByItemIDKey: [recordID: original]])
+        terminal(.failure(wrapper))
+        do { _ = try await prepared.reply(); Issue.record("page failure unexpectedly succeeded") }
+        catch {
+            let fact = try #require(error as? CloudAdoptionSDKFailure)
+            #expect(fact.code == 4 && fact.retryAfterDurationMilliseconds == 180_000)
+            #expect((fact.original as NSError) === original)
+        }
+        #expect(queue.operations.withLock { $0.count } == 1)
+    }
+
     @Test func adoptionProjectionFailureWinsOverZoneAndTerminalNetworkFailures() async throws {
         let queue = NativeOwnCapturingQueue()
         let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
@@ -1064,8 +1218,8 @@ struct NativeCloudOwnTransportTests {
         let record = epochNative()
         record.encryptedValues["e"] = Data([99]) as CKRecordValue
         operation.recordWasChangedBlock?(record.recordID, .success(record))
-        operation.recordZoneFetchResultBlock?(NativeCloudOwnRecords.zone(epochTarget.zone), .failure(CKError(.networkFailure)))
-        operation.fetchRecordZoneChangesResultBlock?(.failure(CKError(.serviceUnavailable)))
+        operation.recordZoneFetchResultBlock?(NativeCloudOwnRecords.zone(epochTarget.zone), .failure(CKError(.networkFailure, userInfo: [CKErrorRetryAfterKey: 120.0])))
+        operation.fetchRecordZoneChangesResultBlock?(.failure(CKError(.serviceUnavailable, userInfo: [CKErrorRetryAfterKey: 180.0])))
         await #expect(throws: NativeCloudKitFailure.self) { try await prepared.reply() }
     }
 

@@ -1216,18 +1216,22 @@ impl Runtime {
                     .inspect_err(|error| diagnostic.cleanup(error))?;
                 return Err(refused());
             }
-            if matches!(
+            let account_unavailable = matches!(
                 self.inputs.identity.read_identity(&self.inputs.scope),
                 IdentityStatus::ReadFailed
                     | IdentityStatus::TemporarilyUnavailable
                     | IdentityStatus::Restricted
                     | IdentityStatus::Configuration
-            ) {
+            );
+            if account_unavailable && !matches!(&reply, AdoptionReply::TransportFailed { .. }) {
                 owner.set_next(work.task.clone());
                 return Err(PublicationError::AccountUnavailable.into());
             }
             adoption_stage!("authority", Authority);
-            if let Err(error) = self.check_adoption_before(&op, collection) {
+            // An already-issued failure may retain only wait bookkeeping while
+            // account proof is unavailable. It grants no request/activation
+            // authority: next work and explicit Resume still check it afresh.
+            if !account_unavailable && let Err(error) = self.check_adoption_before(&op, collection) {
                 if matches!(&reply, AdoptionReply::TransportFailed { .. }) {
                     self.abort_adoption(&op, collection)
                         .inspect_err(|error| diagnostic.cleanup(error))?;

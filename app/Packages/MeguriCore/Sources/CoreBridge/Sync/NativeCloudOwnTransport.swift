@@ -104,7 +104,10 @@ enum NativeCloudOwnRecords {
             // record/zone error already delivered for this issued request.
             if native.domain == CKErrorDomain, native.code == CKError.Code.partialFailure.rawValue {
                 let partials = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any]
-                if partials?[item] == nil { return observed }
+                if partials?[item] == nil {
+                    return CloudAdoptionSDKFailure(original: observed.original, code: observed.code,
+                        retryAfterDurationMilliseconds: maximumDelay(observed.retryAfterDurationMilliseconds, retryDuration(error)))
+                }
             }
         }
         return terminalFailure
@@ -591,14 +594,21 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             var metadataBytes = 0
             mutating func recordFailure(_ error: any Error) {
                 guard !finished else { return }
+                if let observed = failure as? CloudAdoptionSDKFailure,
+                   let incoming = error as? CloudAdoptionSDKFailure {
+                    failure = CloudAdoptionSDKFailure(original: observed.original, code: observed.code,
+                        retryAfterDurationMilliseconds: NativeCloudOwnRecords.maximumDelay(
+                            observed.retryAfterDurationMilliseconds, incoming.retryAfterDurationMilliseconds))
+                    return
+                }
                 // A permanent projection/refusal always wins, including over
                 // later zone and operation network failures.
                 if failure == nil || (failure is CloudAdoptionSDKFailure && !(error is CloudAdoptionSDKFailure)) {
                     failure = error
                 }
             }
-            mutating func acceptChange() -> Bool {
-                guard !finished, failure == nil else { return false }
+            mutating func acceptChange(observingFailure: Bool = false) -> Bool {
+                guard !finished, failure == nil || (observingFailure && failure is CloudAdoptionSDKFailure) else { return false }
                 guard changes < NativeCloudStagingRecords.pageLimit else {
                     failure = NativeCloudKitFailure.unsupportedRecord
                     return false
@@ -608,8 +618,15 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             }
         }
         let state = Mutex(Page())
-        operation.recordWasChangedBlock = { [weak prepared] recordID, result in
-            guard state.withLock({ $0.acceptChange() }) else { return }
+        let perRecord: @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void = { [weak prepared] recordID, result in
+            // Only original failures may add evidence after a transient failure;
+            // successful records and deletions still stop before projection.
+            guard state.withLock({ value in
+                switch result {
+                case .failure: return value.acceptChange(observingFailure: true)
+                case .success: return value.acceptChange()
+                }
+            }) else { return }
             do {
                 guard let prepared, !prepared.cancelled else { throw CancellationError() }
                 guard recordID.zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -638,6 +655,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 }
             } catch { state.withLock { $0.recordFailure(error) } }
         }
+        operation.recordWasChangedBlock = perRecord
+        readPerRecordHandlerInstalled?(perRecord)
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
             state.withLock { value in
                 guard value.acceptChange() else { return }
@@ -664,7 +683,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 }
             } catch { state.withLock { $0.recordFailure(error) } }
         }
-        operation.fetchRecordZoneChangesResultBlock = { [weak prepared] result in
+        let terminal: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
             let page = state.withLock { value in
                 let page = value
                 value.records.removeAll(); value.finished = true
@@ -678,6 +697,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard page.completed else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
             prepared.finish(.success(.page(records: page.records, deleted: page.deleted, next: page.next)))
         }
+        operation.fetchRecordZoneChangesResultBlock = terminal
+        readTerminalHandlerInstalled?(terminal)
         return prepared
     }
 }

@@ -1322,7 +1322,7 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
                 .cloud_connection_directory()
                 .join(&original.staging_name);
             let before = stage_bytes(&stage);
-            let descriptor = handle.work.clone();
+            let descriptor = handle.retained_work_for_test().clone();
             let guard = fixture.workflow.core.adapter_guard();
             let events = fixture.workflow.host.engine().stream().subscribe();
             let pool = hold_pool(&fixture);
@@ -1395,7 +1395,7 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
             ));
             assert!(resume_waiting_adoption(&fixture, &connection));
             let (repeated, action) = adoption_action(&connection);
-            assert_eq!(repeated.work, descriptor);
+            assert_eq!(repeated.retained_work_for_test(), &descriptor);
             if payload {
                 assert!(
                     matches!(action, CloudAdoptionAction::FetchPayload { name, expected, .. }
@@ -1425,6 +1425,106 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
                 let (_, action) = adoption_action(&connection);
                 assert!(matches!(action, CloudAdoptionAction::Fetch { cursor, .. } if cursor == continuation));
             }
+            connection
+                .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+                .unwrap();
+            assert!(!stage.exists());
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn adoption_transport_failure_during_account_unavailability_still_requires_explicit_resume() {
+    for unavailable in [
+        r::IdentityStatus::ReadFailed,
+        r::IdentityStatus::TemporarilyUnavailable,
+        r::IdentityStatus::Restricted,
+        r::IdentityStatus::Configuration,
+    ] {
+        for payload in [false, true] {
+            let account = c::OpaqueBytes(b"synthetic-account-A".to_vec());
+            let identity = Arc::new(CachedIdentity(Mutex::new(Some(r::IdentityStatus::Available(
+                account.clone(),
+            )))));
+            let fixture = Fixture::with_identity(Keys::new([]), Some(identity.clone()));
+            let connection = fixture.workflow.connection().unwrap();
+            adoption_fetch_ready(&connection);
+            // The original page/payload work is issued while this account is
+            // verified. Only its later typed transport failure lacks proof.
+            let (page, _) = adoption_action(&connection);
+            let handle = if payload {
+                let (record, _) = adoption_config_record(b"unavailable-payload", true);
+                connection
+                    .adoption_result(
+                        page,
+                        CloudAdoptionResult::Page {
+                            records: vec![record],
+                            deleted: vec![],
+                            next: Some(vec![81, 82]),
+                        },
+                    )
+                    .unwrap();
+                adoption_action(&connection).0
+            } else {
+                page
+            };
+            let descriptor = handle.retained_work_for_test().clone();
+            let original = fixture.workflow.core.adoption_op().unwrap().unwrap();
+            let stage = fixture
+                .workflow
+                .host
+                .cloud_connection_directory()
+                .join(&original.staging_name);
+            let before = stage_bytes(&stage);
+            identity.set(unavailable.clone());
+            let events = fixture.workflow.host.engine().stream().subscribe();
+            let job = connection
+                .clone()
+                .start_adoption_result(
+                    handle,
+                    CloudAdoptionResult::TransportFailed {
+                        code: 4,
+                        retry_after_duration_ms: Some(120_000),
+                    },
+                )
+                .unwrap();
+            assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
+            assert!(job.result.result().unwrap().unwrap().applied);
+            let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
+            let mut expected = original;
+            expected.transport_wait = true;
+            expected.retry_after_ms = Some(NOW + 120_000);
+            assert_eq!(waiting, expected);
+            assert_eq!(stage_bytes(&stage), before);
+            assert!(matches!(
+                connection.next_publication_work().unwrap(),
+                CloudPublicationWork::Idle
+            ));
+            let operation = connection.recovery_status().unwrap().unwrap().operation;
+            let resume = connection.clone().start_resume_adoption(operation).unwrap();
+            assert!(matches!(finished(&events, resume.handle.id), JobOutcome::Failed { .. }));
+            failure_is(resume.result.result(), CloudConnectionFailure::AccountUnavailable);
+            assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
+            identity.set(r::IdentityStatus::Available(account));
+            fixture.clock.step_ms(5_000);
+            connection.trigger().unwrap();
+            assert!(matches!(
+                connection.next_publication_work().unwrap(),
+                CloudPublicationWork::Idle
+            ));
+            assert!(!resume_waiting_adoption(&fixture, &connection));
+            assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
+            fixture.clock.step_ms(115_001);
+            connection.trigger().unwrap();
+            assert!(matches!(
+                connection.next_publication_work().unwrap(),
+                CloudPublicationWork::Idle
+            ));
+            assert!(resume_waiting_adoption(&fixture, &connection));
+            let (repeated, _) = adoption_action(&connection);
+            assert_eq!(repeated.retained_work_for_test(), &descriptor);
+            assert_eq!(stage_bytes(&stage), before);
             connection
                 .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
                 .unwrap();

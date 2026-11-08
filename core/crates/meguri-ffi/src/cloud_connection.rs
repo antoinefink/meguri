@@ -548,6 +548,9 @@ pub struct CloudAdoptionWork {
 }
 #[cfg(test)]
 impl CloudAdoptionWork {
+    pub(crate) fn retained_work_for_test(&self) -> &a::AdoptionWork {
+        &self.work
+    }
     pub(crate) fn operation_id_for_test(&self) -> [u8; 16] {
         self.work.op
     }
