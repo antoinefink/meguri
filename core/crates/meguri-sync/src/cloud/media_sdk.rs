@@ -433,10 +433,15 @@ impl Runtime {
     }
 
     pub fn prepare_cloud_media_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.prepare_cloud_media_sdk_with_work(sdk, &mut PolicyWork::default())
+    }
+    pub fn prepare_cloud_media_sdk_with_work(&self, sdk: &str, work: &mut PolicyWork) -> Result<(), RuntimeError> {
         self.validate_sdk(sdk)?;
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
+        work.check()?;
         if s.media.sdk.as_deref() != Some(sdk) {
+            work.effect()?;
             // A replacement is registered only after the old native object has
             // drained. Ledger paths survive; callbacks cannot acquire its Work.
             s.actions.media_upload = None;

@@ -92,30 +92,97 @@ final class ForeignMediaQueue: MeguriCoreBindings.CloudMediaQueue {
 }
 public actor CoreCloudMediaService {
     private let raw: MeguriCoreBindings.CloudMedia
-    init(_ raw: MeguriCoreBindings.CloudMedia) { self.raw = raw }
-    static let selectors: [BridgeCall] = [.cloudWorkflowMedia, .cloudWorkflowSubmitMediaBatch, .cloudMediaDownloadsBlocked, .cloudMediaNextWork, .cloudMediaSubmitRead, .cloudMediaQueueUpload, .cloudMediaReply]
+    private let order = CloudPolicyOrder()
+    private let track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob
+    private let onJobQueued: @Sendable () -> Void
+    init(_ raw: MeguriCoreBindings.CloudMedia,
+         onJobQueued: @escaping @Sendable () -> Void = {},
+         track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }) {
+        self.raw = raw; self.track = track; self.onJobQueued = onJobQueued
+    }
+    static let selectors: [BridgeCall] = [.cloudWorkflowMedia, .cloudWorkflowSubmitMediaBatch, .cloudMediaDownloadsBlocked, .cloudMediaStartNextWork, .cloudMediaNextWorkResult, .cloudMediaSubmitRead, .cloudMediaQueueUpload, .cloudMediaReply]
     nonisolated static func call<T: Sendable>(_ name: BridgeCall, _ body: @Sendable @escaping () throws -> T) async throws -> T {
         try await MaintenanceLane.shared.call(name, body)
     }
     public func nextWork(sdk: String) async throws -> CloudMediaIssuedWork? {
         let raw = self.raw
-        return try await Self.call(.cloudMediaNextWork) { try raw.nextWork(sdk: sdk).map(CloudMediaIssuedWork.init) }
+        await order.acquire(queued: onJobQueued)
+        do {
+            try await CoreEventStream.shared.start()
+            let started = try await Self.call(.cloudMediaStartNextWork) { try raw.startNextWork(sdk: sdk) }
+            var outcome: JobOutcome?
+            var trackingFailure: (any Error)?
+            do {
+                let job = try await Jobs.trackDraining(started.handle, setup: track)
+                outcome = await Self.drain(job)
+            } catch {
+                // Listener failure has explicitly cancelled and drained Core.
+                trackingFailure = error
+            }
+            // Read the original cell even after cancellation/setup failure.
+            // Its successful wrapper distinguishes NoWork from Pending.
+            if let value = try await Self.call(.cloudMediaNextWorkResult, { try started.result.result() }) {
+                await order.release()
+                return value.work.map(CloudMediaIssuedWork.init)
+            }
+            if let trackingFailure { throw trackingFailure }
+            switch outcome {
+            case .cancelled: throw BridgeError.cancelled
+            case .failed(let error): throw error
+            default: throw BridgeError.internal("Media job completed without its typed result")
+            }
+        } catch {
+            await order.release()
+            throw error
+        }
+    }
+    /// The cancellation child is joined before the retained job/result and
+    /// service ordering permit are released. No callback or lane waits for Core.
+    private nonisolated static func drain(_ job: CoreJob) async -> JobOutcome {
+        let (requests, cancellation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+        return await withTaskCancellationHandler {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for await _ in requests {
+                        try? await job.cancel()
+                        return
+                    }
+                    // A child inherits cancellation even before its first read.
+                    if Task.isCancelled { try? await job.cancel() }
+                }
+                let outcome = await job.outcome()
+                cancellation.finish()
+                await group.waitForAll()
+                return outcome
+            }
+        } onCancel: { cancellation.yield(()) }
+    }
+    private func orderedCall<T: Sendable>(_ name: BridgeCall, _ body: @Sendable @escaping () throws -> T) async throws -> T {
+        await order.acquire(queued: onJobQueued)
+        do {
+            let value = try await Self.call(name, body)
+            await order.release()
+            return value
+        } catch {
+            await order.release()
+            throw error
+        }
     }
     public func downloadsBlocked(sdk: String) async throws -> Bool {
         let raw = self.raw
-        return try await Self.call(.cloudMediaDownloadsBlocked) { try raw.downloadsBlocked(sdk: sdk) }
+        return try await orderedCall(.cloudMediaDownloadsBlocked) { try raw.downloadsBlocked(sdk: sdk) }
     }
     public func submitRead(_ work: CloudMediaWork, queue: any CloudMediaQueue) async throws -> Bool {
         let raw = self.raw
-        return try await Self.call(.cloudMediaSubmitRead) { try raw.submitRead(work: work.raw, queue: ForeignMediaQueue(queue)) }
+        return try await orderedCall(.cloudMediaSubmitRead) { try raw.submitRead(work: work.raw, queue: ForeignMediaQueue(queue)) }
     }
     public func queueUpload(_ work: CloudMediaWork) async throws {
         let raw = self.raw
-        try await Self.call(.cloudMediaQueueUpload) { try raw.queueUpload(work: work.raw) }
+        try await orderedCall(.cloudMediaQueueUpload) { try raw.queueUpload(work: work.raw) }
     }
     public func reply(_ work: CloudMediaWork, result: CloudMediaReadResult) async throws {
         let raw = self.raw
-        try await Self.call(.cloudMediaReply) { try raw.reply(work: work.raw, reply: result.raw) }
+        try await orderedCall(.cloudMediaReply) { try raw.reply(work: work.raw, reply: result.raw) }
     }
 }
 
@@ -163,7 +230,15 @@ public actor CloudMediaExecutor {
         }
     }
     private func execute(metadataOnly: Bool) async throws -> CloudMediaProgress {
-        guard let work = try await core.nextWork(sdk: sdk) else {
+        let selected: CloudMediaIssuedWork?
+        do {
+            selected = try await core.nextWork(sdk: sdk)
+        } catch let error as BridgeError where error == .cancelled && Task.isCancelled {
+            // Core has explicitly cancelled and drained before effects. Keep
+            // the executor's existing caller/owned cancellation classification.
+            throw CancellationError()
+        }
+        guard let work = selected else {
             if metadataOnly { return .idle }
             return try await core.downloadsBlocked(sdk: sdk) ? .waitingForCollectionDrain : .idle
         }

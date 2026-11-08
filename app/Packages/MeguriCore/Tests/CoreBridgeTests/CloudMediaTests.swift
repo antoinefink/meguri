@@ -6,6 +6,9 @@ import Testing
 
 struct CloudMediaTests {
     @Test @MainActor func everyMediaSelectorUsesMaintenanceLane() async throws {
+        #expect(CoreCloudMediaService.selectors.contains(.cloudMediaStartNextWork))
+        #expect(CoreCloudMediaService.selectors.contains(.cloudMediaNextWorkResult))
+        #expect(!CoreCloudMediaService.selectors.contains(.cloudMediaNextWork))
         for selector in CoreCloudMediaService.selectors {
             let ran = try await CoreCloudMediaService.call(selector, probe)
             #expect(ran.queueLabel == Lane.maintenance.queueLabel && !ran.isMainThread)

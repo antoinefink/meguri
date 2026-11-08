@@ -1,10 +1,12 @@
 //! Opaque original Host/work authority. Native requests are projections only.
+use crate::cloud_policy::policy_jobs::{Cell, Completion};
 use crate::{
     CoreError, callback,
     sync::{CloudWorkflow, cloud_error},
 };
 use meguri_sync::cloud::media as m;
-use std::sync::Arc;
+use meguri_sync::cloud::{policy::PolicyWork, runtime::RuntimeError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudMediaRequest {
@@ -129,6 +131,38 @@ pub struct CloudMediaIssuedWork {
     pub handle: Arc<CloudMediaWork>,
     pub request: CloudMediaRequest,
 }
+// Pending is the outer Option; a completed NoWork is a value with work=None.
+#[derive(Clone, uniffi::Record)]
+pub struct CloudMediaPreparedWork {
+    pub work: Option<CloudMediaIssuedWork>,
+}
+#[derive(uniffi::Object)]
+pub struct CloudMediaNextWorkResult {
+    cell: Arc<Cell<CloudMediaPreparedWork>>,
+}
+#[uniffi::export]
+impl CloudMediaNextWorkResult {
+    pub fn result(&self) -> Result<Option<CloudMediaPreparedWork>, CoreError> {
+        callback::enter("CloudMediaNextWorkResult.result");
+        self.cell
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .transpose()
+    }
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudMediaNextWorkJob {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<CloudMediaNextWorkResult>,
+}
+fn preparation_error(error: RuntimeError) -> CoreError {
+    match error {
+        RuntimeError::Engine(meguri_engine::EngineError::Cancelled) => CoreError::Cancelled,
+        error => cloud_error(error),
+    }
+}
 impl CloudMedia {
     fn collection(&self) -> Result<meguri_engine::Collection, CoreError> {
         let collection = self.host.cloud_connection_collection()?;
@@ -182,6 +216,46 @@ impl CloudWorkflow {
 }
 #[uniffi::export]
 impl CloudMedia {
+    pub fn start_next_work(self: Arc<Self>, sdk: String) -> Result<CloudMediaNextWorkJob, CoreError> {
+        callback::enter("CloudMedia.start_next_work");
+        let cell = Arc::new(Cell(Mutex::new(None)));
+        let completion = Completion(cell.clone());
+        let owner = self.clone();
+        let generation = meguri_engine::Generation(self.generation);
+        // Admission touches only the retained Host's lifecycle/registry, never
+        // Runtime/Driver, media, a provider or a fresh process owner.
+        let handle = self
+            .host
+            .start_cloud_connection_job(generation, "CloudMedia.next_work", move |job| {
+                let mut authority =
+                    PolicyWork::new(&job.cancel).with_generation(owner.host.engine().downgrade(), generation);
+                let value = job
+                    .cancel
+                    .check()
+                    .map_err(CoreError::from)
+                    .and_then(|()| owner.collection())
+                    .and_then(|collection| {
+                        owner
+                            .host
+                            .next_cloud_media_work_with_work(&collection, &sdk, &mut authority)
+                            .map_err(preparation_error)
+                    })
+                    .and_then(|work| {
+                        authority.check().map_err(preparation_error)?;
+                        Ok(CloudMediaPreparedWork {
+                            work: work.map(|work| CloudMediaIssuedWork {
+                                request: (&work.request).into(),
+                                handle: Arc::new(CloudMediaWork { owner, sdk, work }),
+                            }),
+                        })
+                    });
+                completion.finish(value)
+            })?;
+        Ok(CloudMediaNextWorkJob {
+            handle: crate::jobs::wrap(handle),
+            result: Arc::new(CloudMediaNextWorkResult { cell }),
+        })
+    }
     pub fn next_work(self: Arc<Self>, sdk: String) -> Result<Option<CloudMediaIssuedWork>, CoreError> {
         callback::enter("CloudMedia.next_work");
         self.collection()?;

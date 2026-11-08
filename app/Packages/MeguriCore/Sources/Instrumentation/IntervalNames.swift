@@ -415,6 +415,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyExecutionContinueMediaAfterSend = BridgeCall("CloudPolicyExecution.continue_media_after_send")
     public static let cloudPolicyExecutionBeginMedia = BridgeCall("CloudPolicyExecution.begin_media")
     public static let cloudMediaNextWork = BridgeCall("CloudMedia.next_work")
+    public static let cloudMediaStartNextWork = BridgeCall("CloudMedia.start_next_work")
+    public static let cloudMediaNextWorkResult = BridgeCall("CloudMediaNextWorkResult.result")
     public static let cloudMediaSubmitRead = BridgeCall("CloudMedia.submit_read")
     public static let cloudMediaQueueUpload = BridgeCall("CloudMedia.queue_upload")
     public static let cloudMediaReply = BridgeCall("CloudMedia.reply")
@@ -500,7 +502,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
-        cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
+        cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyStartInput, cloudPolicyStartRefreshAccount, cloudPolicyStartProjectIdentityRead, cloudPolicyStartStatus, cloudPolicyStartExecuteCore, cloudPolicyStartSubmitNative, cloudPolicyStartCaptureExchange, cloudPolicyStartCompleteExchange, cloudPolicyStartEndBeforeCapture, cloudPolicyStartExchangeReadiness, cloudPolicyStartPrepareExecution, cloudPolicyOutputResult, cloudPolicyStatusResult, cloudPolicyAdmissionResult, cloudPolicyCaptureResult, cloudPolicyReadinessResult, cloudPolicyExecutionResult,
         cloudWorkflowPolicy, cloudPolicyValidateOriginalOwner, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,
