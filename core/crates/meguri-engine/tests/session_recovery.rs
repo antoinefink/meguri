@@ -783,6 +783,141 @@ fn identity_archive(path: &Path, bytes: &[u8]) -> PathBuf {
     path.with_file_name(format!("meguri-pending-answers.{hash}.identity.jsonl"))
 }
 
+#[test]
+fn c12_managed_same_file_path_reopen_preserves_darwin_history_and_refuses_non_darwin() {
+    use std::{collections::BTreeMap, ffi::OsString, os::unix::ffi::OsStrExt};
+
+    fn archives(path: &Path) -> BTreeMap<OsString, Vec<u8>> {
+        fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(Result::unwrap)
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name.ends_with(".identity.jsonl") || name.ends_with(".recovery.jsonl")
+            })
+            .map(|e| (e.file_name(), fs::read(e.path()).unwrap()))
+            .collect()
+    }
+
+    for with_notice in [false, true] {
+        // All moved directories remain under this owner, even on semantic RED.
+        let outer = tempfile::tempdir().unwrap();
+        let h = Harness::new(3);
+        let mut path = h.collection.path().to_owned();
+        let clock = h.clock.clone();
+        h.engine.close().unwrap();
+        drop(h.collection);
+        drop(h.review);
+        drop(h.engine);
+        let seed_dir = h.dir;
+        let pristine = fs::read(journal_path(&path)).unwrap();
+        let pristine_header = journal_header(&pristine);
+        assert_eq!(pristine_header["next_event"], 1);
+        assert!(pristine_header.get("notice").is_none());
+        if with_notice {
+            // Obtain the notice and exact archive through approved production
+            // pristine migration, before accepting any answer. No codec edits.
+            let directory = outer.path().join("pristine-migration");
+            fs::rename(path.parent().unwrap(), &directory).unwrap();
+            path = directory.join("collection.anki2");
+        }
+        let (engine, collection, review) = session_support::open(&path, clock);
+        let bound = journal_header(&fs::read(journal_path(&path)).unwrap());
+        if with_notice {
+            assert_eq!(bound["notice"]["reason"], "pristine_v2_rebound");
+            assert_ne!(bound["incarnation"], pristine_header["incarnation"]);
+            assert_eq!(fs::read(identity_archive(&path, &pristine)).unwrap(), pristine);
+        } else {
+            assert!(bound.get("notice").is_none());
+        }
+        let (id, head) = start(&review);
+        accept(&review, id, &head, Rating::Easy, NOW);
+        review.flush_for_background().unwrap();
+        review.end(id).unwrap();
+        let expected_logs = logs(&collection);
+        let expected = common::steps::dump(&collection);
+        assert_eq!(expected_logs.len(), 1);
+        engine.close().unwrap();
+        drop(collection);
+        drop(review);
+        drop(engine);
+
+        let saved_journal = fs::read(journal_path(&path)).unwrap();
+        let saved_header = journal_header(&saved_journal);
+        assert_eq!(saved_header["version"], 2);
+        assert!(
+            saved_header["next_event"].as_u64().unwrap() > 1,
+            "not an unused incarnation"
+        );
+        assert_eq!(saved_header["path"], bound["path"]);
+        assert_eq!(saved_header["incarnation"], bound["incarnation"]);
+        assert_eq!(saved_header.get("notice"), bound.get("notice"));
+        let saved_archives = archives(&path);
+        assert_eq!(saved_archives.len(), usize::from(with_notice));
+        let saved_database = fs::read(&path).unwrap();
+        let saved_native = native(&path);
+
+        for relocation in 0..2 {
+            let directory = outer.path().join(format!("update-{relocation}"));
+            fs::rename(path.parent().unwrap(), &directory).unwrap();
+            path = directory.join("collection.anki2");
+            assert_eq!(
+                native(&path),
+                saved_native,
+                "whole-directory rename keeps the actual file"
+            );
+            let current_path = path.canonicalize().unwrap().as_os_str().as_bytes().to_vec();
+            assert_ne!(saved_header["path"], serde_json::json!(current_path));
+            assert_eq!(fs::read(journal_path(&path)).unwrap(), saved_journal);
+
+            // Only the current location is supplied to real managed opening.
+            let (engine, review, stream, opened) = try_review(&path, NOW, UtcOffset::UTC);
+            let ready = matches!(engine.state(), LifecycleState::Ready { .. });
+            let flush = opened.as_ref().ok().map(|_| review.flush_for_background());
+            let observed = opened.as_ref().ok().map(|c| (logs(c), common::steps::dump(c)));
+            let active = review.active_session();
+            let open_error = opened.err();
+            let closed = engine.close();
+            drop(review);
+            drop(engine); // Close/join before any intentional semantic RED assertion.
+            closed.unwrap();
+
+            assert_eq!(
+                archives(&path),
+                saved_archives,
+                "no path-refresh archive or changed evidence"
+            );
+            if cfg!(target_vendor = "apple") {
+                assert!(
+                    ready && open_error.is_none(),
+                    "C12.5 same-file managed reopen must reach Ready (notice={with_notice}): {open_error:?}"
+                );
+                flush.unwrap().unwrap();
+                assert_eq!(active, None);
+                assert!(dropped(&stream).is_empty());
+                let (actual_logs, actual) = observed.unwrap();
+                assert_eq!(actual_logs, expected_logs, "no duplicate answer");
+                assert_eq!(actual["cards"], expected["cards"]);
+                assert_eq!(actual["revlog"], expected["revlog"]);
+                assert_eq!(journal_header(&fs::read(journal_path(&path)).unwrap()), saved_header);
+            } else {
+                assert!(!ready);
+                assert!(
+                    open_error
+                        .unwrap()
+                        .to_string()
+                        .contains("pending_answer_identity_mismatch")
+                );
+                assert!(observed.is_none());
+                assert_eq!(fs::read(&path).unwrap(), saved_database);
+            }
+            assert_eq!(fs::read(journal_path(&path)).unwrap(), saved_journal);
+        }
+        drop(seed_dir); // Its original path has moved; outer owns every remaining path.
+    }
+}
+
 #[derive(Clone, Default)]
 struct MigrationTrace(Arc<Mutex<Vec<std::collections::BTreeMap<String, String>>>>);
 impl tracing::Subscriber for MigrationTrace {
