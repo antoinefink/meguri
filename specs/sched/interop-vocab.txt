@@ -251,4 +251,5 @@ ATTR_CMN_RETURNED_ATTRS
 pending_answer_identity_migration
 legacy_header_only_rebound
 legacy_identity_upgraded
+pristine_v2_rebound
 migration_replayed_answers

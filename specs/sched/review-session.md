@@ -351,9 +351,23 @@ Version-1 headers bind device number and inode. Upgrade them only as follows:
 | any event frame with a mismatched native identity, even when the visible events are terminal | Retain and refuse/report; the legacy header has no volume UUID from which to establish its durable binding. Never guess, replay or rewrite its identity. |
 | wrong path or inode, malformed complete frame, invalid checksum, missing/incomplete header, or extra tail in the header-only mismatch case | Retain and refuse under the existing identity/corruption rules. |
 
-Before either upgrade, publish a permanent archive through the existing exclusive, nofollow atomic-file rules, named by SHA-256 of the original journal bytes. An existing archive must contain exactly those bytes. Full-sync the archive and its directory, then recheck the retained journal and live collection bindings before publishing the version-2 header. Full-sync the new active header and directory before Ready or answer acceptance. Failure at any step preserves evidence and refuses open. Repeating after a crash verifies existing archives and completes only known durable steps; archived events never replay through a landed version-2 binding. The header's optional notice permits migration reporting after a crash.
+**Unused version-2 header rebinding, managed opening only.** A path or native-binding mismatch may establish a fresh binding only when the whole retained journal meets every condition below. This is not a relocation of accepted answers. It needs no claim about why the binding changed.
 
-After these durability steps and before OpenStepReady, emit a structured Rust tracing event with only `event=pending_answer_identity_migration`, a fixed `reason` (`legacy_header_only_rebound` or `legacy_identity_upgraded`), and `migration_replayed_answers=0`. The count covers migration alone; normal matched-version-1 recovery can replay real answers and retains its existing evidence. The notice may cause this event to be emitted again after a crash; it is not exactly-once delivery. Introduce no Swift, FFI, UI or aggregate replay count. Log no volume UUID, inode, path, archive hash or journal content. Migration reporting is separate from stale/drop and corruption reporting.
+| Qualifier | Requirement |
+|---|---|
+| complete file | exactly one valid Header frame, numbered 1, with its valid checksum, final newline and exact EOF; no other frame, extra bytes or torn tail |
+| header | version 2 with a valid current-platform persistent identity; no unknown fields, unsupported variants or invalid values |
+| unused incarnation | `next_event` is exactly 1 and the migration notice is absent; no Intent, Prepared, Terminal, Retired or other recorded evidence |
+| retained source | the colocated journal passes all existing regular-file, single-link, nofollow, ownership and retained-descriptor binding checks; its exact bytes and file binding remain unchanged |
+| current collection | the collection lock and privileged open handle establish its current canonical path and exact C12.1 identity from the original locked descriptor; all live device/inode, pathname and SQLite replacement checks still pass |
+
+The raw strict journal decoder/open still refuses binding mismatch. Managed opening must first validate the entire source and prove that the refused condition is only the header's path or native binding. A catch-all identity or storage error is not permission to retry through this exception. A partial valid prefix, missing file, zero-byte file, missing newline, retired journal or version-1 header does not qualify. Counter 0 is invalid. A header-only counter above 1 retains prior-history evidence and never qualifies. No answer acceptance or journal append may run during rebinding.
+
+After the archive and binding checks below, publish a fresh version-2 header with the exact current canonical path and persistent identity, a new incarnation distinct from the archived one, `next_event` 1, and a notice with reason `pristine_v2_rebound` and the exact archive hash. Recheck the published journal and live collection bindings before append or Ready. Apply zero answers and transfer no event, receipt, terminal history or incarnation from the archive. Then continue normal opening/recovery. A matching journal uses ordinary recovery; it is not rebound. A later mismatch with any migration notice is refused. Compaction preserves the notice. All populated journals, compacted headers with `next_event` above 1, and corrupt, retired, version-1 and platform-mismatched cases retain their existing rules.
+
+Before either version-1 upgrade or unused-version-2 rebinding, publish a permanent archive through the existing exclusive, nofollow atomic-file rules, named by SHA-256 of the original journal bytes. An existing archive must contain exactly those bytes. Full-sync the archive and its directory, then recheck the retained journal and live collection bindings before publishing the version-2 header. Full-sync the new active header and directory before Ready or answer acceptance. Failure at any step preserves evidence and refuses open. Repeating after a crash verifies existing archives and completes only known durable steps; archived events never replay through a landed version-2 binding. The header's optional notice permits migration reporting after a crash.
+
+After these durability steps and before OpenStepReady, emit a structured Rust tracing event with only `event=pending_answer_identity_migration`, a fixed `reason` (`legacy_header_only_rebound`, `legacy_identity_upgraded` or `pristine_v2_rebound`), and `migration_replayed_answers=0`. The count covers migration alone; normal matched-version-1 recovery can replay real answers and retains its existing evidence. The notice may cause this event to be emitted again after a crash; it is not exactly-once delivery. Introduce no Swift, FFI, UI or aggregate replay count. Log no volume UUID, inode, path, archive hash or journal content. Migration reporting is separate from stale/drop and corruption reporting.
 
 | Evidence | Action |
 |---|---|
@@ -391,7 +405,7 @@ Apply the frozen accepted transition with its recorded instant/day/boundary. Its
 | controlled file replacement | drain accepted events -> WAL coverage and terminal durability -> invalidate incarnation durably -> replace |
 | worker callback | matching incarnation and live generation required |
 | ordinary reopen | retain the bound incarnation despite a new process generation and, on Darwin, a changed device number with equal durable identity |
-| unexpected file identity | retain/quarantine journal and report before Ready; only C12.5's exact version-1 header-only case may establish a fresh binding |
+| unexpected file identity | retain/quarantine journal and report before Ready; only C12.5's exact version-1 header-only case or managed-opening unused-version-2 exception may establish a fresh binding |
 
 No synced UUID or configuration token is introduced. These rules prevent an old accepted event from being applied after its committed undo or to a replacement collection.
 
@@ -404,6 +418,8 @@ No synced UUID or configuration token is introduced. These rules prevent an old 
 | complete malformed frame; checksum error; missing/interior frame; invalid dependency; unknown version | retain file; explicit corruption error; Ready forbidden |
 
 Header versions 1 and 2 follow C12.5. A complete valid header with no event frames is a valid journal, including terminal compaction with a next-event value above 1. A zero-byte file or incomplete header is not that case. A missing journal permits normal new-header creation; a dangling link does not count as absence. Retired incarnations still follow the existing controlled-replacement rules, not a general identity-rebinding exception.
+
+Header-only validity does not establish an unused incarnation. C12.5's version-2 exception requires the entire exact file, counter 1 and no notice or other evidence. A torn tail that ordinary recovery can ignore still forbids that exception. Keep raw strict binding refusal and all nonqualifying identity/corruption refusals; do not reinterpret them as managed-opening rebinding.
 
 Header creation and compaction follow U32's atomic-file and directory-sync rules. A valid stale/conflict report is separate from corruption.
 
