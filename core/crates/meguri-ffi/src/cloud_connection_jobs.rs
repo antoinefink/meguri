@@ -33,6 +33,11 @@ typed_result!(
     CloudPublicationWorkJob,
     CloudPublicationWork
 );
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAdoptionResumed {
+    pub resumed: bool,
+}
+typed_result!(CloudAdoptionResumeResult, CloudAdoptionResumeJob, CloudAdoptionResumed);
 // A successful void reply must remain distinct from a pending typed result.
 #[derive(Clone, uniffi::Record)]
 pub struct CloudAdoptionApplied {
@@ -269,6 +274,32 @@ impl CloudConnection {
         Ok(CloudPublicationWorkJob {
             handle,
             result: Arc::new(CloudPublicationWorkResult { cell }),
+        })
+    }
+    pub fn start_resume_adoption(
+        self: Arc<Self>,
+        operation: Arc<CloudRecoveryOperation>,
+    ) -> Result<CloudAdoptionResumeJob, CoreError> {
+        callback::enter("CloudConnection.start_resume_adoption");
+        self.owns(&operation.owner)?;
+        if !operation.adoption {
+            return Err(failure(CloudConnectionFailure::NotOffered));
+        }
+        let (handle, cell) = self.start_connection(
+            "CloudConnection.resume_adoption",
+            operation.generation,
+            move |owner, work| {
+                owner
+                    .owner
+                    .host
+                    .resume_cloud_adoption_with_work(operation.id, work)
+                    .map(|resumed| CloudAdoptionResumed { resumed })
+                    .map_err(error)
+            },
+        )?;
+        Ok(CloudAdoptionResumeJob {
+            handle,
+            result: Arc::new(CloudAdoptionResumeResult { cell }),
         })
     }
     pub fn start_adoption_result(

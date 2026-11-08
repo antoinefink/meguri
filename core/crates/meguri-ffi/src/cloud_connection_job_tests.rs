@@ -1277,3 +1277,247 @@ fn connection_adoption_page_epoch_unchanged_projection_is_accepted_without_stagi
     assert!(job.result.result().unwrap().unwrap().applied);
     assert!(job.result.failure_diagnostic().unwrap().is_none());
 }
+
+fn resume_waiting_adoption(fixture: &Fixture, connection: &Arc<CloudConnection>) -> bool {
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let operation = connection.recovery_status().unwrap().unwrap().operation;
+    let job = connection.clone().start_resume_adoption(operation).unwrap();
+    assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
+    job.result.result().unwrap().unwrap().resumed
+}
+
+#[test]
+fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_after_deadline() {
+    for initial in [false, true] {
+        for payload in [false, true] {
+            let fixture = if initial {
+                Fixture::without_collection(Keys::new([]))
+            } else {
+                Fixture::new(Keys::new([]))
+            };
+            let connection = fixture.workflow.connection().unwrap();
+            adoption_fetch_ready(&connection);
+            let (page, _) = adoption_action(&connection);
+            let (record, bytes) = adoption_config_record(b"waiting-payload", true);
+            let continuation = Some(vec![91, 92, 93]);
+            let handle = if payload {
+                connection
+                    .adoption_result(
+                        page,
+                        CloudAdoptionResult::Page {
+                            records: vec![record.clone()],
+                            deleted: vec![],
+                            next: continuation.clone(),
+                        },
+                    )
+                    .unwrap();
+                adoption_action(&connection).0
+            } else {
+                page
+            };
+            let original = fixture.workflow.core.adoption_op().unwrap().unwrap();
+            let stage = fixture
+                .workflow
+                .host
+                .cloud_connection_directory()
+                .join(&original.staging_name);
+            let before = stage_bytes(&stage);
+            let descriptor = handle.work.clone();
+            let guard = fixture.workflow.core.adapter_guard();
+            let events = fixture.workflow.host.engine().stream().subscribe();
+            let pool = hold_pool(&fixture);
+            let job = connection
+                .clone()
+                .start_adoption_result(
+                    handle.clone(),
+                    CloudAdoptionResult::TransportFailed {
+                        code: 4,
+                        retry_after_duration_ms: Some(120_000),
+                    },
+                )
+                .unwrap();
+            assert!(job.result.result().unwrap().is_none());
+            assert!(!fixture.workflow.core.adoption_op().unwrap().unwrap().transport_wait);
+            assert_eq!(stage_bytes(&stage), before);
+            drop(pool);
+            assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
+            assert!(job.result.result().unwrap().unwrap().applied);
+            let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
+            assert!(waiting.transport_wait);
+            assert_eq!(waiting.id, original.id);
+            assert_eq!(waiting.candidate, original.candidate);
+            assert_eq!(waiting.staging_name, original.staging_name);
+            assert_eq!(stage_bytes(&stage), before);
+            assert_eq!(fixture.workflow.core.adapter_guard(), guard);
+            let status = connection.recovery_status().unwrap().unwrap();
+            assert!(status.adoption_transport_wait);
+            assert_eq!(status.retry_after_ms, waiting.retry_after_ms);
+            assert_eq!(waiting.retry_after_ms, Some(NOW + 120_000));
+            if initial {
+                assert!(
+                    !fixture
+                        .workflow
+                        .host
+                        .cloud_connection_directory()
+                        .join("collection.anki2")
+                        .exists()
+                );
+            }
+            // Waiting never reports due work, including a replayed failed fact.
+            assert!(
+                connection
+                    .adoption_result(
+                        handle,
+                        CloudAdoptionResult::TransportFailed {
+                            code: 4,
+                            retry_after_duration_ms: None,
+                        }
+                    )
+                    .is_err()
+            );
+            fixture.clock.step_ms(5_000);
+            if !initial {
+                connection.trigger().unwrap();
+            }
+            assert!(matches!(
+                connection.next_publication_work().unwrap(),
+                CloudPublicationWork::Idle
+            ));
+            assert!(!resume_waiting_adoption(&fixture, &connection));
+            assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
+            fixture.clock.step_ms(115_001);
+            if !initial {
+                connection.trigger().unwrap();
+            }
+            assert!(matches!(
+                connection.next_publication_work().unwrap(),
+                CloudPublicationWork::Idle
+            ));
+            assert!(resume_waiting_adoption(&fixture, &connection));
+            let (repeated, action) = adoption_action(&connection);
+            assert_eq!(repeated.work, descriptor);
+            if payload {
+                assert!(
+                    matches!(action, CloudAdoptionAction::FetchPayload { name, expected, .. }
+                    if name == record.name && expected.encrypted == record.record.encrypted && expected.system_fields == record.record.system_fields)
+                );
+                let file = tempfile::NamedTempFile::new().unwrap();
+                std::fs::write(file.path(), bytes).unwrap();
+                let mut returned = record;
+                returned.payload_file = Some(file.path().to_str().unwrap().into());
+                connection
+                    .adoption_result(repeated, CloudAdoptionResult::Payload { record: returned })
+                    .unwrap();
+                let (_, action) = adoption_action(&connection);
+                assert!(matches!(action, CloudAdoptionAction::Fetch { cursor, .. } if cursor == continuation));
+            } else {
+                assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: None, .. }));
+                connection
+                    .adoption_result(
+                        repeated,
+                        CloudAdoptionResult::Page {
+                            records: vec![],
+                            deleted: vec![],
+                            next: continuation.clone(),
+                        },
+                    )
+                    .unwrap();
+                let (_, action) = adoption_action(&connection);
+                assert!(matches!(action, CloudAdoptionAction::Fetch { cursor, .. } if cursor == continuation));
+            }
+            connection
+                .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
+                .unwrap();
+            assert!(!stage.exists());
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn adoption_transport_fact_rejects_unallowed_codes_and_nonfetch_tasks() {
+    for code in [2, 20, 11, 0, -1, 999] {
+        let fixture = Fixture::new(Keys::new([]));
+        let connection = fixture.workflow.connection().unwrap();
+        adoption_fetch_ready(&connection);
+        let (handle, _) = adoption_action(&connection);
+        assert!(
+            connection
+                .adoption_result(
+                    handle,
+                    CloudAdoptionResult::TransportFailed {
+                        code,
+                        retry_after_duration_ms: Some(1),
+                    }
+                )
+                .is_err()
+        );
+        assert!(connection.recovery_status().unwrap().is_none());
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+        fixture.workflow.host.close().unwrap();
+    }
+    let fixture = Fixture::new(Keys::new([]));
+    let (connection, handle, _, stage) = adoption(&fixture);
+    assert!(
+        connection
+            .adoption_result(
+                handle,
+                CloudAdoptionResult::TransportFailed {
+                    code: 4,
+                    retry_after_duration_ms: None,
+                }
+            )
+            .is_err()
+    );
+    assert!(connection.recovery_status().unwrap().is_none());
+    assert!(!stage.exists());
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn adoption_wait_cancel_drains_queued_resume_and_rejects_late_facts() {
+    let fixture = Fixture::without_collection(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    adoption_fetch_ready(&connection);
+    let (handle, _) = adoption_action(&connection);
+    connection
+        .adoption_result(
+            handle.clone(),
+            CloudAdoptionResult::TransportFailed {
+                code: 3,
+                retry_after_duration_ms: None,
+            },
+        )
+        .unwrap();
+    let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    let stage = fixture
+        .workflow
+        .host
+        .cloud_connection_directory()
+        .join(&waiting.staging_name);
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let operation = connection.recovery_status().unwrap().unwrap().operation;
+    let job = connection.clone().start_resume_adoption(operation.clone()).unwrap();
+    assert!(job.result.result().unwrap().is_none() && stage.exists());
+    job.handle.cancel.cancel().unwrap();
+    drop(pool);
+    assert_eq!(finished(&events, job.handle.id), JobOutcome::Cancelled);
+    assert!(job.result.result().is_err());
+    assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
+    connection.cancel_operation(operation).unwrap();
+    assert!(!stage.exists());
+    assert!(
+        connection
+            .adoption_result(
+                handle,
+                CloudAdoptionResult::TransportFailed {
+                    code: 4,
+                    retry_after_duration_ms: None,
+                }
+            )
+            .is_err()
+    );
+    assert!(connection.recovery_status().unwrap().is_none());
+    fixture.workflow.host.close().unwrap();
+}

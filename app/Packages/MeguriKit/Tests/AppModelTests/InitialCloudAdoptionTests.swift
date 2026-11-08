@@ -1,5 +1,6 @@
 @testable import CoreBridge
 import Foundation
+import CloudKit
 @testable import Instrumentation
 import func MeguriCoreBindings.testCloudPolicyExchangeObservation
 import Synchronization
@@ -481,24 +482,50 @@ extension ReviewCollectionStartupTests {
         } catch { harness.release(); await transition?.value; await harness.cleanup(); throw error }
     }
 
+    @Test(arguments: [false, true])
+    func genericInitialCloudPageFailureRemainsPermanent(unprovenSDKError: Bool) async throws {
+        let fixture = try InitialCloudFixture.load()
+        let harness = try InitialCloudHarness(fixture: fixture)
+        defer { harness.release(); harness.removeTemporaryStorage() }
+        do {
+            try await harness.beginAndWaitForPage()
+            if unprovenSDKError { harness.page.failUnprovenSDKError() }
+            else { harness.page.fail() }
+            await harness.joinOriginal()
+            #expect(harness.sync.operationFailed && !harness.sync.initialAdoptionActive)
+            #expect(harness.sync.recovery == nil && !harness.sync.settings.enabled)
+            #expect(!harness.collectionExists && harness.factory.created.isEmpty)
+            #expect(await harness.owner.close())
+        } catch { await harness.cleanup(); throw error }
+    }
+
     @Test func acceptedInitialAdoptionRetainsEnabledAfterTransientPageError() async throws {
         let fixture = try InitialCloudFixture.load()
         let harness = try InitialCloudHarness(fixture: fixture)
         defer { harness.release(); harness.removeTemporaryStorage() }
         do {
             try await harness.beginAndWaitForPage()
-            harness.page.fail()
+            harness.page.failSDK()
             await harness.joinOriginal()
             #expect(harness.sync.operationFailed && harness.sync.initialAdoptionActive)
             #expect(harness.sync.recovery != nil && harness.sync.settings.enabled && harness.persistedEnabled == true)
             #expect(!harness.collectionExists && harness.factory.created.isEmpty)
+            let requests = harness.requests.count
             await harness.sync.accountChanged()
             await harness.sync.prepareConnectionAuthority()
-            harness.sync.resumeConnection()
+            harness.sync.receive(.network(reachable: false))
+            harness.sync.receive(.network(reachable: true))
+            harness.sync.syncNow()
+            harness.sync.resumeConnection() // automatic wake cannot release the wait
+            await harness.sync.waitForConnectionPreview()
+            #expect(harness.requests.count == requests && harness.sync.recovery?.adoptionTransportWait == true)
+            harness.sync.resumeWaitingAdoption() // explicit user action
             await harness.sync.waitForConnectionPreview()
             await harness.sync.waitForReplacement()
             await harness.owner.waitForCloudActivation()
             await harness.sync.prepareConnectionAuthority()
+            let successor = harness.backends.count > 1
+            try #require(successor, "the original retained/enabled/manual Resume predicates must produce a successor")
             try await harness.backends[1].waitForStart()
             #expect(harness.backends[1].starts.count == 1 && harness.backends[1].starts.first?.succeeded == true)
             #expect(harness.backends[1].starts.first?.automatic == false)
@@ -1218,7 +1245,7 @@ private nonisolated final class InitialCloudReplyGate: CloudPreparedOwnOperation
     private struct State {
         var queued = false
         var returned = false
-        var result: Result<CloudOwnTransportReply, InitialCloudPageFailure>?
+        var result: Result<CloudOwnTransportReply, any Error>?
         var waiter: CheckedContinuation<CloudOwnTransportReply, any Error>?
     }
     private let state = Mutex(State())
@@ -1235,8 +1262,13 @@ private nonisolated final class InitialCloudReplyGate: CloudPreparedOwnOperation
     }
     func cancel() { cancelled.yield(()) }
     func finish(_ reply: CloudOwnTransportReply) { finishResult(.success(reply)) }
-    func fail() { finishResult(.failure(InitialCloudPageFailure())) }
-    private func finishResult(_ reply: Result<CloudOwnTransportReply, InitialCloudPageFailure>) {
+    func fail() { finishResult(.failure(GenericInitialCloudPageFailure())) }
+    func failUnprovenSDKError() { finishResult(.failure(CKError(.networkFailure))) }
+    func failSDK() {
+        finishResult(.failure(NativeCloudOwnRecords.adoptionSDKFailure(CKError(.networkFailure),
+            item: CKRecordZone.ID(zoneName: "c-synthetic", ownerName: CKCurrentUserDefaultName))))
+    }
+    private func finishResult(_ reply: Result<CloudOwnTransportReply, any Error>) {
         let waiter = state.withLock { s in
             guard s.result == nil else { return Optional<CheckedContinuation<CloudOwnTransportReply, any Error>>.none }
             s.result = reply
@@ -1254,7 +1286,7 @@ private nonisolated final class InitialCloudReplyGate: CloudPreparedOwnOperation
     func reply() async throws -> CloudOwnTransportReply {
         defer { state.withLock { $0.returned = true } }
         return try await withCheckedThrowingContinuation { continuation in
-            let result: Result<CloudOwnTransportReply, InitialCloudPageFailure>? = state.withLock { s in
+            let result: Result<CloudOwnTransportReply, any Error>? = state.withLock { s in
                 if let result = s.result { return result }
                 s.waiter = continuation
                 return nil
@@ -1287,7 +1319,7 @@ private nonisolated struct InitialCloudTimeout: Error, CustomStringConvertible {
     var observations: String = ""
     var description: String { "InitialCloudTimeout(stage: \(stage), observations: \(observations))" }
 }
-private nonisolated struct InitialCloudPageFailure: Error {}
+private nonisolated struct GenericInitialCloudPageFailure: Error {}
 private nonisolated final class InitialCloudRequests: Sendable {
     private let commands = Mutex<[CloudOwnTransportCommand]>([])
     var count: Int { commands.withLock { $0.count } }

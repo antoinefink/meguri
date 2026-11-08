@@ -159,11 +159,12 @@ public struct CloudStagingRecord: Sendable {
 }
 public enum CloudAdoptionResult: Sendable {
     case failed
+    case transportFailed(code: Int64, retryAfterDurationMilliseconds: UInt64?)
     case payload(CloudStagingRecord)
     case read(CloudControlRead)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
     var raw: MeguriCoreBindings.CloudAdoptionResult {
-        switch self { case .failed: .failed; case .payload(let r): .payload(record: r.raw); case .read(let r): .read(read: r.raw); case .page(let r, let d, let n): .page(records: r.map(\.raw), deleted: d, next: n) }
+        switch self { case .failed: .failed; case .transportFailed(let code, let delay): .transportFailed(code: code, retryAfterDurationMs: delay); case .payload(let r): .payload(record: r.raw); case .read(let r): .read(read: r.raw); case .page(let r, let d, let n): .page(records: r.map(\.raw), deleted: d, next: n) }
     }
     /// Keep the concrete staging projection alive across the awaited lane.
     /// Capturing raw paths alone would allow ARC to release native file leases.
@@ -195,7 +196,9 @@ public struct CloudRecoveryStatus: Sendable {
     public let switchSent: Bool
     public let switchConflict: Bool
     public let retryAfterMilliseconds: Int64?
+    public let adoptionTransportWait: Bool
     init(_ v: MeguriCoreBindings.CloudRecoveryStatus) {
+        adoptionTransportWait = v.adoptionTransportWait
         operation = .init(raw: v.operation); switchSent = v.switchSent; switchConflict = v.switchConflict; retryAfterMilliseconds = v.retryAfterMs
         step = switch v.step { case .confirmed: .confirmed; case .bound: .bound; case .zones: .zones; case .sent: .sent; case .complete: .complete; case .cancelling: .cancelling; case .staging: .staging; case .staged: .staged; case .ready: .ready }
     }

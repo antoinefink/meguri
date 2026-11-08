@@ -73,6 +73,42 @@ enum NativeCloudOwnRecords {
     static func maximumDelay(_ first: UInt64?, _ second: UInt64?) -> UInt64? {
         switch (first, second) { case (nil, nil): nil; default: max(first ?? 0, second ?? 0) }
     }
+    /// Call only from an original issued SDK Result.failure branch. A partial
+    /// wrapper may name only the exact record/zone this request issued.
+    static func adoptionSDKFailure(_ original: any Error, item: AnyHashable) -> any Error {
+        let outer = original as NSError
+        guard outer.domain == CKErrorDomain else { return original }
+        var cause = outer
+        if outer.code == CKError.Code.partialFailure.rawValue {
+            guard let partials = outer.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any],
+                  let relevant = partials[item] as? any Error else { return original }
+            cause = relevant as NSError
+        }
+        guard cause.domain == CKErrorDomain,
+              [CKError.Code.networkFailure, .networkUnavailable, .requestRateLimited, .zoneBusy, .serviceUnavailable]
+                .contains(where: { $0.rawValue == cause.code }) else { return original }
+        return CloudAdoptionSDKFailure(original: original, code: Int64(cause.code),
+            retryAfterDurationMilliseconds: maximumDelay(retryDuration(original), retryDuration(cause)))
+    }
+    static func adoptionCompletionFailure(_ observed: (any Error)?, terminal: Result<Void, any Error>, item: AnyHashable) -> (any Error)? {
+        if let observed, !(observed is CloudAdoptionSDKFailure) { return observed }
+        guard case .failure(let error) = terminal else { return observed }
+        let native = error as NSError
+        let terminalFailure = adoptionSDKFailure(error, item: item)
+        if let observed = observed as? CloudAdoptionSDKFailure {
+            if let terminalFailure = terminalFailure as? CloudAdoptionSDKFailure {
+                return CloudAdoptionSDKFailure(original: observed.original, code: observed.code,
+                    retryAfterDurationMilliseconds: maximumDelay(observed.retryAfterDurationMilliseconds, terminalFailure.retryAfterDurationMilliseconds))
+            }
+            // The SDK's partial wrapper alone must not replace the exact
+            // record/zone error already delivered for this issued request.
+            if native.domain == CKErrorDomain, native.code == CKError.Code.partialFailure.rawValue {
+                let partials = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any]
+                if partials?[item] == nil { return observed }
+            }
+        }
+        return terminalFailure
+    }
     static func assetReadFailure(_ error: any Error, perRecord: CloudAssetReadFailureFacts? = nil) -> CloudAssetReadResult {
         let native = error as NSError
         // A single-record partial wrapper describes the per-record cause.
@@ -442,8 +478,13 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 do {
                     guard let prepared, !prepared.cancelled else { throw CancellationError() }
                     guard received == id else { throw NativeCloudKitFailure.unsupportedRecord }
-                    value.record = try NativeCloudStagingRecords.payload(result.get(), target: target, expected: expected,
-                                                                         staging: staging, cancelled: { prepared.cancelled }, tagReader: tagReader)
+                    switch result {
+                    case .failure(let error):
+                        value.failure = NativeCloudOwnRecords.adoptionSDKFailure(error, item: id)
+                    case .success(let record):
+                        value.record = try NativeCloudStagingRecords.payload(record, target: target, expected: expected,
+                            staging: staging, cancelled: { prepared.cancelled }, tagReader: tagReader)
+                    }
                 } catch { value.failure = error }
             }
         }
@@ -457,8 +498,9 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             }
             guard let prepared else { return }
             if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
-            if let error = read.failure { prepared.finish(.failure(error)); return }
-            if case .failure(let error) = result { prepared.finish(.failure(error)); return }
+            if let error = NativeCloudOwnRecords.adoptionCompletionFailure(read.failure, terminal: result, item: id) {
+                prepared.finish(.failure(error)); return
+            }
             guard let record = read.record else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
             prepared.finish(.success(.adoptionPayload(record)))
         }
@@ -547,6 +589,14 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             var finished = false
             var changes = 0
             var metadataBytes = 0
+            mutating func recordFailure(_ error: any Error) {
+                guard !finished else { return }
+                // A permanent projection/refusal always wins, including over
+                // later zone and operation network failures.
+                if failure == nil || (failure is CloudAdoptionSDKFailure && !(error is CloudAdoptionSDKFailure)) {
+                    failure = error
+                }
+            }
             mutating func acceptChange() -> Bool {
                 guard !finished, failure == nil else { return false }
                 guard changes < NativeCloudStagingRecords.pageLimit else {
@@ -563,7 +613,13 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             do {
                 guard let prepared, !prepared.cancelled else { throw CancellationError() }
                 guard recordID.zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
-                let record = try result.get()
+                let record: CKRecord
+                switch result {
+                case .failure(let error):
+                    state.withLock { $0.recordFailure(NativeCloudOwnRecords.adoptionSDKFailure(error, item: recordID)) }
+                    return
+                case .success(let value): record = value
+                }
                 guard record.recordID == recordID else { throw NativeCloudKitFailure.unsupportedRecord }
                 let target = CloudControlTarget(zone: zone, name: recordID.recordName, recordType: record.recordType)
                 let value: CloudStagingRecord
@@ -576,11 +632,11 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                 state.withLock {
                     guard !$0.finished, $0.failure == nil else { return }
                     guard bytes <= NativeCloudStagingRecords.metadataLimit - $0.metadataBytes else {
-                        $0.failure = NativeCloudKitFailure.unsupportedRecord; return
+                        $0.recordFailure(NativeCloudKitFailure.unsupportedRecord); return
                     }
                     $0.metadataBytes += bytes; $0.records.append(value)
                 }
-            } catch { state.withLock { if !$0.finished { $0.failure = error } } }
+            } catch { state.withLock { $0.recordFailure(error) } }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
             state.withLock { value in
@@ -596,13 +652,17 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         operation.recordZoneFetchResultBlock = { zoneID, result in
             do {
                 guard zoneID == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                if case .failure(let error) = result {
+                    state.withLock { $0.recordFailure(NativeCloudOwnRecords.adoptionSDKFailure(error, item: id)) }
+                    return
+                }
                 let page = try result.get()
                 let next = page.moreComing ? try NSKeyedArchiver.archivedData(withRootObject: page.serverChangeToken, requiringSecureCoding: true) : nil
                 state.withLock {
-                    guard !$0.finished, !$0.completed else { $0.failure = NativeCloudKitFailure.unsupportedRecord; return }
+                    guard !$0.finished, !$0.completed else { $0.recordFailure(NativeCloudKitFailure.unsupportedRecord); return }
                     $0.next = next; $0.completed = true
                 }
-            } catch { state.withLock { $0.failure = error } }
+            } catch { state.withLock { $0.recordFailure(error) } }
         }
         operation.fetchRecordZoneChangesResultBlock = { [weak prepared] result in
             let page = state.withLock { value in
@@ -612,8 +672,9 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             }
             guard let prepared else { return }
             if prepared.cancelled { prepared.finish(.failure(CancellationError())); return }
-            if let error = page.failure { prepared.finish(.failure(error)); return }
-            if case .failure(let error) = result { prepared.finish(.failure(error)); return }
+            if let error = NativeCloudOwnRecords.adoptionCompletionFailure(page.failure, terminal: result, item: id) {
+                prepared.finish(.failure(error)); return
+            }
             guard page.completed else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)); return }
             prepared.finish(.success(.page(records: page.records, deleted: page.deleted, next: page.next)))
         }

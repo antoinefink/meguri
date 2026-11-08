@@ -84,12 +84,16 @@ public struct CloudConnectionView: View {
                 }
             }
             if sync.initialAdoptionActive {
-                ProgressView(SyncText.value("sync.connect.downloading"))
-                    .accessibilityIdentifier("sync.connect.download")
-                    #if DEBUG
-                    .accessibilityValue("preview:\(DebugCloudPreviewProbe.shared.latestTag);work:\(DebugCloudPreviewProbe.ownWork.latestTag);\(DebugCloudPreviewProbe.ownWork.adoptionProgressTag)"
-                        + (DebugCloudPreviewProbe.ownWork.adoptionFailureTag.map { ";\($0)" } ?? ""))
-                    #endif
+                if let recovery = sync.recovery, recovery.adoptionTransportWait {
+                    CloudRecoveryContent(collection: collection, recovery: recovery)
+                } else {
+                    ProgressView(SyncText.value("sync.connect.downloading"))
+                        .accessibilityIdentifier("sync.connect.download")
+                        #if DEBUG
+                        .accessibilityValue("preview:\(DebugCloudPreviewProbe.shared.latestTag);work:\(DebugCloudPreviewProbe.ownWork.latestTag);\(DebugCloudPreviewProbe.ownWork.adoptionProgressTag)"
+                            + (DebugCloudPreviewProbe.ownWork.adoptionFailureTag.map { ";\($0)" } ?? ""))
+                        #endif
+                }
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {

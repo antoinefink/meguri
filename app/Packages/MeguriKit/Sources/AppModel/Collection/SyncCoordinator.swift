@@ -670,6 +670,29 @@ public final class SyncCoordinator {
             }
         }
     }
+    /// User action only. Automatic connection/policy wakes cannot release a wait.
+    public func resumeWaitingAdoption() {
+        guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
+              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil,
+              recovery?.adoptionTransportWait == true, let operation = recovery?.operation,
+              let backend, let connection = backend.connection, let own = backend.own else { return }
+        let expected = generation, revision = hostRevision
+        ownTask = Task {
+            defer { finishOwnWork() }
+            do {
+                let resumed = try await own.resumeAdoption(operation)
+                guard expected == generation, revision == hostRevision, self.backend === backend,
+                      !closing, !suspended, !replacing,
+                      (!initialAdoptionActive || !initialAdoptionCancelled) else { return }
+                let current = try await connection.recoveryStatus()
+                guard expected == generation, revision == hostRevision, self.backend === backend else { return }
+                recovery = current
+                if resumed { await runOwnWork(backend, generation: expected, revision: revision) }
+            } catch {
+                if expected == generation, revision == hostRevision, !closing { operationFailed = true }
+            }
+        }
+    }
     public func resumeConnection() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
               initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, let backend, let connection = backend.connection else { return }
@@ -785,7 +808,11 @@ public final class SyncCoordinator {
                 else { failure = nil }
                 onFailure?(failure)
             }
-            if revision == hostRevision, !replacing { await reconcileInitialAdoption(backend) }
+            if expected == generation, revision == hostRevision, !replacing, self.backend === backend {
+                if let current = try? await backend.connection?.recoveryStatus(),
+                   expected == generation, revision == hostRevision, self.backend === backend { recovery = current }
+                await reconcileInitialAdoption(backend)
+            }
         }
     }
     func foregroundAfterLocalResume() async {

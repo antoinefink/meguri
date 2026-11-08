@@ -25,6 +25,10 @@ pub struct AdoptOp {
     pub media_root: Option<ControlRecord>,
     pub staging_name: String,
     pub started_at_ms: i64,
+    #[serde(default)]
+    pub transport_wait: bool,
+    #[serde(default)]
+    pub retry_after_ms: Option<i64>,
 }
 impl std::fmt::Debug for AdoptOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -81,6 +85,11 @@ pub enum AdoptionReply {
     Read(RecordRead),
     /// A terminal transport failure invalidates the entire unpublished candidate.
     Failed,
+    /// Numeric evidence from an original issued SDK page/payload failure only.
+    TransportFailed {
+        code: i64,
+        retry_after_duration_ms: Option<u64>,
+    },
     Payload {
         record: StagingRecord,
     },

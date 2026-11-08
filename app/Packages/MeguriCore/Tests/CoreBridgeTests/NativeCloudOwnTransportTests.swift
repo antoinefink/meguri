@@ -1001,5 +1001,97 @@ struct NativeCloudOwnTransportTests {
         guard case .read(.failed) = try await accepted.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
         #expect(queue.operations.withLock { $0.count } == 1)
     }
+    @Test(arguments: [3, 4, 6, 7, 23, 20, 2, 11, 999])
+    func adoptionOriginalSDKTerminalAllowlistOnly(code: Int) async throws {
+        let queue = NativeOwnCapturingQueue()
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let original = NSError(domain: CKErrorDomain, code: code, userInfo: [CKErrorRetryAfterKey: 1.0001])
+        operation.fetchRecordZoneChangesResultBlock?(.failure(original))
+        do { _ = try await prepared.reply(); Issue.record("SDK failure unexpectedly succeeded") }
+        catch {
+            let fact = error as? CloudAdoptionSDKFailure
+            #expect((fact != nil) == [3, 4, 6, 7, 23].contains(code))
+            if let fact {
+                #expect(fact.code == Int64(code) && fact.retryAfterDurationMilliseconds == 1_001)
+                #expect((fact.original as NSError).code == original.code)
+            }
+        }
+    }
+
+    @Test func adoptionPartialFailureUsesOnlyExactIssuedZone() async throws {
+        for relevant in [true, false] {
+            let queue = NativeOwnCapturingQueue()
+            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
+                .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+            #expect(prepared.enqueue())
+            let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+            let zone = NativeCloudOwnRecords.zone(relevant ? epochTarget.zone : "unrelated")
+            let original = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [zone: CKError(.networkUnavailable)]])
+            operation.fetchRecordZoneChangesResultBlock?(.failure(original))
+            do { _ = try await prepared.reply(); Issue.record("partial failure unexpectedly succeeded") }
+            catch { #expect((error is CloudAdoptionSDKFailure) == relevant) }
+        }
+    }
+
+    @Test func adoptionSDKCallbackNeverClassifiesUnderlyingLocalOrUnrelatedPartialErrors() async throws {
+        let zone = NativeCloudOwnRecords.zone(epochTarget.zone)
+        let network = CKError(.networkFailure)
+        let local = NSError(domain: NSCocoaErrorDomain, code: 4, userInfo: [NSUnderlyingErrorKey: network])
+        let errors: [any Error] = [local,
+            CKError(.partialFailure, userInfo: [NSUnderlyingErrorKey: network]),
+            CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [zone: local]])]
+        for original in errors {
+            let queue = NativeOwnCapturingQueue()
+            let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
+                .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+            #expect(prepared.enqueue())
+            let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+            operation.fetchRecordZoneChangesResultBlock?(.failure(original))
+            do { _ = try await prepared.reply(); Issue.record("failure unexpectedly succeeded") }
+            catch { #expect(!(error is CloudAdoptionSDKFailure)) }
+        }
+    }
+
+    @Test func adoptionProjectionFailureWinsOverZoneAndTerminalNetworkFailures() async throws {
+        let queue = NativeOwnCapturingQueue()
+        let prepared = try NativeCloudOwnTransport(queue: queue).prepare(
+            .adoptionPage(zone: epochTarget.zone, cursor: nil, expectedEpoch: epochExpected()))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordZoneChangesOperation })
+        let record = epochNative()
+        record.encryptedValues["e"] = Data([99]) as CKRecordValue
+        operation.recordWasChangedBlock?(record.recordID, .success(record))
+        operation.recordZoneFetchResultBlock?(NativeCloudOwnRecords.zone(epochTarget.zone), .failure(CKError(.networkFailure)))
+        operation.fetchRecordZoneChangesResultBlock?(.failure(CKError(.serviceUnavailable)))
+        await #expect(throws: NativeCloudKitFailure.self) { try await prepared.reply() }
+    }
+
+    @Test func adoptionOriginalPayloadRecordFailureSurvivesPartialWrapperUntilRealTerminal() async throws {
+        let queue = NativeOwnCapturingQueue()
+        let handlers = NativeOwnReadHandlers()
+        let target = CloudControlTarget(zone: epochTarget.zone, name: "ordinary", recordType: "MGEntity")
+        let record = CKRecord(recordType: target.recordType, recordID: NativeCloudOwnRecords.id(target))
+        record.encryptedValues["e"] = Data([1]) as CKRecordValue
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { callback in handlers.perRecord.withLock { $0 = callback } },
+            readTerminalHandlerInstalled: { callback in handlers.terminal.withLock { $0 = callback } })
+            .prepare(.adoptionPayload(zone: target.zone, name: target.name, expected: payloadExpected(record)))
+        #expect(prepared.enqueue())
+        let perRecord = try #require(handlers.perRecord.withLock { $0 })
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        let original = CKError(.networkFailure, userInfo: [CKErrorRetryAfterKey: 2.0001])
+        perRecord(record.recordID, .failure(original))
+        #expect(queue.operations.withLock { $0.count } == 1)
+        terminal(.failure(CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [record.recordID: original]])))
+        do { _ = try await prepared.reply(); Issue.record("payload failure unexpectedly succeeded") }
+        catch {
+            let fact = try #require(error as? CloudAdoptionSDKFailure)
+            #expect(fact.code == 4 && fact.retryAfterDurationMilliseconds == 2_001)
+        }
+    }
+
 }
 #endif

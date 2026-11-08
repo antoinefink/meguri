@@ -202,3 +202,64 @@ extension EventTests {
         }
     }
 }
+
+extension EventTests {
+    @Test func explicitAdoptionResumeWaitsForOriginalResultJobDrain() async throws {
+        try await withCloudConnection { _ in
+            let raw = try await rawJobConnection()
+            let queued = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let connection = CoreCloudConnectionService(raw, onJobQueued: { queued.continuation.yield(()) })
+            var handle = try await connectionAdoption(connection)
+            let id = Data(repeating: 8, count: 16)
+            let reads: [CoreBridge.CloudControlRecord] = [
+                .init(encrypted: Data([8, 1, 18, 16]) + id, systemFields: Data([1])),
+                .init(encrypted: Data([8, 1, 18, 16]) + id + Data([26, 32]) + Data(repeating: 19, count: 32) + Data([40, 18, 48, 2, 56, 1]), systemFields: Data([2])),
+                .init(encrypted: Data([8, 1, 18, 32]) + Data(repeating: 23, count: 32), systemFields: Data([3]))
+            ]
+            for record in reads {
+                try await connection.adoptionResult(handle, result: .read(.found(record)))
+                guard case .adoption(let next, _, _) = try await connection.nextPublicationWork() else {
+                    throw CloudOwnTransportFailure.unexpectedReply
+                }
+                handle = next
+            }
+            let status = try #require(try await connection.recoveryStatus())
+            let gate = try await MaintenanceLane.shared.call("test.holdAdoptionReply") { try testCloudHoldAdoptionReply() }
+            let pendingHandle = handle
+            let original = Task { try await connection.adoptionResult(pendingHandle, result: .transportFailed(code: 4, retryAfterDurationMilliseconds: nil)) }
+            var following: Task<Bool, any Error>?
+            do {
+                try await QueryLane.shared.call("test.waitAdoptionClaim") { try gate.waitForClaim() }
+                let resumed = Task { try await connection.resumeAdoption(status.operation) }
+                following = resumed
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        for await _ in queued.stream { return }
+                        throw CloudOwnTransportFailure.missingReply
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(10))
+                        throw CloudOwnTransportFailure.missingReply
+                    }
+                    defer { group.cancelAll() }
+                    _ = try await group.next()
+                }
+                #expect(try await connection.recoveryStatus()?.adoptionTransportWait == false)
+                try await MaintenanceLane.shared.call("test.releaseAdoptionReply") { try gate.release() }
+                try await original.value
+                #expect(try await resumed.value)
+                guard case .adoption(_, .fetch(_, let cursor, _), _) = try await connection.nextPublicationWork() else {
+                    throw CloudOwnTransportFailure.unexpectedReply
+                }
+                #expect(cursor == nil)
+                try await connection.cancelOperation(status.operation)
+            } catch {
+                try? await MaintenanceLane.shared.call("test.releaseAdoptionReply") { try gate.release() }
+                _ = try? await original.value
+                _ = try? await following?.value
+                throw error
+            }
+            queued.continuation.finish()
+        }
+    }
+}

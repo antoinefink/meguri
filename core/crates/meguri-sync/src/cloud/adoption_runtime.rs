@@ -794,6 +794,8 @@ impl Runtime {
                 .ok_or_else(refused)?
                 .into(),
             started_at_ms: self.adapter_now()?,
+            transport_wait: false,
+            retry_after_ms: None,
         };
         self.check_adoption_preview(preview, collection)?;
         let cleanup_evidence = collection
@@ -895,6 +897,9 @@ impl Runtime {
             self.cancel_cloud_adoption_with_work(op.id, collection, work)?;
             return Ok(None);
         }
+        if op.transport_wait {
+            return Ok(None);
+        }
         let owner = self.adoption_owner()?;
         let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner).clone();
         if next == Some(AdoptionTask::Activate)
@@ -910,6 +915,39 @@ impl Runtime {
         }
         work.check()?;
         Ok(next.map(|task| AdoptionWork { op: op.id, task }))
+    }
+    /// Only an explicit user Resume releases a live staging transport wait.
+    pub fn resume_cloud_adoption_with_work(
+        &self,
+        id: [u8; 16],
+        collection: Option<&Collection>,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<bool, RuntimeError> {
+        work.check()?;
+        let mut op = self
+            .adoption_op()?
+            .filter(|op| op.id == id)
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        let owner = self.adoption_owner()?;
+        self.check_adoption_before(&op, collection)?;
+        if op.step != AdoptStep::Staging || !op.transport_wait {
+            return Err(PublicationError::NotOffered.into());
+        }
+        if !matches!(
+            *owner.next.lock().unwrap_or_else(PoisonError::into_inner),
+            Some(AdoptionTask::Fetch { .. } | AdoptionTask::FetchPayload { .. })
+        ) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let now = self.adapter_now()?;
+        if op.retry_after_ms.is_some_and(|deadline| now < deadline) {
+            return Ok(false);
+        }
+        work.effect()?;
+        op.transport_wait = false;
+        op.retry_after_ms = None;
+        self.write_adoption(&op)?;
+        Ok(true)
     }
     /// Delivery owns no reader lease, Runtime/store guard or lifecycle lock.
     pub fn cloud_adoption_reply(
@@ -1154,6 +1192,9 @@ impl Runtime {
                 .ok_or(RuntimeError::StaleIncarnation)?;
             adoption_stage!("owner", Owner);
             let owner = self.adoption_owner()?;
+            if op.transport_wait {
+                return Err(RuntimeError::StaleIncarnation);
+            }
             adoption_stage!("claim", Claim);
             owner.claim_with_work(&work.task, authority)?;
             claimed = true;
@@ -1186,12 +1227,56 @@ impl Runtime {
                 return Err(PublicationError::AccountUnavailable.into());
             }
             adoption_stage!("authority", Authority);
-            if self.check_adoption_before(&op, collection).is_err() {
+            if let Err(error) = self.check_adoption_before(&op, collection) {
+                if matches!(&reply, AdoptionReply::TransportFailed { .. }) {
+                    self.abort_adoption(&op, collection)
+                        .inspect_err(|error| diagnostic.cleanup(error))?;
+                    return Err(error);
+                }
                 // This pre-existing path discards the authority check error.
                 // Only an abort failure contributes a category here.
                 return self
                     .abort_adoption(&op, collection)
                     .inspect_err(|error| diagnostic.cleanup(error));
+            }
+            if let AdoptionReply::TransportFailed {
+                code,
+                retry_after_duration_ms,
+            } = &reply
+            {
+                let outcome = (|| {
+                    // CKError networkUnavailable, networkFailure,
+                    // serviceUnavailable, requestRateLimited, zoneBusy only.
+                    if op.step != AdoptStep::Staging
+                        || !matches!(*code, 3 | 4 | 6 | 7 | 23)
+                        || !matches!(
+                            work.task,
+                            AdoptionTask::Fetch { .. } | AdoptionTask::FetchPayload { .. }
+                        )
+                    {
+                        return Err(refused());
+                    }
+                    op.retry_after_ms = retry_after_duration_ms
+                        .map(|duration| {
+                            let duration = i64::try_from(duration).map_err(|_| refused())?;
+                            self.adapter_now()?.checked_add(duration).ok_or_else(refused)
+                        })
+                        .transpose()?;
+                    authority.effect()?;
+                    op.transport_wait = true;
+                    self.write_adoption(&op)?;
+                    // No page or payload boundary has been accepted. The cursor
+                    // and front metadata remain solely in this same owner.
+                    owner.set_next(work.task.clone());
+                    Ok(())
+                })();
+                if let Err(error) = outcome {
+                    diagnostic.primary(&error);
+                    self.abort_adoption(&op, collection)
+                        .inspect_err(|error| diagnostic.cleanup(error))?;
+                    return Err(error);
+                }
+                return Ok(());
             }
             if matches!(&reply, AdoptionReply::Read(RecordRead::Failed))
                 && matches!(
@@ -2419,6 +2504,8 @@ mod tests {
             media_root: None,
             staging_name: ".meguri-stage-decoder".into(),
             started_at_ms: 1,
+            transport_wait: false,
+            retry_after_ms: None,
         };
         let payload = codec::Payload::MediaName(codec::MediaName {
             name: b"photo.jpg".to_vec(),

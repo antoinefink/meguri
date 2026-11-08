@@ -160,6 +160,15 @@ impl CoreHost {
             .ok_or_else(unavailable)?
             .cancel_cloud_adoption(id, self.cloud_adoption_collection()?.as_ref())
     }
+    pub fn resume_cloud_adoption_with_work(
+        &self,
+        id: [u8; 16],
+        work: &mut meguri_sync::cloud::policy::PolicyWork,
+    ) -> Result<bool, RuntimeError> {
+        self.cloud_runtime()
+            .ok_or_else(unavailable)?
+            .resume_cloud_adoption_with_work(id, self.cloud_adoption_collection()?.as_ref(), work)
+    }
     pub fn cloud_adoption_reply(&self, work: &AdoptionWork, reply: AdoptionReply) -> Result<(), RuntimeError> {
         self.cloud_adoption_reply_with_work(work, reply, &mut meguri_sync::cloud::policy::PolicyWork::default())
     }

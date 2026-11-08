@@ -34,6 +34,13 @@ public enum CloudOwnTransportReply: Sendable {
     case adoptionPayload(CloudStagingRecord)
     case page(records: [CloudStagingRecord], deleted: [String], next: Data?)
 }
+/// Constructed only at original issued SDK failure callbacks. Local projection
+/// failures and arbitrary errors never acquire this provenance in the executor.
+struct CloudAdoptionSDKFailure: Error, Sendable {
+    let original: any Error
+    let code: Int64
+    let retryAfterDurationMilliseconds: UInt64?
+}
 public enum CloudOwnTransportFailure: Error, Sendable {
     case closed, busy, queueRejected, missingReply, unexpectedReply, invalidCursor, privateDatabaseRequired
 }
@@ -571,7 +578,18 @@ public actor CloudOwnExecutor {
                     #if DEBUG
                     recordWorkStage(.adoptionPageFailureResult)
                     #endif
-                    if !stopping && !closed { try? await core.adoptionResult(handle, result: .failed) }
+                    if !stopping && !closed {
+                        if let failure = error as? CloudAdoptionSDKFailure {
+                            try checkStopping()
+                            try admission?.check()
+                            // A typed wait's authority/tracking failure must escape.
+                            // Never follow an accepted wait with generic Failed.
+                            try await core.adoptionResult(handle, result: .transportFailed(
+                                code: failure.code, retryAfterDurationMilliseconds: failure.retryAfterDurationMilliseconds))
+                            throw failure.original
+                        }
+                        try? await core.adoptionResult(handle, result: .failed)
+                    }
                     throw error
                 }
             case .fetchPayload(let zone, let name, let expected):
@@ -588,7 +606,18 @@ public actor CloudOwnExecutor {
                     try await core.adoptionResult(handle, result: .payload(record))
                 } catch {
                     prepared = nil
-                    if !stopping && !closed { try? await core.adoptionResult(handle, result: .failed) }
+                    if !stopping && !closed {
+                        if let failure = error as? CloudAdoptionSDKFailure {
+                            try checkStopping()
+                            try admission?.check()
+                            // A typed wait's authority/tracking failure must escape.
+                            // Never follow an accepted wait with generic Failed.
+                            try await core.adoptionResult(handle, result: .transportFailed(
+                                code: failure.code, retryAfterDurationMilliseconds: failure.retryAfterDurationMilliseconds))
+                            throw failure.original
+                        }
+                        try? await core.adoptionResult(handle, result: .failed)
+                    }
                     throw error
                 }
             case .validate:
@@ -624,6 +653,19 @@ public actor CloudOwnExecutor {
         case .idle: return .idle
         }
         return .progressed
+    }
+    /// Serialize explicit Resume with this executor's original SDK/result drain.
+    public func resumeAdoption(_ operation: CloudRecoveryOperation) async throws -> Bool {
+        try requireIdle()
+        let result = Task { [core] in try await core.resumeAdoption(operation) }
+        let id = UUID()
+        let join = Task<CloudConnectionProgress, any Error> { _ = try await result.value; return .progressed }
+        active = (id, join)
+        defer { if active?.id == id { active = nil; prepared = nil } }
+        let resumed = try await result.value
+        _ = try await join.value
+        try checkStopping()
+        return resumed
     }
     /// Stop queue admission first, cancel the current operation, then await its
     /// original reply/delivery before asking Rust to cancel the exact recovery.

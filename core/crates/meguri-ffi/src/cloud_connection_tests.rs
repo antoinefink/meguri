@@ -2023,3 +2023,65 @@ fn adoption_pending_payload_cancel_and_late_page_failure_keep_old_collection() {
         assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
     }
 }
+
+#[test]
+fn adoption_wait_row_decodes_old_shape_and_same_generation_successor_discards_live_work() {
+    let (fixture, process, config, _, _) = held_no_collection_host();
+    let connection = fixture.workflow.connection().unwrap();
+    adoption_fetch_ready(&connection);
+    let original = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    let mut old = serde_json::to_value(&original).unwrap();
+    old.as_object_mut().unwrap().remove("transport_wait");
+    old.as_object_mut().unwrap().remove("retry_after_ms");
+    let decoded: c::adoption::AdoptOp = serde_json::from_value(old).unwrap();
+    assert_eq!(decoded, original);
+    assert!(!decoded.transport_wait && decoded.retry_after_ms.is_none());
+    let (handle, _) = adoption_action(&connection);
+    connection
+        .adoption_result(
+            handle.clone(),
+            CloudAdoptionResult::TransportFailed {
+                code: 7,
+                retry_after_duration_ms: Some(120_000),
+            },
+        )
+        .unwrap();
+    let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    let bytes = serde_json::to_vec(&waiting).unwrap();
+    assert_eq!(serde_json::from_slice::<c::adoption::AdoptOp>(&bytes).unwrap(), waiting);
+    let operation = connection.recovery_status().unwrap().unwrap().operation;
+    let stage = fixture
+        .workflow
+        .host
+        .cloud_connection_directory()
+        .join(&waiting.staging_name);
+    let generation = fixture.workflow.host.engine().generation();
+    fixture.workflow.host.close().unwrap();
+    assert!(!stage.exists());
+    let successor = Arc::new(process.prepare_cloud_connection(config).unwrap());
+    assert_eq!(successor.engine().generation(), generation);
+    let workflow = CloudWorkflow {
+        core: successor.cloud_runtime().unwrap().clone(),
+        host: successor.clone(),
+        identity: None,
+    };
+    let reopened = workflow.connection().unwrap();
+    assert!(reopened.recovery_status().unwrap().is_none());
+    failure_is(
+        reopened.clone().start_resume_adoption(operation),
+        CloudConnectionFailure::WrongOwner,
+    );
+    assert!(
+        connection
+            .adoption_result(
+                handle,
+                CloudAdoptionResult::TransportFailed {
+                    code: 4,
+                    retry_after_duration_ms: None,
+                }
+            )
+            .is_err()
+    );
+    assert!(!successor.cloud_connection_directory().join("collection.anki2").exists());
+    successor.close().unwrap();
+}

@@ -189,6 +189,16 @@ public actor CoreCloudConnectionService {
             }
         }
     }
+    public func resumeAdoption(_ operation: CloudRecoveryOperation) async throws -> Bool {
+        let raw = self.raw
+        let value: MeguriCoreBindings.CloudAdoptionResumed = try await run(
+            .cloudConnectionStartResumeAdoption, result: .cloudAdoptionResumeResult
+        ) { [raw] in
+            let started = try raw.startResumeAdoption(operation: operation.raw)
+            return CloudConnectionJobValue(handle: started.handle, read: { try started.result.result() })
+        }
+        return value.resumed
+    }
     public func performAdoptionLocal(_ handle: CloudAdoptionWork) async throws {
         let raw = self.raw
         try await MaintenanceLane.shared.call(.cloudConnectionPerformAdoptionLocal) { [raw] in try raw.performAdoptionLocal(handle: handle.raw) }

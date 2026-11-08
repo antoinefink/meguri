@@ -219,13 +219,19 @@ struct CloudRecoveryContent: View {
     var body: some View {
         Text(SyncText.value(stepKey))
         if recovery.switchConflict { Text(SyncText.value("sync.attention.publishConflict")) }
-        Button(SyncText.value("sync.action.resumeOp")) { collection.sync.resumeConnection() }
+        Button(SyncText.value("sync.action.resumeOp")) {
+            if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
+            else { collection.sync.resumeConnection() }
+        }
             .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
             .accessibilityIdentifier("sync.recovery.resume")
-        // There is no public operation-kind/exclusive-phase/cancel-offer fact.
-        // A generic Cancel must not cancel an unoffered or exclusive operation.
-        Button(SyncText.value("sync.action.cancelOp")) {}.disabled(true)
-        Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+        // Only the exact accepted staging wait grants this Cancel offer.
+        Button(SyncText.value("sync.action.cancelOp")) {
+            if recovery.adoptionTransportWait { Task { await collection.sync.cancelConnectionOperation() } }
+        }.disabled(!recovery.adoptionTransportWait)
+        if !recovery.adoptionTransportWait {
+            Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+        }
     }
     private var stepKey: String {
         switch recovery.step {

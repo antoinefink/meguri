@@ -384,11 +384,12 @@ impl CloudConnection {
             },
         }
     }
-    fn recovery(&self, id: [u8; 16], adoption: bool) -> Arc<CloudRecoveryOperation> {
+    fn recovery(&self, id: [u8; 16], adoption: bool, generation: u64) -> Arc<CloudRecoveryOperation> {
         Arc::new(CloudRecoveryOperation {
             owner: self.owner.clone(),
             id,
             adoption,
+            generation,
         })
     }
 }
@@ -438,6 +439,7 @@ pub struct CloudRecoveryOperation {
     owner: Arc<Owner>,
     id: [u8; 16],
     adoption: bool,
+    generation: u64,
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CloudPublicationLocalKind {
@@ -578,6 +580,10 @@ pub struct CloudStagingRecord {
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionResult {
     Failed,
+    TransportFailed {
+        code: i64,
+        retry_after_duration_ms: Option<u64>,
+    },
     Payload {
         record: CloudStagingRecord,
     },
@@ -633,6 +639,7 @@ pub struct CloudRecoveryStatus {
     pub switch_sent: bool,
     pub switch_conflict: bool,
     pub retry_after_ms: Option<i64>,
+    pub adoption_transport_wait: bool,
 }
 
 #[uniffi::export]
@@ -724,6 +731,7 @@ impl CloudConnection {
                 .confirm_connection_publication(&p, &collection)
                 .map_err(error)?,
             false,
+            preview.generation,
         ))
     }
     pub fn confirm_adoption(
@@ -736,7 +744,11 @@ impl CloudConnection {
         let p::PreviewWork::Ready(p) = preview.take_adoption()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
-        Ok(self.recovery(self.owner.host.confirm_cloud_adoption(&p).map_err(error)?, true))
+        Ok(self.recovery(
+            self.owner.host.confirm_cloud_adoption(&p).map_err(error)?,
+            true,
+            preview.generation,
+        ))
     }
     pub fn next_publication_work(&self) -> Result<CloudPublicationWork, CoreError> {
         callback::enter("CloudConnection.next_publication_work");
@@ -767,7 +779,7 @@ impl CloudConnection {
             {
                 work @ p::PublicationWork::Local { op, work: kind } => CloudPublicationWork::Local {
                     handle: local(work),
-                    operation: self.recovery(op, false),
+                    operation: self.recovery(op, false, generation),
                     kind: match kind {
                         p::LocalWork::Bind => CloudPublicationLocalKind::Bind,
                         p::LocalWork::WriteDecision => CloudPublicationLocalKind::WriteDecision,
@@ -801,7 +813,7 @@ impl CloudConnection {
                         },
                     };
                     CloudPublicationWork::Own {
-                        operation: self.recovery(request.op, false),
+                        operation: self.recovery(request.op, false, generation),
                         command,
                         metadata: (&*request).into(),
                         request: Arc::new(CloudPublicationRequest {
@@ -863,7 +875,7 @@ impl CloudConnection {
                         a::AdoptionTask::Activate => CloudAdoptionAction::Activate,
                     };
                     CloudPublicationWork::Adoption {
-                        operation: self.recovery(work.op, true),
+                        operation: self.recovery(work.op, true, generation),
                         action,
                         handle: Arc::new(CloudAdoptionWork {
                             owner: self.owner.clone(),
@@ -957,6 +969,13 @@ impl CloudConnection {
         self.owner.check_generation(handle.generation)?;
         let reply = match result {
             CloudAdoptionResult::Failed => a::AdoptionReply::Failed,
+            CloudAdoptionResult::TransportFailed {
+                code,
+                retry_after_duration_ms,
+            } => a::AdoptionReply::TransportFailed {
+                code,
+                retry_after_duration_ms,
+            },
             CloudAdoptionResult::Payload { record: v } => a::AdoptionReply::Payload {
                 record: a::StagingRecord {
                     name: v.name,
@@ -1019,10 +1038,10 @@ impl CloudConnection {
     }
     pub fn recovery_status(&self) -> Result<Option<CloudRecoveryStatus>, CoreError> {
         callback::enter("CloudConnection.recovery_status");
-        self.owner.current_generation()?;
+        let generation = self.owner.current_generation()?;
         if let Some(op) = self.owner.core.adoption_op().map_err(error)? {
             return Ok(Some(CloudRecoveryStatus {
-                operation: self.recovery(op.id, true),
+                operation: self.recovery(op.id, true, generation),
                 step: match op.step {
                     a::AdoptStep::Staging => CloudRecoveryStep::Staging,
                     a::AdoptStep::Staged => CloudRecoveryStep::Staged,
@@ -1030,7 +1049,8 @@ impl CloudConnection {
                 },
                 switch_sent: false,
                 switch_conflict: false,
-                retry_after_ms: None,
+                retry_after_ms: op.retry_after_ms,
+                adoption_transport_wait: op.transport_wait,
             }));
         }
         Ok(self
@@ -1039,7 +1059,7 @@ impl CloudConnection {
             .publication_op()
             .map_err(error)?
             .map(|op| CloudRecoveryStatus {
-                operation: self.recovery(op.id, false),
+                operation: self.recovery(op.id, false, generation),
                 step: match op.step {
                     p::PublishStep::Confirmed => CloudRecoveryStep::Confirmed,
                     p::PublishStep::Bound => CloudRecoveryStep::Bound,
@@ -1051,6 +1071,7 @@ impl CloudConnection {
                 switch_sent: op.switch_sent,
                 switch_conflict: op.switch_conflict.is_some(),
                 retry_after_ms: op.retry_after_ms,
+                adoption_transport_wait: false,
             }))
     }
 }
