@@ -64,3 +64,11 @@ remain pending with root. No phone artifacts, research, network, builds, tests,
 scans or main-checkout writes were used for this pass.
 
 Independent review clears the fixed comparison categories and unchanged refusal. `core-test/20261108T215127Z-35874` passes 68 engine tests. Privacy `20261108T215123Z-35619` passes. Similarity `20261108T215306Z-37866` passes three files. Swift run `20261108T215302Z-36812` matched no tests and fails; corrected selection `20261108T215449Z-39740` passes both diagnostic and presentation tests. Actual phone comparisons remain unknown until the next signed run.
+
+## Actual review start, 2026-11-09
+
+Signed phone run `69464` on `ecf13bbb` passes normal preparation. Preserve drive `71666` opens the collection, selects a deck and activates Study. Step 6 fails after 30 seconds; the status remains `coreStart` before and after the wait. No card loads or answer is sent. This is not a successful review or sync proof.
+
+Filtered export `cleanroom/20261108T230226Z-74304` adds only DEBUG per-start fixed stage observations through the existing status value. It changes no Release behavior, scheduling, cancellation, time limit, visible layout or settings. Independent review clears production behavior and finds a P2 test-order race. Focused Swift `76481` compiles and fails with lifecycle busy: the new test starts two real review jobs before awaiting the first. Privacy `77965` and similarity `77508` pass. The test correction is pending; no unit is accepted.
+
+Export `78424` moves the existing first-job completion wait before the second start. All assertions remain. Independent review has no P0–P2 findings. Swift `81433` passes the real bridge test; Swift `78777` passes both model tests, including both loading cases. Privacy `81152` passes. The diagnostic is ready for the phone; the underlying wait and signed review/sync proof remain open.

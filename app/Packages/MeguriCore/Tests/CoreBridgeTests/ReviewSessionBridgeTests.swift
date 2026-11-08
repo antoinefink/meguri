@@ -31,13 +31,13 @@ extension EventTests {
             let firstJob = try await Core.startSessionJob(deckID: 1, observation: first)
             #expect(first.stage == .jobWait)
             #expect(second.stage == nil)
+            // Completion alone does not read the native result or advance stages.
+            try await firstJob.job.value()
+            #expect(first.stage == .jobWait)
             let secondJob = try await Core.startSessionJob(deckID: 1, observation: second)
             let secondResult = try await secondJob.value()
             #expect(second.stage == .resultReturned)
             #expect(first.stage == .jobWait, "another job's result must not advance this invocation")
-            // Completion alone does not read the native result or advance stages.
-            try await firstJob.job.value()
-            #expect(first.stage == .jobWait)
             _ = try await firstJob.value()
             #expect(first.stage == .resultReturned)
             let expected: [ReviewStartObservation.Stage?] = [
