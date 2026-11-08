@@ -405,7 +405,7 @@ import Testing
                 #if DEBUG
                 let diagnostic = try #require(owner.openFailureDiagnosticValue)
                 #expect(diagnostic.hasPrefix("phase:coreResult;bridge:open;lifecycle:failed.open."))
-                #expect(diagnostic.hasSuffix(";step:none"))
+                #expect(diagnostic.hasSuffix(";step:none;reason:none"))
                 #expect(!diagnostic.contains(root.path))
                 #endif
             } else {
@@ -449,11 +449,42 @@ import Testing
         ]
         for (error, expected) in bridges {
             #expect(OpenFailureDiagnostic.bridgeCategory(error) == expected)
+            let reason = expected == "invalidArgument" ? "review_service_other" : "none"
             for phase in OpenFailureDiagnostic.Phase.allCases {
                 #expect(OpenFailureDiagnostic.value(phase: phase, error: error,
                     lifecycle: .failed(.openStep(step: detail, detail: detail))) ==
-                    "phase:\(phase.rawValue);bridge:\(expected);lifecycle:failed.openStep;step:other")
+                    "phase:\(phase.rawValue);bridge:\(expected);lifecycle:failed.openStep;step:other;reason:\(reason)")
             }
+        }
+        let markers = ["pending_answer_identity_mismatch", "pending_answer_journal_corruption",
+            "pending_answer_identity_migration_io"]
+        for marker in markers {
+            let message = "review journal: \(marker)"
+            let cases: [(any Error, String, String)] = [
+                (BridgeError.invalidArgument(message), "invalidArgument", marker),
+                (BridgeError.invalidArgument("\(message): \(detail)"), "invalidArgument", "review_journal_other"),
+                (BridgeError.invalidArgument("\(message)_unknown"), "invalidArgument", "review_journal_other"),
+                (BridgeError.invalidArgument("\(message)\n\(detail)"), "invalidArgument", "review_journal_other"),
+                (BridgeError.invalidArgument("review journal: \(detail);\(marker)"), "invalidArgument", "review_journal_other"),
+                (BridgeError.invalidArgument(marker), "invalidArgument", "review_service_other"),
+                (BridgeError.invalidArgument("\(detail);\(message)"), "invalidArgument", "review_service_other"),
+                (BridgeError.invalidArgument("review journal:\(marker)"), "invalidArgument", "review_service_other"),
+                (BridgeError.invalidArgument("Review journal: \(marker)"), "invalidArgument", "review_service_other"),
+                (BridgeError.internal(message), "internal", "none"),
+                (BridgeError.open(.io(detail: message)), "open", "none"),
+                (NSError(domain: detail, code: 123,
+                    userInfo: [NSUnderlyingErrorKey: BridgeError.invalidArgument(message)]), "other", "other")
+            ]
+            for (error, bridge, reason) in cases {
+                #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: error,
+                    lifecycle: .failed(.openStep(step: "review-session", detail: message))) ==
+                    "phase:coreResult;bridge:\(bridge);lifecycle:failed.openStep;step:review-session;reason:\(reason)")
+            }
+        }
+        for message in ["review journal: ", "review journal: unknown", "review journal: \(detail)"] {
+            #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: BridgeError.invalidArgument(message),
+                lifecycle: .failed(.openStep(step: "review-session", detail: detail))) ==
+                "phase:coreResult;bridge:invalidArgument;lifecycle:failed.openStep;step:review-session;reason:review_journal_other")
         }
         let states: [(CollectionLifecycle?, String)] = [
             (nil, "queryFailed"), (.noCollection, "noCollection"), (.opening, "opening"),
@@ -465,7 +496,7 @@ import Testing
         for (state, expected) in states {
             #expect(OpenFailureDiagnostic.value(phase: .coreResult,
                 error: NSError(domain: detail, code: 123), lifecycle: state) ==
-                "phase:coreResult;bridge:other;lifecycle:\(expected);step:none")
+                "phase:coreResult;bridge:other;lifecycle:\(expected);step:none;reason:other")
         }
         let failures: [(CollectionOpenFailure, String)] = [
             (.openInAnotherProgram, "openInAnotherProgram"), (.tooOld(version: 123), "tooOld"),
@@ -479,7 +510,7 @@ import Testing
         for (failure, expected) in failures {
             #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: BridgeError.open(failure),
                 lifecycle: .failed(.open(failure))) ==
-                "phase:coreResult;bridge:open;lifecycle:failed.open.\(expected);step:none")
+                "phase:coreResult;bridge:open;lifecycle:failed.open.\(expected);step:none;reason:none")
         }
         let knownSteps = ["open", "ownership", "open_evidence", "writer", "fsrs_policy", "day_clock",
             "derived-store", "media", "review-session", "cloud-note-capture"]
@@ -487,7 +518,7 @@ import Testing
             let expected = knownSteps.contains(step) ? step : "other"
             #expect(OpenFailureDiagnostic.value(phase: .coreResult, error: BridgeError.internal(detail),
                 lifecycle: .failed(.openStep(step: step, detail: detail))) ==
-                "phase:coreResult;bridge:internal;lifecycle:failed.openStep;step:\(expected)")
+                "phase:coreResult;bridge:internal;lifecycle:failed.openStep;step:\(expected);reason:none")
         }
     }
     #endif

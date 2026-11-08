@@ -1326,7 +1326,20 @@ enum OpenFailureDiagnostic {
             case .corrupt: category = "failed.corrupt"
             }
         }
-        return "phase:\(phase.rawValue);bridge:\(bridgeCategory(error));lifecycle:\(category);step:\(step)"
+        return "phase:\(phase.rawValue);bridge:\(bridgeCategory(error));lifecycle:\(category);step:\(step);reason:\(reasonCategory(error))"
+    }
+
+    private static func reasonCategory(_ error: any Error) -> String {
+        guard let error = error as? BridgeError else { return "other" }
+        guard case .invalidArgument(let message) = error else { return "none" }
+        // frozen::error adds this exact prefix to journal.rs's fixed markers.
+        // Match the whole message; attached details are never trusted as markers.
+        switch message {
+        case "review journal: pending_answer_identity_mismatch": return "pending_answer_identity_mismatch"
+        case "review journal: pending_answer_journal_corruption": return "pending_answer_journal_corruption"
+        case "review journal: pending_answer_identity_migration_io": return "pending_answer_identity_migration_io"
+        default: return message.hasPrefix("review journal: ") ? "review_journal_other" : "review_service_other"
+        }
     }
 
     static func bridgeCategory(_ error: any Error) -> String {
