@@ -108,6 +108,7 @@ public actor CoreCloudMediaService {
         let raw = self.raw
         await order.acquire(queued: onJobQueued)
         do {
+            try Task.checkCancellation()
             try await CoreEventStream.shared.start()
             let started = try await Self.call(.cloudMediaStartNextWork) { try raw.startNextWork(sdk: sdk) }
             var outcome: JobOutcome?

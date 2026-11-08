@@ -13,15 +13,16 @@ extension EventTests {
             let raw = try await MaintenanceLane.shared.call(.cloudWorkflowMedia) { try workflow.media() }
             var pool: [CoreJob] = []
             let (arrivals, arrived) = AsyncStream.makeStream(of: Void.self)
-            let witness = Mutex<MeguriCoreBindings.JobHandle?>(nil)
+            let witness = Mutex<[MeguriCoreBindings.JobHandle]>([])
             let returned = Mutex(false)
             let (queued, didQueue) = AsyncStream.makeStream(of: Void.self)
             let service = CoreCloudMediaService(raw, onJobQueued: { didQueue.yield(()) }, track: { handle in
-                witness.withLock { $0 = handle }; arrived.yield(())
+                witness.withLock { $0.append(handle) }; arrived.yield(())
                 if listenerFailure { throw BridgeError.invalidArgument("media listener setup") }
                 return try Jobs.track(handle)
             })
             var call: Task<CoreBridge.CloudMediaIssuedWork?, any Error>?
+            var queuedCall: Task<CoreBridge.CloudMediaIssuedWork?, any Error>?
             var following: Task<Bool, any Error>?
             do {
                 for _ in 0..<4 {
@@ -37,11 +38,15 @@ extension EventTests {
                 call = active
                 var arrival = arrivals.makeAsyncIterator()
                 _ = await arrival.next()
-                let handle = try #require(witness.withLock { $0 })
+                let handle = try #require(witness.withLock { $0.first })
+                let second = Task { try await service.nextWork(sdk: "synthetic-queued-sdk") }
+                queuedCall = second
+                var waiting = queued.makeAsyncIterator()
+                try #require(await waiting.next() != nil, "second nextWork queued behind the admitted job")
+                second.cancel()
                 let next = Task { try await service.downloadsBlocked(sdk: "synthetic-queued-sdk") }
                 following = next
-                var waiting = queued.makeAsyncIterator()
-                _ = await waiting.next()
+                try #require(await waiting.next() != nil, "downloadsBlocked queued behind both nextWork callers")
                 active.cancel()
                 // Observe the native atomic cancellation before releasing the
                 // occupied pool; completion must not win this test's setup.
@@ -60,14 +65,19 @@ extension EventTests {
                 _ = await review.job.outcome()
                 do { _ = try await active.value; Issue.record("queued native cancellation was lost") }
                 catch { #expect(error as? BridgeError == .cancelled) }
+                do { _ = try await second.value; Issue.record("service-order cancellation was lost") }
+                catch { #expect(error is CancellationError) }
                 _ = try? await next.value
+                #expect(witness.withLock { $0.map(\.id) } == [handle.id], "cancelled service-order waiter reached native job tracking")
                 #expect(try await CoreBridge.CancelToken(raw: handle.cancel).isCancelled())
                 #expect(returned.withLock { $0 })
             } catch {
                 call?.cancel()
+                queuedCall?.cancel()
                 for job in pool { try? await job.cancel() }
                 for job in pool { _ = await job.outcome() }
                 _ = try? await call?.value
+                _ = try? await queuedCall?.value
                 _ = try? await following?.value
                 throw error
             }

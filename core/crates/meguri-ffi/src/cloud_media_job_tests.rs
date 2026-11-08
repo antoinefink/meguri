@@ -12,7 +12,9 @@ impl Drop for Release {
 }
 fn terminal(events: &Subscription, id: u64) -> Result<JobOutcome, mpsc::RecvTimeoutError> {
     loop {
-        let event = events.recv_timeout(Duration::from_secs(10))?;
+        let event = events
+            .recv_timeout(Duration::from_secs(10))
+            .ok_or(mpsc::RecvTimeoutError::Timeout)?;
         if let EventKind::JobFinished { id: got, outcome } = &event.kind
             && got.0 == id
         {
@@ -118,7 +120,12 @@ fn media_next_job_scan_hold_admits_and_completes_real_review_before_release() {
                     job.cancel.clone(),
                     job.progress.clone(),
                 );
-                let _ = done.send(value.as_ref().map(|_| ()).map_err(Clone::clone));
+                let _ = done.send(
+                    value
+                        .as_ref()
+                        .map(|value| matches!(value, meguri_engine::session::StartResult::Started { .. }))
+                        .map_err(Clone::clone),
+                );
                 if let Ok(meguri_engine::session::StartResult::Started { session_id, .. }) = value {
                     host.review()
                         .end_controlled(session_id, job.cancel.clone(), job.progress.clone())?;
@@ -163,9 +170,12 @@ fn media_next_job_scan_hold_admits_and_completes_real_review_before_release() {
         still_held,
         "review completion was observed only after the scan hold ended"
     );
-    review
-        .expect("real review start completed before scan release")
-        .unwrap();
+    assert!(
+        review
+            .expect("real review start completed before scan release")
+            .unwrap(),
+        "real review start was refused"
+    );
     assert_eq!(review_terminal.unwrap().unwrap(), JobOutcome::Succeeded);
     assert_eq!(terminal.unwrap().unwrap(), JobOutcome::Succeeded);
 }
