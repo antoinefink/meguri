@@ -50,7 +50,7 @@ if [ "${FX_BUILD_FAIL:-}" = "$package" ]; then
   exit 42
 fi
 case "$package" in
-  meguri-engine) suites="suspend wal_durability session_recovery";;
+  meguri-engine) suites="suspend wal_durability session_recovery journal_unit";;
   meguri-ffi) suites="collection_ffi";;
   meguri-sync) suites="cloud_records cloud_recovery cloud_unit";;
   meguri-storage) suites="persistent_identity";;
@@ -64,6 +64,7 @@ for suite in $suites; do
   chmod +x "$exe"
   [ "${FX_NOT_EXECUTABLE:-}" != "$suite" ] || chmod -x "$exe"
   target_name="$suite"; kind=test
+  [ "$suite" != journal_unit ] || { target_name=meguri_engine; kind=lib; }
   [ "$suite" != cloud_unit ] || { target_name=meguri_sync; kind=lib; }
   [ "$suite" != persistent_identity ] || { target_name=meguri_storage; kind=lib; }
   [ "${FX_WRONG_KIND:-}" != "$suite" ] || { if [ "$kind" = lib ]; then kind=test; else kind=lib; fi; }
@@ -75,7 +76,7 @@ for suite in $suites; do
     --argjson missing "$([ "${FX_NO_EXECUTABLE:-}" = "$suite" ] && echo true || echo false)" \
     '{reason:"compiler-artifact",package_id:$package,profile:{test:$test},target:{name:$name,kind:[$kind]},executable:(if $missing then null else $exe end)}')"
   # Cargo also reports the ordinary library without a test executable.
-  if [ "$suite" = cloud_unit ]; then
+  if [ "$suite" = cloud_unit ] || [ "$suite" = journal_unit ]; then
     printf '%s\n' "$artifact" | jq -c '.profile.test = false | .executable = null'
   fi
   printf '%s\n' "$artifact"
@@ -131,12 +132,12 @@ mg() {
 }
 field() { jq -r "$@" "$result"; }
 
-@test "native durability builds before leasing, runs ten suites once and retains timing" {
+@test "native durability builds before leasing, runs eleven suites once and retains timing" {
   FX_CACHE_COLD=1 MEGURI_BENCH_FIXTURES=/must-not-use mg
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
-  [ "$(field .summary.passed)" -eq 43 ]
-  [ "$(field .summary.total)" -eq 43 ]
+  [ "$(field .summary.passed)" -eq 45 ]
+  [ "$(field .summary.total)" -eq 45 ]
   [ "$(field .details.environment.rustc)" = 'rustc fake' ]
   grep -Fx "rustc $SB/core -V" "$STUB_LOG"
   [ "$(field '.details.wal_durability.passed')" -eq 2 ]
@@ -145,7 +146,7 @@ field() { jq -r "$@" "$result"; }
   [ "$(field '.details.cloud_unit.passed')" -eq 1 ]
   local target="$SB/build/native-durability/target"
   grep -Fx 'cargo metadata --locked --no-deps --format-version 1' "$STUB_LOG"
-  grep -Fx "cargo test --locked -p meguri-engine --features test-hooks --test suspend --test wal_durability --test session_recovery --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
+  grep -Fx "cargo test --locked -p meguri-engine --features test-hooks --lib --test suspend --test wal_durability --test session_recovery --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
   grep -Fx "cargo test --locked -p meguri-ffi --features test-hooks --test collection_ffi --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
   grep -Fx "cargo test --locked -p meguri-sync --features test-hooks --lib --test cloud_records --test cloud_recovery --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
   grep -Fx "cargo test --locked -p meguri-storage --lib --target aarch64-apple-darwin --target-dir $target --no-run --message-format json-render-diagnostics" "$STUB_LOG"
@@ -159,9 +160,12 @@ field() { jq -r "$@" "$result"; }
   grep -Fx 'run persistent_identity persistent_identity::tests::darwin_generated_regular_fd_reads_full_volume_uuid_and_retains_binding --exact --test-threads=1 --nocapture' "$STUB_LOG"
   [ "$(field '.details.persistent_identity.passed')" -eq 1 ]
   [ "$(grep -c '^cargo test .*--no-run .*--message-format json-render-diagnostics$' "$STUB_LOG")" -eq 5 ]
-  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 10 ]
+  [ "$(grep -c '^run .* --test-threads=1 --nocapture$' "$STUB_LOG")" -eq 11 ]
   grep -Fx 'run session_recovery --test-threads=1 --nocapture' "$STUB_LOG"
   [ "$(field '.details.session_recovery.passed')" -eq 21 ]
+  grep -Fx 'run journal_unit session::journal:: --test-threads=1 --nocapture' "$STUB_LOG"
+  [ "$(field '.details.journal_unit.passed')" -eq 2 ]
+  [ "$(field '.details.journal_unit.skipped')" -eq 0 ]
   grep -Fx 'run cloud_unit cloud:: --test-threads=1 --nocapture' "$STUB_LOG"
   [ "$(sed -n '8p' "$STUB_LOG")" = 'lease --no-session' ]
   grep -q '^U32 full WAL sync: p50=123us, p95=456us' "$(dirname "$result")/wal_durability.log"
@@ -185,7 +189,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability artifacts require exact package target kind profile and one executable" {
   local suite fault
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery journal_unit cloud_runtime cloud_publication_phase; do
     for fault in FX_OMIT FX_DUPLICATE FX_NO_EXECUTABLE FX_NOT_EXECUTABLE FX_WRONG_KIND FX_WRONG_PROFILE FX_WRONG_PACKAGE FX_WRONG_TARGET; do
       export "$fault=$suite"
       mg
@@ -257,7 +261,7 @@ field() { jq -r "$@" "$result"; }
   [ "$(field .summary.failed)" -eq 1 ]
   [ "$(field '.details.wal_durability.exit_code')" -eq 101 ]
   [ "$(grep -c '^run wal_durability ' "$STUB_LOG")" -eq 1 ]
-  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
+  [ "$(grep -c '^run ' "$STUB_LOG")" -eq 11 ]
 }
 
 @test "native durability rejects empty suites and absent summaries" {
@@ -271,7 +275,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability cloud suites reject zero tests and missing or duplicate summaries" {
   local suite
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery journal_unit cloud_runtime cloud_publication_phase; do
     FX_EMPTY="$suite" mg
     [ "$status" -eq 1 ]
     [ "$(field '.failures[0].id')" = "empty/$suite" ]
@@ -287,7 +291,7 @@ field() { jq -r "$@" "$result"; }
 
 @test "native durability cloud failures and nonzero exits cannot pass or retry" {
   local suite fault
-  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery cloud_runtime cloud_publication_phase; do
+  for suite in cloud_records cloud_recovery cloud_unit persistent_identity session_recovery journal_unit cloud_runtime cloud_publication_phase; do
     for fault in FX_TEST_FAIL FX_EXIT_FAIL; do
       : >"$STUB_LOG"
       export "$fault=$suite"
@@ -300,7 +304,7 @@ field() { jq -r "$@" "$result"; }
         [ "$(field .summary.failed)" -eq 1 ]
       fi
       [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
-      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
+      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 11 ]
     done
   done
 }
@@ -345,17 +349,21 @@ field() { jq -r "$@" "$result"; }
         [ "$(field '.failures[0].id')" = "test/$suite" ]
       fi
       [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
-      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 10 ]
+      [ "$(grep -c '^run ' "$STUB_LOG")" -eq 11 ]
     done
   done
 }
 
-@test "native durability C12 integration suite cannot count ignored cases as passed" {
-  FX_IGNORED=session_recovery mg
-  [ "$status" -eq 1 ]
-  [ "$(field '.failures[0].id')" = test/session_recovery ]
-  [ "$(field '.details.session_recovery.skipped')" -eq 1 ]
-  [ "$(grep -c '^run session_recovery ' "$STUB_LOG")" -eq 1 ]
+@test "native durability C12 suites cannot count ignored cases as passed" {
+  local suite
+  for suite in session_recovery journal_unit; do
+    : >"$STUB_LOG"
+    FX_IGNORED="$suite" mg
+    [ "$status" -eq 1 ]
+    [ "$(field '.failures[0].id')" = "test/$suite" ]
+    [ "$(field ".details.$suite.skipped")" -eq 1 ]
+    [ "$(grep -c "^run $suite " "$STUB_LOG")" -eq 1 ]
+  done
 }
 
 @test "native durability exposes no arbitrary native Cargo or shell interface" {

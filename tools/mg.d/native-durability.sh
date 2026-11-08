@@ -22,7 +22,7 @@ mg_native_durability() {
   mg_detail environment "$(jq -nc --arg os "$(uname -sm)" --arg rustc "$(cd core && rustc -V 2>&1)" \
     '{os: $os, rustc: $rustc, target: "aarch64-apple-darwin", retries: 0}')"
   local package package_id suite target_name kind json log rc binary counts passed failed skipped expected_passed
-  local suites="suspend wal_durability session_recovery collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity cloud_runtime cloud_publication_phase"
+  local suites="suspend wal_durability session_recovery journal_unit collection_ffi cloud_records cloud_recovery cloud_unit persistent_identity cloud_runtime cloud_publication_phase"
   local total_passed=0 total_failed=0 total_skipped=0 broken=false
   local target="$MG_ROOT/build/native-durability/target"
   # Synthetic benchmark collections only, regardless of a caller's override.
@@ -47,7 +47,7 @@ mg_native_durability() {
     json="$MG_RUN_DIR/$package-build.jsonl"
     log="$MG_RUN_DIR/$package-build.log"
     if [ "$package" = meguri-engine ]; then
-      (cd core && cargo test --locked -p meguri-engine --features test-hooks \
+      (cd core && cargo test --locked -p meguri-engine --features test-hooks --lib \
         --test suspend --test wal_durability --test session_recovery \
         --target aarch64-apple-darwin --target-dir "$target" --no-run \
         --message-format json-render-diagnostics) >"$json" 2>"$log"
@@ -85,6 +85,7 @@ mg_native_durability() {
     package=meguri-engine
     target_name="$suite" kind=test
     case "$suite" in
+      journal_unit) target_name=meguri_engine; kind=lib;;
       collection_ffi) package=meguri-ffi;;
       cloud_records|cloud_recovery) package=meguri-sync;;
       cloud_unit) package=meguri-sync; target_name=meguri_sync; kind=lib;;
@@ -123,6 +124,8 @@ mg_native_durability() {
     if [ "$suite" = persistent_identity ]; then
       "$binary" persistent_identity::tests::darwin_generated_regular_fd_reads_full_volume_uuid_and_retains_binding \
         --exact --test-threads=1 --nocapture >"$log" 2>&1
+    elif [ "$suite" = journal_unit ]; then
+      "$binary" session::journal:: --test-threads=1 --nocapture >"$log" 2>&1
     elif [ "$suite" = cloud_unit ]; then
       # Keep the private cloud settings proof; frozen server tests stay out.
       "$binary" cloud:: --test-threads=1 --nocapture >"$log" 2>&1
@@ -152,7 +155,7 @@ mg_native_durability() {
         cloud_runtime) expected_passed=3;;
       esac
       case "$suite" in
-        persistent_identity|session_recovery|cloud_runtime|cloud_publication_phase)
+        persistent_identity|session_recovery|journal_unit|cloud_runtime|cloud_publication_phase)
           if [ "$skipped" -ne 0 ] || { [ "$expected_passed" -ne 0 ] && [ "$passed" -ne "$expected_passed" ]; }; then
             mg_failure "test/$suite" "$suite must execute its full selection without ignored tests (expected passes: $expected_passed; 0 means the full suite)"
             broken=true
