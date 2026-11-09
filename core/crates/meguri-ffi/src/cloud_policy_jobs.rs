@@ -94,6 +94,11 @@ pub struct CloudPolicySendCall {
     pub call: Option<u64>,
 }
 typed_result!(CloudPolicySendResult, CloudPolicySendJob, CloudPolicySendCall);
+typed_result!(
+    CloudPolicyAssetReadPassResult,
+    CloudPolicyAssetReadPassJob,
+    Arc<crate::cloud_asset_reads::CloudAssetReadPass>
+);
 
 impl CloudPolicy {
     pub(super) fn start_policy<T: Send + 'static>(
@@ -148,6 +153,20 @@ impl CloudPolicy {
 
 #[uniffi::export]
 impl CloudPolicyExecution {
+    pub fn start_begin_asset_read_pass(self: Arc<Self>) -> Result<CloudPolicyAssetReadPassJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_begin_asset_read_pass");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.begin_asset_read_pass", move |_, work| {
+                self.begin_asset_read_pass_with_work(work)
+            })?;
+        Ok(CloudPolicyAssetReadPassJob {
+            handle,
+            result: Arc::new(CloudPolicyAssetReadPassResult { cell }),
+        })
+    }
     pub fn start_validate_control(self: Arc<Self>) -> Result<CloudPolicyControlJob, CoreError> {
         callback::enter("CloudPolicyExecution.start_validate_control");
         self.policy().owns(&self.command)?;
@@ -293,6 +312,27 @@ impl CloudPolicyExecution {
         Ok(CloudPolicyRetirementJob {
             handle,
             result: Arc::new(CloudPolicyRetirementResult { cell }),
+        })
+    }
+}
+
+#[uniffi::export]
+impl CloudWorkflow {
+    pub fn start_begin_first_asset_read_pass(
+        self: Arc<Self>,
+        sdk: String,
+    ) -> Result<CloudPolicyAssetReadPassJob, CoreError> {
+        callback::enter("CloudWorkflow.start_begin_first_asset_read_pass");
+        // Metadata only: retain this original workflow and its policy before
+        // queueing. Collection acquisition and all Runtime work stay on worker.
+        let policy = CloudPolicy::for_workflow(&self)?;
+        let (handle, cell) = policy
+            .start_policy("CloudWorkflow.begin_first_asset_read_pass", move |policy, work| {
+                self.begin_first_asset_read_pass_with_work(sdk, policy, work)
+            })?;
+        Ok(CloudPolicyAssetReadPassJob {
+            handle,
+            result: Arc::new(CloudPolicyAssetReadPassResult { cell }),
         })
     }
 }

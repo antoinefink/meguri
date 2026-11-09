@@ -9,6 +9,9 @@ mod activity;
 #[path = "cloud_asset_retry_reopen_tests.rs"]
 mod retry_reopen;
 
+#[path = "cloud_asset_read_job_tests.rs"]
+mod jobs;
+
 fn waiting_note(fixture: &PublishedFixture, sdk: &CloudEngineRegistration) -> (Record, NoteId, Vec<u8>) {
     let (input, bytes, id) = remote_note(fixture, true);
     let server = save(fixture, sdk, input, None);
@@ -601,8 +604,19 @@ fn accepted_original_terminal_cleans_up_after_account_generation_or_close() {
     }
 }
 
-#[test]
-fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_return() {
+struct FirstConflict {
+    fixture: PublishedFixture,
+    sdk: CloudEngineRegistration,
+    id: NoteId,
+    original: w::EntityFacts,
+    server: Record,
+    local_front: String,
+    remote_back: String,
+    bytes: Vec<u8>,
+    remote: codec::Entity,
+}
+
+fn first_conflict() -> FirstConflict {
     let (fixture, sdk) = published();
     let (id, original) = add_note(&fixture, "Base back".into());
     for update in fixture.workflow.take_pending_updates(sdk.instance_id.clone()).unwrap() {
@@ -816,6 +830,33 @@ fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_retur
             .is_err()
     );
     fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    FirstConflict {
+        fixture,
+        sdk,
+        id,
+        original,
+        server,
+        local_front,
+        remote_back,
+        bytes,
+        remote,
+    }
+}
+
+#[test]
+fn actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_return() {
+    let FirstConflict {
+        fixture,
+        sdk,
+        id,
+        original,
+        server,
+        local_front,
+        remote_back,
+        bytes,
+        remote,
+    } = first_conflict();
+    let collection = fixture.workflow.host.collection().unwrap();
     let first = fixture
         .workflow
         .begin_first_asset_read_pass(sdk.instance_id.clone())

@@ -87,8 +87,36 @@ impl Runtime {
         kind: AssetReadKind,
         command: Option<crate::cloud::policy::Command>,
     ) -> Result<AssetReadPass, RuntimeError> {
+        self.begin_asset_read_pass_owned_with_work(
+            sdk,
+            collection,
+            kind,
+            command,
+            &mut crate::cloud::policy::PolicyWork::default(),
+        )
+    }
+
+    pub fn begin_asset_read_pass_with_work(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        kind: AssetReadKind,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<AssetReadPass, RuntimeError> {
+        self.begin_asset_read_pass_owned_with_work(sdk, collection, kind, None, work)
+    }
+
+    pub(crate) fn begin_asset_read_pass_owned_with_work(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        kind: AssetReadKind,
+        command: Option<crate::cloud::policy::Command>,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<AssetReadPass, RuntimeError> {
         let guard = {
             let s = self.state();
+            work.check()?;
             Self::sdk_locked(&s, sdk)?;
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             ScanGuard {
@@ -100,13 +128,31 @@ impl Runtime {
                 incarnation: s.incarnation,
             }
         };
-        self.with_scan(&guard, collection, |s| {
+        #[cfg(feature = "test-hooks")]
+        {
+            // Observe the real shared gate without retaining it or changing
+            // with_scan's acquisition order. The following scan still waits
+            // there, and checks work only inside its acquired closure.
+            let contended = matches!(TRACKING_ACCESS.try_lock(), Err(std::sync::TryLockError::WouldBlock));
+            if contended {
+                self.incoming_hooks
+                    .hit(super::super::testing::IncomingStage::AssetReadPassTrackingContended);
+            }
+        }
+        let result = self.with_scan(&guard, collection, |s| {
+            // with_scan invokes this only after State authority validation and
+            // tracking acquisition. A waiter has not changed selection yet.
+            work.check()?;
             Self::sdk_locked(s, sdk)?;
             if s.actions.handler.is_some() || s.tracking_stopped {
                 return Err(Error::InvalidData.into());
             }
             // Only unstarted selections can be abandoned on authority change.
             // Enqueueing/accepted operations still own their original result.
+            work.effect()?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadPassEffect);
             s.incoming
                 .asset_reads
                 .retain(|_, read| read.phase != ReadPhase::Selected || (read.sdk == sdk && read.guard == guard));
@@ -136,7 +182,18 @@ impl Runtime {
                 },
             );
             Ok(pass)
-        })
+        });
+        #[cfg(feature = "test-hooks")]
+        if result.is_ok() {
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadPassCreated);
+        }
+        result
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn asset_read_pass_count_for_testing(&self) -> usize {
+        self.state().incoming.asset_passes.len()
     }
 
     /// Reserve at most one request. Until it is refused, cancelled or completed,

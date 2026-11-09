@@ -5,7 +5,11 @@ use crate::{
     cloud_policy::{CloudPolicy, CloudPolicyExecution, CloudPolicyOutput, operation_error_class},
     sync::{CloudRecord, CloudWorkflow, cloud_error},
 };
-use meguri_sync::cloud::{incoming as i, runtime::Runtime, workflow::FetchedRecord};
+use meguri_sync::cloud::{
+    incoming as i, policy as p,
+    runtime::{Runtime, RuntimeError},
+    workflow::FetchedRecord,
+};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -99,23 +103,15 @@ impl CloudWorkflow {
             .core
             .begin_asset_read_pass(&sdk, &collection, i::AssetReadKind::SaveConflictFirst)
             .map_err(cloud_error)?;
-        let activity = match self.core.asset_read_activity_guard(&pass) {
-            Ok(activity) => activity,
-            Err(error) => {
-                self.core.cancel_asset_read_pass(&pass);
-                return Err(cloud_error(error));
-            }
-        };
-        Ok(Arc::new(CloudAssetReadPass {
-            policy,
-            activity,
-            host: self.host.clone(),
-            core: self.core.clone(),
+        CloudAssetReadPass::created(
+            self.host.clone(),
+            self.core.clone(),
             collection,
             sdk,
-            execution: None,
+            None,
+            policy,
             pass,
-        }))
+        )
     }
 }
 
@@ -129,6 +125,75 @@ impl CloudPolicyExecution {
         let pass = driver
             .begin_native_asset_read_pass(command, &sdk, &collection)
             .map_err(cloud_error)?;
+        let policy = self.policy().clone();
+        CloudAssetReadPass::created(host, core, collection, sdk, Some(self), policy, pass)
+    }
+}
+
+// Only the work-aware creation path uses this mapping. Driver validation,
+// sdk_locked and tracking/member queries cannot return Engine::Cancelled;
+// NativeFiles returns FileIdentityUnavailable and publication has its own error.
+// Thus this variant here is the sampled PolicyWork rejection, never a fresh
+// token read over a later failure. Legacy synchronous refusals keep cloud_error.
+fn creation_error(error: RuntimeError) -> CoreError {
+    match error {
+        RuntimeError::Engine(meguri_engine::EngineError::Cancelled) => CoreError::Cancelled,
+        error => cloud_error(error),
+    }
+}
+
+impl CloudWorkflow {
+    pub(crate) fn begin_first_asset_read_pass_with_work(
+        &self,
+        sdk: String,
+        policy: Arc<CloudPolicy>,
+        work: &mut p::PolicyWork,
+    ) -> Result<Arc<CloudAssetReadPass>, CoreError> {
+        let collection = self.host.cloud_connection_collection()?;
+        let pass = self
+            .core
+            .begin_asset_read_pass_with_work(&sdk, &collection, i::AssetReadKind::SaveConflictFirst, work)
+            .map_err(creation_error)?;
+        CloudAssetReadPass::created(
+            self.host.clone(),
+            self.core.clone(),
+            collection,
+            sdk,
+            None,
+            policy,
+            pass,
+        )
+    }
+}
+
+impl CloudPolicyExecution {
+    pub(crate) fn begin_asset_read_pass_with_work(
+        self: Arc<Self>,
+        work: &mut p::PolicyWork,
+    ) -> Result<Arc<CloudAssetReadPass>, CoreError> {
+        let (host, core, collection, sdk) = self.asset_read_owner()?;
+        let (driver, command) = self.asset_read_driver()?;
+        let pass = driver
+            .begin_native_asset_read_pass_with_work(command, &sdk, &collection, work)
+            .map_err(|error| match error {
+                p::DriverError::Runtime(error) => creation_error(error),
+                error => cloud_error(error),
+            })?;
+        let policy = self.policy().clone();
+        CloudAssetReadPass::created(host, core, collection, sdk, Some(self), policy, pass)
+    }
+}
+
+impl CloudAssetReadPass {
+    fn created(
+        host: Arc<meguri_host::CoreHost>,
+        core: Arc<Runtime>,
+        collection: meguri_engine::Collection,
+        sdk: String,
+        execution: Option<Arc<CloudPolicyExecution>>,
+        policy: Arc<CloudPolicy>,
+        pass: i::AssetReadPass,
+    ) -> Result<Arc<Self>, CoreError> {
         let activity = match core.asset_read_activity_guard(&pass) {
             Ok(activity) => activity,
             Err(error) => {
@@ -136,15 +201,14 @@ impl CloudPolicyExecution {
                 return Err(cloud_error(error));
             }
         };
-        let policy = self.policy().clone();
-        Ok(Arc::new(CloudAssetReadPass {
+        Ok(Arc::new(Self {
             policy,
             activity,
             host,
             core,
             collection,
             sdk,
-            execution: Some(self),
+            execution,
             pass,
         }))
     }

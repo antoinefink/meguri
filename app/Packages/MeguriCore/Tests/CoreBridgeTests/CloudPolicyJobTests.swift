@@ -31,6 +31,157 @@ private func policyJobActions(_ value: MeguriCoreBindings.CloudPolicyOutput) thr
 }
 
 extension EventTests {
+    @Test(arguments: [false, true])
+    func policyAssetReadPassListenerFailureRetainsOriginalWorkAuthorityAfterClose(reopen: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let policy = try await assetExecutorPolicy(fixture)
+            let remote = try await AssetExecutorRemote.make(1)
+            let execution = try await assetExecutorRetryExecution(fixture, policy: policy, records: [remote])
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartBeginAssetReadPass) {
+                try raw.startBeginAssetReadPass()
+            }
+            // Observe the real completed pass before forcing listener setup
+            // failure, so cancellation must retain its issued resource.
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) {
+                try started.result.result()
+            })
+            let original = CoreCloudAssetReadPass(actual)
+            var other: CoreCloudAssetReadPass?
+            do {
+                let selected = try #require(try await original.next())
+                let attempted = Mutex<UInt64?>(nil)
+                let retained: MeguriCoreBindings.CloudAssetReadPass = try await retainCompletedPolicyResource(
+                    .cloudPolicyExecutionStartBeginAssetReadPass, result: .cloudPolicyAssetReadPassResult,
+                    attempted: { id in attempted.withLock { $0 = id } }, message: "retry pass listener setup",
+                    CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+                )
+                let recovered = CoreCloudAssetReadPass(retained)
+                // Ownership is checked by Rust against the actual selected
+                // work. Distinct UniFFI wrappers can still retain the same Arc.
+                let cancelled = try await recovered.cancel(selected.handle)
+                try await recovered.finish()
+                let sdk = try await fixture.engine().instanceID
+                let unrelated = try await fixture.core.beginFirstAssetReadPass(sdk: sdk)
+                other = unrelated
+                let foreignCancel = await Task { try await unrelated.cancel(selected.handle) }.result
+                try await unrelated.finish()
+                let observed = try await remote.observe()
+                _ = try await policy.status() // The failure drain released ordering.
+
+                _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+                let stale = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartBeginAssetReadPass) {
+                    try raw.startBeginAssetReadPass()
+                }
+                for await event in CoreEventStream.shared.events {
+                    if case .jobFinished(let id, _) = event.kind, id.rawValue == stale.handle.id { break }
+                }
+                let staleAttempt = Mutex<UInt64?>(nil)
+                await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                    let _: MeguriCoreBindings.CloudAssetReadPass = try await retainCompletedPolicyResource(
+                        .cloudPolicyExecutionStartBeginAssetReadPass, result: .cloudPolicyAssetReadPassResult,
+                        attempted: { id in staleAttempt.withLock { $0 = id } }, message: "stale retry pass listener setup",
+                        CloudPolicyJobValue(handle: stale.handle, read: { try stale.result.result() })
+                    )
+                }
+                try await fixture.adapter.stop()
+                try await fixture.collection.close()
+                if reopen {
+                    let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
+                        backupsDirectory: fixture.directory.appending(path: "backups"),
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                    try await fixture.collection.open(location, randomSeed: 115)
+                }
+                // Only the original typed cells are read after owner change.
+                // They must neither revalidate nor obtain a successor facade.
+                let reread = try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) {
+                    try started.result.result()
+                }
+                var rereadCancel: Result<Bool, any Error>?
+                if let reread {
+                    let rereadPass = CoreCloudAssetReadPass(reread)
+                    rereadCancel = await Task { try await rereadPass.cancel(selected.handle) }.result
+                    try await rereadPass.finish()
+                }
+                await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                    _ = try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) { try stale.result.result() }
+                }
+                if reopen { try await fixture.collection.close() }
+                #expect(reread != nil)
+                #expect(try rereadCancel?.get() == false)
+                #expect(selected.name == remote.record.name && selected.zone == fixture.zone && selected.kind == .retry)
+                #expect(cancelled && observed.ownedCount == 0 && observed.retryCount == 0 && observed.rowFields == nil)
+                #expect(attempted.withLock { $0 } == started.handle.id)
+                #expect(staleAttempt.withLock { $0 } == stale.handle.id)
+                #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+                #expect(try await CoreBridge.CancelToken(raw: stale.handle.cancel).isCancelled())
+                if case .failure(let error) = foreignCancel { #expect(error is BridgeError) }
+                else { Issue.record("A different pass accepted the original pass's work") }
+            } catch {
+                try? await other?.finish()
+                try? await original.finish()
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func policyFirstAssetReadPassListenerFailureRetainsCompletedEmptyPassAfterClose(reopen: Bool) async throws {
+        try await withCloudKitFixture { fixture in
+            let sdk = try await fixture.engine().instanceID
+            // Construct on the registered lane while the fixture's original
+            // Host is current; result reads retain only this workflow's cell.
+            let raw = try await MaintenanceLane.shared.call(.cloudWorkflowNew) { try MeguriCoreBindings.CloudWorkflow() }
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudWorkflowStartBeginFirstAssetReadPass) {
+                try raw.startBeginFirstAssetReadPass(sdk: sdk)
+            }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) {
+                try started.result.result()
+            }, "A completed empty pass is an object, not a pending result")
+            let original = CoreCloudAssetReadPass(actual)
+            do {
+                let initial = try await original.next()
+                let attempted = Mutex<UInt64?>(nil)
+                let retained: MeguriCoreBindings.CloudAssetReadPass = try await retainCompletedPolicyResource(
+                    .cloudWorkflowStartBeginFirstAssetReadPass, result: .cloudPolicyAssetReadPassResult,
+                    attempted: { id in attempted.withLock { $0 = id } }, message: "first pass listener setup",
+                    CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+                )
+                let recovered = CoreCloudAssetReadPass(retained)
+                let empty = try await recovered.next()
+                try await recovered.finish()
+                _ = try await fixture.core.policy().status()
+                try await fixture.adapter.stop()
+                try await fixture.collection.close()
+                if reopen {
+                    let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
+                        backupsDirectory: fixture.directory.appending(path: "backups"),
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                    try await fixture.collection.open(location, randomSeed: 115)
+                }
+                let reread = try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) {
+                    try started.result.result()
+                }
+                if reopen { try await fixture.collection.close() }
+                #expect(initial == nil && empty == nil)
+                #expect(reread != nil)
+                #expect(attempted.withLock { $0 } == started.handle.id)
+                #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            } catch {
+                try? await original.finish()
+                throw error
+            }
+        }
+    }
+
     @Test func policyOriginalOwnerMetadataSurvivesSuspendAndKeepsOrdinaryJobsCancelled() async throws {
         try await withCloudConnection { fixture in
             let policy = try await fixture.workflow.policy()

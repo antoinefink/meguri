@@ -1,6 +1,7 @@
 # meguri-ffi
 
 - Every export returns `Result<_, CoreError>` (a panic in a non-throwing export crashes Swift) and starts with `callback::enter("<name>")`. Object constructors too.
+- `#[uniffi::export]` requires an unqualified type name in an `impl`; import the type first. Qualified self paths fail macro expansion.
 - Call into Swift only through `callback::invoke`; no async foreign traits (KTD9). Event, progress, search and host delivery, and all other callbacks, never run while holding a lock.
 - Antoine approved only synchronous `HostClock` and `DiskSpaceProvider` value reads under core locks (`E-20261021T142014Z-9c3d`, 2026-10-21). Their trusted host implementations return bounded platform values, never reenter the core, and perform no UI or async work. Keep `callback::invoke` and reentry checks.
 - The exported surface is identical on every slice of one configuration: gate implementations with `cfg` inside a function, never an export, a signature or a record field. `build-core-xcframework.sh` compares the `uniffi_*` symbols and the bindings generated from each slice, and fails otherwise.

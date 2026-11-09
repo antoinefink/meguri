@@ -50,6 +50,12 @@ func assetExecutorPolicy(_ fixture: CloudKitBridgeFixture) async throws -> CoreC
 
 func assetExecutorRetryPass(_ fixture: CloudKitBridgeFixture, policy: CoreCloudPolicyService,
                             records: [AssetExecutorRemote]) async throws -> CoreCloudAssetReadPass {
+    let execution = try await assetExecutorRetryExecution(fixture, policy: policy, records: records)
+    return try await execution.beginAssetReadPass()
+}
+
+func assetExecutorRetryExecution(_ fixture: CloudKitBridgeFixture, policy: CoreCloudPolicyService,
+                                records: [AssetExecutorRemote]) async throws -> CoreCloudPolicyExecution {
     let sdk = try await fixture.engine().instanceID
     try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: records.map(\.record), deleted: [])
     let fetch = try await fixture.core.beginFetch(sdk: sdk, zones: [fixture.zone])
@@ -64,7 +70,7 @@ func assetExecutorRetryPass(_ fixture: CloudKitBridgeFixture, policy: CoreCloudP
     }
     let command = try #require(commands.first { if case .retryAssetEntries = $0.action { true } else { false } })
     let execution = try #require(try await policy.prepareExecution(command))
-    return try await execution.beginAssetReadPass()
+    return execution
 }
 
 /// A deterministic original terminal over an actual owned result. Cancellation

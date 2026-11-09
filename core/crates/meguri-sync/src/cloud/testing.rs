@@ -91,6 +91,10 @@ pub enum IncomingStage {
     PolicyMediaSelected,
     PolicyFetchBegun,
     PolicySendRetryCleared,
+    AssetReadPassEffect,
+    // Outside State/tracking ownership, before FFI activity-guard acquisition.
+    AssetReadPassCreated,
+    AssetReadPassTrackingContended,
     AdoptionIsolationPublished,
     AssetReadPrepared,
     AssetReadFinishing,

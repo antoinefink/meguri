@@ -35,9 +35,14 @@ public actor CoreCloudWorkflowService {
     /// Begin only after the original SDK handler has returned.
     public func beginFirstAssetReadPass(sdk: String) async throws -> CoreCloudAssetReadPass {
         let raw = try await owner()
-        return try await MaintenanceLane.shared.call(.cloudWorkflowBeginFirstAssetReadPass) {
-            CoreCloudAssetReadPass(try raw.beginFirstAssetReadPass(sdk: sdk))
+        let pass: MeguriCoreBindings.CloudAssetReadPass = try await CoreCloudPolicyService.runOrdered(
+            .cloudWorkflowStartBeginFirstAssetReadPass, result: .cloudPolicyAssetReadPassResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw, sdk] in
+            let started = try raw.startBeginFirstAssetReadPass(sdk: sdk)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
+        return CoreCloudAssetReadPass(pass)
     }
     func submitMediaBatch(sdk: String, batch: UInt64, queue: any CloudMediaQueue) async throws -> Bool {
         let raw = try await owner()

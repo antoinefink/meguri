@@ -9,9 +9,14 @@ struct CoreCloudPolicyExecution: Sendable {
     init(_ raw: MeguriCoreBindings.CloudPolicyExecution) { self.raw = raw }
     func beginAssetReadPass() async throws -> CoreCloudAssetReadPass {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudPolicyExecutionBeginAssetReadPass) {
-            CoreCloudAssetReadPass(try raw.beginAssetReadPass())
+        let pass: MeguriCoreBindings.CloudAssetReadPass = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartBeginAssetReadPass, result: .cloudPolicyAssetReadPassResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startBeginAssetReadPass()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
+        return CoreCloudAssetReadPass(pass)
     }
     func originalSDK() async throws -> String? {
         let raw = self.raw

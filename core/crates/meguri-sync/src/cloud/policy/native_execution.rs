@@ -10,13 +10,27 @@ impl Driver {
         sdk: &str,
         collection: &Collection,
     ) -> Result<AssetReadPass, DriverError> {
-        self.validate(command)?;
+        self.begin_native_asset_read_pass_with_work(command, sdk, collection, &mut PolicyWork::default())
+    }
+
+    pub fn begin_native_asset_read_pass_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        collection: &Collection,
+        work: &mut PolicyWork,
+    ) -> Result<AssetReadPass, DriverError> {
+        self.validate_with_work(command, work)?;
         if command.action.kind != ActionKind::RetryAssetEntries {
             return Err(DriverError::NotCoreAction);
         }
-        Ok(self
-            .runtime
-            .begin_asset_read_pass_owned(sdk, collection, AssetReadKind::Retry, Some(command.clone()))?)
+        Ok(self.runtime.begin_asset_read_pass_owned_with_work(
+            sdk,
+            collection,
+            AssetReadKind::Retry,
+            Some(command.clone()),
+            work,
+        )?)
     }
 
     pub fn next_native_asset_read(
