@@ -1064,7 +1064,7 @@ impl Runtime {
                     state.publish_authority();
                     #[cfg(feature = "test-hooks")]
                     self.incoming_hooks
-                        .hit(super::super::testing::IncomingStage::AccountIsolationPublished);
+                        .hit(crate::cloud::testing::IncomingStage::AccountIsolationPublished);
                     let store = state.store.as_mut().ok_or(Error::Database)?;
                     store.isolate_runtime_binding(id, reason)?;
                     let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;

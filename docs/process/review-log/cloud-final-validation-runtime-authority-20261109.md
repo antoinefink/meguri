@@ -40,3 +40,10 @@ Independent review of export `57877` finds no P0–P2 source issue. Privacy
 `67356` passes. Core `67076` stops at compilation: the new test-hook path
 in runtime.rs has one extra parent module. No focused test ran. Preserve
 this failed receipt; repair compilation before claiming any behavioral pass.
+
+Export `68039` corrects that module path. Core `68899` compiles and runs
+108 checks: 107 pass, including both unchanged held-lock regressions. One
+new lifecycle fixture reaches an SDK account event after resume while its
+binding is unverified and fails with IdentityUnverified. Mirror/state
+comparison passes before that event. Fixture setup review remains open;
+no behavioral or unit acceptance is claimed.
