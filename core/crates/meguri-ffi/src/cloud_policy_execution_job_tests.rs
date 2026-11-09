@@ -26,12 +26,13 @@ enum AdmissionKind {
     Send,
     NoCall,
     Invocation,
+    Started,
     Validate,
     ContinueFalse,
     ContinueQuota,
     Flush,
 }
-const ADMISSIONS: [AdmissionKind; 11] = [
+const ADMISSIONS: [AdmissionKind; 12] = [
     AdmissionKind::Register,
     AdmissionKind::Retire,
     AdmissionKind::Media,
@@ -39,6 +40,7 @@ const ADMISSIONS: [AdmissionKind; 11] = [
     AdmissionKind::Send,
     AdmissionKind::NoCall,
     AdmissionKind::Invocation,
+    AdmissionKind::Started,
     AdmissionKind::Validate,
     AdmissionKind::ContinueFalse,
     AdmissionKind::ContinueQuota,
@@ -103,9 +105,11 @@ impl AdmissionJob {
 }
 fn expected_value(kind: AdmissionKind) -> AdmissionValue {
     match kind {
-        AdmissionKind::Register | AdmissionKind::Retire | AdmissionKind::Invocation | AdmissionKind::Flush => {
-            AdmissionValue::Done
-        }
+        AdmissionKind::Register
+        | AdmissionKind::Retire
+        | AdmissionKind::Invocation
+        | AdmissionKind::Started
+        | AdmissionKind::Flush => AdmissionValue::Done,
         AdmissionKind::Validate => AdmissionValue::Control(true),
         AdmissionKind::ContinueFalse => AdmissionValue::Continuation(false),
         AdmissionKind::ContinueQuota => AdmissionValue::Continuation(true),
@@ -120,9 +124,31 @@ struct AdmissionTarget {
     execution: Arc<CloudPolicyExecution>,
     zones: Vec<String>,
 }
+// The synchronous API ignores failure/cancel/saved details for Started. Keep
+// supplying them intact; the job must preserve that behavior, not reinterpret it.
+fn full_started_facts() -> CloudPolicyOperationFacts {
+    CloudPolicyOperationFacts {
+        zones: vec![
+            CloudPolicyZone::Root,
+            CloudPolicyZone::Collection,
+            CloudPolicyZone::Media,
+        ],
+        kind: CloudPolicyOperationKind::Fetch,
+        started: true,
+        failed: true,
+        code: Some(7),
+        retry_after_ms: Some(4_321),
+        saved: 17,
+        app_cancelled: true,
+    }
+}
+
 fn admit(target: AdmissionTarget, kind: AdmissionKind) -> Result<AdmissionJob, CoreError> {
     let execution = target.execution;
     match kind {
+        AdmissionKind::Started => execution
+            .start_report_started(full_started_facts())
+            .map(AdmissionJob::Invocation),
         AdmissionKind::Validate => execution.start_validate_control().map(AdmissionJob::Control),
         AdmissionKind::ContinueFalse | AdmissionKind::ContinueQuota => execution
             .start_continue_media_after_send(Some(25))
@@ -631,6 +657,9 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
             let events = engine.stream().subscribe();
             let pool = hold_pool(&fixture);
             let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+            let before = fixture.workflow.core.adapter_guard();
+            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            let cycles_before = driver.state().cycles;
             let job = admit(execution.clone(), kind).unwrap();
             let pending = job.result();
             if replace {
@@ -642,6 +671,10 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
             drop(slot);
             drop(pool);
             let outcome = finished(&events, job.handle().id);
+            if !replace {
+                assert_eq!(fixture.workflow.core.adapter_guard(), before);
+                assert_eq!(driver.state().cycles, cycles_before);
+            }
             let retry = if replace {
                 None
             } else {
@@ -1188,63 +1221,53 @@ fn invocation_snapshot(output: Result<CloudPolicyOutput, CoreError>) -> Result<V
 
 #[test]
 fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_after_effect_cancel_close() {
-    for retire in [false, true] {
-        let mut baseline = None;
-        for asynchronous in [false, true] {
-            let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Invocation);
-            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
-            let pending_before = driver.state().status().pending;
-            let collection = fixture.workflow.host.collection().unwrap();
-            let added = meguri_engine::decks::add(&collection, "Started multizone pending deck".into()).unwrap();
-            fixture
-                .workflow
-                .await_tracking(collection.generation().0, added.seq.0)
-                .unwrap();
-            let engine = fixture.workflow.host.engine();
-            let events = engine.stream().subscribe();
-            let pool = hold_pool(&fixture);
-            let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
-            let token = cancel.clone();
-            let saw = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let observed = saw.clone();
-            let host = fixture.workflow.host.clone();
-            let runtime = fixture.workflow.core.clone();
-            // The second projection is reached only after the first zone's
-            // state publication. Rearm the existing Rust-only one-shot hook.
-            driver.set_projection_hook_for_testing(move || {
-                host.cloud_policy_driver()
-                    .unwrap()
-                    .set_projection_hook_for_testing(move || {
-                        observed.store(true, std::sync::atomic::Ordering::SeqCst);
-                        if let Some(token) = token.lock().unwrap().as_ref() {
-                            token.trigger();
-                        }
-                        if retire {
-                            runtime.retire_sdk(sdk.as_deref().unwrap(), false).unwrap();
-                        }
-                    });
-            });
-            let zones = vec![
-                CloudPolicyZone::Root,
-                CloudPolicyZone::Collection,
-                CloudPolicyZone::Media,
-            ];
-            let (job, output, outcome) = if asynchronous {
-                let job = target
-                    .execution
-                    .start_report_invocation(zones, CloudPolicyOperationKind::Fetch)
+    for generic in [false, true] {
+        for retire in [false, true] {
+            let mut baseline = None;
+            for asynchronous in [false, true] {
+                let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Invocation);
+                let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+                let pending_before = driver.state().status().pending;
+                let collection = fixture.workflow.host.collection().unwrap();
+                let added = meguri_engine::decks::add(&collection, "Started multizone pending deck".into()).unwrap();
+                fixture
+                    .workflow
+                    .await_tracking(collection.generation().0, added.seq.0)
                     .unwrap();
-                *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
-                drop(pool);
-                let outcome = finished(&events, job.handle.id);
-                let output = job.result.result().map(|value| value.expect("completed typed result"));
-                (Some(job), output, Some(outcome))
-            } else {
-                drop(pool);
-                (
-                    None,
-                    target.execution.operation_activity(CloudPolicyOperationFacts {
-                        zones,
+                let engine = fixture.workflow.host.engine();
+                let events = engine.stream().subscribe();
+                let pool = hold_pool(&fixture);
+                let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+                let token = cancel.clone();
+                let saw = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let observed = saw.clone();
+                let host = fixture.workflow.host.clone();
+                let runtime = fixture.workflow.core.clone();
+                // The second projection is reached only after the first zone's
+                // state publication. Rearm the existing Rust-only one-shot hook.
+                driver.set_projection_hook_for_testing(move || {
+                    host.cloud_policy_driver()
+                        .unwrap()
+                        .set_projection_hook_for_testing(move || {
+                            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                            if let Some(token) = token.lock().unwrap().as_ref() {
+                                token.trigger();
+                            }
+                            if retire {
+                                runtime.retire_sdk(sdk.as_deref().unwrap(), false).unwrap();
+                            }
+                        });
+                });
+                let zones = vec![
+                    CloudPolicyZone::Root,
+                    CloudPolicyZone::Collection,
+                    CloudPolicyZone::Media,
+                ];
+                let facts = if generic {
+                    full_started_facts()
+                } else {
+                    CloudPolicyOperationFacts {
+                        zones: zones.clone(),
                         kind: CloudPolicyOperationKind::Fetch,
                         started: true,
                         failed: false,
@@ -1252,53 +1275,70 @@ fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_a
                         retry_after_ms: None,
                         saved: 0,
                         app_cancelled: false,
-                    }),
-                    None,
-                )
-            };
-            let cycles = driver.state().cycles;
-            fixture.workflow.host.close().unwrap();
-            if !retire {
-                let CloudPolicyOutput::Commands { commands } = output.as_ref().expect("Started outputs") else {
-                    panic!("expected actual policy commands")
+                    }
                 };
-                assert!(commands.iter().any(|command| matches!(
-                    &command.action,
-                    CloudPolicyAction::StatusChanged { status } if status.pending == pending_before + 1
-                )));
-            }
-            let snapshot = invocation_snapshot(output);
-            assert!(saw.load(std::sync::atomic::Ordering::SeqCst));
-            if retire {
-                assert!(snapshot.is_err());
-            } else {
-                assert!(snapshot.as_ref().is_ok_and(|actions| !actions.is_empty()));
-                for zone in [p::Zone::Root, p::Zone::Collection, p::Zone::Media] {
-                    assert!(
-                        cycles
-                            .get(&p::Operation {
-                                zone,
-                                kind: p::OperationKind::Fetch
-                            })
-                            .unwrap()
-                            .active
-                    );
-                }
-            }
-            if let Some(job) = job {
-                let outcome = outcome.unwrap();
-                assert_eq!(matches!(outcome, JobOutcome::Failed { .. }), retire);
+                let (job, output, outcome) = if asynchronous {
+                    let job = if generic {
+                        target.execution.start_report_started(facts)
+                    } else {
+                        target
+                            .execution
+                            .start_report_invocation(zones, CloudPolicyOperationKind::Fetch)
+                    }
+                    .unwrap();
+                    *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+                    drop(pool);
+                    let outcome = finished(&events, job.handle.id);
+                    let output = job.result.result().map(|value| value.expect("completed typed result"));
+                    (Some(job), output, Some(outcome))
+                } else {
+                    drop(pool);
+                    (None, target.execution.operation_activity(facts), None)
+                };
+                let cycles = driver.state().cycles;
+                fixture.workflow.host.close().unwrap();
                 if !retire {
-                    assert_eq!(outcome, JobOutcome::Succeeded);
+                    let CloudPolicyOutput::Commands { commands } = output.as_ref().expect("Started outputs") else {
+                        panic!("expected actual policy commands")
+                    };
+                    assert!(commands.iter().any(|command| matches!(
+                        &command.action,
+                        CloudPolicyAction::StatusChanged { status } if status.pending == pending_before + 1
+                    )));
                 }
-                assert!(job.handle.cancel.requested());
-                let replacement = super::fixture();
-                let reread = invocation_snapshot(job.result.result().map(|value| value.unwrap()));
-                replacement.workflow.host.close().unwrap();
-                assert_eq!(reread, snapshot);
-                assert_eq!(baseline.as_ref().unwrap(), &(snapshot, cycles));
-            } else {
-                baseline = Some((snapshot, cycles));
+                let snapshot = invocation_snapshot(output);
+                assert!(saw.load(std::sync::atomic::Ordering::SeqCst));
+                if retire {
+                    assert!(snapshot.is_err());
+                } else {
+                    assert!(snapshot.as_ref().is_ok_and(|actions| !actions.is_empty()));
+                    for zone in [p::Zone::Root, p::Zone::Collection, p::Zone::Media] {
+                        assert!(
+                            cycles
+                                .get(&p::Operation {
+                                    zone,
+                                    kind: p::OperationKind::Fetch
+                                })
+                                .unwrap()
+                                .active
+                        );
+                    }
+                }
+                if let Some(job) = job {
+                    let outcome = outcome.unwrap();
+                    assert_eq!(matches!(outcome, JobOutcome::Failed { .. }), retire);
+                    if !retire {
+                        assert_eq!(outcome, JobOutcome::Succeeded);
+                    }
+                    assert!(job.handle.cancel.requested());
+                    let replacement = super::fixture();
+                    let reread = invocation_snapshot(job.result.result().map(|value| value.unwrap()));
+                    replacement.workflow.host.close().unwrap();
+                    assert_eq!(reread, snapshot);
+                    assert_eq!(baseline.as_ref().unwrap(), &(snapshot, cycles));
+                } else {
+                    baseline = Some((snapshot, cycles));
+                }
             }
         }
     }
@@ -1613,4 +1653,63 @@ fn native_admission_jobs_flush_cancel_at_original_writer_admission_prevents_firs
     assert!(pending.is_empty());
     original.unwrap();
     assert!(matches!(job.result.result(), Err(CoreError::Cancelled)));
+}
+
+#[test]
+fn generic_started_job_rejects_ended_and_keeps_original_error_precedence() {
+    let (fixture, _, target, _) = admission_fixture(AdmissionKind::Started);
+    let mut ended = full_started_facts();
+    ended.started = false;
+    assert!(matches!(
+        target.execution.clone().start_report_started(ended.clone()),
+        Err(CoreError::InvalidArgument { message }) if message == "started report requires Started facts"
+    ));
+    fixture.workflow.host.close().unwrap();
+    assert!(matches!(
+        target.execution.start_report_started(ended),
+        Err(CoreError::CloudPolicy {
+            failure: CloudPolicyFailure::Closed
+        })
+    ));
+}
+
+#[test]
+fn generic_started_job_rechecks_command_and_sdk_after_existing_pool_wait() {
+    for retire_sdk in [false, true] {
+        let (fixture, policy, target, sdk) = admission_fixture(AdmissionKind::Started);
+        let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let job = target
+            .execution
+            .clone()
+            .start_report_started(full_started_facts())
+            .unwrap();
+        assert!(matches!(job.result.result(), Ok(None)));
+        let successor = if retire_sdk {
+            fixture.workflow.retire_sdk(sdk.clone().unwrap(), false).unwrap();
+            fixture.workflow.release_sdk(sdk.unwrap()).unwrap();
+            Some(fixture.workflow.register_sdk(false).unwrap())
+        } else {
+            policy.clone().input(settings(false, true)).unwrap();
+            None
+        };
+        let expected = target
+            .execution
+            .operation_activity(full_started_facts())
+            .err()
+            .expect("original authority is stale");
+        let before = driver.state();
+        let backend = fixture.workflow.core.adapter_guard();
+        drop(pool);
+        let outcome = finished(&events, job.handle.id);
+        assert_eq!(driver.state(), before);
+        assert_eq!(fixture.workflow.core.adapter_guard(), backend);
+        if let Some(successor) = successor {
+            fixture.workflow.validate_sdk(successor.instance_id).unwrap();
+        }
+        fixture.workflow.host.close().unwrap();
+        assert!(matches!(outcome, JobOutcome::Failed { .. }));
+        assert!(matches!(job.result.result(), Err(error) if error == expected));
+    }
 }

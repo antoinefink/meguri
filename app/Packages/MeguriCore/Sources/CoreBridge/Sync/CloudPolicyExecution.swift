@@ -54,7 +54,8 @@ struct CoreCloudPolicyExecution: Sendable {
             return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
     }
-    func report(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind, started: Bool, error: (any Error)? = nil, saved: UInt64 = 0) async throws -> CloudPolicyOutput {
+    func report(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind, started: Bool, error: (any Error)? = nil, saved: UInt64 = 0,
+                trackStarted: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }) async throws -> CloudPolicyOutput {
         let raw = self.raw
         let failure = error as? CloudKitSDKOperationFailure
         let facts = MeguriCoreBindings.CloudPolicyOperationFacts(zones: zones.map(\.raw), kind: kind.raw,
@@ -70,9 +71,14 @@ struct CoreCloudPolicyExecution: Sendable {
             }
             return CloudPolicyOutput(value)
         }
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionOperationActivity) {
-            CloudPolicyOutput(try raw.operationActivity(facts: facts))
+        let value: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartReportStarted, result: .cloudPolicyOutputResult,
+            track: trackStarted, retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let job = try raw.startReportStarted(facts: facts)
+            return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
         }
+        return CloudPolicyOutput(value)
     }
     /// Started preparation belongs to the retained operation task. Final
     /// synchronous authorization follows this job and all event waits.

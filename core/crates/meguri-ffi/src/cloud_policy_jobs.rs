@@ -257,6 +257,29 @@ impl CloudPolicyExecution {
             result: Arc::new(CloudPolicyOutputResult { cell }),
         })
     }
+    /// Full Started facts only, on the ordinary pool with queued cancellation.
+    pub fn start_report_started(
+        self: Arc<Self>,
+        facts: CloudPolicyOperationFacts,
+    ) -> Result<CloudPolicyOutputJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_report_started");
+        self.policy().owns(&self.command)?;
+        if !facts.started {
+            return Err(CoreError::InvalidArgument {
+                message: "started report requires Started facts".into(),
+            });
+        }
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.report_started", move |_, work| {
+                self.operation_activity_with_work(facts, work)
+            })?;
+        Ok(CloudPolicyOutputJob {
+            handle,
+            result: Arc::new(CloudPolicyOutputResult { cell }),
+        })
+    }
     /// Actual Ended facts for this original execution only. This starts no SDK
     /// work and retains normal typed returns even when cancellation is requested.
     pub fn start_report_completion(
