@@ -47,3 +47,16 @@ new lifecycle fixture reaches an SDK account event after resume while its
 binding is unverified and fails with IdentityUnverified. Mirror/state
 comparison passes before that event. Fixture setup review remains open;
 no behavioral or unit acceptance is claimed.
+
+## Verified repair
+
+Independent review confirms the fixture mismatch. Export `70422` adds two
+pre-proof IdentityUnverified assertions, uses the existing scoped provider
+through refresh_identity, and preserves the original SDK event and every
+success assertion. It changes no production code or timing limit.
+
+Core `71254` passes all 108 selected checks, including both unchanged
+held-lock regressions and the durable isolation/readback cases. Lint `71531`
+and similarity pass. Earlier compilation and fixture failures remain retained.
+This completes the reviewed validation component only. Started reporting,
+full native invocation, V3.4 workflow evidence and batch acceptance remain open.

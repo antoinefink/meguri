@@ -1363,6 +1363,16 @@ fn native_authority_matches_actual_runtime_lifecycle_sdk_and_noops() {
                 ));
                 rig.host.engine().resume().unwrap();
                 check();
+                assert!(matches!(
+                    runtime.validate_sdk(&rig.sdk),
+                    Err(RuntimeError::IdentityUnverified)
+                ));
+                assert!(matches!(
+                    runtime.validate_native_sdk_for_testing(&rig.sdk),
+                    Err(RuntimeError::IdentityUnverified)
+                ));
+                runtime.refresh_identity().unwrap();
+                check();
                 runtime
                     .adapter_account(
                         Some(&rig.sdk),
