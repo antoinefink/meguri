@@ -459,6 +459,13 @@ pub struct CloudPublicationRequest {
     request: p::OwnRequest,
 }
 impl CloudPublicationRequest {
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(crate) fn selected_event(
+        &self,
+        reply: CloudPublicationResult,
+    ) -> Option<c::selected_observation::PublicationEvent> {
+        c::selected_observation::PublicationEvent::from_reply(&self.request, &reply.into())
+    }
     #[cfg(test)]
     pub(crate) fn retained_for_test(&self) -> &p::OwnRequest {
         &self.request

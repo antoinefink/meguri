@@ -969,6 +969,33 @@ fn active_request(fixture: &Fixture) -> (Arc<CloudConnection>, Arc<CloudPublicat
     let (connection, request, _) = active_request_with_epoch(fixture);
     (connection, request)
 }
+
+#[test]
+fn selected_reply_projection_retains_original_request_without_granting_commit_or_fresh_owner_proof() {
+    use c::selected_observation::{Missing, Proof, PublicationEvent};
+    let fixture = Fixture::new(keys());
+    let (connection, request) = active_request(&fixture);
+    let p::OwnOperation::Save { encrypted, .. } = &request.retained_for_test().operation else {
+        panic!("actual retained Active request")
+    };
+    let reply = CloudPublicationResult::Saved {
+        record: CloudControlRecord {
+            encrypted: Some(encrypted.clone()),
+            system_fields: vec![31, 41],
+        },
+    };
+    let expected = PublicationEvent::from_reply(request.retained_for_test(), &reply.clone().into()).unwrap();
+    assert_eq!(request.selected_event(reply.clone()), Some(expected.clone()));
+    assert!(request.selected_event(CloudPublicationResult::NotStarted).is_none());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let control = fixture.workflow.core.selected_control_for_testing(&collection).unwrap();
+    assert_eq!(control.status, Proof::Missing(Missing::OperationInProgress));
+    assert!(control.publication_done_active.is_none());
+    fixture.workflow.host.close().unwrap();
+    // Diagnostic projection can survive the old owner, but acceptance cannot.
+    assert_eq!(request.selected_event(reply.clone()), Some(expected));
+    assert!(connection.publication_result(request, reply).is_err());
+}
 fn active_request_with_epoch(
     fixture: &Fixture,
 ) -> (Arc<CloudConnection>, Arc<CloudPublicationRequest>, CloudControlRecord) {

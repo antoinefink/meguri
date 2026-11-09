@@ -23,7 +23,7 @@ import Foundation
     var missing: [Dependency] {
         let selected = program ?? (try? AgentHeader.read(originalHeaderBytes).program)
         return selected == .smoke || selected == nil ? [.recoveryInspector]
-            : [.epochInspector, .adoptionInspector, .peerApplyInspector, .selectedRecoveryInspector]
+            : [.peerApplyInspector, .selectedRecoveryInspector]
     }
     private(set) var userSteps: [String] = []
     private let admittedRun: AgentRunDirectory
@@ -180,7 +180,7 @@ import Foundation
                 // Both the app account reader and adapter use this factory.
                 // Its fresh result matches the frozen input before Core accepts
                 // identity; J2.2 preserves automatic SDK scheduling.
-                let factory = NativeCloudKitEngineFactory(database: database, accountResolver: { [self] in
+                let nativeFactory = NativeCloudKitEngineFactory(database: database, accountResolver: { [self] in
                     try await resolveAccount(container: container)
                 })
                 let stagingRoot = data.appendingPathComponent("cloud-native-staging", isDirectory: true)
@@ -192,6 +192,29 @@ import Foundation
                 let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
                 try admission.revalidate()
                 let workflow = CoreCloudWorkflowService()
+                let factory: any CloudKitEngineFactory
+                if program == .smoke { factory = nativeFactory }
+                else {
+                    factory = CloudKitSelectedSDKFactory(original: nativeFactory, beforeMake: { [self] configuration in
+                        _ = try retainedAdmission()
+                        let control = try await SelectedCloudControlInspection().current()
+                        let observations = try await workflow.observations()
+                        let kinds = Set(observations.compactMap { observation -> UInt8? in
+                            if case .reconcileKindCompleted(let kind, _) = observation { return kind }; return nil
+                        })
+                        guard kinds == Set(UInt8(1)...UInt8(9)), control.requiredScanComplete else { throw AgentFailure.execution }
+                        if program == .syncNowPhone {
+                            guard let originalRole else { throw AgentFailure.implementationMissing }
+                            let role = try await originalRole.validateOwned(generation: control.generation)
+                            guard !role.qChanged else { throw AgentFailure.execution }
+                        }
+                        _ = try retainedAdmission()
+                        let replacement = changes.events.last { event in
+                            if case .collectionReplaced = event.kind { return event.generation == control.generation }; return false
+                        }
+                        try evidence.admitSDK(origin: configuration.instanceID, control: control, replacement: replacement)
+                    }, failed: { [evidence] in evidence.fail() })
+                }
                 let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
                     factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
                     observeEvent: { [evidence] event in
@@ -225,7 +248,7 @@ import Foundation
             guard collection.state == .ready, !sync.operationFailed, let backend else { throw AgentFailure.execution }
             let local = try await inspection.cloud()
             guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
-            try evidence.setGeneration(collection.generation)
+            try evidence.setGeneration(collection.generation, selectedPublication: program != .smoke)
             try await resolveGeneratedRoles(collection)
             if program != .smoke {
                 guard let originalRole else { throw AgentFailure.implementationMissing }
@@ -248,11 +271,6 @@ import Foundation
             try observe(fact)
             return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact])]
         case .publish:
-            // The selected program additionally requires canonical control
-            // payloads from the original publication. Existing smoke proof
-            // exposes completion, not these payloads. Refuse before publishing
-            // until that observation is available, retaining the real preview.
-            if program != .smoke { throw AgentFailure.implementationMissing }
             guard let owner, let backend, let preview,
                   case .ready(let current, let summary) = owner.sync.preview,
                   CoreSmokeInspection.samePreview(preview, current) else { throw AgentFailure.execution }
@@ -277,7 +295,63 @@ import Foundation
             backend.watchPublication = false
             let fact = AgentFact(name: .stateSaved, count: completed.seq, engine: "engine1", operation: "p1")
             try observe(fact)
+            if program != .smoke {
+                let control = try await SelectedCloudControlInspection().current()
+                _ = try retainedAdmission()
+                try evidence.requireSelectedPublication(control)
+                try evidence.requireSelectedAdmission(current: completed, control: control)
+                let facts = try CloudKitSelectedSyncProof.controlFacts(control, generation: owner.generation)
+                for fact in facts { try observe(fact) }
+                return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact] + facts)]
+            }
             return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact])]
+        case .adopt:
+            guard program == .syncNowPhone, let owner, let preview, let originalRole,
+                  owner.state == .ready, owner.review == nil,
+                  case .ready(let current, let summary) = owner.sync.preview,
+                  CoreSmokeInspection.samePreview(preview, current) else { throw AgentFailure.execution }
+            try CloudKitSelectedSyncProof.requireReceiverPreview(summary)
+            let old = owner.generation
+            let before = changes.events.last?.seq ?? 0
+            try evidence.beginAdoption()
+            self.preview = nil
+            try Task.checkCancellation()
+            await owner.sync.confirmAdoption()
+            await owner.sync.waitForConnectionPreview()
+            await owner.sync.waitForReplacement()
+            await owner.waitForCloudActivation()
+            await owner.sync.prepareConnectionAuthority()
+            await owner.sync.waitForInputs()
+            _ = try retainedAdmission()
+            try Task.checkCancellation()
+            try changes.checkFailure()
+            // These barriers joined the original confirmation, replacement and
+            // activation. A refusal/failure has no future replacement to await.
+            // Generation changes reach owner and this sink in the same
+            // synchronous ChangeFanout delivery.
+            guard !owner.sync.operationFailed, owner.state == .ready,
+                  owner.generation > old, owner.sync.preview == nil, owner.sync.recovery == nil,
+                  let replaced = changes.events.first(where: { event in
+                      guard event.seq > before, event.generation == owner.generation,
+                            case .collectionReplaced = event.kind else { return false }
+                      return true
+                  }) else { throw AgentFailure.execution }
+            let control = try await SelectedCloudControlInspection().current()
+            let completed = try await inspection.cloud()
+            let role = try await originalRole.validateOwned(generation: control.generation)
+            _ = try retainedAdmission()
+            try Task.checkCancellation()
+            guard owner.state == .ready, owner.generation == replaced.generation, control.generation == owner.generation,
+                  !owner.sync.operationFailed, owner.sync.preview == nil, owner.sync.recovery == nil,
+                  completed.bindingUsable, completed.engine != nil, !role.qChanged,
+                  control.provenance == .retainedAdoption, control.activation == .proven,
+                  control.ownedBackup == .proven else { throw AgentFailure.execution }
+            try evidence.requireSelectedAdmission(current: completed, control: control)
+            var facts = try CloudKitSelectedSyncProof.controlFacts(control, generation: owner.generation)
+            facts.append(.init(name: .applied, count: owner.generation, operation: "owned-adoption-backup-activation"))
+            facts.append(.init(name: .localDurable, digest: CloudKitSmokeGeneratedInput.hex(role.noteDigest), operation: "original-n1-preserved"))
+            for fact in facts { try observe(fact) }
+            return [try await integrityCheck(owner), .init(name: .coordinatorResult, outcome: .pass, facts: facts)]
         case .addNote:
             guard let owner, owner.state == .ready, mutation == nil else { throw AgentFailure.execution }
             let types = try await CoreNotetypeService().notetypeNames()
@@ -453,11 +527,21 @@ import Foundation
             try observe(joined)
             return [integrity, .init(name: .coordinatorResult, outcome: .pass, facts: proof),
                     .init(name: .localDurability, outcome: .pass, facts: [joined])]
-        case .adopt, .edit, .observe:
-            // The original role is prepared at launch. Adoption still requires
-            // actual backup/activation/epoch evidence.
-            // Likewise no edit or readback can claim the missing role/apply
-            // provenance. These typed gaps are not user-owned setup steps.
+        case .edit:
+            guard program == .syncNowMac, let owner, let originalRole,
+                  owner.review == nil else { throw AgentFailure.execution }
+            _ = try retainedAdmission()
+            let edited = try await originalRole.fixedEdit(generation: owner.generation)
+            _ = try retainedAdmission()
+            guard edited.source == .userUndoable, edited.updatedNotes == 1,
+                  let revision = edited.localRevision, revision > 0 else { throw AgentFailure.execution }
+            let digest = CloudKitSmokeGeneratedInput.hex(edited.noteDigest)
+            let facts = [AgentFact(name: .localCommitted, count: edited.seq, digest: digest, operation: "n1"),
+                         AgentFact(name: .localDurable, count: revision, digest: digest, operation: "n1")]
+            for fact in facts { try observe(fact) }
+            return [.init(name: .localDurability, outcome: .pass, facts: facts)]
+        case .observe:
+            // Peer readback still requires durable apply provenance.
             throw AgentFailure.implementationMissing
         }
     }

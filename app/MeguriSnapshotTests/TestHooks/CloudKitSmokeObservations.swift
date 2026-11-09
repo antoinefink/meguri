@@ -16,6 +16,7 @@ import Foundation
         if let event = events.first(where: { $0.seq > seq && predicate($0) }) { return event }
         return try await stream.next(where: { $0.seq > seq && predicate($0) })
     }
+    func checkFailure() throws { try stream.checkFailure() }
     func finish() { ChangeFanout.shared.unsubscribe(self); stream.finish() }
 }
 

@@ -887,8 +887,27 @@ pub fn test_cloud_installed_sdk_owner() -> Result<Option<String>, CoreError> {
 #[path = "test_hooks_cloud_smoke.rs"]
 mod cloud_smoke;
 pub use cloud_smoke::{
-    CloudSmokeEntity, CloudSmokeObservation, SmokeBatchProof, SmokeIntegrityObservation, SmokeReviewImage,
+    CloudSelectedControlObservation, CloudSelectedMissing, CloudSelectedProof, CloudSelectedProvenance,
+    CloudSelectedPublicationEvent, CloudSelectedPublicationKind, CloudSelectedReplyOrigin, CloudSmokeEntity,
+    CloudSmokeObservation, SmokeBatchProof, SmokeIntegrityObservation, SmokeReviewImage,
 };
+
+#[uniffi::export]
+pub fn test_cloud_selected_control() -> Result<CloudSelectedControlObservation, CoreError> {
+    callback::enter("test_cloud_selected_control");
+    cloud_smoke::selected_control()
+}
+
+/// Projection only: the retained original request, never metadata reconstruction.
+/// This grants neither result acceptance nor production authority.
+#[uniffi::export]
+pub fn test_cloud_selected_publication_event(
+    request: Arc<crate::cloud_connection::CloudPublicationRequest>,
+    reply: crate::cloud_connection::CloudPublicationResult,
+) -> Result<Option<CloudSelectedPublicationEvent>, CoreError> {
+    callback::enter("test_cloud_selected_publication_event");
+    Ok(request.selected_event(reply).and_then(|v| v.try_into().ok()))
+}
 
 /// Inspect only an already committed batch, without building or sending one.
 #[uniffi::export]
@@ -926,7 +945,10 @@ pub fn test_cloud_smoke_observation(
 
 #[path = "test_hooks_cloud_original.rs"]
 mod cloud_original;
-pub use cloud_original::{CloudOriginalOwnedFacts, CloudOriginalRole, CloudOriginalRoleFacts};
+pub use cloud_original::{
+    CloudOriginalEditFacts, CloudOriginalEditJob, CloudOriginalEditResult, CloudOriginalOwnedFacts, CloudOriginalRole,
+    CloudOriginalRoleFacts,
+};
 
 /// Inspect only admitted, bounded original snapshot bytes. No native ID, path,
 /// SQL, expected observation or caller-provided success flag.
@@ -941,8 +963,25 @@ impl CloudOriginalRole {
         callback::enter("CloudOriginalRole.facts");
         Ok(self.facts_inner())
     }
+    pub fn start_fixed_edit(self: Arc<Self>) -> Result<CloudOriginalEditJob, CoreError> {
+        callback::enter("CloudOriginalRole.start_fixed_edit");
+        self.start_fixed_edit_inner()
+    }
     pub fn validate_owned(&self) -> Result<CloudOriginalOwnedFacts, CoreError> {
         callback::enter("CloudOriginalRole.validate_owned");
         self.validate_owned_inner()
+    }
+}
+
+#[uniffi::export]
+impl CloudOriginalEditResult {
+    pub fn result(&self) -> Result<Option<CloudOriginalEditFacts>, CoreError> {
+        callback::enter("CloudOriginalEditResult.result");
+        self.cell
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .transpose()
     }
 }

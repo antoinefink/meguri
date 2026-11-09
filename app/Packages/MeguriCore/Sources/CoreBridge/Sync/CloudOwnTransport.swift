@@ -525,9 +525,17 @@ public actor CloudOwnExecutor {
                 let reply = try await op.reply() // Rust has returned.
                 prepared = nil
                 guard case .publication(let result) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
-                emit(.replied(result))
+                var event: SelectedCloudPublicationEvent?
+                #if DEBUG
+                if observation != nil {
+                    // Await the diagnostic projection of this retained request
+                    // and original reply before accepting or advancing work.
+                    event = try? await SelectedCloudControlInspection.publicationEvent(request, reply: result)
+                }
+                #endif
+                observation?(.init(metadata: metadata, identity: identity, phase: .replied(result), publicationEvent: event))
                 try await core.publicationResult(request, result: result)
-                emit(.committed)
+                observation?(.init(metadata: metadata, identity: identity, phase: .committed, publicationEvent: event))
             } catch {
                 prepared = nil
                 // An absent reply remains durably uncertain. A terminal native

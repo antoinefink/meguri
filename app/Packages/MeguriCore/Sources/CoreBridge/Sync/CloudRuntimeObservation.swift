@@ -16,6 +16,25 @@ public struct CloudOwnObservation: Sendable {
     public let metadata: CloudOwnMetadata
     public let identity: UUID
     public let phase: CloudOwnObservationPhase
+    public let publicationEvent: SelectedCloudPublicationEvent?
+    init(metadata: CloudOwnMetadata, identity: UUID, phase: CloudOwnObservationPhase,
+         publicationEvent: SelectedCloudPublicationEvent? = nil) {
+        self.metadata = metadata; self.identity = identity; self.phase = phase
+        self.publicationEvent = publicationEvent
+    }
+}
+
+/// Content-free projection of an original reply. Present only when an observer
+/// requested capture in a test-hooks build; never used for ordinary decisions.
+public struct SelectedCloudPublicationEvent: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+    public enum Origin: Sendable, Equatable { case saved, conflict }
+    public enum Kind: Sendable, Equatable { case completeEpoch, doneActive }
+    public let origin: Origin
+    public let attempt: UInt64
+    public let kind: Kind
+    public let correlation: Data
+    public var description: String { "SelectedCloudPublicationEvent" }
+    public var debugDescription: String { description }
 }
 
 struct ObservedCloudPublicationQueue: CloudPublicationQueue {

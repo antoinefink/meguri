@@ -1,7 +1,183 @@
 //! Test-only observations; no fixture construction, writes or SDK admission.
 use crate::{CoreError, runtime, sync::cloud_error};
 use meguri_storage::{ReadRows, ReaderRole, RowKey};
+use meguri_sync::cloud::selected_observation as selected;
 use meguri_sync::cloud::{entity_codec as c, row_payload};
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum CloudSelectedMissing {
+    Unbound,
+    CurrentCollectionChanged,
+    AccountUnavailable,
+    BindingUnusable,
+    OperationInProgress,
+    ActiveUnavailable,
+    ControlsMismatch,
+    MissingAfterRestart,
+    PublicationNotCommitted,
+    AdoptionNotActivated,
+    ActivationUnavailable,
+    OwnedBackupUnavailable,
+}
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum CloudSelectedProof {
+    Proven,
+    Missing { reason: CloudSelectedMissing },
+}
+impl From<selected::Proof> for CloudSelectedProof {
+    fn from(v: selected::Proof) -> Self {
+        match v {
+            selected::Proof::Proven => Self::Proven,
+            selected::Proof::Missing(reason) => Self::Missing {
+                reason: match reason {
+                    selected::Missing::Unbound => CloudSelectedMissing::Unbound,
+                    selected::Missing::CurrentCollectionChanged => CloudSelectedMissing::CurrentCollectionChanged,
+                    selected::Missing::AccountUnavailable => CloudSelectedMissing::AccountUnavailable,
+                    selected::Missing::BindingUnusable => CloudSelectedMissing::BindingUnusable,
+                    selected::Missing::OperationInProgress => CloudSelectedMissing::OperationInProgress,
+                    selected::Missing::ActiveUnavailable => CloudSelectedMissing::ActiveUnavailable,
+                    selected::Missing::ControlsMismatch => CloudSelectedMissing::ControlsMismatch,
+                    selected::Missing::MissingAfterRestart => CloudSelectedMissing::MissingAfterRestart,
+                    selected::Missing::PublicationNotCommitted => CloudSelectedMissing::PublicationNotCommitted,
+                    selected::Missing::AdoptionNotActivated => CloudSelectedMissing::AdoptionNotActivated,
+                    selected::Missing::ActivationUnavailable => CloudSelectedMissing::ActivationUnavailable,
+                    selected::Missing::OwnedBackupUnavailable => CloudSelectedMissing::OwnedBackupUnavailable,
+                },
+            },
+        }
+    }
+}
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum CloudSelectedProvenance {
+    CurrentAcceptedActive,
+    RuntimeAcceptedPublication,
+    RetainedAdoption,
+}
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum CloudSelectedReplyOrigin {
+    Saved,
+    Conflict,
+}
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum CloudSelectedPublicationKind {
+    CompleteEpoch,
+    DoneActive,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudSelectedPublicationEvent {
+    pub origin: CloudSelectedReplyOrigin,
+    pub attempt: u64,
+    pub kind: CloudSelectedPublicationKind,
+    pub correlation: Vec<u8>,
+}
+impl TryFrom<selected::PublicationEvent> for CloudSelectedPublicationEvent {
+    type Error = ();
+    fn try_from(v: selected::PublicationEvent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            origin: match v.origin {
+                selected::ReplyOrigin::Saved => CloudSelectedReplyOrigin::Saved,
+                selected::ReplyOrigin::Conflict => CloudSelectedReplyOrigin::Conflict,
+            },
+            attempt: v.attempt,
+            kind: match v.kind {
+                meguri_sync::cloud::publication::OwnKind::SaveCompleteEpoch => {
+                    CloudSelectedPublicationKind::CompleteEpoch
+                }
+                meguri_sync::cloud::publication::OwnKind::SaveActive => CloudSelectedPublicationKind::DoneActive,
+                _ => return Err(()),
+            },
+            correlation: v.correlation.to_vec(),
+        })
+    }
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudSelectedControlObservation {
+    pub generation: u64,
+    pub status: CloudSelectedProof,
+    pub provenance: Option<CloudSelectedProvenance>,
+    pub publication_complete: Option<CloudSelectedPublicationEvent>,
+    pub publication_done_active: Option<CloudSelectedPublicationEvent>,
+    pub active_sha256: Option<Vec<u8>>,
+    pub epoch_sha256: Option<Vec<u8>>,
+    pub binding_matches_epoch: CloudSelectedProof,
+    pub activation: CloudSelectedProof,
+    pub owned_backup: CloudSelectedProof,
+    pub required_scan_complete: bool,
+}
+
+pub fn selected_control() -> Result<CloudSelectedControlObservation, CoreError> {
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| cloud_error("selected runtime absent"))?;
+    let collection = host.collection()?;
+    let generation = collection.generation();
+    let observed = core.selected_control_for_testing(&collection).map_err(cloud_error)?;
+    let status = core.status().map_err(cloud_error)?;
+    let scan = core.note_scan_proof();
+    let evidence = collection.open_evidence()?;
+    // Whole/note scan coverage belongs to this open generation and native file.
+    // Durable scan_drained is deliberately absent: it describes suspend.
+    let current_owner = matches!(
+        observed.status,
+        selected::Proof::Proven | selected::Proof::Missing(selected::Missing::OperationInProgress)
+    );
+    let scan_complete = current_owner
+        && status.stored_usable
+        && status.identity_verified
+        && !status.scan_required
+        && !status.scan_running
+        && !status.tracking_stopped
+        && status.scan_completed_this_open
+        && status.note_scan_completed_this_open
+        && status.generation == Some(generation)
+        && scan.as_ref().is_some_and(|p| {
+            p.snapshot_generation == generation
+                && (p.snapshot_native_file.device, p.snapshot_native_file.inode) == evidence.native_file
+                && p.receipt.identity().generation() == generation
+                && p.receipt.identity().native_file() == evidence.native_file
+                && p.receipt.through() >= p.snapshot_seq
+        });
+    let final_status = core.status().map_err(cloud_error)?;
+    let final_scan = core.note_scan_proof();
+    if !collection.is_current()
+        || collection.open_evidence()? != evidence
+        || core.selected_control_for_testing(&collection).map_err(cloud_error)? != observed
+        || final_status.generation != status.generation
+        || final_status.scan_required != status.scan_required
+        || final_status.scan_running != status.scan_running
+        || final_status.scan_completed_this_open != status.scan_completed_this_open
+        || final_status.note_scan_completed_this_open != status.note_scan_completed_this_open
+        || final_status.tracking_stopped != status.tracking_stopped
+        || final_status.stored_usable != status.stored_usable
+        || final_status.identity_verified != status.identity_verified
+        || scan
+            .as_ref()
+            .map(|p| (p.snapshot_generation, p.snapshot_native_file, p.snapshot_seq, p.receipt))
+            != final_scan
+                .as_ref()
+                .map(|p| (p.snapshot_generation, p.snapshot_native_file, p.snapshot_seq, p.receipt))
+    {
+        return Err(cloud_error("selected current owner changed"));
+    }
+    Ok(CloudSelectedControlObservation {
+        generation: generation.0,
+        status: observed.status.into(),
+        provenance: observed.provenance.map(|p| match p {
+            selected::Provenance::CurrentAcceptedActive => CloudSelectedProvenance::CurrentAcceptedActive,
+            selected::Provenance::RuntimeAcceptedPublication => CloudSelectedProvenance::RuntimeAcceptedPublication,
+            selected::Provenance::RetainedAdoption => CloudSelectedProvenance::RetainedAdoption,
+        }),
+        publication_complete: observed.publication_complete.and_then(|v| v.try_into().ok()),
+        publication_done_active: observed.publication_done_active.and_then(|v| v.try_into().ok()),
+        active_sha256: observed.active_sha256.map(|v| v.to_vec()),
+        epoch_sha256: observed.epoch_sha256.map(|v| v.to_vec()),
+        binding_matches_epoch: observed.binding_matches_epoch.into(),
+        activation: observed.activation.into(),
+        owned_backup: observed.owned_backup.into(),
+        required_scan_complete: scan_complete,
+    })
+}
 
 #[derive(Clone, uniffi::Record)]
 pub struct SmokeIntegrityObservation {

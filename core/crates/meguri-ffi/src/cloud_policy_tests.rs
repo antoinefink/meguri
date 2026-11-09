@@ -1115,6 +1115,82 @@ fn policy_initial_automatic_bound_unverified_resume_waits_for_account_and_reconc
 }
 
 #[test]
+fn selected_bootstrap_held_required_scan_prevents_new_native_sdk_admission() {
+    let provider = Arc::new(ProjectionCountingAccount(AtomicUsize::new(0)));
+    let (fixture, _) = unbound_fixture(provider);
+    let (sdk, _, _) = fixture.baseline();
+    fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+    fixture.workflow.release_sdk(sdk.instance_id).unwrap();
+    let engine = fixture.workflow.host.engine();
+    assert_eq!(
+        engine.suspend(Duration::from_secs(5)).unwrap(),
+        meguri_engine::SuspendOutcome::Suspended
+    );
+    engine.resume().unwrap();
+    let policy = fixture.workflow.policy().unwrap();
+    drain(&policy, policy.clone().input(settings(false)).unwrap());
+    drain(&policy, policy.clone().refresh_account().unwrap());
+    let runtime = &fixture.workflow.core;
+    let collection = fixture.workflow.host.collection().unwrap();
+    let media = fixture.workflow.host.media().unwrap();
+    std::thread::scope(|threads| {
+        let (reached, wait) = std::sync::mpsc::channel();
+        let (resume, go) = std::sync::mpsc::channel();
+        runtime
+            .arm_note_scan_pause_for_testing(r::ScanPausePoint::BeforeSnapshot, reached, go)
+            .unwrap();
+        let scan = threads.spawn(|| runtime.reconcile_binding(&collection, &media, Duration::from_secs(5)));
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        let status = runtime.status().unwrap();
+        assert!(status.scan_required && status.scan_running && !status.scan_completed_this_open);
+        assert!(runtime.note_scan_proof().is_none());
+        assert!(fixture.workflow.register_sdk(false).is_err());
+        let output = commands(
+            policy
+                .clone()
+                .input(CloudPolicyEvent::Refresh {
+                    cause: CloudPolicyChangeCause::Cloud,
+                })
+                .unwrap(),
+        );
+        assert!(
+            output
+                .iter()
+                .all(|c| matches!(c.action, CloudPolicyAction::StatusChanged { .. }))
+        );
+        drain(&policy, CloudPolicyOutput::Commands { commands: output });
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        resume.send(()).unwrap();
+        scan.join().unwrap().unwrap();
+    });
+    let status = runtime.status().unwrap();
+    assert!(!status.scan_required && !status.scan_running && status.scan_completed_this_open);
+    assert!(status.note_scan_completed_this_open);
+    let proof = runtime.note_scan_proof().unwrap();
+    assert_eq!(proof.snapshot_generation, collection.generation());
+    assert_eq!(proof.receipt.identity().generation(), collection.generation());
+    assert_eq!(
+        proof.receipt.identity().native_file(),
+        collection.open_evidence().unwrap().native_file
+    );
+    assert!(proof.receipt.through() >= proof.snapshot_seq);
+    let start = select(
+        &policy,
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Refresh {
+                cause: CloudPolicyChangeCause::Cloud,
+            })
+            .unwrap(),
+        |a| matches!(a, CloudPolicyAction::StartEngine { .. }),
+    );
+    let execution = policy.clone().prepare_execution(start.handle).unwrap().unwrap();
+    let sdk = execution.register_sdk().unwrap();
+    fixture.workflow.validate_sdk(sdk.instance_id).unwrap();
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
 fn policy_initial_automatic_scan_configuration_requires_current_non_stopping_sdk() {
     for engine in 0..3 {
         let (fixture, sdk, _) = rig();

@@ -14,6 +14,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         let kind: String
         var phase = 0
         var result: CloudPublicationResult?
+        var publicationEvent: SelectedCloudPublicationEvent?
+        var committedAt: UInt64?
     }
     private struct Callback {
         let alias: String
@@ -41,6 +43,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     }
     private struct State {
         var failed = false
+        var selectedPublication = false
         var generation: UInt64?
         var origin: String?
         var tick: UInt64 = 0
@@ -51,6 +54,9 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var lastOrdinal: UInt64 = 0
         var held: Held?
         var stateCommits: [UInt64] = []
+        var adoptingFrom: UInt64?
+        var retiredGenerations: Set<UInt64> = []
+        var sdkAdmissions: [String: UInt64] = [:]
         mutating func append(_ name: AgentFact.Name, _ label: String, engine: Bool = false) {
             guard tick < 4096 else { failed = true; return }
             tick += 1
@@ -62,15 +68,55 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         }
     }
     private let state = Mutex(State())
-    func setGeneration(_ generation: UInt64) throws {
+    func setGeneration(_ generation: UInt64, selectedPublication: Bool = false) throws {
         try state.withLock {
             guard $0.generation == nil else { throw AgentFailure.execution }
             $0.generation = generation
+            $0.selectedPublication = selectedPublication
         }
     }
     func fail() { state.withLock { $0.failed = true } }
     func check() throws { try state.withLock { if $0.failed { throw AgentFailure.execution } } }
     func drain() -> [AgentFact] { state.withLock { let facts = $0.facts; $0.facts.removeAll(); return facts } }
+
+    func beginAdoption() throws {
+        try state.withLock { s in
+            guard !s.failed, let generation = s.generation, s.adoptingFrom == nil,
+                  s.origin == nil, s.callbacks.isEmpty, s.batches.isEmpty,
+                  s.own.values.allSatisfy({ $0.phase == 4 }) else { throw AgentFailure.execution }
+            s.adoptingFrom = generation
+        }
+    }
+    // Called at the actual factory boundary after current-Host control/scan and
+    // independently retained original-role validation. No reset or caller-selected generation.
+    func admitSDK(origin: String, control: SelectedCloudControlObservation, replacement: CoreEvent?) throws {
+        try state.withLock { s in
+            guard !s.failed, control.requiredScanComplete, s.sdkAdmissions[origin] == nil else { throw AgentFailure.execution }
+            if let old = s.adoptingFrom {
+                guard s.generation == old, control.generation > old,
+                      control.status == .proven, control.provenance == .retainedAdoption,
+                      control.bindingMatchesEpoch == .proven, control.activation == .proven, control.ownedBackup == .proven,
+                      let replacement, replacement.generation == control.generation,
+                      case .collectionReplaced = replacement.kind,
+                      s.origin == nil, s.callbacks.isEmpty, s.batches.isEmpty,
+                      s.own.values.allSatisfy({ $0.phase == 4 }) else { throw AgentFailure.execution }
+                s.retiredGenerations.insert(old)
+                s.generation = control.generation
+                s.adoptingFrom = nil
+                s.append(.applied, "normal-adoption-generation-joined")
+            }
+            guard s.generation == control.generation, !s.retiredGenerations.contains(control.generation) else { throw AgentFailure.execution }
+            s.sdkAdmissions[origin] = control.generation
+            s.append(.applied, "required-scan-before-native-sdk")
+        }
+    }
+    func requireSelectedAdmission(current: SmokeCloudObservation, control: SelectedCloudControlObservation) throws {
+        try state.withLock { s in
+            guard !s.failed, s.adoptingFrom == nil, control.requiredScanComplete,
+                  current.generation == control.generation, current.generation == s.generation,
+                  let origin = current.engine, s.sdkAdmissions[origin] == current.generation else { throw AgentFailure.execution }
+        }
+    }
 
     func own(_ observation: CloudOwnObservation) {
         state.withLock { s in
@@ -97,19 +143,28 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                     case ("createZones", .zonesCreated), ("saveMediaRoot", .saved), ("saveMediaRoot", .conflict),
                          ("savePublishingEpoch", .saved), ("saveCompleteEpoch", .saved),
                          ("saveActive", .saved), ("readOwnEpoch", .read), ("readResetMediaRoot", .read): break
+                    case ("saveCompleteEpoch", .conflict), ("saveActive", .conflict):
+                        guard s.selectedPublication, let event = observation.publicationEvent,
+                              event.origin == .conflict, event.attempt == own.attempt,
+                              event.correlation.count == 32,
+                              event.kind == (kind == "saveCompleteEpoch" ? .completeEpoch : .doneActive) else {
+                            throw AgentFailure.execution
+                        }
                     default: throw AgentFailure.execution
                     }
                     // Keep the actual typed reply, including the server's opaque
                     // media root. Only the original Core call validates it.
                     own.result = result
+                    own.publicationEvent = observation.publicationEvent
                     expected = 2; suffix = "replied"
                 case .committed:
-                    guard own.result != nil else { throw AgentFailure.execution }
+                    guard own.result != nil, own.publicationEvent == observation.publicationEvent else { throw AgentFailure.execution }
                     expected = 3; suffix = "committed"
                 }
                 guard own.phase == expected else { throw AgentFailure.execution }
                 own.phase += 1; s.own[observation.identity] = own
                 s.append(expected == 3 ? .stateSaved : .applied, own.alias + "-" + suffix)
+                if expected == 3 { own.committedAt = s.tick; s.own[observation.identity] = own }
             } catch { s.failed = true }
         }
     }
@@ -120,6 +175,23 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                   completed.publicationComplete, completed.bindingUsable, completed.engine != nil,
                   s.own.values.allSatisfy({ $0.operation == id && $0.phase == 4 }),
                   Set(s.own.values.map(\.kind)).isSuperset(of: ["createZones", "saveMediaRoot", "savePublishingEpoch", "saveCompleteEpoch", "saveActive"]) else { throw AgentFailure.execution }
+        }
+    }
+    func requireSelectedPublication(_ control: SelectedCloudControlObservation) throws {
+        try state.withLock { s in
+            guard !s.failed, s.selectedPublication, control.generation == s.generation, control.status == .proven,
+                  control.provenance == .runtimeAcceptedPublication,
+                  let complete = control.publicationComplete, complete.kind == .completeEpoch,
+                  let done = control.publicationDoneActive, done.kind == .doneActive,
+                  complete.correlation.count == 32, done.correlation.count == 32 else { throw AgentFailure.execution }
+            var committed: [UInt64] = []
+            for event in [complete, done] {
+                let joined = s.own.values.filter { $0.phase == 4 && $0.publicationEvent == event && $0.attempt == event.attempt }
+                guard joined.count == 1, let own = joined.first, let at = own.committedAt,
+                      own.kind == (event.kind == .completeEpoch ? "saveCompleteEpoch" : "saveActive") else { throw AgentFailure.execution }
+                committed.append(at)
+            }
+            guard committed[0] < committed[1] else { throw AgentFailure.execution }
         }
     }
 

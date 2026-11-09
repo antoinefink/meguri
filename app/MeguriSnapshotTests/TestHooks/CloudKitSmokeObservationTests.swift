@@ -194,6 +194,48 @@ import Testing
             #expect(!evidence.drain().contains { $0.operation == "own1-saveMediaRoot-committed" })
         }
     }
+    @Test func selectedControlConflictsRequireTypedOriginAttemptKindAndOriginalCommit() throws {
+        for target in [CloudOwnKind.saveCompleteEpoch, .saveActive] {
+            let eventKind: SelectedCloudPublicationEvent.Kind = target == .saveCompleteEpoch ? .completeEpoch : .doneActive
+            for variant in 0..<6 {
+                let evidence = CloudKitSmokeEvidence()
+                try evidence.setGeneration(11, selectedPublication: true)
+                let kinds: [CloudOwnKind] = [.createZones, .saveMediaRoot, .savePublishingEpoch, .saveCompleteEpoch, .saveActive]
+                for kind in kinds {
+                    let identity = UUID()
+                    let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: kind)
+                    let event = kind == target && variant != 5 ? SelectedCloudPublicationEvent(
+                        origin: variant == 2 ? .saved : .conflict,
+                        attempt: variant == 3 ? 5 : 4,
+                        kind: variant == 4 ? (eventKind == .completeEpoch ? .doneActive : .completeEpoch) : eventKind,
+                        correlation: Data(repeating: 41, count: 32)) : nil
+                    let reply: CloudPublicationResult = kind == target ? .conflict(controlRecord)
+                        : (kind == .createZones ? .zonesCreated : .saved(controlRecord))
+                    for phase in [CloudOwnObservationPhase.prepared, .enqueued(true), .replied(reply)] {
+                        evidence.own(.init(metadata: metadata, identity: identity, phase: phase,
+                            publicationEvent: { if case .replied = phase { return event }; return nil }()))
+                    }
+                    if kind != target || variant != 1 {
+                        evidence.own(.init(metadata: metadata, identity: identity, phase: .committed, publicationEvent: event))
+                    }
+                }
+                switch variant {
+                case 0:
+                    try evidence.check()
+                    // Only the phase join is proven here. Runtime still must
+                    // correlate both events with actual final Core controls.
+                    try evidence.requirePublication(Data([1]), completed: current())
+                case 1:
+                    try evidence.check()
+                    #expect(throws: AgentFailure.execution) { try evidence.requirePublication(Data([1]), completed: current()) }
+                    #expect(!evidence.drain().contains { $0.operation?.contains(target == .saveCompleteEpoch ? "saveCompleteEpoch-committed" : "saveActive-committed") == true })
+                default:
+                    #expect(throws: AgentFailure.execution) { try evidence.check() }
+                }
+            }
+        }
+    }
+
     @Test func sdkStateSaveRequiresOriginalDeliveryCommitAndReturnWithoutOpaqueFacts() throws {
         let valid = try ledger()
         stateCallback(valid)

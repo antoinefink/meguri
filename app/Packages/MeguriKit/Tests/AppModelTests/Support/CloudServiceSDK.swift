@@ -13,6 +13,8 @@ actor ServiceSDKFactory: CloudKitEngineFactory {
     private(set) var engines: [ServiceSDK] = []
     init(wire: ServiceWorkflowWire) { self.wire = wire }
     private var nextAccountRead: (@Sendable () async -> Void)?
+    private var observeCreation: (@Sendable (CloudEngineConfiguration) async throws -> Void)?
+    func inspectCreation(_ inspect: @escaping @Sendable (CloudEngineConfiguration) async throws -> Void) { observeCreation = inspect }
     private(set) var accountReadCount = 0
     func holdNextAccountRead(_ hold: @escaping @Sendable () async -> Void) { nextAccountRead = hold }
     func resolveAccount() async throws -> CloudResolvedAccount? {
@@ -22,6 +24,7 @@ actor ServiceSDKFactory: CloudKitEngineFactory {
         return .init(status: .available, identity: Data("synthetic-initial-account".utf8))
     }
     func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
+        try await observeCreation?(configuration)
         let engine = try ServiceSDK(configuration: configuration, delegate: delegate, wire: wire)
         engines.append(engine)
         return engine

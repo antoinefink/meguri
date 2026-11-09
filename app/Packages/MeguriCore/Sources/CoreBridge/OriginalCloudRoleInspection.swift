@@ -28,6 +28,21 @@ public struct OriginalCloudOwnedFacts: Sendable {
     public let qChanged: Bool
 }
 
+public struct OriginalCloudEditFacts: Sendable {
+    public let generation: UInt64
+    public let seq: UInt64
+    public let noteDigest: Data
+    public let localRevision: UInt64?
+    public let source: OpSource
+    public let undoName: String?
+    public let updatedNotes: UInt32
+    internal init(_ r: MeguriCoreBindings.CloudOriginalEditFacts) {
+        generation = r.generation; seq = r.seq; noteDigest = r.noteDigest
+        localRevision = r.localRevision; source = OpSource(r.source)
+        undoName = r.undoName; updatedNotes = r.updatedNotes
+    }
+}
+
 // The caller retains verified-source authority through each await. Rust retains
 // the full canonical baseline and all native identities behind this handle.
 public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugStringConvertible {
@@ -46,6 +61,25 @@ public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugSt
             try OriginalCloudRoleFacts(raw.facts())
         }
         return OriginalCloudRoleInspection(raw: raw, facts: facts)
+    }
+    public func fixedEdit() async throws -> OriginalCloudEditFacts {
+        let raw = raw
+        try await CoreEventStream.shared.start()
+        let started = try await InteractiveLane.shared.call(.cloudOriginalRoleStartFixedEdit) {
+            try raw.startFixedEdit()
+        }
+        let job = try await Jobs.trackDraining(started.handle)
+        let outcome = await job.outcome()
+        let result = try await InteractiveLane.shared.call(.cloudOriginalEditResult) {
+            try started.result.result().map(OriginalCloudEditFacts.init)
+        }
+        switch outcome {
+        case .succeeded:
+            guard let result else { throw BridgeError.internal("Original edit completed without its typed result") }
+            return result
+        case .cancelled: throw BridgeError.cancelled
+        case .failed(let error): throw error
+        }
     }
     public func validateOwned() async throws -> OriginalCloudOwnedFacts {
         let raw = raw

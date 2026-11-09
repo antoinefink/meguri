@@ -1,7 +1,18 @@
 #if DEBUG && MEGURI_TEST_HOOKS
 import CoreBridge
+import Foundation
 
 nonisolated enum CloudKitSelectedSyncProof {
+    static func controlFacts(_ control: SelectedCloudControlObservation, generation: UInt64) throws -> [AgentFact] {
+        guard control.generation == generation, control.status == .proven,
+              control.bindingMatchesEpoch == .proven, control.requiredScanComplete,
+              let active = control.activeSHA256, active.count == 32,
+              let epoch = control.epochSHA256, epoch.count == 32 else { throw AgentFailure.execution }
+        return [.init(name: .applied, digest: CloudKitSmokeGeneratedInput.hex(active), operation: "canonical-active"),
+                .init(name: .applied, digest: CloudKitSmokeGeneratedInput.hex(epoch), operation: "canonical-complete-epoch"),
+                .init(name: .applied, count: generation, operation: "binding-matches-epoch"),
+                .init(name: .applied, count: generation, operation: "required-scan-native-sdk-admitted")]
+    }
     static func requireReceiverPreview(_ summary: CloudConnectionSummary) throws {
         guard summary.localCollectionPresent, !summary.initialAdoptionRequired, !summary.localEmpty,
               summary.decision == .chooseCollection || summary.decision == .confirmAdoption,
@@ -28,6 +39,27 @@ nonisolated enum CloudKitSelectedSyncProof {
             if let count { facts.append(.init(name: .syncResult, count: count, operation: label)) }
         }
         return facts
+    }
+}
+
+// Wrap only the existing native factory. The retained normal adapter's actual
+// makeEngine call supplies the SDK identity after Core registration and scan.
+nonisolated final class CloudKitSelectedSDKFactory: CloudKitEngineFactory {
+    private let original: any CloudKitEngineFactory
+    private let beforeMake: @MainActor @Sendable (CloudEngineConfiguration) async throws -> Void
+    private let failed: @Sendable () -> Void
+    init(original: any CloudKitEngineFactory,
+         beforeMake: @escaping @MainActor @Sendable (CloudEngineConfiguration) async throws -> Void,
+         failed: @escaping @Sendable () -> Void) {
+        self.original = original; self.beforeMake = beforeMake; self.failed = failed
+    }
+    func accountChanges() async -> AsyncStream<Void>? { await original.accountChanges() }
+    func resolveAccount() async throws -> CloudResolvedAccount? { try await original.resolveAccount() }
+    func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
+        do {
+            try await beforeMake(configuration)
+            return try await original.makeEngine(configuration: configuration, delegate: delegate)
+        } catch { failed(); throw error }
     }
 }
 #endif

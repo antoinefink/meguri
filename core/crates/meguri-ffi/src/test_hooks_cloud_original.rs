@@ -8,7 +8,10 @@ use meguri_sync::cloud::{
     row_payload::{self, View},
 };
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 fn invalid() -> CoreError {
     CoreError::Internal {
@@ -39,6 +42,7 @@ pub struct CloudOriginalOwnedFacts {
     pub q_changed: bool,
 }
 
+#[derive(Clone)]
 struct Baseline {
     note: c::Note,
     layout: c::Notetype,
@@ -52,6 +56,34 @@ struct Baseline {
 pub struct CloudOriginalRole {
     baseline: Baseline,
     facts: CloudOriginalRoleFacts,
+    edit: Mutex<EditState>,
+    owner: Mutex<Option<(std::sync::Weak<meguri_host::CoreHost>, meguri_engine::Generation)>>,
+}
+#[derive(Default)]
+struct EditState {
+    attempted: bool,
+    // Actual executor result, including native change keys, stays in Rust.
+    committed: Option<meguri_engine::OpResult<(meguri_engine::notes::Updated, i64)>>,
+    facts: Option<CloudOriginalEditFacts>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudOriginalEditFacts {
+    pub generation: u64,
+    pub seq: u64,
+    pub note_digest: Vec<u8>,
+    pub local_revision: Option<u64>,
+    pub source: crate::changes::OpSource,
+    pub undo_name: Option<String>,
+    pub updated_notes: u32,
+}
+#[derive(uniffi::Object)]
+pub struct CloudOriginalEditResult {
+    pub(crate) cell: Arc<crate::cloud_policy::policy_jobs::Cell<CloudOriginalEditFacts>>,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudOriginalEditJob {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<CloudOriginalEditResult>,
 }
 impl std::fmt::Debug for CloudOriginalRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -77,7 +109,12 @@ pub fn inspect(main: Vec<u8>, wal: Option<Vec<u8>>) -> Result<Arc<CloudOriginalR
     let id = first.first().ok_or_else(invalid)?.id;
     let baseline = capture(&snapshot, id)?;
     let facts = baseline.facts(&main, wal.as_deref())?;
-    Ok(Arc::new(CloudOriginalRole { baseline, facts }))
+    Ok(Arc::new(CloudOriginalRole {
+        baseline,
+        facts,
+        edit: Mutex::new(EditState::default()),
+        owner: Mutex::new(None),
+    }))
 }
 
 fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
@@ -298,11 +335,170 @@ impl CloudOriginalRole {
         let snapshot = checked(reader.snapshot())?;
         let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
         let changed = self.baseline.compare(&current)?;
+        let mut owner = self.owner.lock().unwrap_or_else(PoisonError::into_inner);
+        if owner.is_none() {
+            *owner = Some((Arc::downgrade(&host), snapshot.generation()));
+        }
         Ok(CloudOriginalOwnedFacts {
             generation: snapshot.generation().0,
             seq: snapshot.seq().0,
             note_digest: checked(c::Payload::Note(current.note).payload_digest())?.to_vec(),
             q_changed: changed,
+        })
+    }
+}
+
+impl CloudOriginalRole {
+    pub(crate) fn start_fixed_edit_inner(self: Arc<Self>) -> Result<CloudOriginalEditJob, CoreError> {
+        use crate::cloud_policy::policy_jobs::{Cell, Completion};
+        let host = runtime::host()?;
+        let collection = host.cloud_connection_collection()?;
+        let generation = collection.generation();
+        {
+            let owner = self.owner.lock().unwrap_or_else(PoisonError::into_inner);
+            let (bound, bound_generation) = owner.as_ref().ok_or_else(invalid)?;
+            if *bound_generation != generation || !bound.upgrade().is_some_and(|h| Arc::ptr_eq(&h, &host)) {
+                return Err(invalid());
+            }
+        }
+        // A fresh handle cannot recover an interrupted command from matching
+        // content. J5 restoration remains a separate, missing inspector.
+        {
+            let mut state = self.edit.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.attempted {
+                return Err(invalid());
+            }
+            state.attempted = true;
+        }
+        let cell = Arc::new(Cell(Mutex::new(None)));
+        let completion = Completion(cell.clone());
+        let retained = host.clone();
+        let handle = host.start_cloud_connection_job(generation, "CloudOriginalRole.fixed_edit", move |job| {
+            let value = (|| {
+                job.cancel.check()?;
+                let baseline = self.baseline.clone();
+                let owner = retained.clone();
+                // Same ordinary Update Note admission and updater as
+                // notes::update: one UserUndoable op, no raw write or replay.
+                let name = meguri_engine::undo::names::UPDATE_NOTE;
+                let spec = meguri_engine::OpSpec::named(name, meguri_engine::OpSource::UserUndoable)
+                    .undo_step(name, meguri_engine::StepKind::Other)
+                    .cancel(job.cancel.clone())
+                    .progress(job.progress.clone());
+                let result = collection.run(spec, move |ctx| {
+                    let actual = runtime::host().map_err(meguri_engine::EngineError::from)?;
+                    if !Arc::ptr_eq(&actual, &owner) {
+                        return Err(meguri_engine::EngineError::from(invalid()));
+                    }
+                    let now = ctx.now().0;
+                    let scope = ctx.scope();
+                    // Read and validate inside the real write boundary: a
+                    // concurrent edit cannot be overwritten by prepared fields.
+                    let current = capture(scope, NoteId(baseline.note.id)).map_err(meguri_engine::EngineError::from)?;
+                    if baseline.compare(&current).map_err(meguri_engine::EngineError::from)? {
+                        return Err(meguri_engine::EngineError::from(invalid()));
+                    }
+                    let note = scope
+                        .note(NoteId(baseline.note.id))?
+                        .ok_or_else(|| meguri_engine::EngineError::from(invalid()))?;
+                    let mut fields: Vec<String> = note.field_values().map(str::to_owned).collect();
+                    let edit = format!("{}-sync-now-n1-Q", baseline.marker);
+                    if fields[baseline.q] == edit {
+                        return Err(meguri_engine::EngineError::from(invalid()));
+                    }
+                    fields[baseline.q] = edit;
+                    let updated = meguri_engine::notes::update_in(
+                        scope,
+                        &meguri_engine::notes::UpdateNote {
+                            id: note.id,
+                            fields,
+                            tags: meguri_engine::tags::split_text(&note.tags).map(str::to_owned).collect(),
+                        },
+                    )?;
+                    let after = capture(scope, note.id).map_err(meguri_engine::EngineError::from)?;
+                    if !updated.written || !baseline.compare(&after).map_err(meguri_engine::EngineError::from)? {
+                        return Err(meguri_engine::EngineError::from(invalid()));
+                    }
+                    Ok((updated, now))
+                })?;
+                // Keep the real committed provenance even if flush/readback
+                // fails. Such a failure returns no successful edit facts.
+                let seq = result.seq;
+                let now = result.value.1;
+                let summary = crate::mutations::MutationSummary::of(&result);
+                self.edit.lock().unwrap_or_else(PoisonError::into_inner).committed = Some(result);
+                // Use the existing generation-bound WAL path off the writer.
+                // The lifecycle control lane can be draining this very job;
+                // acquiring that lane here would deadlock close/suspend.
+                let durability_wait = std::time::Duration::from_secs(5);
+                collection.flush_wal(durability_wait)?;
+                let actual = runtime::host()?;
+                if !Arc::ptr_eq(&actual, &retained) || retained.cloud_connection_generation()? != generation {
+                    return Err(invalid());
+                }
+                let reader = collection.reader(ReaderRole::Query)?;
+                let snapshot = reader.snapshot()?;
+                let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
+                let note = snapshot.note(NoteId(self.baseline.note.id))?.ok_or_else(invalid)?;
+                if !self.baseline.compare(&current)?
+                    || snapshot.generation() != generation
+                    || snapshot.seq() < seq
+                    || note.mtime.0 != now.div_euclid(1000)
+                    || note.usn.0 != -1
+                    || snapshot.col()?.modified.0 != now
+                    || summary.changes.source != crate::changes::OpSource::UserUndoable
+                    || summary.changes.notes.len() != 1
+                    || summary.changes.notes[0].id != self.baseline.note.id
+                    || summary.changes.notes[0].kind != crate::changes::ChangeKind::Updated
+                    || !summary.changes.cards.is_empty()
+                {
+                    return Err(invalid());
+                }
+                let identity = snapshot.wal_identity();
+                match collection.wait_wal_covered(identity, seq, durability_wait)? {
+                    meguri_engine::WalCoverage::Covered(receipt)
+                        if receipt.identity() == identity && receipt.through() >= seq => {}
+                    _ => return Err(invalid()),
+                }
+                let digest = checked(c::Payload::Note(current.note).payload_digest())?;
+                let local_revision = if let Some(core) = retained.cloud_runtime() {
+                    let status = checked(core.status())?;
+                    let binding = status.binding.ok_or_else(invalid)?;
+                    let name = checked(c::entity_name(
+                        &binding.facts.record_key.0,
+                        c::Kind::Note,
+                        &c::id_key(self.baseline.note.id),
+                    ))?;
+                    let entity = checked(core.entity_facts(&name))?.ok_or_else(invalid)?;
+                    if entity.local_rev == 0
+                        || entity.tombstone_at.is_some()
+                        || entity.observed_generation != generation.0
+                        || entity.observed_seq != seq.0
+                        || checked(entity.payload.payload_digest())? != digest
+                    {
+                        return Err(invalid());
+                    }
+                    Some(entity.local_rev)
+                } else {
+                    None
+                };
+                let facts = CloudOriginalEditFacts {
+                    generation: summary.generation,
+                    seq: summary.seq,
+                    note_digest: digest.to_vec(),
+                    local_revision,
+                    source: summary.changes.source,
+                    undo_name: summary.undo_name,
+                    updated_notes: summary.changes.notes.len() as u32,
+                };
+                self.edit.lock().unwrap_or_else(PoisonError::into_inner).facts = Some(facts.clone());
+                Ok(facts)
+            })();
+            completion.finish(value)
+        })?;
+        Ok(CloudOriginalEditJob {
+            handle: crate::jobs::wrap(handle),
+            result: Arc::new(CloudOriginalEditResult { cell }),
         })
     }
 }

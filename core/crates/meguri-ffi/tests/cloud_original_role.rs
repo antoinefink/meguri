@@ -11,6 +11,25 @@ use meguri_testkit::generate::cloud_small;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+// Compare every stored cell and identity across every page, including rows
+// outside the edited note. No typed model equality or lossy projection.
+fn stored_rows(rows: &impl ReadRows, table: Table) -> Vec<meguri_storage::RowImage> {
+    let mut result = Vec::new();
+    let mut after = None;
+    loop {
+        let page = rows.row_page(table, after.as_ref()).unwrap();
+        if page.is_empty() {
+            return result;
+        }
+        let id = page.last().unwrap()[0].as_i64().unwrap();
+        if let Some(RowKey::Id(previous)) = after {
+            assert!(id > previous);
+        }
+        after = Some(RowKey::Id(id));
+        result.extend(page);
+    }
+}
+
 fn generate(root: &Path) {
     cloud_small::generate(&cloud_small::Request::new(7), root).unwrap();
 }
@@ -230,7 +249,7 @@ fn reused_wal_keeps_exact_obsolete_tail_and_reads_the_new_committed_snapshot() {
 }
 
 #[test]
-fn real_owned_host_maps_captured_identity_accepts_only_fixed_q_edit_and_keeps_original_private() {
+fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and_refusals() {
     use meguri_ffi::{
         CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
         collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
@@ -243,7 +262,7 @@ fn real_owned_host_maps_captured_identity_accepts_only_fixed_q_edit_and_keeps_or
     struct Clock;
     impl HostClock for Clock {
         fn now_ms(&self) -> i64 {
-            cloud_small::NOW_MS
+            cloud_small::NOW_MS + 60_000
         }
         fn offset_from_utc(&self, _: i64) -> i32 {
             0
@@ -264,91 +283,249 @@ fn real_owned_host_maps_captured_identity_accepts_only_fixed_q_edit_and_keeps_or
             let _ = self.0.send(event);
         }
     }
-    let temp = tempfile::tempdir().unwrap();
-    let original = temp.path().join("original");
-    let live = temp.path().join("live");
-    generate(&original);
-    let original_bytes = bytes(&original);
-    let role = test_cloud_original_role(original_bytes.0.clone(), original_bytes.1.clone()).unwrap();
-    let baseline = role.facts().unwrap();
-    std::fs::create_dir(&live).unwrap();
-    std::fs::write(live.join("collection.anki2"), &original_bytes.0).unwrap();
-    std::fs::create_dir(temp.path().join("backups")).unwrap();
-    let (tx, rx) = mpsc::channel();
-    meguri_ffi::events::set_event_listener(Arc::new(Listener(tx))).unwrap();
-    let job = collection::start_open(
-        CollectionLocation {
+    // One process Host and listener at a time; all scenarios exercise the
+    // exported capability's actual registered job and ordinary engine updater.
+    for (mode, swapped) in [
+        ("success", false),
+        ("success", true),
+        ("changed", true),
+        ("failed", true),
+        ("cancelled", true),
+        ("matching", true),
+        ("stale", true),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let original = temp.path().join("original");
+        let live = temp.path().join("live");
+        generate(&original);
+        {
+            let db = PlainDatabase::open(&original.join("collection.anki2")).unwrap();
+            if swapped {
+                db.execute_batch("BEGIN; UPDATE fields SET name='temporary-role' WHERE name='Q'; UPDATE fields SET name='Q' WHERE name='A'; UPDATE fields SET name='A' WHERE name='temporary-role'; COMMIT").unwrap();
+            }
+            db.execute_batch("UPDATE notes SET tags=' retained-tag ',flags=19,data='retained opaque data' WHERE id=(SELECT min(id) FROM notes)").unwrap();
+        }
+        let original_bytes = bytes(&original);
+        let role = test_cloud_original_role(original_bytes.0.clone(), original_bytes.1.clone()).unwrap();
+        let baseline = role.facts().unwrap();
+        assert_eq!(baseline.q_ordinal, u32::from(swapped));
+        std::fs::create_dir(&live).unwrap();
+        std::fs::write(live.join("collection.anki2"), &original_bytes.0).unwrap();
+        std::fs::create_dir(temp.path().join("backups")).unwrap();
+        let (tx, rx) = mpsc::channel();
+        meguri_ffi::events::set_event_listener(Arc::new(Listener(tx))).unwrap();
+        let wait = |job_id| loop {
+            let event = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+            if let CoreEventKind::JobFinished { id, outcome } = event.kind
+                && id == job_id
+            {
+                break outcome;
+            }
+        };
+        let location = CollectionLocation {
             collection_directory: live.to_string_lossy().into_owned(),
             backups_directory: temp.path().join("backups").to_string_lossy().into_owned(),
             app_group_snapshot: temp.path().join("widget.snapshot").to_string_lossy().into_owned(),
             manual_transfer_directory: temp.path().join("manual").to_string_lossy().into_owned(),
-        },
-        Arc::new(Clock),
-        Arc::new(Space),
-        7,
-    )
-    .unwrap();
-    loop {
-        let event = rx.recv_timeout(Duration::from_secs(20)).unwrap();
-        if let CoreEventKind::JobFinished { id, outcome } = event.kind
-            && id == job.id
-        {
-            assert_eq!(outcome, JobOutcome::Succeeded);
-            break;
+        };
+        let open = || collection::start_open(location.clone(), Arc::new(Clock), Arc::new(Space), 7).unwrap();
+        assert_eq!(wait(open().id), JobOutcome::Succeeded);
+        let collection = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+        let (first, card_rows, deck_rows) = {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let first = reader.notes_after(None, 1).unwrap().remove(0);
+            (
+                first,
+                stored_rows(&*reader, Table::Cards),
+                stored_rows(&*reader, Table::Decks),
+            )
+        };
+        let owned = role.validate_owned().unwrap();
+        assert_eq!(owned.generation, collection.generation().0);
+        assert_eq!(owned.note_digest, baseline.note_digest);
+        assert!(!owned.q_changed);
+        let mut extra = first.clone();
+        extra.id = meguri_model::ids::NoteId(1);
+        extra.guid = "unrelated-live-row".into();
+        let lower = extra.clone();
+        collection
+            .run(
+                meguri_engine::OpSpec::named("lower current row", meguri_engine::OpSource::Maintenance),
+                move |ctx| {
+                    ctx.scope().put(&extra)?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(!role.validate_owned().unwrap().q_changed);
+        if mode == "stale" {
+            meguri_ffi::lifecycle::close_collection().unwrap();
+            assert_eq!(wait(open().id), JobOutcome::Succeeded);
+            assert!(!role.validate_owned().unwrap().q_changed);
+            assert!(
+                role.clone().start_fixed_edit().is_err(),
+                "validation cannot rebind edit authority to a successor Host"
+            );
+            let reopened = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+            assert_eq!(
+                reopened.reader(ReaderRole::Query).unwrap().note(first.id).unwrap(),
+                Some(first)
+            );
+            meguri_ffi::lifecycle::close_collection().unwrap();
+            assert_eq!(bytes(&original), original_bytes);
+            continue;
         }
+        let mut fields: Vec<String> = first.field_values().map(str::to_owned).collect();
+        let tags: Vec<String> = meguri_engine::tags::split_text(&first.tags)
+            .map(str::to_owned)
+            .collect();
+        if mode == "changed" || mode == "matching" {
+            let ordinal = if mode == "changed" {
+                1 - baseline.q_ordinal as usize
+            } else {
+                baseline.q_ordinal as usize
+            };
+            fields[ordinal] = if mode == "changed" {
+                "concurrent other field".into()
+            } else {
+                format!("{}-sync-now-n1-Q", cloud_small::Request::new(7).marker())
+            };
+            notes::update_note(UpdateNoteRequest {
+                id: first.id.0,
+                fields: fields.clone(),
+                tags: tags.clone(),
+            })
+            .unwrap();
+        }
+        let before = collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .note(first.id)
+            .unwrap()
+            .unwrap();
+        let before_seq = collection.last_seq();
+        let before_col = collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+        // Hold the actual writer so cancellation happens before the edit's
+        // admitted mutation, without sleeps or a custom alternate updater.
+        let mut barrier = None;
+        let mut release = None;
+        if mode == "cancelled" {
+            let (entered, reached) = mpsc::channel();
+            let (tx, rx) = mpsc::channel();
+            barrier = Some(collection.submit(
+                meguri_engine::OpSpec::named("fixed edit cancellation barrier", meguri_engine::OpSource::Maintenance),
+                move |_| {
+                    entered.send(()).unwrap();
+                    rx.recv().unwrap();
+                    Ok(())
+                },
+            ));
+            reached.recv_timeout(Duration::from_secs(20)).unwrap();
+            release = Some(tx);
+        }
+        if mode == "failed" {
+            meguri_model::faultpoint::arm(
+                "storage.commit.before",
+                meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+            );
+        }
+        let edit = role.clone().start_fixed_edit().unwrap();
+        if let Some(release) = release {
+            edit.handle.cancel.cancel().unwrap();
+            release.send(()).unwrap();
+            barrier.take().unwrap().wait().unwrap();
+        }
+        let outcome = wait(edit.handle.id);
+        if mode == "failed" {
+            meguri_model::faultpoint::disarm("storage.commit.before");
+        }
+        let result = edit.result.result();
+        if mode == "success" {
+            assert_eq!(outcome, JobOutcome::Succeeded);
+            let committed = result.unwrap().unwrap();
+            assert_eq!(committed.generation, collection.generation().0);
+            assert!(committed.seq > before_seq.0);
+            assert_eq!(committed.source, meguri_ffi::changes::OpSource::UserUndoable);
+            assert_eq!(
+                committed.undo_name.as_deref(),
+                Some(meguri_engine::undo::names::UPDATE_NOTE)
+            );
+            assert_eq!(committed.updated_notes, 1);
+            assert_eq!(committed.local_revision, None);
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            let after = snapshot.note(first.id).unwrap().unwrap();
+            let mut expected = first.clone();
+            fields[baseline.q_ordinal as usize] = format!("{}-sync-now-n1-Q", cloud_small::Request::new(7).marker());
+            expected.fields = fields.join("\u{1f}");
+            expected.sort_field = meguri_text::checksum::sort_text_of(&fields, 0).into_owned();
+            expected.checksum = meguri_text::checksum::note_checksum(&fields[0]);
+            expected.mtime = meguri_model::time::EpochSecs((cloud_small::NOW_MS + 60_000) / 1000);
+            expected.usn = meguri_model::usn::Usn(-1);
+            assert_eq!(
+                after, expected,
+                "every saved field, GUID, type, tag, flag/data and derived stamp"
+            );
+            assert_eq!(snapshot.col().unwrap().modified.0, cloud_small::NOW_MS + 60_000);
+            assert_eq!(stored_rows(&*snapshot, Table::Cards), card_rows);
+            assert_eq!(stored_rows(&*snapshot, Table::Decks), deck_rows);
+            // Maintenance stamped the extra row, so compare the original role
+            // fields and identity rather than assuming its fixture stamps.
+            let current_lower = snapshot.note(lower.id).unwrap().unwrap();
+            assert_eq!(current_lower.fields, lower.fields);
+            assert_eq!(current_lower.guid, lower.guid);
+            assert_eq!(snapshot.seq().0, committed.seq);
+            let view = row_payload::ReadView(&*snapshot);
+            let layout = row_payload::notetype(
+                &view,
+                &view
+                    .row(Table::Notetypes, &RowKey::Id(after.notetype_id.0))
+                    .unwrap()
+                    .unwrap(),
+                1,
+            )
+            .unwrap();
+            let raw = view.row(Table::Notes, &RowKey::Id(after.id.0)).unwrap().unwrap();
+            let observed = row_payload::project(&view, c::Kind::Note, &raw, |_| Ok(layout.clone())).unwrap();
+            assert_eq!(committed.note_digest, observed.payload_digest().unwrap().to_vec());
+            drop(snapshot);
+            drop(reader);
+            let edited = role.validate_owned().unwrap();
+            assert!(edited.q_changed);
+            assert_eq!(edited.note_digest, committed.note_digest);
+            assert_ne!(edited.note_digest, baseline.note_digest);
+            assert_eq!(role.facts().unwrap(), baseline);
+            assert!(role.clone().start_fixed_edit().is_err());
+            assert_eq!(collection.last_seq().0, committed.seq);
+            meguri_ffi::lifecycle::close_collection().unwrap();
+            assert_eq!(wait(open().id), JobOutcome::Succeeded);
+            let reopened = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+            assert_eq!(
+                reopened.reader(ReaderRole::Query).unwrap().note(first.id).unwrap(),
+                Some(after)
+            );
+            assert_eq!(role.validate_owned().unwrap().note_digest, committed.note_digest);
+            assert!(
+                role.clone().start_fixed_edit().is_err(),
+                "old owner cannot mutate reopened Host"
+            );
+        } else {
+            assert_ne!(outcome, JobOutcome::Succeeded);
+            assert!(
+                result.is_err(),
+                "failed/cancelled/preexisting content never yields committed facts"
+            );
+            assert_eq!(
+                collection.reader(ReaderRole::Query).unwrap().note(first.id).unwrap(),
+                Some(before)
+            );
+            assert_eq!(collection.reader(ReaderRole::Query).unwrap().col().unwrap(), before_col);
+            assert!(role.clone().start_fixed_edit().is_err());
+        }
+        meguri_ffi::lifecycle::close_collection().unwrap();
+        assert!(role.validate_owned().is_err());
+        assert_eq!(bytes(&original), original_bytes);
     }
-    let collection = meguri_ffi::test_hooks::collection_for_testing().unwrap();
-    let first = {
-        let reader = collection.reader(ReaderRole::Query).unwrap();
-        reader.notes_after(None, 1).unwrap().remove(0)
-    };
-    let owned = role.validate_owned().unwrap();
-    assert_eq!(owned.generation, collection.generation().0);
-    assert_eq!(owned.note_digest, baseline.note_digest);
-    assert!(!owned.q_changed);
-    let mut extra = first.clone();
-    extra.id = meguri_model::ids::NoteId(1);
-    extra.guid = "unrelated-live-row".into();
-    collection
-        .run(
-            meguri_engine::OpSpec::named("lower current row", meguri_engine::OpSource::Maintenance),
-            move |ctx| {
-                ctx.scope().put(&extra)?;
-                Ok(())
-            },
-        )
-        .unwrap();
-    assert!(!role.validate_owned().unwrap().q_changed);
-    let mut fields: Vec<String> = first.field_values().map(str::to_owned).collect();
-    fields[baseline.q_ordinal as usize] = format!("{}-sync-now-n1-Q", cloud_small::Request::new(7).marker());
-    let tags: Vec<String> = meguri_engine::tags::split_text(&first.tags)
-        .map(str::to_owned)
-        .collect();
-    notes::update_note(UpdateNoteRequest {
-        id: first.id.0,
-        fields: fields.clone(),
-        tags: tags.clone(),
-    })
-    .unwrap();
-    meguri_ffi::suspend::flush_for_background().unwrap();
-    let edited = role.validate_owned().unwrap();
-    assert!(edited.q_changed);
-    assert_ne!(edited.note_digest, baseline.note_digest);
-    assert_eq!(role.facts().unwrap(), baseline);
-    let other = 1 - baseline.q_ordinal as usize;
-    let prior = fields[other].clone();
-    fields[other].push_str(&first.guid);
-    assert_ne!(fields[other], prior);
-    notes::update_note(UpdateNoteRequest {
-        id: first.id.0,
-        fields,
-        tags,
-    })
-    .unwrap();
-    assert!(role.validate_owned().is_err());
-    meguri_ffi::lifecycle::close_collection().unwrap();
-    assert!(role.validate_owned().is_err());
-    assert_eq!(bytes(&original), original_bytes);
 }
 
 #[test]

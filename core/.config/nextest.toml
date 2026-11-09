@@ -154,3 +154,7 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and test(/asset_lifecycle_jobs_/)'
 threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(=fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and_refusals)'
+threads-required = "num-test-threads"

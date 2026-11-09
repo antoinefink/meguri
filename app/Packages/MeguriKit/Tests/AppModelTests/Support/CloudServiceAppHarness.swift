@@ -62,10 +62,13 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     private let mediaCompletions: AsyncStream<ServiceMediaCompletion>
     private let mediaCompleted: AsyncStream<ServiceMediaCompletion>.Continuation
     static func make(wire: ServiceWorkflowWire, factory: ServiceSDKFactory,
-                     persisted: @escaping @Sendable () async -> Void) async throws -> ServiceAppBackend {
+                     persisted: @escaping @Sendable () async -> Void,
+                     observeOwn: (@Sendable (CloudOwnObservation) -> Void)? = nil,
+                     ownTransport: (any CloudOwnTransport)? = nil) async throws -> ServiceAppBackend {
         let workflow = CoreCloudWorkflowService()
         let production = try await NativeCollectionCloudBackend.make(workflow: workflow, factory: factory,
-            ownTransport: ServiceOwnTransport(wire: wire), mediaTransport: ServiceMediaTransport(wire: wire), persisted: persisted)
+            ownTransport: ownTransport ?? ServiceOwnTransport(wire: wire), mediaTransport: ServiceMediaTransport(wire: wire), persisted: persisted,
+            observeOwn: observeOwn)
         return ServiceAppBackend(production: production, workflow: workflow, wire: wire)
     }
     private init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService, wire: ServiceWorkflowWire) {
@@ -282,6 +285,8 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     let wire: ServiceWorkflowWire
     let factory: ServiceSDKFactory
     private(set) var backends: [ServiceAppBackend] = []
+    var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
+    var ownTransport: (any CloudOwnTransport)?
     lazy var sync = makeSync()
 
     private func makeSync() -> SyncCoordinator {
@@ -299,7 +304,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
             }.joined(separator: " | ")
             try #require(allBackendsClosed,
                 "Service app backend close: count=\(backends.count); first 16=[\(closeDiagnostics)]")
-            let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted)
+            let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted, observeOwn: observeOwn, ownTransport: ownTransport)
             backends.append(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
