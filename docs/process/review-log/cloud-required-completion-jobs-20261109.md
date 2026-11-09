@@ -37,3 +37,11 @@ work. Required Ended semantics do not grant those calls a new owner exemption.
 Core `69561` fails compilation before tests. The completion selector borrows
 the engine through self, then moves self into its worker closure. A narrow
 owned-original-engine correction is pending; no test is counted as passing.
+
+Export `70251` retains an owned clone of the same Engine handle. Independent
+review confirms shared identity, generation and registry. Core `71960` passes
+all 248 selected checks. Native `74919` builds; one new order test expects
+nonempty commands from quiet Ended while automatic sync is off. Source review
+confirms Commands([]) is the exact original result. A strict synchronous
+baseline and rearmed Started proof will correct that expectation, preserving
+every drain, cancellation and ordering check. The native failure is retained.

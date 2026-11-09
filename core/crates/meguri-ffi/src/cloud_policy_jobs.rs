@@ -272,7 +272,7 @@ impl CloudPolicyExecution {
         }
         let cell = Arc::new(Cell(Mutex::new(None)));
         let completion = RequiredCompletion(cell.clone());
-        let engine = self.policy().host.engine();
+        let engine = self.policy().host.engine().clone();
         let original_engine = engine.downgrade();
         let generation = Generation(self.policy().generation);
         let handle =
