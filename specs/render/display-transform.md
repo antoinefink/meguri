@@ -34,13 +34,20 @@ A **marker** is the text `[anki:play:` + side + `:` + digits + `]`, where side i
 
 ## D4. Replay button
 
-Every marker that D5 does not claim becomes this original Meguri replay button, with ACTION in place:
+Every marker that D5 does not claim becomes this original Meguri replay control, with ACTION and ID in place. The generated control has a meaningful accessible name and stable identifier (R1964); it is not exempt card-authored content:
 
 ```html
-<a class="replay-button soundLink" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
+<a class="replay-button soundLink" id="ID" data-meguri-replay="true" aria-label="Play audio" href=# onclick="ACTION; return false;" draggable="false"><svg class="playImage" aria-hidden="true" focusable="false" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
 ```
 
 The transform adds no leading or trailing line break and no indentation. The rounded-square frame and filled triangle were specified for Meguri from simple geometry on 2026-10-19, without an external image, code or asset as an input. This graphic replaces the earlier graphic literal; its presence in the old Product Contract did not prove independent authorship. R1960 and R1907 require the original graphic while preserving the outer anchor attributes and classes, native actions and AV behavior. Base styling preserves the unfilled frame and inherits the card foreground for its `currentColor` stroke and triangle fill, including dark mode and preview (R483).
+
+
+ID uses `review.card.replay.` followed by the displayed document side (`q` or `a`) and a zero-based occurrence ordinal, for example `review.card.replay.a0`. It identifies an emitted control, not its AV command. Allocate in document order, counting generated replay controls only; repeated identical markers and every FrontSide occurrence receive distinct IDs. The question and answer each have their own display document. Identical display inputs produce identical IDs, independent of locale. If an authored ID already occupies a candidate, choose the next unused ordinal for the generated control; do not change any authored ID or HTML.
+
+`Play audio` is Meguri's own default accessible copy for the standalone display transform. In the native card page, use the existing CardRendering `CardBehavior.xcstrings` catalog and `String(localized:table:bundle:)` pipeline to supply its localized form through the narrow `CardRuntime.pageDocument` configuration. The runtime applies that label only to controls positively identified as transform-generated through transform/host metadata or an equally safe existing ownership mechanism. The `data-meguri-replay` marker is a locator, not ownership proof. Authored lookalikes remain untouched even when they use matching classes, markers or ID prefixes. Apply the final generated-control labels before card readiness, interaction or accessibility exposure. Use text/attribute assignment, not HTML interpolation. Do not add a locale subsystem to `RenderHost`, rewrite user-authored controls or create a new page-world global. The SVG is decorative; its geometry contributes no separate accessible name or focus target.
+
+These attributes extend only Meguri-generated replay markup. Keep the existing classes, graphic, card CSS and native play action. Preserve AV lists, exact command text (including repeated commands and leading zeroes), marker order, TTS replacement and hidden-button behavior. Comparable render HTML and user-authored styling remain unchanged. This is required control naming/identification, not the optional VoiceOver cursor/speech follow-up. R1965 hierarchy checks remain in force; this change grants no ruby, geometry, hit-target, missing-ID or card-content audit exception.
 
 ACTION:
 
@@ -120,3 +127,11 @@ Links (exact): `https://docs.ankiweb.net/templates/errors.html#front-of-card-is-
 ## D12. Tests
 
 Snapshot tests (insta, `core/crates/meguri-template/tests/snapshots/`) pin the D9 output for both platforms and both `hidePlayButtons` values on at least: a question with two sounds and its answer with FrontSide plus one sound (the FrontSide buttons carry `play:q:0` and `play:q:1`, the answer's own button `play:a:0`); a TTS directive followed by a sound (TTS content shown, the sound's command `play:q:1`); hidden buttons with the AV lists unchanged; a literal `[anki:play:x:1]` and `[anki:play:q:١]` left as text; an empty-front card, a missing-cloze card and a template error on each side. Tests assert that the markup the transform adds never contains a backtick or `${`. These snapshots are Meguri-produced and never serve as goldens.
+
+
+Focused generated-control checks:
+
+- `generated_replay_controls_have_names_and_unique_deterministic_ids`: verify nonempty default labels, decorative SVG and per-document IDs on both platforms, including repeated identical markers, FrontSide repeated twice, leading-zero commands and authored-ID collision. Rerendering preserves IDs and exact play-command order.
+- `generated_replay_accessibility_preserves_display_contract`: hidden controls and TTS create no replay element; comparable HTML, user-authored HTML/IDs/styles, AV lists, graphic and native messages remain unchanged. Preserve the existing no-backtick/no-`${` checks for generated display markup.
+- `native_generated_replay_controls_use_catalog_localization`: the final native page exposes catalog-localized names before readiness; quote/ampersand/non-ASCII copy stays plain attribute text and creates no extra HTML or script. Preserve authored marker-lookalike anchors with matching replay classes, `data-meguri-replay` and reserved-looking IDs; only positively identified transform-generated controls receive localized labels.
+- `native_generated_replay_controls_are_named_and_identified_in_webkit_hierarchy`: with multiple sounds and repeated FrontSide, verify distinct stable identifiers, meaningful localized labels and activation of the exact intended command in the actual native WebKit accessibility hierarchy. DOM `id` or `aria-label` assertions alone do not establish R1964 compliance. Keep the hierarchy checker and its ruby/geometric findings unchanged; classify unrelated findings separately.

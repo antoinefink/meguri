@@ -360,3 +360,9 @@ highlight-shape-color
 active-shape-border
 inactive-shape-border
 highlight-shape-border
+
+# Standard accessibility attributes used by D4.
+id
+aria-label
+aria-hidden
+focusable
