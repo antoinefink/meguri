@@ -1003,8 +1003,10 @@ extension EventTests {
                     actions = commands.map { String(describing: $0.action) }
                 }
                 if asynchronous { #expect(actions == baseline) }
-                else { baseline = actions }
-                #expect(!actions.isEmpty)
+                else {
+                    try #require(actions == [])
+                    baseline = actions
+                }
             }
         }
     }
