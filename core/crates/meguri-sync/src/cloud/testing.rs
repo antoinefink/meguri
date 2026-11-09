@@ -83,6 +83,7 @@ pub fn saved_ack_body_reads() -> Option<usize> {
 pub enum IncomingStage {
     AccountIsolationPublished,
     SDKIsolationPublished,
+    SDKRetireBeforeReacquisition,
     AdoptionIsolationPublished,
     AssetReadPrepared,
     AssetReadFinishing,

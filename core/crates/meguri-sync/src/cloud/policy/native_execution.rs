@@ -222,7 +222,14 @@ impl Driver {
     }
 
     pub fn register_native_sdk(&self, command: &Command) -> Result<(String, Option<Vec<u8>>, String), DriverError> {
-        let owned = self.lock_owned();
+        self.register_native_sdk_with_work(command, &mut PolicyWork::default())
+    }
+    pub fn register_native_sdk_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<(String, Option<Vec<u8>>, String), DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         let automatic = match command.action.kind {
             ActionKind::StartEngine { automatic, .. } => automatic,
@@ -231,7 +238,9 @@ impl Driver {
         };
         // validate_locked also checks the current scheduling preference. Holding
         // Driver authority through registration excludes a concurrent settings input.
-        Ok(self.runtime.register_sdk_guarded(&command.backend_guard, automatic)?)
+        Ok(self
+            .runtime
+            .register_sdk_guarded_with_work(&command.backend_guard, automatic, work)?)
     }
 
     pub fn validate_native_sdk(&self, command: &Command, sdk: &str) -> Result<(), DriverError> {
@@ -272,7 +281,15 @@ impl Driver {
     }
 
     pub fn retire_native_sdk(&self, command: &Command, sdk: &str) -> Result<(), DriverError> {
-        let owned = self.lock_owned();
+        self.retire_native_sdk_with_work(command, sdk, &mut PolicyWork::default())
+    }
+    pub fn retire_native_sdk_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        work: &mut PolicyWork,
+    ) -> Result<(), DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         if !matches!(
             command.action.kind,
@@ -280,9 +297,11 @@ impl Driver {
         ) {
             return Err(DriverError::NotCoreAction);
         }
-        match self.runtime.policy_sdk_origin(&command.backend_guard)? {
+        let origin = self.runtime.policy_sdk_origin(&command.backend_guard)?;
+        work.check()?;
+        match origin {
             None => Ok(()), // The original creation/stop already drained its own SDK.
-            Some(current) if current == sdk => Ok(self.runtime.retire_sdk(sdk, false)?),
+            Some(current) if current == sdk => Ok(self.runtime.retire_sdk_with_work(sdk, false, work)?),
             Some(_) => Err(DriverError::StaleCommand),
         }
     }

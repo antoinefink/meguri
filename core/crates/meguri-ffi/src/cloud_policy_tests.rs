@@ -41,7 +41,7 @@ fn assert_deck_capture_live(fixture: &Fixture, sdk: &CloudEngineRegistration) {
 
 // A real provider call samples first, then waits off every core lock. The
 // release guard also unblocks the worker if an assertion unwinds the test.
-struct ReleaseDeckAccount(std::sync::mpsc::Sender<()>);
+pub(crate) struct ReleaseDeckAccount(std::sync::mpsc::Sender<()>);
 impl Drop for ReleaseDeckAccount {
     fn drop(&mut self) {
         let _ = self.0.send(());
@@ -2748,4 +2748,4 @@ fn policy_without_binding_has_unknown_media_counts() {
 }
 
 #[path = "cloud_policy_job_tests.rs"]
-mod policy_job_tests;
+pub(super) mod policy_job_tests;

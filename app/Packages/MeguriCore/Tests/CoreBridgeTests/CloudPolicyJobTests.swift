@@ -104,6 +104,69 @@ extension EventTests {
         }
     }
 
+    @Test func policyRegistrationListenerFailureRetainsInstalledIdentity() async throws {
+        try await withNativePolicyFixture { fixture in
+            try await fixture.requireNativePolicyBaseline()
+            let policy = try await fixture.core.policy()
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter)
+            _ = try await consumePolicySetup(policy.input(.settings(.init(enabled: false, paused: false, automatic: false, media: false))), executor: executor)
+            _ = try await consumePolicySetup(policy.refreshAccount(), executor: executor)
+            _ = try await consumePolicySetup(policy.input(.network(reachable: true)), executor: executor)
+            let output = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false)))
+            guard case .commands(let commands) = output else {
+                throw BridgeError.internal("Expected policy startup commands")
+            }
+            let command = try #require(commands.first { if case .startEngine = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartRegisterSdk) {
+                try raw.startRegisterSdk()
+            }
+            // Real terminal delivery fixes the race at the already-installed
+            // registration, before the injected listener setup error.
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let installed = try #require(try await MaintenanceLane.shared.call(.cloudPolicyRegistrationResult) {
+                try started.result.result()
+            })
+            try await fixture.core.validateSDK(installed.instanceId)
+            let attempted = Mutex<UInt64?>(nil)
+            let retained: MeguriCoreBindings.CloudEngineRegistration = try await CoreCloudPolicyService.runOrdered(
+                .cloudPolicyExecutionStartRegisterSdk, result: .cloudPolicyRegistrationResult,
+                track: { handle in
+                    attempted.withLock { $0 = handle.id }
+                    throw BridgeError.invalidArgument("registration listener setup")
+                }, retainResourceResultOnTrackingFailure: true
+            ) {
+                CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+            }
+            #expect(attempted.withLock { $0 } == started.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            #expect(retained.instanceId == installed.instanceId)
+            #expect(retained.serialization == installed.serialization)
+            #expect(retained.collectionZone == installed.collectionZone)
+            #expect(retained.needsRootFetch == installed.needsRootFetch)
+            try await fixture.core.validateSDK(retained.instanceId)
+            try await execution.validate()
+            // A following ordered call proves the drained registration released
+            // its permit. Cleanup names only the recovered original identity.
+            _ = try await policy.status()
+            try await fixture.core.retireSDK(retained.instanceId, policyStop: false)
+            try await fixture.core.releaseSDK(retained.instanceId)
+            let successor = try await fixture.core.registerSDK(automatic: false)
+            #expect(successor.instanceID != retained.instanceId)
+            let reread = try #require(try await MaintenanceLane.shared.call(.cloudPolicyRegistrationResult) {
+                try started.result.result()
+            })
+            #expect(reread.instanceId == retained.instanceId)
+            try await fixture.core.validateSDK(successor.instanceID)
+            try await fixture.core.retireSDK(successor.instanceID, policyStop: false)
+            try await fixture.core.releaseSDK(successor.instanceID)
+        }
+    }
+
     @Test func policyFacadeKeepsTypedFailureBeforeGenericJobFailure() async throws {
         try await withCloudConnection { _ in
             let policy = CoreCloudPolicyService(try await rawJobPolicy())

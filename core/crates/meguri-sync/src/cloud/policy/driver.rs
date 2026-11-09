@@ -216,6 +216,7 @@ impl Owned {
 pub struct PolicyWork {
     cancel: Option<meguri_engine::CancelToken>,
     generation: Option<(meguri_engine::WeakEngine, meguri_engine::Generation)>,
+    generation_rejected: Arc<std::sync::atomic::AtomicBool>,
     effected: Arc<std::sync::atomic::AtomicBool>,
     rejected: Arc<std::sync::atomic::AtomicBool>,
     owner_check: Option<Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>>,
@@ -259,10 +260,16 @@ impl PolicyWork {
             if let Some((engine, generation)) = &self.generation
                 && engine.upgrade().is_none_or(|engine| engine.generation() != *generation)
             {
+                self.generation_rejected
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 return Err(RuntimeError::StaleIncarnation);
             }
         }
         Ok(())
+    }
+    /// Retain only rejection by this work's sampled engine generation.
+    pub fn generation_was_rejected(&self) -> bool {
+        self.generation_rejected.load(std::sync::atomic::Ordering::SeqCst)
     }
     pub fn effect(&self) -> Result<(), RuntimeError> {
         if let Err(error) = self.check() {

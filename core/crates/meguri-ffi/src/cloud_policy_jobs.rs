@@ -75,9 +75,15 @@ typed_result!(
     CloudPolicyExecutionJob,
     CloudPolicyPreparedExecution
 );
+typed_result!(
+    CloudPolicyRegistrationResult,
+    CloudPolicyRegistrationJob,
+    crate::sync::CloudEngineRegistration
+);
+typed_result!(CloudPolicyRetirementResult, CloudPolicyRetirementJob, bool);
 
 impl CloudPolicy {
-    fn start_policy<T: Send + 'static>(
+    pub(super) fn start_policy<T: Send + 'static>(
         self: Arc<Self>,
         name: &'static str,
         work: impl FnOnce(Arc<Self>, &mut p::PolicyWork) -> Result<T, CoreError> + Send + 'static,
@@ -89,38 +95,73 @@ impl CloudPolicy {
         let cell = Arc::new(Cell(Mutex::new(None)));
         let completion = Completion(cell.clone());
         let engine = self.host.engine();
+        let original_engine = engine.downgrade();
+        let generation = Generation(self.generation);
         let owner = self.clone();
-        let handle = engine
-            .jobs()
-            .start(name, Generation(self.generation), None, move |job| {
-                // The explicit authority reaches the actual pre-effect checks,
-                // including acquisition behind a projection. It stops cancelling
-                // only once an effect occurred, preserving exact failure follow-ups.
-                let owner_error = Arc::new(Mutex::new(None));
-                let rejected_owner = owner_error.clone();
-                let validation_owner = owner.clone();
-                let mut work_authority = p::PolicyWork::new(&job.cancel).with_owner_check(Arc::new(move || {
+        let handle = engine.jobs().start(name, generation, None, move |job| {
+            // The explicit authority reaches the actual pre-effect checks,
+            // including acquisition behind a projection. It stops cancelling
+            // only once an effect occurred, preserving exact failure follow-ups.
+            let owner_error = Arc::new(Mutex::new(None));
+            let rejected_owner = owner_error.clone();
+            let validation_owner = owner.clone();
+            let mut work_authority = p::PolicyWork::new(&job.cancel)
+                .with_generation(original_engine, generation)
+                .with_owner_check(Arc::new(move || {
                     validation_owner.validate_owner().map_err(|error| {
                         *rejected_owner.lock().unwrap_or_else(PoisonError::into_inner) = Some(error.clone());
                         EngineError::from(error)
                     })
                 }));
-                let value = job
-                    .cancel
-                    .check()
-                    .map_err(CoreError::from)
-                    .and_then(|()| owner.validate_owner())
-                    .and_then(|()| job.cancel.check().map_err(CoreError::from))
-                    .and_then(|()| work(owner, &mut work_authority));
-                // Retain the precise FFI owner failure sampled after contention;
-                // never perform a fresh owner lookup over an effected outcome.
-                let value = match owner_error.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                    Some(error) => Err(error),
-                    None => value,
-                };
-                completion.finish(value)
-            });
+            let value = job
+                .cancel
+                .check()
+                .map_err(CoreError::from)
+                .and_then(|()| owner.validate_owner())
+                .and_then(|()| job.cancel.check().map_err(CoreError::from))
+                .and_then(|()| work(owner, &mut work_authority));
+            // Retain the precise FFI owner failure sampled after contention;
+            // never perform a fresh owner lookup over an effected outcome.
+            let value = match owner_error.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                Some(error) => Err(error),
+                None if work_authority.generation_was_rejected() => Err(failure(CloudPolicyFailure::GenerationChanged)),
+                None => value,
+            };
+            completion.finish(value)
+        });
         Ok((crate::jobs::wrap(handle), cell))
+    }
+}
+
+#[uniffi::export]
+impl CloudPolicyExecution {
+    pub fn start_register_sdk(self: Arc<Self>) -> Result<CloudPolicyRegistrationJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_register_sdk");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.register_sdk", move |_, work| {
+                self.register_sdk_with_work(work)
+            })?;
+        Ok(CloudPolicyRegistrationJob {
+            handle,
+            result: Arc::new(CloudPolicyRegistrationResult { cell }),
+        })
+    }
+    pub fn start_retire_original(self: Arc<Self>) -> Result<CloudPolicyRetirementJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_retire_original");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.retire_original", move |_, work| {
+                self.retire_original_with_work(work).map(|()| true)
+            })?;
+        Ok(CloudPolicyRetirementJob {
+            handle,
+            result: Arc::new(CloudPolicyRetirementResult { cell }),
+        })
     }
 }
 

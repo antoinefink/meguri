@@ -29,15 +29,25 @@ struct CoreCloudPolicyExecution: Sendable {
     }
     func registerSDK() async throws -> CloudRegistration {
         let raw = self.raw
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionRegisterSdk) { [raw] in
-            let r = try raw.registerSdk()
-            return CloudRegistration(instanceID: r.instanceId, serialization: r.serialization,
-                                     collectionZone: r.collectionZone, needsRootFetch: r.needsRootFetch)
+        let r: MeguriCoreBindings.CloudEngineRegistration = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartRegisterSdk, result: .cloudPolicyRegistrationResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startRegisterSdk()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
+        return CloudRegistration(instanceID: r.instanceId, serialization: r.serialization,
+                                 collectionZone: r.collectionZone, needsRootFetch: r.needsRootFetch)
     }
     func retireOriginal() async throws {
         let raw = self.raw
-        try await CoreCloudPolicyService.call(.cloudPolicyExecutionRetireOriginal) { [raw] in try raw.retireOriginal() }
+        let _: Bool = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartRetireOriginal, result: .cloudPolicyRetirementResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startRetireOriginal()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
     }
     func report(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind, started: Bool, error: (any Error)? = nil, saved: UInt64 = 0) async throws -> CloudPolicyOutput {
         let raw = self.raw

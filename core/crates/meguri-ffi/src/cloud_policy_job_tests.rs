@@ -88,7 +88,7 @@ fn policy_original_owner_metadata_completes_while_real_driver_projection_is_held
     fixture.workflow.host.close().unwrap();
 }
 
-pub(super) fn finished(events: &Subscription, id: u64) -> JobOutcome {
+pub(crate) fn finished(events: &Subscription, id: u64) -> JobOutcome {
     loop {
         let event = events.recv_timeout(Duration::from_secs(10)).expect("JobFinished");
         if let EventKind::JobFinished { id: got, outcome } = &event.kind
@@ -357,7 +357,7 @@ fn policy_job_cancelled_after_settings_effect_keeps_actual_projection_result() {
 
 // Four positively entered jobs hold the existing pool. No sleep establishes
 // queue order, and the release guard works during assertion unwinding too.
-fn hold_pool(fixture: &Fixture) -> Vec<ReleaseDeckAccount> {
+pub(crate) fn hold_pool(fixture: &Fixture) -> Vec<ReleaseDeckAccount> {
     (0..4)
         .map(|_| {
             let (entered, reached) = mpsc::channel();

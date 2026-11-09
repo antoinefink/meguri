@@ -366,6 +366,10 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyCaptureResult = BridgeCall("CloudPolicyCaptureResult.result")
     public static let cloudPolicyReadinessResult = BridgeCall("CloudPolicyReadinessResult.result")
     public static let cloudPolicyExecutionResult = BridgeCall("CloudPolicyExecutionResult.result")
+    public static let cloudPolicyExecutionStartRegisterSdk = BridgeCall("CloudPolicyExecution.start_register_sdk")
+    public static let cloudPolicyExecutionStartRetireOriginal = BridgeCall("CloudPolicyExecution.start_retire_original")
+    public static let cloudPolicyRegistrationResult = BridgeCall("CloudPolicyRegistrationResult.result")
+    public static let cloudPolicyRetirementResult = BridgeCall("CloudPolicyRetirementResult.result")
     public static let cloudPolicyInput = BridgeCall("CloudPolicy.input")
     public static let cloudPolicyRefreshAccount = BridgeCall("CloudPolicy.refresh_account")
     public static let cloudPolicyProjectIdentityRead = BridgeCall("CloudPolicy.project_identity_read")
@@ -503,6 +507,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
+        cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,
         cloudPolicyStartInput, cloudPolicyStartRefreshAccount, cloudPolicyStartProjectIdentityRead, cloudPolicyStartStatus, cloudPolicyStartExecuteCore, cloudPolicyStartSubmitNative, cloudPolicyStartCaptureExchange, cloudPolicyStartCompleteExchange, cloudPolicyStartEndBeforeCapture, cloudPolicyStartExchangeReadiness, cloudPolicyStartPrepareExecution, cloudPolicyOutputResult, cloudPolicyStatusResult, cloudPolicyAdmissionResult, cloudPolicyCaptureResult, cloudPolicyReadinessResult, cloudPolicyExecutionResult,
         cloudWorkflowPolicy, cloudPolicyValidateOriginalOwner, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,

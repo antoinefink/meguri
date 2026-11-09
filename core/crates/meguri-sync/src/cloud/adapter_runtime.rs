@@ -30,7 +30,7 @@ impl Runtime {
     pub fn register_sdk(&self, automatic: bool) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         let _ = self.adapter_now();
         let mut s = self.state();
-        self.register_sdk_locked(&mut s, automatic)
+        self.register_sdk_locked(&mut s, automatic, &mut PolicyWork::default())
     }
     /// Registration is the linearization point, after all native preparation awaits.
     /// The issued guard is compared in the same critical section as installation.
@@ -39,17 +39,27 @@ impl Runtime {
         guard: &Guard,
         automatic: bool,
     ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
+        self.register_sdk_guarded_with_work(guard, automatic, &mut PolicyWork::default())
+    }
+    pub fn register_sdk_guarded_with_work(
+        &self,
+        guard: &Guard,
+        automatic: bool,
+        work: &mut PolicyWork,
+    ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         let _ = self.adapter_now();
         let mut s = self.state();
+        work.check()?;
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
-        self.register_sdk_locked(&mut s, automatic)
+        self.register_sdk_locked(&mut s, automatic, work)
     }
     fn register_sdk_locked(
         &self,
         s: &mut State,
         automatic: bool,
+        work: &mut PolicyWork,
     ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         if s.adapter.sdk.is_some() {
             return Err(Error::InvalidData.into());
@@ -62,6 +72,9 @@ impl Runtime {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone();
         let (serialization, durable) = with_tracking_access(|| -> Result<_, RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
+            // All registration preconditions precede the first durable effect.
+            // In particular, waiting for State or tracking access is cancellable.
+            work.effect()?;
             store.adapter_install()?;
             let live = store.inbox(b.id)?;
             super::super::payload_asset::sweep(&self.directory, b.id, &live)?;
@@ -163,7 +176,16 @@ impl Runtime {
     }
     /// Re-creation invalidates the SDK authority without changing the policy guard.
     pub fn retire_sdk(&self, sdk: &str, policy_stop: bool) -> Result<(), RuntimeError> {
+        self.retire_sdk_with_work(sdk, policy_stop, &mut PolicyWork::default())
+    }
+    pub fn retire_sdk_with_work(
+        &self,
+        sdk: &str,
+        policy_stop: bool,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let mut s = self.state();
+        work.check()?;
         if !s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk) {
             return Ok(());
         }
@@ -178,7 +200,11 @@ impl Runtime {
             let path = self.directory.join("collection.anki2");
             let file = self.inputs.files.identity(&path)?;
             let publication = meguri_engine::device_state::DeviceState::for_collection(&path).publication()?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::SDKRetireBeforeReacquisition);
             s = self.state();
+            work.check()?;
             if !s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk) {
                 return Ok(());
             }
@@ -209,10 +235,9 @@ impl Runtime {
                     // local rows and clear absence state. Never overwrite a
                     // stronger current reason with this service fallback.
                     let (binding, durable) = with_tracking_access(|| {
-                        s.store
-                            .as_mut()
-                            .ok_or(Error::Database)?
-                            .isolate_runtime_binding(scan.binding, IsolationReason::ZoneMissing)?;
+                        let store = s.store.as_mut().ok_or(Error::Database)?;
+                        work.effect()?;
+                        store.isolate_runtime_binding(scan.binding, IsolationReason::ZoneMissing)?;
                         // Isolation has committed. Failed readback cannot restore
                         // authority to this already isolated binding.
                         let b = s.bound.as_mut().ok_or(Error::BindingNotFound)?;
@@ -228,10 +253,10 @@ impl Runtime {
                             .retire_readback_failure
                             .swap(false, std::sync::atomic::Ordering::SeqCst)
                         {
-                            return Err(Error::Database);
+                            return Err(RuntimeError::from(Error::Database));
                         }
                         let store = s.store.as_ref().ok_or(Error::Database)?;
-                        Ok::<_, Error>((
+                        Ok::<_, RuntimeError>((
                             store.binding(scan.binding)?.ok_or(Error::BindingNotFound)?,
                             store.adapter_durable(scan.binding)?,
                         ))
@@ -243,6 +268,7 @@ impl Runtime {
                     b.verified = false;
                     s.root_confirmed = false;
                 }
+                work.effect()?;
                 s.adapter.pending_collection_loss = None;
             }
         }
@@ -252,6 +278,7 @@ impl Runtime {
             .as_mut()
             .filter(|a| a.id == sdk)
             .ok_or(RuntimeError::StaleIncarnation)?;
+        work.effect()?;
         authority.stopping = true;
         s.publish_authority();
         s.policy.flights.retain(|(owner, _), _| owner != sdk);

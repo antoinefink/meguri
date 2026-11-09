@@ -27,7 +27,7 @@ actor CloudPolicyOrder {
     }
 }
 
-private struct CloudPolicyJobValue<Value: Sendable>: Sendable {
+struct CloudPolicyJobValue<Value: Sendable>: Sendable {
     let handle: MeguriCoreBindings.JobHandle
     let read: @Sendable () throws -> Value?
 }
@@ -60,14 +60,42 @@ public actor CoreCloudPolicyService {
         _ startName: BridgeCall, result resultName: BridgeCall,
         _ start: @escaping @Sendable () throws -> CloudPolicyJobValue<Value>
     ) async throws -> Value {
-        await Self.order.acquire(queued: onJobQueued)
+        try await Self.runOrdered(startName, result: resultName, beforeJobStart: beforeJobStart,
+                                  onJobQueued: onJobQueued, track: track, start)
+    }
+
+    nonisolated static func runOrdered<Value: Sendable>(
+        _ startName: BridgeCall, result resultName: BridgeCall,
+        beforeJobStart: @Sendable (BridgeCall) async -> Void = { _ in },
+        onJobQueued: @Sendable () -> Void = {},
+        track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) },
+        retainResourceResultOnTrackingFailure: Bool = false,
+        _ start: @escaping @Sendable () throws -> CloudPolicyJobValue<Value>
+    ) async throws -> Value {
+        await order.acquire(queued: onJobQueued)
         // Release on errors only after any admitted job has drained. Swift
         // cancellation does not remove a predecessor or drop its effects.
         do {
             await beforeJobStart(startName)
             try await CoreEventStream.shared.start()
             let started = try await Self.call(startName, start)
-            let job = try await Jobs.trackDraining(started.handle, setup: track)
+            let job: CoreJob
+            do {
+                job = try await Jobs.trackDraining(started.handle, setup: track)
+            } catch {
+                guard retainResourceResultOnTrackingFailure else { throw error }
+                let setupError = error
+                // Keep the actual resource result after drain.
+                do {
+                    if let value = try await Self.call(resultName, started.read) {
+                        await Self.order.release()
+                        return value
+                    }
+                } catch BridgeError.cancelled {
+                    throw setupError
+                }
+                throw setupError
+            }
             let outcome = await job.outcome()
             // Inspect the exact FFI error before lossy JobFinished conversion.
             // Result reads never consult the current collection owner.

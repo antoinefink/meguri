@@ -840,3 +840,6 @@ fn committed_validation_tracks_accepted_identity_and_discards_superseded_prepara
         fixture.workflow.host.close().unwrap();
     }
 }
+
+#[path = "cloud_policy_execution_job_tests.rs"]
+mod jobs;

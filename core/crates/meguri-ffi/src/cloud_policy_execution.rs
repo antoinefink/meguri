@@ -28,7 +28,7 @@ struct Registration {
 
 #[derive(uniffi::Object)]
 pub struct CloudPolicyExecution {
-    command: Arc<CloudPolicyCommand>,
+    pub(super) command: Arc<CloudPolicyCommand>,
     original_sdk: Option<String>,
     registration: Mutex<Registration>,
     pub(crate) cleanup_begun: std::sync::atomic::AtomicBool,
@@ -36,6 +36,53 @@ pub struct CloudPolicyExecution {
 }
 
 impl CloudPolicyExecution {
+    pub(super) fn register_sdk_with_work(
+        &self,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudEngineRegistration, CoreError> {
+        self.policy().owns(&self.command)?;
+        let mut registration = self.registration.lock().unwrap_or_else(PoisonError::into_inner);
+        if registration.sdk.is_some() {
+            return Err(failure(CloudPolicyFailure::StaleCommand));
+        }
+        let (instance_id, serialization, collection_zone) = self
+            .policy()
+            .driver()?
+            .register_native_sdk_with_work(&self.command.command, work)
+            .map_err(execution_error)?;
+        registration.sdk = Some(instance_id.clone());
+        let automatic = match self.command.command.action.kind {
+            p::ActionKind::StartEngine { automatic, .. } => automatic,
+            p::ActionKind::ConfigureAutomatic { on } => on,
+            _ => false,
+        };
+        let runtime = self
+            .policy()
+            .host
+            .cloud_runtime()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?;
+        Ok(CloudEngineRegistration {
+            instance_id,
+            serialization,
+            collection_zone,
+            needs_root_fetch: automatic && !runtime.sdk_root_confirmed(),
+        })
+    }
+    pub(super) fn retire_original_with_work(&self, work: &mut p::PolicyWork) -> Result<(), CoreError> {
+        self.policy().owns(&self.command)?;
+        if let Some(sdk) = &self.original_sdk {
+            self.policy()
+                .driver()?
+                .retire_native_sdk_with_work(&self.command.command, sdk, work)
+                .map_err(execution_error)?;
+        } else {
+            self.policy()
+                .driver()?
+                .validate_with_work(&self.command.command, work)
+                .map_err(execution_error)?;
+        }
+        Ok(())
+    }
     // A terminal reply keeps its original command when policy has moved on.
     // Let Driver retire that command's read; validate new admission separately
     // so an FFI generation check cannot bypass cleanup of the original owner.
@@ -133,46 +180,11 @@ impl CloudPolicyExecution {
     }
     pub fn register_sdk(&self) -> Result<CloudEngineRegistration, CoreError> {
         callback::enter("CloudPolicyExecution.register_sdk");
-        self.policy().owns(&self.command)?;
-        let mut registration = self.registration.lock().unwrap_or_else(PoisonError::into_inner);
-        if registration.sdk.is_some() {
-            return Err(failure(CloudPolicyFailure::StaleCommand));
-        }
-        let (instance_id, serialization, collection_zone) = self
-            .policy()
-            .driver()?
-            .register_native_sdk(&self.command.command)
-            .map_err(execution_error)?;
-        registration.sdk = Some(instance_id.clone());
-        let automatic = match self.command.command.action.kind {
-            p::ActionKind::StartEngine { automatic, .. } => automatic,
-            p::ActionKind::ConfigureAutomatic { on } => on,
-            _ => false,
-        };
-        let runtime = self
-            .policy()
-            .host
-            .cloud_runtime()
-            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?;
-        Ok(CloudEngineRegistration {
-            instance_id,
-            serialization,
-            collection_zone,
-            needs_root_fetch: automatic && !runtime.sdk_root_confirmed(),
-        })
+        self.register_sdk_with_work(&mut p::PolicyWork::default())
     }
     pub fn retire_original(&self) -> Result<(), CoreError> {
         callback::enter("CloudPolicyExecution.retire_original");
-        self.policy().owns(&self.command)?;
-        if let Some(sdk) = &self.original_sdk {
-            self.policy()
-                .driver()?
-                .retire_native_sdk(&self.command.command, sdk)
-                .map_err(execution_error)?;
-        } else {
-            self.check()?;
-        }
-        Ok(())
+        self.retire_original_with_work(&mut p::PolicyWork::default())
     }
     /// Actual operation facts only. Error classification is Core-owned P15;
     /// native supplies the SDK code/retry-after, never a policy outcome.
