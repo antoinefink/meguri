@@ -935,3 +935,6 @@ fn asset_lifecycle_jobs_old_terminal_cancel_duplicate_finish_cannot_mutate_actua
         }
     }
 }
+
+#[path = "cloud_asset_resource_matrix_tests.rs"]
+mod resource_matrix;
