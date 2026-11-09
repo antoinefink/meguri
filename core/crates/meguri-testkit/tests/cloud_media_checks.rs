@@ -4,7 +4,10 @@ use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::{
     self as production,
     entity_codec::{Kind, Payload},
-    runtime::{CloudInputs, IdentityProvider, IdentityStatus, KeyByteSource, KeySourceError},
+    runtime::{
+        CloudInputs, FileIdentityProvider, IdentityProvider, IdentityStatus, KeyByteSource, KeySourceError,
+        NoteScanProof,
+    },
 };
 use meguri_testkit::{
     cloud::{
@@ -392,13 +395,35 @@ fn published_and_adopted_bound_runtime_pages_preserve_actual_media_facts() {
         runtime.refresh_identity().unwrap();
         let collection = host.collection().unwrap();
         let media = host.media().unwrap();
-        runtime
+        let reconciled = runtime
             .reconcile_binding(&collection, &media, Duration::from_secs(30))
             .unwrap();
         let before = runtime.status().unwrap();
         assert!(before.binding.as_ref() == Some(&binding));
         assert_eq!(before.generation, Some(collection.generation()));
-        assert!(before.stored_usable && before.identity_verified && before.scan_drained);
+        assert!(before.stored_usable && before.identity_verified);
+        // K11.4: completion this open precedes durable drain at clean stop.
+        assert!(!before.scan_drained);
+        assert!(before.scan_completed_this_open && before.note_scan_completed_this_open);
+        let proof: NoteScanProof = runtime
+            .note_scan_proof()
+            .expect("retained proof from this reconciliation");
+        assert_eq!(proof.snapshot_seq, reconciled.snapshot_seq);
+        assert_eq!(proof.snapshot_generation, reconciled.snapshot_generation);
+        assert_eq!(proof.snapshot_native_file, reconciled.snapshot_native_file);
+        assert_eq!(proof.receipt, reconciled.receipt);
+        assert_eq!(proof.recovered_names, reconciled.recovered_names);
+        assert_eq!(proof.snapshot_generation, collection.generation());
+        assert_eq!(
+            proof.snapshot_native_file,
+            NativeFiles.identity(collection.path()).unwrap()
+        );
+        assert_eq!(proof.receipt.identity().generation(), proof.snapshot_generation);
+        assert_eq!(
+            proof.receipt.identity().native_file(),
+            (proof.snapshot_native_file.device, proof.snapshot_native_file.inode)
+        );
+        assert!(proof.receipt.through() >= proof.snapshot_seq);
         assert!(!before.scan_required && !before.scan_running && !before.tracking_stopped);
         assert_eq!(binding.facts.state, production::BindingState::Active);
         let journal_before = media.store().entries().unwrap();
@@ -460,18 +485,26 @@ fn published_and_adopted_bound_runtime_pages_preserve_actual_media_facts() {
                 identity_verified: true,
                 scan_required: false,
                 scan_running: false,
-                scan_drained: true,
+                scan_drained: false,
                 tracking_stopped: false,
             }
         );
         assert_eq!(observation.names.len(), FILES);
         assert_eq!(observation.entities.len(), FILES);
         assert_eq!(
-            observation.names.iter().map(|row| row.name_sha256).collect::<BTreeSet<_>>(),
+            observation
+                .names
+                .iter()
+                .map(|row| row.name_sha256)
+                .collect::<BTreeSet<_>>(),
             expected_names
         );
         assert_eq!(
-            observation.entities.iter().map(|row| row.name_sha256).collect::<BTreeSet<_>>(),
+            observation
+                .entities
+                .iter()
+                .map(|row| row.name_sha256)
+                .collect::<BTreeSet<_>>(),
             expected_names
         );
         let mut actual_hash_counts = BTreeMap::new();
@@ -488,11 +521,19 @@ fn published_and_adopted_bound_runtime_pages_preserve_actual_media_facts() {
             assert_eq!((row.local_rev, row.acked_rev), (entity.local_rev, entity.acked_rev));
             assert!(entity.tombstone_at.is_none());
             assert!(!row.tombstone && !row.has_dirty_mark && row.in_flight == 0);
-            let file = &observation.names.iter().find(|name| name.name_sha256 == row.name_sha256).unwrap().file;
+            let file = &observation
+                .names
+                .iter()
+                .find(|name| name.name_sha256 == row.name_sha256)
+                .unwrap()
+                .file;
             let FileObservation::Present(actual) = file else {
                 panic!("actual file for runtime entity required");
             };
-            assert_eq!((row.sha256, row.sha1, row.size), (actual.sha256, actual.sha1, actual.size));
+            assert_eq!(
+                (row.sha256, row.sha1, row.size),
+                (actual.sha256, actual.sha1, actual.size)
+            );
             *actual_hash_counts.entry(row.sha256).or_insert(0_usize) += 1;
         }
         assert_eq!(actual_hash_counts, expected_hash_counts);

@@ -94,3 +94,15 @@ or readiness condition has been relaxed.
 Review and fixer `92467` agree: `scan_drained` is a clean-stop flag.
 The new test must check `scan_completed_this_open` after reconciliation.
 Production is unchanged. The earlier eight cases and all limits are intact.
+
+Export `94648` adds current-open completion and actual `NoteScanProof`
+checks for generation, native identity and WAL coverage. Independent review
+is clear. Focused `20261109T205306Z-95371` passes the new case: 251 generated
+files, publication, adoption, Runtime pages 250/1/EOF and actual ACK/file
+checks. Nine other cases were filtered; their earlier evidence is unchanged.
+The four missing proofs and whole Q5 remain open.
+
+Lint `95715` found formatting only. Formatter `96574` changed only this
+new test; final lint `96861` passes all four checks. Focused result `95371`
+is reused because formatting changes no behavior. Guard `95979` passes five
+files; similarity `96233` passes three files with no exceptions.
