@@ -566,30 +566,34 @@ impl CloudOriginalRole {
                 let digest = checked(c::Payload::Note(current.note).payload_digest())?;
                 let local_revision = if let Some(core) = retained.cloud_runtime() {
                     let status = checked(core.status())?;
-                    let binding = status.binding.ok_or_else(|| invalid_category("binding.missing"))?;
-                    let name = checked(c::entity_name(
-                        &binding.facts.record_key.0,
-                        c::Kind::Note,
-                        &c::id_key(self.baseline.note.id),
-                    ))?;
-                    let entity =
-                        checked(core.entity_facts(&name))?.ok_or_else(|| invalid_category("binding.entity_missing"))?;
-                    if entity.local_rev == 0 {
-                        return Err(invalid_category("revision.zero"));
+                    match status.binding {
+                        Some(binding) => {
+                            let name = checked(c::entity_name(
+                                &binding.facts.record_key.0,
+                                c::Kind::Note,
+                                &c::id_key(self.baseline.note.id),
+                            ))?;
+                            let entity = checked(core.entity_facts(&name))?
+                                .ok_or_else(|| invalid_category("binding.entity_missing"))?;
+                            if entity.local_rev == 0 {
+                                return Err(invalid_category("revision.zero"));
+                            }
+                            if entity.tombstone_at.is_some() {
+                                return Err(invalid_category("revision.tombstone"));
+                            }
+                            if entity.observed_generation != generation.0 {
+                                return Err(invalid_category("revision.generation"));
+                            }
+                            if entity.observed_seq != seq.0 {
+                                return Err(invalid_category("revision.seq"));
+                            }
+                            if checked(entity.payload.payload_digest())? != digest {
+                                return Err(invalid_category("revision.payload_mismatch"));
+                            }
+                            Some(entity.local_rev)
+                        }
+                        None => None,
                     }
-                    if entity.tombstone_at.is_some() {
-                        return Err(invalid_category("revision.tombstone"));
-                    }
-                    if entity.observed_generation != generation.0 {
-                        return Err(invalid_category("revision.generation"));
-                    }
-                    if entity.observed_seq != seq.0 {
-                        return Err(invalid_category("revision.seq"));
-                    }
-                    if checked(entity.payload.payload_digest())? != digest {
-                        return Err(invalid_category("revision.payload_mismatch"));
-                    }
-                    Some(entity.local_rev)
                 } else {
                     None
                 };

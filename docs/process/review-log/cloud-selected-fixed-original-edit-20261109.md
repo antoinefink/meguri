@@ -49,3 +49,20 @@ comparison repair. Debug run 52445 executes nine cases: eight pass; the real
 fixed-edit success path returns an invalid-role error. Preserve that failure
 and every assertion. A bounded content-free trace is required before repair.
 The new bound-Host revision test is authored but has not executed. This is WIP.
+
+Recorded fixer; supplied clean base `f4b1932b`. Root-provided core-test 56876
+trace reaches `binding.missing` after the normal write, metadata and WAL checks:
+an unbound Host still has a Runtime. Revision lookup now returns None only for
+absent Runtime or a successful status with no binding. Status/tracking errors
+and every bound entity/revision/generation/seq/digest check still fail closed.
+Actual OpResult, updater, WAL path, assertions and native positive-revision
+guard are unchanged. Diagnostics remain temporarily for Apple job 92260;
+root will apply this export only after its terminal result. One read-only
+consistency check; no builds, tests or git in this fixer run. Root owns focused
+verification, independent review and guards. Native bound coverage remains
+blocked at fixture admission; no acceptance claim.
+
+Verification after the correction: core-test 60415 passes all seven cases;
+core-lint 61007 passes four checks. Independent optional-revision review is
+clear. The native fixture still fails its QA-layout admission, and the native
+matching-conflict status command remains unresolved. No signed claim follows.
