@@ -359,7 +359,15 @@ fn active_refusal_retains_accepted_asset_read_until_original_terminal_cleanup() 
     let sender_dir = root.path().join("sender");
     actual::generated(&sender_dir);
     let sender = actual::open_actual(&sender_dir, Arc::new(CountedAccount::default()));
-    let mut service = service(root.path());
+    let mut service = Service::open(
+        root.path(),
+        Config {
+            page_size: 32,
+            ..Config::default()
+        },
+        SeededRandom::new(1717),
+    )
+    .unwrap();
     actual::publish(&sender, &mut service);
     let receiver = actual::adopt(&root.path().join("receiver"), &mut service);
     let (sender_sdk, _, zone) = admit(&sender);

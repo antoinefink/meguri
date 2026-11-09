@@ -96,3 +96,13 @@ All validators, cleanup assertions and deadlines remain enabled.
 The combined lint run is blocked by three test-compilation errors in the separate asset lifecycle draft.
 Those errors do not occur in this Host test target. Native verification and the original batch gate remain pending.
 This WIP source commit grants no unit or release acceptance.
+
+## Scoped cleanup fixture correction
+
+Filtered fixer export `20261109T181921Z-90265`, based on `509662ed`, changes only
+this test's Service constructor to a page size of 32. Shared helpers, production
+validation, assertions and deadlines are unchanged. Focused core check
+`20261109T182549Z-91537` passes the previously blocked cleanup witness. Together
+with the seven unchanged passing cases in `87740`, all eight Rust resume cases
+have passing focused evidence. Native checks and the original batch gate remain
+pending; this is not unit acceptance.
